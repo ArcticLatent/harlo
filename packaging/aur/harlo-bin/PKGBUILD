@@ -1,0 +1,42 @@
+# Maintainer: ArcticLatent <hello@harlo.run>
+#
+# harlo's release build (with its own Qt), from the release's AppImage:
+#   cd packaging/aur/harlo-bin && makepkg -si
+# (For a release: set pkgver, then `updpkgsums`.) The `harlo` package
+# builds from source against Arch's Qt instead.
+
+pkgname=harlo-bin
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Desktop app for coding agents: Claude Code, OpenCode, pi and Oh My Pi (release build)"
+arch=('x86_64')
+url="https://harlo.run"
+license=('MIT' 'OFL-1.1' 'LGPL-3.0-only')
+depends=('glibc' 'libglvnd' 'fontconfig' 'freetype2' 'libx11' 'libxcb' 'libxkbcommon' 'dbus' 'git')
+optdepends=('libnotify: desktop notifications'
+            'openssh: projects on remote machines (Settings → Remote Instances)')
+provides=('harlo')
+conflicts=('harlo' 'harlo-git')
+options=('!strip' '!debug')
+source=("harlo-$pkgver-x86_64.AppImage::https://github.com/ArcticLatent/harlo/releases/download/v$pkgver/harlo-$pkgver-x86_64.AppImage")
+sha256sums=('SKIP')
+noextract=("harlo-$pkgver-x86_64.AppImage")
+
+prepare() {
+    chmod +x "harlo-$pkgver-x86_64.AppImage"
+    rm -rf squashfs-root
+    "./harlo-$pkgver-x86_64.AppImage" --appimage-extract > /dev/null
+}
+
+package() {
+    install -d "$pkgdir/opt"
+    cp -a squashfs-root/usr "$pkgdir/opt/harlo"
+    # (Updated by pacman, not by harlo itself.)
+    rm -f "$pkgdir/opt/harlo/install-kind"
+    install -d "$pkgdir/usr/bin"
+    ln -s /opt/harlo/bin/harlo "$pkgdir/usr/bin/harlo"
+    install -Dm644 squashfs-root/usr/share/applications/harlo.desktop "$pkgdir/usr/share/applications/harlo.desktop"
+    install -Dm644 squashfs-root/usr/share/icons/hicolor/scalable/apps/harlo.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/harlo.svg"
+    install -d "$pkgdir/usr/share/licenses/$pkgname"
+    cp -a squashfs-root/usr/share/licenses/harlo/. "$pkgdir/usr/share/licenses/$pkgname/"
+}

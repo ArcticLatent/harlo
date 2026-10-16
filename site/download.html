@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Download harlo</title>
+<meta name="description" content="Download harlo for Ubuntu, Debian, Fedora, openSUSE, Arch or any Linux (AppImage), and the iPhone app.">
+<meta name="theme-color" content="#1b1c21">
+<link rel="canonical" href="https://harlo.run/download">
+<link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<link rel="preload" href="/fonts/Geist-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="/"><img src="/assets/icon.svg" alt="">Harlo</a>
+    <nav class="links">
+      <a class="hide-small" href="/#features">Features</a>
+      <a class="hide-small" href="/#iphone">iPhone</a>
+      <a href="/download" aria-current="page">Download</a>
+      <a href="https://github.com/ArcticLatent/harlo">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main class="page">
+<div class="wrap">
+  <h1>Download harlo</h1>
+  <p class="muted"><span id="version">The latest version</span> for Linux (x86-64), free and open source. <a href="https://github.com/ArcticLatent/harlo/releases">All releases</a></p>
+
+  <div class="pick" id="pick" hidden>
+    <h2 id="pick-title"></h2>
+    <p id="pick-text" class="muted flush"></p>
+    <div class="cta" id="pick-cta"></div>
+  </div>
+
+  <div class="systems">
+    <div class="system" data-kind="deb">
+      <h3>Ubuntu and Debian</h3>
+      <p class="who">Ubuntu 22.04 or later, Debian 12 or later, Linux Mint, Pop!_OS, elementary OS</p>
+      <a class="btn primary" data-file="deb" href="https://github.com/ArcticLatent/harlo/releases/latest">Download .deb</a>
+      <p class="file" data-name="deb">harlo_<i>version</i>-1_amd64.deb</p>
+      <pre><code>sudo apt install ./harlo_*_amd64.deb</code></pre>
+    </div>
+    <div class="system" data-kind="rpm">
+      <h3>Fedora and openSUSE</h3>
+      <p class="who">Fedora 36 or later, openSUSE Tumbleweed, Nobara</p>
+      <a class="btn primary" data-file="rpm" href="https://github.com/ArcticLatent/harlo/releases/latest">Download .rpm</a>
+      <p class="file" data-name="rpm">harlo-<i>version</i>-1.x86_64.rpm</p>
+      <pre><code>sudo dnf install ./harlo-*.rpm
+# openSUSE:
+sudo zypper install ./harlo-*.rpm</code></pre>
+    </div>
+    <div class="system" data-kind="arch">
+      <h3>Arch Linux</h3>
+      <p class="who">Arch, Manjaro, EndeavourOS, CachyOS, Garuda</p>
+      <a class="btn primary" data-file="arch" href="https://github.com/ArcticLatent/harlo/releases/latest">Download package</a>
+      <p class="file" data-name="arch">harlo-<i>version</i>-1-x86_64.pkg.tar.zst</p>
+      <pre><code>sudo pacman -U ./harlo-*.pkg.tar.zst</code></pre>
+    </div>
+    <div class="system" data-kind="appimage">
+      <h3>Any other Linux <span class="badge">AppImage</span></h3>
+      <p class="who">One file that runs on most distributions, nothing to install</p>
+      <a class="btn primary" data-file="appimage" href="https://github.com/ArcticLatent/harlo/releases/latest">Download AppImage</a>
+      <p class="file" data-name="appimage">harlo-<i>version</i>-x86_64.AppImage</p>
+      <pre><code>chmod +x harlo-*.AppImage
+./harlo-*.AppImage</code></pre>
+    </div>
+  </div>
+
+  <h2>After installing</h2>
+  <ul>
+    <li>On its first start, harlo's setup guide helps you install the agents you want (Claude Code, OpenCode, pi, Oh My Pi) and sign them in. <code>harlo --setup</code> opens it again.</li>
+    <li>harlo checks for new versions and updates itself with your system's package manager (Settings → General).</li>
+    <li>Dictation's speech model (148 MB) downloads the first time you use the microphone.</li>
+    <li>On the iPhone, get <a href="https://apps.apple.com/app/id6822811546">harlo from the App Store</a>, then in harlo on your computer: Settings → Devices → Pair a device, and scan the code.</li>
+  </ul>
+
+  <h2>What it needs</h2>
+  <table>
+    <tr><th>System</th><td>Linux, x86-64 with AVX2 (most PCs since 2013), glibc 2.35 or newer</td></tr>
+    <tr><th>Included</th><td>Its own Qt 6, so it runs where the system's Qt is older</td></tr>
+    <tr><th>Uses</th><td><code>git</code>; optionally <code>ssh</code> (other machines), <code>notify-send</code> (notifications)</td></tr>
+    <tr><th>Checksums</th><td>Each release lists its files' SHA-256 sums in <code>SHA256SUMS</code></td></tr>
+  </table>
+
+  <h2>Other ways</h2>
+  <ul>
+    <li><strong>AUR:</strong> <code>harlo-bin</code> (the release build), <code>harlo</code> (built from source against Arch's Qt), <code>harlo-git</code> (the latest commit).</li>
+    <li><strong>From source:</strong> Rust 1.85+, Qt 6.9+, cmake and clang, then <code>cargo run -p harlo-app --release</code>. See the <a href="https://github.com/ArcticLatent/harlo#build-and-run">README</a>.</li>
+  </ul>
+</div>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <span>© 2026 Harlo</span>
+    <nav>
+      <a href="/download">Download</a>
+      <a href="/support">Support</a>
+      <a href="/privacy">Privacy</a>
+      <a href="https://github.com/ArcticLatent/harlo">GitHub</a>
+      <a href="mailto:hello@harlo.run">hello@harlo.run</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="/download.js"></script>
+</body>
+</html>

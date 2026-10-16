@@ -1,0 +1,12 @@
+{
+  "images": [
+    {
+      "filename": "penguin-headphones.png",
+      "idiom": "universal"
+    }
+  ],
+  "info": {
+    "author": "xcode",
+    "version": 1
+  }
+}

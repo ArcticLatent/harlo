@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>harlo · A native desktop app for coding agents</title>
+<meta name="description" content="A native Rust and Qt app, not Electron. harlo runs Claude Code, OpenCode, pi and Oh My Pi on your Linux computer and your other machines, with a native chat, changes and diffs, pull requests and CI, and an iPhone app to follow and answer them.">
+<meta name="theme-color" content="#1b1c21">
+<link rel="canonical" href="https://harlo.run/">
+<link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<meta property="og:title" content="harlo · A desktop app for coding agents">
+<meta property="og:description" content="Native Rust and Qt, not Electron: Claude Code, OpenCode, pi and Oh My Pi in one native Linux app, with an iPhone app to follow and answer them.">
+<meta property="og:image" content="https://harlo.run/assets/og.png">
+<meta property="og:url" content="https://harlo.run/">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="preload" href="/fonts/Geist-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="/"><img src="/assets/icon.svg" alt="">Harlo</a>
+    <nav class="links">
+      <a class="hide-small" href="#features">Features</a>
+      <a class="hide-small" href="#iphone">iPhone</a>
+      <a href="/download">Download</a>
+      <a href="https://github.com/ArcticLatent/harlo">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<div class="hero">
+  <div class="wrap">
+    <picture><source srcset="/assets/logo-light.svg" media="(prefers-color-scheme: light)"><img class="logo" src="/assets/logo.svg" alt="Harlo" width="678" height="220"></picture>
+    <p class="stack"><span>Rust</span><span>Qt 6</span><span class="no" aria-label="not Electron">Electron</span></p>
+    <h1>Your coding agents, <span class="grad">in a truly native app</span></h1>
+    <p class="lead">harlo is written in Rust and Qt, not Electron: no browser bundled in a window, just a fast, light desktop app. It runs Claude Code, OpenCode, pi and Oh My Pi on your Linux computer and your other machines, and its iPhone app follows them wherever you are.</p>
+    <div class="cta">
+      <a class="btn primary" href="/download">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16"/></svg>
+        Download for Linux
+      </a>
+      <a class="btn" href="https://apps.apple.com/app/id6822811546">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.37 12.6c-.02-2.24 1.83-3.32 1.91-3.37-1.04-1.52-2.66-1.73-3.24-1.75-1.38-.14-2.69.81-3.39.81-.7 0-1.78-.79-2.92-.77-1.5.02-2.89.87-3.66 2.21-1.56 2.71-.4 6.72 1.12 8.92.74 1.08 1.63 2.28 2.79 2.24 1.12-.05 1.54-.72 2.89-.72s1.73.72 2.91.7c1.2-.02 1.96-1.1 2.7-2.18.85-1.25 1.2-2.46 1.22-2.52-.03-.01-2.33-.9-2.35-3.56ZM14.15 6.02c.62-.75 1.03-1.78.92-2.82-.89.04-1.96.59-2.6 1.34-.57.66-1.07 1.71-.94 2.73.99.08 2-.5 2.62-1.25Z"/></svg>
+        iPhone app
+      </a>
+    </div>
+    <p class="note">Free and open source (MIT) · Ubuntu, Debian, Fedora, openSUSE, Arch and more · No account</p>
+    <ul class="agents">
+      <li><b>Claude Code</b></li>
+      <li><b>OpenCode</b></li>
+      <li><b>pi</b></li>
+      <li><b>Oh My Pi</b></li>
+    </ul>
+    <img class="shot" src="/assets/desktop-main.webp" width="1440" height="900" alt="harlo's window: the sessions in the sidebar, a session's chat, and the Changes panel listing the files the agent changed.">
+  </div>
+</div>
+
+<section class="native">
+  <div class="wrap">
+    <p class="kicker">Why native</p>
+    <h2>Built like a desktop app, because it is one</h2>
+    <p class="section-lead">Many AI agent apps are web pages in an Electron window. harlo is Rust and Qt from top to bottom.</p>
+    <div class="grid">
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z"/></svg></div>
+        <h3>A Rust core</h3>
+        <p>Agent streams, transcripts, diffs, git and search run in compiled Rust, on threads of their own. Long sessions don't slow the window down.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v5"/></svg></div>
+        <h3>A Qt Quick interface</h3>
+        <p>Drawn by your GPU with Qt 6, the toolkit behind KDE Plasma. No HTML, no JavaScript framework, no bundled Chromium.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 7v5l3 2"/></svg></div>
+        <h3>At home on Linux</h3>
+        <p>Native windows on Wayland and X11, your system's notifications, input methods and file dialogs, a drop-down window, and packages for your distribution.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="features" class="alt">
+  <div class="wrap">
+    <p class="kicker">On your computer</p>
+    <h2>Everything a session needs, in one window</h2>
+    <p class="section-lead">Each agent runs with your own login and settings. harlo gives them a proper home: a chat that keeps up with long runs, and everything around it.</p>
+    <div class="grid">
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z"/></svg></div>
+        <h3>Four agents, one chat</h3>
+        <p>Your existing Claude Code, OpenCode, pi and Oh My Pi sessions show up in the sidebar. Click one to read it, send a message to carry on.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h3M16 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3M9 9h6M9 15h6"/></svg></div>
+        <h3>Changes and diffs</h3>
+        <p>See every file an agent touched, read the diff, and undo a turn. A folder of repositories shows each repository's changes on its own.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7M18 15.5V11a4 4 0 0 0-4-4h-4"/></svg></div>
+        <h3>Pull requests and CI</h3>
+        <p>Open a pull request when the work is done and watch its checks. GitHub, GitLab and Forgejo, including your own Forgejo server.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></div>
+        <h3>Your other machines</h3>
+        <p>Add a machine you reach over SSH and run sessions there, with its terminal, files and changes, as if it were this one.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12M18 9v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M6 15a6 6 0 0 0 6-6h3"/></svg></div>
+        <h3>Worktrees</h3>
+        <p>Start a session in a worktree of its own so agents can work side by side, then bring the branch back when it's ready.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></div>
+        <h3>Dictation, on this computer</h3>
+        <p>Tap the mic and speak. Speech is recognised by a model running on your computer; nothing is sent anywhere.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
+        <h3>Spending limits</h3>
+        <p>Set a limit per session or per day. harlo holds the agent when it's reached and asks before going on.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h7"/></svg></div>
+        <h3>Action log</h3>
+        <p>Every command an agent ran and every file it changed, in order, for any session. Export a session as Markdown.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6-6-6M12 19h8"/></svg></div>
+        <h3>A terminal, files, templates</h3>
+        <p>A terminal in the session's folder, a file browser and editor, and session templates for the prompts you start with every day.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap split">
+    <div>
+      <p class="kicker">Review</p>
+      <h2>Read what the agent did before you keep it</h2>
+      <ul>
+        <li><b>Diffs side by side</b> or inline, with syntax highlighting.</li>
+        <li><b>Undo a turn</b>: put back the files as they were before it, in every repository it touched.</li>
+        <li><b>Commit, push and open a pull request</b> from the Changes panel, then follow its CI; when checks fail, hand the failure to the agent.</li>
+      </ul>
+    </div>
+    <img class="shot" src="/assets/desktop-diff.webp" width="1440" height="900" loading="lazy" alt="A diff of a TypeScript file in harlo, with lines removed and added.">
+  </div>
+</section>
+
+<section id="iphone" class="alt">
+  <div class="wrap split flip">
+    <div>
+      <p class="kicker">On your iPhone</p>
+      <h2>Away from your desk, still in the loop</h2>
+      <ul>
+        <li><b>Answer questions and approvals</b> from a notification, even with the app closed.</li>
+        <li><b>Live Activities</b> on the Lock Screen and in the Dynamic Island while a session works, and a home screen widget.</li>
+        <li><b>Start sessions</b> on any of your machines, with templates, photos and dictation.</li>
+        <li><b>End-to-end encrypted</b> between the phone and your computer: on your Wi-Fi, over Tailscale, or through harlo's relay, which can't read what it passes on.</li>
+      </ul>
+      <div class="cta start">
+        <a class="btn" href="https://apps.apple.com/app/id6822811546">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.37 12.6c-.02-2.24 1.83-3.32 1.91-3.37-1.04-1.52-2.66-1.73-3.24-1.75-1.38-.14-2.69.81-3.39.81-.7 0-1.78-.79-2.92-.77-1.5.02-2.89.87-3.66 2.21-1.56 2.71-.4 6.72 1.12 8.92.74 1.08 1.63 2.28 2.79 2.24 1.12-.05 1.54-.72 2.89-.72s1.73.72 2.91.7c1.2-.02 1.96-1.1 2.7-2.18.85-1.25 1.2-2.46 1.22-2.52-.03-.01-2.33-.9-2.35-3.56ZM14.15 6.02c.62-.75 1.03-1.78.92-2.82-.89.04-1.96.59-2.6 1.34-.57.66-1.07 1.71-.94 2.73.99.08 2-.5 2.62-1.25Z"/></svg>
+          Get it on the App Store
+        </a>
+      </div>
+    </div>
+    <div class="phones">
+      <img src="/assets/iphone-dashboard.webp" width="660" height="1434" loading="lazy" alt="The iPhone app's sessions, grouped by what waits on you.">
+      <img src="/assets/iphone-session.webp" width="660" height="1434" loading="lazy" alt="A session on the iPhone, following the agent live.">
+      <img src="/assets/iphone-approval.webp" width="660" height="1434" loading="lazy" alt="Approving an agent's command from the iPhone.">
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker">Make it yours</p>
+    <h2>31 themes, dark and light</h2>
+    <p class="section-lead">From harlo's own to Catppuccin, Tokyo Night, Gruvbox and Midnight, with your fonts, text size, and glass that blurs what's behind menus and dialogs.</p>
+    <div class="themes">
+      <figure>
+        <img class="shot" src="/assets/desktop-midnight.webp" width="1440" height="900" loading="lazy" alt="harlo in the Midnight theme, with the Activity panel open.">
+        <figcaption>Midnight, with the Activity panel</figcaption>
+      </figure>
+      <figure>
+        <img class="shot" src="/assets/desktop-new.webp" width="1440" height="900" loading="lazy" alt="harlo's new session page: pick a project, an agent and a template.">
+        <figcaption>A new session: project, agent, template</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section class="closing">
+  <div class="wrap">
+    <h2>Free, open source, and yours</h2>
+    <p>No account and no analytics. Your sessions stay where your agents keep them, on your computers. harlo checks for its own updates and installs them with your system's package manager.</p>
+    <div class="cta">
+      <a class="btn primary" href="/download">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16"/></svg>
+        Download harlo
+      </a>
+      <a class="btn" href="https://github.com/ArcticLatent/harlo">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.9-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.89 1.53 2.34 1.09 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02a9.6 9.6 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg>
+        Source on GitHub
+      </a>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <span>© 2026 Harlo</span>
+    <nav>
+      <a href="/download">Download</a>
+      <a href="/support">Support</a>
+      <a href="/privacy">Privacy</a>
+      <a href="https://github.com/ArcticLatent/harlo">GitHub</a>
+      <a href="mailto:hello@harlo.run">hello@harlo.run</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

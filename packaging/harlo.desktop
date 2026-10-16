@@ -1,0 +1,22 @@
+[Desktop Entry]
+Type=Application
+Name=harlo
+GenericName=Coding agent workspace
+Comment=Desktop app for coding agents: Claude Code, OpenCode, pi and Oh My Pi
+Exec=harlo
+Icon=harlo
+Terminal=false
+Categories=Development;IDE;
+Keywords=ai;agent;coding;claude;opencode;pi;omp;llm;assistant;
+StartupNotify=true
+StartupWMClass=harlo
+SingleMainWindow=true
+Actions=mini-chat;drop-down;
+
+[Desktop Action mini-chat]
+Name=Mini chat
+Exec=harlo --mini-chat
+
+[Desktop Action drop-down]
+Name=Drop-down window
+Exec=harlo --toggle-dropdown

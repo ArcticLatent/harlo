@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>harlo · Privacy</title>
+<meta name="description" content="harlo has no accounts, collects no analytics and sends nothing about you to us.">
+<meta name="theme-color" content="#1b1c21">
+<link rel="canonical" href="https://harlo.run/privacy">
+<link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<link rel="preload" href="/fonts/Geist-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="/"><img src="/assets/icon.svg" alt="">Harlo</a>
+    <nav class="links">
+      <a class="hide-small" href="/#features">Features</a>
+      <a class="hide-small" href="/#iphone">iPhone</a>
+      <a href="/download">Download</a>
+      <a href="https://github.com/ArcticLatent/harlo">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main class="page">
+<div class="wrap narrow">
+<h1>Privacy</h1>
+<p class="muted">harlo, its iPhone app, its relay and this website · Last updated October 16, 2026</p>
+
+<p>harlo is a desktop app for running coding agents on your own computer, with an iPhone app to follow and answer them from your phone. In short: <strong>harlo has no accounts, collects no analytics, and sends nothing about you to us.</strong> What you do in harlo stays on your computer and your phone, and between them it is end-to-end encrypted.</p>
+
+<h2>The iPhone app</h2>
+<ul>
+  <li><strong>No account, no tracking.</strong> The app has no sign-up, no analytics, no advertising, and no third-party SDKs.</li>
+  <li><strong>Pairing.</strong> You pair the app with harlo on your computer by scanning a QR code. The app keeps the keys for that pairing in the iPhone's Keychain. Everything between the app and your computer (sessions, messages, files, photos, answers) is end-to-end encrypted with those keys.</li>
+  <li><strong>Camera.</strong> Used only to scan the pairing QR code, and to take a photo when you choose to send one to an agent.</li>
+  <li><strong>Photos.</strong> Only the photos you pick are read, and they go to harlo on your computer, for the agent you send them to.</li>
+  <li><strong>Local network.</strong> Used to reach harlo on your computer when both are on the same network.</li>
+  <li><strong>Microphone and speech recognition.</strong> Only while you dictate a message (you tap the mic). Your words are turned into text on the iPhone itself when it supports the language; otherwise Apple's speech recognition does it, under Apple's privacy policy. The audio isn't kept, and never comes to us.</li>
+  <li><strong>On the phone only.</strong> The name you can enter for the greeting, and which sessions you marked unread, stay on the phone.</li>
+  <li><strong>The demo</strong> shows sample sessions; it connects to nothing and saves nothing.</li>
+</ul>
+
+<h2>Notifications and Live Activities</h2>
+<p>If you allow notifications, harlo on your computer sends them (and Live Activity updates) through harlo's relay to Apple's Push Notification service. What a notification says (the session and its question) is encrypted for your phone before it leaves your computer: the relay and Apple only carry a sealed message and see your phone's notification token, the time and the size.</p>
+
+<h2>The relay</h2>
+<p>harlo's relay (relay.harlo.run) lets your phone reach your computer away from home, and passes notifications on. It forwards encrypted messages it cannot read, and it does not store them. Like any server on the internet, it sees IP addresses, when connections happen and how much data passes; it uses them only to run the service and limit abuse, and keeps no record of what you do. You can also use harlo without the relay, on your own network, Tailscale or a VPN.</p>
+
+<h2>harlo on your computer</h2>
+<ul>
+  <li>harlo keeps its data (settings, projects, notes, the session list) on your computer.</li>
+  <li>The coding agents you run in harlo (Claude Code, OpenCode, pi, Oh My Pi) send your prompts and code to the AI providers you sign them in to, under those providers' own terms and privacy policies. harlo doesn't see or keep their credentials.</li>
+  <li>harlo checks GitHub for its own new versions (and downloads them from there when you update), checks the npm registry for newer versions of the agents, and downloads speech models for dictation from Hugging Face when you first use it. These requests carry no information about you beyond what any download does.</li>
+  <li>Signing git in to GitHub, GitLab or Forgejo uses those services' own tools and git's credential store; harlo keeps no token.</li>
+</ul>
+
+<h2>This website</h2>
+<p>harlo.run has no cookies, no analytics and no trackers, and its fonts come from the site itself. It is hosted by Cloudflare Pages, which, like any web host, sees the IP addresses of visitors and keeps short-lived logs to run and protect the service. The download page asks GitHub's API for the latest release's files, from your browser.</p>
+
+<h2>Children</h2>
+<p>harlo is a developer tool and is not directed at children.</p>
+
+<h2>Changes and contact</h2>
+<p>If this policy changes, this page will say so, with a new date. Questions: <a href="mailto:hello@harlo.run">hello@harlo.run</a>. Help with the app: <a href="/support">support</a>.</p>
+</div>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <span>© 2026 Harlo</span>
+    <nav>
+      <a href="/download">Download</a>
+      <a href="/support">Support</a>
+      <a href="/privacy">Privacy</a>
+      <a href="https://github.com/ArcticLatent/harlo">GitHub</a>
+      <a href="mailto:hello@harlo.run">hello@harlo.run</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

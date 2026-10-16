@@ -1,0 +1,110 @@
+{
+  "metadata": {
+    "id": "harlo-light",
+    "name": "harlo",
+    "variant": "light",
+    "description": "harlo's own: cool neutral greys, a soft blue accent - light variant",
+    "version": "1.0.0",
+    "tags": [
+      "light",
+      "neutral",
+      "cool"
+    ]
+  },
+  "colors": {
+    "primary": {
+      "base": "#2f6fd6",
+      "hover": "#2862c0",
+      "active": "#2257aa",
+      "muted": "#2f6fd680",
+      "foreground": "#ffffff"
+    },
+    "surface": {
+      "background": "#ffffff",
+      "foreground": "#1d1e22",
+      "muted": "#f4f5f7",
+      "mutedForeground": "#6b6e76",
+      "elevated": "#f7f8fa",
+      "subtle": "#eef0f3"
+    },
+    "interactive": {
+      "border": "#e3e5e9",
+      "selection": "#2f6fd633",
+      "borderHover": "#c9ccd3",
+      "focusRing": "#2f6fd655",
+      "hover": "#0000000a",
+      "active": "#00000014"
+    },
+    "status": {
+      "error": "#d64545",
+      "warning": "#c7761c",
+      "success": "#1f9d61",
+      "info": "#2f6fd6"
+    },
+    "syntax": {
+      "base": {
+        "background": "#f6f7f9",
+        "comment": "#8a93a3",
+        "keyword": "#8b3fd1",
+        "string": "#2f8a3e",
+        "number": "#c4551b",
+        "function": "#2f6fd6",
+        "variable": "#1d1e22",
+        "type": "#a86b00",
+        "operator": "#0b7fa8"
+      },
+      "tokens": {
+        "commentDoc": "#8a93a3",
+        "stringEscape": "#0b7fa8",
+        "variableProperty": "#c23b4a",
+        "variableLocal": "#1d1e22",
+        "className": "#a86b00",
+        "punctuation": "#5d6068"
+      },
+      "highlights": {
+        "diffAdded": "#1f9d61",
+        "diffRemoved": "#d64545",
+        "diffModified": "#2f6fd6"
+      }
+    },
+    "pr": {
+      "open": "#1f9d61",
+      "blocked": "#c7761c",
+      "merged": "#7c5cd6"
+    },
+    "chat": {
+      "userMessageBackground": "#f0f2f5",
+      "divider": "#eceef1",
+      "background": "#ffffff"
+    },
+    "markdown": {
+      "link": "#2f6fd6",
+      "linkHover": "#2257aa",
+      "inlineCode": "#a14d0a",
+      "inlineCodeBackground": "#f0f2f5",
+      "blockquote": "#6b6e76",
+      "blockquoteBorder": "#2f6fd6",
+      "listMarker": "#8a8d95",
+      "bold": "#111215",
+      "italic": "#1d1e22"
+    },
+    "tools": {
+      "border": "#e3e5e9",
+      "icon": "#6b6e76",
+      "title": "#1d1e22",
+      "description": "#6b6e76",
+      "edit": {
+        "addedBackground": "#1f9d611f",
+        "removedBackground": "#d645451f",
+        "lineNumber": "#9a9da5"
+      }
+    }
+  },
+  "config": {
+    "transitions": {
+      "fast": "150ms ease",
+      "normal": "250ms ease",
+      "slow": "350ms ease"
+    }
+  }
+}

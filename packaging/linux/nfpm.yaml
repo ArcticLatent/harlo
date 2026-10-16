@@ -1,0 +1,121 @@
+# harlo's .deb, .rpm and Arch packages, from packaging/linux/bundle.sh's
+# dist/opt/harlo (harlo with its own Qt):
+#
+#   VERSION=$(cat dist/version) nfpm package -f packaging/linux/nfpm.yaml -p deb -t dist/
+#   (and -p rpm, -p archlinux)
+#
+# Installs to /opt/harlo, with /usr/bin/harlo, the menu entry and icons.
+# Depends only on what every desktop has, and git.
+name: harlo
+arch: amd64
+platform: linux
+version: ${VERSION}
+release: 1
+section: devel
+priority: optional
+maintainer: ArcticLatent <hello@harlo.run>
+vendor: harlo
+homepage: https://harlo.run
+license: MIT
+description: |-
+  Desktop app for coding agents.
+  harlo runs Claude Code, OpenCode, pi and Oh My Pi on your computer (and on
+  your other machines over SSH), with a native chat, changes and diffs,
+  worktrees, a terminal, and an iPhone app to follow and answer them.
+
+contents:
+  - src: dist/opt/harlo
+    dst: /opt/harlo
+    type: tree
+  - src: /opt/harlo/bin/harlo
+    dst: /usr/bin/harlo
+    type: symlink
+  - src: packaging/harlo.desktop
+    dst: /usr/share/applications/harlo.desktop
+  - src: crates/harlo-app/icons/app/harlo.svg
+    dst: /usr/share/icons/hicolor/scalable/apps/harlo.svg
+  - src: dist/opt/harlo/share/icons/hicolor/256x256/apps/harlo.png
+    dst: /usr/share/icons/hicolor/256x256/apps/harlo.png
+  - src: LICENSE
+    dst: /usr/share/licenses/harlo/LICENSE
+  # How harlo was installed (its updates use the same kind of package).
+  - src: packaging/linux/kind/deb
+    dst: /opt/harlo/install-kind
+    packager: deb
+  - src: packaging/linux/kind/rpm
+    dst: /opt/harlo/install-kind
+    packager: rpm
+  - src: packaging/linux/kind/arch
+    dst: /opt/harlo/install-kind
+    packager: archlinux
+
+overrides:
+  # What the bundle takes from the system (every desktop has it): checked
+  # by packaging/linux/test-install.sh on clean images.
+  deb:
+    depends:
+      - libc6 (>= 2.35)
+      - libstdc++6
+      - libgcc-s1
+      - libgl1
+      - libegl1
+      - libdrm2
+      - libfontconfig1
+      - libfreetype6
+      - libx11-6
+      - libx11-xcb1
+      - libxcb1
+      - libwayland-client0
+      - zlib1g
+      - libgpg-error0
+      - libcom-err2
+      - git
+    recommends:
+      - libnotify-bin
+      - openssh-client
+  # (By library, not package name: Fedora's and openSUSE's names differ.)
+  rpm:
+    depends:
+      - libc.so.6(GLIBC_2.35)(64bit)
+      - libstdc++.so.6()(64bit)
+      - libgcc_s.so.1()(64bit)
+      - libGL.so.1()(64bit)
+      - libEGL.so.1()(64bit)
+      - libdrm.so.2()(64bit)
+      - libfontconfig.so.1()(64bit)
+      - libfreetype.so.6()(64bit)
+      - libX11.so.6()(64bit)
+      - libX11-xcb.so.1()(64bit)
+      - libxcb.so.1()(64bit)
+      - libwayland-client.so.0()(64bit)
+      - libz.so.1()(64bit)
+      - libgpg-error.so.0()(64bit)
+      - libcom_err.so.2()(64bit)
+      - git
+    recommends:
+      - /usr/bin/notify-send
+      - /usr/bin/ssh
+  archlinux:
+    depends:
+      - glibc
+      - gcc-libs
+      - libglvnd
+      - libdrm
+      - fontconfig
+      - freetype2
+      - libx11
+      - libxcb
+      - wayland
+      - zlib
+      - libgpg-error
+      - e2fsprogs
+      - git
+
+rpm:
+  summary: Desktop app for coding agents (Claude Code, OpenCode, pi, Oh My Pi)
+  group: Development/Tools
+deb:
+  fields:
+    Bugs: https://github.com/ArcticLatent/harlo/issues
+archlinux:
+  packager: ArcticLatent <hello@harlo.run>

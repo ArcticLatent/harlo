@@ -1,0 +1,66 @@
+# Maintainer: ArcticLatent <17465603+ArcticLatent@users.noreply.github.com>
+#
+# Builds harlo from the latest commit on GitHub:
+#   cd packaging/aur/harlo-git && makepkg -si
+
+pkgname=harlo-git
+pkgver=r0.0000000
+pkgrel=1
+pkgdesc="Desktop app for coding agents: Claude Code, OpenCode, pi and Oh My Pi"
+arch=('x86_64' 'aarch64')
+url="https://harlo.run"
+license=('MIT' 'OFL-1.1')
+depends=('qt6-base' 'qt6-declarative' 'qt6-multimedia' 'qt6-svg' 'git' 'gcc-libs' 'glibc')
+# cmake and clang build the bundled whisper.cpp (dictation).
+makedepends=('cargo' 'cmake' 'clang')
+optdepends=('layer-shell-qt: drop-down window on Wayland'
+            'syntax-highlighting: syntax colours in the file editor'
+            'libnotify: desktop notifications (notify-send)'
+            'openssh: projects on remote machines (Settings → Remote Instances)')
+# The C++ parts (cxx-qt) must stay plain object code: with makepkg's LTO
+# flags they become GCC bytecode that Rust's linker cannot read.
+options=('!lto')
+provides=('harlo')
+conflicts=('harlo' 'harlo-bin')
+source=("harlo::git+https://github.com/ArcticLatent/harlo.git")
+sha256sums=('SKIP')
+
+pkgver() {
+    cd harlo
+    printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
+}
+
+prepare() {
+    cd harlo
+    export RUSTUP_TOOLCHAIN=stable
+    cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+    cd harlo
+    export RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR=target QMAKE=qmake6
+    cargo build --frozen --release -p harlo-app
+}
+
+check() {
+    cd harlo
+    export RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR=target QMAKE=qmake6
+    cargo test --frozen --release -p harlo-core -p harlo-harness
+}
+
+package() {
+    cd harlo
+    install -Dm755 target/release/harlo "$pkgdir/usr/bin/harlo"
+    install -Dm644 packaging/harlo.desktop "$pkgdir/usr/share/applications/harlo.desktop"
+    install -Dm644 crates/harlo-app/icons/app/harlo.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/harlo.svg"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    # Bundled third-party material.
+    install -Dm644 crates/harlo-app/themes/LICENSE "$pkgdir/usr/share/licenses/$pkgname/themes-LICENSE"
+    install -Dm644 crates/harlo-app/icons/file-types/LICENSE "$pkgdir/usr/share/licenses/$pkgname/file-icons-LICENSE"
+    install -Dm644 crates/harlo-app/icons/REMIXICON-LICENSE "$pkgdir/usr/share/licenses/$pkgname/remixicon-LICENSE"
+    install -Dm644 crates/harlo-app/icons/providers/OPENCHAMBER-LICENSE "$pkgdir/usr/share/licenses/$pkgname/provider-logos-LICENSE"
+    install -Dm644 crates/harlo-app/phone/TWEETNACL-LICENSE "$pkgdir/usr/share/licenses/$pkgname/tweetnacl-LICENSE"
+    install -Dm644 crates/harlo-app/fonts/OFL.txt "$pkgdir/usr/share/licenses/$pkgname/jetbrains-mono-OFL.txt"
+    install -Dm644 crates/harlo-app/fonts/Geist-OFL.txt "$pkgdir/usr/share/licenses/$pkgname/geist-OFL.txt"
+    install -Dm644 crates/harlo-app/icons/PASEO-NOTICE "$pkgdir/usr/share/licenses/$pkgname/paseo-NOTICE"
+}

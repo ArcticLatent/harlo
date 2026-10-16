@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>harlo · Support</title>
+<meta name="description" content="Help with harlo and its iPhone app, and how to reach us.">
+<meta name="theme-color" content="#1b1c21">
+<link rel="canonical" href="https://harlo.run/support">
+<link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<link rel="preload" href="/fonts/Geist-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="/"><img src="/assets/icon.svg" alt="">Harlo</a>
+    <nav class="links">
+      <a class="hide-small" href="/#features">Features</a>
+      <a class="hide-small" href="/#iphone">iPhone</a>
+      <a href="/download">Download</a>
+      <a href="https://github.com/ArcticLatent/harlo">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main class="page">
+<div class="wrap narrow">
+<h1>Support</h1>
+<p class="muted">harlo and its iPhone app</p>
+
+<p>harlo runs coding agents (Claude Code, OpenCode, pi, Oh My Pi) on your own computer. The iPhone app lets you follow your sessions, answer their questions and approve their actions from your phone.</p>
+
+<div class="callout">
+  <strong>Questions, problems, ideas:</strong> email <a href="mailto:hello@harlo.run">hello@harlo.run</a>. Say what you tried, what happened, and your iPhone's iOS version; a screenshot helps.
+</div>
+
+<h2>Getting started</h2>
+<ol>
+  <li><a href="/download">Install harlo</a> on your computer (Linux) and start it.</li>
+  <li>In harlo, click the phone button at the bottom of the left rail (<em>Pair a device</em>). It shows a QR code.</li>
+  <li>Open the iPhone app and scan the code. The app is now paired with that computer.</li>
+</ol>
+<p>Without a computer, <em>Try the demo</em> on the app's first screen shows sample sessions. It connects to nothing.</p>
+
+<h2>Common questions</h2>
+
+<h3>The app can't reach my computer</h3>
+<ul>
+  <li>harlo has to be running on the computer.</li>
+  <li>On the same Wi-Fi it connects directly. Away from home, pair over Tailscale, or choose <em>From anywhere</em> in harlo's Pair a device (it goes through harlo's relay, end-to-end encrypted).</li>
+  <li>If harlo says the computer's firewall blocks the phone, click <em>Allow</em> in that notice.</li>
+  <li>Allow <em>Local Network</em> for harlo in the iPhone's Settings → Privacy &amp; Security.</li>
+</ul>
+
+<h3>I don't get notifications</h3>
+<ul>
+  <li>Allow notifications for harlo in the iPhone's Settings → Notifications.</li>
+  <li>In harlo on the computer, Settings → Devices → iPhone notifications sends a test notification.</li>
+  <li>Notifications come while the app is closed; with it open, you see the session itself.</li>
+  <li>If you set quiet hours (harlo's Settings → Notifications), notifications in those hours arrive silently in Notification Center.</li>
+</ul>
+
+<h3>Live Activities and the widget</h3>
+<ul>
+  <li>A session you send a message to from the phone shows on the Lock Screen and in the Dynamic Island while it works. Turn this on or off in the app's Settings → Notifications.</li>
+  <li>The home screen widget shows your sessions; add it from the home screen's edit mode.</li>
+</ul>
+
+<h3>Dictation</h3>
+<p>Tap the mic beside a message and speak; tap it again to stop. Allow the microphone and speech recognition when the iPhone asks. The language follows the phone, or pick one in the app's Settings → Dictation.</p>
+
+<h3>Unpairing</h3>
+<p>In the app: Settings → Forget harlo. In harlo on the computer: Settings → Devices, then remove the phone.</p>
+
+<h3>Updating harlo</h3>
+<p>At startup and twice a day, harlo looks for a new version and offers it in a notice (Settings → General → Check for updates turns this off). It updates with your system's package manager (it asks for your password), or replaces the AppImage, then offers to restart.</p>
+
+<h3>Something's wrong on the computer</h3>
+<p>Report it on <a href="https://github.com/ArcticLatent/harlo/issues">GitHub</a>, or email us. Say which Linux you run and which agent the session used.</p>
+
+<h2>Privacy</h2>
+<p>harlo has no accounts and collects nothing about you; what passes between the app and your computer is end-to-end encrypted. See the <a href="/privacy">privacy policy</a>.</p>
+</div>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <span>© 2026 Harlo</span>
+    <nav>
+      <a href="/download">Download</a>
+      <a href="/support">Support</a>
+      <a href="/privacy">Privacy</a>
+      <a href="https://github.com/ArcticLatent/harlo">GitHub</a>
+      <a href="mailto:hello@harlo.run">hello@harlo.run</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

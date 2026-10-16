@@ -1,0 +1,5 @@
+The provider marks drawn in qml/Icon.qml ("harness-claude", "harness-opencode",
+"harness-pi", "harness-omp") come from Paseo (https://github.com/getpaseo/paseo),
+Copyright (c) 2025-present Mohamed Boudra, licensed under the Apache License,
+Version 2.0 (https://www.apache.org/licenses/LICENSE-2.0). The marks themselves
+belong to their projects (Anthropic's Claude, OpenCode, pi, Oh My Pi).

@@ -1,0 +1,29 @@
+[package]
+name = "harlo-relay"
+description = "Lets phones reach harlo from anywhere: serves harlo's phone app and forwards its end-to-end encrypted frames"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "harlo-relay"
+path = "src/main.rs"
+
+[dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws", "query"] }
+tokio = { workspace = true, features = ["net", "signal"] }
+futures-util = "0.3"
+serde_json.workspace = true
+serde = { workspace = true }
+sha2 = "0.10"
+base64 = "0.22"
+# The iOS app's notifications, sent with the app's APNs key (POST /push).
+harlo-apns.workspace = true
+
+[dev-dependencies]
+tokio-tungstenite = "0.29"
+# A stand-in for Apple's push service (HTTP/2) in the tests.
+axum = { version = "0.8", default-features = false, features = ["http1", "http2", "tokio", "ws", "query"] }

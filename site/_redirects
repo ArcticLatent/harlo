@@ -1,0 +1,10 @@
+# Cloudflare: the pages without .html, and older addresses.
+/index.html  /  301
+/download.html  /download  301
+/privacy.html  /privacy  301
+/support.html  /support  301
+/privacy-policy  /privacy  301
+/help  /support  301
+/github  https://github.com/ArcticLatent/harlo  302
+/ios  https://apps.apple.com/app/id6822811546  302
+/app  https://apps.apple.com/app/id6822811546  302

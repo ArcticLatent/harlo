@@ -1,0 +1,141 @@
+# harlo for Linux: the AppImage, .deb, .rpm and Arch package, Qt bundled,
+# built on Ubuntu 22.04 (glibc 2.35: Ubuntu 22.04+, Debian 12+, Fedora,
+# openSUSE, Arch…), published as a GitHub Release with their SHA-256 sums.
+#
+# A tag publishes:   git tag v1.0.0 && git push origin v1.0.0
+# A test (the packages as the run's artifact, nothing published): push a
+# branch named release-check…, or `gh workflow run release.yml`.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+    branches: ["release-check*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  QT_VERSION: "6.12.0"
+  NFPM_VERSION: "2.43.0"
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Tools
+        run: |
+          sudo apt-get update
+          # Building (whisper.cpp: cmake, clang), the bundle's tools, and what Qt's
+          # X11 and Wayland plugins link (so linuxdeploy finds it).
+          sudo apt-get install -y --no-install-recommends build-essential cmake clang libclang-dev pkg-config \
+            librsvg2-bin file patchelf desktop-file-utils libfuse2 \
+            libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libfontconfig1-dev libfreetype6-dev \
+            libdbus-1-dev libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
+            libxcb-shape0 libxcb-xinerama0 libxcb-xkb1 libxcb-xinput0 libwayland-client0 libwayland-cursor0 libwayland-egl1 \
+            libpulse0 libasound2
+          curl -fsSL -o nfpm.deb "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_amd64.deb"
+          sudo dpkg -i nfpm.deb
+
+      - name: Qt ${{ env.QT_VERSION }}
+        run: |
+          pip install --user aqtinstall
+          python3 -m aqt install-qt linux desktop "$QT_VERSION" linux_gcc_64 -O "$HOME/Qt" -m qtmultimedia qtimageformats qtshadertools
+          echo "QMAKE=$HOME/Qt/$QT_VERSION/gcc_64/bin/qmake" >> "$GITHUB_ENV"
+          ls "$HOME/Qt/$QT_VERSION/gcc_64/plugins/platforms" "$HOME/Qt/$QT_VERSION/gcc_64/plugins"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Bundle (the AppImage, the packages' tree)
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: packaging/linux/bundle.sh
+
+      - name: Packages (.deb, .rpm, Arch)
+        run: |
+          export VERSION=$(cat dist/version)
+          for p in deb rpm archlinux; do nfpm package -f packaging/linux/nfpm.yaml -p $p -t dist/; done
+          cd dist
+          ls -la *.AppImage *.deb *.rpm *.pkg.tar.zst
+          sha256sum *.AppImage *.deb *.rpm *.pkg.tar.zst > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Starts (offscreen, from the .deb's tree and the AppImage)
+        run: |
+          # It runs and its QML loads: --version prints and quits; a short
+          # offscreen start must not report missing modules or libraries.
+          QT_QPA_PLATFORM=offscreen dist/opt/harlo/bin/harlo --version
+          ./dist/harlo-*.AppImage --appimage-extract-and-run --version
+          QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 HOME=$(mktemp -d) timeout 20 dist/opt/harlo/bin/harlo --check-start 2>&1 | tee start.log || true
+          grep -q "check-start: ok" start.log
+          ! grep -E "module .* is not installed|cannot open shared object|Cannot load library" start.log
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: harlo-linux
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.rpm
+            dist/*.pkg.tar.zst
+            dist/SHA256SUMS
+
+  # Each package installed with its system's own package manager on a clean
+  # image, then started (offscreen): its dependencies resolve, nothing's missing.
+  install:
+    needs: linux
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { image: "ubuntu:22.04", install: "apt-get update && apt-get install -y ./harlo_*_amd64.deb" }
+          - { image: "ubuntu:24.04", install: "apt-get update && apt-get install -y ./harlo_*_amd64.deb" }
+          - { image: "debian:12", install: "apt-get update && apt-get install -y ./harlo_*_amd64.deb" }
+          - { image: "fedora:42", install: "dnf install -y ./harlo-*.x86_64.rpm" }
+          - { image: "opensuse/tumbleweed", install: "zypper --non-interactive install --allow-unsigned-rpm ./harlo-*.x86_64.rpm" }
+          - { image: "archlinux:latest", install: "pacman -Syu --noconfirm && pacman -U --noconfirm ./harlo-*-x86_64.pkg.tar.zst" }
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: harlo-linux
+      - name: Install
+        run: ${{ matrix.install }}
+      - name: Starts
+        run: |
+          harlo --version
+          export QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 HOME=$(mktemp -d) XDG_RUNTIME_DIR=$(mktemp -d)
+          timeout 30 harlo --check-start > start.log 2>&1 || true
+          cat start.log
+          grep -q "check-start: ok" start.log
+          ! grep -E "module .* is not installed|cannot open shared object|Cannot load library" start.log
+
+  publish:
+    needs: [linux, install]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v6
+        with:
+          name: harlo-linux
+          path: dist
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          gh release create "$GITHUB_REF_NAME" --title "harlo ${GITHUB_REF_NAME#v}" --notes-file ../packaging/linux/release-notes.md \
+            *.AppImage *.deb *.rpm *.pkg.tar.zst SHA256SUMS

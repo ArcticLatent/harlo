@@ -1,0 +1,4 @@
+[env]
+# whisper.cpp (dictation) for any x86-64 CPU with AVX2, not just the
+# build machine's: packages built here must run elsewhere.
+GGML_NATIVE = "OFF"
