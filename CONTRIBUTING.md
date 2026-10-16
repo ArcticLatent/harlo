@@ -1,25 +1,26 @@
 # Contributing to harlo
 
-Thanks for wanting to help. Bug reports, ideas, fixes, translations of the
+Thanks for wanting to help. harlo is made by one person, me, so every
+report, idea and pull request makes a real difference. Bug reports, ideas, fixes, translations of the
 website, packaging for more distributions and whole new platforms are all
 welcome.
 
 - **Found a bug or have an idea?** [Open an issue](https://github.com/ArcticLatent/harlo/issues/new/choose).
   The forms ask for what helps most.
 - **Want to fix or build something?** For anything bigger than a small
-  fix, open an issue first (or comment on one) and say what you plan, so we
-  can agree on the approach before you spend the time.
+  fix, open an issue first (or comment on one) and say what you plan, so I
+  can tell you early whether it fits, before you spend the time.
 - **Security problems:** please report privately, see [SECURITY.md](SECURITY.md).
 
 ## Wanted: macOS, Windows and Android
 
 harlo is Linux-only today, but most of it isn't tied to Linux: the Rust core
 and the Qt 6 interface run on macOS and Windows, and so do the agents
-(Claude Code, OpenCode, pi, Oh My Pi). We'd love to have harlo there, and we
-are looking for **contributors and maintainers** for a macOS app and a
-Windows app. If you'd like to take one on, open an issue titled
-"macOS port" or "Windows port" and introduce yourself; we'll help you find
-your way around and review the work.
+(Claude Code, OpenCode, pi, Oh My Pi). I'd love to have harlo there, and I'm
+looking for **contributors and maintainers** for a macOS app and a Windows
+app. If you'd like to take one on, open an issue titled "macOS port" or
+"Windows port" and introduce yourself; I'll help you find your way around
+and review the work.
 
 What's Linux-specific today, and would need a macOS / Windows counterpart:
 
@@ -40,7 +41,7 @@ whatever system harlo runs on.
 
 ### Android
 
-We're also looking for **contributors and maintainers for an Android app**,
+I'm also looking for **contributors and maintainers for an Android app**,
 the counterpart of the iPhone app: follow sessions live, answer questions
 and approvals from notifications, start new sessions. Open an issue titled
 "Android app" to get started. What it needs:
@@ -113,5 +114,5 @@ project's [MIT license](LICENSE).
 
 Be respectful and assume good intent, in issues, reviews and everywhere else
 around the project. Harassment or personal attacks aren't tolerated;
-maintainers may remove such comments and block those who make them. To
+I may remove such comments and block those who make them. To
 report a problem with someone's behaviour, email hello@harlo.run.
