@@ -135,7 +135,7 @@ harlo is open source and contributions are welcome: bug reports, ideas, fixes, f
 
 - **Found a bug or have an idea?** [Open an issue](https://github.com/ArcticLatent/harlo/issues/new/choose).
 - **Want to build something?** Read [CONTRIBUTING.md](CONTRIBUTING.md), then comment on an issue or open one to say what you plan.
-- **macOS and Windows: maintainers wanted.** harlo runs on Linux today, but its Rust core and Qt interface are cross-platform. We're looking for people to bring it to macOS and Windows and look after those versions. [CONTRIBUTING.md](CONTRIBUTING.md#wanted-macos-and-windows) lists what's Linux-specific; open an issue titled "macOS port" or "Windows port" to get started. An Android app is welcome too.
+- **macOS, Windows and Android: maintainers wanted.** harlo runs on Linux today, but its Rust core and Qt interface are cross-platform. We're looking for people to bring it to macOS and Windows and look after those versions, and to build and maintain an Android app alongside the iPhone app. [CONTRIBUTING.md](CONTRIBUTING.md#wanted-macos-windows-and-android) lists where to start; open an issue titled "macOS port", "Windows port" or "Android app".
 - **Security problems:** please report privately, see [SECURITY.md](SECURITY.md).
 
 ## License

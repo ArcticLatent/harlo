@@ -11,7 +11,7 @@ welcome.
   can agree on the approach before you spend the time.
 - **Security problems:** please report privately, see [SECURITY.md](SECURITY.md).
 
-## Wanted: macOS and Windows
+## Wanted: macOS, Windows and Android
 
 harlo is Linux-only today, but most of it isn't tied to Linux: the Rust core
 and the Qt 6 interface run on macOS and Windows, and so do the agents
@@ -36,8 +36,28 @@ What's Linux-specific today, and would need a macOS / Windows counterpart:
 | Packages and releases | `packaging/linux/`, `.github/workflows/release.yml` | .deb, .rpm, Arch, AppImage |
 
 The iPhone app needs no changes: it talks to harlo over the network,
-whatever system harlo runs on. An Android app is welcome too; `ios/HarloKit`
-(the iPhone app's client library) shows the protocol.
+whatever system harlo runs on.
+
+### Android
+
+We're also looking for **contributors and maintainers for an Android app**,
+the counterpart of the iPhone app: follow sessions live, answer questions
+and approvals from notifications, start new sessions. Open an issue titled
+"Android app" to get started. What it needs:
+
+- **The protocol.** `ios/HarloKit` is the iPhone app's client library and
+  the reference: pairing by QR code, NaCl box encryption with per-device
+  keys, and the JSON messages (`Pairing.swift`, `Crypto.swift`,
+  `Client.swift`, `Messages.swift`). The desktop side is
+  `crates/harlo-app/src/phone*.rs` and `crates/harlo-core/src/phone.rs`.
+- **Reaching harlo** directly on the same network, or through the relay
+  (`crates/harlo-relay`) from anywhere.
+- **Notifications.** The relay sends the iPhone's through Apple's push
+  service (`crates/harlo-apns`); Android would need Firebase Cloud Messaging
+  in the relay the same way, with the notification sealed for the phone.
+
+The phone web page harlo serves (`crates/harlo-app/phone/`) already works in
+any phone's browser, and is another working example of the protocol.
 
 ## Building
 
