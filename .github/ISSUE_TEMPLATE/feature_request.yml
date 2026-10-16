@@ -1,0 +1,45 @@
+name: Feature request
+description: An idea for something harlo should do, or do differently.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ideas are welcome. Please search the [issues](https://github.com/ArcticLatent/harlo/issues?q=is%3Aissue) first; if someone has asked already, add a 👍 and your own use case to it.
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options:
+        - Desktop app
+        - iPhone app
+        - Both
+        - A new platform (macOS, Windows, Android…)
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you're trying to do
+      description: The problem or the situation, in your own words. "When I … I have to …, which is slow because …"
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you'd like
+      description: How you picture it working. Sketches and screenshots of other tools are welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do now instead
+      description: Workarounds, or other ways it could be solved.
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Helping
+      options:
+        - label: I'd like to work on this myself (see CONTRIBUTING.md)

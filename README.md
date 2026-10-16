@@ -15,7 +15,8 @@ with an iPhone app to follow and answer them. Written in Rust and Qt, not Electr
   <a href="https://harlo.run/download"><b>Download</b></a> ·
   <a href="https://harlo.run">Website</a> ·
   <a href="https://apps.apple.com/app/id6822811546">iPhone app</a> ·
-  <a href="https://harlo.run/support">Support</a>
+  <a href="https://harlo.run/support">Support</a> ·
+  <a href="CONTRIBUTING.md">Contribute</a>
 </p>
 
 <p align="center">
@@ -127,6 +128,15 @@ It speaks plain HTTP: put it behind something that adds HTTPS (Caddy, a Cloudfla
 | `crates/harlo-apns` | Apple's push service, for the relay |
 | `ios/` | The iPhone app (SwiftUI) and HarloKit, its client library |
 | `site/` | [harlo.run](https://harlo.run) |
+
+## Contributing
+
+harlo is open source and contributions are welcome: bug reports, ideas, fixes, features, and packaging for more distributions.
+
+- **Found a bug or have an idea?** [Open an issue](https://github.com/ArcticLatent/harlo/issues/new/choose).
+- **Want to build something?** Read [CONTRIBUTING.md](CONTRIBUTING.md), then comment on an issue or open one to say what you plan.
+- **macOS and Windows: maintainers wanted.** harlo runs on Linux today, but its Rust core and Qt interface are cross-platform. We're looking for people to bring it to macOS and Windows and look after those versions. [CONTRIBUTING.md](CONTRIBUTING.md#wanted-macos-and-windows) lists what's Linux-specific; open an issue titled "macOS port" or "Windows port" to get started. An Android app is welcome too.
+- **Security problems:** please report privately, see [SECURITY.md](SECURITY.md).
 
 ## License
 

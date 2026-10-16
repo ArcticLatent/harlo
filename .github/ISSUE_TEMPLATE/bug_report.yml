@@ -1,0 +1,75 @@
+name: Bug report
+description: Something in harlo (desktop, iPhone app or relay) doesn't work as it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. Please search the [open issues](https://github.com/ArcticLatent/harlo/issues) first; if it's already there, add a 👍 or your details to it.
+
+        **Security problems** (anything about the encryption, pairing or the relay): please don't open an issue. Email hello@harlo.run instead, see [SECURITY.md](https://github.com/ArcticLatent/harlo/blob/main/SECURITY.md).
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options:
+        - Desktop app
+        - iPhone app
+        - Both (desktop and iPhone)
+        - The relay
+        - Install / packages / updates
+        - Website
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+      placeholder: |
+        1. Opened a Claude Code session in a project with two repositories
+        2. Asked it to edit both, then clicked "Undo these changes"
+        3. Only one repository was put back
+    validations:
+      required: true
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Agent
+      description: Which agent the session used, if it's about a session.
+      multiple: true
+      options:
+        - Claude Code
+        - OpenCode
+        - pi
+        - Oh My Pi (omp)
+        - Not about a session
+  - type: input
+    id: version
+    attributes:
+      label: harlo version
+      description: "`harlo --version`, or Settings → General. On the iPhone: Settings → Version."
+      placeholder: harlo 1.0.0
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: Distribution and version, desktop (KDE, GNOME…), Wayland or X11, and how you installed harlo. For the iPhone app, the iOS version.
+      placeholder: Fedora 42, KDE Plasma 6.4, Wayland, .rpm
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: |
+        The end of harlo.log (Settings → Providers → Diagnostics → Logs folder → Open). If harlo crashed, the crash-….log there too.
+        Check it for anything private before you paste it.
+      render: text
+  - type: textarea
+    id: more
+    attributes:
+      label: Screenshots or anything else
+      description: Drag images here.
