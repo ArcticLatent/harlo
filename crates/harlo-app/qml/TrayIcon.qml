@@ -37,6 +37,11 @@ Item {
         property var sessions: []
         menu: Platform.Menu {
             id: menu
+            // Not open to begin with: KDE's menus take "visible" (true by
+            // default) as "show it now", which on Wayland pops an unanchored
+            // menu at startup ("Failed to create grabbing popup"). The tray
+            // still opens it on a click.
+            visible: false
             onAboutToShow: tray.sessions = JSON.parse(Workspace.runningSessions())
             Platform.MenuItem {
                 text: root.window && root.window.visible ? "Hide harlo" : "Show harlo"

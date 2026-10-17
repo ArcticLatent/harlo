@@ -132,7 +132,13 @@ fn main() {
     fonts::load_bundled();
     fonts::set_application_font_family(&QString::from(fonts::DEFAULT_UI_FONT));
     diagnostics::capture_qt_messages();
-    platform::set_desktop_file_name(&QString::from("harlo"));
+    // Named only when harlo.desktop is installed (a package): Qt registers
+    // that name with the desktop portal, which refuses names it can't find
+    // ("App info not found"), as under `cargo run`. Without it the Wayland
+    // app id is still "harlo" (the program's name).
+    if desktop_entry_installed() {
+        platform::set_desktop_file_name(&QString::from("harlo"));
+    }
     platform::set_window_icon(&QString::from(":/qt/qml/harlo/icons/app/harlo.svg"));
     let mut engine = QQmlApplicationEngine::new();
     if let Some(mut engine) = engine.as_mut() {
@@ -148,4 +154,15 @@ fn main() {
     instance::cleanup();
     // Orchestration's socket.
     let _ = std::fs::remove_file(harlo_core::orchestration::socket_path());
+}
+
+/// Whether harlo.desktop is installed where desktops look for it: the
+/// user's and the system's `applications` folders (XDG data folders).
+fn desktop_entry_installed() -> bool {
+    let env_dir = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty()).map(std::path::PathBuf::from);
+    let home = env_dir("XDG_DATA_HOME").or_else(|| env_dir("HOME").map(|h| h.join(".local/share")));
+    let system = std::env::var("XDG_DATA_DIRS").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| "/usr/local/share:/usr/share".to_owned());
+    home.into_iter()
+        .chain(system.split(':').map(std::path::PathBuf::from))
+        .any(|dir| dir.join("applications/harlo.desktop").is_file())
 }
