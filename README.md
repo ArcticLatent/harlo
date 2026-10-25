@@ -14,7 +14,7 @@ with an iPhone app to follow and answer them. Written in Rust and Qt, not Electr
 <p align="center">
   <a href="https://harlo.run/download"><b>Download</b></a> ·
   <a href="https://harlo.run">Website</a> ·
-  <a href="https://apps.apple.com/app/id6822811546">iPhone app</a> ·
+  <a href="#on-your-iphone">iPhone app</a> (coming soon) ·
   <a href="https://harlo.run/support">Support</a> ·
   <a href="CONTRIBUTING.md">Contribute</a>
 </p>
@@ -58,6 +58,8 @@ Many agent apps are a web page in an Electron window. harlo is a desktop app:
 
 ### On your iPhone
 
+*Coming soon: the app is in App Store review.*
+
 Follow your sessions live, answer questions and approvals from a notification (even with the app closed), watch a run on the Lock Screen and in the Dynamic Island, and start new sessions on any of your machines. Between the phone and your computer everything is end-to-end encrypted: on your Wi-Fi, over Tailscale, or through harlo's relay, which can't read what it passes on.
 
 <p align="center">
@@ -79,7 +81,7 @@ Download the file for your system from [harlo.run/download](https://harlo.run/do
 
 The packages bring their own Qt and need glibc 2.35 or newer, an x86-64 CPU with AVX2, and git. harlo updates itself (Settings → General → Check for updates). Each release lists its files' SHA-256 sums in `SHA256SUMS`.
 
-On first start, harlo's setup guide helps you install and sign in the agents you want (`harlo --setup` opens it again). For the iPhone, get [harlo on the App Store](https://apps.apple.com/app/id6822811546), then Settings → Devices → Pair a device on your computer, and scan the code.
+On first start, harlo's setup guide helps you install and sign in the agents you want (`harlo --setup` opens it again). The iPhone app is in App Store review and comes out soon; once it's there, get it, then Settings → Devices → Pair a device on your computer, and scan the code.
 
 ## Build from source
 
