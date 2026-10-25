@@ -116,6 +116,120 @@ pub fn harlo_release() -> anyhow::Result<Release> {
     Release::verified(&body)
 }
 
+/// The full changelog (as of the release `latest`), on GitHub.
+pub fn harlo_changelog_url(latest: &str) -> String {
+    format!("https://github.com/{REPOSITORY}/blob/v{latest}/CHANGELOG.md")
+}
+
+/// What's new since `current`, up to `latest`: CHANGELOG.md at that
+/// release's tag, read with [`changes_since`]. `HARLO_UPDATE_CHANGELOG_URL`
+/// points elsewhere (the tests' stand-in).
+pub fn harlo_changes(current: &str, latest: &str) -> anyhow::Result<String> {
+    use anyhow::Context;
+    let url = std::env::var("HARLO_UPDATE_CHANGELOG_URL")
+        .ok()
+        .filter(|u| !u.trim().is_empty())
+        .unwrap_or_else(|| format!("https://raw.githubusercontent.com/{REPOSITORY}/v{latest}/CHANGELOG.md"));
+    let http: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(15))).build().into();
+    let text = http
+        .get(&url)
+        .header("User-Agent", concat!("harlo/", env!("CARGO_PKG_VERSION")))
+        .call()
+        .context("couldn't reach harlo's changelog")?
+        .body_mut()
+        .with_config()
+        .limit(1024 * 1024)
+        .read_to_string()
+        .context("couldn't read harlo's changelog")?;
+    Ok(changes_since(&text, current, latest))
+}
+
+/// The CHANGELOG.md sections newer than `current`, up to `latest`, as
+/// plain text: a line per item ("• " for a list's), subheadings left out,
+/// each version named when there's more than one.
+pub fn changes_since(changelog: &str, current: &str, latest: &str) -> String {
+    let mut sections: Vec<(String, Vec<String>)> = Vec::new();
+    let mut taking = false;
+    let mut item: Option<String> = None;
+    let flush = |item: &mut Option<String>, sections: &mut Vec<(String, Vec<String>)>| {
+        if let (Some(text), Some(last)) = (item.take(), sections.last_mut()) {
+            last.1.push(text);
+        }
+    };
+    for line in changelog.lines() {
+        let trimmed = line.trim();
+        if let Some(version) = line.strip_prefix("## ") {
+            flush(&mut item, &mut sections);
+            let version = version.trim().trim_start_matches('v').to_owned();
+            taking = newer(&version, current) && !newer(&version, latest);
+            if taking {
+                sections.push((version, Vec::new()));
+            }
+            continue;
+        }
+        if !taking {
+            continue;
+        }
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            flush(&mut item, &mut sections);
+        } else if let Some(rest) = trimmed.strip_prefix("- ").or_else(|| trimmed.strip_prefix("* ")) {
+            flush(&mut item, &mut sections);
+            item = Some(format!("• {}", plain(rest)));
+        } else {
+            // A wrapped line goes on; else a paragraph starts.
+            match item.as_mut() {
+                Some(text) => {
+                    text.push(' ');
+                    text.push_str(&plain(trimmed));
+                }
+                None => item = Some(plain(trimmed)),
+            }
+        }
+    }
+    flush(&mut item, &mut sections);
+    let named = sections.len() > 1;
+    let mut out = Vec::new();
+    for (version, items) in sections.into_iter().filter(|(_, items)| !items.is_empty()) {
+        if named {
+            out.push(format!("harlo {version}"));
+        }
+        out.extend(items);
+    }
+    out.join("\n")
+}
+
+/// Markdown's marks out: `code`, **bold**, [links](…).
+fn plain(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find('[') {
+        let (before, link) = rest.split_at(start);
+        out.push_str(before);
+        match (link.find("]("), link.find(')')) {
+            (Some(close), Some(end)) if close < end => {
+                out.push_str(&link[1..close]);
+                rest = &link[end + 1..];
+            }
+            _ => {
+                out.push('[');
+                rest = &link[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out.replace("**", "").replace('`', "")
+}
+
+/// At most `max` characters of `text`, cut at a word, "…" if cut.
+pub fn excerpt(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_owned();
+    }
+    let cut: String = text.chars().take(max).collect();
+    let end = cut.rfind(char::is_whitespace).filter(|&i| i > max / 2).unwrap_or(cut.len());
+    format!("{}…", cut[..end].trim_end_matches(|c: char| c.is_whitespace() || matches!(c, ',' | ';' | ':' | '.' | '•')))
+}
+
 /// How this harlo was installed: an AppImage (its file), or a package
 /// (its kind, in `/opt/harlo/install-kind`). None: built from source.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -339,6 +453,41 @@ mod tests {
     fn every_agent_has_a_package_and_an_update() {
         for a in crate::remote::AGENTS {
             assert!(package(a).is_some() && !update_args(a).is_empty(), "{a}");
+        }
+    }
+
+    #[test]
+    fn changes_since_your_version() {
+        let log = "# Changelog\n\nIntro, not a release.\n\n## 1.0.2\n\n- Check now, in Settings.\n\n## 1.0.1\n\n- OpenCode: denying a permission\n  ends the run (`shutdown`).\n- **Archiving** hides it; see [the docs](https://x.y/z).\n\n## 1.0.0\n\nThe first release.\n\n### Agents\n\n- Claude Code.\n";
+        assert_eq!(changes_since(log, "1.0.1", "1.0.2"), "• Check now, in Settings.");
+        assert_eq!(
+            changes_since(log, "1.0.0", "1.0.2"),
+            "harlo 1.0.2\n• Check now, in Settings.\nharlo 1.0.1\n• OpenCode: denying a permission ends the run (shutdown).\n• Archiving hides it; see the docs."
+        );
+        // A paragraph is an item too; subheadings are left out.
+        assert_eq!(changes_since(log, "0.9.0", "1.0.0"), "The first release.\n• Claude Code.");
+        // Nothing newer (or a release missing from it): nothing.
+        assert_eq!(changes_since(log, "1.0.2", "1.0.2"), "");
+        assert_eq!(changes_since(log, "1.0.2", "1.0.3"), "");
+    }
+
+    #[test]
+    fn excerpts_cut_at_a_word() {
+        assert_eq!(excerpt("short", 20), "short");
+        assert_eq!(excerpt("• Archiving hides it, unless it's working", 24), "• Archiving hides it…");
+    }
+
+    /// Each release in harlo's own CHANGELOG.md reads as notes.
+    #[test]
+    fn harlos_changelog_reads() {
+        let log = include_str!("../../../CHANGELOG.md");
+        let versions: Vec<&str> = log.lines().filter_map(|l| l.strip_prefix("## ")).map(str::trim).collect();
+        assert!(!versions.is_empty());
+        // Newest first: each against the one before it (the first against 0).
+        for (i, v) in versions.iter().enumerate() {
+            let before = versions.get(i + 1).copied().unwrap_or("0");
+            let notes = changes_since(log, before, v);
+            assert!(!notes.is_empty() && !notes.starts_with("harlo "), "{v}: {notes:?}");
         }
     }
 }

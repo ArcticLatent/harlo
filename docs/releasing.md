@@ -15,7 +15,10 @@ the signed update manifest and the GitHub release with its notes.
 
    The version comes from that heading; the section's text becomes the
    release's notes (with the install table from
-   `packaging/linux/install-notes.md` under it).
+   `packaging/linux/install-notes.md` under it). harlo's update notice
+   shows the start of every section newer than the installed version (read
+   from CHANGELOG.md at the release's tag), with Read more for the rest, so
+   keep the first items the ones that matter.
 
 2. Run, from an up-to-date `main`:
 

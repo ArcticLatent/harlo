@@ -3680,6 +3680,13 @@ ApplicationWindow {
         ScriptAction { script: {
             const m = win.findName("updateMessage-local/harlo")
             win.check(m !== null && /^Version 9\.9\.9 is available \(you have \d+\.\d+\.\d+\)\.$/.test(m.text), "a newer harlo is offered (" + (m ? m.text : Updates.entriesJson) + ")")
+            // What's new since this version: both releases, cut short, the rest a click away.
+            const notes = win.findName("updateNotes-local/harlo")
+            win.check(notes !== null && notes.visible && notes.text.startsWith("harlo 9.9.9\n• The stand-in release: denying a permission ends the run, and archiving an open session hides it.\n")
+                      && notes.text.indexOf("harlo 9.9.8") > 0 && notes.text.endsWith("…") && notes.text.indexOf("Long ago") < 0, "it says what's new, in short (" + (notes ? JSON.stringify(notes.text) : "none") + ")")
+            const more = win.findName("updateReadMore-local/harlo")
+            win.check(more !== null && more.visible && JSON.parse(Updates.entriesJson).find(e => e.key === "local/harlo").notesUrl === "https://github.com/ArcticLatent/harlo/blob/v9.9.9/CHANGELOG.md", "Read more opens the full changelog")
+            win.shotWindow("clicks-selfupdate-notes")
             win.clickItem(win.findName("updateGo-local/harlo"), "Update") } }
         PauseAnimation { duration: 2500 }
         ScriptAction { script: {

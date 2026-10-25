@@ -112,6 +112,19 @@ Column {
                         font.pixelSize: Theme.px(12)
                         wrapMode: Text.Wrap
                     }
+                    // harlo's: what's new, in short (Read more: all of it).
+                    Label {
+                        objectName: "updateNotes-" + toast.e.key
+                        visible: toast.e.state === "available" && (toast.e.notes || "") !== ""
+                        Layout.fillWidth: true
+                        Layout.topMargin: 4
+                        text: toast.e.notes || ""
+                        color: Theme.foreground
+                        font.pixelSize: Theme.px(12)
+                        lineHeight: 1.15
+                        wrapMode: Text.Wrap
+                        textFormat: Text.PlainText
+                    }
                     // Updating: a bar that runs until it's done.
                     Rectangle {
                         visible: toast.e.state === "running"
@@ -140,6 +153,15 @@ Column {
                         Layout.fillWidth: true
                         Layout.topMargin: 6
                         spacing: 8
+                        Button {
+                            objectName: "updateReadMore-" + toast.e.key
+                            visible: (toast.e.notesUrl || "") !== ""
+                            flat: true
+                            padding: 2
+                            contentItem: Label { text: "Read more"; color: Theme.accent; font.pixelSize: Theme.px(12); font.underline: true }
+                            background: null
+                            onClicked: Qt.openUrlExternally(toast.e.notesUrl)
+                        }
                         Item { Layout.fillWidth: true }
                         FlatButton {
                             objectName: "updateOutput-" + toast.e.key

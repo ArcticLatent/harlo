@@ -16,8 +16,10 @@ pub mod qobject {
         #[qobject]
         #[qml_element]
         #[qml_singleton]
-        /// `[{ key, host, agent, label, current, latest, state, message }]`:
-        /// state "available", "running", "done" or "failed"; host "" here.
+        /// `[{ key, host, agent, label, current, latest, state, message,
+        /// notes, notesUrl }]`: state "available", "running", "done" or
+        /// "failed"; host "" here; notes (harlo's): what's new, in short,
+        /// and the full changelog's address.
         #[qproperty(QString, entries, cxx_name = "entriesJson")]
         /// Check now is looking.
         #[qproperty(bool, checking)]
@@ -80,6 +82,9 @@ struct Item {
     latest: String,
     state: String,
     message: String,
+    /// harlo's: what's new (a few lines) and the full changelog.
+    notes: String,
+    notes_url: String,
     log: PathBuf,
     pid: u32,
 }
@@ -158,6 +163,32 @@ fn harlo_latest(fresh: bool) -> Result<Option<updates::Release>, String> {
     })?;
     *CACHE.lock().unwrap() = Some((r.clone(), Instant::now()));
     Ok(Some(r))
+}
+
+/// How much of what's new an update's notice shows (the rest a click away).
+const NOTES_SHOWN: usize = 240;
+
+/// What's new from `current` to `latest`, in short (remembered: a
+/// release's changelog doesn't change); "" if it can't be read.
+fn harlo_notes(current: &str, latest: &str) -> String {
+    static CACHE: Mutex<Option<(String, String)>> = Mutex::new(None);
+    let key = format!("{current}>{latest}");
+    if let Some((k, notes)) = CACHE.lock().unwrap().as_ref()
+        && *k == key
+    {
+        return notes.clone();
+    }
+    match updates::harlo_changes(current, latest) {
+        Ok(text) => {
+            let notes = updates::excerpt(&text, NOTES_SHOWN);
+            *CACHE.lock().unwrap() = Some((key, notes.clone()));
+            notes
+        }
+        Err(e) => {
+            tracing::warn!("harlo's changelog: {e:#}");
+            String::new()
+        }
+    }
 }
 
 /// Whether a program is on PATH.
@@ -239,7 +270,7 @@ impl Updates {
             .iter()
             .map(|(key, i)| {
                 json!({ "key": key, "host": i.host, "agent": i.agent, "label": label(&i.agent), "current": i.current, "latest": i.latest, "state": i.state, "message": i.message,
-                        "output": i.pid > 0 })
+                        "notes": i.notes, "notesUrl": i.notes_url, "output": i.pid > 0 })
             })
             .collect();
         self.as_mut().set_entries(QString::from(&Value::from(list).to_string()));
@@ -294,16 +325,30 @@ impl Updates {
                 .collect();
             // harlo itself (installed from a package or an AppImage).
             let packaged = harlo_kind().is_some();
-            let mut error = None;
+            let current = env!("CARGO_PKG_VERSION");
+            let (mut error, mut notes) = (None, None);
             if packaged {
                 match harlo_latest(fresh) {
-                    Ok(Some(r)) => found.push(("harlo".into(), env!("CARGO_PKG_VERSION").into(), r.version)),
+                    Ok(Some(r)) => {
+                        // A newer one: what's new in it.
+                        if updates::newer(&r.version, current) {
+                            notes = Some((harlo_notes(current, &r.version), updates::harlo_changelog_url(&r.version)));
+                        }
+                        found.push(("harlo".into(), current.into(), r.version));
+                    }
                     Ok(None) => {}
                     Err(e) => error = Some(e),
                 }
             }
             let _ = thread.queue(move |mut this| {
                 this.as_mut().found("", found);
+                if let Some((text, url)) = notes
+                    && let Some(item) = this.as_mut().rust_mut().items.get_mut("local/harlo")
+                    && item.state == "available"
+                {
+                    (item.notes, item.notes_url) = (text, url);
+                    this.as_mut().publish();
+                }
                 if fresh {
                     this.checked(packaged, error);
                 }
