@@ -115,19 +115,9 @@ pub fn take_dropped() -> String {
 
 /// Starts harlo again once this one has quit (the caller then quits).
 pub fn restart() {
-    let Ok(exe) = std::env::current_exe() else { return };
-    let pid = std::process::id().to_string();
-    // A waiter outside harlo: a new harlo started while this one runs
-    // would only hand over to it.
-    use std::os::unix::process::CommandExt;
-    let _ = std::process::Command::new("sh")
-        .process_group(0)
-        .args(["-c", r#"while kill -0 "$1" 2>/dev/null; do sleep 0.2; done; shift; exec "$@""#, "sh", &pid])
-        .arg(exe)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn();
+    if let Some(program) = harlo_core::updates::this_program() {
+        let _ = harlo_core::updates::relaunch_after_exit(&program);
+    }
 }
 
 #[cfg(test)]

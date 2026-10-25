@@ -42,49 +42,78 @@ pub fn latest(agent: &str) -> Option<String> {
 
 // ---- harlo itself -------------------------------------------------------------
 
-/// Where harlo's releases are (GitHub's API for the repository's latest).
-const RELEASES: &str = "https://api.github.com/repos/ArcticLatent/harlo/releases/latest";
+/// harlo's repository, and its latest release's signed manifest: the
+/// packages with their SHA-256 sums (`packaging/release-manifests.sh`).
+/// A fixed address, not GitHub's API, which allows few requests an hour.
+const REPOSITORY: &str = "ArcticLatent/harlo";
+const MANIFEST: &str = "https://github.com/ArcticLatent/harlo/releases/latest/download/linux-release.json";
 
-/// A harlo release: its version and its files (name, download address).
+pub use harlo_update_signing::Asset;
+
+/// A harlo release, from a manifest whose signature checked out.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Release {
     pub version: String,
-    pub assets: Vec<(String, String)>,
+    pub assets: Vec<Asset>,
 }
 
 impl Release {
-    /// From GitHub's release JSON.
-    pub fn parse(v: &serde_json::Value) -> Option<Self> {
-        let version = v["tag_name"].as_str()?.trim().trim_start_matches('v').to_owned();
-        let assets = v["assets"].as_array()?.iter()
-            .filter_map(|a| Some((a["name"].as_str()?.to_owned(), a["browser_download_url"].as_str()?.to_owned())))
-            .collect();
-        (!version.is_empty()).then_some(Self { version, assets })
+    /// From `linux-release.json`, only if it's signed with harlo's key (and
+    /// is harlo's: its repository, its tag the version's).
+    pub fn verified(json: &str) -> anyhow::Result<Self> {
+        use anyhow::{Context, bail};
+        let v: serde_json::Value = serde_json::from_str(json).context("the release manifest isn't JSON")?;
+        let text = |key: &str| v[key].as_str().map(str::to_owned).with_context(|| format!("the release manifest has no {key}"));
+        let (version, tag, repository) = (text("version")?, text("tag")?, text("repository")?);
+        let assets = v["assets"]
+            .as_array()
+            .context("the release manifest has no files")?
+            .iter()
+            .map(|a| {
+                let field = |key: &str| a[key].as_str().map(str::to_owned).with_context(|| format!("a file in the release manifest has no {key}"));
+                Ok(Asset { name: field("name")?, sha256: field("sha256")?, download_url: field("download_url")? })
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        let signature = v["signature"].as_str().context("the release manifest isn't signed")?;
+        let payload = harlo_update_signing::signing_payload(&version, &tag, &repository, &assets);
+        harlo_update_signing::verify_with_harlo_key(&payload, signature).context("the release manifest's signature isn't harlo's")?;
+        if repository != REPOSITORY || tag != format!("v{version}") {
+            bail!("the release manifest is for {repository} {tag}, not harlo {version}");
+        }
+        // (Checked as signed; compared in lowercase.)
+        let assets = assets.into_iter().map(|a| Asset { sha256: a.sha256.to_lowercase(), ..a }).collect();
+        Ok(Self { version, assets })
     }
 
-    /// The file for this way of installing it.
-    pub fn asset(&self, kind: &InstallKind) -> Option<&(String, String)> {
+    /// The package for this way of installing harlo.
+    pub fn asset(&self, kind: &InstallKind) -> Option<&Asset> {
         let suffix = match kind {
             InstallKind::Deb => "_amd64.deb",
             InstallKind::Rpm => ".x86_64.rpm",
             InstallKind::Arch => "-x86_64.pkg.tar.zst",
             InstallKind::AppImage(_) => "-x86_64.AppImage",
         };
-        self.assets.iter().find(|(n, _)| n.ends_with(suffix))
-    }
-
-    pub fn sums(&self) -> Option<&(String, String)> {
-        self.assets.iter().find(|(n, _)| n == "SHA256SUMS")
+        self.assets.iter().find(|a| a.name.ends_with(suffix))
     }
 }
 
-/// harlo's newest release, or None (offline, say). `HARLO_TEST_RELEASE`
-/// (an address) answers for the tests.
-pub fn harlo_release() -> Option<Release> {
-    let url = std::env::var("HARLO_TEST_RELEASE").unwrap_or_else(|_| RELEASES.to_owned());
+/// harlo's newest release, its manifest's signature checked.
+/// `HARLO_UPDATE_MANIFEST_URL` points elsewhere (the tests' stand-in).
+pub fn harlo_release() -> anyhow::Result<Release> {
+    use anyhow::Context;
+    let url = std::env::var("HARLO_UPDATE_MANIFEST_URL").ok().filter(|u| !u.trim().is_empty()).unwrap_or_else(|| MANIFEST.to_owned());
     let http: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(15))).build().into();
-    let body = http.get(&url).header("Accept", "application/vnd.github+json").header("User-Agent", "harlo").call().ok()?.body_mut().read_to_string().ok()?;
-    Release::parse(&serde_json::from_str(&body).ok()?)
+    let body = http
+        .get(&url)
+        .header("User-Agent", concat!("harlo/", env!("CARGO_PKG_VERSION")))
+        .call()
+        .context("couldn't reach harlo's releases")?
+        .body_mut()
+        .with_config()
+        .limit(1024 * 1024)
+        .read_to_string()
+        .context("couldn't read harlo's release manifest")?;
+    Release::verified(&body)
 }
 
 /// How this harlo was installed: an AppImage (its file), or a package
@@ -112,12 +141,11 @@ impl InstallKind {
         }
     }
 
-    /// The command that installs a downloaded package (with the system's
-    /// password dialog), or None for an AppImage (its file is replaced).
-    /// `has` says whether a program is on PATH.
-    pub fn install_command(&self, file: &std::path::Path, has: impl Fn(&str) -> bool) -> Option<Vec<String>> {
-        let f = file.to_string_lossy().into_owned();
-        let argv: Vec<&str> = match self {
+    /// The package manager's command that installs a downloaded package,
+    /// or None for an AppImage (its file is replaced). `has` says whether a
+    /// program is on PATH.
+    fn installer(&self, has: impl Fn(&str) -> bool) -> Option<Vec<&'static str>> {
+        Some(match self {
             Self::AppImage(_) => return None,
             Self::Deb if has("apt-get") => vec!["apt-get", "install", "-y", "--allow-downgrades"],
             Self::Deb => vec!["dpkg", "-i"],
@@ -125,17 +153,66 @@ impl InstallKind {
             Self::Rpm if has("zypper") => vec!["zypper", "--non-interactive", "install", "--allow-unsigned-rpm"],
             Self::Rpm => vec!["rpm", "-U"],
             Self::Arch => vec!["pacman", "-U", "--noconfirm"],
-        };
-        Some(std::iter::once("pkexec").chain(argv).map(str::to_owned).chain(std::iter::once(f)).collect())
+        })
+    }
+
+    /// The command that installs a downloaded package with the rights it
+    /// needs (`elevate`: see [`elevation`]), or None for an AppImage.
+    pub fn install_command(&self, file: &std::path::Path, has: impl Fn(&str) -> bool, elevate: &[String]) -> Option<Vec<String>> {
+        let argv = self.installer(has)?;
+        Some(elevate.iter().cloned().chain(argv.into_iter().map(str::to_owned)).chain(std::iter::once(file.to_string_lossy().into_owned())).collect())
+    }
+
+    /// The same, to type in a terminal (when installing it here failed).
+    pub fn manual_command(&self, file: &std::path::Path, has: impl Fn(&str) -> bool) -> Option<String> {
+        let argv = self.installer(has)?;
+        Some(format!("sudo {} \"{}\"", argv.join(" "), file.display()))
     }
 }
 
-/// The SHA-256 a `SHA256SUMS` file gives for `name`.
-pub fn sum_for(sums: &str, name: &str) -> Option<String> {
-    sums.lines().find_map(|l| {
-        let (hash, file) = l.split_once(char::is_whitespace)?;
-        (file.trim().trim_start_matches('*') == name).then(|| hash.trim().to_lowercase())
-    })
+/// How to run a package manager as root: as it is (harlo runs as root),
+/// `sudo -n` (sudo needs no password here), else `pkexec` (the desktop's
+/// password dialog).
+pub fn elevation() -> Vec<String> {
+    use std::os::unix::fs::MetadataExt;
+    if std::fs::metadata("/proc/self").is_ok_and(|m| m.uid() == 0) {
+        return Vec::new();
+    }
+    let sudo_free = std::process::Command::new("sudo")
+        .args(["-n", "true"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success());
+    if sudo_free { vec!["sudo".into(), "-n".into()] } else { vec!["pkexec".into()] }
+}
+
+/// The program to start harlo again: the AppImage (its file), else this
+/// program. A package upgrade replaces it while it runs, after which
+/// Linux names it "<path> (deleted)"; the path itself is the new harlo.
+pub fn this_program() -> Option<std::path::PathBuf> {
+    if let Some(appimage) = std::env::var_os("APPIMAGE").filter(|a| !a.is_empty()) {
+        return Some(appimage.into());
+    }
+    let exe = std::env::current_exe().ok()?;
+    let exe = exe.to_string_lossy();
+    Some(exe.strip_suffix(" (deleted)").unwrap_or(&exe).into())
+}
+
+/// Starts `program` once this process has exited: a waiter outside harlo
+/// (a harlo started while this one runs would only hand over to it).
+pub fn relaunch_after_exit(program: &std::path::Path) -> std::io::Result<()> {
+    use std::os::unix::process::CommandExt;
+    std::process::Command::new("sh")
+        .process_group(0)
+        .args(["-c", r#"while kill -0 "$1" 2>/dev/null; do sleep 0.2; done; shift; exec "$@""#, "sh", &std::process::id().to_string()])
+        .arg(program)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|_| ())
 }
 
 /// Downloads `url` to `dest`: its SHA-256 (hex).
@@ -189,27 +266,53 @@ pub fn newer(latest: &str, current: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// A manifest as the release workflow writes it, signed with a
+    /// throwaway key (`HARLO_UPDATE_PUBLIC_KEY` makes harlo trust it).
+    fn manifest(version: &str, repository: &str, key: &[u8; 32]) -> String {
+        use base64::{Engine, engine::general_purpose::STANDARD};
+        use ed25519_dalek::{Signer, SigningKey};
+        let names = [format!("harlo_{version}-1_amd64.deb"), format!("harlo-{version}-1.x86_64.rpm"), format!("harlo-{version}-1-x86_64.pkg.tar.zst"), format!("harlo-{version}-x86_64.AppImage")];
+        let assets: Vec<Asset> = names.iter().map(|n| Asset { name: n.clone(), sha256: format!("AB{}", n.len()), download_url: format!("https://x/{n}") }).collect();
+        let tag = format!("v{version}");
+        let signing = SigningKey::from_bytes(key);
+        let signature = STANDARD.encode(signing.sign(&harlo_update_signing::signing_payload(version, &tag, repository, &assets)).to_bytes());
+        serde_json::json!({ "version": version, "tag": tag, "repository": repository, "signature": signature,
+            "assets": assets.iter().map(|a| serde_json::json!({ "name": a.name, "sha256": a.sha256, "download_url": a.download_url })).collect::<Vec<_>>() }).to_string()
+    }
+
     #[test]
     fn harlo_releases() {
-        let r = Release::parse(&serde_json::json!({ "tag_name": "v1.2.0", "assets": [
-            { "name": "harlo_1.2.0-1_amd64.deb", "browser_download_url": "https://x/deb" },
-            { "name": "harlo-1.2.0-1.x86_64.rpm", "browser_download_url": "https://x/rpm" },
-            { "name": "harlo-1.2.0-1-x86_64.pkg.tar.zst", "browser_download_url": "https://x/arch" },
-            { "name": "harlo-1.2.0-x86_64.AppImage", "browser_download_url": "https://x/appimage" },
-            { "name": "SHA256SUMS", "browser_download_url": "https://x/sums" } ] })).unwrap();
+        use base64::{Engine, engine::general_purpose::STANDARD};
+        let test_key = [5u8; 32];
+        // SAFETY: only this test reads HARLO_UPDATE_PUBLIC_KEY.
+        unsafe { std::env::set_var("HARLO_UPDATE_PUBLIC_KEY", STANDARD.encode(ed25519_dalek::SigningKey::from_bytes(&test_key).verifying_key().to_bytes())) };
+        let r = Release::verified(&manifest("1.2.0", "ArcticLatent/harlo", &test_key)).unwrap();
         assert_eq!(r.version, "1.2.0");
-        assert_eq!(r.asset(&InstallKind::Deb).unwrap().1, "https://x/deb");
-        assert_eq!(r.asset(&InstallKind::Rpm).unwrap().1, "https://x/rpm");
-        assert_eq!(r.asset(&InstallKind::Arch).unwrap().1, "https://x/arch");
-        assert_eq!(r.asset(&InstallKind::AppImage("/a".into())).unwrap().1, "https://x/appimage");
-        assert_eq!(r.sums().unwrap().1, "https://x/sums");
-        assert_eq!(sum_for("abc  harlo_1.2.0-1_amd64.deb\nDEF *harlo-1.2.0-x86_64.AppImage\n", "harlo-1.2.0-x86_64.AppImage").as_deref(), Some("def"));
-        assert_eq!(sum_for("abc  other", "harlo"), None);
+        assert_eq!(r.asset(&InstallKind::Deb).unwrap().download_url, "https://x/harlo_1.2.0-1_amd64.deb");
+        assert_eq!(r.asset(&InstallKind::Rpm).unwrap().name, "harlo-1.2.0-1.x86_64.rpm");
+        assert_eq!(r.asset(&InstallKind::Arch).unwrap().name, "harlo-1.2.0-1-x86_64.pkg.tar.zst");
+        let appimage = r.asset(&InstallKind::AppImage("/a".into())).unwrap();
+        assert_eq!((appimage.name.as_str(), appimage.sha256.as_str()), ("harlo-1.2.0-x86_64.AppImage", "ab27"), "sums are lowercased");
+        // Signed by another key, or changed after signing: refused.
+        assert!(Release::verified(&manifest("1.2.0", "ArcticLatent/harlo", &[6u8; 32])).is_err());
+        let changed = manifest("1.2.0", "ArcticLatent/harlo", &test_key).replace("https://x/harlo-1.2.0-x86_64.AppImage", "https://evil/harlo");
+        assert!(Release::verified(&changed).is_err());
+        // Unsigned: refused.
+        let mut unsigned: serde_json::Value = serde_json::from_str(&manifest("1.2.0", "ArcticLatent/harlo", &test_key)).unwrap();
+        unsigned.as_object_mut().unwrap().remove("signature");
+        assert!(Release::verified(&unsigned.to_string()).is_err());
+        // Signed, but another project's.
+        assert!(Release::verified(&manifest("1.2.0", "someone/else", &test_key)).is_err());
+        // SAFETY: as above.
+        unsafe { std::env::remove_var("HARLO_UPDATE_PUBLIC_KEY") };
+
         let f = std::path::Path::new("/tmp/h.rpm");
-        assert_eq!(InstallKind::Rpm.install_command(f, |p| p == "zypper").unwrap().join(" "), "pkexec zypper --non-interactive install --allow-unsigned-rpm /tmp/h.rpm");
-        assert_eq!(InstallKind::Deb.install_command(f, |p| p == "apt-get").unwrap()[..2], ["pkexec", "apt-get"]);
-        assert_eq!(InstallKind::Arch.install_command(f, |_| true).unwrap().join(" "), "pkexec pacman -U --noconfirm /tmp/h.rpm");
-        assert!(InstallKind::AppImage("/a".into()).install_command(f, |_| true).is_none());
+        let pk = vec!["pkexec".to_owned()];
+        assert_eq!(InstallKind::Rpm.install_command(f, |p| p == "zypper", &pk).unwrap().join(" "), "pkexec zypper --non-interactive install --allow-unsigned-rpm /tmp/h.rpm");
+        assert_eq!(InstallKind::Deb.install_command(f, |p| p == "apt-get", &["sudo".into(), "-n".into()]).unwrap()[..3], ["sudo", "-n", "apt-get"]);
+        assert_eq!(InstallKind::Arch.install_command(f, |_| true, &[]).unwrap().join(" "), "pacman -U --noconfirm /tmp/h.rpm", "as root");
+        assert!(InstallKind::AppImage("/a".into()).install_command(f, |_| true, &pk).is_none());
+        assert_eq!(InstallKind::Deb.manual_command(std::path::Path::new("/d/h.deb"), |p| p == "apt-get").unwrap(), "sudo apt-get install -y --allow-downgrades \"/d/h.deb\"");
         // How it was installed.
         assert_eq!(InstallKind::detect(std::path::Path::new("/x/bin/harlo"), Some("/home/me/harlo.AppImage")), Some(InstallKind::AppImage("/home/me/harlo.AppImage".into())));
         let root = std::env::temp_dir().join(format!("harlo-kind-{}", std::process::id()));

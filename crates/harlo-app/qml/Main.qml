@@ -3649,7 +3649,8 @@ ApplicationWindow {
     }
 
     // harlo's own update (an AppImage here): offered from its release,
-    // downloaded, checked against SHA256SUMS, put in place; then Restart.
+    // downloaded, checked against its signed manifest, put in place; then
+    // Restart.
     SequentialAnimation {
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksselfupdate"
         PauseAnimation { duration: 900 }

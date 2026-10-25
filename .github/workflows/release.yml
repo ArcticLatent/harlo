@@ -1,8 +1,11 @@
 # harlo for Linux: the AppImage, .deb, .rpm and Arch package, Qt bundled,
 # built on Ubuntu 22.04 (glibc 2.35: Ubuntu 22.04+, Debian 12+, Fedora,
-# openSUSE, Arch…), published as a GitHub Release with their SHA-256 sums.
+# openSUSE, Arch…), each installed and started on a clean system, then
+# published as a GitHub Release with the signed update manifest harlo reads
+# (linux-release.json) and the notes from CHANGELOG.md.
 #
-# A tag publishes:   git tag v1.0.0 && git push origin v1.0.0
+# A release: packaging/release.sh (it tags v<version> and pushes; see
+# docs/releasing.md).
 # A test (the packages as the run's artifact, nothing published): push a
 # branch named release-check…, or `gh workflow run release.yml`.
 name: release
@@ -14,7 +17,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -125,17 +128,49 @@ jobs:
     needs: [linux, install]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v6
       - uses: actions/download-artifact@v6
         with:
           name: harlo-linux
           path: dist
+
+      - name: Check the version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          cargo_version="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)"
+          if [[ "$version" != "$cargo_version" ]]; then
+            echo "The tag $GITHUB_REF_NAME doesn't match Cargo.toml ($cargo_version)" >&2
+            exit 1
+          fi
+          echo "VERSION=$version" >>"$GITHUB_ENV"
+
+      - name: Release notes
+        run: |
+          {
+            packaging/changelog.sh notes "$VERSION"
+            echo
+            cat packaging/linux/install-notes.md
+          } >"$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # The manifest harlo reads to update itself, signed; checked against
+      # the public key built into harlo, so a wrong key stops here.
+      - name: Sign the update manifest
+        env:
+          HARLO_UPDATE_SIGNING_KEY: ${{ secrets.HARLO_UPDATE_SIGNING_KEY }}
+        run: packaging/release-manifests.sh dist "$VERSION" "$GITHUB_REPOSITORY"
+
       - name: Publish the release
-        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cd dist
-          gh release create "$GITHUB_REF_NAME" --title "harlo ${GITHUB_REF_NAME#v}" --notes-file ../packaging/linux/release-notes.md \
-            *.AppImage *.deb *.rpm *.pkg.tar.zst SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "harlo $VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            --verify-tag

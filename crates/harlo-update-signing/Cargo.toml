@@ -1,0 +1,11 @@
+[package]
+name = "harlo-update-signing"
+description = "The signature on harlo's update manifest: what is signed, and its check against the key built into harlo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+base64 = "0.22"
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }

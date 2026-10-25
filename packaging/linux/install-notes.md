@@ -2,7 +2,7 @@
 
 | Your system | Download | Install |
 |---|---|---|
-| Ubuntu, Debian, Linux Mint, Pop!_OS | `harlo_<version>_amd64.deb` | `sudo apt install ./harlo_*_amd64.deb` |
+| Ubuntu, Debian, Linux Mint, Pop!_OS | `harlo_<version>-1_amd64.deb` | `sudo apt install ./harlo_*_amd64.deb` |
 | Fedora, openSUSE, RHEL-likes | `harlo-<version>-1.x86_64.rpm` | `sudo dnf install ./harlo-*.rpm` (openSUSE: `sudo zypper install ./harlo-*.rpm`) |
 | Arch, Manjaro, EndeavourOS, CachyOS | `harlo-<version>-1-x86_64.pkg.tar.zst` | `sudo pacman -U ./harlo-*.pkg.tar.zst` |
 | Anything else | `harlo-<version>-x86_64.AppImage` | `chmod +x harlo-*.AppImage && ./harlo-*.AppImage` |

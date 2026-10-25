@@ -124,9 +124,9 @@ fn harlo_kind() -> Option<updates::InstallKind> {
 }
 
 /// harlo's newest release (looked up at most every few hours; self-tests
-/// only ask `HARLO_TEST_RELEASE`).
+/// only ask `HARLO_UPDATE_MANIFEST_URL`).
 fn harlo_latest() -> Option<updates::Release> {
-    if std::env::args().any(|a| a.starts_with("--selftest")) && std::env::var_os("HARLO_TEST_RELEASE").is_none() {
+    if std::env::args().any(|a| a.starts_with("--selftest")) && std::env::var_os("HARLO_UPDATE_MANIFEST_URL").is_none() {
         return None;
     }
     static CACHE: Mutex<Option<(updates::Release, Instant)>> = Mutex::new(None);
@@ -135,7 +135,7 @@ fn harlo_latest() -> Option<updates::Release> {
     {
         return Some(r.clone());
     }
-    let r = updates::harlo_release()?;
+    let r = updates::harlo_release().map_err(|e| tracing::warn!("harlo's release: {e:#}")).ok()?;
     *CACHE.lock().unwrap() = Some((r.clone(), Instant::now()));
     Some(r)
 }
@@ -145,21 +145,27 @@ fn on_path(program: &str) -> bool {
     std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(program).is_file()))
 }
 
+/// A downloaded package ready to install: the command, the file, and the
+/// same command to type in a terminal should it fail here.
+struct Install {
+    command: std::process::Command,
+    file: PathBuf,
+    manual: String,
+}
+
 /// Downloads the new harlo for how it was installed, checks it against the
-/// release's SHA-256, and puts it in place (an AppImage) or returns the
-/// command that installs it (a package).
-fn fetch_harlo(kind: &updates::InstallKind) -> Result<Option<(std::process::Command, PathBuf)>, String> {
-    let release = updates::harlo_release().ok_or("Couldn't reach harlo's releases.")?;
-    let (name, url) = release.asset(kind).cloned().ok_or("The release has no file for this kind of install.")?;
-    let (_, sums_url) = release.sums().cloned().ok_or("The release has no SHA256SUMS.")?;
+/// release's signed manifest, and puts it in place (an AppImage) or returns
+/// what installs it (a package).
+fn fetch_harlo(kind: &updates::InstallKind) -> Result<Option<Install>, String> {
+    let release = updates::harlo_release().map_err(|e| format!("{e:#}."))?;
+    let asset = release.asset(kind).cloned().ok_or("The release has no file for this kind of install.")?;
     let dir = harlo_core::db::default_path().parent().map(|d| d.join("updates")).ok_or("no data folder")?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let sums_file = dir.join("SHA256SUMS");
-    updates::download(&sums_url, &sums_file).map_err(|e| format!("{e:#}"))?;
-    let expected = updates::sum_for(&std::fs::read_to_string(&sums_file).unwrap_or_default(), &name).ok_or("SHA256SUMS doesn't list the file.")?;
-    let file = dir.join(&name);
-    let got = updates::download(&url, &file).map_err(|e| format!("{e:#}"))?;
-    if got != expected {
+    // (Only the file name: the manifest is signed, but a name is all it needs.)
+    let name = std::path::Path::new(&asset.name).file_name().ok_or("The release's file has no name.")?;
+    let file = dir.join(name);
+    let got = updates::download(&asset.download_url, &file).map_err(|e| format!("{e:#}"))?;
+    if got != asset.sha256 {
         let _ = std::fs::remove_file(&file);
         return Err("The download didn't match its checksum, so it wasn't installed.".into());
     }
@@ -175,10 +181,11 @@ fn fetch_harlo(kind: &updates::InstallKind) -> Result<Option<(std::process::Comm
             Ok(None)
         }
         _ => {
-            let argv = kind.install_command(&file, on_path).ok_or("no installer")?;
-            let mut c = std::process::Command::new(&argv[0]);
-            c.args(&argv[1..]);
-            Ok(Some((c, file)))
+            let argv = kind.install_command(&file, on_path, &updates::elevation()).ok_or("no installer")?;
+            let mut command = std::process::Command::new(&argv[0]);
+            command.args(&argv[1..]);
+            let manual = kind.manual_command(&file, on_path).unwrap_or_default();
+            Ok(Some(Install { command, file, manual }))
         }
     }
 }
@@ -382,7 +389,7 @@ impl Updates {
             match fetch_harlo(&kind) {
                 Err(why) => set("failed", format!("Updating harlo failed: {why}")),
                 Ok(None) => set("done", installed),
-                Ok(Some((command, file))) => {
+                Ok(Some(Install { command, file, manual })) => {
                     let job = match crate::jobs::start(command, "update-local-harlo") {
                         Ok(j) => j,
                         Err(e) => return set("failed", format!("Couldn't start installing it: {e:#}")),
@@ -397,23 +404,24 @@ impl Updates {
                         this.publish();
                     });
                     match crate::jobs::wait(job, Duration::from_secs(20 * 60)) {
-                        Ok(()) => set("done", installed),
-                        Err(why) => set("failed", format!("Installing harlo {} failed: {why}", item.latest)),
+                        Ok(()) => {
+                            set("done", installed);
+                            let _ = std::fs::remove_file(file);
+                        }
+                        // (The file stays, for installing it by hand.)
+                        Err(why) => set("failed", format!("Installing harlo {} failed: {why}. To install it from a terminal: {manual}", item.latest)),
                     }
-                    let _ = std::fs::remove_file(file);
                 }
             }
         });
     }
 
+    /// The new harlo starts once this one has quit (QML quits next).
     pub fn restart_harlo(&self) {
-        // The AppImage (its file), else the package's harlo.
-        let exe = std::env::var("APPIMAGE").ok().filter(|a| !a.is_empty()).map(PathBuf::from)
-            .or_else(|| Some(PathBuf::from("/usr/bin/harlo")).filter(|p| p.exists()))
-            .or_else(|| std::env::current_exe().ok());
-        if let Some(exe) = exe {
-            let _ = std::process::Command::new("sh").arg("-c").arg("sleep 1.5; exec \"$0\"").arg(exe)
-                .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
+        if let Some(program) = updates::this_program()
+            && let Err(e) = updates::relaunch_after_exit(&program)
+        {
+            tracing::warn!("harlo won't start again by itself: {e}");
         }
     }
 
