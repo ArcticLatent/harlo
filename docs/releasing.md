@@ -14,8 +14,7 @@ the signed update manifest and the GitHub release with its notes.
    ```
 
    The version comes from that heading; the section's text becomes the
-   release's notes (with the install table from
-   `packaging/linux/install-notes.md` under it). harlo's update notice
+   release's notes (how to install is in the README). harlo's update notice
    shows the start of every section newer than the installed version (read
    from CHANGELOG.md at the release's tag), with Read more for the rest, so
    keep the first items the ones that matter.
@@ -89,7 +88,7 @@ packaging/linux/test-install.sh dist    # each installed and started on clean sy
 | `packaging/release.sh` | The release command |
 | `packaging/changelog.sh` | Reads the version and notes from CHANGELOG.md |
 | `packaging/release-manifests.sh` | Writes and signs the update manifest |
-| `packaging/linux/` | The bundle, nfpm's package definition, the install notes, local builds and tests |
+| `packaging/linux/` | The bundle, nfpm's package definition, local builds and tests |
 | `crates/harlo-update-signing/` | What's signed, and the check harlo makes |
 | `crates/harlo-manifest-signer/` | The signing tool (not part of harlo) |
 | `crates/harlo-core/src/updates.rs` | harlo's update: the manifest, the package for how it was installed, installing it, starting again |

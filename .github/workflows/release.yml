@@ -149,11 +149,8 @@ jobs:
 
       - name: Release notes
         run: |
-          {
-            packaging/changelog.sh notes "$VERSION"
-            echo
-            cat packaging/linux/install-notes.md
-          } >"$RUNNER_TEMP/notes.md"
+          # (How to install is in the README.)
+          packaging/changelog.sh notes "$VERSION" >"$RUNNER_TEMP/notes.md"
           cat "$RUNNER_TEMP/notes.md"
 
       - uses: dtolnay/rust-toolchain@stable
