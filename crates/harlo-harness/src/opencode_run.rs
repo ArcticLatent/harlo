@@ -5,7 +5,7 @@
 //! become harlo events (steps → messages, reasoning / text / tools →
 //! blocks, permissions and forms → UI requests).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -257,6 +257,9 @@ struct State {
     /// UI request id → (kind: "permission" | "form", OpenCode's id, form
     /// fields, the session that asked: this one or a subagent's).
     waiting: HashMap<String, (String, String, Value, String)>,
+    /// Sessions (this one, subagents') whose permission was just denied:
+    /// OpenCode then stops them with a "shutdown" interruption, their end.
+    declined: HashSet<String>,
     /// Subagents by the call that started them (as harlo's dock shows
     /// them); their sessions → those calls; their tool calls' names.
     subagents: HashMap<String, Value>,
@@ -790,8 +793,10 @@ fn event(s: &Arc<Session>, ev: &Value) {
                 }
             }
             "session.execution.succeeded" | "session.execution.failed" | "session.execution.interrupted" => {
-                // A restart's "shutdown" isn't the end: OpenCode carries on.
-                if ev["type"] == "session.execution.interrupted" && d["reason"] == "shutdown" {
+                // A restart's "shutdown" isn't the end: OpenCode carries on
+                // (after a denied permission it is).
+                let declined = st.declined.remove(&own);
+                if ev["type"] == "session.execution.interrupted" && d["reason"] == "shutdown" && !declined {
                     return;
                 }
                 if let Some(step) = st.step.take() {
@@ -806,6 +811,8 @@ fn event(s: &Arc<Session>, ev: &Value) {
                 }
             }
             "session.step.started" => {
+                // It carried on after the denial.
+                st.declined.remove(&own);
                 let id = d["assistantMessageID"].as_str().unwrap_or_default().to_owned();
                 // A retry starts the same step again.
                 if st.step.as_ref().is_some_and(|s| s.id == id) {
@@ -977,6 +984,9 @@ fn event(s: &Arc<Session>, ev: &Value) {
                 })));
             }
             "permission.replied" => {
+                if d["reply"] == "reject" {
+                    st.declined.insert(asker.clone());
+                }
                 let rid = d["requestID"].as_str().unwrap_or_default();
                 let ui = st.waiting.iter().find(|(_, w)| w.1 == rid).map(|(k, _)| k.clone());
                 if let Some(ui) = ui {
@@ -1088,7 +1098,10 @@ fn child_event(s: &Arc<Session>, st: &mut State, child: &str, ev: &Value, out: &
         }
         "session.execution.succeeded" if running => out.push(subagent_patch(st, &call, json!({ "status": "completed" }))),
         "session.execution.failed" if running => out.push(subagent_patch(st, &call, json!({ "status": "failed" }))),
-        "session.execution.interrupted" if running && d["reason"] != "shutdown" => out.push(subagent_patch(st, &call, json!({ "status": "aborted" }))),
+        "session.step.started" => {
+            st.declined.remove(child);
+        }
+        "session.execution.interrupted" if running && (d["reason"] != "shutdown" || st.declined.remove(child)) => out.push(subagent_patch(st, &call, json!({ "status": "aborted" }))),
         _ => {}
     }
 }
@@ -1200,6 +1213,35 @@ mod tests {
         assert!(last(|e| matches!(e, HarnessEvent::Retry { .. })) < last(|e| matches!(e, HarnessEvent::MessageStart { .. })));
         assert!(events.iter().any(|e| matches!(e, HarnessEvent::Renamed(Some(t)) if t == "Reading notes.txt and creating hi.txt")));
         assert_eq!(events.iter().filter(|e| matches!(e, HarnessEvent::Settled)).count(), 1);
+    }
+
+    /// A real OpenCode 2.1.4 recording: a shell call denied. OpenCode ends
+    /// with only a "shutdown" interruption, and that's the run's end.
+    #[test]
+    fn a_denied_permission_ends_the_run() {
+        let lines: Vec<Value> = include_str!("../tests/fixtures/opencode-denied.jsonl").lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        let (s, mut rx) = session();
+        s.state.lock().unwrap().session_id = lines[0]["data"]["sessionID"].as_str().unwrap().to_owned();
+        for ev in &lines {
+            event(&s, ev);
+        }
+        let mut events = Vec::new();
+        while let Ok(e) = rx.try_recv() {
+            events.push(e);
+        }
+        assert!(events.iter().any(|e| matches!(e, HarnessEvent::ToolEnd { is_error: true, .. })));
+        assert!(events.iter().any(|e| matches!(e, HarnessEvent::RunEnded)));
+        assert_eq!(events.iter().filter(|e| matches!(e, HarnessEvent::Settled)).count(), 1);
+        assert!(!s.state.lock().unwrap().running);
+
+        // Without the denial, the same interruption is a restart's: still running.
+        let (s, mut rx) = session();
+        s.state.lock().unwrap().session_id = lines[0]["data"]["sessionID"].as_str().unwrap().to_owned();
+        for ev in lines.iter().filter(|e| e["type"] != "permission.replied") {
+            event(&s, ev);
+        }
+        assert!(std::iter::from_fn(|| rx.try_recv().ok()).all(|e| !matches!(e, HarnessEvent::RunEnded)));
+        assert!(s.state.lock().unwrap().running);
     }
 
     #[test]
