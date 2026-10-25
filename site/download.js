@@ -19,8 +19,7 @@
     pick.hidden = false;
   };
   if (iphone) {
-    say("On an iPhone?", "Get the harlo app, then pair it with harlo on your Linux computer.",
-        [["Get it on the App Store", "https://apps.apple.com/app/id6822811546", true]]);
+    say("On an iPhone?", "The harlo app is coming soon to the App Store (it's in review). Then you pair it with harlo on your Linux computer.", []);
   } else if (!linux) {
     say("harlo is for Linux", "It runs on Linux computers (and their iPhone app). Open this page on your Linux computer, or pick its file below.", []);
   }

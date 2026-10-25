@@ -80,6 +80,8 @@ nav.links a:hover, nav.links a[aria-current] { color: var(--fg); }
 .btn.primary { background: linear-gradient(135deg, var(--mauve), var(--blue)); color: var(--on-accent); border-color: transparent; }
 .btn.primary:hover { filter: brightness(1.06); }
 .btn svg { width: 18px; height: 18px; flex: none; }
+.btn.soon { cursor: default; color: var(--muted); }
+.btn.soon:hover { transform: none; border-color: var(--rule); }
 .btn .sub { font-weight: 400; opacity: 0.75; font-size: 13px; }
 
 /* The first screen. */
