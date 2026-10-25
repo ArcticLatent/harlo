@@ -4,6 +4,14 @@ What's new in each harlo release, newest first. `packaging/release.sh`
 releases the version at the top: each section starts with `## <version>`,
 and its text becomes the release's notes.
 
+## 1.0.1
+
+- OpenCode: denying a permission ends the run. Before, the session stayed
+  on "Working…" on the desktop and the iPhone.
+- Archiving a session you have open (on the desktop or from the iPhone)
+  now takes it out of the list. A session still working or waiting on you
+  stays until it's done.
+
 ## 1.0.0
 
 The first release of harlo: a native Linux app for coding agents, written in
