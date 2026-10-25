@@ -769,11 +769,11 @@ ApplicationWindow {
         }
     }
     readonly property bool checkUpdates: Workspace.setting("check_updates") !== "0"
-    // At startup (once things settle), then twice a day.
+    // At startup (once things settle), then every 6 hours.
     Timer {
         interval: 6000
         running: win.selftestDir === "" && win.checkUpdates
-        onTriggered: { Updates.checkLocal(); interval = 12 * 3600 * 1000; restart() }
+        onTriggered: { Updates.checkLocal(); interval = 6 * 3600 * 1000; restart() }
     }
     Connections {
         target: Remotes
@@ -3663,11 +3663,23 @@ ApplicationWindow {
     SequentialAnimation {
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksselfupdate"
         PauseAnimation { duration: 900 }
-        ScriptAction { script: { if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth=")); Updates.checkLocal() } }
+        ScriptAction { script: { if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth=")); settingsDialog.openPage("general") } }
+        PauseAnimation { duration: 600 }
+        // Settings → General → Check now.
+        ScriptAction { script: win.clickItem(win.findName("checkUpdatesNow", settingsDialog.contentItem), "Check now") }
         PauseAnimation { duration: 2500 }
         ScriptAction { script: {
+            win.check(!Updates.checking && Updates.checkStatus === "1 update found: it's offered at the bottom right of the window.", "Check now says what it found (" + Updates.checkStatus + ")")
+            // (Scrolled to the row's end, its answer in the picture.)
+            let f = win.findName("checkUpdatesNow", settingsDialog.contentItem)
+            while (f && f.contentY === undefined) f = f.parent
+            if (f) f.contentY = Math.max(0, f.contentHeight - f.height)
+            win.shotPopup(settingsDialog, "clicks-selfupdate-check")
+            settingsDialog.close() } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
             const m = win.findName("updateMessage-local/harlo")
-            win.check(m !== null && m.text === "Version 9.9.9 is available (you have 1.0.0).", "a newer harlo is offered (" + (m ? m.text : Updates.entriesJson) + ")")
+            win.check(m !== null && /^Version 9\.9\.9 is available \(you have \d+\.\d+\.\d+\)\.$/.test(m.text), "a newer harlo is offered (" + (m ? m.text : Updates.entriesJson) + ")")
             win.clickItem(win.findName("updateGo-local/harlo"), "Update") } }
         PauseAnimation { duration: 2500 }
         ScriptAction { script: {

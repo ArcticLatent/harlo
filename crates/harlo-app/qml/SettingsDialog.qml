@@ -624,12 +624,23 @@ Popup {
                 SettingRow {
                     divider: true
                     title: "Check for updates"
-                    detail: "At startup and twice a day (and when a remote host connects), harlo looks for newer versions of itself (installed from a package or an AppImage) and of the agents you use, and offers to update them."
+                    detail: "At startup and every 6 hours (and when a remote host connects), harlo looks for newer versions of itself (installed from a package or an AppImage) and of the agents you use, and offers to update them."
+                            + (Updates.checkStatus !== "" ? "\n" + Updates.checkStatus : "")
                     icon: "refresh"
-                    AppSwitch {
-                        objectName: "checkUpdatesSwitch"
-                        checked: Workspace.setting("check_updates") !== "0"
-                        onToggled: Workspace.setSetting("check_updates", checked ? "1" : "0")
+                    RowLayout {
+                        spacing: 8
+                        FlatButton {
+                            objectName: "checkUpdatesNow"
+                            text: Updates.checking ? "Checking…" : "Check now"
+                            enabled: !Updates.checking
+                            font.pixelSize: Theme.px(12)
+                            onClicked: Updates.checkNow()
+                        }
+                        AppSwitch {
+                            objectName: "checkUpdatesSwitch"
+                            checked: Workspace.setting("check_updates") !== "0"
+                            onToggled: Workspace.setSetting("check_updates", checked ? "1" : "0")
+                        }
                     }
                 }
             }

@@ -1,8 +1,9 @@
 //! `Updates` (QML singleton): newer versions of the agents, here and on
 //! the remote hosts, shown as notices (Dismiss / Update), and the updates
 //! themselves, run in the background (their output a click away).
-//! Checked at startup (Settings → General → Check for agent updates) and
-//! when a host connects; a dismissed version isn't offered again.
+//! Checked at startup, every few hours and when a host connects (Settings
+//! → General → Check for updates, with Check now); a dismissed version
+//! isn't offered again.
 
 #[cxx_qt::bridge]
 pub mod qobject {
@@ -18,6 +19,10 @@ pub mod qobject {
         /// `[{ key, host, agent, label, current, latest, state, message }]`:
         /// state "available", "running", "done" or "failed"; host "" here.
         #[qproperty(QString, entries, cxx_name = "entriesJson")]
+        /// Check now is looking.
+        #[qproperty(bool, checking)]
+        /// What Check now found ("" before it's used).
+        #[qproperty(QString, check_status, cxx_name = "checkStatus")]
         type Updates = super::UpdatesRust;
     }
 
@@ -29,6 +34,10 @@ pub mod qobject {
         /// on in Settings → Providers).
         #[qinvokable]
         fn check_local(self: Pin<&mut Updates>);
+        /// Check now (Settings): asks again (nothing remembered), and says
+        /// what it found in `checkStatus`.
+        #[qinvokable]
+        fn check_now(self: Pin<&mut Updates>);
         /// The hosts as `Remotes.hostsJson()` has them: the connected ones'
         /// agents are compared with the newest versions.
         #[qinvokable]
@@ -78,6 +87,8 @@ struct Item {
 #[derive(Default)]
 pub struct UpdatesRust {
     entries: QString,
+    checking: bool,
+    check_status: QString,
     /// By "host/agent" ("local/…" here).
     items: BTreeMap<String, Item>,
     /// The versions last compared per host, so an unchanged host isn't
@@ -99,15 +110,20 @@ fn dismissed() -> serde_json::Map<String, Value> {
     db().and_then(|d| d.get(DISMISSED).ok().flatten()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
 }
 
-/// The newest version of an agent (looked up at most every few hours).
-fn latest(agent: &str) -> Option<String> {
+/// How long a looked-up version is trusted before asking again.
+const REMEMBER: Duration = Duration::from_secs(3600);
+
+/// The newest version of an agent (looked up at most hourly; `fresh`:
+/// now).
+fn latest(agent: &str, fresh: bool) -> Option<String> {
     // Self-tests never ask the registry (only `HARLO_TEST_LATEST`).
     if std::env::args().any(|a| a.starts_with("--selftest")) && std::env::var_os("HARLO_TEST_LATEST").is_none() {
         return None;
     }
     static CACHE: Mutex<Option<HashMap<String, (String, Instant)>>> = Mutex::new(None);
     if let Some((v, at)) = CACHE.lock().unwrap().get_or_insert_with(HashMap::new).get(agent)
-        && at.elapsed() < Duration::from_secs(6 * 3600)
+        && !fresh
+        && at.elapsed() < REMEMBER
     {
         return Some(v.clone());
     }
@@ -123,21 +139,25 @@ fn harlo_kind() -> Option<updates::InstallKind> {
     updates::InstallKind::detect(&exe, std::env::var("APPIMAGE").ok().as_deref())
 }
 
-/// harlo's newest release (looked up at most every few hours; self-tests
-/// only ask `HARLO_UPDATE_MANIFEST_URL`).
-fn harlo_latest() -> Option<updates::Release> {
+/// harlo's newest release (looked up at most hourly; `fresh`: now;
+/// self-tests only ask `HARLO_UPDATE_MANIFEST_URL`). Ok(None): not asked.
+fn harlo_latest(fresh: bool) -> Result<Option<updates::Release>, String> {
     if std::env::args().any(|a| a.starts_with("--selftest")) && std::env::var_os("HARLO_UPDATE_MANIFEST_URL").is_none() {
-        return None;
+        return Ok(None);
     }
     static CACHE: Mutex<Option<(updates::Release, Instant)>> = Mutex::new(None);
     if let Some((r, at)) = CACHE.lock().unwrap().as_ref()
-        && at.elapsed() < Duration::from_secs(6 * 3600)
+        && !fresh
+        && at.elapsed() < REMEMBER
     {
-        return Some(r.clone());
+        return Ok(Some(r.clone()));
     }
-    let r = updates::harlo_release().map_err(|e| tracing::warn!("harlo's release: {e:#}")).ok()?;
+    let r = updates::harlo_release().map_err(|e| {
+        tracing::warn!("harlo's release: {e:#}");
+        format!("{e:#}")
+    })?;
     *CACHE.lock().unwrap() = Some((r.clone(), Instant::now()));
-    Some(r)
+    Ok(Some(r))
 }
 
 /// Whether a program is on PATH.
@@ -249,26 +269,61 @@ impl Updates {
     }
 
     pub fn check_local(self: Pin<&mut Self>) {
+        self.check(false);
+    }
+
+    pub fn check_now(mut self: Pin<&mut Self>) {
+        if *self.checking() {
+            return;
+        }
+        self.as_mut().set_checking(true);
+        self.check(true);
+    }
+
+    fn check(self: Pin<&mut Self>, fresh: bool) {
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
-            let found: Vec<(String, String, String)> = remote::AGENTS
+            let mut found: Vec<(String, String, String)> = remote::AGENTS
                 .iter()
                 .filter_map(|a| {
                     let program = local_program(a)?;
                     let current = local_version(&program);
-                    let newest = latest(a)?;
+                    let newest = latest(a, fresh)?;
                     (!current.is_empty()).then(|| (a.to_string(), current, newest))
                 })
                 .collect();
             // harlo itself (installed from a package or an AppImage).
-            let mut found = found;
-            if harlo_kind().is_some()
-                && let Some(r) = harlo_latest()
-            {
-                found.push(("harlo".into(), env!("CARGO_PKG_VERSION").into(), r.version));
+            let packaged = harlo_kind().is_some();
+            let mut error = None;
+            if packaged {
+                match harlo_latest(fresh) {
+                    Ok(Some(r)) => found.push(("harlo".into(), env!("CARGO_PKG_VERSION").into(), r.version)),
+                    Ok(None) => {}
+                    Err(e) => error = Some(e),
+                }
             }
-            let _ = thread.queue(move |this| this.found("", found));
+            let _ = thread.queue(move |mut this| {
+                this.as_mut().found("", found);
+                if fresh {
+                    this.checked(packaged, error);
+                }
+            });
         });
+    }
+
+    /// Check now's answer: what's offered, or that all is up to date.
+    fn checked(mut self: Pin<&mut Self>, packaged: bool, error: Option<String>) {
+        let offered = self.items.iter().filter(|(k, i)| k.starts_with("local/") && i.state == "available").count();
+        let version = env!("CARGO_PKG_VERSION");
+        let status = match (error, offered) {
+            (Some(e), _) => format!("Couldn't check for a newer harlo: {e}"),
+            (None, 0) if packaged => format!("Everything is up to date (harlo {version})."),
+            (None, 0) => format!("Your agents are up to date. This harlo ({version}) was built from source, so it doesn't update itself."),
+            (None, 1) => "1 update found: it's offered at the bottom right of the window.".to_owned(),
+            (None, n) => format!("{n} updates found: they're offered at the bottom right of the window."),
+        };
+        self.as_mut().set_check_status(QString::from(&status));
+        self.set_checking(false);
     }
 
     pub fn note_hosts(mut self: Pin<&mut Self>, hosts: &QString) {
@@ -288,7 +343,7 @@ impl Updates {
                     .flatten()
                     .filter_map(|(agent, v)| {
                         let current = v.as_str()?.to_owned();
-                        let newest = latest(agent)?;
+                        let newest = latest(agent, false)?;
                         Some((agent.clone(), current, newest))
                     })
                     .collect();
