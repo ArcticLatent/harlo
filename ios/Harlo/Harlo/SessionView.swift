@@ -84,9 +84,10 @@ struct SessionContent: View {
                                 .contextMenu { menu(for: item) }
                         }
                     }
-                    // What the last turn changed: tap for the diff, or undo it.
+                    // What the last turn changed: tap for the diff, or undo it
+                    // (in a git repository: elsewhere there's no diff to show).
                     let changed = changedFiles
-                    if !changed.isEmpty {
+                    if !changed.isEmpty && session.git {
                         HStack(spacing: 8) {
                         Button {
                             sheet = .changes

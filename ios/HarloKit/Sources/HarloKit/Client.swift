@@ -254,9 +254,12 @@ public actor HarloClient {
 
     /// Your messages in the open session a turn can be undone to: row key →
     /// snapshot.
-    public func undoTargets(_ key: String) async throws -> [String: String] {
+    /// Which of your messages a turn can be undone to (row key → snapshot),
+    /// and whether the folder is a git repository (its changes have diffs;
+    /// nil from a harlo that doesn't say).
+    public func undoTargets(_ key: String) async throws -> (targets: [String: String], git: Bool?) {
         let r = try check(await call("undoTargets", ["key": .string(key)]))
-        return (r["targets"].object ?? [:]).compactMapValues(\.string)
+        return ((r["targets"].object ?? [:]).compactMapValues(\.string), r["git"].bool)
     }
 
     /// What undoing from one of your messages does (`apply`: does it).

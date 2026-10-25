@@ -80,6 +80,9 @@ public final class OpenSession {
     public internal(set) var requests: [UIRequest] = []
     /// Your messages a turn can be undone to (row key → snapshot).
     public internal(set) var undoable: [String: String] = [:]
+    /// Its folder is a git repository (or holds some): its changes have
+    /// diffs. Until harlo says, taken as one.
+    public internal(set) var git = true
     /// Review comments on the session's changes, until sent.
     public var review: [ReviewComment] = []
     public internal(set) var loading = true
@@ -805,7 +808,10 @@ public final class HarloModel {
     /// Which of your messages in the open session a turn can be undone to.
     public func loadUndo() async {
         guard !demo, let s = session, let c = client, !s.liveKey.isEmpty else { return }
-        if let targets = try? await c.undoTargets(s.liveKey), session === s { s.undoable = targets }
+        if let r = try? await c.undoTargets(s.liveKey), session === s {
+            s.undoable = r.targets
+            s.git = r.git ?? true
+        }
     }
 
     /// What undoing from one of your messages would do (nil: the alert says why).

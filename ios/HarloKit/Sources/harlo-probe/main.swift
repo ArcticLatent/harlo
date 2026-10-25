@@ -329,6 +329,7 @@ func features(_ model: HarloModel) async {
     await model.loadUndo()
     let first = s.rows.first { $0.kind == "user" }?.key ?? ""
     check(!first.isEmpty && s.undoable[first] != nil, "your message has a snapshot to undo to (\(s.undoable.count))")
+    check(s.git, "its folder holds a repository: its changes have diffs")
     if let repo = ProcessInfo.processInfo.environment["HARLO_E2E_REPO"] {
         let notes = URL(fileURLWithPath: repo).appendingPathComponent("notes.txt")
         let before = (try? String(contentsOf: notes, encoding: .utf8)) ?? ""
@@ -486,4 +487,7 @@ func pushes(_ model: HarloModel, store: SecretStore) async {
           "what it's doing is sealed for the phone (\(words))")
     model.resume()
     _ = await waitFor(8) { model.state == .connected }
+    // That session is in the home folder, no repository: no View diff.
+    await model.loadUndo()
+    check(model.session === a && !a.git, "outside a repository, harlo says so (no View diff)")
 }

@@ -704,7 +704,16 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
                         (Some(live), Some((key, _))) if key == msg["key"].as_str().unwrap_or_default() => {
                             let prompts: Vec<(String, i64)> = window.full.iter().filter(|r| r.kind == harlo_core::RowKind::User).map(|r| (r.key.clone(), r.time)).collect();
                             let (cwd, row, op) = (live.cwd.clone(), msg["row"].as_str().unwrap_or_default().to_owned(), op.to_owned());
-                            tokio::task::spawn_blocking(move || undo_op(&op, &cwd, &prompts, &row)).await.unwrap_or_else(|e| json!({ "error": e.to_string() }))
+                            tokio::task::spawn_blocking(move || {
+                                let mut reply = undo_op(&op, &cwd, &prompts, &row);
+                                // (And whether its changes have diffs: a repository, or a folder of them.)
+                                if op == "undoTargets" {
+                                    reply["git"] = json!(harlo_core::git::repo_root(&cwd).is_some() || !harlo_core::git::nested_repos(&cwd).is_empty());
+                                }
+                                reply
+                            })
+                            .await
+                            .unwrap_or_else(|e| json!({ "error": e.to_string() }))
                         }
                         _ => json!({ "error": "Open the session first." }),
                     },
