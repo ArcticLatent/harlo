@@ -119,7 +119,10 @@ pub fn build(input: &SidebarInput<'_>) -> Vec<SidebarRow> {
     for s in input.sessions {
         let meta = input.meta.get(&s.path).cloned().unwrap_or_default();
         let live = live_by_file.remove(s.path.as_path());
-        if meta.archived && !input.show_archived && live.is_none() {
+        // Archived: hidden, even open, unless it's working or waiting on
+        // you (then it goes once it's done).
+        let active = live.is_some_and(|l| l.needs_input || matches!(l.status, SessionStatus::Busy | SessionStatus::Starting));
+        if meta.archived && !input.show_archived && !active {
             continue;
         }
         let (key, status) = match live {
@@ -446,6 +449,34 @@ mod tests {
         assert_eq!(rows.iter().filter(|r| r.kind == SidebarKind::Session).count(), 1);
         let rows = build(&SidebarInput { projects: &projects, worktrees: &[], sessions: &sessions, live: &[], meta: &meta, filter: "zzz", show_archived: true, other_collapsed: false, expanded: &[] });
         assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn archived_open_sessions_stay_only_while_they_need_you() {
+        let projects = [project(1, "/w")];
+        let sessions = [session("/s/a", "/w", "alpha", 1)];
+        let mut meta = HashMap::new();
+        meta.insert(PathBuf::from("/s/a"), SessionMeta { archived: true, ..Default::default() });
+        let shown = |status, needs_input| {
+            let live = [LiveInfo {
+                key: "live:1".into(),
+                harness: "pi".into(),
+                cwd: PathBuf::from("/w"),
+                session_file: Some(PathBuf::from("/s/a")),
+                name: String::new(),
+                first_message: String::new(),
+                status,
+                needs_input,
+                unread: false,
+                started_at: SystemTime::now(),
+            }];
+            build(&SidebarInput { projects: &projects, worktrees: &[], sessions: &sessions, live: &live, meta: &meta, filter: "", show_archived: false, other_collapsed: false, expanded: &[] })
+                .iter()
+                .any(|r| r.kind == SidebarKind::Session)
+        };
+        assert!(!shown(SessionStatus::Idle, false), "open but done: archived");
+        assert!(shown(SessionStatus::Busy, false), "still working");
+        assert!(shown(SessionStatus::Idle, true), "waiting on you");
     }
 
     #[test]

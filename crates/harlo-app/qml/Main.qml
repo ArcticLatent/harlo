@@ -2638,6 +2638,15 @@ ApplicationWindow {
             const hits = JSON.parse(Workspace.searchMessages("picked Postgres", 20))
             win.check(hits.some(h => String(h.path).indexOf("/claude-config/projects/") >= 0), "message search finds Claude's sessions (" + hits.length + " hits)")
             win.shot("clicks-claude")
+            // Archived from the phone while open (and done): it leaves the lists.
+            win.claudeKey = chat.session.key
+            const r = JSON.parse(Workspace.phoneTestCall(JSON.stringify({ op: "archive", key: win.claudeKey, archived: true })))
+            win.check(r.ok === true, "the phone archives it (" + JSON.stringify(r) + ")") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const keys = []
+            for (let i = 0; Workspace.keyAt(i) !== ""; i++) keys.push(Workspace.keyAt(i))
+            win.check(keys.indexOf(win.claudeKey) < 0 && !keys.some(k => k.indexOf("/claude-config/projects/") >= 0), "archived, the open session leaves the sidebar (" + keys + ")")
             win.summary(); Qt.quit() } }
     }
 
