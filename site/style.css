@@ -87,6 +87,7 @@ nav.links a:hover, nav.links a[aria-current] { color: var(--fg); }
 /* The first screen. */
 .hero { padding: 76px 0 40px; text-align: center; position: relative; overflow: hidden; isolation: isolate; }
 .hero::before { content: ""; position: absolute; inset: -40% -10% auto; height: 620px; background: radial-gradient(closest-side, color-mix(in srgb, var(--mauve) 22%, transparent), transparent 70%), radial-gradient(closest-side at 70% 60%, color-mix(in srgb, var(--blue) 18%, transparent), transparent 70%); z-index: -1; pointer-events: none; }
+.hero picture { display: block; }
 .hero .logo { width: min(320px, 70vw); margin: 0 auto 26px; }
 .stack { display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 0 0 20px; padding: 0; font-size: 15px; font-weight: 600; letter-spacing: 0.4px; }
 .stack span { border: 1px solid var(--rule); background: var(--card); border-radius: 999px; padding: 5px 16px; color: var(--fg); }
@@ -198,8 +199,35 @@ footer.foot a:hover { color: var(--fg); }
   code { white-space: normal; word-break: break-word; }
   footer.foot nav { margin-left: 0; }
 }
+/* Motion: the first screen comes in on load, the rest rises into view as you
+   scroll to it (motion.js marks it .reveal, then .in). Only when the system
+   doesn't ask for reduced motion. */
+header.top { transition: border-color .25s, background-color .25s; }
+header.top.at-top { border-bottom-color: transparent; }
+.card { transition: border-color .2s, transform .2s; }
+.card:hover { border-color: color-mix(in srgb, var(--mauve) 45%, var(--rule)); transform: translateY(-2px); }
+
+@keyframes rise { from { opacity: 0; translate: 0 18px; } to { opacity: 1; translate: none; } }
+@keyframes rise-shot { from { opacity: 0; translate: 0 36px; scale: 0.985; } to { opacity: 1; translate: none; scale: none; } }
+@keyframes drift { from { translate: -3% 0; } to { translate: 3% 5%; scale: 1.06; } }
+
+@media (prefers-reduced-motion: no-preference) {
+  .hero .wrap > * { animation: rise .8s cubic-bezier(.2, .7, .2, 1) both; }
+  .hero .wrap > :nth-child(2) { animation-delay: 60ms; }
+  .hero .wrap > :nth-child(3) { animation-delay: 120ms; }
+  .hero .wrap > :nth-child(4) { animation-delay: 180ms; }
+  .hero .wrap > :nth-child(5) { animation-delay: 240ms; }
+  .hero .wrap > :nth-child(6) { animation-delay: 280ms; }
+  .hero .wrap > :nth-child(7) { animation-delay: 320ms; }
+  .hero .wrap > .shot { animation: rise-shot 1s cubic-bezier(.2, .7, .2, 1) 380ms both; }
+  .hero::before { animation: drift 16s ease-in-out infinite alternate; }
+
+  .reveal { opacity: 0; }
+  .reveal.in { animation: rise .7s cubic-bezier(.2, .7, .2, 1) var(--delay, 0ms) both; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  .btn { transition: none; }
-  .btn:hover { transform: none; }
+  .btn, .card { transition: none; }
+  .btn:hover, .card:hover { transform: none; }
 }
