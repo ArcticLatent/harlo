@@ -26,7 +26,8 @@
   --wide: 1160px;
   --narrow: 740px;
 }
-:root[data-theme="light"] { color-scheme: light; }
+/* Light: the system's choice, unless the top bar's button picked one
+   (theme.js sets data-theme). The same colours twice, as CSS can't share them. */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
     color-scheme: light;
@@ -43,6 +44,30 @@
     --shadow: 0 30px 70px -25px rgba(40, 30, 80, 0.35);
     --on-accent: #ffffff;
   }
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #fbfbfd;
+  --bg-2: #f3f3f7;
+  --card: #ffffff;
+  --rule: #e3e4ea;
+  --fg: #1d1e24;
+  --muted: #5b5e69;
+  --faint: #80838e;
+  --mauve: #8839ef;
+  --blue: #1e66f5;
+  --code-bg: #eff0f4;
+  --shadow: 0 30px 70px -25px rgba(40, 30, 80, 0.35);
+  --on-accent: #ffffff;
+}
+
+/* What shows in one theme only: the hero's logo, the theme button's icon. */
+.only-light { display: none !important; }
+:root[data-theme="light"] .only-dark { display: none !important; }
+:root[data-theme="light"] .only-light { display: block !important; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .only-dark { display: none !important; }
+  :root:not([data-theme="dark"]) .only-light { display: block !important; }
 }
 
 * { box-sizing: border-box; }
@@ -73,6 +98,14 @@ header.top .wrap { display: flex; align-items: center; gap: 24px; height: 60px; 
 nav.links { display: flex; gap: 22px; margin-left: auto; font-size: 15px; }
 nav.links a { color: var(--muted); text-decoration: none; }
 nav.links a:hover, nav.links a[aria-current] { color: var(--fg); }
+nav.links { align-items: center; }
+nav.links .icon-btn + .icon-btn { margin-left: -14px; }
+nav.links .icon-btn { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 8px; background: none; color: var(--muted); cursor: pointer; transition: color .15s, background-color .15s; }
+nav.links .icon-btn:hover { color: var(--fg); background: var(--card); }
+nav.links .icon-btn svg { width: 19px; height: 19px; }
+/* The theme button does nothing without scripts, so it shows only with them. */
+.theme-toggle { visibility: hidden; }
+.js .theme-toggle { visibility: visible; }
 
 /* Buttons. */
 .btn { display: inline-flex; align-items: center; gap: 9px; padding: 11px 18px; border-radius: 10px; font-weight: 550; font-size: 15px; text-decoration: none; border: 1px solid var(--rule); color: var(--fg); background: var(--card); transition: background-color .15s, border-color .15s, transform .15s; }
@@ -87,7 +120,6 @@ nav.links a:hover, nav.links a[aria-current] { color: var(--fg); }
 /* The first screen. */
 .hero { padding: 76px 0 40px; text-align: center; position: relative; overflow: hidden; isolation: isolate; }
 .hero::before { content: ""; position: absolute; inset: -40% -10% auto; height: 620px; background: radial-gradient(closest-side, color-mix(in srgb, var(--mauve) 22%, transparent), transparent 70%), radial-gradient(closest-side at 70% 60%, color-mix(in srgb, var(--blue) 18%, transparent), transparent 70%); z-index: -1; pointer-events: none; }
-.hero picture { display: block; }
 .hero .logo { width: min(320px, 70vw); margin: 0 auto 26px; }
 .stack { display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 0 0 20px; padding: 0; font-size: 15px; font-weight: 600; letter-spacing: 0.4px; }
 .stack span { border: 1px solid var(--rule); background: var(--card); border-radius: 999px; padding: 5px 16px; color: var(--fg); }
@@ -202,7 +234,7 @@ footer.foot a:hover { color: var(--fg); }
 /* Motion: the first screen comes in on load, the rest rises into view as you
    scroll to it (motion.js marks it .reveal, then .in). Only when the system
    doesn't ask for reduced motion. */
-header.top { transition: border-color .25s, background-color .25s; }
+header.top { transition: border-color .25s; }
 header.top.at-top { border-bottom-color: transparent; }
 .card { transition: border-color .2s, transform .2s; }
 .card:hover { border-color: color-mix(in srgb, var(--mauve) 45%, var(--rule)); transform: translateY(-2px); }
