@@ -3612,12 +3612,14 @@ ApplicationWindow {
 
     // The website's screenshots (not a test; see click-tests.sh's siteshots):
     // the main window with a session and its changes, the diff tab, the
-    // Midnight theme with the Activity panel, and the new-session page.
+    // Midnight theme with the Activity panel, and the new-session page. Each
+    // dark, then light (name-light) in the same state, for the site's themes.
     property string siteKey: ""
     SequentialAnimation {
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "siteshots"
         PauseAnimation { duration: 1200 }
         ScriptAction { script: {
+            Workspace.chooseThemeMode("dark")
             win.width = 1440
             win.height = 900
             const base = win.argValue("--cwd=").replace(/\/repo$/, "")
@@ -3635,24 +3637,32 @@ ApplicationWindow {
             windowSettings.rightMode = "changes"
             git.refresh(true) } }
         PauseAnimation { duration: 2000 }
-        ScriptAction { script: { chat.transcript.scrollToEnd(); win.shotWindow("site-main") } }
-        PauseAnimation { duration: 600 }
+        ScriptAction { script: { chat.transcript.scrollToEnd(); win.shotWindow("site-main"); Workspace.chooseThemeMode("light") } }
+        PauseAnimation { duration: 1000 }
+        ScriptAction { script: { chat.transcript.scrollToEnd(); win.shotWindow("site-main-light"); Workspace.chooseThemeMode("dark") } }
+        PauseAnimation { duration: 800 }
         ScriptAction { script: win.clickText("guard.ts", changes) }
         PauseAnimation { duration: 800 }
         ScriptAction { script: windowSettings.rightMode = "" }
         PauseAnimation { duration: 1500 }
-        ScriptAction { script: win.shotWindow("site-diff") }
-        PauseAnimation { duration: 600 }
+        ScriptAction { script: { win.shotWindow("site-diff"); Workspace.chooseThemeMode("light") } }
+        PauseAnimation { duration: 1000 }
+        ScriptAction { script: { win.shotWindow("site-diff-light"); Workspace.chooseThemeMode("dark") } }
+        PauseAnimation { duration: 800 }
         ScriptAction { script: {
             Workspace.chooseTheme("Midnight")
             Workspace.open(win.siteKey)
             windowSettings.rightMode = "activity" } }
         PauseAnimation { duration: 1800 }
-        ScriptAction { script: { chat.transcript.scrollToEnd(); win.shotWindow("site-midnight") } }
-        PauseAnimation { duration: 600 }
+        ScriptAction { script: { chat.transcript.scrollToEnd(); win.shotWindow("site-midnight"); Workspace.chooseThemeMode("light") } }
+        PauseAnimation { duration: 1000 }
+        ScriptAction { script: { chat.transcript.scrollToEnd(); win.shotWindow("site-midnight-light"); Workspace.chooseThemeMode("dark") } }
+        PauseAnimation { duration: 800 }
         ScriptAction { script: { Workspace.chooseTheme("harlo"); windowSettings.rightMode = ""; win.openDraft(1) } }
         PauseAnimation { duration: 1500 }
-        ScriptAction { script: win.shotWindow("site-new") }
+        ScriptAction { script: { win.shotWindow("site-new"); Workspace.chooseThemeMode("light") } }
+        PauseAnimation { duration: 1000 }
+        ScriptAction { script: { win.shotWindow("site-new-light"); Workspace.chooseThemeMode("dark") } }
         PauseAnimation { duration: 800 }
         ScriptAction { script: { win.summary(); Qt.quit() } }
     }
