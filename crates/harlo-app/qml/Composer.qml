@@ -392,6 +392,12 @@ Rectangle {
 
     AppMenu {
         id: thinkingMenu
+        // (Nothing to pick: say so rather than an empty menu.)
+        AppMenuItem {
+            visible: root.session.thinkingLevels.length === 0
+            enabled: false
+            text: root.session.harness === "hermes" ? "Hermes sets its reasoning in its own config" : "No thinking levels for this model"
+        }
         Repeater {
             model: root.session.thinkingLevels
             AppMenuItem {
