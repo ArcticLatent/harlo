@@ -301,9 +301,14 @@ Rectangle {
                 Layout.fillHeight: true
                 clip: true
                 highlightMoveDuration: 0
-                model: root.session.models
-                    .map(m => { const p = m.split("\t"); return { provider: p[0], id: p[1], name: p[2] || p[1], reasoning: p[3] === "1" } })
-                    .filter(m => (m.provider + " " + m.id + " " + m.name).toLowerCase().includes(modelFilter.text.toLowerCase()))
+                // Models served on this computer or the local network last,
+                // under "Local".
+                model: {
+                    const all = root.session.models
+                        .map(m => { const p = m.split("\t"); return { provider: p[0], id: p[1], name: p[2] || p[1], reasoning: p[3] === "1", local: p[4] === "1" } })
+                        .filter(m => (m.provider + " " + m.id + " " + m.name).toLowerCase().includes(modelFilter.text.toLowerCase()))
+                    return all.filter(m => !m.local).concat(all.filter(m => m.local))
+                }
                 function pick(i) {
                     const m = model[i]
                     if (m) { root.session.setModel(m.provider, m.id); modelPicker.close() }
@@ -312,10 +317,24 @@ Rectangle {
                     id: mrow
                     required property var modelData
                     required property int index
+                    // The first local model: "Local" above it.
+                    readonly property real heading: modelData.local && (index === 0 || !ListView.view.model[index - 1].local) ? 30 : 0
                     width: ListView.view.width
-                    height: 30
+                    height: 30 + heading
+                    topInset: heading
+                    topPadding: heading + bottomPadding
                     highlighted: ListView.isCurrentItem
                     background: Rectangle { radius: 4; color: mrow.highlighted ? Theme.selected : mrow.hovered ? Theme.hover : "transparent" }
+                    Label {
+                        visible: mrow.heading > 0
+                        x: 8
+                        y: mrow.heading - height - 3
+                        text: "LOCAL"
+                        color: Theme.label
+                        font.pixelSize: Theme.px(11)
+                        font.weight: Font.Medium
+                        font.letterSpacing: Theme.px(11) * 0.07
+                    }
                     contentItem: RowLayout {
                         Label {
                             text: mrow.modelData.name + (mrow.modelData.name === root.session.modelName ? "  ✓" : "")

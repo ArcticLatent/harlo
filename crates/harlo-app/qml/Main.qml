@@ -2712,6 +2712,16 @@ ApplicationWindow {
             win.clickItem(win.findName("modeButton", chat.composerItem), "Build")
             chat.session.setModel("fakeai", "fake-small") } }
         PauseAnimation { duration: 500 }
+        // The model list: one served on this computer last, under Local.
+        ScriptAction { script: win.clickItem(win.findName("modelButton", chat.composerItem), "the model button") }
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: {
+            const names = chat.session.models.map(m => m.split("\t")[2])
+            win.check(chat.session.models.some(m => m.split("\t")[4] === "1" && m.split("\t")[1] === "qwen-home"), "the local model is known as local (" + names + ")")
+            win.check(win.findText("LOCAL") !== null, "under a Local heading")
+            win.shotWindow("clicks-opencode-models")
+            TestInput.key(Qt.Key_Escape, 0) } }
+        PauseAnimation { duration: 400 }
         ScriptAction { script: { chat.session.loadThinkingLevels() } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {

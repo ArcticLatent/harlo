@@ -96,7 +96,10 @@ Rectangle {
         if (project && project.remote) return []
         const p = (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()) : []).find(x => x.id === effectiveHarness)
         if (!p) return []
-        return (p.modelIds || []).map((id, i) => ({ id: id, name: (p.models || [])[i] || id }))
+        // Models served on this computer or the local network last, under
+        // "Local" in the list.
+        const all = (p.modelIds || []).map((id, i) => ({ id: id, name: (p.models || [])[i] || id, local: (p.localIds || []).indexOf(id) >= 0 }))
+        return all.filter(m => !m.local).concat(all.filter(m => m.local))
     }
     readonly property string modelName: { const m = modelChoices.find(x => x.id === model); return m ? m.name : model }
     readonly property var starters: JSON.parse(Workspace.starters())
@@ -400,7 +403,7 @@ Rectangle {
                         id: modelPopup
                         y: parent.height + 4
                         width: 400
-                        height: Math.min(380, 60 + Math.max(1, draftModels.count) * 30)
+                        height: Math.min(380, 60 + Math.max(1, draftModels.count) * 30 + (root.modelChoices.some(m => m.local) ? 30 : 0))
                         padding: 8
                         background: GlassSurface { radius: 10 }
                         onOpened: { draftModelFilter.text = ""; draftModelFilter.forceActiveFocus() }
@@ -442,10 +445,24 @@ Rectangle {
                                     required property var modelData
                                     required property int index
                                     objectName: "draftModel-" + modelData.id
+                                    // The first local model: "Local" above it.
+                                    readonly property real heading: !!modelData.local && (index === 0 || !ListView.view.model[index - 1].local) ? 30 : 0
                                     width: ListView.view.width
-                                    height: 30
+                                    height: 30 + heading
+                                    topInset: heading
+                                    topPadding: heading + bottomPadding
                                     highlighted: ListView.isCurrentItem
                                     background: Rectangle { radius: 4; color: dmRow.highlighted ? Theme.selected : dmRow.hovered ? Theme.hover : "transparent" }
+                                    Label {
+                                        visible: dmRow.heading > 0
+                                        x: 8
+                                        y: dmRow.heading - height - 3
+                                        text: "LOCAL"
+                                        color: Theme.label
+                                        font.pixelSize: Theme.px(11)
+                                        font.weight: Font.Medium
+                                        font.letterSpacing: Theme.px(11) * 0.07
+                                    }
                                     contentItem: RowLayout {
                                         Label {
                                             text: dmRow.modelData.name + (dmRow.modelData.id === root.model ? "  ✓" : "")

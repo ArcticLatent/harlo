@@ -1252,6 +1252,7 @@ impl Workspace {
                     "modelCount": status.map_or(0, |s| s.models.len()),
                     "models": status.map(|s| s.models.iter().map(|(_, name)| name.clone()).collect::<Vec<_>>()).unwrap_or_default(),
                     "modelIds": status.map(|s| s.models.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>()).unwrap_or_default(),
+                    "localIds": status.map(|s| s.local.clone()).unwrap_or_default(),
                     "error": status.and_then(|s| s.error.clone()).unwrap_or_default(),
                 })
             })

@@ -535,9 +535,9 @@ pub fn url_encode(s: &str) -> String {
         .collect()
 }
 
-/// The models OpenCode offers in `directory`: `(provider/model, name)`,
-/// enabled models of providers that aren't turned off.
-pub fn models(server: &Server, directory: &Path) -> Result<Vec<(String, String)>> {
+/// The models OpenCode offers in `directory`: `(provider/model, name,
+/// local)`, enabled models of providers that aren't turned off.
+pub fn models(server: &Server, directory: &Path) -> Result<Vec<(String, String, bool)>> {
     // A folder's catalog loads on first use: empty at first, filled a moment
     // later.
     for _ in 0..40 {
@@ -550,7 +550,7 @@ pub fn models(server: &Server, directory: &Path) -> Result<Vec<(String, String)>
     Ok(Vec::new())
 }
 
-fn models_now(server: &Server, directory: &Path) -> Result<Vec<(String, String)>> {
+fn models_now(server: &Server, directory: &Path) -> Result<Vec<(String, String, bool)>> {
     let providers = server.get("/api/provider", Some(directory))?;
     let off: Vec<&str> = providers["data"]
         .as_array()
@@ -569,7 +569,8 @@ fn models_now(server: &Server, directory: &Path) -> Result<Vec<(String, String)>
         .filter_map(|m| {
             let provider = m["providerID"].as_str()?;
             let id = m["modelID"].as_str().or_else(|| m["id"].as_str())?;
-            Some((format!("{provider}/{id}"), m["name"].as_str().unwrap_or(id).to_owned()))
+            let local = m["settings"]["baseURL"].as_str().is_some_and(crate::is_local_url);
+            Some((format!("{provider}/{id}"), m["name"].as_str().unwrap_or(id).to_owned(), local))
         })
         .collect())
 }

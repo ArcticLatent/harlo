@@ -631,7 +631,7 @@ async fn command(s: &Arc<Session>, pending: &Pending, cmd: Value) {
                     .into_iter()
                     .flatten()
                     .filter(|m| m["enabled"] != false)
-                    .map(|m| json!({ "provider": m["providerID"], "id": m["modelID"].as_str().or_else(|| m["id"].as_str()), "name": m["name"], "reasoning": m["variants"].as_array().is_some_and(|v| !v.is_empty()) }))
+                    .map(|m| json!({ "provider": m["providerID"], "id": m["modelID"].as_str().or_else(|| m["id"].as_str()), "name": m["name"], "reasoning": m["variants"].as_array().is_some_and(|v| !v.is_empty()), "baseUrl": m["settings"]["baseURL"] }))
                     .collect(),
                 Err(_) => Vec::new(),
             };

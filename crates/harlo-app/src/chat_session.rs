@@ -1034,7 +1034,9 @@ impl ChatSession {
             for m in data["models"].as_array().into_iter().flatten() {
                 let s = |k: &str| m[k].as_str().unwrap_or_default().replace('\t', " ");
                 let reasoning = if m["reasoning"].as_bool() == Some(true) { "1" } else { "0" };
-                list.append(QString::from(&format!("{}\t{}\t{}\t{}", s("provider"), s("id"), s("name"), reasoning)));
+                // Served on this computer or the local network.
+                let local = if m["baseUrl"].as_str().is_some_and(harlo_harness::is_local_url) { "1" } else { "0" };
+                list.append(QString::from(&format!("{}\t{}\t{}\t{}\t{}", s("provider"), s("id"), s("name"), reasoning, local)));
             }
             this.as_mut().set_models(list);
         });

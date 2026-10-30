@@ -16,6 +16,8 @@ pub struct Status {
     pub version: Option<String>,
     /// `(id, name)`; ids as the harness takes them.
     pub models: Vec<(String, String)>,
+    /// The ids of models served on this computer or the local network.
+    pub local: Vec<String>,
     pub error: Option<String>,
 }
 
@@ -75,7 +77,10 @@ pub fn check(kind: HarnessKind, configured: &str, runtime: &tokio::runtime::Hand
     let mut status = Status { program: Some(program.clone()), version: version.clone(), ..Default::default() };
     let scratch = std::env::temp_dir();
     let models = match kind {
-        HarnessKind::Claude => Ok(harlo_harness::claude::models(version.as_deref(), harlo_harness::claude::config_dir().map(|d| d.join("settings.json")).as_deref())),
+        HarnessKind::Claude => Ok(harlo_harness::claude::models(version.as_deref(), harlo_harness::claude::config_dir().map(|d| d.join("settings.json")).as_deref())
+            .into_iter()
+            .map(|(id, name)| (id, name, false))
+            .collect()),
         HarnessKind::OpenCode => match version.as_deref().and_then(harlo_harness::opencode::version_number) {
             Some(v) if !harlo_harness::opencode::supported(&v) => Err(format!("OpenCode {v} is too old: harlo needs 2.0.20 or later")),
             _ => harlo_harness::opencode::Server::start(&program, &scratch)
@@ -86,7 +91,10 @@ pub fn check(kind: HarnessKind, configured: &str, runtime: &tokio::runtime::Hand
         HarnessKind::Demo => Ok(Vec::new()),
     };
     match models {
-        Ok(m) => status.models = m,
+        Ok(m) => {
+            status.local = m.iter().filter(|(_, _, local)| *local).map(|(id, _, _)| id.clone()).collect();
+            status.models = m.into_iter().map(|(id, name, _)| (id, name)).collect();
+        }
         Err(e) => status.error = Some(e),
     }
     // Claude's models only when Claude Code is signed in (its own answer;
@@ -127,7 +135,7 @@ fn claude_signed_out(program: &Path) -> bool {
 }
 
 /// pi / omp in RPC mode with no session: their model list.
-async fn rpc_models(kind: HarnessKind, program: PathBuf, cwd: PathBuf) -> Result<Vec<(String, String)>, String> {
+async fn rpc_models(kind: HarnessKind, program: PathBuf, cwd: PathBuf) -> Result<Vec<(String, String, bool)>, String> {
     let cfg = HarnessConfig { kind, program: Some(program), cwd, session: SessionTarget::Ephemeral, extra_args: vec![], env: vec![], remote: None };
     let (harness, _events) = Harness::spawn(cfg).map_err(|e| format!("{e:#}"))?;
     let answer = tokio::time::timeout(Duration::from_secs(25), harness.request(json!({ "type": "get_available_models" }))).await;
@@ -145,7 +153,7 @@ async fn rpc_models(kind: HarnessKind, program: PathBuf, cwd: PathBuf) -> Result
             let id = m["id"].as_str()?;
             let provider = m["provider"].as_str().unwrap_or_default();
             let full = if provider.is_empty() { id.to_owned() } else { format!("{provider}/{id}") };
-            Some((full, m["name"].as_str().unwrap_or(id).to_owned()))
+            Some((full, m["name"].as_str().unwrap_or(id).to_owned(), m["baseUrl"].as_str().is_some_and(harlo_harness::is_local_url)))
         })
         .collect())
 }
