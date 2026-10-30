@@ -3955,15 +3955,17 @@ impl Workspace {
         }
         entry.info.needs_input = !entry.requests.is_empty();
         let _ = needed_input;
-        // Whose limits it's using: Claude's sign-in, or (omp, pi) the
-        // model's provider, as omp names its accounts.
+        // Whose limits it's using: Claude's sign-in, or (omp, pi, OpenCode)
+        // the model's provider, as omp names its accounts (OpenCode's
+        // "openai" is the ChatGPT sign-in, omp's "openai-codex").
         let used = became_busy
             .then(|| match entry.info.harness.as_str() {
                 "claude" => Some("Claude".to_owned()),
-                "omp" | "pi" => entry.model_id.split_once('/').map(|(p, _)| p.to_owned()).filter(|p| !p.is_empty()),
+                "omp" | "pi" | "opencode" => entry.model_id.split_once('/').map(|(p, _)| p.to_owned()).filter(|p| !p.is_empty()),
                 _ => None,
             })
-            .flatten();
+            .flatten()
+            .map(|p| if entry.info.harness == "opencode" && p == "openai" { "openai-codex".to_owned() } else { p });
         if became_idle && !active {
             entry.info.unread = true;
         }
