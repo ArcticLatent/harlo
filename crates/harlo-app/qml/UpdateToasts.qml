@@ -184,6 +184,7 @@ Column {
                             text: "Restart harlo"
                             accent: true
                             implicitHeight: 28
+                            font.pixelSize: Theme.px(12)
                             onClicked: { Updates.restartHarlo(); Qt.quit() }
                         }
                         DialogButton {
@@ -192,6 +193,7 @@ Column {
                             text: "Update"
                             accent: true
                             implicitHeight: 28
+                            font.pixelSize: Theme.px(12)
                             onClicked: Updates.update(toast.e.key)
                         }
                     }
