@@ -64,6 +64,10 @@ export PATH="$QTDIR/bin:$PATH"
     --desktop-file "$APPDIR/usr/share/applications/harlo.desktop" \
     --icon-file "$APPDIR/usr/share/icons/hicolor/256x256/apps/harlo.png"
 echo "appimage" > "$APPDIR/usr/install-kind"
+# The AppImage's own icon: a PNG and .DirIcon at its root (appimagetool no
+# longer takes the SVG linuxdeploy links there).
+ln -sf usr/share/icons/hicolor/256x256/apps/harlo.png "$APPDIR/harlo.png"
+ln -sf harlo.png "$APPDIR/.DirIcon"
 
 # The AppImage.
 ARCH=x86_64 "$TOOLS/appimagetool" --no-appstream "$APPDIR" "$OUT/harlo-$VERSION-x86_64.AppImage"
