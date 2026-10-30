@@ -100,17 +100,21 @@ Rectangle {
                         visible: !!planMeter.shown && planMeter.shown.provider === "Claude"
                         provider: "claude"
                         tip: ""
+                        color: Theme.textMuted
                         implicitWidth: 12
                         implicitHeight: 12
                     }
+                    // (The logos have a margin of their own, about an eighth
+                    // on each side, which Claude's mark hasn't: bigger, so
+                    // they look the same size.)
                     ProviderLogo {
                         objectName: "planMeterLogo"
                         anchors.centerIn: parent
                         visible: !!planMeter.shown && planMeter.shown.provider !== "Claude"
                         provider: planMeter.shown ? planMeter.shown.provider : ""
                         color: Theme.textMuted
-                        implicitWidth: 12
-                        implicitHeight: 12
+                        implicitWidth: 16
+                        implicitHeight: 16
                     }
                 }
                 Label {
