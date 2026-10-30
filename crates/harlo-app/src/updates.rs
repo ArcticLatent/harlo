@@ -56,6 +56,10 @@ pub mod qobject {
         /// (QML quits).
         #[qinvokable]
         fn restart_harlo(self: &Updates);
+        /// Settings → About: JSON `{ version, installed }` (how this harlo
+        /// was installed).
+        #[qinvokable]
+        fn about(self: &Updates) -> QString;
     }
 }
 
@@ -537,6 +541,17 @@ impl Updates {
             let _ = db.set(DISMISSED, &Value::Object(map).to_string());
         }
         self.publish();
+    }
+
+    pub fn about(&self) -> QString {
+        let installed = match harlo_kind() {
+            Some(updates::InstallKind::AppImage(_)) => "AppImage",
+            Some(updates::InstallKind::Deb) => "Debian / Ubuntu package",
+            Some(updates::InstallKind::Rpm) => "RPM package",
+            Some(updates::InstallKind::Arch) => "Arch package",
+            None => "Built from source",
+        };
+        QString::from(&serde_json::json!({ "version": env!("CARGO_PKG_VERSION"), "installed": installed }).to_string())
     }
 
     pub fn output_command(&self, key: &QString) -> QString {

@@ -40,9 +40,11 @@ Popup {
         { id: "mcp", title: "MCP", icon: "node-tree", group: "agents", keywords: "mcp tool servers model context protocol tools stdio http oauth" },
         { id: "orchestration", title: "Orchestration", icon: "ai-agent", group: "agents", keywords: "orchestration skills handoff advisor committee second opinion delegate subagent agents start sessions mcp bridge tools" },
         { id: "remote", title: "Remote Instances", icon: "server", group: "agents", keywords: "remote ssh server host machine nas instance connect" },
+        { id: "about", title: "About Harlo", icon: "information", group: "about", keywords: "about version release licence license mit website source code github changelog what's new report problem issue bug logs" },
         { id: "providers", title: "Providers", icon: "robot-2", group: "agents", keywords: "providers harnesses claude opencode pi omp oh my pi binary path program agent models version enable disable debug log logs protocol crash diagnostics goal subagent model role sign in login log in account accounts api key oauth credentials" },
     ]
-    readonly property var groups: [["harlo", "harlo"], ["workspace", "Workspace"], ["agents", "Agents"]]
+    // (About goes last, under no heading.)
+    readonly property var groups: [["harlo", "harlo"], ["workspace", "Workspace"], ["agents", "Agents"], ["about", ""]]
     property string query: ""
     readonly property var shownPages: {
         const q = query.trim().toLowerCase()
@@ -271,7 +273,7 @@ Popup {
                                 Layout.fillWidth: true
                                 spacing: 2
                                 Label {
-                                    visible: !root.compact
+                                    visible: !root.compact && groupBlock.modelData[1] !== ""
                                     text: groupBlock.modelData[1].toUpperCase()
                                     color: Theme.label
                                     font.pixelSize: Theme.px(11.5)
@@ -471,7 +473,8 @@ Popup {
                     Layout.fillWidth: true
                     sourceComponent: ({
                         general: generalPage, appearance: appearancePage, notifications: notificationsPage, voice: voicePage, devices: devicesPage,
-                        shortcuts: shortcutsPage, projects: projectsPage, worktrees: worktreesPage, git: gitPage, schedules: schedulesPage, providers: providersPage, remote: remotePage, mcp: mcpPage, orchestration: orchestrationPage
+                        shortcuts: shortcutsPage, projects: projectsPage, worktrees: worktreesPage, git: gitPage, schedules: schedulesPage, providers: providersPage, remote: remotePage, mcp: mcpPage, orchestration: orchestrationPage,
+                        about: aboutPage
                     })[root.page] || null
                 }
             }
@@ -1315,6 +1318,91 @@ Popup {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    Component {
+        id: aboutPage
+        ColumnLayout {
+            id: about
+            spacing: 0
+            // `{ version, installed }`
+            readonly property var info: JSON.parse(Updates.about())
+            readonly property bool fromSource: info.installed === "Built from source"
+            readonly property string repo: "https://github.com/ArcticLatent/harlo"
+            RowLayout {
+                spacing: 16
+                Image {
+                    source: "qrc:/qt/qml/harlo/icons/app/harlo.svg"
+                    sourceSize: Qt.size(128, 128)
+                    Layout.preferredWidth: 64
+                    Layout.preferredHeight: 64
+                }
+                ColumnLayout {
+                    spacing: 3
+                    Label { text: "Harlo"; color: Theme.text; font.pixelSize: Theme.px(22); font.weight: Font.DemiBold }
+                    Label { objectName: "aboutVersion"; text: "Version " + about.info.version + " · " + about.info.installed; color: Theme.textMuted; font.pixelSize: Theme.px(13) }
+                    Label { text: "Your coding agents, in a truly native app."; color: Theme.textMuted; font.pixelSize: Theme.px(13) }
+                }
+            }
+            Group {
+                Layout.topMargin: 22
+                SettingRow {
+                    title: "Updates"
+                    detail: (about.fromSource ? "Built from source, so it doesn't update itself: pull and build again for a newer one."
+                                              : "harlo looks for a newer version at startup and every 6 hours, and offers it at the bottom right of the window.")
+                        + (Updates.checkStatus !== "" ? "\n" + Updates.checkStatus : "")
+                    icon: "refresh"
+                    FlatButton {
+                        text: Updates.checking ? "Checking…" : "Check now"
+                        enabled: !Updates.checking
+                        font.pixelSize: Theme.px(12)
+                        onClicked: Updates.checkNow()
+                    }
+                }
+                SettingRow {
+                    divider: true
+                    title: "What's new"
+                    detail: "What changed in each release."
+                    icon: "book-open"
+                    FlatButton { text: "Changelog"; font.pixelSize: Theme.px(12); onClicked: Qt.openUrlExternally(about.repo + "/blob/" + (about.fromSource ? "main" : "v" + about.info.version) + "/CHANGELOG.md") }
+                }
+                SettingRow {
+                    divider: true
+                    title: "Website"
+                    detail: "harlo.run: downloads, the iPhone app and help."
+                    icon: "global"
+                    FlatButton { text: "Open"; font.pixelSize: Theme.px(12); onClicked: Qt.openUrlExternally("https://harlo.run") }
+                }
+                SettingRow {
+                    divider: true
+                    title: "Source code"
+                    detail: "github.com/ArcticLatent/harlo"
+                    icon: "git-repository"
+                    FlatButton { text: "Open"; font.pixelSize: Theme.px(12); onClicked: Qt.openUrlExternally(about.repo) }
+                }
+                SettingRow {
+                    divider: true
+                    title: "Report a problem"
+                    detail: "Open an issue on GitHub. Logs and crash reports help: they're in " + Workspace.logsDir() + "."
+                    icon: "bug"
+                    RowLayout {
+                        spacing: 8
+                        FlatButton { text: "Logs"; font.pixelSize: Theme.px(12); onClicked: Qt.openUrlExternally("file://" + Workspace.logsDir()) }
+                        FlatButton { text: "New issue"; font.pixelSize: Theme.px(12); onClicked: Qt.openUrlExternally(about.repo + "/issues/new") }
+                    }
+                }
+            }
+            Rule { }
+            SectionHeader {
+                title: "Licence"
+                subtitle: "harlo is free and open source, under the MIT licence. It's built with Qt (LGPLv3) and includes fonts, icons and logos under their own licences" + (about.fromSource ? "." : ", installed with harlo.")
+            }
+            RowLayout {
+                Layout.topMargin: 10
+                spacing: 8
+                FlatButton { text: "MIT licence"; font.pixelSize: Theme.px(12); onClicked: Qt.openUrlExternally(about.repo + "/blob/main/LICENSE") }
             }
         }
     }
