@@ -17,10 +17,11 @@ pub mod store;
 pub use event::{BlockKind, HarnessEvent, HarnessKind, NoticeLevel, Translator};
 pub use process::{Harness, HarnessConfig, RemoteLaunch, SendMode, SessionTarget, image_from_file, on_host, resolve_program};
 pub use opencode_run::shutdown as stop_opencode;
-/// A remote host's OpenCode: its sessions, a saved one, its prompts.
+/// A remote host's OpenCode: its sessions, a saved one, its prompts. And
+/// deleting a session (here or there).
 pub use opencode_run::{
-    remote_saved as opencode_remote_saved, remote_sessions as opencode_remote_sessions, remote_subagents as opencode_remote_subagents,
-    remote_user_entries as opencode_remote_user_entries,
+    delete_session as opencode_delete_session, remote_saved as opencode_remote_saved, remote_sessions as opencode_remote_sessions,
+    remote_subagents as opencode_remote_subagents, remote_user_entries as opencode_remote_user_entries,
 };
 pub use store::SessionInfo;
 

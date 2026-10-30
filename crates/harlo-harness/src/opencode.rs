@@ -320,6 +320,12 @@ pub fn remote_session_path(host: &str, id: &str) -> PathBuf {
     PathBuf::from(format!("ssh://{host}/opencode-sessions/{id}"))
 }
 
+/// Whether `path` names an OpenCode session (here or on a remote host)
+/// rather than a file.
+pub fn is_session_path(path: &Path) -> bool {
+    path.to_string_lossy().contains("/opencode-sessions/") || data_dir().is_some_and(|d| path.parent() == Some(d.join("sessions").as_path()))
+}
+
 /// The session id in such a path.
 pub fn session_id(path: &Path) -> String {
     path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
@@ -588,6 +594,14 @@ mod tests {
         assert_eq!(child_of(&json!({ "content": [{ "type": "text", "text": "<subagent sessionID=\"ses_b2\" state=\"completed\">\nok\n</subagent>" }] })).as_deref(), Some("ses_b2"));
         assert_eq!(child_of(&json!({ "error": { "message": "Subagent cancelled (sessionID: ses_c3)" } })).as_deref(), Some("ses_c3"));
         assert_eq!(child_of(&json!({ "content": [{ "type": "text", "text": "no session here" }] })), None);
+    }
+
+    #[test]
+    fn session_paths() {
+        assert!(is_session_path(&session_path("ses_a1")));
+        assert!(is_session_path(&remote_session_path("box", "ses_a1")));
+        assert!(!is_session_path(Path::new("/home/me/.claude/projects/-home-me-proj/3f2a.jsonl")));
+        assert!(!is_session_path(Path::new("/")));
     }
 
     #[test]

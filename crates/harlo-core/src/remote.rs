@@ -692,11 +692,11 @@ fn parse_entries(text: &str) -> Vec<Entry> {
 /// its `gio`, else into ~/.local/share/Trash/files.
 pub fn trash(path: &Path) -> Result<()> {
     let Some((name, f)) = split(path) else {
-        let ok = Command::new("gio").arg("trash").arg(path).status().is_ok_and(|s| s.success());
-        if !ok {
-            bail!("Could not move {} to the trash (needs `gio`).", path.display());
+        match Command::new("gio").arg("trash").arg("--").arg(path).output() {
+            Ok(out) if out.status.success() => return Ok(()),
+            Ok(out) => bail!("Could not move {} to the trash: {}", path.display(), String::from_utf8_lossy(&out.stderr).trim()),
+            Err(_) => bail!("Could not move {} to the trash (needs `gio`).", path.display()),
         }
-        return Ok(());
     };
     let host = host(&name).with_context(|| format!("unknown remote host {name}"))?;
     let q = quote(&f);

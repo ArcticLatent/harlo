@@ -44,14 +44,20 @@ Rectangle {
         id: trashDialog
         property string key: ""
         property string label: ""
-        title: "Move session to trash?"
+        // OpenCode keeps its sessions in its database: there's no file to
+        // move to the trash, so it's deleted.
+        property bool opencode: false
+        title: opencode ? "Delete session?" : "Move session to trash?"
         modal: true
         anchors.centerIn: Overlay.overlay
         footer: AppButtonBox {
             DialogButton { text: "Cancel"; DialogButtonBox.buttonRole: DialogButtonBox.RejectRole }
-            DialogButton { text: "Move to trash"; DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole; accent: false; destructive: true }
+            DialogButton { text: trashDialog.opencode ? "Delete" : "Move to trash"; DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole; accent: false; destructive: true }
         }
-        Label { text: trashDialog.label; width: 360; wrapMode: Text.Wrap; color: Theme.muted }
+        Label {
+            text: trashDialog.label + (trashDialog.opencode ? "\n\nOpenCode deletes it with its subagents' sessions. This can't be undone." : "")
+            width: 360; wrapMode: Text.Wrap; color: Theme.muted
+        }
         onAccepted: Workspace.trashSession(key)
     }
 
@@ -120,6 +126,7 @@ Rectangle {
         id: sessionMenu
         property string key: ""
         property string sessionTitle: ""
+        property string harness: ""
         property bool pinned: false
         property bool live: false
         property string branch: ""
@@ -144,9 +151,9 @@ Rectangle {
         }
         AppMenuSeparator { }
         AppMenuItem {
-            text: "Move to trash…"
+            text: sessionMenu.harness === "opencode" ? "Delete…" : "Move to trash…"
             danger: true
-            onTriggered: { trashDialog.key = sessionMenu.key; trashDialog.label = sessionMenu.sessionTitle; trashDialog.open() }
+            onTriggered: { trashDialog.key = sessionMenu.key; trashDialog.label = sessionMenu.sessionTitle; trashDialog.opencode = sessionMenu.harness === "opencode"; trashDialog.open() }
         }
     }
 
@@ -365,6 +372,7 @@ Rectangle {
                             onTapped: {
                                 sessionMenu.key = sessionRow.rowKey
                                 sessionMenu.sessionTitle = sessionRow.title
+                                sessionMenu.harness = sessionRow.harness
                                 sessionMenu.pinned = sessionRow.pinned
                                 sessionMenu.live = sessionRow.rowKey.startsWith("live:")
                                 sessionMenu.branch = sessionRow.branch

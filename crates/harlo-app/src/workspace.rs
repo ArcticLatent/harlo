@@ -1998,6 +1998,23 @@ impl Workspace {
         let key_s = key.to_string();
         let Some(file) = self.file_for_key(&key_s) else { return };
         self.as_mut().close_session(key);
+        // OpenCode's are in its database: deleted through its server.
+        if harlo_harness::opencode::is_session_path(&file) {
+            let program = self.program_for(HarnessKind::OpenCode).unwrap_or_else(|| PathBuf::from("opencode"));
+            let remote = harlo_core::remote::host_of(&file).and_then(|h| harlo_core::remote::host(&h)).map(|h| harlo_core::remote::launch(&h));
+            let path = file.clone();
+            self.background(
+                move || harlo_harness::opencode_delete_session(&program, remote.as_ref(), &path),
+                move |mut this, result| match result {
+                    Ok(()) => {
+                        this.as_mut().rust_mut().sessions.remove(&file);
+                        this.rebuild();
+                    }
+                    Err(e) => this.set_error_text(QString::from(&format!("Could not delete the OpenCode session: {e:#}"))),
+                },
+            );
+            return;
+        }
         match harlo_core::remote::trash(&file) {
             Ok(()) => {
                 self.as_mut().rust_mut().sessions.remove(&file);

@@ -203,6 +203,15 @@ pub fn remote_user_entries(remote: &RemoteLaunch, path: &Path) -> Vec<String> {
     page["data"].as_array().into_iter().flatten().filter(|m| m["type"] == "user").filter_map(|m| m["id"].as_str().map(str::to_owned)).collect()
 }
 
+/// Deletes a session and its subagents' sessions, through the server here
+/// or on `remote`'s host (blocking). OpenCode keeps them in its database,
+/// so there's no file to move to the trash.
+pub fn delete_session(program: &Path, remote: Option<&RemoteLaunch>, path: &Path) -> Result<()> {
+    let hub = hub(program, remote)?;
+    hub.server.request("DELETE", &format!("/api/session/{}", opencode::session_id(path)), None, None)?;
+    Ok(())
+}
+
 /// Which session an event is about.
 fn event_session(ev: &Value) -> Option<String> {
     let d = &ev["data"];
