@@ -8,7 +8,7 @@
 </p>
 
 <p align="center"><b>Your coding agents, in a truly native app.</b><br>
-Claude Code, OpenCode, pi and Oh My Pi on your Linux computer and your other machines,<br>
+Claude Code, OpenCode, pi, Oh My Pi and Hermes on your Linux computer and your other machines,<br>
 with an iPhone app to follow and answer them. Written in Rust and Qt, not Electron.</p>
 
 <p align="center">
@@ -42,7 +42,7 @@ Many agent apps are a web page in an Electron window. harlo is a desktop app:
 
 | | |
 |---|---|
-| **Four agents, one chat** | Your existing Claude Code, OpenCode, pi and Oh My Pi sessions show up in the sidebar; click one to carry on. Each agent uses your own login and settings. |
+| **Five agents, one chat** | Claude Code, OpenCode, pi, Oh My Pi and Hermes. Your existing Claude Code, OpenCode, pi and Oh My Pi sessions show up in the sidebar; click one to carry on. Each agent uses your own login and settings. |
 | **Changes and diffs** | Every file an agent touched, side-by-side diffs, review comments sent back to the agent, and undo for any turn. A folder of repositories shows each one's changes. |
 | **Pull requests and CI** | Commit, push, open a pull request and follow its checks on GitHub, GitLab or Forgejo (your own server too). Failed checks go back to the agent in one click. |
 | **Your other machines** | Add a machine over SSH and run sessions there, with its files, terminal and changes. |
@@ -123,7 +123,7 @@ It speaks plain HTTP: put it behind something that adds HTTPS (Caddy, a Cloudfla
 
 | Crate | Role |
 |---|---|
-| `crates/harlo-harness` | Runs the agents (pi and omp over RPC, Claude Code's stream-json, OpenCode's server) and turns what they say into one stream of events |
+| `crates/harlo-harness` | Runs the agents (pi and omp over RPC, Claude Code's stream-json, OpenCode's server, Hermes over the Agent Client Protocol) and turns what they say into one stream of events |
 | `crates/harlo-core` | Sessions, transcripts, markdown, git, worktrees, search, remote machines, phone protocol, state. No Qt |
 | `crates/harlo-app` | The desktop app: cxx-qt bridges and the QML interface |
 | `crates/harlo-relay` | The relay |
