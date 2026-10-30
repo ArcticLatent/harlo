@@ -4,6 +4,22 @@ What's new in each harlo release, newest first. `packaging/release.sh`
 releases the version at the top: each section starts with `## <version>`,
 and its text becomes the release's notes.
 
+## 1.0.3
+
+- Hermes Agent: start Hermes sessions like the other agents, with
+  approvals, models, edit and resend, search, remote hosts, its MCP
+  servers in Settings → MCP, and update notices. harlo talks to it over
+  the Agent Client Protocol (`hermes acp`).
+- The phone button in the left rail pauses and resumes notifications to
+  your phone once it's paired (right-click to pair another). The pairing
+  stays.
+- Closing the window keeps harlo running in the tray (Settings → General);
+  Ctrl+Q quits.
+- Settings → About Harlo: your version, how harlo was installed, and links
+  to the changelog, website and source.
+- The thinking menu says so when a model has no levels, instead of opening
+  empty.
+
 ## 1.0.2
 
 - Model lists put the models you run yourself (on this computer or your
