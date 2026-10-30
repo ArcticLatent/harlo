@@ -1023,7 +1023,7 @@ dependencies = [
 
 [[package]]
 name = "harlo-apns"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1035,7 +1035,7 @@ dependencies = [
 
 [[package]]
 name = "harlo-app"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -1062,7 +1062,7 @@ dependencies = [
 
 [[package]]
 name = "harlo-core"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "alacritty_terminal",
  "anyhow",
@@ -1088,7 +1088,7 @@ dependencies = [
 
 [[package]]
 name = "harlo-harness"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1103,7 +1103,7 @@ dependencies = [
 
 [[package]]
 name = "harlo-manifest-signer"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1116,7 +1116,7 @@ dependencies = [
 
 [[package]]
 name = "harlo-relay"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -1131,7 +1131,7 @@ dependencies = [
 
 [[package]]
 name = "harlo-update-signing"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

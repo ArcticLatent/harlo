@@ -4,6 +4,19 @@ What's new in each harlo release, newest first. `packaging/release.sh`
 releases the version at the top: each section starts with `## <version>`,
 and its text becomes the release's notes.
 
+## 1.0.2
+
+- Model lists put the models you run yourself (on this computer or your
+  local network) last, under Local.
+- OpenCode sessions can be deleted again: right-click → Delete…. Moving
+  them to the trash failed, because OpenCode keeps sessions in its database.
+- The plan meter follows OpenCode sessions too, and a provider's logo in it
+  is the same size as Claude's.
+- Settings → General → Check for updates has Check now, and harlo checks
+  every 6 hours instead of 12.
+- The update notice says what's new since your version, with Read more for
+  the full changelog.
+
 ## 1.0.1
 
 - OpenCode: denying a permission ends the run. Before, the session stayed
