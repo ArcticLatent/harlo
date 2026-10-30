@@ -13,7 +13,7 @@ QtObject {
         nextTab: "Ctrl+Tab", nextTabAlt: "Ctrl+PgDown", prevTab: "Ctrl+Shift+Tab", prevTabAlt: "Ctrl+PgUp",
         jumpPrompt: "Ctrl+J", prevPrompt: "Alt+Up", nextPrompt: "Alt+Down",
         newSession: "Ctrl+N", closeTab: "Ctrl+W",
-        toggleSidebar: "Ctrl+B", settings: "Ctrl+,", shortcuts: "Ctrl+/",
+        toggleSidebar: "Ctrl+B", settings: "Ctrl+,", shortcuts: "Ctrl+/", quit: "Ctrl+Q",
         contextPanel: "Ctrl+Shift+I", activityPanel: "Ctrl+Shift+A", changesPanel: "Ctrl+Shift+G", filesPanel: "Ctrl+Shift+E", notesPanel: "Ctrl+Shift+N",
         terminal: "Ctrl+`", newTerminalTab: "Ctrl+Shift+T", closeTerminalTab: "Ctrl+Shift+W",
         miniChat: "Ctrl+Shift+M", expandComposer: "Ctrl+Shift+X", dictate: "Ctrl+Shift+D",

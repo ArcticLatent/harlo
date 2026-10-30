@@ -551,9 +551,9 @@ Popup {
                 SettingRow {
                     divider: true
                     title: "Keep running when the window is closed"
-                    detail: "Closing the window hides it to the tray; quit from the tray menu."
+                    detail: "Closing the window hides it to the tray, and your sessions keep running; quit from the tray menu" + (Keymap.seq("quit") !== "" ? " or with " + Keymap.seq("quit") : "") + ". Off, or without the tray icon, closing the window quits harlo."
                     AppSwitch {
-                        checked: Workspace.setting("close_to_tray") === "1"
+                        checked: Workspace.setting("close_to_tray") !== "0"
                         onToggled: Workspace.setSetting("close_to_tray", checked ? "1" : "0")
                     }
                 }

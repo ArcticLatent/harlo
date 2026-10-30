@@ -100,9 +100,10 @@ ApplicationWindow {
         enabled: !win.drawnOnce
         function onFrameSwapped() { win.drawnOnce = true; Workspace.graphicsDrawn() }
     }
-    // Settings → General: keep running in the tray instead of quitting.
+    // Settings → General: keep running in the tray instead of quitting (on
+    // unless turned off; without a tray, closing quits).
     onClosing: close => {
-        if (Workspace.setting("close_to_tray") === "1" && trayLoader.item && trayLoader.item.available) {
+        if (Workspace.setting("close_to_tray") !== "0" && trayLoader.item && trayLoader.item.available) {
             close.accepted = false
             win.hide()
         }
@@ -598,6 +599,8 @@ ApplicationWindow {
             { id: "toggleSidebar", seq: Keymap.seq("toggleSidebar"), label: "Toggle sidebar", group: ui, glyph: "◧", run: () => win.toggleSidebar() },
             { id: "settings", seq: Keymap.seq("settings"), label: "Settings", group: ui, glyph: "⚙", run: () => settingsDialog.open() },
             { id: "shortcuts", seq: Keymap.seq("shortcuts"), label: "Keyboard shortcuts", group: ui, glyph: "?", run: () => shortcutsDialog.open() },
+            // (Closing the window keeps harlo in the tray: this quits.)
+            { id: "quit", seq: Keymap.seq("quit"), label: "Quit harlo", group: ui, glyph: "⏻", run: () => Qt.quit() },
             { seq: "Ctrl+Alt+L", label: "Layout readout", hidden: true, run: () => { layoutInfo.visible = !layoutInfo.visible; console.log("layout:", layoutInfo.text) } },
             { id: "contextPanel", seq: Keymap.seq("contextPanel"), label: "Context panel", group: panels, glyph: "◔", run: () => win.togglePanel("context") },
             { id: "activityPanel", seq: Keymap.seq("activityPanel"), label: "Activity panel", group: panels, glyph: "≡", run: () => win.togglePanel("activity") },
