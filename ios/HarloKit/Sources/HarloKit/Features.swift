@@ -547,6 +547,7 @@ public struct Palette: Codable, Equatable, Sendable {
         case "omp": base = RGBA(0.608, 0.541, 0.984)
         case "pi": base = RGBA(0.31, 0.757, 0.682)
         case "opencode": base = RGBA(0.357, 0.608, 0.941)
+        case "hermes": base = RGBA(0.882, 0.722, 0.29)
         default: base = RGBA(0.655, 0.667, 0.698)
         }
         return (RGBA(base.r, base.g, base.b, isLight ? 0.16 : 0.2),
@@ -562,6 +563,7 @@ public struct Palette: Codable, Equatable, Sendable {
         case "omp": base = RGBA(0.706, 0.643, 0.988)
         case "pi": base = RGBA(0.502, 0.82, 0.769)
         case "opencode": base = RGBA(0.502, 0.71, 0.984)
+        case "hermes": base = RGBA(0.941, 0.792, 0.42)
         default: base = RGBA(0.733, 0.745, 0.776)
         }
         return (isLight ? base.mix(RGBA(1, 1, 1), 0.2) : base, RGBA(0.09, 0.075, 0.11))

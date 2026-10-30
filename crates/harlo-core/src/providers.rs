@@ -88,6 +88,8 @@ pub fn check(kind: HarnessKind, configured: &str, runtime: &tokio::runtime::Hand
                 .map_err(|e| format!("{e:#}")),
         },
         HarnessKind::Pi | HarnessKind::Omp => runtime.block_on(rpc_models(kind, program.clone(), scratch)),
+        // An ACP agent: the models a session of its offers.
+        HarnessKind::Hermes => harlo_harness::acp::models(kind, &program).map(|m| m.into_iter().map(|(id, name)| (id, name, false)).collect()).map_err(|e| format!("{e:#}")),
         HarnessKind::Demo => Ok(Vec::new()),
     };
     match models {

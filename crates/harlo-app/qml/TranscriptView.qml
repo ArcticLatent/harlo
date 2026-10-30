@@ -386,7 +386,7 @@ Item {
                     // Edit & resend / fork, on hover.
                     Row {
                         z: 2
-                        visible: userHover.hovered && ["pi", "omp", "claude", "opencode"].includes(root.session.harness)
+                        visible: userHover.hovered && ["pi", "omp", "claude", "opencode", "hermes"].includes(root.session.harness)
                         anchors.right: bubble.right
                         anchors.rightMargin: 6
                         anchors.top: bubble.top

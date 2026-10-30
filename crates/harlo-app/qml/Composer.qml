@@ -32,7 +32,9 @@ Rectangle {
     /// omp's approval mode for this session; "" for pi.
     readonly property string approvalMode: Workspace.modesRevision >= 0 ? Workspace.approvalMode(session.key) : ""
     readonly property bool planOn: Workspace.modesRevision >= 0 && Workspace.planMode(session.key)
-    function togglePlan() { Workspace.setPlanMode(session.key, !planOn) }
+    // (Hermes has no plan mode.)
+    readonly property bool canPlan: session.harness !== "hermes"
+    function togglePlan() { if (canPlan) Workspace.setPlanMode(session.key, !planOn) }
     readonly property var approvalModes: ["always-ask", "write", "yolo"]
     function cycleApproval() {
         const i = approvalModes.indexOf(approvalMode)
@@ -694,6 +696,7 @@ Rectangle {
         // Build or Plan (Tab): plan first, without changing files.
         ComposerLabelButton {
             objectName: "modeButton"
+            visible: root.canPlan
             iconName: "ai-agent"
             text: bar.tight ? "" : root.planOn ? "Plan" : "Build"
             tint: root.planOn ? Theme.warning : Theme.success

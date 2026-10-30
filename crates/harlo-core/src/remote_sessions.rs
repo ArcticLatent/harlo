@@ -69,6 +69,16 @@ impl RemoteScanner {
                 Err(e) => tracing::debug!("{}: OpenCode's sessions: {e:#}", host.name),
             }
         }
+        // An ACP agent's: the ones harlo started there (its index).
+        for kind in [HarnessKind::Hermes] {
+            if remote::found_on(&host.name, kind.as_str()) {
+                for info in harlo_harness::acp::remote_sessions(kind, &host.name) {
+                    let mtime = info.modified.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+                    seen.insert(info.path.clone(), (kind, mtime, info.size));
+                    from_api.insert(info.path.clone(), info);
+                }
+            }
+        }
         let prefix = format!("ssh://{}/", host.name);
         // Gone from the host.
         let gone: Vec<PathBuf> = self.known.keys().filter(|p| p.to_string_lossy().starts_with(&prefix) && !seen.contains_key(*p)).cloned().collect();
@@ -82,12 +92,13 @@ impl RemoteScanner {
             .filter(|(p, (_, m, s))| self.known.get(*p) != Some(&(*m, *s)))
             .map(|(p, (k, m, s))| (p.clone(), *k, *m, *s))
             .collect();
-        // (OpenCode's came with the listing.)
-        for (path, _, mtime, size) in changed.iter().filter(|c| c.1 == HarnessKind::OpenCode) {
+        // (OpenCode's and ACP agents' came with the listing.)
+        let listed = |k: HarnessKind| matches!(k, HarnessKind::OpenCode | HarnessKind::Hermes);
+        for (path, _, mtime, size) in changed.iter().filter(|c| listed(c.1)) {
             self.known.insert(path.clone(), (*mtime, *size));
             self.infos.insert(path.clone(), from_api.remove(path));
         }
-        let files: Vec<(PathBuf, HarnessKind, i64, u64)> = changed.iter().filter(|c| c.1 != HarnessKind::OpenCode).cloned().collect();
+        let files: Vec<(PathBuf, HarnessKind, i64, u64)> = changed.iter().filter(|c| !listed(c.1)).cloned().collect();
         for chunk in files.chunks(BATCH) {
             let texts = read_batch(host, chunk.iter().map(|c| c.0.as_path()))?;
             for (path, kind, mtime, size) in chunk {

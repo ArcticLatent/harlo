@@ -1,6 +1,7 @@
 //! Agent updates: the newest version of each agent (from the npm registry,
-//! where all four publish theirs) against the installed one, and the
-//! agent's own command to update itself.
+//! where the four JavaScript ones publish theirs; Hermes' from its GitHub
+//! releases) against the installed one, and the agent's own command to
+//! update itself.
 
 use std::time::Duration;
 
@@ -16,6 +17,15 @@ fn package(agent: &str) -> Option<&'static str> {
     }
 }
 
+/// Where an agent's newest version is published.
+fn latest_url(agent: &str) -> Option<String> {
+    match agent {
+        // (GitHub's API: once an hour at most, well inside its allowance.)
+        "hermes" => Some("https://api.github.com/repos/NousResearch/hermes-agent/releases/latest".to_owned()),
+        _ => package(agent).map(|p| format!("https://registry.npmjs.org/{p}/latest")),
+    }
+}
+
 /// The agent's command to update itself (arguments after the program).
 pub fn update_args(agent: &str) -> &'static [&'static str] {
     match agent {
@@ -23,6 +33,7 @@ pub fn update_args(agent: &str) -> &'static [&'static str] {
         "opencode" => &["upgrade"],
         "pi" => &["update", "--self"],
         "omp" => &["update"],
+        "hermes" => &["update", "--yes"],
         _ => &[],
     }
 }
@@ -33,11 +44,11 @@ pub fn latest(agent: &str) -> Option<String> {
     if let Ok(test) = std::env::var("HARLO_TEST_LATEST") {
         return test.split(',').find_map(|kv| kv.split_once('=').filter(|(k, _)| *k == agent).map(|(_, v)| v.to_owned()));
     }
-    let url = format!("https://registry.npmjs.org/{}/latest", package(agent)?);
+    let url = latest_url(agent)?;
     let agent_http: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(10))).build().into();
-    let body = agent_http.get(&url).header("Accept", "application/json").call().ok()?.body_mut().read_to_string().ok()?;
+    let body = agent_http.get(&url).header("Accept", "application/json").header("User-Agent", concat!("harlo/", env!("CARGO_PKG_VERSION"))).call().ok()?.body_mut().read_to_string().ok()?;
     let v: serde_json::Value = serde_json::from_str(&body).ok()?;
-    v["version"].as_str().map(|s| s.trim().trim_start_matches('v').to_owned()).filter(|s| !s.is_empty())
+    v["version"].as_str().or_else(|| v["tag_name"].as_str()).map(|s| s.trim().trim_start_matches('v').to_owned()).filter(|s| !s.is_empty())
 }
 
 // ---- harlo itself -------------------------------------------------------------
@@ -450,9 +461,9 @@ mod tests {
     }
 
     #[test]
-    fn every_agent_has_a_package_and_an_update() {
+    fn every_agent_has_a_source_and_an_update() {
         for a in crate::remote::AGENTS {
-            assert!(package(a).is_some() && !update_args(a).is_empty(), "{a}");
+            assert!(latest_url(a).is_some() && !update_args(a).is_empty(), "{a}");
         }
     }
 

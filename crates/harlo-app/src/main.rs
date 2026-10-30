@@ -119,6 +119,9 @@ fn main() {
 
     // Parsing the syntax definitions takes a moment; do it off the UI thread.
     runtime().spawn_blocking(harlo_core::markdown::warm_up);
+    // Settings → MCP opens without waiting: Hermes' servers are read once
+    // now (it takes Hermes half a second; kept until its config changes).
+    runtime().spawn_blocking(|| harlo_core::mcp::load(&harlo_core::mcp::Scope::Global));
 
     // A widgets-capable application: the desktop's tray (KDE's needs widgets)
     // and native file dialogs work. Also names the QtCore `Settings` file
@@ -151,6 +154,7 @@ fn main() {
     // graphics didn't stop it starting.
     graphics::inconclusive();
     harlo_harness::stop_opencode();
+    harlo_harness::stop_acp();
     instance::cleanup();
     // Orchestration's socket.
     let _ = std::fs::remove_file(harlo_core::orchestration::socket_path());

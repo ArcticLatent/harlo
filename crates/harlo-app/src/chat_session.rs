@@ -267,6 +267,8 @@ pub fn user_entry_id(file: Option<PathBuf>, harness: &str, ordinal: usize) -> Op
             .and_then(|h| harlo_core::remote::host(&h))
             .map(|h| harlo_harness::opencode_remote_user_entries(&harlo_core::remote::launch(&h), &f)),
         "opencode" => Some(harlo_harness::opencode::user_entries(&f)),
+        // An ACP agent's: harlo numbers its prompts (`u0`, `u1`, …).
+        "hermes" => Some((0..=ordinal).map(|i| format!("u{i}")).collect()),
         // (pi / omp: a remote host's file, read over SSH.)
         _ if harlo_core::remote::is_remote(&f) => harlo_core::remote::read(&f).ok().map(|b| harlo_harness::branches::current_user_entries_text(&String::from_utf8_lossy(&b))),
         _ => harlo_harness::branches::current_user_entries(&f).ok(),

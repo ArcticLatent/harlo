@@ -6,7 +6,7 @@ public struct SessionSummary: Equatable, Sendable, Identifiable {
     public var title: String
     /// The project (or "Other sessions") it's grouped under.
     public var project: String
-    /// "pi", "omp", "claude", "opencode", "demo".
+    /// "pi", "omp", "claude", "opencode", "hermes", "demo".
     public var harness: String
     /// "busy", "input", "live", "idle", "exited", "unread", …
     public var status: String

@@ -499,6 +499,8 @@ fn providers_of(k: HarnessKind) -> Result<Vec<Value>, String> {
                 .filter(|p| p["methods"].as_array().is_some_and(|m| !m.is_empty()))
                 .collect())
         }
+        // Hermes sets up its providers itself, in a terminal.
+        HarnessKind::Hermes => Ok(vec![json!({ "id": "hermes", "name": "Hermes' providers", "note": "Hermes chooses its provider and model in its own setup: run `hermes model` in a terminal.", "methods": [] })]),
         HarnessKind::Demo => Ok(Vec::new()),
     }
 }
@@ -687,6 +689,7 @@ async fn sign_in(k: HarnessKind, provider: &str, method: &str, answers: &Value, 
             let (provider, method, answers, report) = (provider.to_owned(), method.to_owned(), answers.clone(), report.clone());
             tokio::task::spawn_blocking(move || opencode_sign_in(&provider, &method, &answers, &report, rx)).await.map_err(|e| e.to_string())?
         }
+        HarnessKind::Hermes => Err("Hermes chooses its provider in its own setup: run `hermes model` in a terminal.".into()),
         HarnessKind::Demo => Err("harlo can't sign this agent in.".into()),
     }
 }

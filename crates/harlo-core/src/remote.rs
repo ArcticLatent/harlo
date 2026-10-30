@@ -464,6 +464,7 @@ pub struct HostInfo {
     pub omp: String,
     pub claude: String,
     pub opencode: String,
+    pub hermes: String,
     /// Their versions (`program` → "1.0.4").
     pub versions: std::collections::BTreeMap<String, String>,
     /// Claude's sign-in there: "yes" (its credentials file), "keychain"
@@ -483,7 +484,7 @@ pub fn launch(host: &Host) -> harlo_harness::RemoteLaunch {
 }
 
 /// The agents harlo runs, as the host check names them.
-pub const AGENTS: [&str; 4] = ["omp", "pi", "claude", "opencode"];
+pub const AGENTS: [&str; 5] = ["omp", "pi", "claude", "opencode", "hermes"];
 
 /// How to install each agent (its official one-line installer).
 pub fn install_command(agent: &str) -> &'static str {
@@ -492,6 +493,7 @@ pub fn install_command(agent: &str) -> &'static str {
         "omp" => "curl -fsSL https://omp.sh/install | sh",
         "claude" => "curl -fsSL https://claude.ai/install.sh | bash",
         "opencode" => "curl -fsSL https://opencode.ai/install | bash",
+        "hermes" => "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash",
         _ => "",
     }
 }
@@ -502,7 +504,7 @@ pub fn install_command(agent: &str) -> &'static str {
 // (HARLO_TEST_HOME: the click tests' scratch home on the test host.)
 const CHECK_SCRIPT: &str = r#"printf 'os=%s\nhome=%s\n' "$(uname -s)" "${HARLO_TEST_HOME:-$HOME}"
 ver() { if command -v timeout >/dev/null 2>&1; then timeout 10 "$@"; else "$@"; fi; }
-for p in pi omp claude opencode; do
+for p in pi omp claude opencode hermes; do
   w=$(command -v "$p" 2>/dev/null || true)
   case ":${HARLO_TEST_HIDE_AGENTS:-}:" in *":$p:"*) w="";; esac
   printf '%s=%s\n' "$p" "$w"
@@ -524,6 +526,7 @@ pub fn check(host: &Host) -> Result<HostInfo> {
                 "omp" => info.omp = v.to_owned(),
                 "claude" => info.claude = v.to_owned(),
                 "opencode" => info.opencode = v.to_owned(),
+                "hermes" => info.hermes = v.to_owned(),
                 "claude_auth" => info.claude_auth = v.to_owned(),
                 k if k.ends_with("_version") => {
                     let number = crate::providers::version_number(v);
@@ -562,6 +565,7 @@ impl HostInfo {
             "omp" => !self.omp.is_empty(),
             "claude" => !self.claude.is_empty(),
             "opencode" => !self.opencode.is_empty(),
+            "hermes" => !self.hermes.is_empty(),
             _ => false,
         }
     }

@@ -154,7 +154,7 @@ impl Remotes {
                 json!({
                     "name": h.name, "ssh": ssh_text(h), "state": s.state, "message": s.message, "ping": s.ping,
                     "os": s.info.os, "home": s.info.home, "pi": s.info.pi, "omp": s.info.omp,
-                    "claude": s.info.claude, "opencode": s.info.opencode, "versions": s.info.versions, "claudeAuth": s.info.claude_auth,
+                    "claude": s.info.claude, "opencode": s.info.opencode, "hermes": s.info.hermes, "versions": s.info.versions, "claudeAuth": s.info.claude_auth,
                     "install": remote::AGENTS.iter().map(|a| (a.to_string(), json!(remote::install_command(a)))).collect::<serde_json::Map<_, _>>(),
                     "installs": remote::AGENTS
                         .iter()

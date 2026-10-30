@@ -1,5 +1,5 @@
-//! MCP servers for omp, pi, Claude and OpenCode (Settings → MCP), globally
-//! and per project:
+//! MCP servers for omp, pi, Claude, OpenCode and Hermes (Settings → MCP),
+//! globally and per project:
 //!
 //! | | global | project |
 //! |---|---|---|
@@ -7,6 +7,7 @@
 //! | pi | `~/.pi/agent/mcp.json` (`$PI_CODING_AGENT_DIR`) | `<project>/.pi/mcp.json` (trusted projects) |
 //! | Claude | `~/.claude.json` (`$CLAUDE_CONFIG_DIR`), changed with `claude mcp` | `<project>/.mcp.json` |
 //! | OpenCode | `~/.config/opencode/opencode.json[c]` | `<project>/opencode.json[c]` |
+//! | Hermes | `~/.hermes/config.yaml` (`$HERMES_HOME`), changed with `hermes config` | (none) |
 //!
 //! harlo shows one list for all and edits each agent's file in its own
 //! dialect: omp's and OpenCode's timeouts are in milliseconds, pi's in
@@ -16,7 +17,9 @@
 //! pi's per-tool exposure, …) are kept as they are. Claude Code rewrites
 //! its `~/.claude.json` as it runs, so harlo changes its global servers with
 //! Claude's own `claude mcp add-json / remove`; a file with comments
-//! (OpenCode's `.jsonc`) is read but not rewritten.
+//! (OpenCode's `.jsonc`) is read but not rewritten. Hermes' YAML has
+//! comments too: its servers are read and written with `hermes config
+//! get / set / unset`, which keep them.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -59,7 +62,7 @@ pub fn host_home(name: &str) -> PathBuf {
 }
 
 /// The harnesses harlo manages MCP servers for, in display order.
-pub const HARNESSES: [HarnessKind; 4] = [HarnessKind::Omp, HarnessKind::Pi, HarnessKind::Claude, HarnessKind::OpenCode];
+pub const HARNESSES: [HarnessKind; 5] = [HarnessKind::Omp, HarnessKind::Pi, HarnessKind::Claude, HarnessKind::OpenCode, HarnessKind::Hermes];
 
 /// The `claude` that changes Claude's global servers (Settings → Providers
 /// sets it; else the installed one).
@@ -81,6 +84,10 @@ pub fn config_path(kind: HarnessKind, scope: &Scope) -> PathBuf {
         // A host's own (its defaults: harlo can't see its environment).
         (HarnessKind::Claude, Scope::Host(h)) => host_home(h).join(".claude.json"),
         (HarnessKind::OpenCode, Scope::Host(h)) => opencode_file(&host_home(h).join(".config/opencode")),
+        (HarnessKind::Hermes, Scope::Host(h)) => host_home(h).join(".hermes/config.yaml"),
+        (HarnessKind::Hermes, Scope::Global) => hermes_home().join("config.yaml"),
+        // (Hermes has no project servers: a name nothing is read from.)
+        (HarnessKind::Hermes, Scope::Project(p)) => p.join(".hermes-has-no-project-servers"),
         (HarnessKind::Pi, Scope::Host(h)) => host_home(h).join(".pi/agent/mcp.json"),
         (_, Scope::Host(h)) => host_home(h).join(".omp/agent/mcp.json"),
         (HarnessKind::OpenCode, Scope::Global) => opencode_file(&std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| home().join(".config")).join("opencode")),
@@ -102,7 +109,101 @@ fn opencode_file(dir: &Path) -> PathBuf {
 
 /// Where in the file the servers are.
 fn servers_key(kind: HarnessKind) -> &'static str {
-    if kind == HarnessKind::OpenCode { "mcp" } else { "mcpServers" }
+    match kind {
+        HarnessKind::OpenCode => "mcp",
+        HarnessKind::Hermes => "mcp_servers",
+        _ => "mcpServers",
+    }
+}
+
+fn hermes_home() -> PathBuf {
+    std::env::var_os("HERMES_HOME").map(PathBuf::from).unwrap_or_else(|| home().join(".hermes"))
+}
+
+/// Runs `hermes config …` here, or on the host a remote path is on; its
+/// output. None: Hermes isn't there.
+fn hermes(path: &Path, args: &[&str]) -> Result<Option<String>> {
+    let out = match crate::remote::split(path) {
+        Some((name, _)) => {
+            if !crate::remote::found_on(&name, "hermes") {
+                return Ok(None);
+            }
+            let host = crate::remote::host(&name).with_context(|| format!("unknown remote host {name}"))?;
+            let script = format!("hermes {}", args.iter().map(|a| crate::remote::quote(a)).collect::<Vec<_>>().join(" "));
+            crate::remote::run(&host, &script, std::time::Duration::from_secs(60))?
+        }
+        None => {
+            let Some(program) = harlo_harness::resolve_program(HarnessKind::Hermes) else { return Ok(None) };
+            std::process::Command::new(&program).args(args).stdin(std::process::Stdio::null()).output().with_context(|| format!("running {}", program.display()))?
+        }
+    };
+    let say = String::from_utf8_lossy(&out.stdout).into_owned();
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        bail!("hermes config {}: {}", args[1], err.lines().chain(say.lines()).map(str::trim).rfind(|l| !l.is_empty()).unwrap_or("failed"));
+    }
+    Ok(Some(say))
+}
+
+/// The last read of Hermes' servers, by config path: what was read, the
+/// file's stamp then (here), and when. A read runs Hermes (half a second),
+/// and the MCP page reads several times as it opens.
+type HermesRead = (Value, Option<std::time::SystemTime>, std::time::Instant);
+static HERMES_READS: Mutex<Option<std::collections::HashMap<PathBuf, HermesRead>>> = Mutex::new(None);
+
+/// When the file last changed (here; None on a remote host).
+fn stamp(path: &Path) -> Option<std::time::SystemTime> {
+    (!crate::remote::is_remote(path)).then(|| std::fs::metadata(path).and_then(|m| m.modified()).ok()).flatten()
+}
+
+/// Hermes' servers (none in a project; `{}` when it has none or isn't
+/// there): the last read while the file is unchanged (on a remote host,
+/// for 15 s).
+fn hermes_servers(path: &Path) -> Result<Value> {
+    if path.ends_with(".hermes-has-no-project-servers") {
+        return Ok(json!({}));
+    }
+    let now = stamp(path);
+    if let Some((v, at, when)) = HERMES_READS.lock().unwrap().get_or_insert_with(Default::default).get(path) {
+        let fresh = if crate::remote::is_remote(path) { when.elapsed() < std::time::Duration::from_secs(15) } else { *at == now };
+        if fresh {
+            return Ok(v.clone());
+        }
+    }
+    let v = read_hermes_servers(path)?;
+    HERMES_READS.lock().unwrap().get_or_insert_with(Default::default).insert(path.to_path_buf(), (v.clone(), now, std::time::Instant::now()));
+    Ok(v)
+}
+
+fn read_hermes_servers(path: &Path) -> Result<Value> {
+    // (It fails with "Config key not set: mcp_servers" when there are none.)
+    let out = match hermes(path, &["config", "get", "mcp_servers", "--json", "--raw"]) {
+        Ok(Some(out)) => out,
+        Ok(None) => return Ok(json!({})),
+        Err(e) if format!("{e:#}").contains("not set") => return Ok(json!({ "mcp_servers": {} })),
+        Err(e) => return Err(e),
+    };
+    let servers = out.lines().find(|l| l.trim_start().starts_with('{')).and_then(|l| serde_json::from_str::<Value>(l).ok()).filter(Value::is_object).unwrap_or_else(|| json!({}));
+    Ok(json!({ "mcp_servers": servers }))
+}
+
+/// Hermes' changed servers, with `hermes config set / unset`.
+fn hermes_sync(path: &Path, before: &Map<String, Value>, after: &Map<String, Value>) -> Result<()> {
+    if path.ends_with(".hermes-has-no-project-servers") {
+        bail!("Hermes has no project MCP servers; add it under All projects.");
+    }
+    for name in before.keys().filter(|n| !after.contains_key(*n)) {
+        hermes(path, &["config", "unset", &format!("mcp_servers.{name}")])?;
+    }
+    // (Read again next time: a remote host's file has no stamp to tell.)
+    HERMES_READS.lock().unwrap().get_or_insert_with(Default::default).remove(path);
+    for (name, new) in after {
+        if before.get(name) != Some(new) {
+            hermes(path, &["config", "set", &format!("mcp_servers.{name}"), &new.to_string()])?.context("Hermes isn't installed")?;
+        }
+    }
+    HERMES_READS.lock().unwrap().get_or_insert_with(Default::default).remove(path);
+    Ok(())
 }
 
 /// A server as the settings page edits it.
@@ -202,6 +303,8 @@ impl Form {
         }
         // The transport: omp and Claude spell it out; pi infers it (written for http).
         let ty = match (kind, self.transport.as_str()) {
+            // (Hermes tells by `command` or `url`.)
+            (HarnessKind::Hermes, _) => None,
             (HarnessKind::Omp | HarnessKind::Claude, t) => Some(json!(t)),
             (_, "stdio") => m.get("type").filter(|t| *t == "stdio").cloned(),
             (_, _) => Some(json!("http")),
@@ -295,6 +398,9 @@ fn read_text(path: &Path) -> Result<Option<String>> {
 /// A config file's JSON (`{}` when missing), and whether it's plain JSON
 /// (OpenCode's may have comments and trailing commas: read, not rewritten).
 fn read_config(kind: HarnessKind, path: &Path) -> Result<(Value, bool)> {
+    if kind == HarnessKind::Hermes {
+        return Ok((hermes_servers(path)?, true));
+    }
     match read_text(path)? {
         None => Ok((json!({}), true)),
         Some(t) if t.trim().is_empty() => Ok((json!({}), true)),
@@ -382,6 +488,9 @@ pub fn strip_jsonc(text: &str) -> String {
 /// Writes an agent's changed servers: Claude's global ones through `claude
 /// mcp`, the rest into their file (not a file with comments).
 fn write_back(kind: HarnessKind, scope: &Scope, path: &Path, config: &Value, plain: bool, before: &Map<String, Value>) -> Result<()> {
+    if kind == HarnessKind::Hermes {
+        return hermes_sync(path, before, &config["mcp_servers"].as_object().cloned().unwrap_or_default());
+    }
     if kind == HarnessKind::Claude && *scope == Scope::Global {
         let after = config["mcpServers"].as_object().cloned().unwrap_or_default();
         return claude_sync(before, &after, None);
@@ -743,6 +852,21 @@ mod tests {
         assert!(remote.get("command").is_none() && remote["url"] == "https://h/mcp" && remote["type"] == "http");
     }
 
+    /// Hermes' dialect: no `type` (a command or an address says it), its
+    /// timeout in seconds; no project servers.
+    #[test]
+    fn hermes_entries() {
+        let v = json!({ "command": "npx", "args": ["-y", "@x/s"], "env": { "T": "1" }, "timeout": 30, "enabled": false });
+        let f = Form::from_entry(HarnessKind::Hermes, "s", &v);
+        assert_eq!((f.transport.as_str(), f.command.len(), f.timeout_secs, f.enabled), ("stdio", 3, Some(30.0), false));
+        assert_eq!(f.to_entry(HarnessKind::Hermes, Some(&v)), v);
+        let web = Form { name: "w".into(), enabled: true, transport: "http".into(), url: "https://h/mcp".into(), ..Default::default() };
+        assert_eq!(web.to_entry(HarnessKind::Hermes, None), json!({ "url": "https://h/mcp", "enabled": true }));
+        let scope = Scope::Project(scratch());
+        assert_eq!(read_config(HarnessKind::Hermes, &config_path(HarnessKind::Hermes, &scope)).unwrap().0, json!({}));
+        assert!(save(&scope, "", &web, &[HarnessKind::Hermes]).is_err());
+    }
+
     #[test]
     fn saves_lists_and_removes_per_harness() {
         let dir = scratch();
@@ -822,5 +946,23 @@ mod real_config {
             println!("{} {:?} differs={} transport={} timeout={:?} exposure={}", s.form.name, s.harnesses, s.differs, s.form.transport, s.form.timeout_secs, s.form.exposure);
         }
         println!("errors: {:?}", l.errors);
+    }
+
+    /// A server saved, switched off, listed and removed with the real
+    /// `hermes`, in a scratch Hermes home (`HERMES_HOME`, never yours):
+    /// `HERMES_HOME=<scratch copy> cargo test -p harlo-core hermes_round_trip -- --ignored`.
+    #[test]
+    #[ignore]
+    fn hermes_round_trip() {
+        use super::*;
+        let home = std::env::var("HERMES_HOME").expect("HERMES_HOME: a scratch copy");
+        assert!(!home.ends_with("/.hermes"), "not the real one");
+        let form = Form { name: "harlo-test".into(), enabled: true, transport: "stdio".into(), command: vec!["npx".into(), "-y".into(), "@x/s".into()], env: vec![("K".into(), "v".into())], ..Default::default() };
+        save(&Scope::Global, "", &form, &[HarnessKind::Hermes]).unwrap();
+        set_enabled(&Scope::Global, "harlo-test", false).unwrap();
+        let listed = load(&Scope::Global).servers.into_iter().find(|s| s.form.name == "harlo-test").expect("listed");
+        assert_eq!((listed.harnesses.as_slice(), listed.form.enabled, listed.form.command.len()), ([HarnessKind::Hermes].as_slice(), false, 3));
+        remove(&Scope::Global, "harlo-test").unwrap();
+        assert!(load(&Scope::Global).servers.iter().all(|s| s.form.name != "harlo-test"));
     }
 }

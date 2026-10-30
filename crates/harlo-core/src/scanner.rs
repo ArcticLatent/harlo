@@ -28,7 +28,7 @@ impl Scanner {
     pub fn poll(&mut self) -> ScanDelta {
         let mut delta = ScanDelta::default();
         let mut seen = HashMap::with_capacity(self.known.len());
-        for kind in [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::Claude, HarnessKind::OpenCode] {
+        for kind in [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::Claude, HarnessKind::OpenCode, HarnessKind::Hermes] {
             for (path, modified, size) in store::list_files(kind) {
                 let changed = self.known.get(&path) != Some(&(modified, size));
                 if changed {

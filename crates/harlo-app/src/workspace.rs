@@ -1999,6 +1999,13 @@ impl Workspace {
         let key_s = key.to_string();
         let Some(file) = self.file_for_key(&key_s) else { return };
         self.as_mut().close_session(key);
+        // An ACP agent's: out of harlo's list (ACP can't delete one).
+        if let Some(r) = harlo_harness::acp::session_of(&file) {
+            harlo_harness::acp::forget(&r);
+            self.as_mut().rust_mut().sessions.remove(&file);
+            self.rebuild();
+            return;
+        }
         // OpenCode's are in its database: deleted through its server.
         if harlo_harness::opencode::is_session_path(&file) {
             let program = self.program_for(HarnessKind::OpenCode).unwrap_or_else(|| PathBuf::from("opencode"));
@@ -2978,7 +2985,7 @@ impl Workspace {
     pub fn approval_mode(&self, key: &QString) -> QString {
         let key = key.to_string();
         let Some(entry) = self.live.get(&key) else { return QString::default() };
-        if !matches!(entry.info.harness.as_str(), "omp" | "demo" | "claude" | "opencode") {
+        if !matches!(entry.info.harness.as_str(), "omp" | "demo" | "claude" | "opencode" | "hermes") {
             return QString::default();
         }
         if let Some(mode) = self.modes.get(&key).and_then(|m| m.approval.clone()) {
@@ -2989,7 +2996,7 @@ impl Workspace {
 
     pub fn draft_approval(&self, harness: &QString, project_id: i32) -> QString {
         let harness = harness.to_string();
-        if !matches!(harness.as_str(), "omp" | "demo" | "claude" | "opencode") {
+        if !matches!(harness.as_str(), "omp" | "demo" | "claude" | "opencode" | "hermes") {
             return QString::default();
         }
         let cwd = self.projects.iter().find(|p| p.id == project_id as i64).map(|p| p.path.clone()).unwrap_or_else(|| self.instance_home());
@@ -2999,8 +3006,8 @@ impl Workspace {
     /// The shield's mode a session starts in, before it's switched.
     fn starting_approval(&self, harness: &str, cwd: &Path) -> QString {
         // Claude asks first unless told otherwise (its own settings may
-        // differ); for OpenCode the shield answers what OpenCode asks.
-        if matches!(harness, "claude" | "opencode") {
+        // differ); for OpenCode and Hermes the shield answers what they ask.
+        if matches!(harness, "claude" | "opencode" | "hermes") {
             return QString::from("always-ask");
         }
         // On a remote host: that machine's omp config (read with its overlay).
@@ -3056,8 +3063,9 @@ impl Workspace {
             let modes = self.modes.get(key).cloned().unwrap_or_default();
             self.as_mut().save_overlay(path, model, modes);
         }
-        // Claude switches its permission mode, OpenCode its agent, on the spot.
-        if self.live.get(key).is_some_and(|e| matches!(e.info.harness.as_str(), "claude" | "opencode"))
+        // Claude switches its permission mode, OpenCode its agent, Hermes its
+        // mode, on the spot.
+        if self.live.get(key).is_some_and(|e| matches!(e.info.harness.as_str(), "claude" | "opencode" | "hermes"))
             && let Some(live) = registry::get(key)
         {
             let modes = self.modes.get(key).cloned().unwrap_or_default();
@@ -4538,6 +4546,10 @@ fn session_messages(path: &Path, kind: HarnessKind) -> Vec<serde_json::Value> {
             Some(host) => harlo_harness::opencode_remote_saved(&harlo_core::remote::launch(host), path).messages,
             None => harlo_harness::opencode::saved(path).messages,
         };
+    }
+    // An ACP agent's: harlo's copy.
+    if harlo_harness::acp::is_acp(kind) {
+        return harlo_harness::acp::cached(path).map(|s| s.messages).unwrap_or_default();
     }
     let text = match remote {
         Some(_) => harlo_core::remote::read(path).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default(),

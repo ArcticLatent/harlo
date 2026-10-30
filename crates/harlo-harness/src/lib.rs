@@ -2,6 +2,8 @@
 //! protocols into one normalized event vocabulary.
 
 mod demo;
+pub mod acp;
+mod acp_run;
 pub mod branches;
 pub mod claude;
 mod claude_run;
@@ -17,6 +19,7 @@ pub mod store;
 pub use event::{BlockKind, HarnessEvent, HarnessKind, NoticeLevel, Translator};
 pub use process::{Harness, HarnessConfig, RemoteLaunch, SendMode, SessionTarget, image_from_file, on_host, resolve_program};
 pub use opencode_run::shutdown as stop_opencode;
+pub use acp::shutdown as stop_acp;
 /// A remote host's OpenCode: its sessions, a saved one, its prompts. And
 /// deleting a session (here or there).
 pub use opencode_run::{

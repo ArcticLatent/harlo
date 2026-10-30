@@ -12,7 +12,7 @@ Item {
     property string badge: ""
     property color ring: Theme.background
     property string tip: provider !== "" ? Theme.harnessLabel(provider) : ""
-    readonly property bool known: ["claude", "opencode", "pi", "omp", "demo"].indexOf(provider) >= 0
+    readonly property bool known: ["claude", "opencode", "pi", "omp", "hermes", "demo"].indexOf(provider) >= 0
     implicitWidth: 14
     implicitHeight: 14
     Icon {

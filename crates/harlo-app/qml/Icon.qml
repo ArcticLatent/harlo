@@ -112,6 +112,8 @@ Canvas {
         "harness-opencode": { box: [96, 64, 288, 384], d: "M384 416H128V96H384V416ZM320 160H192V352H320V160Z M320 224V352H192V224H320Z" },
         "harness-pi": { box: [100, 100, 600, 600], d: "M165.29 165.29 H517.36 V400 H400 V517.36 H282.65 V634.72 H165.29 Z M282.65 282.65 V400 H400 V282.65 Z M517.36 400 H634.72 V634.72 H517.36 Z" },
         "harness-omp": { box: [4, 4, 56, 56], d: "M10 14h44v9H43v33h-9V23h-9v22h-9V23H10z" },
+        // Hermes' winged staff (its own logo is an illustration, too fine at this size).
+        "harness-hermes": { box: [0, 0, 24, 24], d: "M11 7h2v16h-2z M12 1a2 2 0 1 1 0 4a2 2 0 1 1 0-4z M10.5 7.5L1 5l2.6 3.4-1.8.4 3.6 2.4-1.5.6 6.6 1.2z M13.5 7.5L23 5l-2.6 3.4 1.8.4-3.6 2.4 1.5.6-6.6 1.2z" },
         "harness-demo": { box: [0, 0, 24, 24], d: "M12 2a10 10 0 1 0 0 20a10 10 0 1 0 0-20Z M12 5a7 7 0 1 1 0 14a7 7 0 1 1 0-14Z M10 8.5v7l6-3.5Z" }
     })
 

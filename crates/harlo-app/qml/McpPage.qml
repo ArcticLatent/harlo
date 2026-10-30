@@ -68,7 +68,7 @@ ColumnLayout {
         editing = e
     }
     /// The agents that are on (Settings → Providers) and have MCP servers.
-    readonly property var agents: (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.chatProvidersJson()) : []).filter(p => ["omp", "pi", "claude", "opencode"].includes(p.id))
+    readonly property var agents: (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.chatProvidersJson()) : []).filter(p => ["omp", "pi", "claude", "opencode", "hermes"].includes(p.id))
     /// A new server is for the installed ones (all of them if none is).
     function defaultAgents() {
         const ids = agents.map(a => a.id), installed = ids.filter(id => Mcp.installedOn(id, page.scope))

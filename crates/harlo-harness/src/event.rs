@@ -13,13 +13,15 @@ pub enum HarnessKind {
     Claude,
     /// OpenCode 2.x (a private `opencode serve`; see `opencode.rs`).
     OpenCode,
+    /// Hermes Agent (`hermes acp`: the Agent Client Protocol; see `acp.rs`).
+    Hermes,
     /// Synthetic event source for UI development and benchmarks.
     Demo,
 }
 
 impl HarnessKind {
     /// The providers, in Settings → Providers' order.
-    pub const PROVIDERS: [HarnessKind; 4] = [Self::Claude, Self::OpenCode, Self::Pi, Self::Omp];
+    pub const PROVIDERS: [HarnessKind; 5] = [Self::Claude, Self::OpenCode, Self::Pi, Self::Omp, Self::Hermes];
 
     pub fn parse(s: &str) -> Option<Self> {
         match s {
@@ -27,6 +29,7 @@ impl HarnessKind {
             "omp" => Some(Self::Omp),
             "claude" => Some(Self::Claude),
             "opencode" => Some(Self::OpenCode),
+            "hermes" => Some(Self::Hermes),
             "demo" => Some(Self::Demo),
             _ => None,
         }
@@ -38,6 +41,7 @@ impl HarnessKind {
             Self::Omp => "omp",
             Self::Claude => "claude",
             Self::OpenCode => "opencode",
+            Self::Hermes => "hermes",
             Self::Demo => "demo",
         }
     }
@@ -49,6 +53,7 @@ impl HarnessKind {
             Self::Omp => "Oh My Pi",
             Self::Claude => "Claude",
             Self::OpenCode => "OpenCode",
+            Self::Hermes => "Hermes",
             Self::Demo => "Demo",
         }
     }
@@ -56,7 +61,7 @@ impl HarnessKind {
     /// harlo can run sessions with it (a provider it only lists is shown in
     /// Settings → Providers but not offered).
     pub fn can_chat(self) -> bool {
-        matches!(self, Self::Pi | Self::Omp | Self::Claude | Self::OpenCode | Self::Demo)
+        matches!(self, Self::Pi | Self::Omp | Self::Claude | Self::OpenCode | Self::Hermes | Self::Demo)
     }
 }
 

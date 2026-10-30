@@ -142,7 +142,7 @@ public final class OpenSession {
 
     /// The agent can branch at one of the user's messages (edit & resend),
     /// and fork from one (omp).
-    public var canBranch: Bool { ["pi", "omp", "claude", "opencode"].contains(harness) }
+    public var canBranch: Bool { ["pi", "omp", "claude", "opencode", "hermes"].contains(harness) }
     public var canFork: Bool { harness == "omp" }
     public var items: [TranscriptItem] { TranscriptItem.build(rows, opened: opened) }
 

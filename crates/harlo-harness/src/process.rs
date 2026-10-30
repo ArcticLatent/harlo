@@ -137,6 +137,15 @@ impl Harness {
             };
             return crate::opencode_run::spawn(cfg, program);
         }
+        if crate::acp::is_acp(cfg.kind) {
+            let program = match (&cfg.program, &cfg.remote) {
+                (Some(p), _) => p.clone(),
+                // There: its PATH finds it.
+                (None, Some(_)) => PathBuf::from(cfg.kind.as_str()),
+                (None, None) => resolve_program(cfg.kind).with_context(|| format!("could not find the `{}` binary", cfg.kind.as_str()))?,
+            };
+            return crate::acp_run::spawn(cfg, program);
+        }
         let args = launch_args(&cfg);
         let (program, mut cmd) = match &cfg.remote {
             // On the remote machine: its PATH finds the program.
@@ -301,7 +310,7 @@ fn launch_args(cfg: &HarnessConfig) -> Vec<String> {
         HarnessKind::Pi => vec!["--mode".into(), "rpc".into()],
         // rpc-ui registers prompt-capable tools such as `ask`.
         HarnessKind::Omp => vec!["--mode".into(), "rpc-ui".into()],
-        HarnessKind::Claude | HarnessKind::OpenCode | HarnessKind::Demo => vec![],
+        HarnessKind::Claude | HarnessKind::OpenCode | HarnessKind::Hermes | HarnessKind::Demo => vec![],
     };
     match &cfg.session {
         SessionTarget::New => {}
@@ -339,6 +348,7 @@ pub fn resolve_program(kind: HarnessKind) -> Option<PathBuf> {
             PathBuf::from("/usr/local/bin/opencode"),
             home.join("bin/opencode"),
         ],
+        HarnessKind::Hermes => vec![home.join(".local/bin/hermes"), home.join(".hermes/hermes-agent/venv/bin/hermes"), home.join(".hermes/hermes-agent/.venv/bin/hermes")],
         HarnessKind::Demo => vec![],
     };
     known.into_iter().find(|p| is_executable(p))

@@ -448,6 +448,7 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
     } else if let Some(path) = session_file {
         let tx = aux_tx.clone();
         let remote = driver.cfg.remote.clone();
+        let program = driver.cfg.program.clone().or_else(|| harlo_harness::resolve_program(kind));
         tokio::task::spawn_blocking(move || {
             // OpenCode's sessions are in its database, not a file (a remote
             // host's: through its server).
@@ -456,6 +457,13 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                     Some(r) => harlo_harness::opencode_remote_saved(r, &path),
                     None => harlo_harness::opencode::saved(&path),
                 };
+                let _ = tx.send(Aux::Loaded(saved));
+                return;
+            }
+            // An ACP agent's: its replay (it has no file either).
+            if harlo_harness::acp::is_acp(kind) {
+                let program = if remote.is_some() { Some(std::path::PathBuf::from(kind.as_str())) } else { program };
+                let saved = program.map(|p| harlo_harness::acp::saved(&path, &p, remote.as_ref())).unwrap_or_default();
                 let _ = tx.send(Aux::Loaded(saved));
                 return;
             }

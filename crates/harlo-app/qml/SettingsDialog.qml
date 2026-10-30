@@ -2483,7 +2483,7 @@ Popup {
                         spacing: 6
                         readonly property string folder: "ssh://" + hostBox.modelData.name + (hostBox.modelData.home || "")
                         Repeater {
-                            model: ["omp", "pi", "claude", "opencode"]
+                            model: ["omp", "pi", "claude", "opencode", "hermes"]
                             Rectangle {
                                 id: agentChip
                                 required property string modelData
@@ -2632,7 +2632,7 @@ Popup {
                 Group {
                     visible: hostAgents.host !== null && hostAgents.host.state === "connected"
                     Repeater {
-                        model: ["omp", "pi", "claude", "opencode"]
+                        model: ["omp", "pi", "claude", "opencode", "hermes"]
                         SettingRow {
                             id: hostAgent
                             required property string modelData

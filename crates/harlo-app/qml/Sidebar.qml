@@ -44,18 +44,22 @@ Rectangle {
         id: trashDialog
         property string key: ""
         property string label: ""
-        // OpenCode keeps its sessions in its database: there's no file to
-        // move to the trash, so it's deleted.
-        property bool opencode: false
-        title: opencode ? "Delete session?" : "Move session to trash?"
+        // What happens to it: its file goes to the trash; OpenCode deletes
+        // it (it's in OpenCode's database); Hermes keeps it (ACP has no
+        // deleting), harlo stops listing it.
+        property string harness: ""
+        readonly property bool opencode: harness === "opencode"
+        readonly property bool listOnly: harness === "hermes"
+        title: opencode ? "Delete session?" : listOnly ? "Remove session from harlo?" : "Move session to trash?"
         modal: true
         anchors.centerIn: Overlay.overlay
         footer: AppButtonBox {
             DialogButton { text: "Cancel"; DialogButtonBox.buttonRole: DialogButtonBox.RejectRole }
-            DialogButton { text: trashDialog.opencode ? "Delete" : "Move to trash"; DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole; accent: false; destructive: true }
+            DialogButton { text: trashDialog.opencode ? "Delete" : trashDialog.listOnly ? "Remove" : "Move to trash"; DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole; accent: false; destructive: true }
         }
         Label {
-            text: trashDialog.label + (trashDialog.opencode ? "\n\nOpenCode deletes it with its subagents' sessions. This can't be undone." : "")
+            text: trashDialog.label + (trashDialog.opencode ? "\n\nOpenCode deletes it with its subagents' sessions. This can't be undone."
+                                     : trashDialog.listOnly ? "\n\n" + Theme.harnessLabel(trashDialog.harness) + " keeps it; harlo stops listing it." : "")
             width: 360; wrapMode: Text.Wrap; color: Theme.muted
         }
         onAccepted: Workspace.trashSession(key)
@@ -151,9 +155,9 @@ Rectangle {
         }
         AppMenuSeparator { }
         AppMenuItem {
-            text: sessionMenu.harness === "opencode" ? "Delete…" : "Move to trash…"
+            text: sessionMenu.harness === "opencode" ? "Delete…" : sessionMenu.harness === "hermes" ? "Remove from harlo…" : "Move to trash…"
             danger: true
-            onTriggered: { trashDialog.key = sessionMenu.key; trashDialog.label = sessionMenu.sessionTitle; trashDialog.opencode = sessionMenu.harness === "opencode"; trashDialog.open() }
+            onTriggered: { trashDialog.key = sessionMenu.key; trashDialog.label = sessionMenu.sessionTitle; trashDialog.harness = sessionMenu.harness; trashDialog.open() }
         }
     }
 
