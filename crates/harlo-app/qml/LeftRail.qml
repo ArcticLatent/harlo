@@ -160,7 +160,37 @@ Rectangle {
             }
         }
 
-        RailButton { objectName: "pairDeviceButton"; iconName: "smartphone"; tip: "Pair a device: your sessions on your phone"; active: Phone.running; onClicked: root.pairDeviceRequested() }
+        // With a phone paired: pauses or resumes its notifications (the
+        // pairing stays); right-click pairs another. Else: pairs one.
+        RailButton {
+            id: phoneButton
+            objectName: "pairDeviceButton"
+            readonly property bool paired: Phone.revision >= 0 && Phone.hasDevices()
+            readonly property bool paused: paired && Phone.paused
+            iconName: "smartphone"
+            tip: !paired ? "Pair a device: your sessions on your phone"
+                 : (paused ? "Phone notifications paused. Click to resume." : "Phone notifications on. Click to pause.")
+                   + "\nRight-click to pair a device."
+            active: Phone.running && !paused
+            onClicked: paired ? Phone.setNotificationsPaused(!Phone.paused) : root.pairDeviceRequested()
+            TapHandler { acceptedButtons: Qt.RightButton; onTapped: root.pairDeviceRequested() }
+            // Paused: a pause mark on its corner.
+            Rectangle {
+                objectName: "phonePausedBadge"
+                visible: phoneButton.paused
+                x: phoneButton.width - width - 6
+                y: phoneButton.height - height - 6
+                width: 12
+                height: 12
+                radius: 6
+                color: Theme.warning
+                Row {
+                    anchors.centerIn: parent
+                    spacing: 2
+                    Repeater { model: 2; Rectangle { width: 2; height: 6; radius: 1; color: Theme.background } }
+                }
+            }
+        }
         RailButton { iconName: "keyboard"; tip: "Keyboard shortcuts" + Keymap.hint("shortcuts"); onClicked: root.shortcutsRequested() }
         RailButton { iconName: "stats"; tip: "Usage stats · " + Workspace.sessionCount + " sessions"; active: Workspace.activeKey === "view:stats"; onClicked: Workspace.open("view:stats") }
         RailButton { objectName: "settingsButton"; iconName: "settings"; tip: "Settings" + Keymap.hint("settings"); active: root.settingsOpen; onClicked: root.settingsRequested() }

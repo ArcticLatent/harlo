@@ -296,7 +296,9 @@ async fn watch(shared: Arc<Shared>, key: String, id: u64, live: crate::registry:
                 None => true,
                 Some((last, at)) => end || last.phase != state.phase || (*last != state && at.elapsed() >= MIN_GAP) || at.elapsed() >= KEEPALIVE,
             };
-            if !due {
+            // Paused: none start or change; one already on the phone still
+            // ends.
+            if !due || (crate::phone_push::paused() && (!end || !sent.contains_key(&r.device))) {
                 continue;
             }
             let urgent = end || sent.get(&r.device).is_none_or(|(last, _)| last.phase != state.phase);

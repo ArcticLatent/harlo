@@ -1939,7 +1939,20 @@ Popup {
             Group {
                 id: pushGroup
                 readonly property var cfg: Phone.revision >= 0 ? JSON.parse(Phone.pushJson()) : ({})
+                // (Also the left rail's phone button, once a phone is paired.)
                 SettingRow {
+                    title: "Send notifications"
+                    detail: Phone.paused ? "Paused: nothing goes to your phones (the pairing stays). A test notification still does."
+                                         : "Pause them while you work at the computer: click the phone button in the left rail, or here."
+                    icon: "smartphone"
+                    AppSwitch {
+                        objectName: "pushPausedSwitch"
+                        checked: !Phone.paused
+                        onToggled: { Phone.setNotificationsPaused(!checked); checked = Qt.binding(() => !Phone.paused) }
+                    }
+                }
+                SettingRow {
+                    divider: true
                     title: "Test"
                     detail: Phone.pushNote === "sending" ? "Sending…"
                           : Phone.pushNote !== "" ? Phone.pushNote

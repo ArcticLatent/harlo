@@ -93,6 +93,18 @@ fn relay() -> Result<Arc<apns::Forwarder>, String> {
     Ok(f)
 }
 
+/// Notifications to the phones are paused (the rail's phone button): only
+/// a test one goes.
+static PAUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_paused(on: bool) {
+    PAUSED.store(on, std::sync::atomic::Ordering::SeqCst);
+}
+
+pub fn paused() -> bool {
+    PAUSED.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 /// Sends `alert` to the phones that want it and aren't connected, in the
 /// background.
 pub fn send(alert: Alert) {
@@ -104,6 +116,9 @@ pub fn send(alert: Alert) {
 /// Sends `alert` (to connected phones too with `everyone`): how many got it,
 /// or why none did.
 pub async fn deliver(alert: &Alert, everyone: bool) -> Result<usize, String> {
+    if paused() && !matches!(alert.what, What::Test) {
+        return Ok(0);
+    }
     let Some(shared) = slot().lock().unwrap().upgrade() else { return Err("Phone access is off.".into()) };
     let devices: Vec<Device> = {
         let online = shared.online.lock().unwrap();

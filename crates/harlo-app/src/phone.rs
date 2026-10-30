@@ -43,6 +43,9 @@ pub mod qobject {
         #[qproperty(i32, firewall_revision, cxx_name = "firewallRevision")]
         /// How the test notification went ("" before one; "sending").
         #[qproperty(QString, push_note, cxx_name = "pushNote")]
+        /// Notifications to the phones are paused (the rail's phone button):
+        /// pairings stay, nothing is pushed.
+        #[qproperty(bool, paused)]
         type Phone = super::PhoneRust;
     }
 
@@ -102,6 +105,12 @@ pub mod qobject {
         /// pushNote).
         #[qinvokable]
         fn send_test_push(self: Pin<&mut Phone>);
+        /// Pauses or resumes notifications to the phones (remembered).
+        #[qinvokable]
+        fn set_notifications_paused(self: Pin<&mut Phone>, paused: bool);
+        /// Phones are paired (the rail's button pauses them then).
+        #[qinvokable]
+        fn has_devices(self: &Phone) -> bool;
     }
 }
 
@@ -143,6 +152,7 @@ pub struct PhoneRust {
     firewall_error: QString,
     firewall_revision: i32,
     push_note: QString,
+    paused: bool,
     shared: Option<Arc<Shared>>,
     server: Option<Server>,
     relay: Option<phone_relay::Client>,
@@ -173,6 +183,7 @@ impl Default for PhoneRust {
             firewall_error: QString::default(),
             firewall_revision: 0,
             push_note: QString::default(),
+            paused: false,
             shared: None,
             server: None,
             relay: None,
@@ -283,6 +294,9 @@ impl Phone {
     }
 
     pub fn autostart(mut self: Pin<&mut Self>) {
+        let paused = setting("phone_paused") == "1";
+        crate::phone_push::set_paused(paused);
+        self.as_mut().set_paused(paused);
         let port = setting("phone_port").parse::<i32>().ok().filter(|p| (1..=65535).contains(p)).unwrap_or(DEFAULT_PORT);
         self.as_mut().set_port(port);
         let on = setting("phone_enabled") == "1";
@@ -586,6 +600,19 @@ impl Phone {
         };
         let list: Vec<Value> = list.iter().map(|d| json!({ "id": d.id, "name": d.name, "pairedAt": d.paired_at, "lastSeen": d.last_seen, "push": d.push.is_some() })).collect();
         QString::from(&Value::from(list).to_string())
+    }
+
+    pub fn set_notifications_paused(mut self: Pin<&mut Self>, paused: bool) {
+        crate::phone_push::set_paused(paused);
+        set_setting("phone_paused", if paused { "1" } else { "0" });
+        self.as_mut().set_paused(paused);
+    }
+
+    pub fn has_devices(&self) -> bool {
+        match &self.shared {
+            Some(s) => !s.devices.lock().unwrap().list.is_empty(),
+            None => !Devices::load(&phone::dir().join("devices.json")).list.is_empty(),
+        }
     }
 
     pub fn remove_device(mut self: Pin<&mut Self>, id: &QString) {
