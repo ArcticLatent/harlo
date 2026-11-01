@@ -744,11 +744,17 @@ fn setup_server(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value
             );
             (start, String::new(), alias)
         }
-        Engine::Strata => (
-            format!("{prog} launch --family qwen --model {} --port {port} --access local --no-api-key --yes --no-tui", quote(&model)),
-            format!("{prog} launch --stop"),
-            String::new(),
-        ),
+        // (DeepSeek's own context is 8k, too little for an agent: 64k unless
+        // picked. Qwen's is Strata's choice for the card.)
+        Engine::Strata => {
+            let family = engines::strata_family(&model);
+            let context = if family == "deepseek41" { format!(" --context {}", req["context"].as_u64().filter(|c| *c >= 2048).unwrap_or(65536)) } else { String::new() };
+            (
+                format!("{prog} launch --family {family} --model {}{context} --port {port} --access local --no-api-key --yes --no-tui", quote(&model)),
+                format!("{prog} launch --stop"),
+                String::new(),
+            )
+        }
         // Basalt: its pack (one file: weights, tokenizer, drafter, vision),
         // and its settings file: the model, where it listens, its name and
         // context (it has no "as much as fits": 64k unless picked).
@@ -888,10 +894,27 @@ fn setup_server(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value
                     return report.detail(line);
                 }
                 let received = received_bytes();
-                if received > moving.0 {
+                // (A megabyte: a computer's usual chatter isn't a download.)
+                if received > moving.0 + 1_000_000 {
                     moving = (received, std::time::Instant::now());
                 }
                 let quiet = moving.1.elapsed() > Duration::from_secs(5);
+                // Strata checks each file of a big model when it arrives, and
+                // says little more until the next line: the bar keeps the
+                // download's place instead of running back to one file's check,
+                // and bytes arriving under a finished check are the next file's.
+                let checking = line.contains("nothing is downloaded");
+                if checking && (quiet || said.is_none()) {
+                    let place = said.as_ref().map(|(_, d, t, then)| ((d + received.saturating_sub(*then)).min(t * 999 / 1000)) as f64 / (*t).max(1) as f64);
+                    let place = place.or_else(|| amount_in(line).map(|(d, t)| d as f64 / t as f64)).unwrap_or(-1.0);
+                    report.update(|v| {
+                        v["progress"] = json!(place);
+                        v["detail"] = json!(line);
+                    });
+                    return;
+                }
+                let downloading = if checking { said.as_ref().map(|s| s.0.clone()) } else { None };
+                let line = downloading.as_deref().unwrap_or(line);
                 let amount = amount_in(line).map(|(d, t)| (d, t, true)).or_else(|| about_size(line).map(|t| (0, t, false)));
                 let Some((done, total, exact)) = amount.filter(|_| !quiet) else {
                     said = None;
@@ -1006,8 +1029,9 @@ impl ServerSetup {
                     json!({ "id": e.id(), "name": e.name(), "tagline": e.tagline(), "fit": fit, "why": why, "installed": installed })
                 })
                 .collect();
-            let strata: Vec<Value> = engines::STRATA_MODELS.iter().map(|(id, what, gb)| json!({ "id": id, "what": what, "needGb": gb })).collect();
-            let v = json!({ "state": "ready", "hardware": hw.json(), "engines": list, "strataModels": strata });
+            let strata: Vec<Value> = engines::STRATA_MODELS.iter().map(|(id, what, gb)| json!({ "id": id, "name": id.to_uppercase(), "what": what, "needGb": gb })).collect();
+            let deepseek: Vec<Value> = engines::STRATA_DEEPSEEK.iter().map(|(id, name, what, gb, disk)| json!({ "id": id, "name": name, "what": what, "needGb": gb, "diskGb": disk })).collect();
+            let v = json!({ "state": "ready", "hardware": hw.json(), "engines": list, "strataModels": strata, "strataDeepseek": deepseek });
             let _ = thread.queue(move |mut this| this.as_mut().set_catalog(QString::from(&v.to_string())));
         });
     }

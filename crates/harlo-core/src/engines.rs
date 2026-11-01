@@ -176,7 +176,7 @@ impl Engine {
         match self {
             Engine::Ollama => "The easiest: pick a model by name and it does the rest.",
             Engine::LlamaCpp => "Any GGUF model from Hugging Face, fast on one computer, every setting yours.",
-            Engine::Strata => "Qwen3.8-Flash-Next on consumer hardware, tuned for your card.",
+            Engine::Strata => "Qwen3.8-Flash-Next and DeepSeek-V4.1-Flash on consumer hardware, tuned for your card.",
             Engine::Vllm => "The fastest when several sessions run at once, on an NVIDIA card: Hugging Face models in their own format, full or quantized.",
             Engine::Basalt => "Qwen3.8-Flash-Next on an NVIDIA Blackwell card, its experts in RAM where the card is full. Built on this computer.",
             Engine::Ninfer => "Built for the RTX 5090: Qwen3.6 and Qwen3.8, 27B to Flash-Next, with fast drafts. Built on this computer.",
@@ -785,6 +785,31 @@ pub const STRATA_MODELS: [(&str, &str, u64); 5] = [
     ("coder", "Tuned for code", 30),
 ];
 
+/// Strata's DeepSeek-V4.1-Flash sets: `--model`, the name to show, what it's
+/// like, the RAM + VRAM it needs (GB: its own least RAM and a 12 GB card; the
+/// rest is read from the SSD) and its download (GB, on disk).
+pub const STRATA_DEEPSEEK: [(&str, &str, &str, u64, u64); 6] = [
+    ("ist-das-1.75bpw", "1.75 BPW", "Smallest: fine for code, weaker on prose", 46, 239),
+    ("ist-das-2.00bpw", "2.00 BPW", "Good for code and agent work", 52, 257),
+    ("ist-das-2.25bpw", "2.25 BPW", "Closest to the original", 56, 274),
+    ("ud-iq1_s", "UD-IQ1_S", "Unsloth's smallest: weaker on long work", 48, 241),
+    ("ud-iq1_m", "UD-IQ1_M", "Unsloth's next: partly 1-bit", 52, 258),
+    ("ud-q8_k_xl", "UD-Q8_K_XL", "For several cards and hundreds of GB of RAM", 318, 508),
+];
+
+/// Whether Strata's DeepSeek engine hit a graphics-card fault in its latest
+/// run (its log, runs appended). Its process lives on and its server answers,
+/// but every request fails until it's restarted.
+pub fn strata_engine_faulted(log: &str) -> bool {
+    let run = log.rsplit("engine started:").next().unwrap_or(log);
+    run.lines().any(|l| l.starts_with("ds4: cuda") || (l.starts_with("ds4:") && l.contains("illegal memory access")))
+}
+
+/// The `--family` of one of Strata's models above.
+pub fn strata_family(model: &str) -> &'static str {
+    if STRATA_DEEPSEEK.iter().any(|m| m.0 == model) { "deepseek41" } else { "qwen" }
+}
+
 /// A model on Hugging Face with GGUF files (or, for vLLM, in its own
 /// format: `bytes` its weights, `model_type` its family from config.json).
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -1337,6 +1362,23 @@ mod tests {
     fn hw(vendor: &str, vram_gb: u64, ram_gb: u64, driver: &str) -> Hardware {
         let gpus = if vendor.is_empty() { vec![] } else { vec![Gpu { vendor: vendor.into(), name: "card".into(), vram_mb: vram_gb * 1024, arch: String::new() }] };
         Hardware { gpus, ram_mb: ram_gb * 1024, disk_free_mb: 500 * 1024, avx2: true, nvidia_driver: driver.into() }
+    }
+
+    #[test]
+    fn strata_engine_faults_are_read_from_its_latest_run() {
+        let healthy = "[strata] engine started: x\nds4: CUDA0 layers [0, 39] + head\nmaya ds4 serve: prompt 31 tokens\n";
+        assert!(!strata_engine_faulted(healthy));
+        assert!(strata_engine_faulted(&format!("{healthy}ds4: q: an illegal memory access was encountered\n")));
+        assert!(strata_engine_faulted(&format!("{healthy}ds4: cudaStreamSynchronize(s): operation not supported on global/shared address space\n")));
+        assert!(!strata_engine_faulted(&format!("{healthy}ds4: q: an illegal memory access was encountered\n{healthy}")));
+    }
+
+    #[test]
+    fn strata_models_name_their_family() {
+        assert_eq!(strata_family("ist-das-2.00bpw"), "deepseek41");
+        assert_eq!(strata_family("ud-q8_k_xl"), "deepseek41");
+        assert_eq!(strata_family("iq2_xs"), "qwen");
+        assert_eq!(strata_family("coder"), "qwen");
     }
 
     #[test]

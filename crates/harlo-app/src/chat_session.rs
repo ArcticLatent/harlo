@@ -825,7 +825,7 @@ impl ChatSession {
         // Reading files and encoding images can take a moment; keep it off
         // the UI thread.
         crate::runtime().spawn_blocking(move || {
-            if let Some((name, url)) = server.filter(|(_, url)| !harlo_core::model_servers::answers(url)) {
+            if let Some((name, url)) = server.filter(|(_, url)| crate::accounts::needs_start(url)) {
                 let starting = |name: String| {
                     let _ = thread.queue(move |mut this| this.as_mut().set_starting_server(QString::from(&name)));
                 };

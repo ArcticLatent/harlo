@@ -1061,17 +1061,17 @@ fn saved_models(v: &Value) -> Vec<model_servers::Found> {
     v["models"].as_array().into_iter().flatten().filter_map(|m| Some(model_servers::Found { id: m["id"].as_str()?.to_owned(), context: m["context"].as_u64(), reasoning: m["reasoning"] == true, ..Default::default() })).collect()
 }
 
-/// A server's models as an agent's file gets them: Basalt and NInfer's Qwen3.8
-/// tell thinking levels apart (its Qwen3.6 has only on and off).
+/// A server's models as an agent's file gets them: Basalt, Strata and NInfer's
+/// Qwen3.8 tell thinking levels apart (its Qwen3.6 has only on and off).
 fn with_levels(url: &str, models: Vec<model_servers::Found>) -> Vec<model_servers::Found> {
     let engine = engine_of(url);
-    models.into_iter().map(|m| model_servers::Found { levels: engine == "Basalt" || (engine == "NInfer" && m.id.contains("3.8")), ..m }).collect()
+    models.into_iter().map(|m| model_servers::Found { levels: engine == "Basalt" || engine == "Strata" || (engine == "NInfer" && m.id.contains("3.8")), ..m }).collect()
 }
 
-/// Basalt servers agents got before harlo offered their levels: offered now,
+/// Basalt and Strata servers agents got before harlo offered their levels: offered now,
 /// before any agent reads its file.
 pub(crate) fn offer_levels() {
-    for (url, _) in set_up_servers().into_iter().filter(|(url, _)| engine_of(url) == "Basalt") {
+    for (url, _) in set_up_servers().into_iter().filter(|(url, _)| matches!(engine_of(url), "Basalt" | "Strata")) {
         for k in [HarnessKind::Pi, HarnessKind::OpenCode] {
             for s in model_servers::servers(k).into_iter().filter(|s| s.base_url == url) {
                 if let Err(e) = model_servers::offer_levels(k, &s.name) {
@@ -1225,8 +1225,12 @@ pub(crate) fn managed_server(agent: &str, model: &str) -> Option<(String, String
 /// Starts a server harlo set up unless it answers already (blocking, until
 /// it serves).
 pub(crate) fn ensure_running(url: &str) -> Result<(), String> {
-    if model_servers::answers(url) {
+    if !needs_start(url) {
         return Ok(());
+    }
+    // (A faulted engine answers: stopped first.)
+    if model_servers::answers(url) {
+        stop_any(url);
     }
     let command = commands_of(url)["start"].as_str().unwrap_or_default().to_owned();
     launch(url, &command)?;
@@ -1235,6 +1239,23 @@ pub(crate) fn ensure_running(url: &str) -> Result<(), String> {
         tracing::warn!("{problem}");
     }
     Ok(())
+}
+
+/// Whether a server has to be started before a message: it's down, or its
+/// engine faulted.
+pub(crate) fn needs_start(url: &str) -> bool {
+    !model_servers::answers(url) || engine_faulted(url)
+}
+
+/// A Strata engine that hit a graphics-card fault, from the engine log its
+/// launch named.
+fn engine_faulted(url: &str) -> bool {
+    if engine_of(url) != "Strata" {
+        return false;
+    }
+    let said = std::fs::read_to_string(log_path(url)).unwrap_or_default();
+    let Some(path) = said.lines().rev().find_map(|l| l.trim().strip_prefix("Engine log")?.trim().split("   ").next().map(str::to_owned)) else { return false };
+    std::fs::read_to_string(path).is_ok_and(|log| harlo_core::engines::strata_engine_faulted(&log))
 }
 
 /// After a llama.cpp server harlo set up starts: the context it serves

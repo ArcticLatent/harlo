@@ -35,9 +35,12 @@ AppDialog {
     // (NInfer's drafts take more of the card as it grows: 256k doesn't fit
     // next to its models on an RTX 5090.)
     readonly property var contexts: ninfer ? [32768, 65536, 131072, 196608]
-        : fixedRepo !== "" ? [32768, 65536, 131072, 262144]
+        : fixedRepo !== "" || deepseek ? [32768, 65536, 131072, 262144]
         : maxContext === 0 ? [0, 16384, 32768, 65536, 131072]
         : [0].concat([16384, 32768, 65536, 131072, 262144, 524288].filter(c => c < maxContext), [maxContext])
+    /// Strata: which of its models (DeepSeek takes a context; its own 8k is too little).
+    property string strataFamily: "qwen"
+    readonly property bool deepseek: engine !== null && engine.id === "strata" && strataFamily === "deepseek41"
     /// Basalt: its one model's packs, from its own repository.
     readonly property string fixedRepo: engine !== null && engine.id === "basalt" ? "jesdga/Qwen3.8-Flash-Next-Basalt" : ""
     readonly property bool fromHf: engine !== null && (engine.id === "ollama" || engine.id === "llamacpp" || engine.id === "vllm" || engine.id === "ninfer")
@@ -96,6 +99,7 @@ AppDialog {
         modelSearch.text = ""
         if (e.id === "ollama" || e.id === "llamacpp" || e.id === "vllm" || e.id === "ninfer") ServerSetup.findModels("", e.id)
         if (e.id === "ninfer") context = 65536
+        strataFamily = "qwen"
         // (Basalt: its packs straight away, 64k of context.)
         if (e.id === "basalt") {
             repo = "jesdga/Qwen3.8-Flash-Next-Basalt"
@@ -372,10 +376,76 @@ AppDialog {
                 }
             }
 
+            // Strata: its models' sizes.
+            ColumnLayout {
+                visible: dlg.engine !== null && dlg.engine.id === "strata"
+                Layout.fillWidth: true
+                spacing: 4
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: 6
+                    Repeater {
+                        model: [{ id: "qwen", name: "Qwen3.8-Flash-Next" }, { id: "deepseek41", name: "DeepSeek-V4.1-Flash" }]
+                        ItemDelegate {
+                            id: fChip
+                            required property var modelData
+                            padding: 6
+                            horizontalPadding: 10
+                            highlighted: dlg.strataFamily === modelData.id
+                            background: Rectangle {
+                                radius: 6
+                                color: fChip.highlighted ? Theme.rowSelected : fChip.hovered ? Theme.hover : "transparent"
+                                border.color: fChip.highlighted ? Theme.primary : Theme.hairline
+                            }
+                            contentItem: Label { text: fChip.modelData.name; color: Theme.foreground; font.pixelSize: Theme.px(11.5) }
+                            onClicked: {
+                                if (dlg.strataFamily === modelData.id) return
+                                dlg.strataFamily = modelData.id
+                                dlg.model = ""
+                                dlg.context = dlg.deepseek ? 65536 : 0
+                            }
+                        }
+                    }
+                }
+                FieldName { Layout.topMargin: 4; text: dlg.deepseek ? "DeepSeek-V4.1-Flash, in the size that fits" : "Qwen3.8-Flash-Next, in the size that fits" }
+                // (Strata splits a model between the card and RAM: both count.)
+                Note {
+                    text: (dlg.deepseek ? "The least memory each needs: graphics memory and RAM together, the rest read from your SSD. This computer has " : "Memory each needs: graphics memory and RAM together. This computer has ") + Math.round(dlg.memoryGb) + " GB ("
+                        + Math.round(dlg.vramGb) + " GB graphics + " + Math.round(dlg.memoryGb - dlg.vramGb) + " GB RAM)."
+                }
+                Repeater {
+                    model: (dlg.deepseek ? dlg.cat.strataDeepseek : dlg.cat.strataModels) || []
+                    ItemDelegate {
+                        id: sRow
+                        required property var modelData
+                        readonly property bool fits: modelData.needGb <= dlg.memoryGb
+                        // (Strata keeps part of every model in RAM by design: only
+                        // whether it runs here matters; speed is in its description.)
+                        Layout.fillWidth: true
+                        padding: 6
+                        enabled: fits
+                        highlighted: dlg.model === modelData.id
+                        background: Rectangle { radius: 6; color: sRow.highlighted ? Theme.rowSelected : sRow.hovered ? Theme.hover : "transparent" }
+                        contentItem: RowLayout {
+                            spacing: 8
+                            Label { text: sRow.modelData.name; color: Theme.foreground; font.family: Theme.mono; font.pixelSize: Theme.px(12); Layout.preferredWidth: 80 }
+                            Label { Layout.fillWidth: true; text: sRow.modelData.what; color: Theme.muted; font.pixelSize: Theme.px(12) }
+                            Label { text: (sRow.fits ? "Runs here" : "Too big for this computer") + " · " + (sRow.modelData.diskGb ? sRow.modelData.diskGb + " GB on disk" : sRow.modelData.needGb + " GB"); color: sRow.fits ? Theme.success : Theme.muted; font.pixelSize: Theme.px(11.5) }
+                        }
+                        onClicked: dlg.model = modelData.id
+                    }
+                }
+                Note {
+                    text: dlg.deepseek
+                        ? "Strata downloads the model and its DeepSeek engine the first time it starts, then packs them: that first start takes a long time. Its 111 GB n-gram table stays on the disk, read for every word, so keep Strata's models on an NVMe drive. Expect it slower than Qwen: Strata measured 5 to 10 tokens a second on 12 GB cards; it's quicker with a bigger card and more RAM."
+                        : "Strata downloads the model the first time it starts (tens of GB) and tunes it for your card: that first start takes a while."
+                }
+            }
+
             // llama.cpp and Ollama: how much it reads at once (each llama.cpp
             // model its own; Ollama's is the server's, not asked when adding).
             ColumnLayout {
-                visible: (dlg.fromHf || dlg.fixedRepo !== "") && !(dlg.addTo !== null && dlg.engine.id === "ollama")
+                visible: (dlg.fromHf || dlg.fixedRepo !== "" || dlg.deepseek) && !(dlg.addTo !== null && dlg.engine.id === "ollama")
                 Layout.fillWidth: true
                 spacing: 6
                 FieldName { Layout.topMargin: 4; text: "Context" }
@@ -413,47 +483,12 @@ AppDialog {
                             ? "Ollama picks it from your graphics memory (32k on cards with 24 GB or more), up to the model's own" + (dlg.maxContext ? " " + dlg.ctxText(dlg.maxContext) : "") + "."
                             : "llama.cpp gives it as much as fits on your card next to the model" + (dlg.maxContext ? ", up to its own " + dlg.ctxText(dlg.maxContext) : "") + ", and not less than 16k.")
                         : dlg.ninfer ? "The longest a conversation and its files can be, in tokens. The more you pick, the more of your card it needs next to the model: 64k and 128k leave room for your desktop, 192k needs almost all of the card free."
+                        : dlg.deepseek ? "How much of the conversation and files the model keeps in mind, in tokens. Strata keeps it on your card, so more context leaves room for fewer of the model's experts there, and long prompts read slowly. Its makers haven't tested past 256k."
                         : dlg.wholeRepo ? "How much of the conversation and files the model keeps in mind, in tokens. vLLM keeps it all on your card with the model: if they don't fit together, it says so when it starts."
                         : dlg.fixedRepo !== "" ? "How much of the conversation and files the model keeps in mind, in tokens. Basalt keeps it on your card (8 bits a value), next to the model's busiest parts: more context, more graphics memory."
                         : "How much of the conversation and files the model keeps in mind, in tokens. If the model and " + dlg.ctxText(dlg.context) + " don't fit on your card together, " + (dlg.engine && dlg.engine.id === "ollama" ? "Ollama" : "llama.cpp") + " keeps part of the model in RAM, which is slower."
                             + (dlg.engine && dlg.engine.id === "ollama" ? " (It's Ollama's for every model it serves.)" : "")
                 }
-            }
-
-            // Strata: Qwen3.8-Flash-Next's sizes.
-            ColumnLayout {
-                visible: dlg.engine !== null && dlg.engine.id === "strata"
-                Layout.fillWidth: true
-                spacing: 4
-                FieldName { text: "Qwen3.8-Flash-Next, in the size that fits" }
-                // (Strata splits a model between the card and RAM: both count.)
-                Note {
-                    text: "Memory each needs: graphics memory and RAM together. This computer has " + Math.round(dlg.memoryGb) + " GB ("
-                        + Math.round(dlg.vramGb) + " GB graphics + " + Math.round(dlg.memoryGb - dlg.vramGb) + " GB RAM)."
-                }
-                Repeater {
-                    model: dlg.cat.strataModels || []
-                    ItemDelegate {
-                        id: sRow
-                        required property var modelData
-                        readonly property bool fits: modelData.needGb <= dlg.memoryGb
-                        // (Strata keeps part of every model in RAM by design: only
-                        // whether it runs here matters; speed is in its description.)
-                        Layout.fillWidth: true
-                        padding: 6
-                        enabled: fits
-                        highlighted: dlg.model === modelData.id
-                        background: Rectangle { radius: 6; color: sRow.highlighted ? Theme.rowSelected : sRow.hovered ? Theme.hover : "transparent" }
-                        contentItem: RowLayout {
-                            spacing: 8
-                            Label { text: sRow.modelData.id.toUpperCase(); color: Theme.foreground; font.family: Theme.mono; font.pixelSize: Theme.px(12); Layout.preferredWidth: 80 }
-                            Label { Layout.fillWidth: true; text: sRow.modelData.what; color: Theme.muted; font.pixelSize: Theme.px(12) }
-                            Label { text: (sRow.fits ? "Runs here" : "Too big for this computer") + " · " + sRow.modelData.needGb + " GB"; color: sRow.fits ? Theme.success : Theme.muted; font.pixelSize: Theme.px(11.5) }
-                        }
-                        onClicked: dlg.model = modelData.id
-                    }
-                }
-                Note { text: "Strata downloads the model the first time it starts (tens of GB) and tunes it for your card: that first start takes a while." }
             }
 
             Note {

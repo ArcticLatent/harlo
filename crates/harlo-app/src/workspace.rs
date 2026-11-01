@@ -4820,7 +4820,7 @@ struct FirstPrompt {
 fn send_first_prompt(key: &str, first: FirstPrompt, notify: Option<CxxQtThread<Workspace>>) {
     let Some(live) = registry::get(key) else { return };
     crate::runtime().spawn_blocking(move || {
-        if let Some((name, url)) = first.server.as_ref().filter(|(_, url)| !harlo_core::model_servers::answers(url)) {
+        if let Some((name, url)) = first.server.as_ref().filter(|(_, url)| crate::accounts::needs_start(url)) {
             let say = |text: String, error: bool| {
                 if let Some(thread) = &notify {
                     let _ = thread.queue(move |this| this.set_notice_text(&text, error));
