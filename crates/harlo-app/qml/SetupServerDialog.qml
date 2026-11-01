@@ -198,7 +198,7 @@ AppDialog {
                 }
             }
             Note { visible: dlg.cat.state === "loading" && (dlg.cat.engines || []).length === 0; text: "Checking the graphics card and what's installed…" }
-            Note { text: "More engines (NInfer, Basalt, Avalon, vLLM, LM Studio, Unsloth) come in later updates." }
+            Note { text: "More engines (Basalt, NInfer, Avalon, Unsloth) come in later updates." }
         }
 
         // ---- 2. the model and settings ----
@@ -395,12 +395,19 @@ AppDialog {
                 Layout.fillWidth: true
                 spacing: 4
                 FieldName { text: "Qwen3.8-Flash-Next, in the size that fits" }
+                // (Strata splits a model between the card and RAM: both count.)
+                Note {
+                    text: "Memory each needs: graphics memory and RAM together. This computer has " + Math.round(dlg.memoryGb) + " GB ("
+                        + Math.round(dlg.vramGb) + " GB graphics + " + Math.round(dlg.memoryGb - dlg.vramGb) + " GB RAM)."
+                }
                 Repeater {
                     model: dlg.cat.strataModels || []
                     ItemDelegate {
                         id: sRow
                         required property var modelData
                         readonly property bool fits: modelData.needGb <= dlg.memoryGb
+                        // (Strata keeps part of every model in RAM by design: only
+                        // whether it runs here matters; speed is in its description.)
                         Layout.fillWidth: true
                         padding: 6
                         enabled: fits
@@ -410,12 +417,12 @@ AppDialog {
                             spacing: 8
                             Label { text: sRow.modelData.id.toUpperCase(); color: Theme.foreground; font.family: Theme.mono; font.pixelSize: Theme.px(12); Layout.preferredWidth: 80 }
                             Label { Layout.fillWidth: true; text: sRow.modelData.what; color: Theme.muted; font.pixelSize: Theme.px(12) }
-                            Label { text: "needs " + sRow.modelData.needGb + " GB" + (sRow.fits ? "" : " (too big here)"); color: sRow.fits ? Theme.muted : Theme.error; font.pixelSize: Theme.px(11.5) }
+                            Label { text: (sRow.fits ? "Runs here" : "Too big for this computer") + " · " + sRow.modelData.needGb + " GB"; color: sRow.fits ? Theme.success : Theme.muted; font.pixelSize: Theme.px(11.5) }
                         }
                         onClicked: dlg.model = modelData.id
                     }
                 }
-                Note { text: "RAM and graphics memory together; Strata downloads the model the first time it starts (tens of GB), and tunes it for your card." }
+                Note { text: "Strata downloads the model the first time it starts (tens of GB) and tunes it for your card: that first start takes a while." }
             }
 
             Note {

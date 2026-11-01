@@ -928,7 +928,10 @@ fn unused_json() -> Value {
                 let models: Vec<model_servers::Found> = saved_models(&v);
                 // (One set up before harlo saved names: its engine's.)
                 let name = v["name"].as_str().filter(|n| !n.is_empty()).map(str::to_owned).unwrap_or_else(|| {
-                    if v["start"].as_str().unwrap_or_default().contains("ollama") { "ollama".to_owned() } else { model_servers::suggest_name(&url) }
+                    match engine_of(&url) {
+                        "" | "Your command" => model_servers::suggest_name(&url),
+                        engine => engine.to_lowercase(),
+                    }
                 });
                 json!({
                     "name": name, "baseUrl": url, "models": models.iter().map(|m| m.id.clone()).collect::<Vec<_>>(), "contexts": models.iter().map(|m| json!(m.context)).collect::<Vec<_>>(),
@@ -958,6 +961,18 @@ fn engine_of(url: &str) -> &'static str {
     }
 }
 
+/// What harlo keeps of a server it set up (its commands, name, models), to
+/// put back if a setup over it doesn't finish.
+pub(crate) fn server_record(url: &str) -> Value {
+    commands_of(url)
+}
+
+pub(crate) fn restore_server_record(url: &str, v: &Value) {
+    if let Ok(db) = harlo_core::db::Db::open(&harlo_core::db::default_path()) {
+        let _ = db.set(&server_key(url), &v.to_string());
+    }
+}
+
 /// A server's start command ("" for one harlo didn't set up).
 pub(crate) fn start_command(url: &str) -> String {
     commands_of(url)["start"].as_str().unwrap_or_default().to_owned()
@@ -969,6 +984,10 @@ pub(crate) fn stop_any(url: &str) {
     match STARTED.lock().unwrap().as_mut().and_then(|m| m.remove(url)) {
         Some(child) => stop_group(child),
         None => stop_pids(&leftovers(url)),
+    }
+    // (Its own stop command too, for a server not harlo's process: Strata's.)
+    if model_servers::answers(url) && commands_of(url)["stop"].as_str().is_some_and(|c| !c.is_empty()) {
+        run_stop(url);
     }
     for _ in 0..40 {
         if !model_servers::answers(url) {
@@ -1194,11 +1213,32 @@ pub fn stop_started_servers() {
     for (_, child) in STARTED.lock().unwrap().take().unwrap_or_default() {
         stop_group(child);
     }
+    // A server with its own stop command (Strata's launcher starts its
+    // server and exits: nothing of harlo's to stop), still answering.
+    for (url, v) in set_up_servers() {
+        if v["stop"].as_str().is_some_and(|c| !c.is_empty()) && model_servers::answers(&url) {
+            run_stop(&url);
+        }
+    }
     // And those an earlier harlo left running (it was stopped with Ctrl+C,
     // say, before servers went with it).
     let left: Vec<i32> = set_up_servers().iter().flat_map(|(u, _)| leftovers(u)).collect();
     if !left.is_empty() {
         stop_pids(&left);
+    }
+}
+
+/// Runs a server's own stop command (blocking, a minute at most).
+fn run_stop(url: &str) {
+    let stop = commands_of(url)["stop"].as_str().unwrap_or_default().to_owned();
+    let Ok(mut child) = std::process::Command::new("sh").arg("-c").arg(&stop).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn() else { return };
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    while child.try_wait().ok().flatten().is_none() {
+        if std::time::Instant::now() > deadline {
+            let _ = child.kill();
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(200));
     }
 }
 

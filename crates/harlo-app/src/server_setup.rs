@@ -301,6 +301,45 @@ fn received_bytes() -> u64 {
         .sum()
 }
 
+/// Graphics memory in use now on the NVIDIA card with the most, in MB
+/// (None without one).
+fn gpu_memory_used_mb() -> Option<u64> {
+    let out = std::process::Command::new("nvidia-smi").args(["--query-gpu=memory.used", "--format=csv,noheader,nounits"]).stdin(std::process::Stdio::null()).output().ok()?;
+    String::from_utf8_lossy(&out.stdout).lines().filter_map(|l| l.trim().parse::<u64>().ok()).max()
+}
+
+/// The size a log line announces, "(about 5 GB; …)", in bytes.
+fn about_size(line: &str) -> Option<u64> {
+    let rest = line.split("about ").nth(1)?;
+    let mut words = rest.split_whitespace();
+    let n: f64 = words.next()?.parse().ok()?;
+    let unit = match words.next()?.trim_end_matches(|c: char| !c.is_ascii_alphabetic()) {
+        "GB" => 1e9,
+        "MB" => 1e6,
+        _ => return None,
+    };
+    Some((n * unit) as u64)
+}
+
+/// The amount a log line says it's at: "10.1 of 84.5 GB" (or MB, GiB, MiB;
+/// the same unit on both sides), in bytes: (done, total).
+fn amount_in(line: &str) -> Option<(u64, u64)> {
+    let (head, tail) = line.split_once(" of ")?;
+    let done: f64 = head.rsplit(|c: char| !(c.is_ascii_digit() || c == '.')).next()?.parse().ok()?;
+    let mut words = tail.split_whitespace();
+    let total: f64 = words.next()?.parse().ok()?;
+    let unit = match words.next().unwrap_or_default().trim_end_matches(|c: char| !c.is_ascii_alphabetic()) {
+        "GB" => 1e9,
+        "MB" => 1e6,
+        "KB" => 1e3,
+        "GiB" => (1u64 << 30) as f64,
+        "MiB" => (1u64 << 20) as f64,
+        "KiB" => 1024.0,
+        _ => return None,
+    };
+    (total > 0.0).then(|| ((done.min(total) * unit) as u64, (total * unit) as u64))
+}
+
 /// The size uv announces for a download ("Downloading torch (846.1MiB)").
 fn announced_size(line: &str) -> u64 {
     let Some(inner) = line.rsplit_once('(').and_then(|(_, r)| r.strip_suffix(')')) else { return 0 };
@@ -332,7 +371,20 @@ fn walk_for(dir: &Path, name: &str, depth: usize) -> Option<PathBuf> {
 }
 
 /// One setup (blocking): the server's address, name, models and test.
+/// A setup that didn't finish (failed, cancelled) leaves nothing behind:
+/// the server's record as it was before (none, for a new one).
 fn setup(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value, String> {
+    let port = req["port"].as_u64().filter(|p| *p > 0 && *p < 65536).unwrap_or(8080);
+    let base = format!("http://127.0.0.1:{port}/v1");
+    let before = crate::accounts::server_record(&base);
+    let outcome = setup_server(req, report, stop);
+    if outcome.is_err() {
+        crate::accounts::restore_server_record(&base, &before);
+    }
+    outcome
+}
+
+fn setup_server(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value, String> {
     let engine = Engine::parse(req["engine"].as_str().unwrap_or_default()).ok_or("Pick an engine.")?;
     let model = req["model"].as_str().unwrap_or_default().trim().to_owned();
     if model.is_empty() {
@@ -495,15 +547,66 @@ fn setup(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value, Strin
     } else {
         crate::accounts::launch(&base, &start)?;
         let limit = Duration::from_secs(if engine == Engine::Strata { 12 * 3600 } else { 20 * 60 });
-        // (A progress bar in its log, as vLLM's "Capturing CUDA graphs: 17%|…":
-        // the bar follows it.)
+        // (Progress in its log, as vLLM's "Capturing CUDA graphs: 17%|…" or
+        // Strata's "Downloading the model files: 10.1 of 84.5 GB": the bar
+        // follows it.)
+        // An amount it says now and then ("10.1 of 84.5 GB", Strata's every
+        // few GB): between its lines, what this computer received since, so
+        // it moves as it downloads; its next line puts it right.
+        // (A line announcing a size, "Downloading the draft layer (about 5 GB…)":
+        // what's received since it, of that. Nothing received for a few
+        // seconds: it's working on something else, the line as it is.)
+        let mut said: Option<(String, u64, u64, u64)> = None; // (line, done, total, received then)
+        let mut moving = (received_bytes(), std::time::Instant::now());
+        // (A quiet phase, "Starting the engine and loading the model": how
+        // long so far, and the card's memory filling as the model loads.)
+        let since = std::time::Instant::now();
+        let mut card: (Option<u64>, std::time::Instant) = (gpu_memory_used_mb(), std::time::Instant::now());
         let waited = crate::accounts::wait_up(
             &base,
             limit,
             &mut |line| {
-                let pct = line.split('%').next().and_then(|head| head.rsplit(|c: char| !c.is_ascii_digit()).next()).and_then(|n| n.parse::<f64>().ok()).filter(|p| line.contains("%|") && *p <= 100.0);
-                report.update(|v| v["progress"] = json!(pct.map_or(-1.0, |p| p / 100.0)));
-                report.detail(line);
+                let pct = line.split('%').next().and_then(|head| head.rsplit(|c: char| !c.is_ascii_digit()).next()).and_then(|n| n.parse::<f64>().ok()).filter(|p| line.contains("%|") && *p <= 100.0).map(|p| p / 100.0);
+                if let Some(p) = pct {
+                    report.update(|v| v["progress"] = json!(p));
+                    return report.detail(line);
+                }
+                let received = received_bytes();
+                if received > moving.0 {
+                    moving = (received, std::time::Instant::now());
+                }
+                let quiet = moving.1.elapsed() > Duration::from_secs(5);
+                let amount = amount_in(line).map(|(d, t)| (d, t, true)).or_else(|| about_size(line).map(|t| (0, t, false)));
+                let Some((done, total, exact)) = amount.filter(|_| !quiet) else {
+                    said = None;
+                    if card.1.elapsed() > Duration::from_secs(3) {
+                        card = (gpu_memory_used_mb(), std::time::Instant::now());
+                    }
+                    let secs = since.elapsed().as_secs();
+                    let text = format!(
+                        "{line} · {}:{:02}{}",
+                        secs / 60,
+                        secs % 60,
+                        card.0.map(|mb| format!(" · {:.1} GB on the card", mb as f64 / 1024.0)).unwrap_or_default()
+                    );
+                    report.update(|v| {
+                        v["progress"] = json!(-1.0);
+                        v["detail"] = json!(text);
+                    });
+                    return;
+                };
+                if said.as_ref().is_none_or(|(l, d, t, _)| l != line || *d != done || *t != total) {
+                    said = Some((line.to_owned(), done, total, received));
+                }
+                let (_, d, t, then) = said.clone().unwrap_or_default();
+                let now = (d + received.saturating_sub(then)).min(t * 999 / 1000);
+                let estimate = now > d || !exact;
+                let head = if exact { line.split(" of ").next().unwrap_or(line).trim_end_matches(|c: char| c.is_ascii_digit() || c == '.').trim_end() } else { line.split(" (").next().unwrap_or(line) };
+                let text = format!("{head}{} {}{:.1} of {:.1} GB", if exact { "" } else { ":" }, if estimate { "≈ " } else { "" }, now as f64 / 1e9, t as f64 / 1e9);
+                report.update(|v| {
+                    v["progress"] = json!(now as f64 / t.max(1) as f64);
+                    v["detail"] = json!(text);
+                });
             },
             &cancelled,
         );
@@ -711,6 +814,16 @@ impl ServerSetup {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reads_amounts_in_log_lines() {
+        assert_eq!(super::amount_in("Downloading the model files: 10.1 of 84.5 GB"), Some((10_100_000_000, 84_500_000_000)));
+        assert_eq!(super::amount_in("Fetched 512 of 1024 MiB"), Some((512 << 20, 1024 << 20)));
+        assert_eq!(super::amount_in("Loading 3 of 7 shards"), None);
+        assert_eq!(super::amount_in("Ready"), None);
+        assert_eq!(super::about_size("Downloading the draft layer (about 5 GB; it makes answers about twice as fast)"), Some(5_000_000_000));
+        assert_eq!(super::about_size("Preparing the draft layer"), None);
+    }
+
     #[test]
     fn reads_the_sizes_uv_announces() {
         assert_eq!(super::announced_size("Downloading torch (846.1MiB)"), (846.1 * (1u64 << 20) as f64) as u64);

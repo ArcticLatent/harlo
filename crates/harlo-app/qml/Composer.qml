@@ -678,9 +678,15 @@ Rectangle {
             visible: root.approvalMode !== "" && !root.dictationActive
             iconName: root.approvalMode === "always-ask" ? "shield-user" : root.approvalMode === "write" ? "shield-star" : "shield-check"
             tint: root.approvalMode === "always-ask" ? Theme.foreground : root.approvalMode === "write" ? Theme.success : Theme.info
-            tip: (root.approvalMode === "always-ask" ? "Permissions: ask — the agent asks before it edits files or runs commands"
-                  : root.approvalMode === "write" ? "Permissions: edits — the agent edits files freely, asks before running commands"
-                  : "Permissions: auto — the agent edits and runs commands without asking")
+            // (Hermes decides its own commands: it asks only before edits and
+            // commands it finds risky, whatever the mode.)
+            tip: (root.session.harness === "hermes"
+                    ? (root.approvalMode === "always-ask" ? "Permissions: ask — Hermes asks before it edits files and before commands it considers risky; it runs safe ones (ls, cat…) itself"
+                       : root.approvalMode === "write" ? "Permissions: edits — Hermes edits files in the project freely, asks before commands it considers risky"
+                       : "Permissions: auto — Hermes edits and runs commands without asking")
+                    : root.approvalMode === "always-ask" ? "Permissions: ask — the agent asks before it edits files or runs commands"
+                    : root.approvalMode === "write" ? "Permissions: edits — the agent edits files freely, asks before running commands"
+                    : "Permissions: auto — the agent edits and runs commands without asking")
                  + "\nClick to switch"
             onClicked: root.cycleApproval()
         }

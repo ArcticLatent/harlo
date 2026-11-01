@@ -369,8 +369,14 @@ impl Session {
             self.subscribe(&existing);
             return Ok(existing);
         }
+        // (Named from the start, "build" unless plan mode: a session left
+        // to OpenCode's default ran a command without asking until the
+        // agent was set, when the shield's mode changed.)
         let (model, agent) = {
-            let st = self.state.lock().unwrap();
+            let mut st = self.state.lock().unwrap();
+            if st.agent.is_empty() {
+                st.agent = "build".into();
+            }
             (st.model.clone(), st.agent.clone())
         };
         let mut body = json!({ "location": { "directory": self.dir } });

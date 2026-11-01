@@ -262,6 +262,18 @@ fn find_file(dir: &Path, name: &str, depth: usize) -> Option<PathBuf> {
     subdirs.into_iter().find_map(|d| find_file(&d, name, depth - 1))
 }
 
+/// The version of the vLLM a `vllm` program runs: its environment's
+/// `site-packages/vllm-<version>.dist-info`.
+fn vllm_version(program: &Path) -> Option<String> {
+    let lib = program.parent()?.parent()?.join("lib");
+    std::fs::read_dir(lib).ok()?.flatten().find_map(|py| {
+        std::fs::read_dir(py.path().join("site-packages")).ok()?.flatten().find_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            name.strip_prefix("vllm-")?.strip_suffix(".dist-info").map(str::to_owned)
+        })
+    })
+}
+
 /// vLLM's Python environment (harlo's): `bin/vllm` in it.
 pub fn vllm_env() -> PathBuf {
     engines_dir().join("vllm").join("env")
@@ -278,6 +290,18 @@ pub fn installed(engine: Engine) -> Option<Installed> {
             Engine::Vllm => "vllm",
         })?),
     };
+    // (vLLM: its package's version, not `vllm --version`: that starts Python
+    // with PyTorch, seconds every time the engines are listed.)
+    if engine == Engine::Vllm {
+        let version = vllm_version(&program).unwrap_or_default();
+        return Some(Installed { program, version, harlo });
+    }
+    // (harlo's: the release it installed, its folder's name.)
+    if harlo
+        && let Some(tag) = program.strip_prefix(engines_dir().join(engine.id())).ok().and_then(|rest| rest.components().next()).map(|c| c.as_os_str().to_string_lossy().trim_start_matches('v').to_owned())
+    {
+        return Some(Installed { program, version: tag, harlo });
+    }
     let out = Command::new(&program).arg("--version").stdin(std::process::Stdio::null()).output().ok();
     let text = out.map(|o| format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr))).unwrap_or_default();
     let version = text.split_whitespace().find(|w| w.chars().next().is_some_and(|c| c.is_ascii_digit() || c == 'b' || c == 'v') && w.chars().any(|c| c.is_ascii_digit()) && w.len() < 24).unwrap_or("").trim_start_matches('v').to_owned();
