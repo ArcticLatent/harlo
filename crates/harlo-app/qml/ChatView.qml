@@ -182,6 +182,7 @@ Rectangle {
             composer.focusInput()
         }
         function onStatusChanged() { root.refreshBranches() }
+        function onSendFailed(message) { Workspace.showNotice(message, true) }
     }
     // Branches of the active session's file (header button when > 1).
     property int branchCount: 0
@@ -365,8 +366,11 @@ Rectangle {
                             Label { anchors.verticalCenter: parent.verticalCenter; text: Theme.harnessLabel(session.harness); color: Theme.textMuted; font.pixelSize: Theme.px(13) }
                         }
                         Label {
+                            // A model on one of your servers: the engine it runs on.
+                            readonly property string engine: { const sv = Theme.serverOf(session.harness, session.modelId); return sv ? sv.engine : "" }
                             visible: session.modelName !== ""
-                            text: session.modelName + (session.thinking ? " · " + session.thinking : "")
+                            // (Its thinking level; none said when it's off.)
+                            text: Theme.modelLabel(session.modelName) + (engine ? " on " + engine : "") + (session.thinking && session.thinking !== "off" ? " · " + session.thinking : "")
                             color: Theme.textMuted
                             font.pixelSize: Theme.px(13)
                         }

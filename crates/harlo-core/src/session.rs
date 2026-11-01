@@ -164,6 +164,9 @@ enum Control {
     Request(Value, oneshot::Sender<Result<Value, String>>),
     /// Re-read the transcript and state from the harness (after a branch or fork).
     Reload,
+    /// Stop the harness if it's idle; the next command starts it again on
+    /// this session (it re-reads its config: models, thinking levels).
+    RestartIdle,
     /// Context/usage report built from the session's messages.
     ContextReport(oneshot::Sender<Value>),
     /// The session as Markdown (crate::export).
@@ -248,6 +251,12 @@ impl SessionHandle {
     /// moved to another branch or a forked session file.
     pub fn reload(&self) {
         let _ = self.control.send(Control::Reload);
+    }
+
+    /// Stops the harness if it's idle (not working, nothing asked of you);
+    /// the session starts it again when next used, with its config re-read.
+    pub fn restart_if_idle(&self) {
+        let _ = self.control.send(Control::RestartIdle);
     }
 
     pub fn send_raw(&self, command: Value) {
@@ -511,6 +520,10 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                         st.meta.name = saved.name;
                     }
                     st.meta.model = saved.model;
+                    // (Until the agent runs and says: e.g. to start its server.)
+                    if st.meta.model_id.is_empty() {
+                        st.meta.model_id = saved.model_id;
+                    }
                     st.meta.thinking = saved.thinking;
                     pending.push(SessionUpdate::Meta(st.meta.clone()));
                     if st.status == SessionStatus::Loading {
@@ -634,6 +647,16 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                 Some(Control::Reload) => {
                     if let Some(h) = driver.harness.clone() {
                         tokio::spawn(fetch_initial(h, driver.aux_tx.clone(), true));
+                    }
+                }
+                Some(Control::RestartIdle) => {
+                    // (Its events dropped first: no "exited" notice for it.)
+                    if st.status == SessionStatus::Idle
+                        && let Some(h) = driver.harness.take()
+                    {
+                        driver.events = None;
+                        h.kill();
+                        set_status(&mut st, SessionStatus::Offline, &mut pending);
                     }
                 }
                 Some(Control::Request(cmd, reply)) => match driver.ensure_harness(&mut st, &mut pending) {
@@ -1069,6 +1092,25 @@ mod tests {
         let mut late = Vec::new();
         assert!(collect_until(&mut rx2, &mut late, |u| matches!(u, SessionUpdate::Reset(_))).await);
         assert_eq!(late, rows);
+    }
+
+    /// An idle session's harness stops (to read its config again) and the
+    /// next message starts it again; a working one is left alone.
+    #[tokio::test]
+    async fn idle_session_restarts_when_used_again() {
+        let handle = SessionHandle::spawn(cfg(HarnessKind::Demo, SessionTarget::New));
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        handle.subscribe(ChannelSink(tx));
+        let mut rows = Vec::new();
+        assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::Status(SessionStatus::Idle))).await);
+        handle.restart_if_idle();
+        assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::Status(SessionStatus::Offline))).await);
+        handle.prompt("hello fast", Vec::new(), SendMode::Normal);
+        assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::Status(SessionStatus::Starting))).await);
+        assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::Status(SessionStatus::Busy))).await);
+        // Working: not stopped.
+        handle.restart_if_idle();
+        assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::Status(SessionStatus::Idle))).await);
     }
 
     #[tokio::test]

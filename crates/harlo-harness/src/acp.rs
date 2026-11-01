@@ -193,7 +193,8 @@ pub fn cached(path: &Path) -> Option<SavedSession> {
     let r = session_of(path)?;
     let v: Value = serde_json::from_str(&std::fs::read_to_string(history_path(&r)).ok()?).ok()?;
     let name = entry(&r).map(|e| e.title).unwrap_or_default();
-    Some(SavedSession { messages: v["messages"].as_array().cloned().unwrap_or_default(), model: v["model"].as_str().unwrap_or_default().to_owned(), thinking: String::new(), name })
+    let model = v["model"].as_str().unwrap_or_default().to_owned();
+    Some(SavedSession { messages: v["messages"].as_array().cloned().unwrap_or_default(), model_id: model.clone(), model, thinking: String::new(), name })
 }
 
 fn write_index(path: &Path, all: &[Entry]) {
@@ -694,7 +695,7 @@ pub fn saved(path: &Path, program: &Path, remote: Option<&RemoteLaunch>) -> Save
     }
     let model = loaded.ok().and_then(|r| r["models"]["currentModelId"].as_str().map(str::to_owned)).unwrap_or_default();
     save_history(&r, &replay.messages, &model);
-    SavedSession { messages: replay.messages, model, thinking: String::new(), name: entry.title }
+    SavedSession { messages: replay.messages, model_id: model.clone(), model, thinking: String::new(), name: entry.title }
 }
 
 /// The models an agent offers (blocking): `(id, name)` from a session it

@@ -4,8 +4,9 @@ import QtQuick.Shapes
 import harlo
 
 // Vertical icon bar at the window's left edge, the right rail's mirror:
-// the sidebar's toggle at the top; at the bottom the plan meter, the phone,
-// keyboard shortcuts, usage stats, settings and your avatar.
+// the sidebar's toggle at the top; at the bottom the plan meter, the model
+// servers harlo set up, the phone, keyboard shortcuts, usage stats, settings
+// and your avatar.
 Rectangle {
     id: root
     property bool sidebarOpen: true
@@ -16,6 +17,8 @@ Rectangle {
     signal pairDeviceRequested()
     /// The plan meter: open Settings → Usage.
     signal planRequested()
+    /// Settings → Model servers.
+    signal serversRequested()
     implicitWidth: 52
     color: Theme.chrome
     Rectangle { anchors.right: parent.right; width: 1; height: parent.height; color: Theme.hairline }
@@ -157,6 +160,134 @@ Rectangle {
                 }
                 AppMenuSeparator { }
                 AppMenuItem { objectName: "meterAll"; text: "All limits…"; onTriggered: root.planRequested() }
+            }
+        }
+
+        // The model servers harlo set up on this computer: Start and Stop
+        // (a green dot while one runs).
+        RailButton {
+            id: serversButton
+            objectName: "railServers"
+            readonly property var list: {
+                const rows = []
+                if (Accounts.revision < 0) return rows
+                for (const a of ["pi", "omp", "opencode", "hermes", ""])
+                    for (const sv of JSON.parse(Accounts.servers(a)))
+                        if (sv.managed && !rows.some(r => r.baseUrl === sv.baseUrl)) rows.push(sv)
+                return rows
+            }
+            readonly property var states: Accounts.serverStates !== "" ? JSON.parse(Accounts.serverStates) : ({})
+            readonly property int running: list.filter(r => (states[r.baseUrl] || {}).state === "running").length
+            function check() { if (list.length > 0) Accounts.checkServers(JSON.stringify(list.map(r => r.baseUrl))) }
+            visible: list.length > 0
+            iconName: "server"
+            tip: running === 0 ? "Model servers: none running" : running === 1 ? "Model servers: 1 running" : "Model servers: " + running + " running"
+            active: serversPanel.visible
+            onClicked: serversPanel.visible ? serversPanel.close() : serversPanel.open()
+            Component.onCompleted: Accounts.loadServers()
+            Connections { target: Accounts; function onRevisionChanged() { serversButton.check() } }
+            // Now and then; often while the panel is open.
+            Timer { interval: serversPanel.visible ? 2000 : 15000; repeat: true; running: serversButton.visible; triggeredOnStart: true; onTriggered: serversButton.check() }
+            Rectangle {
+                objectName: "railServersRunning"
+                visible: serversButton.running > 0
+                x: serversButton.width - width - 7
+                y: serversButton.height - height - 7
+                width: 8
+                height: 8
+                radius: 4
+                color: Theme.success
+                border.width: 1.5
+                border.color: Theme.chrome
+            }
+            Popup {
+                id: serversPanel
+                objectName: "railServersPanel"
+                x: serversButton.width + 8
+                y: serversButton.height - height
+                width: 300
+                padding: 6
+                background: GlassSurface { radius: 10 }
+                contentItem: Column {
+                    spacing: 2
+                    Label {
+                        leftPadding: 8
+                        topPadding: 4
+                        bottomPadding: 4
+                        text: "MODEL SERVERS"
+                        color: Theme.label
+                        font.pixelSize: Theme.px(11)
+                        font.weight: Font.Medium
+                        font.letterSpacing: Theme.px(11) * 0.07
+                    }
+                    Repeater {
+                        model: serversButton.list
+                        Item {
+                            id: sRow
+                            required property var modelData
+                            readonly property var st: serversButton.states[modelData.baseUrl] || ({ state: "" })
+                            objectName: "railServer-" + modelData.name
+                            width: serversPanel.availableWidth
+                            height: 44
+                            Rectangle { anchors.fill: parent; radius: 6; color: rowHover.hovered ? Theme.rowHover : "transparent" }
+                            HoverHandler { id: rowHover }
+                            Rectangle {
+                                id: dot
+                                x: 10
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 8
+                                height: 8
+                                radius: 4
+                                color: sRow.st.state === "running" ? Theme.success : sRow.st.state === "starting" ? Theme.warning : sRow.st.state === "failed" ? Theme.error : Theme.muted
+                            }
+                            Column {
+                                anchors.left: dot.right
+                                anchors.leftMargin: 10
+                                anchors.right: rowButton.left
+                                anchors.rightMargin: 8
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 1
+                                // The engine (port when there are two), then its models.
+                                Label {
+                                    width: parent.width
+                                    readonly property bool twin: serversButton.list.filter(r => r.engine === sRow.modelData.engine).length > 1
+                                    text: !sRow.modelData.engine ? sRow.modelData.name
+                                        : sRow.modelData.engine + (twin ? " · " + sRow.modelData.baseUrl.replace(/^https?:\/\/[^:\/]+:?/, "").replace(/\/.*$/, "") : "")
+                                    color: Theme.text
+                                    font.pixelSize: Theme.px(13)
+                                    elide: Text.ElideRight
+                                }
+                                Label {
+                                    width: parent.width
+                                    readonly property var names: (sRow.modelData.models || []).map(Theme.modelLabel)
+                                    text: (({ running: "Running", starting: sRow.st.message || "Starting…", failed: "Didn't start", stopped: "Stopped" })[sRow.st.state] || "…")
+                                        + (names.length > 0 ? " · " + names[0] + (names.length > 1 ? " +" + (names.length - 1) : "") : "")
+                                    color: sRow.st.state === "failed" ? Theme.error : Theme.textMuted
+                                    font.pixelSize: Theme.px(11.5)
+                                    elide: Text.ElideRight
+                                }
+                            }
+                            FlatButton {
+                                id: rowButton
+                                objectName: "railServerToggle-" + sRow.modelData.name
+                                anchors.right: parent.right
+                                anchors.rightMargin: 6
+                                anchors.verticalCenter: parent.verticalCenter
+                                visible: sRow.st.state !== "" && sRow.st.state !== "starting"
+                                text: sRow.st.state === "running" ? "Stop" : "Start"
+                                accent: sRow.st.state === "running" ? Theme.foreground : Theme.primary
+                                font.pixelSize: Theme.px(12)
+                                onClicked: sRow.st.state === "running" ? Accounts.stopServer(sRow.modelData.baseUrl) : Accounts.startServer(sRow.modelData.baseUrl)
+                            }
+                        }
+                    }
+                    AppMenuSeparator { width: serversPanel.availableWidth }
+                    AppMenuItem {
+                        width: serversPanel.availableWidth
+                        text: "Model servers…"
+                        onTriggered: { serversPanel.close(); root.serversRequested() }
+                    }
+                }
             }
         }
 

@@ -392,20 +392,38 @@ Rectangle {
         AppMenuItem { text: "Ask first"; marked: root.session.askFirst; onTriggered: root.session.setAskFirstForSession(!root.session.askFirst) }
     }
 
+    // The thinking levels, asked for when the model is known (ready for
+    // the first click) and again when the menu opens; "reading" until the
+    // agent answers (a second at most).
+    property bool levelsReading: false
+    function readLevels() {
+        if (!root.session || root.session.harness === "demo") return
+        levelsReading = true
+        levelsWait.restart()
+        root.session.loadThinkingLevels()
+    }
+    Timer { id: levelsWait; interval: 1500; onTriggered: root.levelsReading = false }
+    Connections {
+        target: root.session
+        function onThinkingLevelsChanged() { root.levelsReading = false }
+        function onModelIdChanged() { root.readLevels() }
+    }
     AppMenu {
         id: thinkingMenu
         // (Nothing to pick: say so rather than an empty menu.)
         AppMenuItem {
             visible: root.session.thinkingLevels.length === 0
             enabled: false
-            text: root.session.harness === "hermes" ? "Hermes sets its reasoning in its own config" : "No thinking levels for this model"
+            text: root.levelsReading ? "Reading thinking levels…"
+                : root.session.harness === "hermes" ? "Hermes sets its reasoning in its own config" : "No thinking levels for this model"
         }
         Repeater {
             model: root.session.thinkingLevels
             AppMenuItem {
                 required property string modelData
                 text: modelData
-                marked: modelData === root.session.thinking
+                // (No level set yet: the agent's default.)
+                marked: modelData === root.session.thinking || (modelData === "default" && root.session.thinking === "")
                 onTriggered: root.session.setThinkingLevel(modelData)
             }
         }
@@ -716,7 +734,7 @@ Rectangle {
             maxLabel: 120
             enabled: root.session.harness !== "demo"
             tip: "Thinking: " + (root.session.thinking || "default")
-            onClicked: { root.session.loadThinkingLevels(); thinkingMenu.popup() }
+            onClicked: { root.readLevels(); thinkingMenu.popup() }
         }
         ComposerLabelButton {
             id: modelButton

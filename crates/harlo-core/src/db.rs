@@ -411,6 +411,13 @@ impl Db {
         Ok(self.conn.query_row("SELECT value FROM kv WHERE key = ?1", [key], |r| r.get(0)).optional()?)
     }
 
+    /// The settings whose keys start with `prefix`: `(key, value)`.
+    pub fn with_prefix(&self, prefix: &str) -> Result<Vec<(String, String)>> {
+        let mut q = self.conn.prepare("SELECT key, value FROM kv WHERE substr(key, 1, length(?1)) = ?1 ORDER BY key")?;
+        let rows = q.query_map([prefix], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
     pub fn set(&self, key: &str, value: &str) -> Result<()> {
         self.conn.execute(
             "INSERT INTO kv (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = ?2",
@@ -423,6 +430,17 @@ impl Db {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn settings_by_prefix() {
+        let db = Db::open_in_memory().unwrap();
+        db.set("model_server.http://127.0.0.1:8080/v1", "a").unwrap();
+        db.set("model_server.http://127.0.0.1:11434/v1", "b").unwrap();
+        db.set("model_servers_other", "c").unwrap();
+        db.set("tray", "0").unwrap();
+        let got: Vec<String> = db.with_prefix("model_server.").unwrap().into_iter().map(|(k, _)| k).collect();
+        assert_eq!(got, ["model_server.http://127.0.0.1:11434/v1", "model_server.http://127.0.0.1:8080/v1"]);
+    }
 
     #[test]
     fn stores_schedules() {

@@ -27,6 +27,14 @@ pub fn get(key: &str) -> Option<LiveRef> {
     map().lock().unwrap().get(key).cloned()
 }
 
+/// Restarts an agent's idle sessions (after harlo changed its config, which
+/// it reads only when it starts): each starts again when next used.
+pub fn restart_idle(harness: &str) {
+    for live in map().lock().unwrap().values().filter(|l| l.harness == harness) {
+        live.handle.restart_if_idle();
+    }
+}
+
 /// Forgets a session. Its harness stops once no view holds the handle.
 pub fn remove(key: &str) -> Option<LiveRef> {
     map().lock().unwrap().remove(key)

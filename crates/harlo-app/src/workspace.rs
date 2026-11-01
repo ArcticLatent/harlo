@@ -2475,7 +2475,8 @@ impl Workspace {
         if let Some(s) = harlo_core::starters::find(&starter) {
             message = harlo_core::starters::wrap(s, &message);
         }
-        let first = FirstPrompt { text: message, attachments: attachments.iter().map(|p| PathBuf::from(url_to_path(p))).collect(), goal };
+        let server = crate::accounts::managed_server(&harness_name, &model);
+        let first = FirstPrompt { text: message, attachments: attachments.iter().map(|p| PathBuf::from(url_to_path(p))).collect(), goal, server };
         if first.text.trim().is_empty() && first.attachments.is_empty() {
             return QString::default();
         }
@@ -3543,7 +3544,7 @@ impl Workspace {
             message = harlo_core::starters::wrap(st, &message);
         }
         let attachments: Vec<PathBuf> = form["attachments"].as_array().map(|a| a.iter().filter_map(|p| p.as_str().map(|p| PathBuf::from(url_to_path(p)))).collect()).unwrap_or_default();
-        let first = FirstPrompt { text: message, attachments, goal: None };
+        let first = FirstPrompt { text: message, attachments, goal: None, server: None };
         let title: String = {
             let t = harlo_harness::file_blocks::title_text(&prompt);
             let t = if t.is_empty() { starter_info.map(|s| s.label.to_owned()).unwrap_or_default() } else { t };
@@ -3561,6 +3562,8 @@ impl Workspace {
             let letter = (b'a' + idx as u8) as char;
             let Some(kind) = HarnessKind::parse(harness) else { continue };
             let lane_ref = (id.clone(), idx as i64);
+            // (Its model's server, started first if stopped.)
+            let first = FirstPrompt { server: crate::accounts::managed_server(harness, model), ..first.clone() };
             if use_worktrees {
                 let branch = format!("harlo/run-{}-{}-{letter}", if slug.is_empty() { "run" } else { &slug }, &id[id.len().saturating_sub(4)..]);
                 let project = project.as_ref().unwrap();
@@ -4685,6 +4688,9 @@ struct FirstPrompt {
     /// omp: start a goal with the text as its objective instead of sending
     /// it (`Some(token budget)`, 0 for none).
     goal: Option<u64>,
+    /// Its model's server when harlo set it up here (name, address):
+    /// started first if it's stopped.
+    server: Option<(String, String)>,
 }
 
 /// Sends a new session's first message (attachments are read off the UI
@@ -4693,6 +4699,18 @@ struct FirstPrompt {
 fn send_first_prompt(key: &str, first: FirstPrompt, notify: Option<CxxQtThread<Workspace>>) {
     let Some(live) = registry::get(key) else { return };
     crate::runtime().spawn_blocking(move || {
+        if let Some((name, url)) = first.server.as_ref().filter(|(_, url)| !harlo_core::model_servers::answers(url)) {
+            let say = |text: String, error: bool| {
+                if let Some(thread) = &notify {
+                    let _ = thread.queue(move |this| this.set_notice_text(&text, error));
+                }
+            };
+            say(format!("Starting {name}…"), false);
+            match crate::accounts::ensure_running(url) {
+                Ok(()) => say(String::new(), false),
+                Err(e) => return say(format!("{name} didn't start, so your message wasn't sent: {e}"), true),
+            }
+        }
         let prepared = harlo_core::attach::prepare(&first.attachments);
         let text = format!("{}{}", prepared.prefix, first.text);
         let Some(budget) = first.goal else {

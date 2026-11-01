@@ -13,6 +13,7 @@ fn alias(id: &str) -> &str {
         "gemini" | "google-gemini-cli" | "google-vertex" | "vertex" => "google",
         "copilot" => "github-copilot",
         "ollama-cloud" => "ollama",
+        "llamacpp" | "llama-cpp" => "llama.cpp",
         other => other,
     }
 }
@@ -31,9 +32,12 @@ pub fn data_url(provider: &str, color: &str) -> String {
     let Some(id) = id_for(provider) else { return String::new() };
     let svg = LOGOS.iter().find(|(i, _)| *i == id).map(|(_, s)| *s).unwrap_or("");
     let color = if color.starts_with('#') && color.len() <= 9 { color } else { "#888888" };
-    // Unfilled shapes inherit the root's fill; explicit dark fills follow it.
-    let recoloured = svg
-        .replacen("<svg ", &format!("<svg fill=\"{color}\" "), 1)
+    // Unfilled shapes inherit the root's fill (given one unless it has its
+    // own: twice is invalid, and the logo isn't drawn); explicit dark fills
+    // follow it.
+    let root_fill = svg.split_once('>').is_some_and(|(tag, _)| tag.contains(" fill="));
+    let recoloured = if root_fill { svg.to_owned() } else { svg.replacen("<svg ", &format!("<svg fill=\"{color}\" "), 1) };
+    let recoloured = recoloured
         .replace("fill=\"black\"", &format!("fill=\"{color}\""))
         .replace("fill=\"#000\"", &format!("fill=\"{color}\""))
         .replace("fill=\"#000000\"", &format!("fill=\"{color}\""))
@@ -66,12 +70,39 @@ mod tests {
         assert_eq!(id_for("openai-codex"), Some("openai"));
         assert_eq!(id_for("anthropic/claude-sonnet"), Some("anthropic"));
         assert_eq!(id_for("Gemini"), Some("google"));
-        assert_eq!(id_for("llama.cpp"), None);
+        assert_eq!(id_for("llama.cpp"), Some("llama.cpp"));
+        assert_eq!(id_for("llamacpp/Qwen3-4B"), Some("llama.cpp"));
+        assert_eq!(id_for("vllm"), None);
         assert_eq!(base64(b"Man"), "TWFu");
         assert_eq!(base64(b"Ma"), "TWE=");
         assert_eq!(base64(b"M"), "TQ==");
         let url = data_url("openai-codex", "#e0e0e0");
         assert!(url.starts_with("data:image/svg+xml;base64,"));
-        assert_eq!(data_url("llama.cpp", "#fff"), "");
+        assert_eq!(data_url("vllm", "#fff"), "");
+    }
+
+    /// Every logo, recoloured, is still valid: its `<svg>` tag has no
+    /// attribute twice (Qt draws nothing then), and it takes the colour.
+    #[test]
+    fn recoloured_logos_stay_valid() {
+        for (id, svg) in LOGOS {
+            let mut out = svg.to_string();
+            for dark in ["black", "#000", "#000000", "currentColor"] {
+                out = out.replace(&format!("fill=\"{dark}\""), "fill=\"#123456\"");
+            }
+            let root_fill = svg.split_once('>').is_some_and(|(tag, _)| tag.contains(" fill="));
+            if !root_fill {
+                out = out.replacen("<svg ", "<svg fill=\"#123456\" ", 1);
+            }
+            let tag = out.split_once('>').map(|(t, _)| t.to_owned()).unwrap_or_default();
+            let names: Vec<&str> = tag.split_whitespace().skip(1).filter_map(|a| a.split_once('=').map(|(n, _)| n)).collect();
+            let mut seen = std::collections::HashSet::new();
+            for n in &names {
+                assert!(seen.insert(*n), "{id}: {n} twice in {tag}");
+            }
+            // (The real function, too.)
+            let url = data_url(id, "#123456");
+            assert!(url.starts_with("data:image/svg+xml;base64,"), "{id}");
+        }
     }
 }

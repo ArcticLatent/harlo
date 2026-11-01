@@ -119,6 +119,8 @@ fn main() {
                 "qml/UpdateToasts.qml",
                 "qml/PhoneFirewallToast.qml",
                 "qml/AddHostDialog.qml",
+                "qml/ModelServerDialog.qml",
+                "qml/SetupServerDialog.qml",
                 "qml/PiPackages.qml",
                 "qml/SpecsPanel.qml",
                 "qml/PlanDock.qml",
@@ -157,6 +159,7 @@ fn main() {
                 "qml/AppButtonBox.qml",
                 "qml/DialogButton.qml",
                 "qml/AppTextField.qml",
+                "qml/AppProgressBar.qml",
                 "qml/AppCheckBox.qml",
                 "qml/AttachmentChip.qml",
             ]))
@@ -180,6 +183,6 @@ fn main() {
         .qt_module("Widgets")
         .qt_module("Test")
         .qt_module("Multimedia")
-        .files(["src/qt_base.rs", "src/chat_session.rs", "src/workspace.rs", "src/git_panel.rs", "src/file_browser.rs", "src/text_file.rs", "src/usage_stats.rs", "src/fonts.rs", "src/terminal_session.rs", "src/platform.rs", "src/test_input.rs", "src/dictation.rs", "src/audio.rs", "src/remotes.rs", "src/updates.rs", "src/mcp.rs", "src/phone.rs", "src/accounts.rs", "src/setup.rs", "src/diagrams.rs"])
+        .files(["src/qt_base.rs", "src/chat_session.rs", "src/workspace.rs", "src/git_panel.rs", "src/file_browser.rs", "src/text_file.rs", "src/usage_stats.rs", "src/fonts.rs", "src/terminal_session.rs", "src/platform.rs", "src/test_input.rs", "src/dictation.rs", "src/audio.rs", "src/remotes.rs", "src/updates.rs", "src/mcp.rs", "src/phone.rs", "src/accounts.rs", "src/setup.rs", "src/diagrams.rs", "src/server_setup.rs"])
         .build();
 }

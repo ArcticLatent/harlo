@@ -132,6 +132,51 @@ QtObject {
     /// A provider's name for people (its mark is Icon "harness-<id>").
     // A tool's name as people read it: an MCP server's tools
     // ("mcp__harlo__spec_list") as "harlo spec list".
+    /// A local model's name, the same however its server names it: the
+    /// model, then its size (quantization). llama.cpp's file name
+    /// "Qwen3-4B-UD-Q4_K_XL" and Ollama's "hf.co/unsloth/Qwen3-4B-GGUF:UD-Q4_K_XL"
+    /// are both "Qwen3-4B · UD-Q4_K_XL".
+    function modelLabel(id) {
+        // (Hermes names its servers' models "custom:<server>:<model>".)
+        let name = id.replace(/^custom[\/:][^:\/]+:/, "")
+        let quant = ""
+        // (Wherever it is: an agent may put its server's name in front.)
+        const hf = name.indexOf("hf.co/")
+        if (hf >= 0) {
+            const parts = name.slice(hf + 6).split(":")
+            name = parts[0].split("/").pop().replace(/-GGUF$/i, "")
+            quant = parts[1] || ""
+        } else {
+            const m = name.match(/^(.+?)[-_.:]((?:UD-)?(?:I?Q\d[\w]*|TQ\d[\w]*|MXFP\d[\w]*|BF16|F16|F32))$/i)
+            if (m) { name = m[1].split("/").pop(); quant = m[2] }
+        }
+        return quant !== "" ? name + " · " + quant : name
+    }
+    /// Who serves a model, from its id: "provider/model" (pi, OpenCode,
+    /// omp), or Hermes' "custom:<server>:<model>" for its servers (the
+    /// server, not "custom").
+    function providerOf(id) {
+        const hermes = (id || "").match(/^custom[\/:]([^:\/]+):/)
+        return hermes ? hermes[1] : (id || "").split(/[\/:]/)[0]
+    }
+    /// The model server behind a session's model ("provider/model"; Hermes'
+    /// "custom:<server>:<model>"), from Settings → Model servers: `{ name,
+    /// engine ("" for one harlo didn't set up), address (host:port), place
+    /// ("here", "network", "online") }`, or null for a provider's own models.
+    function serverOf(harness, modelId) {
+        if (!modelId || Accounts.revision < 0) return null
+        const hermes = modelId.match(/^custom[\/:]([^:\/]+):/)
+        const name = harness === "hermes" ? (hermes ? hermes[1] : "") : modelId.split("/")[0]
+        // (omp's own providers for a llama.cpp or Ollama it finds on their usual ports.)
+        if (name === "llama.cpp" || (harness === "omp" && name === "ollama"))
+            return { name: name, engine: name === "ollama" ? "Ollama" : "llama.cpp", address: "127.0.0.1:" + (name === "ollama" ? 11434 : 8080), place: "here" }
+        // (Hermes' current model can be "custom:<model>": the server that has it.)
+        const list = JSON.parse(Accounts.servers(harness))
+        const bare = modelId.replace(/^custom[\/:]/, "")
+        const sv = list.find(s => s.name === name) || (harness === "hermes" ? list.find(s => (s.models || []).includes(bare)) : undefined)
+        if (!sv) return null
+        return { name: sv.name, engine: sv.engine === "Your command" ? "" : (sv.engine || ""), address: sv.baseUrl.replace(/^https?:\/\//, "").replace(/\/v1\/?$/, ""), place: sv.place }
+    }
     function toolLabel(name) {
         const m = /^mcp__([^_]+(?:_[^_]+)*?)__(.+)$/.exec(name || "")
         return m ? m[1] + " " + m[2].replace(/_/g, " ") : name

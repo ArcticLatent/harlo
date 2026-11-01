@@ -336,6 +336,7 @@ ApplicationWindow {
             onShortcutsRequested: shortcutsDialog.open()
             onPairDeviceRequested: pairDeviceDialog.open()
             onPlanRequested: { settingsDialog.page = "usage"; settingsDialog.open() }
+            onServersRequested: settingsDialog.openPage("servers")
         }
 
         RightRail {
@@ -833,6 +834,10 @@ ApplicationWindow {
             settingsDialog.close()
             if (!windowSettings.terminalOpen) win.toggleTerminal()
             Qt.callLater(() => terminal.runIn(folder, command))
+        }
+        onOpenFileRequested: path => {
+            settingsDialog.close()
+            chat.requestOpenFile(path)
         }
         onRunInTerminalRequested: command => {
             settingsDialog.close()
@@ -2747,7 +2752,7 @@ ApplicationWindow {
         ScriptAction { script: { chat.session.loadThinkingLevels() } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
-            win.check(chat.session.thinkingLevels.length === 2 && chat.session.thinkingLevels[1] === "high", "its variants are the thinking levels (" + chat.session.thinkingLevels + ")")
+            win.check(chat.session.thinkingLevels.length === 3 && chat.session.thinkingLevels[0] === "default" && chat.session.thinkingLevels[2] === "high", "its variants are the thinking levels, after its default (" + chat.session.thinkingLevels + ")")
             chat.session.setThinkingLevel("high") } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: win.sendByKeys("and now") }

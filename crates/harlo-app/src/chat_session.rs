@@ -205,6 +205,10 @@ pub mod qobject {
         #[qsignal]
         #[cxx_name = "editRequested"]
         fn edit_requested(self: Pin<&mut ChatSession>, text: &QString);
+        /// A message wasn't sent: why (its text goes back in the composer).
+        #[qsignal]
+        #[cxx_name = "sendFailed"]
+        fn send_failed(self: Pin<&mut ChatSession>, message: &QString);
         #[inherit]
         #[qsignal]
         #[cxx_name = "dataChanged"]
@@ -792,6 +796,7 @@ impl ChatSession {
             _ => SendMode::Normal,
         };
         let Some(h) = self.handle().cloned() else { return };
+        let original = text.clone();
         // Plan mode: a plan first, no changes (omp also denies edits).
         let text = if self.plan_mode && mode == SendMode::Normal {
             format!("{text}{}", harlo_harness::file_blocks::PLAN_NOTE)
@@ -805,14 +810,33 @@ impl ChatSession {
             text
         };
         let paths: Vec<PathBuf> = self.attachments.iter().map(|p| PathBuf::from(p.to_string())).collect();
-        if paths.is_empty() {
+        // Its model on a server harlo set up here: started first if stopped.
+        let server = crate::accounts::managed_server(&self.harness.to_string(), &self.model_id.to_string());
+        if paths.is_empty() && server.is_none() {
             h.prompt(&text, Vec::new(), mode);
             return;
         }
         self.as_mut().set_attachments(QStringList::default());
+        let thread = self.qt_thread();
         // Reading files and encoding images can take a moment; keep it off
         // the UI thread.
         crate::runtime().spawn_blocking(move || {
+            if let Some((name, url)) = server.filter(|(_, url)| !harlo_core::model_servers::answers(url)) {
+                let status = |text: Option<String>| {
+                    let _ = thread.queue(move |this| this.set_status_entry("harlo-server".into(), text));
+                };
+                status(Some(format!("Starting {name}…")));
+                let started = crate::accounts::ensure_running(&url);
+                status(None);
+                if let Err(e) = started {
+                    let message = format!("{name} didn't start: {e}");
+                    let _ = thread.queue(move |mut this| {
+                        this.as_mut().edit_requested(&QString::from(&original));
+                        this.as_mut().send_failed(&QString::from(&message));
+                    });
+                    return;
+                }
+            }
             let prepared = harlo_core::attach::prepare(&paths);
             h.prompt(&format!("{}{text}", prepared.prefix), prepared.images, mode);
         });
@@ -1033,11 +1057,20 @@ impl ChatSession {
     pub fn load_models(self: Pin<&mut Self>) {
         self.request_then(json!({ "type": "get_available_models" }), |mut this, data| {
             let mut list = QStringList::default();
+            // (Hermes doesn't say where its models are: its own servers' addresses.)
+            let hermes = (this.harness.to_string() == "hermes").then(|| harlo_core::model_servers::servers(HarnessKind::Hermes));
+            let mut seen = std::collections::HashMap::new();
             for m in data["models"].as_array().into_iter().flatten() {
+                // (omp's leftovers from a local engine that's gone.)
+                if harlo_core::model_servers::stale_discovered(m["provider"].as_str().unwrap_or_default(), m["baseUrl"].as_str().unwrap_or_default(), &mut seen) {
+                    continue;
+                }
                 let s = |k: &str| m[k].as_str().unwrap_or_default().replace('\t', " ");
                 let reasoning = if m["reasoning"].as_bool() == Some(true) { "1" } else { "0" };
                 // Served on this computer or the local network.
-                let local = if m["baseUrl"].as_str().is_some_and(harlo_harness::is_local_url) { "1" } else { "0" };
+                let local = m["baseUrl"].as_str().is_some_and(harlo_harness::is_local_url)
+                    || hermes.as_ref().is_some_and(|servers| harlo_core::model_servers::hermes_local(&format!("{}:{}", s("provider"), s("id")), servers));
+                let local = if local { "1" } else { "0" };
                 list.append(QString::from(&format!("{}\t{}\t{}\t{}\t{}", s("provider"), s("id"), s("name"), reasoning, local)));
             }
             this.as_mut().set_models(list);
@@ -1156,17 +1189,20 @@ impl ChatSession {
                     self.as_mut().rust_mut().requests.retain(|r| r.id != id);
                     self.as_mut().show_front_request();
                 }
-                SessionUpdate::StatusEntry { key, text } => {
-                    let mut this = self.as_mut().rust_mut();
-                    this.status_entries.retain(|(k, _)| *k != key);
-                    if let Some(t) = text {
-                        this.status_entries.push((key, t));
-                    }
-                    let line = this.status_entries.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>().join("  ·  ");
-                    self.as_mut().set_status_line(QString::from(&line));
-                }
+                SessionUpdate::StatusEntry { key, text } => self.as_mut().set_status_entry(key, text),
             }
         }
+    }
+
+    /// One part of the status line (an extension's, or harlo's own).
+    fn set_status_entry(mut self: Pin<&mut Self>, key: String, text: Option<String>) {
+        let mut this = self.as_mut().rust_mut();
+        this.status_entries.retain(|(k, _)| *k != key);
+        if let Some(t) = text {
+            this.status_entries.push((key, t));
+        }
+        let line = this.status_entries.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>().join("  ·  ");
+        self.as_mut().set_status_line(QString::from(&line));
     }
 
     fn show_front_request(mut self: Pin<&mut Self>) {

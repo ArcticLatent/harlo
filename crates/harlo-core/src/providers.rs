@@ -89,7 +89,12 @@ pub fn check(kind: HarnessKind, configured: &str, runtime: &tokio::runtime::Hand
         },
         HarnessKind::Pi | HarnessKind::Omp => runtime.block_on(rpc_models(kind, program.clone(), scratch)),
         // An ACP agent: the models a session of its offers.
-        HarnessKind::Hermes => harlo_harness::acp::models(kind, &program).map(|m| m.into_iter().map(|(id, name)| (id, name, false)).collect()).map_err(|e| format!("{e:#}")),
+        HarnessKind::Hermes => harlo_harness::acp::models(kind, &program)
+            .map(|m| {
+                let servers = crate::model_servers::servers(kind);
+                m.into_iter().map(|(id, name)| (id.clone(), name, crate::model_servers::hermes_local(&id, &servers))).collect()
+            })
+            .map_err(|e| format!("{e:#}")),
         HarnessKind::Demo => Ok(Vec::new()),
     };
     match models {
@@ -147,10 +152,13 @@ async fn rpc_models(kind: HarnessKind, program: PathBuf, cwd: PathBuf) -> Result
         Ok(Err(e)) => return Err(format!("{e:#}")),
         Err(_) => return Err("it didn't answer in time".to_owned()),
     };
+    let mut seen = std::collections::HashMap::new();
     Ok(data["models"]
         .as_array()
         .into_iter()
         .flatten()
+        // (omp's leftovers from a local engine that's gone.)
+        .filter(|m| !crate::model_servers::stale_discovered(m["provider"].as_str().unwrap_or_default(), m["baseUrl"].as_str().unwrap_or_default(), &mut seen))
         .filter_map(|m| {
             let id = m["id"].as_str()?;
             let provider = m["provider"].as_str().unwrap_or_default();

@@ -441,7 +441,7 @@ pub fn saved(path: &Path) -> SavedSession {
     let name = open_db()
         .and_then(|db| db.query_row("SELECT title FROM session_v2 WHERE id = ?1", [session_id(path)], |r| r.get::<_, Option<String>>(0)).ok().flatten())
         .unwrap_or_default();
-    SavedSession { messages, model, thinking: String::new(), name }
+    SavedSession { messages, model_id: model.clone(), model, thinking: String::new(), name }
 }
 
 /// The ids of a session's prompts, in order (as `history` shows them).

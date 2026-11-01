@@ -257,13 +257,22 @@ impl Transcript {
             E::Compaction { started: false, error: None, .. } => {
                 self.push_notice(NoticeLevel::Info, "Context compacted".into())
             }
-            E::Retry { started: true, attempt, max_attempts, error } => self.push_notice(
-                NoticeLevel::Warning,
-                match max_attempts {
+            E::Retry { started: true, attempt, max_attempts, error } => {
+                let text = match max_attempts {
                     0 => format!("Retrying (attempt {attempt}): {}", error.as_deref().unwrap_or("provider error")),
                     max => format!("Retrying ({attempt}/{max}): {}", error.as_deref().unwrap_or("provider error")),
-                },
-            ),
+                };
+                // A run of retries: one line, the latest.
+                let last = self.items.last_mut().filter(|i| i.role == Role::Notice(NoticeLevel::Warning) && matches!(i.blocks.first(), Some(Block::Text(t)) if t.starts_with("Retrying (")));
+                match last {
+                    Some(item) => {
+                        item.blocks = vec![Block::Text(text)];
+                        item.rev += 1;
+                        true
+                    }
+                    None => self.push_notice(NoticeLevel::Warning, text),
+                }
+            }
             E::Retry { started: false, error: Some(err), .. } => {
                 self.push_notice(NoticeLevel::Error, format!("Retry failed: {err}"))
             }
@@ -943,6 +952,22 @@ mod tests {
         t.apply(&HarnessEvent::Notice { level: NoticeLevel::Warning, text: "MCP server failed".into(), system: true });
         t.apply(&HarnessEvent::Notice { level: NoticeLevel::Info, text: "/context output".into(), system: false });
         assert_eq!(t.rows().len(), 2);
+    }
+
+    #[test]
+    fn retries_show_as_one_line() {
+        let mut t = Transcript::new();
+        let retry = |n| HarnessEvent::Retry { started: true, attempt: n, max_attempts: 0, error: Some("ECONNREFUSED".into()) };
+        for n in 1..=6 {
+            t.apply(&retry(n));
+        }
+        let rows = t.rows();
+        assert_eq!(rows.len(), 1);
+        assert!(format!("{rows:?}").contains("attempt 6"), "{rows:?}");
+        // After something else: a new line.
+        t.apply(&HarnessEvent::Notice { level: NoticeLevel::Warning, text: "MCP server failed".into(), system: true });
+        t.apply(&retry(1));
+        assert_eq!(t.rows().len(), 3);
     }
 
     #[test]

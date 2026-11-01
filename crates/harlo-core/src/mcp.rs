@@ -122,7 +122,7 @@ fn hermes_home() -> PathBuf {
 
 /// Runs `hermes config …` here, or on the host a remote path is on; its
 /// output. None: Hermes isn't there.
-fn hermes(path: &Path, args: &[&str]) -> Result<Option<String>> {
+pub(crate) fn hermes(path: &Path, args: &[&str]) -> Result<Option<String>> {
     let out = match crate::remote::split(path) {
         Some((name, _)) => {
             if !crate::remote::found_on(&name, "hermes") {

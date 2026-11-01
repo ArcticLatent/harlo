@@ -219,6 +219,9 @@ pub struct SavedSession {
     pub messages: Vec<Value>,
     /// Last selected model id (`modelId`, or omp's `provider/id`).
     pub model: String,
+    /// The same with its provider, as harlo names models (`provider/id`;
+    /// "" when the file doesn't say).
+    pub model_id: String,
     pub thinking: String,
     /// The name it was given ("" if none).
     pub name: String,
@@ -239,6 +242,7 @@ pub fn parse_saved(text: &str) -> SavedSession {
     let mut entries: Vec<Value> = Vec::new();
     let mut index: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let (mut model, mut thinking, mut name) = (String::new(), String::new(), String::new());
+    let mut model_id = String::new();
     for line in text.lines() {
         let Ok(entry) = serde_json::from_str::<Value>(line) else { continue };
         match entry["type"].as_str() {
@@ -246,6 +250,11 @@ pub fn parse_saved(text: &str) -> SavedSession {
             Some("session_info") => name = entry["name"].as_str().unwrap_or_default().trim().to_owned(),
             Some("model_change") => {
                 model = entry["modelId"].as_str().or_else(|| entry["model"].as_str()).unwrap_or_default().to_owned();
+                // pi: `provider` + `modelId`; omp: `model` as `provider/id`.
+                model_id = match entry["provider"].as_str() {
+                    Some(p) if !p.is_empty() && !model.is_empty() => format!("{p}/{model}"),
+                    _ => model.clone(),
+                };
             }
             Some("thinking_level_change") => {
                 thinking = entry["thinkingLevel"].as_str().unwrap_or_default().to_owned();
@@ -284,8 +293,15 @@ pub fn parse_saved(text: &str) -> SavedSession {
                 _ => None,
             }
         })
-        .collect();
-    SavedSession { messages, model, thinking, name }
+        .collect::<Vec<Value>>();
+    // No model change in it: the model of its last reply.
+    if !model_id.contains('/') {
+        let last = messages.iter().rev().find(|m| m["role"] == "assistant" && m["provider"].is_string() && m["model"].is_string());
+        if let Some(m) = last {
+            model_id = format!("{}/{}", m["provider"].as_str().unwrap_or_default(), m["model"].as_str().unwrap_or_default());
+        }
+    }
+    SavedSession { messages, model, model_id, thinking, name }
 }
 
 /// Converts bytes to text, dropping a partial first line (tail reads) or
@@ -325,6 +341,18 @@ fn first_line(s: &str, max: usize) -> String {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn a_saved_session_knows_its_models_provider() {
+        let pi = r#"{"type":"model_change","id":"a","parentId":null,"provider":"qwen3-4b","modelId":"Qwen3-4B-UD-Q4_K_XL"}"#;
+        let s = parse_saved(pi);
+        assert_eq!((s.model.as_str(), s.model_id.as_str()), ("Qwen3-4B-UD-Q4_K_XL", "qwen3-4b/Qwen3-4B-UD-Q4_K_XL"));
+        let omp = r#"{"type":"model_change","id":"a","parentId":null,"model":"llama.cpp/Qwen3-4B-UD-Q4_K_XL"}"#;
+        assert_eq!(parse_saved(omp).model_id, "llama.cpp/Qwen3-4B-UD-Q4_K_XL");
+        // No model change: its last reply's.
+        let reply = r#"{"type":"message","id":"m","parentId":null,"message":{"role":"assistant","content":[],"provider":"qwen3-4b","model":"Qwen3-4B"}}"#;
+        assert_eq!(parse_saved(reply).model_id, "qwen3-4b/Qwen3-4B");
+    }
 
     fn write(dir: &Path, name: &str, lines: &[&str]) -> PathBuf {
         let path = dir.join(name);

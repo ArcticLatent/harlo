@@ -91,13 +91,65 @@ Rectangle {
                 spacing: 10
                 readonly property var r: root.report || ({})
 
-                // The model, and when the session started.
-                Label {
+                // The model: its name, what serves it (an engine on this
+                // computer or the network, else its provider), when it started.
+                Rectangle {
+                    id: modelCard
+                    visible: !!body.r.model
+                    readonly property string fullId: root.session.modelId || (body.r.provider ? body.r.provider + "/" + (body.r.model || "") : (body.r.model || ""))
+                    readonly property var server: Theme.serverOf(root.session.harness, modelCard.fullId)
+                    readonly property string servedBy: !server ? (body.r.provider || "")
+                        : [server.engine || server.name,
+                           server.place === "here" ? "on this computer (" + server.address + ")" : server.place === "network" ? "on your network (" + server.address + ")" : server.address].filter(s => s).join(" · ")
                     Layout.fillWidth: true
-                    text: [body.r.provider && body.r.model ? body.r.provider + " / " + body.r.model : (body.r.model || ""), root.when(body.r.started)].filter(s => s).join("  ·  ")
-                    color: Theme.textMuted
-                    font.pixelSize: Theme.px(13)
-                    elide: Text.ElideRight
+                    implicitHeight: modelCol.implicitHeight + 28
+                    radius: 12
+                    color: Theme.raised
+                    border.color: Theme.hairline
+                    ColumnLayout {
+                        id: modelCol
+                        x: 14
+                        y: 14
+                        width: parent.width - 28
+                        spacing: 4
+                        Label { text: "MODEL"; color: Theme.label; font.pixelSize: Theme.px(11); font.weight: Font.Medium; font.letterSpacing: Theme.px(11) * 0.07 }
+                        Label {
+                            Layout.fillWidth: true
+                            Layout.topMargin: 2
+                            text: Theme.modelLabel(body.r.model || "")
+                            color: Theme.text
+                            font.pixelSize: Theme.px(15)
+                            font.weight: Font.Medium
+                            elide: Text.ElideRight
+                        }
+                        // What serves it, with its logo: the engine's on your own
+                        // server, else the provider's.
+                        RowLayout {
+                            Layout.fillWidth: true
+                            visible: modelCard.servedBy !== ""
+                            spacing: 6
+                            ProviderLogo {
+                                provider: modelCard.server ? (modelCard.server.engine || modelCard.server.name).toLowerCase() : (body.r.provider || "")
+                                color: Theme.textMuted
+                                implicitWidth: 14
+                                implicitHeight: 14
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                text: modelCard.servedBy
+                                color: Theme.textMuted
+                                font.pixelSize: Theme.px(12.5)
+                                elide: Text.ElideRight
+                            }
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            visible: text !== ""
+                            text: body.r.started ? "Started " + root.when(body.r.started) : ""
+                            color: Theme.textFaint
+                            font.pixelSize: Theme.px(12)
+                        }
+                    }
                 }
 
                 // Context window

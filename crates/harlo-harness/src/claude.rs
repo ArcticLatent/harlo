@@ -311,7 +311,7 @@ pub fn saved(text: &str) -> crate::store::SavedSession {
             ai = t.to_owned();
         }
     }
-    crate::store::SavedSession { messages, model, thinking: String::new(), name: if custom.is_empty() { ai } else { custom } }
+    crate::store::SavedSession { messages, model, model_id: String::new(), thinking: String::new(), name: if custom.is_empty() { ai } else { custom } }
 }
 
 /// The ids (`uuid`) of the prompts in a transcript, in the order harlo

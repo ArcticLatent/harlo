@@ -19,6 +19,8 @@ Popup {
     signal signInRequested(string agent, string label)
     /// MCP sign-in: run this in a terminal.
     signal runInTerminalRequested(string command)
+    /// A file to open in harlo's editor (an agent's config, a log).
+    signal openFileRequested(string path)
     /// A command in a terminal in `folder` (`ssh://host/…`: on that host).
     signal runOnHostRequested(string folder, string command)
     /// Where a page's floating action bar goes.
@@ -42,6 +44,7 @@ Popup {
         { id: "remote", title: "Remote Instances", icon: "server", group: "agents", keywords: "remote ssh server host machine nas instance connect" },
         { id: "about", title: "About Harlo", icon: "information", group: "about", keywords: "about version release licence license mit website source code github changelog what's new report problem issue bug logs" },
         { id: "providers", title: "Providers", icon: "robot-2", group: "agents", keywords: "providers harnesses claude opencode pi omp oh my pi binary path program agent models version enable disable debug log logs protocol crash diagnostics goal subagent model role sign in login log in account accounts api key oauth credentials" },
+        { id: "servers", title: "Model servers", icon: "server", group: "agents", keywords: "model servers local models ollama lm studio llama.cpp vllm sglang gateway openai compatible custom provider models.json models.yml opencode.json pi omp opencode hermes basalt" },
         { id: "packages", title: "pi packages", icon: "code-box", group: "agents", keywords: "pi packages extensions skills prompts themes install update remove npm git project" },
     ]
     // (About goes last, under no heading.)
@@ -474,7 +477,7 @@ Popup {
                     Layout.fillWidth: true
                     sourceComponent: ({
                         general: generalPage, appearance: appearancePage, notifications: notificationsPage, voice: voicePage, devices: devicesPage,
-                        shortcuts: shortcutsPage, projects: projectsPage, worktrees: worktreesPage, git: gitPage, schedules: schedulesPage, providers: providersPage, packages: packagesPage, remote: remotePage, mcp: mcpPage, orchestration: orchestrationPage,
+                        shortcuts: shortcutsPage, projects: projectsPage, worktrees: worktreesPage, git: gitPage, schedules: schedulesPage, providers: providersPage, servers: serversPage, packages: packagesPage, remote: remotePage, mcp: mcpPage, orchestration: orchestrationPage,
                         about: aboutPage
                     })[root.page] || null
                 }
@@ -2669,6 +2672,428 @@ Popup {
                             onClicked: Remotes.connectHost(hostBox.modelData.name)
                         }
                     }
+                    }
+                }
+            }
+        }
+    }
+
+    // Your own model servers, for pi and Oh My Pi (their models files).
+    Component {
+        id: serversPage
+        ColumnLayout {
+            id: srv
+            spacing: 0
+            property int revision: 0
+            readonly property var agents: (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()) : [])
+                .filter(p => ["pi", "omp", "opencode", "hermes"].includes(p.id) && p.state !== "missing")
+            // One row per server, with the agents that have it.
+            readonly property var list: {
+                const rows = []
+                if (revision < 0 || Accounts.revision < 0) return rows
+                for (const a of agents) {
+                    for (const sv of JSON.parse(Accounts.servers(a.id))) {
+                        const same = rows.find(r => r.name === sv.name && r.baseUrl === sv.baseUrl)
+                        if (same) { same.agents.push(a.label); same.agentIds.push(a.id) }
+                        else rows.push({ name: sv.name, baseUrl: sv.baseUrl, models: sv.models, place: sv.place, managed: sv.managed, hermesOk: sv.hermesOk !== false, engine: sv.engine || "", contexts: sv.contexts || [], agents: [a.label], agentIds: [a.id] })
+                    }
+                }
+                // Set up by harlo, in no agent yet.
+                for (const sv of JSON.parse(Accounts.servers("")))
+                    rows.push({ name: sv.name, baseUrl: sv.baseUrl, models: sv.models, place: sv.place, managed: true, hermesOk: sv.hermesOk !== false, engine: sv.engine || "", contexts: sv.contexts || [], agents: [], agentIds: [] })
+                return rows
+            }
+            // What a row says it runs: engine · models · context, then where.
+            // A server: its engine (and port when there are two of it), or
+            // the name of one harlo didn't set up.
+            function title(row) {
+                if (!row.engine) return row.name
+                const port = row.baseUrl.replace(/^https?:\/\/[^:\/]+:?/, "").replace(/\/.*$/, "")
+                const twin = srv.list.filter(r => r.engine === row.engine).length > 1
+                return row.engine + (twin && port ? " · " + port : "")
+            }
+            // Its models, one a line, with their context; then where it is
+            // and the name agents list it under.
+            function describe(row) {
+                const lines = row.models.map((id, i) => {
+                    const c = (row.contexts || [])[i]
+                    // (Ollama says it only while running: harlo writes it down then.)
+                    return Theme.modelLabel(id) + " · " + (c > 0 ? Math.round(c / 1024) + "k context" : row.managed ? "context set when it starts" : "context not given")
+                })
+                if (lines.length === 0) lines.push("No models yet")
+                const where = row.baseUrl.replace(/^https?:\/\//, "").replace(/\/v1\/?$/, "")
+                return lines.join("\n") + "\n" + where + (row.engine ? " · in agents as “" + row.name + "”" : "")
+            }
+            ModelServerDialog { id: modelServerDialog; onAdded: { Accounts.loadServers(); Workspace.refreshProviders() } }
+            // A server one agent has, added to another as it is there.
+            function copy(row, agent) {
+                const taken = [...new Set((agent.modelIds || []).map(m => m.split(/[\/:]/)[0]).filter(p => p !== ""))]
+                // (From an agent that has it, else what harlo saved at its address.)
+                const err = Accounts.copyServer(row.agentIds.length > 0 ? row.agentIds[0] : row.baseUrl, agent.id, row.name, JSON.stringify(taken))
+                if (err !== "" && err !== "OPENCODE_BUSY") { Workspace.showNotice(err, true); return false }
+                if (err === "OPENCODE_BUSY") Workspace.showNotice("Added. OpenCode's open sessions get its models once they're all closed.", false)
+                Accounts.loadServers()
+                Workspace.refreshProviders()
+                return true
+            }
+            // Out of one agent (the others keep it).
+            function uncopy(row, agent) {
+                const err = Accounts.removeServerFrom(agent.id, row.name)
+                if (err === "OPENCODE_BUSY") Workspace.showNotice("Removed. OpenCode's open sessions keep its models until they're all closed.", false)
+                else if (err !== "") { Workspace.showNotice(err, true); return false }
+                Workspace.refreshProviders()
+                return true
+            }
+            // Removing one: from every agent that has it; one harlo set up
+            // is stopped too, and its model file deleted if you like.
+            AppDialog {
+                id: removeServerDialog
+                objectName: "removeServerDialog"
+                property var row: null
+                property var files: ({ files: [], size: 0 })
+                function ask(r) {
+                    row = r
+                    files = r.managed ? JSON.parse(Accounts.serverFiles(r.baseUrl)) : ({ files: [], size: 0 })
+                    deleteFiles.checked = true
+                    open()
+                }
+                title: row ? "Remove " + row.name + "?" : ""
+                width: Math.min(460, (Overlay.overlay ? Overlay.overlay.width : 500) - 40)
+                footer: AppButtonBox {
+                    DialogButton { text: "Cancel"; DialogButtonBox.buttonRole: DialogButtonBox.RejectRole }
+                    DialogButton { objectName: "removeServerConfirm"; text: "Remove"; DialogButtonBox.buttonRole: DialogButtonBox.DestructiveRole }
+                }
+                onDiscarded: {
+                    const err = Accounts.removeServer(row.name, row.baseUrl, files.files.length > 0 && deleteFiles.checked)
+                    if (err === "OPENCODE_BUSY") Workspace.showNotice("Removed. OpenCode's open sessions keep its models until they're all closed.", false)
+                    else if (err !== "") Workspace.showNotice(err, true)
+                    Workspace.refreshProviders()
+                    close()
+                }
+                ColumnLayout {
+                    width: parent.width
+                    spacing: 8
+                    Hint {
+                        color: Theme.foreground
+                        text: !removeServerDialog.row ? "" : removeServerDialog.row.agents.length === 0 ? "No agent uses it; harlo stops it and forgets how to start it."
+                            : "harlo takes it out of " + removeServerDialog.row.agents.join(", ") + (removeServerDialog.row.agents.length === 1 ? "" : " (each one's own file)")
+                              + (removeServerDialog.row.managed ? ", stops it and forgets how to start it." : ". The server itself keeps running where it is.")
+                    }
+                    AppCheckBox {
+                        id: deleteFiles
+                        objectName: "removeServerFiles"
+                        visible: removeServerDialog.files.files.length > 0
+                        text: "Also delete its model file (" + (removeServerDialog.files.size / 1e9).toFixed(1) + " GB)"
+                    }
+                    Hint {
+                        visible: removeServerDialog.row !== null && removeServerDialog.row.managed
+                        text: "The engine stays, for your other servers; setting this one up again downloads the model again if you delete it."
+                    }
+                }
+            }
+            SetupServerDialog { id: setupServer; onAdded: { Accounts.loadServers(); Workspace.refreshProviders() } }
+            // Which are up: now, and every few seconds while this is open.
+            readonly property var states: Accounts.serverStates !== "" ? JSON.parse(Accounts.serverStates) : ({})
+            function check() { Accounts.checkServers(JSON.stringify([...new Set(srv.list.filter(r => r.place !== "online").map(r => r.baseUrl))])) }
+            // (What harlo read last shows at once; read again in the background.)
+            Component.onCompleted: { Accounts.loadServers(); check() }
+            Connections { target: Accounts; function onRevisionChanged() { srv.check() } }
+            Timer { interval: 3000; repeat: true; running: srv.visible; onTriggered: srv.check() }
+            SectionHeader {
+                subtitle: "Models you run yourself or your company serves, for pi, Oh My Pi, OpenCode and Hermes: they show in the model lists (under Local when they run on this computer or your network). Claude Code only uses Anthropic's models."
+            }
+            // The two ways to add one: set one up here, or connect to one.
+            Rectangle {
+                visible: srv.agents.length > 0
+                Layout.fillWidth: true
+                Layout.topMargin: 12
+                implicitHeight: addCol.implicitHeight + 32
+                radius: 12
+                color: Theme.accentSoft
+                border.color: Theme.blend(Theme.hairline, Theme.accent, 0.35)
+                ColumnLayout {
+                    id: addCol
+                    anchors.fill: parent
+                    anchors.margins: 16
+                    spacing: 6
+                    RowLayout {
+                        spacing: 10
+                        Icon { name: "server"; color: Theme.accent; implicitWidth: 18; implicitHeight: 18 }
+                        Label { text: "Run a model on this computer"; color: Theme.foreground; font.pixelSize: Theme.px(14); font.weight: Font.DemiBold }
+                    }
+                    Hint {
+                        text: "harlo installs an engine (llama.cpp, Ollama or Strata), downloads a model that fits your graphics card, starts it and adds it to your agents. Start and Stop it here or from the left bar."
+                    }
+                    RowLayout {
+                        Layout.topMargin: 6
+                        spacing: 8
+                        FlatButton {
+                            objectName: "setupModelServer"
+                            text: "Set up a local model…"
+                            variant: "primary"
+                            font.pixelSize: Theme.px(12.5)
+                            onClicked: { setupServer.addTo = null; setupServer.open() }
+                        }
+                        FlatButton {
+                            objectName: "addModelServer"
+                            text: "Connect to a running server…"
+                            font.pixelSize: Theme.px(12.5)
+                            onClicked: modelServerDialog.open()
+                            ToolTip.visible: hovered
+                            ToolTip.text: "One you run yourself or your company serves (Ollama, LM Studio, vLLM, a gateway…): its address, and harlo finds its models."
+                            ToolTip.delay: 400
+                        }
+                    }
+                }
+            }
+            // Setting one up, in the background (the dialog can be hidden).
+            RowLayout {
+                readonly property var job: ServerSetup.job !== "" ? JSON.parse(ServerSetup.job) : null
+                visible: job !== null && job.state === "running"
+                Layout.topMargin: 12
+                spacing: 8
+                BusyIndicator { implicitWidth: 18; implicitHeight: 18; running: parent.visible }
+                Label { Layout.fillWidth: true; text: parent.job ? parent.job.step : ""; color: Theme.muted; font.pixelSize: Theme.px(12); elide: Text.ElideRight }
+                FlatButton { text: "Show"; font.pixelSize: Theme.px(12); onClicked: setupServer.open() }
+            }
+            Label {
+                visible: srv.list.length > 0
+                Layout.topMargin: 18
+                text: "YOUR SERVERS"
+                color: Theme.blend(Theme.textMuted, Theme.accent, 0.7)
+                font.pixelSize: Theme.px(11.5)
+                font.weight: Font.DemiBold
+                font.letterSpacing: Theme.px(11.5) * 0.07
+            }
+            Label {
+                visible: srv.agents.length === 0
+                Layout.topMargin: 12
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                text: "Model servers are for pi, Oh My Pi, OpenCode and Hermes; none of them is installed."
+                color: Theme.muted
+                font.pixelSize: Theme.px(12.5)
+            }
+            Group {
+                visible: srv.list.length > 0
+                Repeater {
+                    model: srv.list
+                    // A server: its engine's mark with whether it runs under it,
+                    // what it serves and where, the agents that have it; its
+                    // buttons down the right.
+                    Item {
+                        id: serverItem
+                        required property var modelData
+                        required property int index
+                        readonly property var st: srv.states[modelData.baseUrl] || ({ state: "", message: "" })
+                        readonly property bool running: st.state === "running"
+                        readonly property bool local: modelData.place !== "online"
+                        Layout.fillWidth: true
+                        implicitHeight: Math.max(info.implicitHeight, buttons.implicitHeight, mark.implicitHeight) + 28
+                        Rectangle { visible: serverItem.index > 0; width: parent.width; height: 1; color: Theme.hairline }
+                        Column {
+                            id: mark
+                            x: 16
+                            y: 14
+                            spacing: 8
+                            Rectangle {
+                                width: 32
+                                height: 32
+                                radius: 9
+                                color: Theme.controlFill
+                                // (llama.cpp has no logo: a server; one harlo didn't set up too.)
+                                ProviderLogo {
+                                    anchors.centerIn: parent
+                                    implicitWidth: 18
+                                    implicitHeight: 18
+                                    provider: serverItem.modelData.engine ? serverItem.modelData.engine.toLowerCase() : "local"
+                                    color: Theme.textMuted
+                                }
+                            }
+                            Rectangle {
+                                objectName: "serverState-" + serverItem.modelData.name
+                                visible: serverItem.local
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                width: 9
+                                height: 9
+                                radius: 4.5
+                                color: serverItem.running ? Theme.success : serverItem.st.state === "starting" ? Theme.warning : serverItem.st.state === "failed" ? Theme.error : Theme.muted
+                                HoverHandler { id: stateHover }
+                                ToolTip.visible: stateHover.hovered
+                                ToolTip.text: ({ running: serverItem.st.harlo ? "Running (started by harlo)" : "Running", starting: "Starting…", failed: "Didn't start", stopped: "Stopped" })[serverItem.st.state] || "Checking…"
+                                ToolTip.delay: 300
+                            }
+                        }
+                        ColumnLayout {
+                            id: info
+                            x: 60
+                            y: 14
+                            width: parent.width - x - buttons.width - 32
+                            spacing: 3
+                            Label {
+                                Layout.fillWidth: true
+                                text: srv.title(serverItem.modelData)
+                                color: Theme.text
+                                font.pixelSize: Theme.px(14)
+                                font.weight: Font.DemiBold
+                                elide: Text.ElideRight
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                text: srv.describe(serverItem.modelData) + (serverItem.modelData.place === "online" ? "\nOnline service" : "")
+                                color: Theme.muted
+                                font.pixelSize: Theme.px(12)
+                                wrapMode: Text.Wrap
+                            }
+                            // Starting, or why it didn't.
+                            Label {
+                                Layout.fillWidth: true
+                                visible: text !== ""
+                                text: serverItem.st.message || ""
+                                color: serverItem.st.state === "failed" ? Theme.error : Theme.muted
+                                font.pixelSize: Theme.px(12)
+                                wrapMode: Text.Wrap
+                            }
+                            // The agents: ticked ones have it in their config;
+                            // ticking adds it, unticking takes it out.
+                            Flow {
+                                Layout.fillWidth: true
+                                Layout.topMargin: 6
+                                spacing: 16
+                                Repeater {
+                                    model: srv.agents
+                                AppCheckBox {
+                                    id: agentBox
+                                    required property var modelData
+                                    // (Oh My Pi finds Ollama on its usual port by itself.)
+                                    readonly property bool builtIn: modelData.id === "omp" && serverItem.modelData.engine === "Ollama" && /:11434\/v1$/.test(serverItem.modelData.baseUrl)
+                                    readonly property bool has: builtIn || serverItem.modelData.agentIds.includes(modelData.id)
+                                    // Hermes refuses models with under 64k of context.
+                                    readonly property bool fits: modelData.id !== "hermes" || serverItem.modelData.hermesOk
+                                    objectName: "serverAgent-" + serverItem.modelData.name + "-" + modelData.id
+                                    text: modelData.label
+                                    font.pixelSize: Theme.px(12)
+                                    // Changing: what was asked for, locked, with a
+                                    // spinner until the list shows it (the row is
+                                    // made again then).
+                                    property bool busy: false
+                                    property bool want: false
+                                    checked: busy ? want : has
+                                    enabled: !busy && !builtIn && (has || fits)
+                                    onToggled: {
+                                        const want = checked
+                                        checked = Qt.binding(() => agentBox.busy ? agentBox.want : agentBox.has)
+                                        agentBox.want = want
+                                        agentBox.busy = true
+                                        // (After the spinner is drawn: Hermes takes a moment.)
+                                        change.start()
+                                    }
+                                    Timer {
+                                        id: change
+                                        interval: 30
+                                        onTriggered: {
+                                            const ok = agentBox.want ? srv.copy(serverItem.modelData, agentBox.modelData) : srv.uncopy(serverItem.modelData, agentBox.modelData)
+                                            if (ok) giveUp.start()
+                                            else agentBox.busy = false
+                                        }
+                                    }
+                                    // (The list didn't come back: unlocked anyway.)
+                                    Timer { id: giveUp; interval: 10000; onTriggered: agentBox.busy = false }
+                                    BusyIndicator {
+                                        visible: agentBox.busy
+                                        running: visible
+                                        x: agentBox.width + 2
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        implicitWidth: 14
+                                        implicitHeight: 14
+                                    }
+                                    ToolTip.visible: hovered && (builtIn || (!fits && !has))
+                                    ToolTip.text: builtIn ? "Oh My Pi finds Ollama on this port by itself (as “ollama”), with all its models." : "Hermes needs at least 64k tokens of context, more than this serves."
+                                    ToolTip.delay: 300
+                                }
+                                }
+                            }
+                        }
+                        // Its buttons, down the right, as wide as each other.
+                        Column {
+                            id: buttons
+                            anchors.right: parent.right
+                            anchors.rightMargin: 16
+                            y: 14
+                            width: 112
+                            spacing: 4
+                            // Set up by harlo: Start, Stop while it runs.
+                            FlatButton {
+                                objectName: (serverItem.running ? "serverStop-" : "serverStart-") + serverItem.modelData.name
+                                visible: serverItem.modelData.managed && serverItem.local
+                                width: parent.width
+                                enabled: serverItem.st.state !== "starting" && serverItem.st.state !== ""
+                                text: serverItem.running ? "Stop" : serverItem.st.state === "starting" ? "Starting…" : "Start"
+                                variant: serverItem.running ? "outline" : "primary"
+                                font.pixelSize: Theme.px(12)
+                                onClicked: serverItem.running ? Accounts.stopServer(serverItem.modelData.baseUrl) : Accounts.startServer(serverItem.modelData.baseUrl)
+                            }
+                            FlatButton {
+                                readonly property string log: serverItem.modelData.managed && Accounts.revision >= 0 && serverItem.st.state !== "" ? Accounts.serverLog(serverItem.modelData.baseUrl) : ""
+                                visible: log !== ""
+                                width: parent.width
+                                text: "Log"
+                                font.pixelSize: Theme.px(12)
+                                onClicked: root.openFileRequested(log)
+                            }
+                            // An Ollama or llama.cpp harlo set up: more models for it.
+                            FlatButton {
+                                objectName: "serverAddModel-" + serverItem.modelData.name
+                                visible: serverItem.modelData.managed && (serverItem.modelData.engine === "Ollama" || serverItem.modelData.engine === "llama.cpp")
+                                width: parent.width
+                                text: "Add a model…"
+                                font.pixelSize: Theme.px(12)
+                                onClicked: setupServer.addModel(serverItem.modelData)
+                            }
+                            FlatButton {
+                                objectName: "serverRemove-" + serverItem.modelData.name
+                                width: parent.width
+                                text: "Remove"
+                                variant: "danger"
+                                accent: Theme.error
+                                font.pixelSize: Theme.px(12)
+                                onClicked: removeServerDialog.ask(serverItem.modelData)
+                            }
+                        }
+                    }
+                }
+            }
+            Label {
+                visible: srv.agents.length > 0 && srv.list.length === 0
+                Layout.topMargin: 12
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                text: "No model servers yet."
+                color: Theme.muted
+                font.pixelSize: Theme.px(12.5)
+            }
+            Hint { Layout.topMargin: 6; visible: srv.list.length > 0; text: "harlo starts and stops the servers it set up; they stop when harlo quits. Tick an agent to add a server to its config, untick it to take it out." }
+            // The agents' own files, to read.
+            Flow {
+                visible: srv.agents.length > 0
+                Layout.fillWidth: true
+                Layout.topMargin: 18
+                spacing: 4
+                Label { text: "Config files:"; color: Theme.muted; font.pixelSize: Theme.px(12); height: 26; verticalAlignment: Text.AlignVCenter; rightPadding: 4 }
+                Repeater {
+                    model: srv.agents
+                    FlatButton {
+                        required property var modelData
+                        readonly property string file: Accounts.revision >= 0 ? Accounts.serversFile(modelData.id) : ""
+                        visible: file !== ""
+                        text: modelData.label
+                        outlined: false
+                        accent: Theme.accent
+                        font.pixelSize: Theme.px(12)
+                        onClicked: root.openFileRequested(file)
+                        ToolTip.visible: hovered
+                        ToolTip.text: file
+                        ToolTip.delay: 400
                     }
                 }
             }

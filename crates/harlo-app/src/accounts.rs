@@ -33,6 +33,14 @@ pub mod qobject {
         /// optional }, state: "running" | "done" | "failed" | "cancelled",
         /// message }`; "" before one.
         #[qproperty(QString, flow)]
+        /// Asking a model server what it serves (`find_models`): `{ id,
+        /// state: "finding" | "ready" | "failed", baseUrl, name (a
+        /// suggestion), models: [{ id, context }], error }`; "" before one.
+        #[qproperty(QString, server_search, cxx_name = "serverSearch")]
+        /// Model servers' state, by address: `{ <url>: { state: "running" |
+        /// "stopped" | "starting" | "failed", harlo (started by harlo),
+        /// message } }`.
+        #[qproperty(QString, server_states, cxx_name = "serverStates")]
         type Accounts = super::AccountsRust;
     }
 
@@ -76,6 +84,60 @@ pub mod qobject {
         /// every 10 minutes; `revision` follows a change).
         #[qinvokable]
         fn extra_usage(self: Pin<&mut Accounts>, agent: &QString) -> bool;
+        /// An agent's model servers, as last read (`load_servers`): `[{
+        /// name, baseUrl, models: [id], place: "here" | "network" |
+        /// "online", managed (harlo set it up: it starts and stops it) }]`.
+        #[qinvokable]
+        fn servers(self: &Accounts, agent: &QString) -> QString;
+        /// Reads the agents' model servers again, in the background
+        /// (`revision` follows a change).
+        #[qinvokable]
+        fn load_servers(self: Pin<&mut Accounts>);
+        /// Asks the server at `url` what it serves (`serverSearch` follows;
+        /// an empty `url` clears it).
+        #[qinvokable]
+        fn find_models(self: Pin<&mut Accounts>, url: &QString, key: &QString);
+        /// Adds a server and the models picked (`models`: JSON `[{ id,
+        /// context }]`) to the agent's config; `taken`: JSON of the provider
+        /// names it has already. An error, "" (done), or "OPENCODE_BUSY"
+        /// (done; OpenCode's open sessions see it once they're closed).
+        #[qinvokable]
+        fn add_server(self: &Accounts, agent: &QString, name: &QString, base_url: &QString, key: &QString, models: &QString, taken: &QString) -> QString;
+        /// The file an agent's servers are in, for opening ("" when it has
+        /// none yet).
+        #[qinvokable]
+        fn servers_file(self: &Accounts, agent: &QString) -> QString;
+        /// Checks whether these servers (JSON list of addresses) answer
+        /// (`serverStates` follows).
+        #[qinvokable]
+        fn check_servers(self: Pin<&mut Accounts>, urls: &QString);
+        /// Starts a server with its start command (`serverStates` follows).
+        #[qinvokable]
+        fn start_server(self: Pin<&mut Accounts>, url: &QString);
+        /// Stops a server harlo started, else runs its stop command.
+        #[qinvokable]
+        fn stop_server(self: Pin<&mut Accounts>, url: &QString);
+        /// Adds a server one agent has to another (its address, key and
+        /// models as that agent has them): "" or why not ("OPENCODE_BUSY":
+        /// added, for OpenCode's next sessions).
+        #[qinvokable]
+        fn copy_server(self: &Accounts, from: &QString, to: &QString, name: &QString, taken: &QString) -> QString;
+        /// The model files harlo downloaded for a server it set up: `{
+        /// files: [path], size }` (none for a server whose models its
+        /// engine keeps).
+        #[qinvokable]
+        fn server_files(self: &Accounts, url: &QString) -> QString;
+        /// Takes a server out of every agent that has it (by its name and
+        /// address); one harlo set up is stopped and forgotten, and its
+        /// model files deleted with `delete_files`. "" or why not.
+        #[qinvokable]
+        fn remove_server(self: Pin<&mut Accounts>, name: &QString, url: &QString, delete_files: bool) -> QString;
+        /// Takes a server out of one agent (others keep it): "" or why not.
+        #[qinvokable]
+        fn remove_server_from(self: Pin<&mut Accounts>, agent: &QString, name: &QString) -> QString;
+        /// The log of a server harlo starts (its output; "" before one).
+        #[qinvokable]
+        fn server_log(self: &Accounts, url: &QString) -> QString;
         /// pi's packages as seen from `folder` ("" for yours alone): `{
         /// state: "loading" | "ready", list: [{ source, path, project,
         /// version, description, adds }], error, job: { action, source,
@@ -100,7 +162,7 @@ use std::time::{Duration, Instant};
 
 use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::QString;
-use harlo_core::signin;
+use harlo_core::{model_servers, signin};
 use harlo_harness::HarnessKind;
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -112,6 +174,8 @@ use qobject::Accounts;
 pub struct AccountsRust {
     revision: i32,
     flow: QString,
+    server_search: QString,
+    server_states: QString,
     /// The sign-in going on: its id, and where its answers go (dropped:
     /// cancelled).
     current: Option<(u64, mpsc::UnboundedSender<String>)>,
@@ -123,6 +187,8 @@ pub struct AccountsRust {
     extra_usage: HashMap<String, (bool, Option<Instant>)>,
     /// `packages` per folder.
     packages: HashMap<String, Value>,
+    /// `servers` per agent, as last read (`load_servers`).
+    servers: HashMap<String, Value>,
 }
 
 /// An agent's program: the path set in Settings → Providers (if it's
@@ -390,6 +456,791 @@ impl Accounts {
             });
         }
         on
+    }
+}
+
+impl Accounts {
+    pub fn servers(&self, agent: &QString) -> QString {
+        let list = self.rust().servers.get(&agent.to_string()).cloned().unwrap_or_else(|| json!([]));
+        QString::from(&list.to_string())
+    }
+
+    pub fn load_servers(self: Pin<&mut Self>) {
+        let thread = self.qt_thread();
+        crate::runtime().spawn_blocking(move || {
+            let mut all: Vec<(String, Value)> = [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::OpenCode, HarnessKind::Hermes].iter().map(|k| (k.as_str().to_owned(), servers_json(*k))).collect();
+            // ("": those harlo set up that no agent has.)
+            all.push((String::new(), unused_json()));
+            let _ = thread.queue(move |mut this| {
+                let changed = all.iter().any(|(k, v)| this.rust().servers.get(k) != Some(v));
+                for (k, v) in all {
+                    this.as_mut().rust_mut().servers.insert(k, v);
+                }
+                if changed {
+                    this.bump();
+                }
+            });
+        });
+    }
+}
+
+/// An agent's model servers as the page shows them (blocking).
+fn servers_json(k: HarnessKind) -> Value {
+    Value::Array(
+        model_servers::servers(k)
+            .into_iter()
+            .map(|s| {
+                // Where it runs: this computer (harlo can start and stop it), the
+                // local network (only whether it answers), or the internet.
+                let host = s.base_url.split("://").nth(1).unwrap_or_default().split(['/', ':']).next().unwrap_or_default().trim_matches(['[', ']']).to_owned();
+                let place = if ["127.0.0.1", "localhost", "::1", "0.0.0.0"].contains(&host.as_str()) {
+                    "here"
+                } else if harlo_harness::is_local_url(&s.base_url) {
+                    "network"
+                } else {
+                    "online"
+                };
+                // Set up by harlo: it starts and stops it.
+                let managed = place == "here" && commands_of(&s.base_url)["start"].as_str().is_some_and(|c| !c.is_empty());
+                // Hermes takes it (not under its least context). A server on
+                // this computer that didn't say: asked (Ollama's models).
+                let hermes = model_servers::details(k, &s.name).is_none_or(|(url, _, mut models)| {
+                    if place == "here" && models.iter().any(|m| m.context.is_none()) && model_servers::answers(&url) {
+                        for m in models.iter_mut().filter(|m| m.context.is_none()) {
+                            m.context = harlo_core::engines::model_context(&url, &m.id);
+                        }
+                    }
+                    model_servers::hermes_fits(&models).is_ok()
+                });
+                let contexts: Vec<Value> = model_servers::details(k, &s.name).map(|(_, _, m)| m.iter().map(|m| json!(m.context)).collect()).unwrap_or_default();
+                json!({
+                    "name": s.name, "baseUrl": s.base_url, "models": s.models, "contexts": contexts, "place": place, "managed": managed, "hermesOk": hermes,
+                    "engine": engine_of(&s.base_url),
+                })
+            })
+            .collect(),
+    )
+}
+
+impl Accounts {
+
+    pub fn servers_file(&self, agent: &QString) -> QString {
+        QString::from(&kind(&agent.to_string()).and_then(model_servers::file).filter(|f| f.is_file()).map(|f| f.to_string_lossy().into_owned()).unwrap_or_default())
+    }
+
+    pub fn find_models(mut self: Pin<&mut Self>, url: &QString, key: &QString) {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let (url, key) = (url.to_string(), key.to_string());
+        // No address: none (the dialog opened again).
+        if url.trim().is_empty() {
+            self.as_mut().set_server_search(QString::default());
+            return;
+        }
+        let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.as_mut().set_server_search(QString::from(&json!({ "id": id, "state": "finding", "models": [] }).to_string()));
+        let thread = self.qt_thread();
+        crate::runtime().spawn_blocking(move || {
+            let v = match model_servers::find(&url, &key) {
+                Ok(l) => json!({ "id": id, "state": "ready", "baseUrl": l.base_url, "name": model_servers::suggest_name(&l.base_url),
+                                 "models": l.models.iter().map(|m| json!({ "id": m.id, "context": m.context })).collect::<Vec<_>>(), "error": "" }),
+                Err(e) => json!({ "id": id, "state": "failed", "models": [], "error": e }),
+            };
+            let _ = thread.queue(move |mut this| {
+                // Only the latest search.
+                if serde_json::from_str::<Value>(&this.rust().server_search.to_string()).ok().and_then(|v| v["id"].as_u64()) == Some(id) {
+                    this.as_mut().set_server_search(QString::from(&v.to_string()));
+                }
+            });
+        });
+    }
+
+    pub fn add_server(&self, agent: &QString, name: &QString, base_url: &QString, key: &QString, models: &QString, taken: &QString) -> QString {
+        let Some(k) = kind(&agent.to_string()) else { return QString::from("harlo can't add model servers to this agent.") };
+        let models: Vec<model_servers::Found> = serde_json::from_str::<Value>(&models.to_string())
+            .ok()
+            .and_then(|v| v.as_array().cloned())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|m| Some(model_servers::Found { id: m["id"].as_str()?.to_owned(), context: m["context"].as_u64(), reasoning: m["reasoning"] == true }))
+            .collect();
+        let taken: Vec<String> = serde_json::from_str(&taken.to_string()).unwrap_or_default();
+        match model_servers::add(k, &name.to_string(), &base_url.to_string(), &key.to_string(), &models, &taken) {
+            // OpenCode's sessions read it when its server starts again.
+            Ok(()) if !reread(k) => QString::from("OPENCODE_BUSY"),
+            Ok(()) => QString::default(),
+            Err(e) => QString::from(&e),
+        }
+    }
+}
+
+impl Accounts {
+    pub fn copy_server(&self, from: &QString, to: &QString, name: &QString, taken: &QString) -> QString {
+        let Some(to) = kind(&to.to_string()) else { return QString::from("harlo can't add model servers to this agent.") };
+        let name = name.to_string();
+        let (url, key, models) = match kind(&from.to_string()) {
+            Some(from) => match model_servers::details(from, &name) {
+                Some(d) => d,
+                None => return QString::from(&format!("{name} isn't in {}'s file any more.", from.label())),
+            },
+            // No agent has it: what harlo saved when it set it up (else what
+            // it serves now).
+            None => {
+                let url = from.to_string();
+                let mut models = saved_models(&commands_of(&url));
+                if models.is_empty() {
+                    match model_servers::find(&url, "") {
+                        Ok(l) => models = l.models,
+                        Err(e) => return QString::from(&format!("Start it first: harlo asks it for its models. ({e})")),
+                    }
+                    // (The context it serves: not in its list.)
+                    for m in models.iter_mut().filter(|m| m.context.is_none()) {
+                        m.context = harlo_core::engines::model_context(&url, &m.id);
+                    }
+                }
+                (url, String::new(), models)
+            }
+        };
+        let taken: Vec<String> = serde_json::from_str(&taken.to_string()).unwrap_or_default();
+        match model_servers::add(to, &name, &url, &key, &models, &taken) {
+            Ok(()) if !reread(to) => QString::from("OPENCODE_BUSY"),
+            Ok(()) => QString::default(),
+            Err(e) => QString::from(&e),
+        }
+    }
+
+    pub fn server_files(&self, url: &QString) -> QString {
+        let files = model_files(&url.to_string());
+        let size: u64 = files.iter().filter_map(|f| std::fs::metadata(f).ok()).map(|m| m.len()).sum();
+        QString::from(&json!({ "files": files, "size": size }).to_string())
+    }
+
+    pub fn remove_server_from(mut self: Pin<&mut Self>, agent: &QString, name: &QString) -> QString {
+        let Some(k) = kind(&agent.to_string()) else { return QString::from("harlo can't change this agent's model servers.") };
+        let out = match model_servers::remove(k, &name.to_string()) {
+            Ok(()) if !reread(k) => QString::from("OPENCODE_BUSY"),
+            Ok(()) => QString::default(),
+            Err(e) => QString::from(&e),
+        };
+        self.as_mut().load_servers();
+        out
+    }
+
+    pub fn remove_server(mut self: Pin<&mut Self>, name: &QString, url: &QString, delete_files: bool) -> QString {
+        let (name, url) = (name.to_string(), url.to_string());
+        let mut errors = Vec::new();
+        let mut busy = false;
+        for k in [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::OpenCode, HarnessKind::Hermes] {
+            if !model_servers::servers(k).iter().any(|s| s.name == name && s.base_url == url) {
+                continue;
+            }
+            match model_servers::remove(k, &name) {
+                Ok(()) => busy |= !reread(k),
+                Err(e) => errors.push(format!("{}: {e}", k.label())),
+            }
+        }
+        // Set up by harlo, and no agent has it now: stopped and forgotten.
+        let still = [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::OpenCode, HarnessKind::Hermes].iter().any(|k| model_servers::servers(*k).iter().any(|s| s.base_url == url));
+        if !still && commands_of(&url)["start"].as_str().is_some_and(|c| !c.is_empty()) {
+            let files = if delete_files { model_files(&url) } else { Vec::new() };
+            match STARTED.lock().unwrap().as_mut().and_then(|m| m.remove(&url)) {
+                Some(child) => stop_group(child),
+                None => stop_pids(&leftovers(&url)),
+            }
+            // (A llama.cpp router's preset too.)
+            if let Some(preset) = start_command(&url).split(" --models-preset ").nth(1).map(shell_word) {
+                let _ = std::fs::remove_file(preset);
+            }
+            save_commands(&url, "", "");
+            let _ = std::fs::remove_file(log_path(&url));
+            for f in &files {
+                if let Err(e) = std::fs::remove_file(f) {
+                    errors.push(format!("{}: {e}", f.display()));
+                }
+            }
+            // Its folder too, once empty (harlo's models folder stays).
+            let root = models_dir();
+            for f in &files {
+                let mut dir = f.parent();
+                while let Some(d) = dir.filter(|d| d.starts_with(&root) && *d != root) {
+                    if std::fs::remove_dir(d).is_err() {
+                        break;
+                    }
+                    dir = d.parent();
+                }
+            }
+        }
+        self.as_mut().load_servers();
+        if !errors.is_empty() {
+            return QString::from(&errors.join("\n"));
+        }
+        QString::from(if busy { "OPENCODE_BUSY" } else { "" })
+    }
+}
+
+/// After harlo changed an agent's model servers: its sessions read them
+/// again. OpenCode's server reloads when it's idle (false: busy, its open
+/// sessions get them when they close); pi's and omp's idle sessions start
+/// again when next used (they read their models only when they start).
+fn reread(k: HarnessKind) -> bool {
+    match k {
+        HarnessKind::OpenCode => harlo_harness::reload_opencode_if_idle(),
+        HarnessKind::Pi | HarnessKind::Omp => {
+            crate::registry::restart_idle(k.as_str());
+            true
+        }
+        _ => true,
+    }
+}
+
+/// Where harlo keeps the models it downloads.
+fn models_dir() -> PathBuf {
+    harlo_core::engines::engines_dir().parent().map(|d| d.join("models")).unwrap_or_default()
+}
+
+/// The first word of a shell command line, unquoted ('…', \x).
+pub(crate) fn shell_word(s: &str) -> String {
+    let mut out = String::new();
+    let mut chars = s.trim_start().chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' => out.extend(chars.by_ref().take_while(|c| *c != '\'')),
+            '\\' => out.extend(chars.next()),
+            c if c.is_whitespace() => break,
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// The model files of a server harlo set up with llama.cpp: the GGUF its
+/// start command loads (`-m '…'`) and its other parts, in harlo's folder.
+fn model_files(url: &str) -> Vec<PathBuf> {
+    let start = commands_of(url)["start"].as_str().unwrap_or_default().to_owned();
+    // (A router's: each model of its preset.)
+    let paths: Vec<PathBuf> = match start.split(" --models-preset ").nth(1) {
+        Some(rest) => harlo_core::engines::read_preset(Path::new(&shell_word(rest))).into_iter().map(|m| m.path).collect(),
+        None => start.split(" -m ").nth(1).map(|rest| PathBuf::from(shell_word(rest))).into_iter().collect(),
+    };
+    paths
+        .iter()
+        .filter_map(|path| Some((path.parent()?.to_path_buf(), path.file_name()?.to_string_lossy().into_owned())))
+        .filter(|(dir, _)| dir.starts_with(models_dir()))
+        .flat_map(|(dir, file)| harlo_core::engines::gguf_parts(&file).into_iter().map(move |p| dir.join(p)))
+        .filter(|p| p.is_file())
+        .collect()
+}
+
+// ---- starting and stopping model servers --------------------------------------
+
+/// Servers harlo started, by address: their process (a group of its own).
+static STARTED: Mutex<Option<HashMap<String, std::process::Child>>> = Mutex::new(None);
+
+fn server_key(url: &str) -> String {
+    format!("model_server.{}", url.trim_end_matches('/'))
+}
+
+fn commands_of(url: &str) -> Value {
+    harlo_core::db::Db::open(&harlo_core::db::default_path())
+        .ok()
+        .and_then(|d| d.get(&server_key(url)).ok().flatten())
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_else(|| json!({ "start": "", "stop": "" }))
+}
+
+/// Where a server's output goes: harlo's logs folder.
+fn log_path(url: &str) -> PathBuf {
+    let name: String = url.split("://").last().unwrap_or(url).chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+    harlo_core::db::default_path().parent().map(|d| d.join("logs/servers")).unwrap_or_default().join(format!("{}.log", name.trim_matches('-')))
+}
+
+fn log_tail(url: &str) -> String {
+    let text = std::fs::read_to_string(log_path(url)).unwrap_or_default();
+    let lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    lines[lines.len().saturating_sub(3)..].join("\n")
+}
+
+/// Saves a server's start and stop commands (empty ones: harlo forgets it).
+pub(crate) fn save_commands(url: &str, start: &str, stop: &str) {
+    let v = json!({ "start": start.trim(), "stop": stop.trim() });
+    if let Ok(db) = harlo_core::db::Db::open(&harlo_core::db::default_path()) {
+        let _ = db.set(&server_key(url), &v.to_string());
+    }
+}
+
+/// Saves the name and models of a server harlo set up (after its test), so
+/// it's listed, and can go to agents, before any agent has it.
+pub(crate) fn save_server(url: &str, name: &str, models: &[Value]) {
+    let mut v = commands_of(url);
+    v["name"] = json!(name);
+    v["models"] = json!(models);
+    if let Ok(db) = harlo_core::db::Db::open(&harlo_core::db::default_path()) {
+        let _ = db.set(&server_key(url), &v.to_string());
+    }
+}
+
+/// The servers harlo set up (it can start them): `(address, saved)`.
+fn set_up_servers() -> Vec<(String, Value)> {
+    let Ok(db) = harlo_core::db::Db::open(&harlo_core::db::default_path()) else { return Vec::new() };
+    db.with_prefix("model_server.")
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(k, v)| Some((k.strip_prefix("model_server.")?.to_owned(), serde_json::from_str::<Value>(&v).ok()?)))
+        .filter(|(_, v)| v["start"].as_str().is_some_and(|c| !c.is_empty()))
+        .collect()
+}
+
+/// Servers harlo set up that no agent has (closed before adding them, or
+/// unticked everywhere): listed like the others, with no agent ticked.
+fn unused_json() -> Value {
+    let used: Vec<String> = [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::OpenCode, HarnessKind::Hermes].iter().flat_map(|k| model_servers::servers(*k)).map(|s| s.base_url).collect();
+    Value::Array(
+        set_up_servers()
+            .into_iter()
+            .filter(|(url, _)| !used.contains(url))
+            .map(|(url, v)| {
+                let models: Vec<model_servers::Found> = saved_models(&v);
+                // (One set up before harlo saved names: its engine's.)
+                let name = v["name"].as_str().filter(|n| !n.is_empty()).map(str::to_owned).unwrap_or_else(|| {
+                    if v["start"].as_str().unwrap_or_default().contains("ollama") { "ollama".to_owned() } else { model_servers::suggest_name(&url) }
+                });
+                json!({
+                    "name": name, "baseUrl": url, "models": models.iter().map(|m| m.id.clone()).collect::<Vec<_>>(), "contexts": models.iter().map(|m| json!(m.context)).collect::<Vec<_>>(),
+                    "place": "here", "managed": true, "hermesOk": model_servers::hermes_fits(&models).is_ok(), "engine": engine_of(&url),
+                })
+            })
+            .collect(),
+    )
+}
+
+/// The engine of a server harlo set up (from its start command); "" for
+/// one it didn't.
+fn engine_of(url: &str) -> &'static str {
+    let start = commands_of(url)["start"].as_str().unwrap_or_default().to_owned();
+    if start.contains("llama-server") {
+        "llama.cpp"
+    } else if start.contains("ollama") {
+        "Ollama"
+    } else if start.contains("strata") {
+        "Strata"
+    } else if start.is_empty() {
+        ""
+    } else {
+        "Your command"
+    }
+}
+
+/// A server's start command ("" for one harlo didn't set up).
+pub(crate) fn start_command(url: &str) -> String {
+    commands_of(url)["start"].as_str().unwrap_or_default().to_owned()
+}
+
+/// Stops a server harlo set up, however it's running (started by this
+/// harlo or left by an earlier one), until it stops answering.
+pub(crate) fn stop_any(url: &str) {
+    match STARTED.lock().unwrap().as_mut().and_then(|m| m.remove(url)) {
+        Some(child) => stop_group(child),
+        None => stop_pids(&leftovers(url)),
+    }
+    for _ in 0..40 {
+        if !model_servers::answers(url) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+}
+
+/// The models harlo saved for a server it set up (after its tests).
+pub(crate) fn saved_models_of(url: &str) -> Vec<model_servers::Found> {
+    saved_models(&commands_of(url))
+}
+
+fn saved_models(v: &Value) -> Vec<model_servers::Found> {
+    v["models"].as_array().into_iter().flatten().filter_map(|m| Some(model_servers::Found { id: m["id"].as_str()?.to_owned(), context: m["context"].as_u64(), reasoning: m["reasoning"] == true })).collect()
+}
+
+/// Starts a process from one thread that lives as long as harlo: the
+/// parent-death signal goes with the thread that started it, and a worker
+/// thread ending would stop the server.
+fn spawn_from_launcher(cmd: std::process::Command) -> std::io::Result<std::process::Child> {
+    type Job = (std::process::Command, std::sync::mpsc::Sender<std::io::Result<std::process::Child>>);
+    static LAUNCHER: std::sync::OnceLock<Mutex<std::sync::mpsc::Sender<Job>>> = std::sync::OnceLock::new();
+    let tx = LAUNCHER.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<Job>();
+        std::thread::Builder::new()
+            .name("server-launcher".into())
+            .spawn(move || {
+                for (mut cmd, reply) in rx {
+                    let _ = reply.send(cmd.spawn());
+                }
+            })
+            .expect("a thread");
+        Mutex::new(tx)
+    });
+    let (reply, answer) = std::sync::mpsc::channel();
+    tx.lock().unwrap().send((cmd, reply)).map_err(|_| std::io::Error::other("the launcher stopped"))?;
+    answer.recv().map_err(|_| std::io::Error::other("the launcher stopped"))?
+}
+
+/// Runs a server's start command in a shell from the home folder, its
+/// output to its log, as one of harlo's (stopped when harlo quits).
+pub(crate) fn launch(url: &str, command: &str) -> Result<(), String> {
+    use std::os::unix::process::CommandExt;
+    let log = log_path(url);
+    let _ = std::fs::create_dir_all(log.parent().unwrap_or(std::path::Path::new("/")));
+    let out = std::fs::File::create(&log).map_err(|e| format!("Couldn't run it: {e}"))?;
+    let mut cmd = std::process::Command::new("sh");
+    cmd.arg("-c")
+        .arg(command)
+        .current_dir(std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/")))
+        .stdin(std::process::Stdio::null())
+        .stdout(out.try_clone().map_err(|e| format!("Couldn't run it: {e}"))?)
+        .stderr(out)
+        .process_group(0);
+    // It stops when harlo does, however harlo ends (Ctrl+C, a crash):
+    // the kernel tells it when its parent goes.
+    // SAFETY: only async-signal-safe calls between fork and exec.
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+            Ok(())
+        });
+    }
+    let child = spawn_from_launcher(cmd).map_err(|e| format!("Couldn't run it: {e}"))?;
+    STARTED.lock().unwrap().get_or_insert_with(HashMap::new).insert(url.to_owned(), child);
+    Ok(())
+}
+
+/// Waits (blocking) until a launched server answers: whether harlo still
+/// holds its process (a launcher like `strata launch` starts the server and
+/// exits, which is fine), or why it didn't come up. `tick` gets its log's
+/// last line now and then; `stop()` gives up.
+pub(crate) fn wait_up(url: &str, limit: Duration, tick: &mut dyn FnMut(&str), stop: &dyn Fn() -> bool) -> Result<bool, String> {
+    let deadline = Instant::now() + limit;
+    let mut held = true;
+    loop {
+        if held {
+            let exited = STARTED.lock().unwrap().as_mut().and_then(|m| m.get_mut(url)).map(|c| c.try_wait().ok().flatten());
+            match exited {
+                None => return Err("Stopped.".into()),
+                Some(Some(status)) => {
+                    STARTED.lock().unwrap().as_mut().map(|m| m.remove(url));
+                    if !status.success() {
+                        let tail = log_tail(url);
+                        return Err(if tail.is_empty() { format!("It stopped ({status}).") } else { tail });
+                    }
+                    // A launcher: the server goes on without it.
+                    held = false;
+                }
+                Some(None) => {}
+            }
+        }
+        if model_servers::answers(url) {
+            return Ok(held);
+        }
+        if stop() {
+            return Err("Cancelled.".into());
+        }
+        if Instant::now() > deadline {
+            return Err(format!("It hasn't answered in {} minutes.", limit.as_secs() / 60));
+        }
+        if let Some(line) = std::fs::read_to_string(log_path(url)).ok().and_then(|t| t.lines().rev().map(str::trim).find(|l| !l.is_empty()).map(str::to_owned)) {
+            tick(&line);
+        }
+        std::thread::sleep(Duration::from_secs(1));
+    }
+}
+
+/// Stops a server harlo launched (if it did).
+/// The server behind a session's model (`provider/id`) when harlo set it
+/// up on this computer (it can start it): its name and address.
+pub(crate) fn managed_server(agent: &str, model: &str) -> Option<(String, String)> {
+    let k = kind(agent)?;
+    // Hermes: "custom:<server>:<model>", or its current model as just
+    // "custom:<model>" (the server whose models have it, then).
+    let by_model;
+    let provider = match k {
+        HarnessKind::Hermes => match model_servers::hermes_server_of(model).filter(|n| model_servers::servers(k).iter().any(|s| s.name == *n)) {
+            Some(name) => name,
+            None => {
+                let id = model.strip_prefix("custom:").or_else(|| model.strip_prefix("custom/")).unwrap_or(model);
+                by_model = model_servers::servers(k).into_iter().find(|s| s.models.iter().any(|m| m == id))?.name;
+                by_model.as_str()
+            }
+        },
+        _ => model.split_once('/')?.0,
+    };
+    let managed = |url: &str| commands_of(url)["start"].as_str().is_some_and(|c| !c.is_empty());
+    if let Some(s) = model_servers::servers(k).into_iter().find(|s| s.name == provider && managed(&s.base_url)) {
+        return Some((s.name, s.base_url));
+    }
+    // omp's own "llama.cpp" and "ollama" providers: the engines' usual
+    // addresses, where it finds a running server by itself.
+    let usual = match provider {
+        "llama.cpp" => 8080,
+        "ollama" => 11434,
+        _ => 0,
+    };
+    if k == HarnessKind::Omp && usual > 0 {
+        let urls = [format!("http://127.0.0.1:{usual}/v1"), format!("http://localhost:{usual}/v1")];
+        let url = urls.iter().find(|u| managed(u))?.clone();
+        let name = [HarnessKind::Pi, HarnessKind::OpenCode, HarnessKind::Hermes, HarnessKind::Omp]
+            .iter()
+            .find_map(|k| model_servers::servers(*k).into_iter().find(|s| s.base_url.trim_end_matches('/') == url))
+            .map_or_else(|| provider.to_owned(), |s| s.name);
+        return Some((name, url));
+    }
+    None
+}
+
+/// Starts a server harlo set up unless it answers already (blocking, until
+/// it serves).
+pub(crate) fn ensure_running(url: &str) -> Result<(), String> {
+    if model_servers::answers(url) {
+        return Ok(());
+    }
+    let command = commands_of(url)["start"].as_str().unwrap_or_default().to_owned();
+    launch(url, &command)?;
+    wait_up(url, Duration::from_secs(15 * 60), &mut |_| {}, &|| false)?;
+    for problem in sync_context(url) {
+        tracing::warn!("{problem}");
+    }
+    Ok(())
+}
+
+/// After a llama.cpp server harlo set up starts: the context it serves
+/// this time (it fits it to free memory) into each agent that has it.
+/// What couldn't be updated (Hermes under its least context, say).
+pub(crate) fn sync_context(url: &str) -> Vec<String> {
+    let start = commands_of(url)["start"].as_str().unwrap_or_default().to_owned();
+    let llama = start.contains("llama-server");
+    if !llama && !start.contains("ollama") {
+        return Vec::new();
+    }
+    let served = if llama { harlo_core::engines::served_context(url) } else { None };
+    let mut problems = Vec::new();
+    for k in [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::OpenCode, HarnessKind::Hermes] {
+        for s in model_servers::servers(k).into_iter().filter(|s| s.base_url == url) {
+            // llama.cpp: what it serves this time. Ollama (nothing loaded
+            // yet): only a context the agent lacks, from the model's own.
+            let context = match served {
+                Some(c) => c,
+                None => {
+                    let Some((_, _, models)) = model_servers::details(k, &s.name) else { continue };
+                    if models.iter().all(|m| m.context.is_some()) {
+                        continue;
+                    }
+                    let found: Vec<Option<u64>> = models.iter().map(|m| m.context.or_else(|| harlo_core::engines::model_context(url, &m.id))).collect();
+                    match found.first().copied().flatten() {
+                        Some(c) if found.iter().all(|f| *f == Some(c)) => c,
+                        _ => continue,
+                    }
+                }
+            };
+            match model_servers::set_context(k, &s.name, context) {
+                Ok(true) => {
+                    reread(k);
+                }
+                Ok(_) => {}
+                Err(e) => problems.push(format!("{}: {e}", k.label())),
+            }
+        }
+    }
+    problems
+}
+
+pub(crate) fn stop_launched(url: &str) {
+    if let Some(child) = STARTED.lock().unwrap().as_mut().and_then(|m| m.remove(url)) {
+        stop_group(child);
+    }
+}
+
+/// Stops the servers harlo started (it's quitting).
+pub fn stop_started_servers() {
+    for (_, child) in STARTED.lock().unwrap().take().unwrap_or_default() {
+        stop_group(child);
+    }
+    // And those an earlier harlo left running (it was stopped with Ctrl+C,
+    // say, before servers went with it).
+    let left: Vec<i32> = set_up_servers().iter().flat_map(|(u, _)| leftovers(u)).collect();
+    if !left.is_empty() {
+        stop_pids(&left);
+    }
+}
+
+/// Servers harlo set up that an earlier harlo left running (it ended
+/// before stopping them): one of harlo's engines serving the address's
+/// port (`--port N`, or Ollama's `OLLAMA_HOST`).
+fn leftovers(url: &str) -> Vec<i32> {
+    let port = url.split("://").nth(1).and_then(|r| r.split('/').next()).and_then(|h| h.rsplit_once(':')).map(|(_, p)| p.to_owned()).unwrap_or_default();
+    if port.parse::<u16>().is_err() {
+        return Vec::new();
+    }
+    let engines = harlo_core::engines::engines_dir();
+    let Ok(dir) = std::fs::read_dir("/proc") else { return Vec::new() };
+    dir.flatten()
+        .filter_map(|e| e.file_name().to_str()?.parse::<i32>().ok())
+        .filter(|pid| *pid != std::process::id() as i32)
+        .filter(|pid| {
+            if !std::fs::read_link(format!("/proc/{pid}/exe")).is_ok_and(|exe| exe.starts_with(&engines)) {
+                return false;
+            }
+            // A running harlo's (this one's, another window's): not left over.
+            let parent = std::fs::read_to_string(format!("/proc/{pid}/status")).ok().and_then(|t| t.lines().find_map(|l| l.strip_prefix("PPid:")).and_then(|p| p.trim().parse::<i32>().ok()));
+            if parent.is_some_and(|pp| std::fs::read_link(format!("/proc/{pp}/exe")).is_ok_and(|exe| exe.file_name().is_some_and(|n| n.to_string_lossy().starts_with("harlo")))) {
+                return false;
+            }
+            let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default();
+            let args: Vec<&[u8]> = cmdline.split(|b| *b == 0).collect();
+            let host = format!(":{port}");
+            args.windows(2).any(|w| w[0] == b"--port" && w[1] == port.as_bytes())
+                || std::fs::read(format!("/proc/{pid}/environ")).unwrap_or_default().split(|b| *b == 0).any(|v| v.starts_with(b"OLLAMA_HOST=") && v.ends_with(host.as_bytes()))
+        })
+        .collect()
+}
+
+/// Asks processes to stop, then makes them.
+fn stop_pids(pids: &[i32]) {
+    for pid in pids {
+        // SAFETY: a signal to a server process harlo set up.
+        unsafe { libc::kill(*pid, libc::SIGTERM) };
+    }
+    for _ in 0..50 {
+        if pids.iter().all(|p| !Path::new(&format!("/proc/{p}")).exists()) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    for pid in pids {
+        // SAFETY: as above.
+        unsafe { libc::kill(*pid, libc::SIGKILL) };
+    }
+}
+
+/// Asks the server's process group to stop, then makes it.
+fn stop_group(mut child: std::process::Child) {
+    let pid = child.id() as i32;
+    // SAFETY: a signal to the group harlo started.
+    unsafe { libc::kill(-pid, libc::SIGTERM) };
+    for _ in 0..50 {
+        if child.try_wait().ok().flatten().is_some() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    // SAFETY: as above.
+    unsafe { libc::kill(-pid, libc::SIGKILL) };
+    let _ = child.wait();
+}
+
+impl Accounts {
+    fn set_state(mut self: Pin<&mut Self>, url: &str, state: Value) {
+        let mut all: Value = serde_json::from_str(&self.server_states.to_string()).unwrap_or_else(|_| json!({}));
+        all[url] = state;
+        self.as_mut().set_server_states(QString::from(&all.to_string()));
+    }
+
+    pub fn check_servers(self: Pin<&mut Self>, urls: &QString) {
+        let urls: Vec<String> = serde_json::from_str(&urls.to_string()).unwrap_or_default();
+        let thread = self.qt_thread();
+        crate::runtime().spawn_blocking(move || {
+            let found: Vec<(String, bool)> = urls.into_iter().map(|u| {
+                let up = model_servers::answers(&u);
+                (u, up)
+            }).collect();
+            let _ = thread.queue(move |mut this| {
+                let all: Value = serde_json::from_str(&this.server_states.to_string()).unwrap_or_else(|_| json!({}));
+                for (url, up) in found {
+                    let was = &all[&url];
+                    let harlo = STARTED.lock().unwrap().as_ref().is_some_and(|m| m.contains_key(&url));
+                    // (Starting: its own watch says when it's up or failed.)
+                    if was["state"] == "starting" {
+                        continue;
+                    }
+                    let state = match (up, was["state"].as_str()) {
+                        // (Still running: what its start said stays.)
+                        (true, Some("running")) => json!({ "state": "running", "harlo": harlo, "message": was["message"] }),
+                        (true, _) => json!({ "state": "running", "harlo": harlo, "message": "" }),
+                        (false, Some("failed")) => was.clone(),
+                        (false, _) => json!({ "state": "stopped", "harlo": false, "message": "" }),
+                    };
+                    if *was != state {
+                        this.as_mut().set_state(&url, state);
+                    }
+                }
+            });
+        });
+    }
+
+
+    pub fn server_log(&self, url: &QString) -> QString {
+        QString::from(&Some(log_path(&url.to_string())).filter(|f| f.is_file()).map(|f| f.to_string_lossy().into_owned()).unwrap_or_default())
+    }
+
+    pub fn start_server(mut self: Pin<&mut Self>, url: &QString) {
+        let url = url.to_string();
+        let command = commands_of(&url)["start"].as_str().unwrap_or_default().to_owned();
+        if command.is_empty() {
+            return self.set_state(&url, json!({ "state": "failed", "harlo": false, "message": "Set its start command first." }));
+        }
+        if let Err(e) = launch(&url, &command) {
+            return self.set_state(&url, json!({ "state": "failed", "harlo": false, "message": e }));
+        }
+        self.as_mut().set_state(&url, json!({ "state": "starting", "harlo": true, "message": "" }));
+        let thread = self.qt_thread();
+        crate::runtime().spawn_blocking(move || {
+            let state = match wait_up(&url, Duration::from_secs(15 * 60), &mut |_| {}, &|| false) {
+                // (The context it serves this time, into the agents.)
+                Ok(held) => json!({ "state": "running", "harlo": held, "message": sync_context(&url).join("\n") }),
+                Err(e) => json!({ "state": "failed", "harlo": false, "message": e }),
+            };
+            // (The agents' files may say another context now.)
+            let _ = thread.queue(move |mut this| {
+                this.as_mut().set_state(&url, state);
+                this.as_mut().load_servers();
+            });
+        });
+    }
+
+    pub fn stop_server(mut self: Pin<&mut Self>, url: &QString) {
+        let url = url.to_string();
+        let started = STARTED.lock().unwrap().as_mut().and_then(|m| m.remove(&url));
+        let stop = commands_of(&url)["stop"].as_str().unwrap_or_default().to_owned();
+        // One harlo set up, left running by an earlier harlo: its process.
+        let left = if started.is_none() && stop.is_empty() { leftovers(&url) } else { Vec::new() };
+        if started.is_none() && stop.is_empty() && left.is_empty() {
+            return self.set_state(&url, json!({ "state": "running", "harlo": false, "message": "harlo didn't start it: set its stop command to stop it from here." }));
+        }
+        self.as_mut().set_state(&url, json!({ "state": "starting", "harlo": false, "message": "Stopping…" }));
+        let thread = self.qt_thread();
+        crate::runtime().spawn_blocking(move || {
+            let outcome = match started {
+                Some(child) => {
+                    stop_group(child);
+                    Ok(())
+                }
+                None if !left.is_empty() => {
+                    stop_pids(&left);
+                    Ok(())
+                }
+                None => std::process::Command::new("sh").arg("-c").arg(&stop).stdin(std::process::Stdio::null()).output().map_err(|e| e.to_string()).and_then(|o| {
+                    if o.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&o.stderr).trim().lines().last().unwrap_or("It failed.").to_owned()) }
+                }),
+            };
+            // (Its port may take a moment to close.)
+            for _ in 0..20 {
+                if !model_servers::answers(&url) {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(250));
+            }
+            let up = model_servers::answers(&url);
+            let state = match outcome {
+                Err(e) => json!({ "state": if up { "running" } else { "stopped" }, "harlo": false, "message": format!("The stop command failed: {e}") }),
+                Ok(()) if up => json!({ "state": "running", "harlo": false, "message": "It still answers." }),
+                Ok(()) => json!({ "state": "stopped", "harlo": false, "message": "" }),
+            };
+            let _ = thread.queue(move |this| this.set_state(&url, state));
+        });
     }
 }
 
@@ -1070,6 +1921,28 @@ fn opencode_sign_in(provider: &str, method: &str, answers: &Value, report: &Repo
 
 #[cfg(test)]
 mod tests {
+    /// Which server a Hermes model is on, from this computer's configs.
+    #[test]
+    #[ignore = "this computer's configs"]
+    fn finds_hermes_servers() {
+        for id in ["custom/llamacpp:Qwen3-Coder-30B-A3B-Instruct-UD-Q4_K_XL", "custom:llamacpp:Qwen3-Coder-30B-A3B-Instruct-UD-Q4_K_XL", "custom:Qwen3-Coder-30B-A3B-Instruct-UD-Q4_K_XL", "custom/Qwen3-Coder-30B-A3B-Instruct-UD-Q4_K_XL", "llamacpp/Qwen3-Coder-30B-A3B-Instruct-UD-Q4_K_XL"] {
+            println!("{id} → {:?}", super::managed_server("hermes", id));
+        }
+    }
+
+    /// What's left running on this computer (looks only).
+    #[test]
+    #[ignore = "this computer's processes"]
+    fn finds_leftover_servers() {
+        println!("8080: {:?}, 1: {:?}", super::leftovers("http://127.0.0.1:8080/v1"), super::leftovers("http://127.0.0.1:1/v1"));
+    }
+
+    #[test]
+    fn reads_the_model_path_of_a_start_command() {
+        assert_eq!(super::shell_word("'/a/my model'\\''s/x.gguf' --alias q"), "/a/my model's/x.gguf");
+        assert_eq!(super::shell_word(" /plain/x.gguf --port 1"), "/plain/x.gguf");
+    }
+
     #[test]
     fn where_pi_found_a_key() {
         assert_eq!(super::pi_source("models_json_command"), "Command in pi's models.json");

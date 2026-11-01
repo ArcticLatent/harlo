@@ -87,6 +87,19 @@ fn hub(program: &Path, remote: Option<&RemoteLaunch>) -> Result<Arc<Hub>> {
     Ok(hub)
 }
 
+/// This computer's server reads its config again (a provider was added):
+/// stopped now if no session uses it, so the next one starts afresh.
+/// Whether it was.
+pub fn reload_if_idle() -> bool {
+    let Some(hubs) = HUBS.get() else { return true };
+    let mut hubs = hubs.lock().unwrap();
+    let idle = hubs.get("").is_none_or(|h| h.sessions.lock().unwrap().is_empty());
+    if idle && let Some(hub) = hubs.remove("") {
+        hub.server.stop();
+    }
+    idle
+}
+
 /// Stops the servers (harlo is quitting).
 pub fn shutdown() {
     if let Some(hubs) = HUBS.get() {
@@ -150,7 +163,7 @@ pub fn remote_saved(remote: &RemoteLaunch, path: &Path) -> SavedSession {
     let messages = remote_history(&hub, &id);
     let model = messages.iter().rev().find_map(|m| m["model"].as_str().filter(|s| s.len() > 1)).unwrap_or_default().to_owned();
     let name = hub.server.get(&format!("/api/session/{id}"), None).ok().and_then(|v| v["data"]["title"].as_str().map(str::to_owned)).unwrap_or_default();
-    SavedSession { messages, model, thinking: String::new(), name }
+    SavedSession { messages, model_id: model.clone(), model, thinking: String::new(), name }
 }
 
 /// A saved remote session's subagents (its child sessions), from its
@@ -650,7 +663,11 @@ async fn command(s: &Arc<Session>, pending: &Pending, cmd: Value) {
         }
         "get_available_thinking_levels" => {
             let st = s.state.lock().unwrap();
-            let levels = st.variants.get(&format!("{}/{}", st.model.provider, st.model.id)).cloned().unwrap_or_default();
+            let mut levels = st.variants.get(&format!("{}/{}", st.model.provider, st.model.id)).cloned().unwrap_or_default();
+            // (Its default: no variant. Listed, so it can be picked again.)
+            if !levels.is_empty() && !levels.iter().any(|l| l == "default") {
+                levels.insert(0, "default".to_owned());
+            }
             reply(true, json!({ "levels": levels }), "");
         }
         "set_thinking_level" => {

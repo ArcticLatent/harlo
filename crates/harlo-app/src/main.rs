@@ -31,6 +31,7 @@ mod provider_logos;
 mod qt_base;
 mod registry;
 mod remotes;
+mod server_setup;
 mod setup;
 mod workspace;
 mod orchestration;
@@ -127,6 +128,8 @@ fn main() {
     // Settings → MCP opens without waiting: Hermes' servers are read once
     // now (it takes Hermes half a second; kept until its config changes).
     runtime().spawn_blocking(|| harlo_core::mcp::load(&harlo_core::mcp::Scope::Global));
+    // Settings → Model servers too (Hermes' are read with `hermes config`).
+    runtime().spawn_blocking(|| harlo_core::model_servers::servers(harlo_harness::HarnessKind::Hermes));
 
     // A widgets-capable application: the desktop's tray (KDE's needs widgets)
     // and native file dialogs work. Also names the QtCore `Settings` file
@@ -160,6 +163,8 @@ fn main() {
     graphics::inconclusive();
     harlo_harness::stop_opencode();
     harlo_harness::stop_acp();
+    // Model servers harlo started (Settings → Model servers).
+    accounts::stop_started_servers();
     instance::cleanup();
     // Orchestration's socket.
     let _ = std::fs::remove_file(harlo_core::orchestration::socket_path());
