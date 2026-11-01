@@ -48,7 +48,7 @@ pub mod qobject {
         /// Finds GGUF models on Hugging Face: the most downloaded, or those
         /// matching `search` (`hfModels` follows).
         #[qinvokable]
-        fn find_models(self: Pin<&mut ServerSetup>, search: &QString);
+        fn find_models(self: Pin<&mut ServerSetup>, search: &QString, engine: &QString);
         /// Lists a Hugging Face repository's GGUF files (`ggufs` follows).
         #[qinvokable]
         fn list_ggufs(self: Pin<&mut ServerSetup>, repo: &QString);
@@ -185,6 +185,7 @@ fn install(engine: Engine, hw: &engines::Hardware, report: &Report, stop: &Atomi
         }
     }
     match engine {
+        Engine::Vllm => install_vllm(&dir, report, stop),
         Engine::Strata => {
             // Its own installer (checked above): ~/.local/share/strata, ~/.local/bin/strata.
             report.step("Running Strata's installer");
@@ -197,6 +198,137 @@ fn install(engine: Engine, hw: &engines::Hardware, report: &Report, stop: &Atomi
         }
         _ => engines::installed(engine).filter(|i| i.harlo).map(|i| i.program).ok_or_else(|| format!("{} unpacked, but harlo can't find its program.", engine.name())),
     }
+}
+
+/// vLLM with uv (blocking): a Python of its own and vLLM with PyTorch for
+/// this computer's CUDA, in harlo's engines folder (several GB). Its
+/// program, `vllm`.
+fn install_vllm(dir: &Path, report: &Report, stop: &AtomicBool) -> Result<PathBuf, String> {
+    let uv = walk_for(dir, "uv", 3).ok_or("uv unpacked, but harlo can't find it.")?;
+    let home = engines::engines_dir().join("vllm");
+    let env = engines::vllm_env();
+    let cache = home.join("cache");
+    // (harlo's uv first: vLLM's kernel step runs `uv` itself.)
+    let path = format!("{}:{}", uv.parent().unwrap_or(Path::new("/")).display(), std::env::var("PATH").unwrap_or_default());
+    let run = |program: &Path, args: &[&str], step: &str| -> Result<(), String> {
+        report.step(step);
+        let mut child = std::process::Command::new(program)
+            .args(args)
+            .env("PATH", &path)
+            .env("UV_PYTHON_INSTALL_DIR", home.join("python"))
+            .env("UV_CACHE_DIR", &cache)
+            .env("VIRTUAL_ENV", &env)
+            .env("NO_COLOR", "1")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        // Its lines (uv's on stderr, vLLM's on stdout) as they come.
+        let (tx, rx) = std::sync::mpsc::channel::<String>();
+        for pipe in [child.stdout.take().map(|o| Box::new(o) as Box<dyn std::io::Read + Send>), child.stderr.take().map(|e| Box::new(e) as Box<dyn std::io::Read + Send>)].into_iter().flatten() {
+            let tx = tx.clone();
+            std::thread::spawn(move || {
+                use std::io::BufRead;
+                for line in std::io::BufReader::new(pipe).lines().map_while(Result::ok) {
+                    let _ = tx.send(line);
+                }
+            });
+        }
+        drop(tx);
+        // How far: uv says each big download's size ("Downloading torch
+        // (846.1MiB)"); what's come is what this computer received since.
+        let started = received_bytes();
+        let mut total = 0u64;
+        let mut last = String::new();
+        loop {
+            match rx.recv_timeout(Duration::from_millis(400)) {
+                Ok(line) => {
+                    let line = harlo_core::signin::plain(&line).trim().to_owned();
+                    if line.is_empty() {
+                        continue;
+                    }
+                    if line.starts_with("Downloading ") {
+                        total += announced_size(&line);
+                    }
+                    last = line;
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            }
+            if stop.load(Ordering::Relaxed) {
+                let _ = child.kill();
+                return Err("Cancelled.".into());
+            }
+            let got = received_bytes().saturating_sub(started);
+            let shown: String = last.chars().take(90).collect();
+            report.update(|v| {
+                if total > 0 {
+                    v["progress"] = json!((got as f64 / total as f64).min(0.99));
+                    v["detail"] = json!(format!("{:.1} of {:.1} GB · {shown}", got as f64 / 1e9, total as f64 / 1e9));
+                } else {
+                    v["detail"] = json!(shown);
+                }
+            });
+        }
+        let status = child.wait().map_err(|e| e.to_string())?;
+        if status.success() { Ok(()) } else { Err(if last.is_empty() { format!("{} failed.", program.display()) } else { last }) }
+    };
+    let env_s = env.to_string_lossy().into_owned();
+    run(&uv, &["venv", "--python", "3.12", "--managed-python", "--allow-existing", &env_s], "Setting up Python for vLLM")?;
+    let python = env.join("bin/python").to_string_lossy().into_owned();
+    run(&uv, &["pip", "install", "--python", &python, "vllm", "--torch-backend=auto"], "Installing vLLM and PyTorch (several GB)")?;
+    // Its prebuilt GPU kernels, where this vLLM has the command (else it
+    // fetches them when it starts: not worth failing the setup for).
+    if let Err(e) = run(&env.join("bin/vllm"), &["download-kernels"], "Fetching vLLM's GPU kernels") {
+        tracing::warn!("vllm download-kernels: {e}");
+    }
+    // (The downloaded wheels: not needed now.)
+    let _ = std::fs::remove_dir_all(&cache);
+    engines::installed(Engine::Vllm).filter(|i| i.harlo).map(|i| i.program).ok_or_else(|| "vLLM installed, but harlo can't find its program.".into())
+}
+
+/// The bytes this computer has received (all its network but loopback),
+/// from /proc/net/dev.
+fn received_bytes() -> u64 {
+    std::fs::read_to_string("/proc/net/dev")
+        .unwrap_or_default()
+        .lines()
+        .skip(2)
+        .filter_map(|l| l.split_once(':'))
+        .filter(|(name, _)| name.trim() != "lo")
+        .filter_map(|(_, rest)| rest.split_whitespace().next()?.parse::<u64>().ok())
+        .sum()
+}
+
+/// The size uv announces for a download ("Downloading torch (846.1MiB)").
+fn announced_size(line: &str) -> u64 {
+    let Some(inner) = line.rsplit_once('(').and_then(|(_, r)| r.strip_suffix(')')) else { return 0 };
+    let split = inner.find(|c: char| c.is_ascii_alphabetic()).unwrap_or(inner.len());
+    let n: f64 = inner[..split].trim().parse().unwrap_or(0.0);
+    let unit = match inner[split..].trim() {
+        "GiB" => 1u64 << 30,
+        "MiB" => 1 << 20,
+        "KiB" => 1 << 10,
+        "GB" => 1_000_000_000,
+        "MB" => 1_000_000,
+        _ => 1,
+    };
+    (n * unit as f64) as u64
+}
+
+/// A file named `name` under `dir` (a few levels down).
+fn walk_for(dir: &Path, name: &str, depth: usize) -> Option<PathBuf> {
+    let mut subdirs = Vec::new();
+    for e in std::fs::read_dir(dir).ok()?.flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            subdirs.push(p);
+        } else if e.file_name() == name {
+            return Some(p);
+        }
+    }
+    (depth > 0).then(|| subdirs.into_iter().find_map(|d| walk_for(&d, name, depth - 1))).flatten()
 }
 
 /// One setup (blocking): the server's address, name, models and test.
@@ -288,6 +420,54 @@ fn setup(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value, Strin
             format!("{prog} launch --stop"),
             String::new(),
         ),
+        // vLLM: the repository's files in harlo's models folder, served with
+        // its family's parsers (agents need its tool calls read).
+        Engine::Vllm => {
+            let repo = model.clone();
+            let folder = engines::engines_dir().parent().unwrap_or(Path::new(".")).join("models").join(repo.replace('/', "__"));
+            report.step("Listing the model's files");
+            let files = engines::hf_vllm_files(&repo)?;
+            let total: u64 = files.iter().map(|(_, s)| *s).sum();
+            if total / (1024 * 1024) > hw.disk_free_mb {
+                return Err(format!("It's {} GB and only {} GB are free.", total / (1 << 30), hw.disk_free_mb / 1024));
+            }
+            report.step("Downloading the model");
+            let mut before = 0;
+            for (path, size) in &files {
+                let dest = folder.join(path);
+                if !dest.exists() {
+                    let mut checking = false;
+                    let mut progress = |phase: &str, d: u64, _: u64| {
+                        if phase == "check" && !checking {
+                            checking = true;
+                            report.step(&format!("Checking {path} against Hugging Face's checksum"));
+                        } else if phase == "download" && checking {
+                            checking = false;
+                            report.step("Downloading the model");
+                        }
+                        report.progress(if phase == "check" { d } else { before + d }, if phase == "check" { *size } else { total });
+                    };
+                    // (Big files: 8 connections at once, checked.)
+                    if *size > 64 << 20 {
+                        engines::download_parallel(&engines::hf_url(&repo, path), &dest, None, 8, &mut progress, &cancelled)?;
+                    } else {
+                        engines::download(&engines::hf_url(&repo, path), &dest, None, &mut progress, &cancelled)?;
+                    }
+                }
+                before += size;
+            }
+            let config: Value = std::fs::read_to_string(folder.join("config.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+            let (tools, thinking) = engines::vllm_parsers(config["model_type"].as_str().unwrap_or_default(), &repo);
+            let alias = repo.rsplit('/').next().unwrap_or(&repo).to_owned();
+            let context = req["context"].as_u64().filter(|c| *c >= 2048).map_or("auto".to_owned(), |c| c.to_string());
+            let start = format!(
+                "HF_HUB_OFFLINE=1 VLLM_NO_USAGE_STATS=1 DO_NOT_TRACK=1 exec {prog} serve {} --served-model-name {} --host 127.0.0.1 --port {port} --max-model-len {context} --gpu-memory-utilization 0.90 --enable-auto-tool-choice --tool-call-parser {tools}{}",
+                quote(&folder.to_string_lossy()),
+                quote(&alias),
+                thinking.map(|t| format!(" --reasoning-parser {t}")).unwrap_or_default()
+            );
+            (start, String::new(), alias)
+        }
     };
     // (Adding to a llama.cpp server: its command now names its preset.)
     let before = crate::accounts::start_command(&base);
@@ -315,7 +495,18 @@ fn setup(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value, Strin
     } else {
         crate::accounts::launch(&base, &start)?;
         let limit = Duration::from_secs(if engine == Engine::Strata { 12 * 3600 } else { 20 * 60 });
-        let waited = crate::accounts::wait_up(&base, limit, &mut |line| report.detail(line), &cancelled);
+        // (A progress bar in its log, as vLLM's "Capturing CUDA graphs: 17%|…":
+        // the bar follows it.)
+        let waited = crate::accounts::wait_up(
+            &base,
+            limit,
+            &mut |line| {
+                let pct = line.split('%').next().and_then(|head| head.rsplit(|c: char| !c.is_ascii_digit()).next()).and_then(|n| n.parse::<f64>().ok()).filter(|p| line.contains("%|") && *p <= 100.0);
+                report.update(|v| v["progress"] = json!(pct.map_or(-1.0, |p| p / 100.0)));
+                report.detail(line);
+            },
+            &cancelled,
+        );
         if let Err(e) = waited {
             crate::accounts::stop_launched(&base);
             return Err(e);
@@ -345,7 +536,8 @@ fn setup(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value, Strin
     // The context it set (llama.cpp's /props, Ollama's loaded model): not
     // in /models.
     let served = match engine {
-        Engine::Strata => None,
+        // (vLLM's /models says it: max_model_len.)
+        Engine::Strata | Engine::Vllm => None,
         Engine::LlamaCpp => engines::served_context_of(&base, &id),
         Engine::Ollama => engines::served_context(&base),
     };
@@ -396,8 +588,10 @@ impl ServerSetup {
         });
     }
 
-    pub fn find_models(mut self: Pin<&mut Self>, search: &QString) {
+    pub fn find_models(mut self: Pin<&mut Self>, search: &QString, engine: &QString) {
         let search = search.to_string().trim().to_owned();
+        // vLLM's models are in Hugging Face's own format, the others' GGUF.
+        let vllm = engine.to_string() == "vllm";
         let mut v: Value = serde_json::from_str(&self.hf_models.to_string()).unwrap_or_else(|_| json!({ "models": [] }));
         v["state"] = json!("finding");
         v["search"] = json!(search);
@@ -405,11 +599,19 @@ impl ServerSetup {
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
             let hw = engines::detect();
-            let v = match engines::hf_models(&search) {
+            let found = if vllm { engines::hf_vllm_models(&search) } else { engines::hf_models(&search) };
+            let v = match found {
                 Ok(models) => {
                     let list: Vec<Value> = models
                         .iter()
                         .map(|m| {
+                            // (vLLM: its weights as they are, all on the card, with room
+                            // for its context.)
+                            if vllm {
+                                let name = m.repo.rsplit('/').next().unwrap_or(&m.repo);
+                                let fit = if m.bytes == 0 { "" } else if m.bytes / (1024 * 1024) <= hw.vram_mb() * 8 / 10 { "gpu" } else { "no" };
+                                return json!({ "repo": m.repo, "name": name, "params": m.params, "context": 0, "downloads": m.downloads, "q4Size": m.bytes, "fit": fit, "modelType": m.model_type });
+                            }
                             let q4 = engines::q4_bytes(m.params);
                             let name = m.repo.rsplit('/').next().unwrap_or(&m.repo).trim_end_matches("-GGUF").trim_end_matches("-gguf");
                             json!({
@@ -504,5 +706,16 @@ impl ServerSetup {
 
     pub fn cancel(self: Pin<&mut Self>) {
         self.stop.store(true, Ordering::Relaxed);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn reads_the_sizes_uv_announces() {
+        assert_eq!(super::announced_size("Downloading torch (846.1MiB)"), (846.1 * (1u64 << 20) as f64) as u64);
+        assert_eq!(super::announced_size("Downloading flashinfer-jit-cache (1.4GiB)"), (1.4 * (1u64 << 30) as f64) as u64);
+        assert_eq!(super::announced_size("Downloading cpython-3.12.12-linux-x86_64-gnu (download)"), 0);
+        assert!(super::received_bytes() > 0 || !std::path::Path::new("/proc/net/dev").exists());
     }
 }

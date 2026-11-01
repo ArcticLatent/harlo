@@ -32,7 +32,9 @@ AppDialog {
     property int maxContext: 0
     readonly property var contexts: maxContext === 0 ? [0, 16384, 32768, 65536, 131072]
         : [0].concat([16384, 32768, 65536, 131072, 262144, 524288].filter(c => c < maxContext), [maxContext])
-    readonly property bool fromHf: engine !== null && (engine.id === "ollama" || engine.id === "llamacpp")
+    readonly property bool fromHf: engine !== null && (engine.id === "ollama" || engine.id === "llamacpp" || engine.id === "vllm")
+    /// vLLM: a repository as it is (no GGUF sizes to pick from).
+    readonly property bool wholeRepo: engine !== null && engine.id === "vllm"
     /// The files Ollama can take: one file each, not in a folder.
     readonly property var files: gg.repo === repo ? (gg.files || []).filter(f => !(engine && engine.id === "ollama" && f.split)) : []
     property var chosen: []
@@ -45,7 +47,7 @@ AppDialog {
     property bool nameEdited: false
     function defaultName() {
         if (!engine) return ""
-        const usual = engine.id === "ollama" ? 11434 : 8080
+        const usual = engine.id === "ollama" ? 11434 : engine.id === "vllm" ? 8000 : 8080
         const port = parseInt(portField.text)
         return engine.id + (port && port !== usual ? "-" + port : "")
     }
@@ -60,6 +62,13 @@ AppDialog {
         maxContext = m.context || 0
         if (!contexts.includes(context)) context = 0
         chooseFile(null)
+        // (vLLM: the repository is the model; its size, its weights.)
+        if (wholeRepo) {
+            file = m.repo
+            modelSize = m.q4Size || 0
+            model = m.repo
+            return
+        }
         ServerSetup.listGgufs(m.repo)
     }
     function chooseFile(f) {
@@ -76,8 +85,8 @@ AppDialog {
         chooseFile(null)
         error = ""
         modelSearch.text = ""
-        if (e.id === "ollama" || e.id === "llamacpp") ServerSetup.findModels("")
-        portField.text = ServerSetup.freePort(e.id === "ollama" ? 11434 : 8080)
+        if (e.id === "ollama" || e.id === "llamacpp" || e.id === "vllm") ServerSetup.findModels("", e.id)
+        portField.text = ServerSetup.freePort(e.id === "ollama" ? 11434 : e.id === "vllm" ? 8000 : 8080)
         nameEdited = false
         nameField.text = defaultName()
         page = "model"
@@ -209,7 +218,9 @@ AppDialog {
                 ToolTip.text: dlg.engine && dlg.engine.installed ? dlg.engine.installed.program || "" : ""
                 ToolTip.delay: 400
             }
-            Note { visible: dlg.addTo === null && dlg.engine !== null && (dlg.engine.installed === null || !dlg.useInstalled); text: "harlo downloads the latest release for this computer's card, checks it against its published checksum and keeps it in its own folder." }
+            Note { visible: dlg.addTo === null && dlg.engine !== null && (dlg.engine.installed === null || !dlg.useInstalled)
+                text: dlg.wholeRepo ? "harlo installs uv (checked against its published checksum), then a Python of its own with vLLM and PyTorch for your card, in harlo's folder: several GB, a few minutes."
+                    : "harlo downloads the latest release for this computer's card, checks it against its published checksum and keeps it in its own folder." }
 
             // Ollama and llama.cpp: a model from Hugging Face, then its size.
             ColumnLayout {
@@ -224,8 +235,8 @@ AppDialog {
                     placeholderText: "Search Hugging Face, or pick a popular one"
                     font.pixelSize: Theme.px(12)
                     onTextEdited: searchTimer.restart()
-                    onAccepted: { searchTimer.stop(); ServerSetup.findModels(text) }
-                    Timer { id: searchTimer; interval: 400; onTriggered: ServerSetup.findModels(modelSearch.text) }
+                    onAccepted: { searchTimer.stop(); ServerSetup.findModels(text, dlg.engine.id) }
+                    Timer { id: searchTimer; interval: 400; onTriggered: ServerSetup.findModels(modelSearch.text, dlg.engine.id) }
                 }
                 ListView {
                     id: modelList
@@ -282,8 +293,8 @@ AppDialog {
                 }
 
                 // Its sizes (quantizations): smaller is faster and less exact.
-                FieldName { visible: dlg.repo !== ""; Layout.topMargin: 4; text: "Size" }
-                Note { visible: dlg.repo !== "" && dlg.gg.state === "listing"; text: "Listing its files…" }
+                FieldName { visible: dlg.repo !== "" && !dlg.wholeRepo; Layout.topMargin: 4; text: "Size" }
+                Note { visible: dlg.repo !== "" && !dlg.wholeRepo && dlg.gg.state === "listing"; text: "Listing its files…" }
                 Note { visible: dlg.repo !== "" && dlg.gg.repo === dlg.repo && dlg.gg.state === "failed"; color: Theme.error; text: dlg.gg.error || "" }
                 Note {
                     visible: dlg.repo !== "" && dlg.gg.repo === dlg.repo && dlg.gg.state === "ready" && dlg.files.length === 0
@@ -320,9 +331,15 @@ AppDialog {
                     }
                 }
                 Note {
-                    visible: dlg.file !== ""
+                    visible: dlg.file !== "" && !dlg.wholeRepo
                     readonly property var f: dlg.files.find(x => x.file === dlg.file)
                     text: f ? dlg.fitText(f.fit) + ". Q4 and up are close to the full model; Q2 and Q3 lose some quality." : ""
+                }
+                // vLLM: what the repository holds, and what it needs.
+                Note {
+                    visible: dlg.wholeRepo
+                    text: dlg.repo === "" ? "Models in Hugging Face's own format: full, or quantized (AWQ, GPTQ, FP8: smaller, nearly as good). vLLM keeps the whole model on your card, with room for its context."
+                        : "About " + dlg.gb(dlg.modelSize) + " to download. The first start takes a minute or two while vLLM prepares it for your card."
                 }
             }
 
@@ -361,9 +378,12 @@ AppDialog {
                 }
                 Note {
                     text: dlg.context === 0
-                        ? "How much of the conversation and files the model keeps in mind, in tokens. " + (dlg.engine && dlg.engine.id === "ollama"
+                        ? "How much of the conversation and files the model keeps in mind, in tokens. " + (dlg.wholeRepo
+                            ? "vLLM gives it as much as fits on your card next to the model" + (dlg.maxContext ? ", up to its own " + dlg.ctxText(dlg.maxContext) : ", up to the model's own") + "."
+                            : dlg.engine && dlg.engine.id === "ollama"
                             ? "Ollama picks it from your graphics memory (32k on cards with 24 GB or more), up to the model's own" + (dlg.maxContext ? " " + dlg.ctxText(dlg.maxContext) : "") + "."
                             : "llama.cpp gives it as much as fits on your card next to the model" + (dlg.maxContext ? ", up to its own " + dlg.ctxText(dlg.maxContext) : "") + ", and not less than 16k.")
+                        : dlg.wholeRepo ? "How much of the conversation and files the model keeps in mind, in tokens. vLLM keeps it all on your card with the model: if they don't fit together, it says so when it starts."
                         : "How much of the conversation and files the model keeps in mind, in tokens. If the model and " + dlg.ctxText(dlg.context) + " don't fit on your card together, " + (dlg.engine && dlg.engine.id === "ollama" ? "Ollama" : "llama.cpp") + " keeps part of the model in RAM, which is slower."
                             + (dlg.engine && dlg.engine.id === "ollama" ? " (It's Ollama's for every model it serves.)" : "")
                 }

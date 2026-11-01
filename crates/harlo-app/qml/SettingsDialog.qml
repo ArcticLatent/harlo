@@ -2793,29 +2793,60 @@ Popup {
                 objectName: "removeServerDialog"
                 property var row: null
                 property var files: ({ files: [], size: 0 })
+                // Removing (in the background): how far, until it's done.
+                property bool removing: false
+                // Done: what it did (and what didn't go), until it's closed.
+                property bool finished: false
+                property string summary: ""
+                property string problems: ""
+                readonly property var job: Accounts.removal !== "" ? JSON.parse(Accounts.removal) : null
                 function ask(r) {
                     row = r
                     files = r.managed ? JSON.parse(Accounts.serverFiles(r.baseUrl)) : ({ files: [], size: 0 })
                     deleteFiles.checked = true
+                    removing = false
+                    finished = false
                     open()
                 }
-                title: row ? "Remove " + row.name + "?" : ""
+                title: !row ? "" : finished ? "Removed " + row.name : removing ? "Removing " + row.name : "Remove " + row.name + "?"
                 width: Math.min(460, (Overlay.overlay ? Overlay.overlay.width : 500) - 40)
+                closePolicy: removing ? Popup.NoAutoClose : Popup.CloseOnEscape
                 footer: AppButtonBox {
-                    DialogButton { text: "Cancel"; DialogButtonBox.buttonRole: DialogButtonBox.RejectRole }
-                    DialogButton { objectName: "removeServerConfirm"; text: "Remove"; DialogButtonBox.buttonRole: DialogButtonBox.DestructiveRole }
+                    DialogButton { text: removeServerDialog.finished ? "Close" : "Cancel"; enabled: !removeServerDialog.removing; DialogButtonBox.buttonRole: DialogButtonBox.RejectRole }
+                    DialogButton { objectName: "removeServerConfirm"; visible: !removeServerDialog.finished; text: "Remove"; enabled: !removeServerDialog.removing; DialogButtonBox.buttonRole: DialogButtonBox.DestructiveRole }
                 }
                 onDiscarded: {
-                    const err = Accounts.removeServer(row.name, row.baseUrl, files.files.length > 0 && deleteFiles.checked)
-                    if (err === "OPENCODE_BUSY") Workspace.showNotice("Removed. OpenCode's open sessions keep its models until they're all closed.", false)
-                    else if (err !== "") Workspace.showNotice(err, true)
-                    Workspace.refreshProviders()
-                    close()
+                    removing = true
+                    Accounts.removeServer(row.name, row.baseUrl, files.files.length > 0 && deleteFiles.checked)
+                }
+                Connections {
+                    target: Accounts
+                    function onRemovalChanged() {
+                        const j = removeServerDialog.job
+                        if (!removeServerDialog.removing || !j || j.state !== "done" || !removeServerDialog.row || j.url !== removeServerDialog.row.baseUrl) return
+                        removeServerDialog.removing = false
+                        removeServerDialog.finished = true
+                        removeServerDialog.summary = (j.summary || "Removed.") + (j.busy ? " OpenCode's open sessions keep its models until they're all closed." : "")
+                        removeServerDialog.problems = j.error || ""
+                        Workspace.refreshProviders()
+                    }
                 }
                 ColumnLayout {
                     width: parent.width
                     spacing: 8
+                    // Done: what it did.
                     Hint {
+                        visible: removeServerDialog.finished
+                        color: Theme.foreground
+                        text: removeServerDialog.summary
+                    }
+                    Hint {
+                        visible: removeServerDialog.finished && removeServerDialog.problems !== ""
+                        color: Theme.error
+                        text: removeServerDialog.problems
+                    }
+                    Hint {
+                        visible: !removeServerDialog.finished
                         color: Theme.foreground
                         text: !removeServerDialog.row ? "" : removeServerDialog.row.agents.length === 0 ? "No agent uses it; harlo stops it and forgets how to start it."
                             : "harlo takes it out of " + removeServerDialog.row.agents.join(", ") + (removeServerDialog.row.agents.length === 1 ? "" : " (each one's own file)")
@@ -2824,12 +2855,37 @@ Popup {
                     AppCheckBox {
                         id: deleteFiles
                         objectName: "removeServerFiles"
-                        visible: removeServerDialog.files.files.length > 0
-                        text: "Also delete its model file (" + (removeServerDialog.files.size / 1e9).toFixed(1) + " GB)"
+                        visible: removeServerDialog.files.files.length > 0 && !removeServerDialog.finished
+                        enabled: !removeServerDialog.removing
+                        readonly property string size: removeServerDialog.files.size > 0 ? " (" + (removeServerDialog.files.size / 1e9).toFixed(1) + " GB)" : ""
+                        text: removeServerDialog.files.ollama
+                            ? "Also delete its " + (removeServerDialog.files.files.length === 1 ? "model" : removeServerDialog.files.files.length + " models") + " from Ollama" + size
+                            : "Also delete its model " + (removeServerDialog.files.files.length === 1 ? "file" : "files") + size
                     }
                     Hint {
-                        visible: removeServerDialog.row !== null && removeServerDialog.row.managed
+                        visible: removeServerDialog.row !== null && removeServerDialog.row.managed && !removeServerDialog.removing && !removeServerDialog.finished
                         text: "The engine stays, for your other servers; setting this one up again downloads the model again if you delete it."
+                    }
+                    // What it's doing now, and how many of how many.
+                    ColumnLayout {
+                        visible: removeServerDialog.removing && removeServerDialog.job !== null
+                        Layout.fillWidth: true
+                        Layout.topMargin: 6
+                        spacing: 6
+                        Label {
+                            Layout.fillWidth: true
+                            readonly property var j: removeServerDialog.job || ({})
+                            text: (j.step || "Removing it") + (j.total > 1 ? " (" + (j.done + 1) + " of " + j.total + ")" : "")
+                            color: Theme.foreground
+                            font.pixelSize: Theme.px(12.5)
+                            elide: Text.ElideMiddle
+                        }
+                        AppProgressBar {
+                            Layout.fillWidth: true
+                            readonly property var j: removeServerDialog.job || ({})
+                            indeterminate: !(j.total > 1)
+                            value: j.total > 1 ? j.done / j.total : 0
+                        }
                     }
                 }
             }
@@ -3071,7 +3127,9 @@ Popup {
                                 width: parent.width
                                 enabled: serverItem.st.state !== "starting" && serverItem.st.state !== ""
                                 text: serverItem.running ? "Stop" : serverItem.st.state === "starting" ? "Starting…" : "Start"
-                                variant: serverItem.running ? "outline" : "primary"
+                                // (Stop in red, as Remove.)
+                                variant: serverItem.running ? "danger" : "primary"
+                                accent: serverItem.running ? Theme.error : Theme.foreground
                                 font.pixelSize: Theme.px(12)
                                 onClicked: serverItem.running ? Accounts.stopServer(serverItem.modelData.baseUrl) : Accounts.startServer(serverItem.modelData.baseUrl)
                             }

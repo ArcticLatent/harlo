@@ -72,13 +72,14 @@ mod tests {
         assert_eq!(id_for("Gemini"), Some("google"));
         assert_eq!(id_for("llama.cpp"), Some("llama.cpp"));
         assert_eq!(id_for("llamacpp/Qwen3-4B"), Some("llama.cpp"));
-        assert_eq!(id_for("vllm"), None);
+        assert_eq!(id_for("vllm"), Some("vllm"));
+        assert_eq!(id_for("koboldcpp"), None);
         assert_eq!(base64(b"Man"), "TWFu");
         assert_eq!(base64(b"Ma"), "TWE=");
         assert_eq!(base64(b"M"), "TQ==");
         let url = data_url("openai-codex", "#e0e0e0");
         assert!(url.starts_with("data:image/svg+xml;base64,"));
-        assert_eq!(data_url("vllm", "#fff"), "");
+        assert_eq!(data_url("koboldcpp", "#fff"), "");
     }
 
     /// Every logo, recoloured, is still valid: its `<svg>` tag has no

@@ -138,9 +138,10 @@ pub enum Engine {
     Ollama,
     LlamaCpp,
     Strata,
+    Vllm,
 }
 
-pub const ENGINES: [Engine; 3] = [Engine::Ollama, Engine::LlamaCpp, Engine::Strata];
+pub const ENGINES: [Engine; 4] = [Engine::Ollama, Engine::LlamaCpp, Engine::Vllm, Engine::Strata];
 
 impl Engine {
     pub fn id(self) -> &'static str {
@@ -148,6 +149,7 @@ impl Engine {
             Engine::Ollama => "ollama",
             Engine::LlamaCpp => "llamacpp",
             Engine::Strata => "strata",
+            Engine::Vllm => "vllm",
         }
     }
 
@@ -160,6 +162,7 @@ impl Engine {
             Engine::Ollama => "Ollama",
             Engine::LlamaCpp => "llama.cpp",
             Engine::Strata => "Strata",
+            Engine::Vllm => "vLLM",
         }
     }
 
@@ -168,6 +171,7 @@ impl Engine {
             Engine::Ollama => "The easiest: pick a model by name and it does the rest.",
             Engine::LlamaCpp => "Any GGUF model from Hugging Face, fast on one computer, every setting yours.",
             Engine::Strata => "Qwen3.8-Flash-Next on consumer hardware, tuned for your card.",
+            Engine::Vllm => "The fastest when several sessions run at once, on an NVIDIA card: Hugging Face models in their own format, full or quantized.",
         }
     }
 
@@ -176,6 +180,8 @@ impl Engine {
             Engine::Ollama => "ollama/ollama",
             Engine::LlamaCpp => "ggml-org/llama.cpp",
             Engine::Strata => "Niko1221/Strata",
+            // (Installed with uv, Python's fast installer: its release.)
+            Engine::Vllm => "astral-sh/uv",
         }
     }
 
@@ -193,6 +199,14 @@ impl Engine {
                 "nvidia" if hw.vram_mb() < 12 * 1024 => ("no", "Needs an NVIDIA card with 12 GB or more.".into()),
                 _ if total_gb < 38 => ("warn", format!("Its smallest model needs about 38 GB of RAM and graphics memory together; this computer has {total_gb} GB.")),
                 _ => ("ok", String::new()),
+            },
+            // NVIDIA (compute 7.5 and up), the whole model on the card.
+            Engine::Vllm => match hw.vendor() {
+                "nvidia" if hw.gpus.iter().filter(|g| g.vendor == "nvidia").all(|g| g.arch.parse::<f32>().is_ok_and(|c| c < 7.5)) => ("no", "Needs an NVIDIA card from the RTX 20 series (Turing) or newer.".into()),
+                "nvidia" if hw.vram_mb() < 8 * 1024 => ("warn", "Small models only: vLLM keeps the whole model on the card, and this one has under 8 GB.".into()),
+                "nvidia" => ("ok", String::new()),
+                "amd" => ("no", "vLLM on AMD cards isn't set up in harlo yet; llama.cpp or Ollama run here.".into()),
+                _ => ("no", "Needs an NVIDIA card.".into()),
             },
         }
     }
@@ -225,6 +239,8 @@ fn harlo_install(engine: Engine) -> Option<PathBuf> {
         Engine::Ollama => "ollama",
         Engine::LlamaCpp => "llama-server",
         Engine::Strata => return None,
+        // (Its own Python environment: one, updated in place.)
+        Engine::Vllm => return Some(vllm_env().join("bin/vllm")).filter(|p| p.is_file()),
     };
     versions.iter().rev().find_map(|v| find_file(v, prog, 4))
 }
@@ -246,6 +262,11 @@ fn find_file(dir: &Path, name: &str, depth: usize) -> Option<PathBuf> {
     subdirs.into_iter().find_map(|d| find_file(&d, name, depth - 1))
 }
 
+/// vLLM's Python environment (harlo's): `bin/vllm` in it.
+pub fn vllm_env() -> PathBuf {
+    engines_dir().join("vllm").join("env")
+}
+
 /// Where an engine is installed on this computer, if it is.
 pub fn installed(engine: Engine) -> Option<Installed> {
     let (harlo, program) = match harlo_install(engine) {
@@ -254,6 +275,7 @@ pub fn installed(engine: Engine) -> Option<Installed> {
             Engine::Ollama => "ollama",
             Engine::LlamaCpp => "llama-server",
             Engine::Strata => "strata",
+            Engine::Vllm => "vllm",
         })?),
     };
     let out = Command::new(&program).arg("--version").stdin(std::process::Stdio::null()).output().ok();
@@ -356,6 +378,11 @@ pub fn plan(engine: Engine, hw: &Hardware) -> Result<(String, Vec<Asset>), Strin
         Engine::Strata => {
             let sums = rel["assets"].as_array().into_iter().flatten().find(|a| a["name"] == "SHA256SUMS.txt").and_then(|a| a["browser_download_url"].as_str()).map(get_text).transpose()?;
             vec![asset_named(&rel, "install.sh", sums.as_deref()).ok_or_else(|| format!("Strata {tag} has no install.sh with a checksum."))?]
+        }
+        // uv, which then installs vLLM (and its Python) from PyPI.
+        Engine::Vllm => {
+            let name = "uv-x86_64-unknown-linux-gnu.tar.gz";
+            vec![asset_named(&rel, name, None).ok_or_else(|| format!("uv {tag} has no {name} with a checksum."))?]
         }
     };
     Ok((tag, assets))
@@ -628,7 +655,8 @@ pub const STRATA_MODELS: [(&str, &str, u64); 5] = [
     ("coder", "Tuned for code", 30),
 ];
 
-/// A model on Hugging Face with GGUF files.
+/// A model on Hugging Face with GGUF files (or, for vLLM, in its own
+/// format: `bytes` its weights, `model_type` its family from config.json).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct HfModel {
     pub repo: String,
@@ -636,6 +664,8 @@ pub struct HfModel {
     pub context: u64,
     pub downloads: u64,
     pub updated: String,
+    pub bytes: u64,
+    pub model_type: String,
 }
 
 /// The most downloaded GGUF chat models on Hugging Face (Unsloth's, a
@@ -660,9 +690,108 @@ pub fn hf_models(search: &str) -> Result<Vec<HfModel>, String> {
                 context: m["gguf"]["context_length"].as_u64().unwrap_or(0),
                 downloads: m["downloads"].as_u64().unwrap_or(0),
                 updated: m["lastModified"].as_str().unwrap_or_default().chars().take(10).collect(),
+                ..Default::default()
             })
         })
         .collect())
+}
+
+/// Models for vLLM: repositories in Hugging Face's own format (safetensors),
+/// full or quantized (AWQ, GPTQ, FP8), not gated (no account needed). The
+/// most downloaded of the families vLLM serves well, or those matching
+/// `search`. Their weights' size from their parameters by type.
+pub fn hf_vllm_models(search: &str) -> Result<Vec<HfModel>, String> {
+    let base = "https://huggingface.co/api/models?pipeline_tag=text-generation&library=safetensors&sort=downloads&direction=-1&expand[]=downloads&expand[]=safetensors&expand[]=gated&expand[]=config&expand[]=lastModified";
+    let q = search.trim();
+    let urls: Vec<String> = if q.is_empty() {
+        ["Qwen", "openai", "mistralai", "zai-org", "ibm-granite"].iter().map(|a| format!("{base}&limit=15&author={a}")).collect()
+    } else {
+        vec![format!("{base}&limit=40&search={}", q.split_whitespace().collect::<Vec<_>>().join("%20").replace('&', "%26").replace('#', "%23"))]
+    };
+    let mut out: Vec<HfModel> = Vec::new();
+    for url in urls {
+        for m in get_json(&url)?.as_array().into_iter().flatten() {
+            let gated = m["gated"].as_bool() != Some(false);
+            let types = m["safetensors"]["parameters"].as_object();
+            let model_type = m["config"]["model_type"].as_str().unwrap_or_default();
+            let (Some(id), Some(types), false) = (m["id"].as_str(), types, gated || model_type.is_empty()) else { continue };
+            // Each type's size: FP8 one byte, BF16 two, packed 4-bit in I32s…
+            // (MXFP4, gpt-oss's: two of its "U8" parameters to a byte.)
+            let mxfp4 = m["config"]["quantization_config"]["quant_method"] == "mxfp4";
+            let bytes: u64 = types
+                .iter()
+                .map(|(t, n)| {
+                    let n = n.as_u64().unwrap_or(0);
+                    match t.as_str() {
+                        "F64" | "I64" | "U64" => n * 8,
+                        "F32" | "I32" | "U32" => n * 4,
+                        "U8" if mxfp4 => n / 2,
+                        t if t.starts_with("F8") || t == "I8" || t == "U8" || t == "BOOL" => n,
+                        _ => n * 2,
+                    }
+                })
+                .sum();
+            out.push(HfModel {
+                repo: id.to_owned(),
+                params: m["safetensors"]["total"].as_u64().unwrap_or(0),
+                downloads: m["downloads"].as_u64().unwrap_or(0),
+                updated: m["lastModified"].as_str().unwrap_or_default().chars().take(10).collect(),
+                bytes,
+                model_type: model_type.to_owned(),
+                ..Default::default()
+            });
+        }
+    }
+    out.sort_by_key(|m| std::cmp::Reverse(m.downloads));
+    Ok(out)
+}
+
+/// The files vLLM needs from a repository: its weights (safetensors),
+/// config and tokenizer, not other formats or extras. `(path, size)`.
+pub fn hf_vllm_files(repo: &str) -> Result<Vec<(String, u64)>, String> {
+    let repo = repo.trim().trim_matches('/');
+    let tree = get_json(&format!("https://huggingface.co/api/models/{repo}/tree/main?recursive=true"))?;
+    let wanted = |p: &str| {
+        let name = p.rsplit('/').next().unwrap_or(p);
+        let skip_dir = ["original/", "metal/", "onnx/", "gguf/", "openvino/"].iter().any(|d| p.starts_with(d));
+        !skip_dir && (name.ends_with(".safetensors") || name.ends_with(".json") || name.ends_with(".jinja") || ["tokenizer.model", "merges.txt", "vocab.txt"].contains(&name) || name.ends_with(".tiktoken"))
+    };
+    let files: Vec<(String, u64)> = tree
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|f| f["type"] == "file")
+        .filter_map(|f| {
+            let path = f["path"].as_str()?;
+            wanted(path).then(|| (path.to_owned(), f["lfs"]["size"].as_u64().or(f["size"].as_u64()).unwrap_or(0)))
+        })
+        .collect();
+    if !files.iter().any(|(p, _)| p.ends_with(".safetensors")) {
+        return Err(format!("{repo} has no safetensors weights for vLLM."));
+    }
+    Ok(files)
+}
+
+/// vLLM's parsers for a model family (config.json's `model_type`, and the
+/// repository's name): how its tool calls are read (agents need them), and
+/// its thinking (None: it doesn't think, or vLLM reads it on its own).
+pub fn vllm_parsers(model_type: &str, repo: &str) -> (&'static str, Option<&'static str>) {
+    let name = repo.to_lowercase();
+    match model_type {
+        "qwen3" | "qwen3_moe" | "qwen3_next" if name.contains("coder") => ("qwen3_coder", None),
+        "qwen3" | "qwen3_moe" | "qwen3_next" => ("hermes", Some("qwen3")),
+        "qwen2" | "qwen2_moe" => ("hermes", None),
+        "gpt_oss" => ("openai", Some("openai_gptoss")),
+        "llama" => ("llama3_json", None),
+        "llama4" => ("llama4_pythonic", None),
+        "mistral" | "mistral3" | "ministral" => ("mistral", None),
+        "glm4_moe" if name.contains("4.7") => ("glm47", Some("glm47")),
+        "glm4_moe" => ("glm45", Some("glm45")),
+        "deepseek_v3" if name.contains("r1") => ("deepseek_v3", Some("deepseek_r1")),
+        "deepseek_v3" => ("deepseek_v31", None),
+        "granite" | "granitemoe" | "granitemoehybrid" => ("granite4", None),
+        _ => ("hermes", None),
+    }
 }
 
 /// A GGUF file's quantization ("Qwen3-4B-UD-Q4_K_XL.gguf" → "UD-Q4_K_XL"),
@@ -909,6 +1038,33 @@ pub fn write_preset(file: &Path, models: &[PresetModel]) -> std::io::Result<()> 
     std::fs::write(file, t)
 }
 
+/// The models Ollama has and their sizes (`/api/tags`; it must be running).
+pub fn ollama_sizes(base_url: &str) -> Vec<(String, u64)> {
+    let root = base_url.trim_end_matches('/').trim_end_matches("/v1");
+    get_json(&format!("{root}/api/tags"))
+        .ok()
+        .and_then(|v| v["models"].as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|m| Some((m["name"].as_str().or(m["model"].as_str())?.to_owned(), m["size"].as_u64().unwrap_or(0))))
+        .collect()
+}
+
+/// Deletes a model from Ollama's store (`/api/delete`; it must be running).
+pub fn ollama_delete(base_url: &str, model: &str) -> Result<(), String> {
+    let root = base_url.trim_end_matches('/').trim_end_matches("/v1");
+    let resp = http(Duration::from_secs(60))
+        .delete(&format!("{root}/api/delete"))
+        .header("Content-Type", "application/json")
+        .force_send_body()
+        .send(json!({ "model": model }).to_string())
+        .map_err(|e| format!("{model}: {e}"))?;
+    match resp.status().as_u16() {
+        200 | 404 => Ok(()),
+        s => Err(format!("Ollama didn't delete {model} (HTTP {s})")),
+    }
+}
+
 /// A model's context on a server that doesn't list it: what the server
 /// serves now (`served_context`), else, for Ollama with nothing loaded, the
 /// model's own most (`/api/show`; it serves no more than that).
@@ -1072,6 +1228,14 @@ mod tests {
     }
 
     #[test]
+    fn picks_vllm_parsers() {
+        assert_eq!(vllm_parsers("qwen3", "Qwen/Qwen3-4B-AWQ"), ("hermes", Some("qwen3")));
+        assert_eq!(vllm_parsers("qwen3_moe", "Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8"), ("qwen3_coder", None));
+        assert_eq!(vllm_parsers("gpt_oss", "openai/gpt-oss-20b"), ("openai", Some("openai_gptoss")));
+        assert_eq!(vllm_parsers("something_new", "x/y"), ("hermes", None));
+    }
+
+    #[test]
     fn presets_round_trip() {
         let dir = std::env::temp_dir().join(format!("harlo-preset-{}", std::process::id()));
         let file = dir.join("llamacpp-8080.ini");
@@ -1178,6 +1342,19 @@ mod tests {
         let mb = std::fs::metadata(&dest).unwrap().len() as f64 / 1e6;
         println!("{mb:.0} MB in {:.1}s ({:.0} MB/s), checked: {checked}", started.elapsed().as_secs_f64(), mb / started.elapsed().as_secs_f64());
         assert!(checked);
+    }
+
+    /// vLLM's models and a repository's files, from Hugging Face (reads only).
+    #[test]
+    #[ignore = "network: Hugging Face"]
+    fn vllm_models_from_hugging_face() {
+        let list = hf_vllm_models("").unwrap();
+        for m in list.iter().take(10) {
+            println!("{} · {:.1} GB · {}", m.repo, m.bytes as f64 / 1e9, m.model_type);
+        }
+        let files = hf_vllm_files("Qwen/Qwen3-4B-AWQ").unwrap();
+        println!("Qwen3-4B-AWQ: {:?}", files.iter().map(|(p, s)| format!("{p} {}", s / 1_000_000)).collect::<Vec<_>>());
+        assert!(!list.is_empty());
     }
 
     /// What would be installed here, from the real releases (metadata only).

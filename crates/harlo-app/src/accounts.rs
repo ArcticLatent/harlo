@@ -41,6 +41,10 @@ pub mod qobject {
         /// "stopped" | "starting" | "failed", harlo (started by harlo),
         /// message } }`.
         #[qproperty(QString, server_states, cxx_name = "serverStates")]
+        /// A server being removed (in the background): `{ url, state:
+        /// "running" | "done", step, done, total, error, busy, summary }`
+        /// (summary: what it did, when done); "" none.
+        #[qproperty(QString, removal)]
         type Accounts = super::AccountsRust;
     }
 
@@ -129,9 +133,10 @@ pub mod qobject {
         fn server_files(self: &Accounts, url: &QString) -> QString;
         /// Takes a server out of every agent that has it (by its name and
         /// address); one harlo set up is stopped and forgotten, and its
-        /// model files deleted with `delete_files`. "" or why not.
+        /// model files deleted with `delete_files`. In the background:
+        /// `removal` says how far, then whether it went.
         #[qinvokable]
-        fn remove_server(self: Pin<&mut Accounts>, name: &QString, url: &QString, delete_files: bool) -> QString;
+        fn remove_server(self: Pin<&mut Accounts>, name: &QString, url: &QString, delete_files: bool);
         /// Takes a server out of one agent (others keep it): "" or why not.
         #[qinvokable]
         fn remove_server_from(self: Pin<&mut Accounts>, agent: &QString, name: &QString) -> QString;
@@ -176,6 +181,7 @@ pub struct AccountsRust {
     flow: QString,
     server_search: QString,
     server_states: QString,
+    removal: QString,
     /// The sign-in going on: its id, and where its answers go (dropped:
     /// cancelled).
     current: Option<(u64, mpsc::UnboundedSender<String>)>,
@@ -609,7 +615,15 @@ impl Accounts {
     }
 
     pub fn server_files(&self, url: &QString) -> QString {
-        let files = model_files(&url.to_string());
+        let url = url.to_string();
+        // Ollama's: its models in Ollama's store (sizes while it runs).
+        if engine_of(&url) == "Ollama" {
+            let names = ollama_models_of(&url);
+            let sizes = if model_servers::answers(&url) { harlo_core::engines::ollama_sizes(&url) } else { Vec::new() };
+            let size: u64 = sizes.iter().filter(|(n, _)| names.contains(n)).map(|(_, s)| s).sum();
+            return QString::from(&json!({ "files": names, "size": size, "ollama": true }).to_string());
+        }
+        let files = model_files(&url);
         let size: u64 = files.iter().filter_map(|f| std::fs::metadata(f).ok()).map(|m| m.len()).sum();
         QString::from(&json!({ "files": files, "size": size }).to_string())
     }
@@ -625,56 +639,139 @@ impl Accounts {
         out
     }
 
-    pub fn remove_server(mut self: Pin<&mut Self>, name: &QString, url: &QString, delete_files: bool) -> QString {
+    pub fn remove_server(mut self: Pin<&mut Self>, name: &QString, url: &QString, delete_files: bool) {
         let (name, url) = (name.to_string(), url.to_string());
-        let mut errors = Vec::new();
-        let mut busy = false;
-        for k in [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::OpenCode, HarnessKind::Hermes] {
-            if !model_servers::servers(k).iter().any(|s| s.name == name && s.base_url == url) {
-                continue;
-            }
-            match model_servers::remove(k, &name) {
-                Ok(()) => busy |= !reread(k),
-                Err(e) => errors.push(format!("{}: {e}", k.label())),
-            }
-        }
-        // Set up by harlo, and no agent has it now: stopped and forgotten.
-        let still = [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::OpenCode, HarnessKind::Hermes].iter().any(|k| model_servers::servers(*k).iter().any(|s| s.base_url == url));
-        if !still && commands_of(&url)["start"].as_str().is_some_and(|c| !c.is_empty()) {
-            let files = if delete_files { model_files(&url) } else { Vec::new() };
-            match STARTED.lock().unwrap().as_mut().and_then(|m| m.remove(&url)) {
-                Some(child) => stop_group(child),
-                None => stop_pids(&leftovers(&url)),
-            }
-            // (A llama.cpp router's preset too.)
-            if let Some(preset) = start_command(&url).split(" --models-preset ").nth(1).map(shell_word) {
-                let _ = std::fs::remove_file(preset);
-            }
-            save_commands(&url, "", "");
-            let _ = std::fs::remove_file(log_path(&url));
-            for f in &files {
-                if let Err(e) = std::fs::remove_file(f) {
-                    errors.push(format!("{}: {e}", f.display()));
-                }
-            }
-            // Its folder too, once empty (harlo's models folder stays).
-            let root = models_dir();
-            for f in &files {
-                let mut dir = f.parent();
-                while let Some(d) = dir.filter(|d| d.starts_with(&root) && *d != root) {
-                    if std::fs::remove_dir(d).is_err() {
-                        break;
-                    }
-                    dir = d.parent();
-                }
-            }
-        }
-        self.as_mut().load_servers();
-        if !errors.is_empty() {
-            return QString::from(&errors.join("\n"));
-        }
-        QString::from(if busy { "OPENCODE_BUSY" } else { "" })
+        let first = json!({ "url": url, "state": "running", "step": "Removing it", "done": 0, "total": 0, "error": "", "busy": false });
+        self.as_mut().set_removal(QString::from(&first.to_string()));
+        let thread = self.qt_thread();
+        crate::runtime().spawn_blocking(move || {
+            // How far it is, for the dialog.
+            let state = std::sync::Mutex::new(first);
+            let say = |f: &dyn Fn(&mut Value)| {
+                let text = {
+                    let mut v = state.lock().unwrap();
+                    f(&mut v);
+                    v.to_string()
+                };
+                let _ = thread.queue(move |mut this| this.as_mut().set_removal(QString::from(&text)));
+            };
+            let step = |text: &str, done: usize, total: usize| {
+                say(&|v| {
+                    v["step"] = json!(text);
+                    v["done"] = json!(done);
+                    v["total"] = json!(total);
+                })
+            };
+            let (errors, busy, summary) = remove(&name, &url, delete_files, &step);
+            say(&|v| {
+                v["state"] = json!("done");
+                v["error"] = json!(errors.join("\n"));
+                v["busy"] = json!(busy);
+                v["summary"] = json!(summary);
+            });
+            let _ = thread.queue(|mut this| this.as_mut().load_servers());
+        });
     }
+}
+
+/// Removes a server (blocking): out of each agent that has it; one harlo set
+/// up stopped and forgotten, its models deleted with `delete_files`.
+/// `step(what, done, of)` says how far. What went wrong, whether OpenCode
+/// was busy (its open sessions keep the server until they close), and what
+/// it did ("Taken out of OpenCode and pi. Deleted 2 models from Ollama
+/// (15.2 GB).").
+fn remove(name: &str, url: &str, delete_files: bool, step: &dyn Fn(&str, usize, usize)) -> (Vec<String>, bool, String) {
+    let mut errors = Vec::new();
+    let mut busy = false;
+    let mut agents: Vec<&str> = Vec::new();
+    let mut summary: Vec<String> = Vec::new();
+    let gb = |b: u64| format!("{:.1} GB", b as f64 / 1e9);
+    // (Ollama's models to delete: named before the agents' entries go.)
+    let ollama = if delete_files && engine_of(url) == "Ollama" { ollama_models_of(url) } else { Vec::new() };
+    for k in [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::OpenCode, HarnessKind::Hermes] {
+        if !model_servers::servers(k).iter().any(|s| s.name == name && s.base_url == url) {
+            continue;
+        }
+        step(&format!("Taking it out of {}'s config", k.label()), 0, 0);
+        match model_servers::remove(k, name) {
+            Ok(()) => {
+                busy |= !reread(k);
+                agents.push(k.label());
+            }
+            Err(e) => errors.push(format!("{}: {e}", k.label())),
+        }
+    }
+    if !agents.is_empty() {
+        summary.push(format!("Taken out of {}.", agents.join(", ")));
+    }
+    // Set up by harlo, and no agent has it now: stopped and forgotten.
+    let still = [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::OpenCode, HarnessKind::Hermes].iter().any(|k| model_servers::servers(*k).iter().any(|s| s.base_url == url));
+    if still || !commands_of(url)["start"].as_str().is_some_and(|c| !c.is_empty()) {
+        return (errors, busy, summary.join(" "));
+    }
+    // Ollama's models out of its store first (it must run for that).
+    if !ollama.is_empty() {
+        if !model_servers::answers(url) {
+            step("Starting Ollama to delete its models", 0, 0);
+        }
+        match ensure_running(url) {
+            Ok(()) => {
+                let sizes = harlo_core::engines::ollama_sizes(url);
+                let (mut count, mut freed) = (0, 0);
+                for (i, n) in ollama.iter().enumerate() {
+                    step(&format!("Deleting {} from Ollama", n.strip_prefix("hf.co/").unwrap_or(n)), i, ollama.len());
+                    match harlo_core::engines::ollama_delete(url, n) {
+                        Ok(()) => {
+                            count += 1;
+                            freed += sizes.iter().find(|(s, _)| s == n).map_or(0, |(_, b)| *b);
+                        }
+                        Err(e) => errors.push(e),
+                    }
+                }
+                if count > 0 {
+                    summary.push(format!("Deleted {count} {} from Ollama ({}).", if count == 1 { "model" } else { "models" }, gb(freed)));
+                }
+            }
+            Err(e) => errors.push(format!("Ollama didn't start to delete its models: {e}")),
+        }
+    }
+    let files = if delete_files { model_files(url) } else { Vec::new() };
+    step("Stopping the server", 0, 0);
+    stop_any(url);
+    // (A llama.cpp router's preset too.)
+    if let Some(preset) = start_command(url).split(" --models-preset ").nth(1).map(shell_word) {
+        let _ = std::fs::remove_file(preset);
+    }
+    save_commands(url, "", "");
+    let _ = std::fs::remove_file(log_path(url));
+    let (mut count, mut freed) = (0, 0);
+    for (i, f) in files.iter().enumerate() {
+        step(&format!("Deleting {}", f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()), i, files.len());
+        let size = std::fs::metadata(f).map(|m| m.len()).unwrap_or(0);
+        match std::fs::remove_file(f) {
+            Ok(()) => {
+                count += 1;
+                freed += size;
+            }
+            Err(e) => errors.push(format!("{}: {e}", f.display())),
+        }
+    }
+    summary.push("Stopped it; harlo forgot how to start it.".into());
+    if count > 0 {
+        summary.push(format!("Deleted {count} model {} ({}).", if count == 1 { "file" } else { "files" }, gb(freed)));
+    }
+    // Its folder too, once empty (harlo's models folder stays).
+    let root = models_dir();
+    for f in &files {
+        let mut dir = f.parent();
+        while let Some(d) = dir.filter(|d| d.starts_with(&root) && *d != root) {
+            if std::fs::remove_dir(d).is_err() {
+                break;
+            }
+            dir = d.parent();
+        }
+    }
+    (errors, busy, summary.join(" "))
 }
 
 /// After harlo changed an agent's model servers: its sessions read them
@@ -690,6 +787,20 @@ fn reread(k: HarnessKind) -> bool {
         }
         _ => true,
     }
+}
+
+/// The models an Ollama server serves in harlo: what its setup saved, and
+/// what agents list for it (taken before they're taken out).
+fn ollama_models_of(url: &str) -> Vec<String> {
+    let mut names: Vec<String> = saved_models(&commands_of(url)).into_iter().map(|m| m.id).collect();
+    for k in [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::OpenCode, HarnessKind::Hermes] {
+        for s in model_servers::servers(k).into_iter().filter(|s| s.base_url == url) {
+            names.extend(s.models);
+        }
+    }
+    names.sort();
+    names.dedup();
+    names
 }
 
 /// Where harlo keeps the models it downloads.
@@ -716,6 +827,22 @@ pub(crate) fn shell_word(s: &str) -> String {
 /// start command loads (`-m '…'`) and its other parts, in harlo's folder.
 fn model_files(url: &str) -> Vec<PathBuf> {
     let start = commands_of(url)["start"].as_str().unwrap_or_default().to_owned();
+    // (vLLM's: the model's folder, all of it.)
+    if let Some(rest) = start.split(" serve ").nth(1).filter(|_| start.contains("vllm")) {
+        let dir = PathBuf::from(shell_word(rest));
+        if !dir.starts_with(models_dir()) || dir == models_dir() {
+            return Vec::new();
+        }
+        let mut files = Vec::new();
+        let mut dirs = vec![dir];
+        while let Some(d) = dirs.pop() {
+            for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+                let p = e.path();
+                if p.is_dir() { dirs.push(p) } else { files.push(p) }
+            }
+        }
+        return files;
+    }
     // (A router's: each model of its preset.)
     let paths: Vec<PathBuf> = match start.split(" --models-preset ").nth(1) {
         Some(rest) => harlo_core::engines::read_preset(Path::new(&shell_word(rest))).into_iter().map(|m| m.path).collect(),
@@ -822,6 +949,8 @@ fn engine_of(url: &str) -> &'static str {
         "Ollama"
     } else if start.contains("strata") {
         "Strata"
+    } else if start.contains("vllm") {
+        "vLLM"
     } else if start.is_empty() {
         ""
     } else {
@@ -943,7 +1072,13 @@ pub(crate) fn wait_up(url: &str, limit: Duration, tick: &mut dyn FnMut(&str), st
         if Instant::now() > deadline {
             return Err(format!("It hasn't answered in {} minutes.", limit.as_secs() / 60));
         }
-        if let Some(line) = std::fs::read_to_string(log_path(url)).ok().and_then(|t| t.lines().rev().map(str::trim).find(|l| !l.is_empty()).map(str::to_owned)) {
+        // (Its last line; of a progress bar redrawn in place with carriage
+        // returns, as vLLM's, only its latest drawing.)
+        let last = std::fs::read_to_string(log_path(url)).ok().and_then(|t| {
+            let line = t.lines().rev().map(str::trim).find(|l| !l.is_empty())?.to_owned();
+            line.split('\r').map(str::trim).rfind(|s| !s.is_empty()).map(str::to_owned)
+        });
+        if let Some(line) = last {
             tick(&line);
         }
         std::thread::sleep(Duration::from_secs(1));

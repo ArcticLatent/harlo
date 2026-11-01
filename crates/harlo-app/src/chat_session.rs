@@ -40,6 +40,9 @@ pub mod qobject {
         #[qproperty(QString, cwd)]
         #[qproperty(QStringList, queued)]
         #[qproperty(QString, status_line, cxx_name = "statusLine")]
+        /// The model server being started before a message is sent (its
+        /// name; "" none): the chat says so above the composer.
+        #[qproperty(QString, starting_server, cxx_name = "startingServer")]
         /// "42% · 115k/272k · $0.31"
         #[qproperty(QString, context_text, cxx_name = "contextText")]
         #[qproperty(f64, context_fraction, cxx_name = "contextFraction")]
@@ -321,6 +324,7 @@ pub struct ChatSessionRust {
     cwd: QString,
     queued: QStringList,
     status_line: QString,
+    starting_server: QString,
     context_text: QString,
     context_fraction: f64,
     commands: QStringList,
@@ -822,12 +826,12 @@ impl ChatSession {
         // the UI thread.
         crate::runtime().spawn_blocking(move || {
             if let Some((name, url)) = server.filter(|(_, url)| !harlo_core::model_servers::answers(url)) {
-                let status = |text: Option<String>| {
-                    let _ = thread.queue(move |this| this.set_status_entry("harlo-server".into(), text));
+                let starting = |name: String| {
+                    let _ = thread.queue(move |mut this| this.as_mut().set_starting_server(QString::from(&name)));
                 };
-                status(Some(format!("Starting {name}…")));
+                starting(name.clone());
                 let started = crate::accounts::ensure_running(&url);
-                status(None);
+                starting(String::new());
                 if let Err(e) = started {
                     let message = format!("{name} didn't start: {e}");
                     let _ = thread.queue(move |mut this| {

@@ -734,6 +734,37 @@ Rectangle {
             }
         }
 
+        // The model's server is starting before the message goes (a local
+        // one harlo set up, stopped): a while for a big model or vLLM.
+        Rectangle {
+            objectName: "startingServerBanner"
+            Layout.fillWidth: true
+            Layout.leftMargin: transcript.gutter
+            Layout.rightMargin: transcript.gutter
+            Layout.topMargin: 8
+            visible: root.hasSession && root.session.startingServer !== "" && !root.covered
+            implicitHeight: startingRow.implicitHeight + 18
+            radius: 10
+            color: Theme.accentSoft
+            border.color: Theme.blend(Theme.hairline, Theme.accent, 0.35)
+            RowLayout {
+                id: startingRow
+                anchors.fill: parent
+                anchors.margins: 9
+                anchors.leftMargin: 12
+                spacing: 10
+                BusyIndicator { implicitWidth: 16; implicitHeight: 16; running: parent.visible }
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    readonly property var server: root.hasSession ? Theme.serverOf(root.session.harness, root.session.modelId) : null
+                    text: "Starting " + (root.hasSession ? root.session.startingServer : "") + (server && server.engine ? " (" + server.engine + ")" : "") + ": your message is sent when it's ready."
+                    color: Theme.foreground
+                    font.pixelSize: Theme.px(12.5)
+                }
+            }
+        }
+
         // pi or omp uses Claude through a Claude subscription: Anthropic
         // bills that as extra usage (pi says so only in its terminal).
         Rectangle {
