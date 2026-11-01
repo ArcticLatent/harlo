@@ -140,9 +140,10 @@ pub enum Engine {
     Strata,
     Vllm,
     Basalt,
+    Ninfer,
 }
 
-pub const ENGINES: [Engine; 5] = [Engine::Ollama, Engine::LlamaCpp, Engine::Vllm, Engine::Strata, Engine::Basalt];
+pub const ENGINES: [Engine; 6] = [Engine::Ollama, Engine::LlamaCpp, Engine::Vllm, Engine::Strata, Engine::Basalt, Engine::Ninfer];
 
 impl Engine {
     pub fn id(self) -> &'static str {
@@ -152,6 +153,7 @@ impl Engine {
             Engine::Strata => "strata",
             Engine::Vllm => "vllm",
             Engine::Basalt => "basalt",
+            Engine::Ninfer => "ninfer",
         }
     }
 
@@ -166,6 +168,7 @@ impl Engine {
             Engine::Strata => "Strata",
             Engine::Vllm => "vLLM",
             Engine::Basalt => "Basalt",
+            Engine::Ninfer => "NInfer",
         }
     }
 
@@ -176,6 +179,7 @@ impl Engine {
             Engine::Strata => "Qwen3.8-Flash-Next on consumer hardware, tuned for your card.",
             Engine::Vllm => "The fastest when several sessions run at once, on an NVIDIA card: Hugging Face models in their own format, full or quantized.",
             Engine::Basalt => "Qwen3.8-Flash-Next on an NVIDIA Blackwell card, its experts in RAM where the card is full. Built on this computer.",
+            Engine::Ninfer => "Built for the RTX 5090: Qwen3.6 and Qwen3.8, 27B to Flash-Next, with fast drafts. Built on this computer.",
         }
     }
 
@@ -187,6 +191,7 @@ impl Engine {
             // (Installed with uv, Python's fast installer: its release.)
             Engine::Vllm => "astral-sh/uv",
             Engine::Basalt => "jesdga95/basalt",
+            Engine::Ninfer => "Neroued/ninfer",
         }
     }
 
@@ -228,6 +233,18 @@ impl Engine {
                 }
                 ("ok", String::new())
             }
+            // An RTX 5090 (the one single card it's built and tuned for), and
+            // the tools and libraries to build it.
+            Engine::Ninfer => {
+                if !hw.gpus.iter().any(|g| g.vendor == "nvidia" && g.name.contains("5090")) {
+                    return ("no", "Needs an NVIDIA RTX 5090.".into());
+                }
+                let missing = ninfer_tools_missing();
+                if !missing.is_empty() {
+                    return ("no", format!("harlo builds it here, which needs {} installed first.", missing.join(", ")));
+                }
+                ("ok", String::new())
+            }
         }
     }
 }
@@ -264,6 +281,10 @@ fn harlo_install(engine: Engine) -> Option<PathBuf> {
         // (Built from its source: <release>/<source>/bin/basalt.)
         Engine::Basalt => {
             return versions.iter().rev().find_map(|v| std::fs::read_dir(v).ok()?.flatten().map(|e| e.path().join("bin/basalt")).find(|p| p.is_file()));
+        }
+        // (Built from its source: <commit>/<source>/build/…/apps/ninfer-serve.)
+        Engine::Ninfer => {
+            return versions.iter().rev().find_map(|v| std::fs::read_dir(v).ok()?.flatten().map(|e| e.path().join("build/rtx5090-release/apps/ninfer-serve")).find(|p| p.is_file()));
         }
     };
     versions.iter().rev().find_map(|v| find_file(v, prog, 4))
@@ -318,6 +339,26 @@ pub fn basalt_tools_missing() -> Vec<&'static str> {
     missing
 }
 
+/// What building NInfer here needs and this computer lacks: the CUDA toolkit,
+/// CMake, Ninja, a C++ compiler, and the libraries it links.
+pub fn ninfer_tools_missing() -> Vec<String> {
+    let mut missing: Vec<String> = basalt_tools_missing().into_iter().filter(|t| *t != "Python 3").map(str::to_owned).collect();
+    if on_path("ninja").is_none() {
+        missing.push("Ninja".to_owned());
+    }
+    if on_path("pkg-config").is_none() {
+        missing.push("pkg-config".to_owned());
+        return missing;
+    }
+    let libraries = [("libjpeg", "libjpeg"), ("libavformat", "FFmpeg"), ("hwloc", "hwloc"), ("liburing", "liburing"), ("libcurl", "curl")];
+    for (library, package) in libraries {
+        if !Command::new("pkg-config").args(["--exists", library]).status().is_ok_and(|s| s.success()) {
+            missing.push(format!("{package} (with its development files)"));
+        }
+    }
+    missing
+}
+
 /// vLLM's Python environment (harlo's): `bin/vllm` in it.
 pub fn vllm_env() -> PathBuf {
     engines_dir().join("vllm").join("env")
@@ -333,6 +374,7 @@ pub fn installed(engine: Engine) -> Option<Installed> {
             Engine::Strata => "strata",
             Engine::Vllm => "vllm",
             Engine::Basalt => "basalt",
+            Engine::Ninfer => "ninfer-serve",
         })?),
     };
     // (vLLM: its package's version, not `vllm --version`: that starts Python
@@ -428,6 +470,15 @@ pub fn llamacpp_build(hw: &Hardware, tag: &str) -> (String, Option<String>) {
 /// What installing an engine downloads (its release's files for here), and
 /// the version.
 pub fn plan(engine: Engine, hw: &Hardware) -> Result<(String, Vec<Asset>), String> {
+    // NInfer has no releases: its source at its latest commit (the date first,
+    // so the newest build is last among harlo's), built here.
+    if engine == Engine::Ninfer {
+        let commits = get_json(&format!("https://api.github.com/repos/{}/commits?per_page=1", engine.repo()))?;
+        let latest = &commits[0];
+        let sha = latest["sha"].as_str().filter(|s| s.len() >= 8).ok_or("NInfer's repository has no commits to build.")?;
+        let date = latest["commit"]["committer"]["date"].as_str().unwrap_or_default().split('T').next().unwrap_or_default().replace('-', "");
+        return Ok((format!("{date}-{}", &sha[..8]), vec![Asset { name: format!("ninfer-{}.tar.gz", &sha[..8]), url: format!("https://codeload.github.com/{}/tar.gz/{sha}", engine.repo()), sha256: String::new(), size: 0 }]));
+    }
     let rel = release(engine)?;
     let tag = rel["tag_name"].as_str().unwrap_or_default().to_owned();
     let assets = match engine {
@@ -456,6 +507,8 @@ pub fn plan(engine: Engine, hw: &Hardware) -> Result<(String, Vec<Asset>), Strin
             sha256: String::new(),
             size: 0,
         }],
+        // (Above: no release.)
+        Engine::Ninfer => Vec::new(),
         // uv, which then installs vLLM (and its Python) from PyPI.
         Engine::Vllm => {
             let name = "uv-x86_64-unknown-linux-gnu.tar.gz";
@@ -743,6 +796,51 @@ pub struct HfModel {
     pub updated: String,
     pub bytes: u64,
     pub model_type: String,
+}
+
+/// NInfer's official models for one card, most downloaded first, with what
+/// they download (GLM-5.3-Flash needs two DGX Sparks).
+pub fn hf_ninfer_models(search: &str) -> Result<Vec<HfModel>, String> {
+    let list = get_json("https://huggingface.co/api/models?author=neroued&search=NInfer&sort=downloads&direction=-1&limit=30")?;
+    let search = search.to_lowercase();
+    let repos: Vec<(String, u64)> = list
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|m| Some((m["id"].as_str()?.to_owned(), m["downloads"].as_u64().unwrap_or(0))))
+        .filter(|(repo, _)| repo.ends_with("-NInfer") && !repo.contains("GLM") && repo.to_lowercase().contains(&search))
+        .collect();
+    Ok(std::thread::scope(|s| {
+        let sizes: Vec<_> = repos.iter().map(|(repo, _)| s.spawn(move || hf_ninfer_files(repo).map(|f| f.iter().map(|(_, size)| size).sum::<u64>()).unwrap_or(0))).collect();
+        repos.iter().zip(sizes).map(|((repo, downloads), size)| HfModel { repo: repo.clone(), downloads: *downloads, bytes: size.join().unwrap_or(0), ..Default::default() }).collect()
+    }))
+}
+
+/// The files of a NInfer model: the entry file first, then its parts (kept
+/// beside it; the engine is given only the entry).
+pub fn hf_ninfer_files(repo: &str) -> Result<Vec<(String, u64)>, String> {
+    let repo = repo.trim().trim_matches('/');
+    let tree = get_json(&format!("https://huggingface.co/api/models/{repo}/tree/main"))?;
+    let mut files: Vec<(String, u64)> = tree
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|f| {
+            let path = f["path"].as_str()?;
+            (path.ends_with(".ninfer") || path.contains(".ninfer.part-")).then(|| (path.to_owned(), f["lfs"]["size"].as_u64().or(f["size"].as_u64()).unwrap_or(0)))
+        })
+        .collect();
+    files.sort_by_key(|(path, _)| !path.ends_with(".ninfer"));
+    if files.first().is_none_or(|(path, _)| !path.ends_with(".ninfer")) {
+        return Err(format!("{repo} has no .ninfer file."));
+    }
+    Ok(files)
+}
+
+/// What a NInfer model is called ("neroued/Qwen3.8-27B-nvfp4-NInfer" →
+/// "Qwen3.8-27B-NVFP4").
+pub fn ninfer_name(repo: &str) -> String {
+    repo.rsplit('/').next().unwrap_or(repo).trim_end_matches("-NInfer").replace("nvfp4", "NVFP4")
 }
 
 /// The most downloaded GGUF chat models on Hugging Face (Unsloth's, a
@@ -1375,6 +1473,35 @@ mod tests {
         assert_eq!(basalt_build_format(&dir.join("bin/basalt")), Some(2));
         assert_eq!(basalt_build_format(Path::new("/usr/bin/basalt")), None);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn ninfer_needs_an_rtx_5090() {
+        let mut card = hw("nvidia", 32, 93, "580.1");
+        card.gpus[0].arch = "12.0".into();
+        card.gpus[0].name = "NVIDIA GeForce RTX 5080".into();
+        assert_eq!(Engine::Ninfer.fit(&card).0, "no");
+        card.gpus[0].name = "NVIDIA GeForce RTX 5090".into();
+        // (The build tools: this computer's.)
+        let fit = Engine::Ninfer.fit(&card);
+        assert!(fit.0 == "ok" || fit.1.contains("installed first"), "{fit:?}");
+        assert_eq!(ninfer_name("neroued/Qwen3.8-27B-nvfp4-NInfer"), "Qwen3.8-27B-NVFP4");
+        assert_eq!(ninfer_name("neroued/Qwen3.8-Flash-Next-NInfer"), "Qwen3.8-Flash-Next");
+    }
+
+    #[test]
+    #[ignore = "network: Hugging Face and GitHub"]
+    fn ninfer_from_its_own_repository() {
+        let models = hf_ninfer_models("").unwrap();
+        println!("{:?}", models.iter().map(|m| (&m.repo, m.bytes)).collect::<Vec<_>>());
+        assert!(models.iter().all(|m| m.repo.starts_with("neroued/") && !m.repo.contains("GLM") && m.bytes > 0));
+        assert_eq!(hf_ninfer_models("flash").unwrap().len(), 1);
+        let files = hf_ninfer_files("neroued/Qwen3.8-Flash-Next-NInfer").unwrap();
+        assert_eq!(files.len(), 4);
+        assert!(files[0].0.ends_with(".ninfer") && files[1..].iter().all(|(p, _)| p.contains(".part-")));
+        let (tag, assets) = plan(Engine::Ninfer, &hw("nvidia", 32, 93, "580.1")).unwrap();
+        println!("{tag} {}", assets[0].url);
+        assert!(assets[0].url.contains("Neroued/ninfer") && tag.len() == 17);
     }
 
     #[test]

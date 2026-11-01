@@ -30,15 +30,19 @@ AppDialog {
     /// llama.cpp's context (tokens; 0: as much as fits) and the model's own.
     property int context: 0
     property int maxContext: 0
-    // (Basalt has no "as much as fits": a size, 64k to start with.)
-    readonly property var contexts: fixedRepo !== "" ? [32768, 65536, 131072, 262144]
+    // (Basalt and NInfer have no "as much as fits": a size, 64k to start with.)
+    readonly property bool ninfer: engine !== null && engine.id === "ninfer"
+    // (NInfer's drafts take more of the card as it grows: 256k doesn't fit
+    // next to its models on an RTX 5090.)
+    readonly property var contexts: ninfer ? [32768, 65536, 131072, 196608]
+        : fixedRepo !== "" ? [32768, 65536, 131072, 262144]
         : maxContext === 0 ? [0, 16384, 32768, 65536, 131072]
         : [0].concat([16384, 32768, 65536, 131072, 262144, 524288].filter(c => c < maxContext), [maxContext])
     /// Basalt: its one model's packs, from its own repository.
     readonly property string fixedRepo: engine !== null && engine.id === "basalt" ? "jesdga/Qwen3.8-Flash-Next-Basalt" : ""
-    readonly property bool fromHf: engine !== null && (engine.id === "ollama" || engine.id === "llamacpp" || engine.id === "vllm")
-    /// vLLM: a repository as it is (no GGUF sizes to pick from).
-    readonly property bool wholeRepo: engine !== null && engine.id === "vllm"
+    readonly property bool fromHf: engine !== null && (engine.id === "ollama" || engine.id === "llamacpp" || engine.id === "vllm" || engine.id === "ninfer")
+    /// vLLM and NInfer: a repository as it is (no GGUF sizes to pick from).
+    readonly property bool wholeRepo: engine !== null && (engine.id === "vllm" || engine.id === "ninfer")
     /// The files Ollama can take: one file each, not in a folder.
     readonly property var files: gg.repo === repo ? (gg.files || []).filter(f => !(engine && engine.id === "ollama" && f.split)) : []
     property var chosen: []
@@ -59,7 +63,7 @@ AppDialog {
     function count(n) { return n >= 1e9 ? +(n / 1e9).toFixed(n < 10e9 ? 1 : 0) + "B" : n >= 1e6 ? +(n / 1e6).toFixed(n < 10e6 ? 1 : 0) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "k" : "" + n }
     /// Tokens, as models count them: 128k, 1M.
     function ctxText(n) { return n >= 1048576 ? +(n / 1048576).toFixed(1) + "M" : Math.round(n / 1024) + "k" }
-    // ("runs": Basalt's, on the card and in RAM together by design.)
+    // ("runs": Basalt's and NInfer's, on the card and in RAM together by design.)
     function fitText(fit) { return fit === "gpu" ? "Fits your graphics card" : fit === "ram" ? "Partly in RAM (slower)" : fit === "runs" ? "Runs here" : fit === "no" ? "Too big for this computer" : "" }
     function fitColor(fit) { return fit === "gpu" || fit === "runs" ? Theme.success : fit === "ram" ? Theme.warning : Theme.muted }
     function chooseRepo(m) {
@@ -90,7 +94,8 @@ AppDialog {
         chooseFile(null)
         error = ""
         modelSearch.text = ""
-        if (e.id === "ollama" || e.id === "llamacpp" || e.id === "vllm") ServerSetup.findModels("", e.id)
+        if (e.id === "ollama" || e.id === "llamacpp" || e.id === "vllm" || e.id === "ninfer") ServerSetup.findModels("", e.id)
+        if (e.id === "ninfer") context = 65536
         // (Basalt: its packs straight away, 64k of context.)
         if (e.id === "basalt") {
             repo = "jesdga/Qwen3.8-Flash-Next-Basalt"
@@ -209,7 +214,7 @@ AppDialog {
                 }
             }
             Note { visible: dlg.cat.state === "loading" && (dlg.cat.engines || []).length === 0; text: "Checking the graphics card and what's installed…" }
-            Note { text: "More engines (Basalt, NInfer, Avalon, Unsloth) come in later updates." }
+            Note { text: "More engines (Avalon, Unsloth) come in later updates." }
         }
 
         // ---- 2. the model and settings ----
@@ -231,6 +236,7 @@ AppDialog {
             }
             Note { visible: dlg.addTo === null && dlg.engine !== null && (dlg.engine.installed === null || !dlg.useInstalled)
                 text: dlg.engine && dlg.engine.id === "basalt" ? "Basalt has no ready-made builds: harlo downloads its latest release's source from GitHub and builds it here with CMake and your CUDA toolkit (several minutes), then gives its server a Python of its own, in harlo's folder."
+                    : dlg.ninfer ? "NInfer has no ready-made builds or releases: harlo downloads its latest source from GitHub and builds it here with CMake and your CUDA toolkit (several minutes), in harlo's folder."
                     : dlg.wholeRepo ? "harlo installs uv (checked against its published checksum), then a Python of its own with vLLM and PyTorch for your card, in harlo's folder: several GB, a few minutes."
                     : "harlo downloads the latest release for this computer's card, checks it against its published checksum and keeps it in its own folder." }
 
@@ -247,7 +253,7 @@ AppDialog {
                 }
                 AppTextField {
                     id: modelSearch
-                    visible: dlg.fromHf
+                    visible: dlg.fromHf && !dlg.ninfer
                     objectName: "setupModelSearch"
                     Layout.fillWidth: true
                     placeholderText: "Search Hugging Face, or pick a popular one"
@@ -359,7 +365,9 @@ AppDialog {
                 // vLLM: what the repository holds, and what it needs.
                 Note {
                     visible: dlg.wholeRepo
-                    text: dlg.repo === "" ? "Models in Hugging Face's own format: full, or quantized (AWQ, GPTQ, FP8: smaller, nearly as good). vLLM keeps the whole model on your card, with room for its context."
+                    text: dlg.ninfer ? (dlg.repo === "" ? "NInfer's official models for your card. NVFP4 is the most exact and a little bigger. Flash-Next is much the biggest: its experts stay in RAM (about 63 GB), and it needs that free."
+                            : "About " + dlg.gb(dlg.modelSize) + " to download.")
+                        : dlg.repo === "" ? "Models in Hugging Face's own format: full, or quantized (AWQ, GPTQ, FP8: smaller, nearly as good). vLLM keeps the whole model on your card, with room for its context."
                         : "About " + dlg.gb(dlg.modelSize) + " to download. The first start takes a minute or two while vLLM prepares it for your card."
                 }
             }
@@ -404,6 +412,7 @@ AppDialog {
                             : dlg.engine && dlg.engine.id === "ollama"
                             ? "Ollama picks it from your graphics memory (32k on cards with 24 GB or more), up to the model's own" + (dlg.maxContext ? " " + dlg.ctxText(dlg.maxContext) : "") + "."
                             : "llama.cpp gives it as much as fits on your card next to the model" + (dlg.maxContext ? ", up to its own " + dlg.ctxText(dlg.maxContext) : "") + ", and not less than 16k.")
+                        : dlg.ninfer ? "The longest a conversation and its files can be, in tokens. The more you pick, the more of your card it needs next to the model: 64k and 128k leave room for your desktop, 192k needs almost all of the card free."
                         : dlg.wholeRepo ? "How much of the conversation and files the model keeps in mind, in tokens. vLLM keeps it all on your card with the model: if they don't fit together, it says so when it starts."
                         : dlg.fixedRepo !== "" ? "How much of the conversation and files the model keeps in mind, in tokens. Basalt keeps it on your card (8 bits a value), next to the model's busiest parts: more context, more graphics memory."
                         : "How much of the conversation and files the model keeps in mind, in tokens. If the model and " + dlg.ctxText(dlg.context) + " don't fit on your card together, " + (dlg.engine && dlg.engine.id === "ollama" ? "Ollama" : "llama.cpp") + " keeps part of the model in RAM, which is slower."

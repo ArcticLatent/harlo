@@ -147,7 +147,7 @@ QtObject {
             name = parts[0].split("/").pop().replace(/-GGUF$/i, "")
             quant = parts[1] || ""
         } else {
-            const m = name.match(/^(.+?)[-_.:]((?:UD-)?(?:I?Q\d[\w]*|TQ\d[\w]*|MXFP\d[\w]*|BF16|F16|F32))$/i)
+            const m = name.match(/^(.+?)[-_.:]((?:UD-)?(?:I?Q\d[\w]*|TQ\d[\w]*|MXFP\d[\w]*|NVFP\d[\w]*|BF16|F16|F32))$/i)
             if (m) { name = m[1].split("/").pop(); quant = m[2] }
         }
         return quant !== "" ? name + " · " + quant : name

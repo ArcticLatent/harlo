@@ -278,6 +278,7 @@ fn install(engine: Engine, hw: &engines::Hardware, report: &Report, stop: &Atomi
     match engine {
         Engine::Vllm => install_vllm(&dir, report, stop),
         Engine::Basalt => install_basalt(&dir, report, stop),
+        Engine::Ninfer => install_ninfer(&dir, report, stop),
         Engine::Strata => {
             // Its own installer (checked above): ~/.local/share/strata, ~/.local/bin/strata.
             report.step("Running Strata's installer");
@@ -397,22 +398,73 @@ fn install_basalt(dir: &Path, report: &Report, stop: &AtomicBool) -> Result<Path
         configure.extend(["-G".to_owned(), "Ninja".to_owned()]);
     }
     run_streamed(Path::new("cmake"), &configure, &path, "Preparing Basalt's build", report, stop, |_| None)?;
-    let jobs = std::thread::available_parallelism().map_or(4, |n| n.get()).to_string();
-    // Its own count: "[ 42%] Building …" (make) or "[123/456] …" (Ninja).
-    let built = run_streamed(Path::new("cmake"), &["--build".to_owned(), build.to_string_lossy().into_owned(), "-j".to_owned(), jobs], &path, "Building Basalt (several minutes)", report, stop, |line| {
-        let inner = line.strip_prefix('[')?.split(']').next()?.trim();
-        match inner.split_once('/') {
-            Some((a, b)) => Some(a.trim().parse::<f64>().ok()? / b.trim().parse::<f64>().ok()?.max(1.0)),
-            None => Some(inner.trim_end_matches('%').trim().parse::<f64>().ok()? / 100.0),
-        }
-    });
-    built?;
+    run_streamed(Path::new("cmake"), &["--build".to_owned(), build.to_string_lossy().into_owned(), "-j".to_owned(), build_jobs()], &path, "Building Basalt (several minutes)", report, stop, build_progress)?;
     let venv = src.join(".venv");
     let venv_s = venv.to_string_lossy().into_owned();
     run_streamed(Path::new("python3"), &["-m".to_owned(), "venv".to_owned(), venv_s], &path, "Setting up Python for Basalt", report, stop, |_| None)?;
     let requirements = src.join("requirements.txt").to_string_lossy().into_owned();
     run_streamed(&venv.join("bin/python"), &["-m".to_owned(), "pip".to_owned(), "install".to_owned(), "--disable-pip-version-check".to_owned(), "-r".to_owned(), requirements], &path, "Installing Basalt's server", report, stop, |_| None)?;
     engines::installed(Engine::Basalt).filter(|i| i.harlo).map(|i| i.program).ok_or_else(|| "Basalt built, but harlo can't find bin/basalt.".into())
+}
+
+/// NInfer from its source (blocking): its RTX 5090 preset, built here with
+/// CMake, Ninja and the CUDA toolkit. Its program, `ninfer-serve`.
+fn install_ninfer(dir: &Path, report: &Report, stop: &AtomicBool) -> Result<PathBuf, String> {
+    let src = std::fs::read_dir(dir).map_err(|e| e.to_string())?.flatten().map(|e| e.path()).find(|p| p.join("CMakePresets.json").is_file()).ok_or("NInfer's source unpacked, but harlo can't find it.")?;
+    let path = format!("{}:/opt/cuda/bin:/usr/local/cuda/bin", std::env::var("PATH").unwrap_or_default());
+    let configure = ["-S".to_owned(), src.to_string_lossy().into_owned(), "--preset".to_owned(), "rtx5090-release".to_owned()];
+    run_streamed(Path::new("cmake"), &configure, &path, "Preparing NInfer's build", report, stop, |_| None)?;
+    let build = src.join("build/rtx5090-release");
+    run_streamed(Path::new("cmake"), &["--build".to_owned(), build.to_string_lossy().into_owned(), "-j".to_owned(), build_jobs()], &path, "Building NInfer (several minutes)", report, stop, build_progress)?;
+    engines::installed(Engine::Ninfer).filter(|i| i.harlo).map(|i| i.program).ok_or_else(|| "NInfer built, but harlo can't find ninfer-serve.".into())
+}
+
+fn build_jobs() -> String {
+    std::thread::available_parallelism().map_or(4, |n| n.get()).to_string()
+}
+
+/// How far a build is, by its own count: "[ 42%] Building …" (make) or
+/// "[123/456] …" (Ninja).
+fn build_progress(line: &str) -> Option<f64> {
+    let inner = line.strip_prefix('[')?.split(']').next()?.trim();
+    match inner.split_once('/') {
+        Some((a, b)) => Some(a.trim().parse::<f64>().ok()? / b.trim().parse::<f64>().ok()?.max(1.0)),
+        None => Some(inner.trim_end_matches('%').trim().parse::<f64>().ok()? / 100.0),
+    }
+}
+
+/// A repository's files into `folder`, on one bar: big ones over 8 connections,
+/// each checked against Hugging Face's SHA-256 (those already there kept).
+fn download_files(repo: &str, folder: &Path, files: &[(String, u64)], report: &Report, cancelled: &dyn Fn() -> bool) -> Result<(), String> {
+    let total: u64 = files.iter().map(|(_, s)| *s).sum();
+    report.step("Downloading the model");
+    let mut before = 0;
+    for (path, size) in files {
+        let dest = folder.join(path);
+        if !dest.exists() {
+            let mut checking = false;
+            let mut progress = |phase: &str, d: u64, _: u64| {
+                if phase == "check" && !checking {
+                    checking = true;
+                    report.step(&format!("Checking {path} against Hugging Face's checksum"));
+                } else if phase == "download" && checking {
+                    checking = false;
+                    report.step("Downloading the model");
+                }
+                report.progress(if phase == "check" { d } else { before + d }, if phase == "check" { *size } else { total });
+            };
+            // (Big files: 8 connections at once, checked.)
+            if *size > 64 << 20 {
+                report.line(&format!("{} → {}", engines::hf_url(repo, path), dest.display()));
+                engines::download_parallel(&engines::hf_url(repo, path), &dest, None, 8, &mut progress, cancelled)?;
+                report.line("Downloaded; it matches Hugging Face's SHA-256.");
+            } else {
+                engines::download(&engines::hf_url(repo, path), &dest, None, &mut progress, cancelled)?;
+            }
+        }
+        before += size;
+    }
+    Ok(())
 }
 
 fn engines_on_path(prog: &str) -> bool {
@@ -733,6 +785,32 @@ fn setup_server(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value
             std::fs::write(&config, serde_json::to_string_pretty(&settings).unwrap_or_default()).map_err(|e| format!("Couldn't write {}: {e}", config.display()))?;
             (format!("exec {prog} serve --config {}", quote(&config.to_string_lossy())), String::new(), alias)
         }
+        // NInfer: the model's files in harlo's models folder, and its settings
+        // file: the deployment its model cards give for an RTX 5090 (every
+        // official model has Vision, MTP and the optimized head).
+        Engine::Ninfer => {
+            let repo = model.clone();
+            let folder = engines::engines_dir().parent().unwrap_or(Path::new(".")).join("models").join(repo.replace('/', "__"));
+            report.step("Listing the model's files");
+            let files = engines::hf_ninfer_files(&repo)?;
+            let total: u64 = files.iter().map(|(_, s)| *s).sum();
+            if total / (1024 * 1024) > hw.disk_free_mb {
+                return Err(format!("It's {} GB and only {} GB are free.", total / (1 << 30), hw.disk_free_mb / 1024));
+            }
+            download_files(&repo, &folder, &files, report, &cancelled)?;
+            let alias = engines::ninfer_name(&repo);
+            let context = req["context"].as_u64().filter(|c| *c >= 2048).unwrap_or(65536);
+            let config = engines::engines_dir().join("ninfer").join("servers").join(format!("ninfer-{port}.toml"));
+            let word = |s: &str| serde_json::to_string(s).unwrap_or_default();
+            let settings = format!(
+                "[model]\npath = {}\nvision = true\n\n[engine]\nmax_context = {context}\nmax_concurrency = 2\nkv_dtype = \"fp8\"\ncontext_capacity = \"auto\"\nmemory_headroom = \"256MiB\"\ncuda_graph = true\n\n[speculative]\nbackend = \"mtp\"\ndraft_tokens = 3\nproposal_head = \"optimized\"\n\n[vision]\nmemory_budget = \"1GiB\"\n\n[server]\nhost = \"127.0.0.1\"\nport = {port}\nmodel_id = {}\n",
+                word(&folder.join(&files[0].0).to_string_lossy()),
+                word(&alias)
+            );
+            std::fs::create_dir_all(config.parent().unwrap_or(Path::new("/"))).map_err(|e| e.to_string())?;
+            std::fs::write(&config, settings).map_err(|e| format!("Couldn't write {}: {e}", config.display()))?;
+            (format!("exec {prog} --config {}", quote(&config.to_string_lossy())), String::new(), alias)
+        }
         // vLLM: the repository's files in harlo's models folder, served with
         // its family's parsers (agents need its tool calls read).
         Engine::Vllm => {
@@ -744,33 +822,7 @@ fn setup_server(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value
             if total / (1024 * 1024) > hw.disk_free_mb {
                 return Err(format!("It's {} GB and only {} GB are free.", total / (1 << 30), hw.disk_free_mb / 1024));
             }
-            report.step("Downloading the model");
-            let mut before = 0;
-            for (path, size) in &files {
-                let dest = folder.join(path);
-                if !dest.exists() {
-                    let mut checking = false;
-                    let mut progress = |phase: &str, d: u64, _: u64| {
-                        if phase == "check" && !checking {
-                            checking = true;
-                            report.step(&format!("Checking {path} against Hugging Face's checksum"));
-                        } else if phase == "download" && checking {
-                            checking = false;
-                            report.step("Downloading the model");
-                        }
-                        report.progress(if phase == "check" { d } else { before + d }, if phase == "check" { *size } else { total });
-                    };
-                    // (Big files: 8 connections at once, checked.)
-                    if *size > 64 << 20 {
-                        report.line(&format!("{} → {}", engines::hf_url(&repo, path), dest.display()));
-                        engines::download_parallel(&engines::hf_url(&repo, path), &dest, None, 8, &mut progress, &cancelled)?;
-                        report.line("Downloaded; it matches Hugging Face's SHA-256.");
-                    } else {
-                        engines::download(&engines::hf_url(&repo, path), &dest, None, &mut progress, &cancelled)?;
-                    }
-                }
-                before += size;
-            }
+            download_files(&repo, &folder, &files, report, &cancelled)?;
             let config: Value = std::fs::read_to_string(folder.join("config.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
             let (tools, thinking) = engines::vllm_parsers(config["model_type"].as_str().unwrap_or_default(), &repo);
             let alias = repo.rsplit('/').next().unwrap_or(&repo).to_owned();
@@ -906,8 +958,9 @@ fn setup_server(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value
     // The context it set (llama.cpp's /props, Ollama's loaded model): not
     // in /models.
     let served = match engine {
-        // (vLLM's /models says it: max_model_len; Basalt's is what harlo set.)
-        Engine::Strata | Engine::Vllm => None,
+        // (vLLM's and NInfer's /models say it: max_model_len; Basalt's is what
+        // harlo set.)
+        Engine::Strata | Engine::Vllm | Engine::Ninfer => None,
         Engine::Basalt => Some(req["context"].as_u64().filter(|c| *c >= 2048).unwrap_or(65536)),
         Engine::LlamaCpp => engines::served_context_of(&base, &id),
         Engine::Ollama => engines::served_context(&base),
@@ -961,8 +1014,10 @@ impl ServerSetup {
 
     pub fn find_models(mut self: Pin<&mut Self>, search: &QString, engine: &QString) {
         let search = search.to_string().trim().to_owned();
-        // vLLM's models are in Hugging Face's own format, the others' GGUF.
+        // vLLM's models are in Hugging Face's own format, NInfer's its own, the
+        // others' GGUF.
         let vllm = engine.to_string() == "vllm";
+        let ninfer = engine.to_string() == "ninfer";
         let mut v: Value = serde_json::from_str(&self.hf_models.to_string()).unwrap_or_else(|_| json!({ "models": [] }));
         v["state"] = json!("finding");
         v["search"] = json!(search);
@@ -970,12 +1025,18 @@ impl ServerSetup {
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
             let hw = engines::detect();
-            let found = if vllm { engines::hf_vllm_models(&search) } else { engines::hf_models(&search) };
+            let found = if ninfer { engines::hf_ninfer_models(&search) } else if vllm { engines::hf_vllm_models(&search) } else { engines::hf_models(&search) };
             let v = match found {
                 Ok(models) => {
                     let list: Vec<Value> = models
                         .iter()
                         .map(|m| {
+                            // (NInfer's: on the card, or its experts in RAM as well.)
+                            if ninfer {
+                                let mb = m.bytes / (1024 * 1024);
+                                let fit = if m.bytes == 0 { "" } else if mb <= hw.vram_mb() * 8 / 10 { "gpu" } else if mb <= (hw.vram_mb() + hw.ram_mb) * 9 / 10 { "runs" } else { "no" };
+                                return json!({ "repo": m.repo, "name": engines::ninfer_name(&m.repo), "params": 0, "context": 0, "downloads": m.downloads, "q4Size": m.bytes, "fit": fit });
+                            }
                             // (vLLM: its weights as they are, all on the card, with room
                             // for its context.)
                             if vllm {

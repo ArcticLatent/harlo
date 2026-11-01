@@ -32,8 +32,9 @@ pub struct Found {
     /// It thinks before it answers (harlo's test saw it): pi, Oh My Pi and
     /// OpenCode then show its thinking and offer thinking levels.
     pub reasoning: bool,
-    /// Its server tells low, medium and high apart (Basalt): offered, where
-    /// the others have only on and off. For writing an agent's file.
+    /// Its server tells low, medium and high apart (Basalt, NInfer's Qwen3.8):
+    /// offered, where the others have only on and off. For writing an agent's
+    /// file.
     pub levels: bool,
 }
 
@@ -347,7 +348,7 @@ fn set_context_in(kind: HarnessKind, file: &Path, name: &str, context: u64) -> R
 /// OpenCode's thinking choices for a model that thinks.
 fn opencode_variants(levels: bool) -> Value {
     if levels {
-        json!({ "off": { "reasoningEffort": "none" }, "low": { "reasoningEffort": "low" }, "medium": { "reasoningEffort": "medium" }, "high": { "reasoningEffort": "high" } })
+        json!({ "off": { "reasoningEffort": "none" }, "low": { "reasoningEffort": "low" }, "medium": { "reasoningEffort": "medium" }, "high": { "reasoningEffort": "xhigh" } })
     } else {
         json!({ "off": { "reasoningEffort": "none" } })
     }
@@ -355,8 +356,9 @@ fn opencode_variants(levels: bool) -> Value {
 
 /// pi's thinking levels for a model that thinks (null: not offered).
 fn pi_levels(levels: bool) -> Value {
+    // (Their top level: "xhigh", which some of these models' templates alone take.)
     if levels {
-        json!({ "off": "none", "minimal": null, "low": "low", "medium": "medium", "high": "high" })
+        json!({ "off": "none", "minimal": null, "low": "low", "medium": "medium", "high": "xhigh" })
     } else {
         json!({ "off": "none", "minimal": null, "low": null, "medium": null, "high": "high" })
     }
@@ -799,12 +801,13 @@ mod tests {
                 let p = &v["provider"];
                 assert_eq!(p["basalt"]["models"]["qwen"]["variants"].as_object().unwrap().keys().collect::<Vec<_>>(), ["off", "low", "medium", "high"]);
                 assert_eq!(p["basalt"]["models"]["qwen"]["variants"]["low"]["reasoningEffort"], "low");
+                assert_eq!(p["basalt"]["models"]["qwen"]["variants"]["high"]["reasoningEffort"], "xhigh");
                 assert!(p["basalt"]["models"]["small"].get("variants").is_none());
                 assert!(p["other"]["models"]["qwen"]["variants"].get("low").is_none());
             } else {
                 let p = &v["providers"];
                 let map = &p["basalt"]["models"][0]["thinkingLevelMap"];
-                assert!(map["off"] == "none" && map["low"] == "low" && map["medium"] == "medium" && map["high"] == "high" && map["minimal"].is_null());
+                assert!(map["off"] == "none" && map["low"] == "low" && map["medium"] == "medium" && map["high"] == "xhigh" && map["minimal"].is_null());
                 assert!(p["basalt"]["models"][1].get("thinkingLevelMap").is_none());
                 assert!(p["other"]["models"][0]["thinkingLevelMap"]["low"].is_null());
             }

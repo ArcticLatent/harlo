@@ -836,6 +836,13 @@ fn model_files(url: &str) -> Vec<PathBuf> {
         let settings: Value = std::fs::read_to_string(shell_word(rest)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
         return settings["server"]["model"].as_str().map(PathBuf::from).filter(|p| p.starts_with(models_dir()) && p.is_file()).into_iter().collect();
     }
+    // (NInfer's: the entry file its settings name, and the parts beside it.)
+    if let Some(rest) = start.split(" --config ").nth(1).filter(|_| start.contains("ninfer-serve")) {
+        let settings = std::fs::read_to_string(shell_word(rest)).unwrap_or_default();
+        let entry = settings.lines().find_map(|l| serde_json::from_str::<String>(l.strip_prefix("path = ")?).ok()).map(PathBuf::from);
+        let Some((dir, name)) = entry.filter(|p| p.starts_with(models_dir())).and_then(|p| Some((p.parent()?.to_path_buf(), p.file_name()?.to_string_lossy().into_owned()))) else { return Vec::new() };
+        return std::fs::read_dir(&dir).into_iter().flatten().flatten().filter(|e| e.file_name().to_string_lossy().starts_with(&name)).map(|e| e.path()).collect();
+    }
     // (vLLM's: the model's folder, all of it.)
     if let Some(rest) = start.split(" serve ").nth(1).filter(|_| start.contains("vllm")) {
         let dir = PathBuf::from(shell_word(rest));
@@ -895,7 +902,15 @@ fn log_tail(url: &str) -> String {
     let tail = &lines[lines.len().saturating_sub(3)..];
     // (Its error, without what it printed before it.)
     let from = tail.iter().position(|l| l.to_lowercase().contains("error:")).unwrap_or(0);
-    tail[from..].join("\n")
+    start_failure(&tail[from..].join("\n"))
+}
+
+/// Why a server didn't start, said plainly where the engine's words don't.
+fn start_failure(log: &str) -> String {
+    if log.contains("Device budget cannot hold") {
+        return "The model and this context don't fit on your graphics card together. Set it up with a smaller context, or stop what else is using the card.".to_owned();
+    }
+    log.to_owned()
 }
 
 /// Saves a server's start and stop commands (empty ones: harlo forgets it).
@@ -966,6 +981,8 @@ fn engine_of(url: &str) -> &'static str {
         "Strata"
     } else if start.contains("basalt") {
         "Basalt"
+    } else if start.contains("ninfer-serve") {
+        "NInfer"
     } else if start.contains("vllm") {
         "vLLM"
     } else if start.is_empty() {
@@ -1044,11 +1061,11 @@ fn saved_models(v: &Value) -> Vec<model_servers::Found> {
     v["models"].as_array().into_iter().flatten().filter_map(|m| Some(model_servers::Found { id: m["id"].as_str()?.to_owned(), context: m["context"].as_u64(), reasoning: m["reasoning"] == true, ..Default::default() })).collect()
 }
 
-/// A server's models as an agent's file gets them: Basalt tells thinking
-/// levels apart.
+/// A server's models as an agent's file gets them: Basalt and NInfer's Qwen3.8
+/// tell thinking levels apart (its Qwen3.6 has only on and off).
 fn with_levels(url: &str, models: Vec<model_servers::Found>) -> Vec<model_servers::Found> {
-    let levels = engine_of(url) == "Basalt";
-    models.into_iter().map(|m| model_servers::Found { levels, ..m }).collect()
+    let engine = engine_of(url);
+    models.into_iter().map(|m| model_servers::Found { levels: engine == "Basalt" || (engine == "NInfer" && m.id.contains("3.8")), ..m }).collect()
 }
 
 /// Basalt servers agents got before harlo offered their levels: offered now,
@@ -2155,6 +2172,13 @@ fn opencode_sign_in(provider: &str, method: &str, answers: &Value, report: &Repo
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn says_why_a_server_did_not_start() {
+        let said = super::start_failure("12:05:13 FATAL server failed during startup | Device budget cannot hold model weights and required execution resources");
+        assert!(said.starts_with("The model and this context don't fit"), "{said}");
+        assert_eq!(super::start_failure("error: no such file"), "error: no such file");
+    }
+
     /// Which server a Hermes model is on, from this computer's configs.
     #[test]
     #[ignore = "this computer's configs"]
