@@ -433,13 +433,17 @@ Rectangle {
             }
             readonly property int middle: 30
             readonly property int ruler: 14
+            // A new file has no old side: its lines take the whole width.
+            readonly property bool added: dg.splitLeft.replace(/\n/g, "") === "" && dg.splitRight.trim() !== ""
+            readonly property real paneWidth: (width - middle - ruler) / (added ? 1 : 2)
 
             DiffPane {
                 id: leftPane
                 isLeft: true
                 text: root.view.left
                 x: 0
-                width: (sides.width - sides.middle - sides.ruler) / 2
+                visible: !sides.added
+                width: sides.added ? 0 : sides.paneWidth
                 height: sides.height
                 onScrolled: y => { if (rightPane.flick.contentY !== y) rightPane.flick.contentY = y }
             }
@@ -500,7 +504,7 @@ Rectangle {
                 isLeft: false
                 text: root.view.right
                 x: leftPane.width + sides.middle
-                width: leftPane.width
+                width: sides.paneWidth
                 height: sides.height
                 onScrolled: y => { if (leftPane.flick.contentY !== y) leftPane.flick.contentY = y }
             }

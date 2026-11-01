@@ -23,6 +23,8 @@ tracing-subscriber.workspace = true
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws"] }
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 base64 = "0.22"
+# Mermaid diagrams in the chat, drawn without a browser (diagrams.rs).
+merman = { version = "0.9.3", features = ["png", "native-fonts"] }
 futures-util = "0.3"
 # To a harlo relay (wss); its relay ids.
 harlo-relay.workspace = true

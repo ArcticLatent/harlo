@@ -26,7 +26,9 @@ fn forced_on() -> bool {
 
 /// Logging to stderr and to `harlo.log`.
 pub fn init_logging() {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
+    // (Diagrams: the SVG renderer warns about each effect it skips, like a
+    // drop shadow it can't parse; the picture is fine.)
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| "info,usvg=error,resvg=error".into());
     let stderr = fmt::layer().with_writer(std::io::stderr);
     let file = open_log().map(|f| fmt::layer().with_ansi(false).with_writer(Mutex::new(f)));
     tracing_subscriber::registry().with(filter).with(stderr).with(file).init();

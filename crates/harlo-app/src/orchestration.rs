@@ -68,6 +68,16 @@ fn handle(thread: &CxxQtThread<Workspace>, call: &Value) -> Result<Value, String
             .map_err(|_| "harlo is closing".to_owned())?;
     }
     let result = rx.recv_timeout(Duration::from_secs(60)).map_err(|_| "harlo didn't answer in time".to_owned())??;
+    // Specs and the plan: their work here, with what the UI thread gave.
+    if result["_defer"] == true {
+        if tool.starts_with("spec_") {
+            let cwd = std::path::PathBuf::from(result["cwd"].as_str().unwrap_or_default());
+            return harlo_core::specs::call(&harlo_core::specs::root_of(&cwd), &tool, &args);
+        }
+        let outcome = crate::plans::tool(&tool, &args, &result);
+        let _ = thread.queue(|this| this.plans_changed());
+        return outcome;
+    }
     if tool != "read_session" {
         return Ok(result);
     }

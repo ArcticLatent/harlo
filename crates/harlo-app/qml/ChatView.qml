@@ -600,6 +600,17 @@ Rectangle {
             visible: goal !== null && dismissed !== goal.id && !root.covered
         }
 
+        // The shared plan (a project with the plan on).
+        PlanDock {
+            id: planDock
+            Layout.fillWidth: true
+            Layout.leftMargin: transcript.gutter
+            Layout.rightMargin: transcript.gutter
+            Layout.topMargin: 8
+            session: root.session
+            visible: plan.enabled && steps.length > 0 && !root.covered
+        }
+
         // omp's todo list.
         TodoDock {
             id: todoDock

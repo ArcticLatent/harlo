@@ -82,6 +82,8 @@ jobs:
           QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 HOME=$(mktemp -d) timeout 20 dist/opt/harlo/bin/harlo --check-start 2>&1 | tee start.log || true
           grep -q "check-start: ok" start.log
           ! grep -E "module .* is not installed|cannot open shared object|Cannot load library" start.log
+          # Diagrams in the chat: drawn (merman, harlo's own fonts).
+          dist/opt/harlo/bin/harlo --check-diagram
 
       - uses: actions/upload-artifact@v6
         with:
@@ -123,6 +125,8 @@ jobs:
           cat start.log
           grep -q "check-start: ok" start.log
           ! grep -E "module .* is not installed|cannot open shared object|Cannot load library" start.log
+          # Diagrams in the chat: drawn here.
+          harlo --check-diagram
 
   publish:
     needs: [linux, install]

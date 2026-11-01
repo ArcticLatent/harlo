@@ -47,6 +47,7 @@ install -Dm644 crates/harlo-app/icons/REMIXICON-LICENSE "$LIC/remixicon-LICENSE"
 install -Dm644 crates/harlo-app/icons/PASEO-NOTICE "$LIC/paseo-NOTICE"
 install -Dm644 crates/harlo-app/icons/providers/OPENCHAMBER-LICENSE "$LIC/provider-logos-LICENSE"
 install -Dm644 crates/harlo-app/phone/TWEETNACL-LICENSE "$LIC/tweetnacl-LICENSE"
+install -Dm644 crates/harlo-app/assets/mermaid/LICENSE "$LIC/mermaid-LICENSE"
 for f in crates/harlo-app/fonts/*LICENSE* crates/harlo-app/fonts/*OFL*; do [ -f "$f" ] && install -Dm644 "$f" "$LIC/fonts-$(basename "$f")"; done
 # (Qt's own licences: LGPLv3, linked dynamically.)
 [ -d "$QTDIR/../../Licenses" ] && cp -r "$QTDIR/../../Licenses" "$LIC/qt" || true

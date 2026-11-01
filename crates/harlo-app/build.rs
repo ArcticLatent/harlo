@@ -57,6 +57,7 @@ fn main() {
     std::fs::write(out, format!("pub const THEME_FILES: &[&str] = &[{}];\n", items.join(", "))).unwrap();
     println!("cargo::rerun-if-changed=themes");
     println!("cargo::rerun-if-changed=cpp");
+    println!("cargo::rerun-if-changed=assets");
 
     CxxQtBuilder::new_qml_module(QmlModule::new("harlo")
             .qml_file(QmlFile::from("qml/Theme.qml").singleton(true))
@@ -118,6 +119,8 @@ fn main() {
                 "qml/UpdateToasts.qml",
                 "qml/PhoneFirewallToast.qml",
                 "qml/AddHostDialog.qml",
+                "qml/SpecsPanel.qml",
+                "qml/PlanDock.qml",
                 "qml/InstanceSwitcher.qml",
                 "qml/SearchDialog.qml",
                 "qml/BranchDialog.qml",
@@ -176,6 +179,6 @@ fn main() {
         .qt_module("Widgets")
         .qt_module("Test")
         .qt_module("Multimedia")
-        .files(["src/qt_base.rs", "src/chat_session.rs", "src/workspace.rs", "src/git_panel.rs", "src/file_browser.rs", "src/text_file.rs", "src/usage_stats.rs", "src/fonts.rs", "src/terminal_session.rs", "src/platform.rs", "src/test_input.rs", "src/dictation.rs", "src/audio.rs", "src/remotes.rs", "src/updates.rs", "src/mcp.rs", "src/phone.rs", "src/accounts.rs", "src/setup.rs"])
+        .files(["src/qt_base.rs", "src/chat_session.rs", "src/workspace.rs", "src/git_panel.rs", "src/file_browser.rs", "src/text_file.rs", "src/usage_stats.rs", "src/fonts.rs", "src/terminal_session.rs", "src/platform.rs", "src/test_input.rs", "src/dictation.rs", "src/audio.rs", "src/remotes.rs", "src/updates.rs", "src/mcp.rs", "src/phone.rs", "src/accounts.rs", "src/setup.rs", "src/diagrams.rs"])
         .build();
 }

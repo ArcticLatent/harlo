@@ -561,6 +561,14 @@ Item {
                     required property string text
                     required property string title
                     readonly property real gap: root.gapAbove("code", ListView.previousSection)
+                    // A Mermaid diagram: drawn (Diagrams), its code a click away.
+                    readonly property bool mermaid: title.toLowerCase() === "mermaid"
+                    property bool showCode: false
+                    readonly property var diagram: mermaid && Diagrams.revision >= 0
+                        ? JSON.parse(Diagrams.diagram(text, Theme.isLight, JSON.stringify({ background: String(Theme.codeBg), surface: String(Theme.elevated), text: String(Theme.foreground),
+                                                                                             muted: String(Theme.muted), accent: String(Theme.primary), font: Theme.uiFont })))
+                        : null
+                    readonly property bool drawn: diagram !== null && diagram.state === "ready" && !showCode
                     AgentHead { visible: codeRow.ListView.previousSection === "user"; y: codeRow.gap - height - 10 }
                     width: view.width
                     implicitHeight: codeBox.height + gap
@@ -569,7 +577,7 @@ Item {
                         x: view.columnX
                         y: codeRow.gap
                         width: view.columnWidth
-                        height: codeHeader.height + codeFlick.height
+                        height: codeHeader.height + (codeRow.drawn ? diagramBox.height : codeFlick.height) + (diagramNote.visible ? diagramNote.height : 0)
                         radius: 10
                         color: Theme.codeBg
                         border.color: Theme.hairline
@@ -580,6 +588,20 @@ Item {
                             Label { Layout.leftMargin: 10; text: codeRow.title || "text"; color: Theme.muted; font.pixelSize: Theme.px(12) }
                             Item { Layout.fillWidth: true }
                             FlatButton {
+                                visible: codeRow.mermaid && codeRow.diagram !== null && codeRow.diagram.state === "ready"
+                                Layout.preferredHeight: 22
+                                text: codeRow.showCode ? "Diagram" : "Code"
+                                font.pixelSize: Theme.px(11)
+                                onClicked: codeRow.showCode = !codeRow.showCode
+                            }
+                            FlatButton {
+                                visible: codeRow.mermaid
+                                Layout.preferredHeight: 22
+                                text: "Open in browser"
+                                font.pixelSize: Theme.px(11)
+                                onClicked: Diagrams.openInBrowser(codeRow.text, Theme.isLight)
+                            }
+                            FlatButton {
                                 Layout.rightMargin: 4
                                 Layout.preferredHeight: 22
                                 text: "Copy"
@@ -587,9 +609,53 @@ Item {
                                 onClicked: clipboardHelper.copyText(codeRow.text)
                             }
                         }
+                        // Drawing it, or why it isn't drawn.
+                        Label {
+                            id: diagramNote
+                            anchors.top: codeHeader.bottom
+                            x: 10
+                            width: parent.width - 20
+                            visible: codeRow.mermaid && codeRow.diagram !== null && codeRow.diagram.state !== "ready"
+                            height: visible ? implicitHeight + 4 : 0
+                            text: !codeRow.diagram ? "" : codeRow.diagram.state === "drawing" ? "Drawing the diagram…" : (codeRow.diagram.error || "")
+                            color: codeRow.diagram && codeRow.diagram.state === "failed" ? Theme.warning : Theme.muted
+                            font.pixelSize: Theme.px(11.5)
+                            wrapMode: Text.Wrap
+                        }
+                        // The picture, fitted to the column (the chat scrolls past
+                        // it; clicking it opens it full size).
+                        Item {
+                            id: diagramBox
+                            objectName: "diagram"
+                            anchors.top: codeHeader.bottom
+                            visible: codeRow.drawn
+                            width: parent.width
+                            height: visible ? diagramImage.height + 20 : 0
+                            Image {
+                                id: diagramImage
+                                readonly property real fit: codeRow.drawn ? Math.min(1, (diagramBox.width - 20) / Math.max(1, codeRow.diagram.width)) : 1
+                                x: (diagramBox.width - width) / 2
+                                y: 10
+                                source: codeRow.drawn ? codeRow.diagram.url : ""
+                                width: codeRow.drawn ? Math.round(codeRow.diagram.width * fit) : 0
+                                height: codeRow.drawn ? Math.round(codeRow.diagram.height * fit) : 0
+                                sourceSize.width: width * 2
+                                fillMode: Image.PreserveAspectFit
+                                smooth: true
+                                mipmap: true
+                                asynchronous: true
+                                cache: false
+                                HoverHandler { id: diagramHover; cursorShape: Qt.PointingHandCursor }
+                                TapHandler { onTapped: Qt.openUrlExternally(codeRow.diagram.url) }
+                                ToolTip.visible: diagramHover.hovered
+                                ToolTip.text: "Open full size"
+                                ToolTip.delay: 600
+                            }
+                        }
                         Flickable {
                             id: codeFlick
-                            anchors.top: codeHeader.bottom
+                            anchors.top: diagramNote.visible ? diagramNote.bottom : codeHeader.bottom
+                            visible: !codeRow.drawn
                             width: parent.width
                             height: codeText.implicitHeight + 16
                             // Settings → Appearance → Word wrap: long lines wrap.
@@ -801,7 +867,7 @@ Item {
                                     font.bold: toolRow.asking
                                     font.pixelSize: Theme.px(12)
                                 }
-                                Label { text: toolRow.title; color: Theme.foreground; font.bold: true; font.pixelSize: Theme.px(13) }
+                                Label { text: Theme.toolLabel(toolRow.title); color: Theme.foreground; font.bold: true; font.pixelSize: Theme.px(13) }
                                 Label {
                                     Layout.fillWidth: true
                                     text: toolRow.subtitle

@@ -83,6 +83,13 @@ pub fn tools() -> Value {
 
 /// What the bridge asks to learn whether orchestration is on.
 pub const ENABLED: &str = "_enabled";
+/// What the bridge asks for a session's tools.
+pub const TOOLS: &str = "_tools";
+/// What the bridge asks for what a session's tools are for.
+pub const INSTRUCTIONS: &str = "_instructions";
+
+/// What harlo's tools are for, before a project's specs and plan.
+pub const BASE_INSTRUCTIONS: &str = "harlo's sessions: start other coding agents, send them messages, read their replies.";
 
 /// What the bridge sends harlo for a tool call (one line), and harlo's
 /// answer (one line): `{ok, result}` or `{ok: false, error}`.
@@ -118,18 +125,24 @@ pub fn run_bridge() {
         let Some(id) = msg.get("id").cloned() else { continue };
         let reply = |result: Value| json!({ "jsonrpc": "2.0", "id": id, "result": result });
         let answer = match msg["method"].as_str().unwrap_or_default() {
-            "initialize" => reply(json!({
-                "protocolVersion": msg["params"]["protocolVersion"].as_str().unwrap_or("2025-06-18"),
-                "capabilities": { "tools": {} },
-                "serverInfo": { "name": "harlo", "version": env!("CARGO_PKG_VERSION") },
-                "instructions": "harlo's sessions: start other coding agents, send them messages, read their replies.",
-            })),
+            // What this session's tools are for (the project's specs and
+            // plan add to it).
+            "initialize" => {
+                let said = ask_harlo(&call_line(&session, opencode, INSTRUCTIONS, &json!({}))).filter(|a| a["ok"] == true);
+                reply(json!({
+                    "protocolVersion": msg["params"]["protocolVersion"].as_str().unwrap_or("2025-06-18"),
+                    "capabilities": { "tools": {} },
+                    "serverInfo": { "name": "harlo", "version": env!("CARGO_PKG_VERSION") },
+                    "instructions": said.and_then(|a| a["result"].as_str().map(str::to_owned)).unwrap_or_else(|| BASE_INSTRUCTIONS.to_owned()),
+                }))
+            }
             "ping" => reply(json!({})),
-            // No harlo running, or orchestration off in it: no tools.
-            // (A socket left by a harlo that crashed doesn't count.)
+            // This session's tools, as harlo says; none with no harlo
+            // running or orchestration off in it. (A socket left by a
+            // harlo that crashed doesn't count.)
             "tools/list" => {
-                let on = ask_harlo(&call_line(&session, opencode, ENABLED, &json!({}))).is_some_and(|a| a["ok"] == true);
-                reply(json!({ "tools": if on { tools() } else { json!([]) } }))
+                let listed = ask_harlo(&call_line(&session, opencode, TOOLS, &json!({}))).filter(|a| a["ok"] == true);
+                reply(json!({ "tools": listed.map(|a| a["result"].clone()).filter(Value::is_array).unwrap_or_else(|| json!([])) }))
             }
             "tools/call" => {
                 let p = &msg["params"];

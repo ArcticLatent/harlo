@@ -525,6 +525,25 @@ ApplicationWindow {
                             c.focusInput()
                         }
                     }
+                    SpecsPanel {
+                        anchors.fill: parent
+                        // (On the new-session page: the project picked there.)
+                        sessionKey: chat.isDraft ? "project:" + chat.draftView.projectId : chat.session.key
+                        canSend: !chat.isDraft && chat.session.key !== ""
+                        drafting: chat.isDraft && chat.draftView.projectId >= 0
+                        // Starts the session with it, as the button says.
+                        onDraftRequested: text => {
+                            chat.draftView.input.text = text
+                            chat.draftView.send()
+                        }
+                        visible: rightPanel.shownMode === "specs"
+                        onCloseRequested: windowSettings.rightMode = ""
+                        onOpenRequested: path => chat.requestOpenFile(path)
+                        onSendRequested: text => {
+                            chat.session.send(text, chat.session.status === "busy" ? "followUp" : "normal")
+                            Workspace.open(chat.session.key)
+                        }
+                    }
                     FilesPanel {
                         id: files
                         anchors.fill: parent

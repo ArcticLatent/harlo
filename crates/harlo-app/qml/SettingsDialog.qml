@@ -2191,6 +2191,56 @@ Popup {
                     FlatButton { text: "Save"; variant: "primary"; font.pixelSize: Theme.px(12); onClicked: Workspace.setProjectSetup(proj.p.id, setupArea.text) }
                     FlatButton { text: "Cancel"; outlined: false; font.pixelSize: Theme.px(12); onClicked: setupArea.text = proj.p.setup }
                 }
+                // Specs and the shared plan (sessions on this computer).
+                SectionHeader {
+                    visible: proj.p !== null && !proj.p.remote
+                    title: "Specs and plans"
+                    subtitle: "harlo's tools for this project's agents (every agent, through harlo's tools: Settings → Orchestration). Sessions started afterwards get them."
+                }
+                Group {
+                    id: featureGroup
+                    visible: proj.p !== null && !proj.p.remote
+                    // (Re-read when another project is picked, or a switch moves.)
+                    readonly property int pid: proj.p ? proj.p.id : -1
+                    property int rev: 0
+                    function on(name) { return rev >= 0 && pid >= 0 && Workspace.setting(name + "_" + pid) === "1" }
+                    function set(name, on) { Workspace.setSetting(name + "_" + pid, on ? "1" : "0"); rev++ }
+                    SettingRow {
+                        title: "Specs"
+                        detail: "SPEC.md files beside the code say what each part is for, how it behaves and why. Agents read them before changing code and keep them true in the same change, so the project's intent outlives the chats. The Specs panel (right edge) lists them."
+                        icon: "file-text"
+                        AppSwitch {
+                            objectName: "projectSpecs"
+                            checked: featureGroup.on("specs")
+                            onToggled: featureGroup.set("specs", checked)
+                        }
+                    }
+                    SettingRow {
+                        id: planRow
+                        divider: true
+                        title: "Shared plan"
+                        detail: "For a bigger task the agent writes a plan of steps and works through it; you add, change, reorder or skip steps at any time (above the message box), and it reads them before each step."
+                        icon: "list-check-2"
+                        readonly property bool on: featureGroup.on("plan")
+                        AppSwitch {
+                            objectName: "projectPlan"
+                            checked: planRow.on
+                            onToggled: featureGroup.set("plan", checked)
+                        }
+                    }
+                    SettingRow {
+                        divider: true
+                        visible: planRow.on
+                        title: "Commit each finished step"
+                        detail: "When a step is done, harlo commits its changes on their own, with the step as the message, if they're provably the step's: not when a file it touched already had changes, the branch moved, or another session worked there meanwhile (then it says why and leaves them to you). A finished step can be reviewed by another agent."
+                        icon: "git-commit"
+                        AppSwitch {
+                            objectName: "projectPlanCommits"
+                            checked: featureGroup.rev >= 0 && featureGroup.pid >= 0 && Workspace.setting("plan_commits_" + featureGroup.pid) !== "0"
+                            onToggled: featureGroup.set("plan_commits", checked)
+                        }
+                    }
+                }
                 Rule { }
 
                 RowLayout {

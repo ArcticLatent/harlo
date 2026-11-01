@@ -5,6 +5,7 @@ mod audio;
 mod chat_session;
 mod ci;
 mod diagnostics;
+mod diagrams;
 mod dictation;
 mod terminal_session;
 mod test_input;
@@ -33,6 +34,7 @@ mod remotes;
 mod setup;
 mod workspace;
 mod orchestration;
+mod plans;
 mod graphics;
 mod jobs;
 mod updates;
@@ -64,6 +66,9 @@ fn main() {
     if std::env::args().nth(1).as_deref() == Some("--mcp-bridge") {
         harlo_core::orchestration::run_bridge();
         return;
+    }
+    if std::env::args().nth(1).as_deref() == Some("--check-diagram") {
+        std::process::exit(diagrams::check());
     }
     // Already running? Hand over (show the window / toggle the drop-down).
     // Checked first, so a launch that only hands over keeps the running

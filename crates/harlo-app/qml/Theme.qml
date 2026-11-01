@@ -130,6 +130,12 @@ QtObject {
         return !h || h.state !== "connected" || (h[id] || "") !== ""
     }
     /// A provider's name for people (its mark is Icon "harness-<id>").
+    // A tool's name as people read it: an MCP server's tools
+    // ("mcp__harlo__spec_list") as "harlo spec list".
+    function toolLabel(name) {
+        const m = /^mcp__([^_]+(?:_[^_]+)*?)__(.+)$/.exec(name || "")
+        return m ? m[1] + " " + m[2].replace(/_/g, " ") : name
+    }
     function harnessLabel(id) {
         return ({ claude: "Claude", opencode: "OpenCode", pi: "Pi", omp: "Oh My Pi", hermes: "Hermes", demo: "Demo" })[id] || id
     }

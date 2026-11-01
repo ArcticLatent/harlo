@@ -146,7 +146,7 @@ Rectangle {
                 ToolTip { id: copied }
                 ToolTip.visible: hovered && !copied.visible
                 ToolTip.delay: 600
-                ToolTip.text: modelData.tool + ": " + modelData.target + (row.isFile ? "\nClick to open" : modelData.kind === "command" ? "\nClick to copy" : "")
+                ToolTip.text: Theme.toolLabel(modelData.tool) + ": " + modelData.target + (row.isFile ? "\nClick to open" : modelData.kind === "command" ? "\nClick to copy" : "")
                 background: Rectangle {
                     color: row.hovered ? Theme.rowHover : "transparent"
                     Behavior on color { ColorAnimation { duration: Theme.hoverMotion } }
@@ -167,7 +167,7 @@ Rectangle {
                         spacing: 2
                         Label {
                             Layout.fillWidth: true
-                            text: row.modelData.target !== "" ? row.modelData.target : row.modelData.tool
+                            text: row.modelData.target !== "" ? row.modelData.target : Theme.toolLabel(row.modelData.tool)
                             color: Theme.text
                             font.family: row.modelData.target !== "" ? Theme.mono : Theme.uiFont
                             font.pixelSize: Theme.px(12)
@@ -177,7 +177,7 @@ Rectangle {
                         }
                         Label {
                             Layout.fillWidth: true
-                            text: [row.modelData.tool, row.modelData.pending ? "running…" : row.modelData.error ? "failed" + (row.modelData.result && row.modelData.result !== "failed" ? " · " + row.modelData.result : "") : row.modelData.result]
+                            text: [Theme.toolLabel(row.modelData.tool), row.modelData.pending ? "running…" : row.modelData.error ? "failed" + (row.modelData.result && row.modelData.result !== "failed" ? " · " + row.modelData.result : "") : row.modelData.result]
                                   .filter(s => s).join(" · ")
                             color: row.modelData.error ? Theme.error : Theme.textFaint
                             font.pixelSize: Theme.px(11.5)

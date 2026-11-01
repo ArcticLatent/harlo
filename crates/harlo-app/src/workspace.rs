@@ -41,6 +41,8 @@ pub mod qobject {
         #[qproperty(i32, orchestration_revision, cxx_name = "orchestrationRevision")]
         /// Settings → Orchestration's switch.
         #[qproperty(bool, orchestration_on, cxx_name = "orchestrationOn")]
+        /// Bumped when a session's shared plan changes (`planJson`).
+        #[qproperty(i32, plans_revision, cxx_name = "plansRevision")]
         /// Bumped whenever scheduled prompts change (views re-read them).
         #[qproperty(i32, schedules_revision, cxx_name = "schedulesRevision")]
         /// Bumped whenever a session's approval or plan mode changes.
@@ -130,6 +132,26 @@ pub mod qobject {
         fn set_archived(self: Pin<&mut Workspace>, key: &QString, archived: bool);
         #[qinvokable]
         fn set_pinned(self: Pin<&mut Workspace>, key: &QString, pinned: bool);
+        /// A session's shared plan: `{ enabled, commits, steps: [{ id,
+        /// title, detail, status, summary, commit, commitNote,
+        /// editedByUser }] }` (`enabled`: the plan is on for its project).
+        #[qinvokable]
+        fn plan_json(self: &Workspace, key: &QString) -> QString;
+        /// The specs of a session's repository (`key`: a session, or
+        /// `project:<id>`): `{ root, project (its id, -1 outside one),
+        /// enabled, specs: [{ path, title, summary }] }`.
+        #[qinvokable]
+        fn specs_json(self: &Workspace, key: &QString) -> QString;
+        /// Your edit of a session's plan: `{ op: "add", title, detail,
+        /// after }`, `{ op: "edit", id, title, detail }`, `{ op: "remove",
+        /// id }`, `{ op: "shift", id, by }`, `{ op: "skip", id, skipped }`,
+        /// `{ op: "clear" }`.
+        #[qinvokable]
+        fn plan_edit(self: Pin<&mut Workspace>, key: &QString, op: &QString);
+        /// Has another agent review a finished step's commit; its review
+        /// comes back to the session. The problem, if any.
+        #[qinvokable]
+        fn review_step(self: Pin<&mut Workspace>, key: &QString, id: i32, agent: &QString) -> QString;
         /// Stops the session's harness process; the session stays on disk.
         #[qinvokable]
         fn close_session(self: Pin<&mut Workspace>, key: &QString);
@@ -755,6 +777,7 @@ pub struct WorkspaceRust {
     filter: String,
     other_collapsed: bool,
     expanded: Vec<i64>,
+    plans_revision: i32,
     rows: Vec<SidebarRow>,
     window_active: bool,
     tabs: QStringList,
@@ -1970,6 +1993,116 @@ impl Workspace {
 
     pub fn set_archived(self: Pin<&mut Self>, key: &QString, archived: bool) {
         self.update_meta(&key.to_string(), |m| m.archived = archived);
+    }
+
+    /// What a session's project has on: `(cwd, specs, plan, commits)`
+    /// (sessions on this computer in a harlo project only).
+    fn features_of(&self, key: &str) -> Option<(PathBuf, bool, bool, bool)> {
+        let cwd = self.live.get(key).map(|e| e.info.cwd.clone()).or_else(|| self.sessions.get(Path::new(key)).map(|s| s.cwd.clone()))?;
+        if harlo_core::remote::is_remote(&cwd) {
+            return None;
+        }
+        let project = self
+            .worktrees
+            .iter()
+            .filter(|w| cwd.starts_with(&w.path))
+            .max_by_key(|w| w.path.components().count())
+            .map(|w| w.project_id)
+            .or_else(|| self.projects.iter().filter(|p| cwd.starts_with(&p.path)).max_by_key(|p| p.path.components().count()).map(|p| p.id))?;
+        let on = |k: &str| self.setting_str(&format!("{k}_{project}")) == "1";
+        Some((cwd, on("specs"), on("plan"), self.setting_str(&format!("plan_commits_{project}")) != "0"))
+    }
+
+    pub fn plan_json(&self, key: &QString) -> QString {
+        let key = key.to_string();
+        let (enabled, commits) = self.features_of(&key).map_or((false, false), |(_, _, plan, commits)| (plan, commits));
+        let mut v = crate::plans::get(self.file_for_key(&key).as_deref(), &key).json();
+        v["enabled"] = json!(enabled);
+        v["commits"] = json!(commits);
+        QString::from(&v.to_string())
+    }
+
+    pub fn specs_json(&self, key: &QString) -> QString {
+        let key = key.to_string();
+        let none = || QString::from(&json!({ "root": "", "project": -1, "enabled": false, "specs": [] }).to_string());
+        // A project itself (the new-session page): its folder.
+        let found = match key.strip_prefix("project:").and_then(|id| id.parse::<i64>().ok()) {
+            Some(id) => self
+                .projects
+                .iter()
+                .find(|p| p.id == id && !harlo_core::remote::is_remote(&p.path))
+                .map(|p| (p.path.clone(), self.setting_str(&format!("specs_{id}")) == "1")),
+            None => self.features_of(&key).map(|(cwd, specs, ..)| (cwd, specs)),
+        };
+        let Some((cwd, enabled)) = found else { return none() };
+        let project = self
+            .worktrees
+            .iter()
+            .filter(|w| cwd.starts_with(&w.path))
+            .max_by_key(|w| w.path.components().count())
+            .map(|w| w.project_id)
+            .or_else(|| self.projects.iter().filter(|p| cwd.starts_with(&p.path)).max_by_key(|p| p.path.components().count()).map(|p| p.id))
+            .unwrap_or(-1);
+        let root = harlo_core::specs::root_of(&cwd);
+        let specs: Vec<serde_json::Value> = harlo_core::specs::find(&root).into_iter().map(|s| json!({ "path": s.path, "title": s.title, "summary": s.summary })).collect();
+        QString::from(&json!({ "root": root.to_string_lossy(), "project": project, "enabled": enabled, "specs": specs }).to_string())
+    }
+
+    pub fn plan_edit(mut self: Pin<&mut Self>, key: &QString, op: &QString) {
+        let key = key.to_string();
+        let op: serde_json::Value = serde_json::from_str(&op.to_string()).unwrap_or_default();
+        let id = op["id"].as_u64().unwrap_or(0) as u32;
+        let text = |k: &str| op[k].as_str().unwrap_or_default().to_owned();
+        crate::plans::update(self.file_for_key(&key).as_deref(), &key, |p| match op["op"].as_str().unwrap_or_default() {
+            "add" if !text("title").trim().is_empty() => {
+                p.add(&text("title"), &text("detail"), op["after"].as_u64().map(|a| a as u32));
+            }
+            "edit" if !text("title").trim().is_empty() => {
+                let _ = p.edit(id, &text("title"), &text("detail"));
+            }
+            "remove" => p.remove(id),
+            "shift" => p.shift(id, op["by"].as_i64().unwrap_or(0) as i32),
+            "skip" => {
+                let _ = p.set_skipped(id, op["skipped"].as_bool().unwrap_or(true));
+            }
+            "clear" => p.steps.clear(),
+            _ => {}
+        });
+        self.as_mut().plans_changed();
+    }
+
+    pub(crate) fn plans_changed(mut self: Pin<&mut Self>) {
+        let next = self.plans_revision + 1;
+        self.as_mut().set_plans_revision(next);
+    }
+
+    pub fn review_step(mut self: Pin<&mut Self>, key: &QString, id: i32, agent: &QString) -> QString {
+        let key = key.to_string();
+        let plan = crate::plans::get(self.file_for_key(&key).as_deref(), &key);
+        let Some(step) = plan.step(id as u32).filter(|s| !s.commit.is_empty()) else { return QString::from("That step has no commit to review.") };
+        let Some(kind) = HarnessKind::parse(&agent.to_string()).filter(|k| self.usable_harness(*k)) else { return QString::from("That agent isn't available.") };
+        let Some((cwd, ..)) = self.features_of(&key) else { return QString::from("That session isn't in a project here.") };
+        if !self.live.contains_key(&key) {
+            return QString::from("Open the session first: the review comes back to it.");
+        }
+        let prompt = format!(
+            "Review one step of another agent's work: commit {sha} in {folder}, \"{title}\"{summary}. See it with `git show {sha}`. \
+             Check it does what the step says, and look for bugs, missed cases, broken behavior elsewhere, and specs (SPEC.md files) it should have updated. \
+             Don't change any files. Reply with what you found, most serious first, each with the file and line; or say it looks right.",
+            sha = step.commit,
+            folder = cwd.display(),
+            title = step.title,
+            summary = if step.summary.is_empty() { String::new() } else { format!(" ({})", step.summary) },
+        );
+        let title = format!("Review: {}", step.title);
+        let child = self.as_mut().start_session_with(kind, cwd, "", false);
+        if let Some(live) = registry::get(&child) {
+            live.handle.send_raw(json!({ "type": "set_session_name", "name": title }));
+        }
+        self.as_mut().adopt(&child, &key, &title, kind.as_str(), true);
+        // (Its progress shows in the session's Subagents box.)
+        send_first_prompt(&child, FirstPrompt { text: prompt, ..Default::default() }, Some(self.qt_thread()));
+        QString::default()
     }
 
     pub fn set_pinned(self: Pin<&mut Self>, key: &QString, pinned: bool) {
@@ -4581,9 +4714,60 @@ impl Workspace {
         if tool == harlo_core::orchestration::ENABLED {
             return Ok(json!(true));
         }
-        // (A host's bridge asks for the tools themselves.)
-        if tool == "_tools" {
-            return Ok(harlo_core::orchestration::tools());
+        // The caller's tools, and what they're for: harlo's, and its
+        // project's specs and plan when they're on.
+        let features = caller.as_deref().and_then(|c| self.features_of(c));
+        if tool == harlo_core::orchestration::TOOLS {
+            let mut tools = harlo_core::orchestration::tools().as_array().cloned().unwrap_or_default();
+            if let Some((_, specs, plan, commits)) = &features {
+                if *specs {
+                    tools.extend(harlo_core::specs::tools().as_array().cloned().unwrap_or_default());
+                }
+                if *plan {
+                    tools.extend(harlo_core::plan::tools(*commits).as_array().cloned().unwrap_or_default());
+                }
+            }
+            return Ok(json!(tools));
+        }
+        if tool == harlo_core::orchestration::INSTRUCTIONS {
+            let mut text = harlo_core::orchestration::BASE_INSTRUCTIONS.to_owned();
+            if let Some((_, specs, plan, _)) = &features {
+                if *specs {
+                    text = format!("{text}\n\n{}", harlo_core::specs::INSTRUCTIONS);
+                }
+                if *plan {
+                    text = format!("{text}\n\n{}", harlo_core::plan::INSTRUCTIONS);
+                }
+            }
+            return Ok(json!(text));
+        }
+        // Specs and the plan: done off this thread (crate::orchestration),
+        // with what it needs from here.
+        if tool.starts_with("spec_") || tool.starts_with("plan_") {
+            let (Some(caller), Some((cwd, specs, plan, commits))) = (caller.as_deref(), &features) else {
+                return Err("Specs and the shared plan are for sessions in a harlo project on this computer.".into());
+            };
+            if tool.starts_with("spec_") && !specs {
+                return Err("Specs are off for this project (its settings in harlo).".into());
+            }
+            if tool.starts_with("plan_") && !plan {
+                return Err("The shared plan is off for this project (its settings in harlo).".into());
+            }
+            // Other sessions' last work (now, while busy), for telling a
+            // step's changes apart.
+            let unix = |t: SystemTime| t.duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+            let others: Vec<serde_json::Value> = self
+                .live
+                .values()
+                .filter(|e| e.info.key != caller)
+                .map(|e| {
+                    let busy = matches!(e.info.status, SessionStatus::Busy | SessionStatus::Starting);
+                    let last = e.info.session_file.as_ref().and_then(|f| self.sessions.get(f)).map_or(unix(e.info.started_at), |s| unix(s.modified));
+                    json!({ "cwd": e.info.cwd.to_string_lossy(), "last": if busy { i64::MAX } else { last } })
+                })
+                .collect();
+            let file = self.file_for_key(caller).map(|f| f.to_string_lossy().into_owned());
+            return Ok(json!({ "_defer": true, "cwd": cwd.to_string_lossy(), "key": caller, "file": file, "commits": commits, "others": others }));
         }
         let text = |k: &str| args[k].as_str().map(str::trim).unwrap_or_default().to_owned();
         let session = |this: &Self| -> Result<String, String> {
