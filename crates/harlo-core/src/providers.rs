@@ -158,7 +158,7 @@ async fn rpc_models(kind: HarnessKind, program: PathBuf, cwd: PathBuf) -> Result
         .into_iter()
         .flatten()
         // (omp's leftovers from a local engine that's gone.)
-        .filter(|m| !crate::model_servers::stale_discovered(m["provider"].as_str().unwrap_or_default(), m["baseUrl"].as_str().unwrap_or_default(), &mut seen))
+        .filter(|m| !crate::model_servers::stale_discovered(m["provider"].as_str().unwrap_or_default(), m["id"].as_str().unwrap_or_default(), m["baseUrl"].as_str().unwrap_or_default(), &mut seen))
         .filter_map(|m| {
             let id = m["id"].as_str()?;
             let provider = m["provider"].as_str().unwrap_or_default();

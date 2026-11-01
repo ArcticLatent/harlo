@@ -110,7 +110,7 @@ Popup {
             objectName: "delegateModel" + row.label.replace(/\s/g, "")
             Layout.fillWidth: true
             Layout.preferredWidth: 1
-            model: [row.info && row.info.state === "checking" ? "Default model (finding models…)" : "Default model"].concat(row.info ? row.info.models : [])
+            model: [row.info && row.info.state === "checking" ? "Default model (finding models…)" : "Default model"].concat(row.info ? row.info.models.map(m => Theme.modelLabel(m)) : [])
             onActivated: i => row.model = i > 0 ? row.modelIds[i - 1] || "" : ""
             onModelChanged: row.sync()
         }

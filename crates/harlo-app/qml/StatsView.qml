@@ -328,7 +328,7 @@ Rectangle {
                             Layout.fillWidth: true
                             spacing: 8
                             // Names give way on narrow windows; the numbers stay.
-                            Label { text: modelData.model; color: Theme.foreground; font.pixelSize: Theme.px(13); elide: Text.ElideRight; Layout.minimumWidth: 0 }
+                            Label { text: Theme.modelLabel(modelData.model); color: Theme.foreground; font.pixelSize: Theme.px(13); elide: Text.ElideRight; Layout.minimumWidth: 0 }
                             Label { visible: modelData.thinking !== ""; text: modelData.thinking; color: Theme.muted; font.pixelSize: Theme.px(12); elide: Text.ElideRight; Layout.minimumWidth: 0 }
                             Label { text: modelData.provider; color: Theme.muted; font.pixelSize: Theme.px(12); opacity: 0.8; elide: Text.ElideRight; Layout.minimumWidth: 0 }
                             Item { Layout.fillWidth: true; Layout.minimumWidth: 0 }

@@ -531,7 +531,7 @@ Popup {
                         objectName: "defaultModel"
                         visible: modelRow.ids.length > 0
                         width: 260
-                        model: [modelRow.prov ? modelRow.prov.label + "'s own default" : ""].concat(modelRow.ids.map((id, i) => (modelRow.prov.models || [])[i] || id))
+                        model: [modelRow.prov ? modelRow.prov.label + "'s own default" : ""].concat(modelRow.ids.map((id, i) => Theme.modelLabel((modelRow.prov.models || [])[i] || id)))
                         currentIndex: Math.max(0, modelRow.ids.indexOf(modelRow.current) + 1)
                         onActivated: i => {
                             const id = i === 0 ? "" : modelRow.ids[i - 1]
@@ -2322,9 +2322,10 @@ Popup {
                         variant: "danger"
                         accent: Theme.error
                         font.pixelSize: Theme.px(12)
-                        onClicked: { const id = proj.p.id; proj.chosen = -1; Workspace.removeProject(id) }
+                        onClicked: removeProject.ask(proj.p.id, proj.p.name)
                     }
-                    Hint { text: "Its folder and saved sessions stay; the sessions move to Other sessions." }
+                    Hint { text: "Its folder stays; you choose what happens to its sessions." }
+                    RemoveProjectDialog { id: removeProject; onRemoved: proj.chosen = -1 }
                 }
             }
         }
@@ -3539,7 +3540,7 @@ Popup {
                                             radius: 6
                                             color: Theme.controlFill
                                             border.color: Theme.controlBorder
-                                            Label { id: modelName; anchors.centerIn: parent; text: parent.modelData; color: Theme.muted; font.pixelSize: Theme.px(11) }
+                                            Label { id: modelName; anchors.centerIn: parent; text: Theme.modelLabel(parent.modelData); color: Theme.muted; font.pixelSize: Theme.px(11) }
                                         }
                                     }
                                 }

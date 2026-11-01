@@ -76,6 +76,7 @@ Rectangle {
         onAccepted: Workspace.trashSession(key)
     }
 
+    RemoveProjectDialog { id: removeProjectDialog }
     WorktreeDialogs { id: worktreeDialogs }
     // For the command palette.
     /// Settings → Projects, on this project.
@@ -131,7 +132,7 @@ Rectangle {
         AppMenuSeparator { }
         AppMenuItem { text: "Project settings…"; onTriggered: root.projectSettingsRequested(projectMenu.projectId) }
         AppMenuItem { text: "Open folder"; visible: !projectMenu.path.startsWith("ssh://"); onTriggered: Qt.openUrlExternally("file://" + projectMenu.path) }
-        AppMenuItem { text: "Remove project"; danger: true; onTriggered: Workspace.removeProject(projectMenu.projectId) }
+        AppMenuItem { text: "Remove project…"; danger: true; onTriggered: removeProjectDialog.ask(projectMenu.projectId, projectMenu.name) }
     }
 
     AppMenu {

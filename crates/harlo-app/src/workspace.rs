@@ -111,6 +111,15 @@ pub mod qobject {
         fn add_project(self: Pin<&mut Workspace>, path: &QString);
         #[qinvokable]
         fn remove_project(self: Pin<&mut Workspace>, id: i32);
+        /// What a project's sessions are, for asking before removing it:
+        /// `{ count, trash, opencode, listed, archived, running, worktree }`.
+        #[qinvokable]
+        fn project_sessions(self: &Workspace, id: i32) -> QString;
+        /// Removes a project and deletes its sessions, each as Delete session
+        /// does (in the background; one that can't be deleted stays, in
+        /// Other sessions, and says why).
+        #[qinvokable]
+        fn remove_project_and_sessions(self: Pin<&mut Workspace>, id: i32);
         #[qinvokable]
         fn set_project_harness(self: Pin<&mut Workspace>, id: i32, harness: &QString);
         /// Collapses or expands a project (`project:<id>`), `group:other`,
@@ -1280,6 +1289,90 @@ impl Workspace {
         let r = self.db().map(|db| db.remove_project(id as i64)).transpose();
         self.as_mut().report(r);
         self.reload_projects();
+    }
+
+    /// This instance's sessions of a project.
+    fn sessions_of_project(&self, id: i64) -> Vec<sidebar::ProjectSession> {
+        let sessions: Vec<SessionInfo> = self.sessions.values().filter(|s| self.here(&s.path)).cloned().collect();
+        let live: Vec<LiveInfo> = self.live.values().filter(|e| self.here(&e.info.cwd)).map(|e| e.info.clone()).collect();
+        let projects: Vec<Project> = self.projects.iter().filter(|p| self.here(&p.path)).cloned().collect();
+        sidebar::project_sessions(
+            id,
+            &SidebarInput { projects: &projects, worktrees: &self.worktrees, sessions: &sessions, live: &live, meta: &self.meta, filter: "", show_archived: true, other_collapsed: false, expanded: &[], shelves_open: &[] },
+        )
+    }
+
+    pub fn project_sessions(&self, id: i32) -> QString {
+        let list = self.sessions_of_project(id as i64);
+        let count = |f: &dyn Fn(&sidebar::ProjectSession) -> bool| list.iter().filter(|s| f(s)).count();
+        // (A session with nothing sent yet has nothing to delete, and goes when it stops.)
+        let saved = |s: &sidebar::ProjectSession| self.file_for_key(&s.key).is_some();
+        let v = serde_json::json!({
+            "count": list.len(),
+            "trash": count(&|s| saved(s) && s.harness != "opencode" && s.harness != "hermes"),
+            "opencode": count(&|s| saved(s) && s.harness == "opencode"),
+            "listed": count(&|s| saved(s) && s.harness == "hermes"),
+            "archived": count(&|s| s.archived),
+            "running": count(&|s| s.running),
+            "worktree": count(&|s| s.worktree),
+        });
+        QString::from(&v.to_string())
+    }
+
+    pub fn remove_project_and_sessions(mut self: Pin<&mut Self>, id: i32) {
+        let list = self.sessions_of_project(id as i64);
+        let mut files = Vec::new();
+        for s in &list {
+            let file = self.file_for_key(&s.key);
+            self.as_mut().close_session(&QString::from(&s.key));
+            match file {
+                // An ACP agent's: out of harlo's list (ACP can't delete one).
+                Some(f) => match harlo_harness::acp::session_of(&f) {
+                    Some(r) => {
+                        harlo_harness::acp::forget(&r);
+                        self.as_mut().rust_mut().sessions.remove(&f);
+                    }
+                    None => files.push(f),
+                },
+                None => {}
+            }
+        }
+        self.as_mut().rebuild();
+        // The files and OpenCode's (its server), off the UI thread: the
+        // project goes when they have, so they don't pass through Other
+        // sessions on the way.
+        let program = self.program_for(HarnessKind::OpenCode).unwrap_or_else(|| PathBuf::from("opencode"));
+        self.background(
+            move || {
+                files
+                    .into_iter()
+                    .map(|file| {
+                        let done = if harlo_harness::opencode::is_session_path(&file) {
+                            let remote = harlo_core::remote::host_of(&file).and_then(|h| harlo_core::remote::host(&h)).map(|h| harlo_core::remote::launch(&h));
+                            harlo_harness::opencode_delete_session(&program, remote.as_ref(), &file).map_err(|e| format!("{e:#}"))
+                        } else {
+                            harlo_core::remote::trash(&file).map_err(|e| format!("{e:#}"))
+                        };
+                        (file, done)
+                    })
+                    .collect::<Vec<_>>()
+            },
+            move |mut this, results| {
+                let mut failed = Vec::new();
+                for (file, done) in results {
+                    match done {
+                        Ok(()) => {
+                            this.as_mut().rust_mut().sessions.remove(&file);
+                        }
+                        Err(e) => failed.push(e),
+                    }
+                }
+                this.as_mut().remove_project(id);
+                if let Some(first) = failed.first() {
+                    this.set_error_text(QString::from(&format!("Could not delete {} of the project's sessions: {first}", failed.len())));
+                }
+            },
+        );
     }
 
     pub fn projects_json(&self) -> QString {

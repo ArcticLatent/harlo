@@ -579,7 +579,7 @@ Rectangle {
                                         model: root.knownModels.filter(m => m.harness === laneRow.modelData.harness)
                                         AppMenuItem {
                                             required property var modelData
-                                            text: modelData.model
+                                            text: Theme.modelLabel(modelData.model)
                                             marked: laneRow.modelData.model === modelData.model
                                             onTriggered: root.setLane(laneRow.index, "model", modelData.model)
                                         }

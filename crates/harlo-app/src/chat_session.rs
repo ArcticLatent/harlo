@@ -1066,7 +1066,7 @@ impl ChatSession {
             let mut seen = std::collections::HashMap::new();
             for m in data["models"].as_array().into_iter().flatten() {
                 // (omp's leftovers from a local engine that's gone.)
-                if harlo_core::model_servers::stale_discovered(m["provider"].as_str().unwrap_or_default(), m["baseUrl"].as_str().unwrap_or_default(), &mut seen) {
+                if harlo_core::model_servers::stale_discovered(m["provider"].as_str().unwrap_or_default(), m["id"].as_str().unwrap_or_default(), m["baseUrl"].as_str().unwrap_or_default(), &mut seen) {
                     continue;
                 }
                 let s = |k: &str| m[k].as_str().unwrap_or_default().replace('\t', " ");

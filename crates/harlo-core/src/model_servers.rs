@@ -183,12 +183,22 @@ pub fn servers(kind: HarnessKind) -> Vec<Server> {
     listed(kind, &providers(kind))
 }
 
+/// A server at a local address, as far as listing a model goes: the start
+/// command harlo has for it ("" for none), whether it answers, and what it
+/// serves if it says (one with a key may not).
+#[derive(Debug, Clone, Default)]
+pub struct LocalServer {
+    start: String,
+    answers: bool,
+    serving: Option<Vec<String>>,
+}
+
 /// A model Oh My Pi lists from its own discovery of a local engine
-/// ("llama.cpp", "ollama", "lm-studio") that's gone: omp keeps the models it
-/// found and lists them after the server stopped for good. Kept when the
-/// server answers, or harlo set it up (it starts it before a message).
-/// `answers` caches by address across a list.
-pub fn stale_discovered(provider: &str, base_url: &str, seen: &mut std::collections::HashMap<String, bool>) -> bool {
+/// ("llama.cpp", "ollama", "lm-studio") that's not there: omp keeps the models
+/// it found after their server stopped for good, and takes whatever answers on
+/// an engine's usual port for that engine. `seen` caches by address across a
+/// list.
+pub fn stale_discovered(provider: &str, model: &str, base_url: &str, seen: &mut std::collections::HashMap<String, LocalServer>) -> bool {
     // (This computer only, where omp looks: a refused connection is instant.)
     let host = base_url.split("://").nth(1).unwrap_or_default().split(['/', ':']).next().unwrap_or_default();
     if !["llama.cpp", "ollama", "lm-studio"].contains(&provider) || !["127.0.0.1", "localhost"].contains(&host) {
@@ -196,15 +206,39 @@ pub fn stale_discovered(provider: &str, base_url: &str, seen: &mut std::collecti
     }
     let url = base_url.trim_end_matches('/').to_owned();
     let url = if url.ends_with("/v1") { url } else { format!("{url}/v1") };
-    let set_up = || {
-        crate::db::Db::open(&crate::db::default_path())
-            .ok()
-            .and_then(|d| d.get(&format!("model_server.{url}")).ok().flatten())
-            .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-            .is_some_and(|v| v["start"].as_str().is_some_and(|c| !c.is_empty()))
+    let server = seen.entry(url.clone()).or_insert_with(|| {
+        let answering = answers(&url);
+        LocalServer {
+            start: crate::db::Db::open(&crate::db::default_path())
+                .ok()
+                .and_then(|d| d.get(&format!("model_server.{url}")).ok().flatten())
+                .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+                .and_then(|v| v["start"].as_str().map(str::to_owned))
+                .unwrap_or_default(),
+            answers: answering,
+            serving: answering.then(|| find(&url, "").ok()).flatten().map(|l| l.models.into_iter().map(|m| m.id).collect()),
+        }
+    });
+    discovered_is_stale(provider, model, server)
+}
+
+fn discovered_is_stale(provider: &str, model: &str, server: &LocalServer) -> bool {
+    let same_engine = match provider {
+        "llama.cpp" => server.start.contains("llama-server"),
+        "ollama" => server.start.contains("ollama"),
+        _ => false,
     };
-    let alive = *seen.entry(url.clone()).or_insert_with(|| answers(&url) || set_up());
-    !alive
+    // Another engine harlo set up on that port: not what omp calls it (it's
+    // in omp's file under its own name, if it's there at all).
+    if !server.start.is_empty() && !same_engine {
+        return true;
+    }
+    match &server.serving {
+        Some(models) => !models.iter().any(|m| m == model),
+        // Not answering: harlo starts its own before a message; any other's
+        // gone. (Answering without saying: left as it is.)
+        None => !server.answers && server.start.is_empty(),
+    }
 }
 
 /// The least context Hermes runs a model with (it refuses smaller ones).
@@ -879,14 +913,31 @@ mod tests {
     fn hides_omps_leftovers_from_gone_servers() {
         let mut seen = std::collections::HashMap::new();
         // Nothing answers on port 9: omp's llama.cpp models there are gone.
-        assert!(stale_discovered("llama.cpp", "http://127.0.0.1:9/v1", &mut seen));
-        assert!(stale_discovered("ollama", "http://127.0.0.1:9", &mut seen));
+        assert!(stale_discovered("llama.cpp", "qwen", "http://127.0.0.1:9/v1", &mut seen));
+        assert!(stale_discovered("ollama", "qwen", "http://127.0.0.1:9", &mut seen));
         // Not omp's discovery, or not this computer: left as they are.
-        assert!(!stale_discovered("qwen3-4b", "http://127.0.0.1:9/v1", &mut seen));
-        assert!(!stale_discovered("llama.cpp", "http://192.168.1.20:9/v1", &mut seen));
-        // A server that answers stays.
+        assert!(!stale_discovered("qwen3-4b", "qwen", "http://127.0.0.1:9/v1", &mut seen));
+        assert!(!stale_discovered("llama.cpp", "qwen", "http://192.168.1.20:9/v1", &mut seen));
+        // One that answers but wants a key to list its models: can't tell, stays.
         let addr = fake_server();
-        assert!(!stale_discovered("llama.cpp", &format!("http://{addr}/v1"), &mut seen));
+        assert!(!stale_discovered("llama.cpp", "qwen", &format!("http://{addr}/v1"), &mut seen));
+
+        let server = |start: &str, serving: Option<&[&str]>| LocalServer { start: start.into(), answers: serving.is_some(), serving: serving.map(|m| m.iter().map(|s| s.to_string()).collect()) };
+        // Someone's own server: what it serves stays, what it doesn't goes.
+        assert!(!discovered_is_stale("llama.cpp", "qwen", &server("", Some(&["qwen"]))));
+        assert!(discovered_is_stale("llama.cpp", "an-older-model", &server("", Some(&["qwen"]))));
+        let ninfer = "exec /x/ninfer-serve --config /x/n.toml";
+        // Another engine harlo set up on llama.cpp's port, stopped or running:
+        // an old model of omp's, and its own under omp's "llama.cpp".
+        assert!(discovered_is_stale("llama.cpp", "Qwen3.8-FN-GSQ-RCO-IQ3_S", &server(ninfer, None)));
+        assert!(discovered_is_stale("llama.cpp", "Qwen3.8-27B-NVFP4", &server(ninfer, Some(&["Qwen3.8-27B-NVFP4"]))));
+        // harlo's own llama.cpp: stopped, kept (it starts before a message);
+        // running, what it serves.
+        let llama = "exec /x/llama-server --models-preset /x/p.ini";
+        assert!(!discovered_is_stale("llama.cpp", "qwen", &server(llama, None)));
+        assert!(!discovered_is_stale("llama.cpp", "qwen", &server(llama, Some(&["qwen"]))));
+        assert!(discovered_is_stale("llama.cpp", "old", &server(llama, Some(&["qwen"]))));
+        assert!(!discovered_is_stale("ollama", "qwen", &server("OLLAMA_HOST=x exec /x/ollama serve", None)));
     }
 
     #[test]

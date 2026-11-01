@@ -284,7 +284,7 @@ Popup {
                     visible: modelPick.ids.length > 0
                     Layout.fillWidth: true
                     Layout.maximumWidth: 420
-                    model: [agents.defaultAgent ? agents.defaultAgent.label + "'s own default" : ""].concat(modelPick.ids.map((id, i) => modelPick.names[i] || id))
+                    model: [agents.defaultAgent ? agents.defaultAgent.label + "'s own default" : ""].concat(modelPick.ids.map((id, i) => Theme.modelLabel(modelPick.names[i] || id)))
                     currentIndex: Math.max(0, modelPick.ids.indexOf(modelPick.current) + 1)
                     onActivated: i => {
                         const id = i === 0 ? "" : modelPick.ids[i - 1]

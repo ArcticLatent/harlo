@@ -115,6 +115,54 @@ struct Entry {
     settled: String,
 }
 
+/// A session of a project, whatever the list shows (archived, on a shelf).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectSession {
+    /// The live key if it's running, else its file.
+    pub key: String,
+    pub harness: String,
+    pub archived: bool,
+    pub running: bool,
+    /// In one of the project's worktrees.
+    pub worktree: bool,
+}
+
+/// Which worktree holds a session, else the deepest project containing its
+/// cwd: its branch and its project.
+fn owner_of(cwd: &Path, projects: &[Project], worktrees: &[WorktreeRecord]) -> (String, Option<i64>) {
+    match worktrees.iter().filter(|w| cwd.starts_with(&w.path)).max_by_key(|w| w.path.components().count()) {
+        Some(w) => (w.branch.clone(), Some(w.project_id)),
+        None => (String::new(), projects.iter().filter(|p| cwd.starts_with(&p.path)).max_by_key(|p| p.path.components().count()).map(|p| p.id)),
+    }
+}
+
+/// All a project's sessions (each under the project `build` lists it under).
+pub fn project_sessions(id: i64, input: &SidebarInput<'_>) -> Vec<ProjectSession> {
+    let ours = |cwd: &Path| owner_of(cwd, input.projects, input.worktrees);
+    let mut out = Vec::new();
+    for s in input.sessions {
+        let (branch, owner) = ours(&s.cwd);
+        if owner == Some(id) {
+            let live = input.live.iter().find(|l| l.session_file.as_ref() == Some(&s.path));
+            out.push(ProjectSession {
+                key: live.map_or_else(|| s.path.to_string_lossy().into_owned(), |l| l.key.clone()),
+                harness: s.harness.as_str().to_owned(),
+                archived: input.meta.get(&s.path).is_some_and(|m| m.archived),
+                running: live.is_some(),
+                worktree: !branch.is_empty(),
+            });
+        }
+    }
+    // (Running with no file yet: new, nothing sent.)
+    for l in input.live.iter().filter(|l| !l.session_file.as_ref().is_some_and(|f| input.sessions.iter().any(|s| &s.path == f))) {
+        let (branch, owner) = ours(&l.cwd);
+        if owner == Some(id) {
+            out.push(ProjectSession { key: l.key.clone(), harness: l.harness.clone(), archived: false, running: true, worktree: !branch.is_empty() });
+        }
+    }
+    out
+}
+
 pub fn build(input: &SidebarInput<'_>) -> Vec<SidebarRow> {
     let filter = input.filter.trim().to_lowercase();
     let mut entries: Vec<Entry> = Vec::new();
@@ -192,22 +240,7 @@ pub fn build(input: &SidebarInput<'_>) -> Vec<SidebarRow> {
     // Assign each session to a worktree's project, else to the deepest
     // project containing its cwd.
     for e in entries.iter_mut() {
-        if let Some(w) = input
-            .worktrees
-            .iter()
-            .filter(|w| e.cwd.starts_with(&w.path))
-            .max_by_key(|w| w.path.components().count())
-        {
-            e.branch = w.branch.clone();
-            e.owner = Some(w.project_id);
-        } else {
-            e.owner = input
-                .projects
-                .iter()
-                .filter(|p| e.cwd.starts_with(&p.path))
-                .max_by_key(|p| p.path.components().count())
-                .map(|p| p.id);
-        }
+        (e.branch, e.owner) = owner_of(&e.cwd, input.projects, input.worktrees);
     }
     let mut by_project: HashMap<i64, Vec<&Entry>> = HashMap::new();
     let mut other: Vec<&Entry> = Vec::new();
@@ -436,6 +469,43 @@ mod tests {
 
     fn project(id: i64, path: &str) -> Project {
         Project { id, path: PathBuf::from(path), name: path.rsplit('/').next().unwrap().into(), harness: "pi".into(), collapsed: false, position: id, setup: String::new(), icon: String::new(), color: String::new() }
+    }
+
+    #[test]
+    fn finds_all_a_projects_sessions() {
+        let projects = [project(1, "/w"), project(2, "/w/app")];
+        let worktrees = [WorktreeRecord { path: PathBuf::from("/data/trees/w/feat"), project_id: 1, branch: "feat".into(), base: "main".into(), removed: false }];
+        let sessions = [
+            session("/s/plain", "/w/src", "plain", 10),
+            session("/s/archived", "/w", "archived", 20),
+            session("/s/running", "/w", "running", 30),
+            session("/s/tree", "/data/trees/w/feat", "in a worktree", 40),
+            session("/s/nested", "/w/app", "the nested project's", 50),
+            session("/s/stray", "/elsewhere", "no project's", 60),
+        ];
+        let meta = HashMap::from([(PathBuf::from("/s/archived"), SessionMeta { archived: true, ..Default::default() })]);
+        let live = |key: &str, cwd: &str, file: Option<&str>| LiveInfo {
+            key: key.into(),
+            harness: "pi".into(),
+            cwd: PathBuf::from(cwd),
+            session_file: file.map(PathBuf::from),
+            name: String::new(),
+            first_message: String::new(),
+            status: SessionStatus::Idle,
+            needs_input: false,
+            unread: false,
+            started_at: SystemTime::now(),
+        };
+        let live = [live("live:1", "/w", Some("/s/running")), live("live:2", "/w", None), live("live:3", "/elsewhere", None)];
+        let input = SidebarInput { projects: &projects, worktrees: &worktrees, sessions: &sessions, live: &live, meta: &meta, filter: "hidden by a filter", show_archived: false, other_collapsed: false, expanded: &[], shelves_open: &[] };
+        let got = project_sessions(1, &input);
+        let keys: Vec<&str> = got.iter().map(|s| s.key.as_str()).collect();
+        assert_eq!(keys, ["/s/plain", "/s/archived", "live:1", "/s/tree", "live:2"]);
+        assert!(got[1].archived && !got[0].archived);
+        assert!(got[2].running && got[4].running && !got[0].running);
+        assert!(got[3].worktree && !got[0].worktree);
+        // The nested project's are its own; removing it leaves the others.
+        assert_eq!(project_sessions(2, &input).iter().map(|s| s.key.as_str()).collect::<Vec<_>>(), ["/s/nested"]);
     }
 
     #[test]
