@@ -730,6 +730,57 @@ Rectangle {
             }
         }
 
+        // pi or omp uses Claude through a Claude subscription: Anthropic
+        // bills that as extra usage (pi says so only in its terminal).
+        Rectangle {
+            id: extraUsageBanner
+            objectName: "extraUsageBanner"
+            readonly property bool applies: root.hasSession && (root.session.harness === "pi" || root.session.harness === "omp")
+                && root.session.modelId.startsWith("anthropic/") && !root.session.cwd.startsWith("ssh://")
+                && Workspace.setting("extra_usage_notice") !== "0"
+            property bool dismissed: false
+            Layout.fillWidth: true
+            Layout.leftMargin: transcript.gutter
+            Layout.rightMargin: transcript.gutter
+            Layout.topMargin: 8
+            visible: applies && !dismissed && Accounts.revision >= 0 && Accounts.extraUsage(root.session.harness) && !root.covered
+            implicitHeight: extraUsageRow.implicitHeight + 18
+            radius: 10
+            color: Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, 0.1)
+            border.color: Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, 0.35)
+            RowLayout {
+                id: extraUsageRow
+                anchors.fill: parent
+                anchors.margins: 9
+                anchors.leftMargin: 12
+                spacing: 10
+                Icon { name: "alert"; color: Theme.warning; implicitWidth: 16; implicitHeight: 16 }
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    text: Theme.harnessLabel(root.hasSession ? root.session.harness : "") + " uses Claude through your Claude subscription. Anthropic bills that as extra usage, per token, not from your plan's limits."
+                    color: Theme.foreground
+                    font.pixelSize: Theme.px(12.5)
+                }
+                FlatButton {
+                    text: "Manage extra usage"
+                    font.pixelSize: Theme.px(12)
+                    onClicked: Qt.openUrlExternally("https://claude.ai/settings/usage")
+                }
+                FlatButton {
+                    objectName: "extraUsageHide"
+                    text: "Don't show again"
+                    font.pixelSize: Theme.px(12)
+                    outlined: false
+                    accent: Theme.muted
+                    onClicked: {
+                        Workspace.setSetting("extra_usage_notice", "0")
+                        extraUsageBanner.dismissed = true
+                    }
+                }
+            }
+        }
+
         // Pending attachments
         Flow {
             Layout.fillWidth: true

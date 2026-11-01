@@ -71,6 +71,24 @@ pub mod qobject {
         /// The dialog and Settings closed: OpenCode's private server goes.
         #[qinvokable]
         fn release(self: Pin<&mut Accounts>);
+        /// Whether pi or omp uses Claude through a Claude subscription,
+        /// which Anthropic bills as extra usage (checked in the background
+        /// every 10 minutes; `revision` follows a change).
+        #[qinvokable]
+        fn extra_usage(self: Pin<&mut Accounts>, agent: &QString) -> bool;
+        /// pi's packages as seen from `folder` ("" for yours alone): `{
+        /// state: "loading" | "ready", list: [{ source, path, project,
+        /// version, description, adds }], error, job: { action, source,
+        /// state: "running" | "done" | "failed", message } }`.
+        #[qinvokable]
+        fn packages(self: &Accounts, folder: &QString) -> QString;
+        /// Reads pi's packages again (`packages` follows).
+        #[qinvokable]
+        fn load_packages(self: Pin<&mut Accounts>, folder: &QString);
+        /// `pi install|update|remove <source>` ("update" of "all": every
+        /// package), yours or (`project`) the project's own in `folder`.
+        #[qinvokable]
+        fn change_package(self: Pin<&mut Accounts>, folder: &QString, action: &QString, source: &QString, project: bool);
     }
 }
 
@@ -78,7 +96,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::QString;
@@ -100,6 +118,11 @@ pub struct AccountsRust {
     next_id: u64,
     status: HashMap<String, Value>,
     providers: HashMap<String, Value>,
+    /// `extra_usage` per agent: the answer, and when it came (`None`:
+    /// being checked).
+    extra_usage: HashMap<String, (bool, Option<Instant>)>,
+    /// `packages` per folder.
+    packages: HashMap<String, Value>,
 }
 
 /// An agent's program: the path set in Settings → Providers (if it's
@@ -220,6 +243,8 @@ impl Accounts {
     pub fn refresh(mut self: Pin<&mut Self>, agent: &QString) {
         let agent = agent.to_string();
         let Some(k) = kind(&agent) else { return };
+        // What it's signed in to may have changed.
+        self.as_mut().rust_mut().extra_usage.remove(&agent);
         let was = self.rust().status.get(&agent).cloned().unwrap_or_else(|| json!({ "accounts": [] }));
         self.as_mut().rust_mut().status.insert(agent.clone(), json!({ "state": "loading", "accounts": was["accounts"] }));
         self.as_mut().bump();
@@ -342,6 +367,112 @@ impl Accounts {
         if self.current.is_none() {
             *OPENCODE.lock().unwrap() = None;
         }
+    }
+
+    pub fn extra_usage(mut self: Pin<&mut Self>, agent: &QString) -> bool {
+        let agent = agent.to_string();
+        let Some(k) = kind(&agent).filter(|k| matches!(k, HarnessKind::Pi | HarnessKind::Omp)) else { return false };
+        let (on, fresh) = match self.rust().extra_usage.get(&agent) {
+            Some((on, at)) => (*on, at.is_none_or(|t| t.elapsed() < Duration::from_secs(600))),
+            None => (false, false),
+        };
+        if !fresh {
+            self.as_mut().rust_mut().extra_usage.insert(agent.clone(), (on, None));
+            let thread = self.qt_thread();
+            crate::runtime().spawn_blocking(move || {
+                let now = claude_subscription_in_use(k);
+                let _ = thread.queue(move |mut this| {
+                    this.as_mut().rust_mut().extra_usage.insert(agent, (now, Some(Instant::now())));
+                    if now != on {
+                        this.bump();
+                    }
+                });
+            });
+        }
+        on
+    }
+}
+
+fn package_json(p: &harlo_core::pi_packages::Package) -> Value {
+    json!({ "source": p.source, "path": p.path.to_string_lossy(), "project": p.project, "version": p.version, "description": p.description, "adds": p.adds })
+}
+
+impl Accounts {
+    pub fn packages(&self, folder: &QString) -> QString {
+        let v = self.rust().packages.get(&folder.to_string()).cloned().unwrap_or_else(|| json!({ "state": "loading", "list": [], "error": "", "job": null }));
+        QString::from(&v.to_string())
+    }
+
+    pub fn load_packages(mut self: Pin<&mut Self>, folder: &QString) {
+        let folder = folder.to_string();
+        let mut v = self.rust().packages.get(&folder).cloned().unwrap_or_else(|| json!({ "list": [], "job": null }));
+        v["state"] = json!("loading");
+        self.as_mut().rust_mut().packages.insert(folder.clone(), v);
+        self.as_mut().bump();
+        let thread = self.qt_thread();
+        crate::runtime().spawn_blocking(move || {
+            let result = program(HarnessKind::Pi).ok_or_else(|| "pi isn't installed.".to_owned()).and_then(|pi| harlo_core::pi_packages::list(&pi, &package_dir(&folder)));
+            let _ = thread.queue(move |mut this| {
+                let mut v = this.rust().packages.get(&folder).cloned().unwrap_or_else(|| json!({ "job": null }));
+                v["state"] = json!("ready");
+                match result {
+                    Ok(list) => {
+                        v["list"] = Value::Array(list.iter().map(package_json).collect());
+                        v["error"] = json!("");
+                    }
+                    Err(e) => v["error"] = json!(e),
+                }
+                this.as_mut().rust_mut().packages.insert(folder, v);
+                this.bump();
+            });
+        });
+    }
+
+    pub fn change_package(mut self: Pin<&mut Self>, folder: &QString, action: &QString, source: &QString, project: bool) {
+        let (folder, action, source) = (folder.to_string(), action.to_string(), source.to_string().trim().to_owned());
+        let mut v = self.rust().packages.get(&folder).cloned().unwrap_or_else(|| json!({ "state": "ready", "list": [], "error": "" }));
+        if v["job"]["state"] == "running" {
+            return;
+        }
+        v["job"] = json!({ "action": action, "source": source, "state": "running", "message": "" });
+        self.as_mut().rust_mut().packages.insert(folder.clone(), v);
+        self.as_mut().bump();
+        let thread = self.qt_thread();
+        crate::runtime().spawn_blocking(move || {
+            let result = program(HarnessKind::Pi)
+                .ok_or_else(|| "pi isn't installed.".to_owned())
+                .and_then(|pi| harlo_core::pi_packages::change(&pi, &package_dir(&folder), &action, &source, project));
+            let _ = thread.queue(move |mut this| {
+                let mut v = this.rust().packages.get(&folder).cloned().unwrap_or_default();
+                let (state, message) = match result {
+                    Ok(()) => ("done", match action.as_str() {
+                        "install" => "Installed. New pi sessions have it.",
+                        "remove" => "Removed. New pi sessions are without it.",
+                        _ => "Updated. New pi sessions use the new version.",
+                    }.to_owned()),
+                    Err(e) => ("failed", e),
+                };
+                v["job"] = json!({ "action": action, "source": source, "state": state, "message": message });
+                this.as_mut().rust_mut().packages.insert(folder.clone(), v);
+                this.load_packages(&QString::from(&folder));
+            });
+        });
+    }
+}
+
+/// Where pi's package commands run: the project, or (yours) your home.
+fn package_dir(folder: &str) -> PathBuf {
+    if folder.is_empty() { std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/")) } else { PathBuf::from(folder) }
+}
+
+/// Whether the agent uses Claude through a Claude subscription (blocking):
+/// pi as its own warning checks (not when it's switched off in pi's
+/// settings), omp from what it's signed in to.
+fn claude_subscription_in_use(k: HarnessKind) -> bool {
+    match k {
+        HarnessKind::Pi => pi_helper(&["subscription"], Duration::from_secs(30)).ok().and_then(|v| v["subscription"].as_bool()).unwrap_or(false),
+        HarnessKind::Omp => signin::omp_claude_subscription(None),
+        _ => false,
     }
 }
 

@@ -42,6 +42,13 @@ pub struct SessionMeta {
     pub pinned: bool,
     /// Unix seconds when the user last viewed the session in harlo.
     pub last_viewed_at: i64,
+    /// Why harlo put it on its project's Settled shelf ("merged",
+    /// "closed", "quiet"); "" when it isn't there.
+    pub settled_why: String,
+    /// The session's last activity (unix seconds) when harlo last put it
+    /// there: newer work brings it back, and put back by hand it stays
+    /// until there is some.
+    pub settled_at: i64,
 }
 
 pub struct Db {
@@ -164,6 +171,12 @@ impl Db {
         if !has_icon {
             conn.execute_batch("ALTER TABLE projects ADD COLUMN icon TEXT NOT NULL DEFAULT ''; ALTER TABLE projects ADD COLUMN color TEXT NOT NULL DEFAULT ''")?;
         }
+        let has_settled: bool = conn
+            .prepare("SELECT 1 FROM pragma_table_info('session_meta') WHERE name = 'settled_why'")?
+            .exists([])?;
+        if !has_settled {
+            conn.execute_batch("ALTER TABLE session_meta ADD COLUMN settled_why TEXT NOT NULL DEFAULT ''; ALTER TABLE session_meta ADD COLUMN settled_at INTEGER NOT NULL DEFAULT 0")?;
+        }
         Ok(Self { conn })
     }
 
@@ -270,20 +283,20 @@ impl Db {
         Ok(self
             .conn
             .query_row(
-                "SELECT archived, pinned, last_viewed_at FROM session_meta WHERE path = ?1",
+                "SELECT archived, pinned, last_viewed_at, settled_why, settled_at FROM session_meta WHERE path = ?1",
                 [path.to_string_lossy()],
-                |r| Ok(SessionMeta { archived: r.get(0)?, pinned: r.get(1)?, last_viewed_at: r.get(2)? }),
+                |r| Ok(SessionMeta { archived: r.get(0)?, pinned: r.get(1)?, last_viewed_at: r.get(2)?, settled_why: r.get(3)?, settled_at: r.get(4)? }),
             )
             .optional()?
             .unwrap_or_default())
     }
 
     pub fn all_session_meta(&self) -> Result<Vec<(PathBuf, SessionMeta)>> {
-        let mut stmt = self.conn.prepare("SELECT path, archived, pinned, last_viewed_at FROM session_meta")?;
+        let mut stmt = self.conn.prepare("SELECT path, archived, pinned, last_viewed_at, settled_why, settled_at FROM session_meta")?;
         let rows = stmt.query_map([], |r| {
             Ok((
                 PathBuf::from(r.get::<_, String>(0)?),
-                SessionMeta { archived: r.get(1)?, pinned: r.get(2)?, last_viewed_at: r.get(3)? },
+                SessionMeta { archived: r.get(1)?, pinned: r.get(2)?, last_viewed_at: r.get(3)?, settled_why: r.get(4)?, settled_at: r.get(5)? },
             ))
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
@@ -291,9 +304,9 @@ impl Db {
 
     pub fn set_session_meta(&self, path: &Path, meta: &SessionMeta) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO session_meta (path, archived, pinned, last_viewed_at) VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(path) DO UPDATE SET archived = ?2, pinned = ?3, last_viewed_at = ?4",
-            params![path.to_string_lossy(), meta.archived, meta.pinned, meta.last_viewed_at],
+            "INSERT INTO session_meta (path, archived, pinned, last_viewed_at, settled_why, settled_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(path) DO UPDATE SET archived = ?2, pinned = ?3, last_viewed_at = ?4, settled_why = ?5, settled_at = ?6",
+            params![path.to_string_lossy(), meta.archived, meta.pinned, meta.last_viewed_at, meta.settled_why, meta.settled_at],
         )?;
         Ok(())
     }
@@ -490,12 +503,24 @@ mod tests {
     }
 
     #[test]
+    fn migrates_old_session_meta() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE session_meta (path TEXT PRIMARY KEY, archived INTEGER NOT NULL DEFAULT 0, pinned INTEGER NOT NULL DEFAULT 0, last_viewed_at INTEGER NOT NULL DEFAULT 0); INSERT INTO session_meta (path, pinned) VALUES ('/s/a', 1);").unwrap();
+        let db = Db::init(conn).unwrap();
+        assert_eq!(db.session_meta(Path::new("/s/a")).unwrap(), SessionMeta { pinned: true, ..Default::default() });
+    }
+
+    #[test]
     fn session_meta_defaults_and_updates() {
         let db = Db::open_in_memory().unwrap();
         let p = Path::new("/s/1.jsonl");
         assert_eq!(db.session_meta(p).unwrap(), SessionMeta::default());
-        db.set_session_meta(p, &SessionMeta { archived: true, pinned: false, last_viewed_at: 5 }).unwrap();
+        db.set_session_meta(p, &SessionMeta { archived: true, pinned: false, last_viewed_at: 5, ..Default::default() }).unwrap();
         assert!(db.session_meta(p).unwrap().archived);
+        let settled = SessionMeta { settled_why: "merged".into(), settled_at: 7, ..Default::default() };
+        db.set_session_meta(p, &settled).unwrap();
+        assert_eq!(db.session_meta(p).unwrap(), settled);
+        assert_eq!(db.all_session_meta().unwrap(), vec![(p.to_path_buf(), settled)]);
         db.set("window", "{}").unwrap();
         assert_eq!(db.get("window").unwrap().as_deref(), Some("{}"));
     }

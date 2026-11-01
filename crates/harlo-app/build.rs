@@ -119,6 +119,7 @@ fn main() {
                 "qml/UpdateToasts.qml",
                 "qml/PhoneFirewallToast.qml",
                 "qml/AddHostDialog.qml",
+                "qml/PiPackages.qml",
                 "qml/SpecsPanel.qml",
                 "qml/PlanDock.qml",
                 "qml/InstanceSwitcher.qml",

@@ -99,6 +99,22 @@ pub fn claude_subscription(name: &str) -> bool {
     (n.contains("anthropic") || n.contains("claude")) && (n.contains("pro/max") || n.contains("subscription"))
 }
 
+/// Whether omp is signed in to Anthropic with a Claude subscription, from
+/// its `agent.db` (`~/.omp/agent/agent.db` by default). Only the kind of
+/// each sign-in is read, never its token.
+pub fn omp_claude_subscription(db: Option<&std::path::Path>) -> bool {
+    let home = std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".omp/agent/agent.db"));
+    let Some(path) = db.map(std::path::Path::to_path_buf).or(home).filter(|p| p.is_file()) else { return false };
+    let Ok(c) = rusqlite::Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY) else { return false };
+    let _ = c.busy_timeout(std::time::Duration::from_secs(2));
+    c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM auth_credentials WHERE provider = 'anthropic' AND credential_type = 'oauth' AND disabled_cause IS NULL)",
+        [],
+        |r| r.get::<_, bool>(0),
+    )
+    .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -124,5 +140,22 @@ mod tests {
         assert!(claude_subscription("Anthropic (Claude Pro/Max)"));
         assert!(!claude_subscription("Anthropic"));
         assert!(!claude_subscription("ChatGPT Plus/Pro (Codex Subscription)"));
+    }
+
+    #[test]
+    fn reads_omps_kind_of_sign_in() {
+        let dir = std::env::temp_dir().join(format!("harlo-omp-auth-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("agent.db");
+        let c = rusqlite::Connection::open(&db).unwrap();
+        c.execute_batch("CREATE TABLE auth_credentials (id INTEGER PRIMARY KEY, provider TEXT NOT NULL, credential_type TEXT NOT NULL, data TEXT NOT NULL, disabled_cause TEXT DEFAULT NULL);
+                         INSERT INTO auth_credentials (provider, credential_type, data) VALUES ('openai-codex', 'oauth', '{}'), ('anthropic', 'api_key', '{}');").unwrap();
+        assert!(!omp_claude_subscription(Some(&db)));
+        c.execute("INSERT INTO auth_credentials (provider, credential_type, data, disabled_cause) VALUES ('anthropic', 'oauth', '{}', 'expired')", []).unwrap();
+        assert!(!omp_claude_subscription(Some(&db)));
+        c.execute("INSERT INTO auth_credentials (provider, credential_type, data) VALUES ('anthropic', 'oauth', '{}')", []).unwrap();
+        assert!(omp_claude_subscription(Some(&db)));
+        assert!(!omp_claude_subscription(Some(&dir.join("none.db"))));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

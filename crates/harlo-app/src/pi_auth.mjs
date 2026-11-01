@@ -6,6 +6,7 @@
 //   node pi-auth.mjs <pi's package folder> list
 //   node pi-auth.mjs <pi's package folder> login <provider> <oauth|api_key>
 //   node pi-auth.mjs <pi's package folder> logout <provider>
+//   node pi-auth.mjs <pi's package folder> subscription
 //
 // pi keeps the credential (its auth.json); harlo never reads it.
 import { createInterface } from "node:readline";
@@ -80,6 +81,17 @@ try {
       { getDeviceId: () => settings.getOrCreateDeviceId() },
     );
     out({ done: true });
+    finish(0);
+  } else if (cmd === "subscription") {
+    // As pi's own warning checks: Claude signed in with a Claude
+    // subscription (or its token given as a key), and the warning not
+    // switched off in pi's settings. Only the kind of sign-in is said.
+    let on = pi.SettingsManager.create(process.cwd()).getWarnings().anthropicExtraUsage !== false;
+    if (on && (await runtime.checkAuth("anthropic"))?.type !== "oauth") {
+      const key = (await runtime.getAuth("anthropic"))?.auth?.apiKey;
+      on = typeof key === "string" && key.startsWith("sk-ant-oat");
+    }
+    out({ subscription: on });
     finish(0);
   } else if (cmd === "logout") {
     await runtime.logout(provider);

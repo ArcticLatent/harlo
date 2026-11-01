@@ -59,3 +59,31 @@ pub fn failure_report(service: &str, full: &str, word: &str, number: i64, url: &
     out.push_str("\nFind out why they fail and fix it.");
     out
 }
+
+/// The branch's pull (merge) request on GitHub or GitLab, for the Settled
+/// shelf (blocking): an open one, else the one merged or closed last.
+/// Read from the branch's remote as git keeps it, so a branch deleted
+/// there after merging still finds its request.
+pub fn review(root: &std::path::Path, branch: &str) -> Option<harlo_core::shelf::Review> {
+    use harlo_core::git;
+    let remote = git::output_in(root, &["config", &format!("branch.{branch}.remote")]).trim().to_owned();
+    let remote = if remote.is_empty() || remote == "." { "origin".to_owned() } else { remote };
+    let merge = git::output_in(root, &["config", &format!("branch.{branch}.merge")]);
+    let head = merge.trim().strip_prefix("refs/heads/").filter(|h| !h.is_empty()).unwrap_or(branch).to_owned();
+    let url = git::output_in(root, &["remote", "get-url", &remote]).trim().to_owned();
+    let (host, repo) = hosting::parse_remote(&url)?;
+    let service = hosting::service_for(&host, &crate::setup::setting("gitlab_host"), &crate::setup::setting("forgejo_host"), &crate::setup::setting("git_host"));
+    let full = format!("{host}/{repo}");
+    let mut c = crate::setup::tool(&service)?;
+    match service.as_str() {
+        "github" => {
+            c.args(["pr", "list", "--repo", &full, "--head", &head, "--state", "all", "--limit", "20", "--json", "state,mergedAt,closedAt"]);
+            harlo_core::shelf::gh_review(&output(c)?)
+        }
+        "gitlab" => {
+            c.args(["mr", "list", "--source-branch", &head, "--all", "-R", &full, "-F", "json"]);
+            harlo_core::shelf::glab_review(&output(c)?)
+        }
+        _ => None,
+    }
+}

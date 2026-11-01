@@ -27,14 +27,14 @@ Popup {
 
     readonly property var pages: [
         { id: "general", title: "General", icon: "settings-3", group: "harlo", keywords: "setup guide welcome first model default harness new session startup reopen restore tabs tray close background drop-down quake yakuake hotkey shortcut graphics renderer gpu vulkan opengl software acceleration" },
-        { id: "appearance", title: "Appearance", icon: "palette", group: "harlo", keywords: "glass blur opacity transparency shadow theme colour color dark light mode font monospace code text size prompt navigator rail jump" },
+        { id: "appearance", title: "Appearance", icon: "palette", group: "harlo", keywords: "glass blur opacity transparency shadow theme colour color dark light mode font monospace code text size prompt navigator rail jump claude subscription extra usage billing notice" },
         { id: "notifications", title: "Notifications", icon: "notification-3", group: "harlo", keywords: "notify desktop alert finished input" },
         { id: "devices", title: "Devices", icon: "smartphone", group: "harlo", keywords: "phone pair device mobile qr tailscale remote access" },
         { id: "voice", title: "Voice", icon: "mic", group: "harlo", keywords: "voice speech dictation microphone mic whisper transcribe speak" },
         { id: "shortcuts", title: "Shortcuts", icon: "command", group: "harlo", keywords: "keyboard keys hotkeys" },
         { id: "usage", title: "Usage", icon: "bar-chart-2", group: "harlo", keywords: "stats statistics tokens cost models tools" },
-        { id: "projects", title: "Projects", icon: "folder-3", group: "workspace", keywords: "project icon colour color name harness setup remove" },
-        { id: "worktrees", title: "Worktrees", icon: "git-branch", group: "workspace", keywords: "worktree folder location branch" },
+        { id: "projects", title: "Projects", icon: "folder-3", group: "workspace", keywords: "project icon colour color name harness setup remove specs spec plan steps commit review pi packages" },
+        { id: "worktrees", title: "Worktrees", icon: "git-branch", group: "workspace", keywords: "worktree folder location branch settled shelf finished merged closed pull request quiet archive" },
         { id: "git", title: "Git", icon: "git-repository", group: "workspace", keywords: "undo snapshot turn revert rollback github gitlab forgejo codeberg gitea hosting sign in login token credentials changes count repository hidden sidebar uncommitted commit message model ai" },
         { id: "schedules", title: "Schedules", icon: "history", group: "workspace", keywords: "schedule scheduled prompt cron timer daily weekday every hour morning automatic run" },
         { id: "mcp", title: "MCP", icon: "node-tree", group: "agents", keywords: "mcp tool servers model context protocol tools stdio http oauth" },
@@ -42,6 +42,7 @@ Popup {
         { id: "remote", title: "Remote Instances", icon: "server", group: "agents", keywords: "remote ssh server host machine nas instance connect" },
         { id: "about", title: "About Harlo", icon: "information", group: "about", keywords: "about version release licence license mit website source code github changelog what's new report problem issue bug logs" },
         { id: "providers", title: "Providers", icon: "robot-2", group: "agents", keywords: "providers harnesses claude opencode pi omp oh my pi binary path program agent models version enable disable debug log logs protocol crash diagnostics goal subagent model role sign in login log in account accounts api key oauth credentials" },
+        { id: "packages", title: "pi packages", icon: "code-box", group: "agents", keywords: "pi packages extensions skills prompts themes install update remove npm git project" },
     ]
     // (About goes last, under no heading.)
     readonly property var groups: [["harlo", "harlo"], ["workspace", "Workspace"], ["agents", "Agents"], ["about", ""]]
@@ -473,7 +474,7 @@ Popup {
                     Layout.fillWidth: true
                     sourceComponent: ({
                         general: generalPage, appearance: appearancePage, notifications: notificationsPage, voice: voicePage, devices: devicesPage,
-                        shortcuts: shortcutsPage, projects: projectsPage, worktrees: worktreesPage, git: gitPage, schedules: schedulesPage, providers: providersPage, remote: remotePage, mcp: mcpPage, orchestration: orchestrationPage,
+                        shortcuts: shortcutsPage, projects: projectsPage, worktrees: worktreesPage, git: gitPage, schedules: schedulesPage, providers: providersPage, packages: packagesPage, remote: remotePage, mcp: mcpPage, orchestration: orchestrationPage,
                         about: aboutPage
                     })[root.page] || null
                 }
@@ -1108,6 +1109,16 @@ Popup {
                     AppSwitch {
                         checked: Workspace.setting("prompt_rail") !== "0"
                         onToggled: { Workspace.setSetting("prompt_rail", checked ? "1" : "0"); root.promptRailToggled(checked) }
+                    }
+                }
+                SettingRow {
+                    divider: true
+                    title: "Claude subscription notice"
+                    detail: "When Pi or Oh My Pi uses Claude through your Claude subscription, the chat says that Anthropic bills it as extra usage, per token."
+                    icon: "alert"
+                    AppSwitch {
+                        checked: Workspace.setting("extra_usage_notice") !== "0"
+                        onToggled: Workspace.setSetting("extra_usage_notice", checked ? "1" : "0")
                     }
                 }
             }
@@ -1762,6 +1773,20 @@ Popup {
                 FlatButton { text: "Reset"; visible: worktreeField.text !== ""; onClicked: { Workspace.setSetting("worktree_dir", ""); worktreeField.text = "" } }
             }
             Hint { Layout.topMargin: 6; text: "Empty uses harlo's data folder." }
+            Rule { }
+            SectionHeader { title: "Finished worktree sessions" }
+            Group {
+                SettingRow {
+                    title: "Put them on a Settled shelf"
+                    detail: "A worktree session goes on its project's Settled shelf (under its sessions in the sidebar) when its branch's pull request is merged or closed (GitHub, GitLab), or after a week without activity. Working in one brings it back; right-click → Put back does too. Pinned sessions stay. Off: every session comes back."
+                    icon: "archive-stack"
+                    AppSwitch {
+                        objectName: "settleSessions"
+                        checked: Workspace.setting("settle_sessions") !== "0"
+                        onToggled: Workspace.setSettling(checked)
+                    }
+                }
+            }
         }
     }
 
@@ -2646,6 +2671,55 @@ Popup {
                     }
                     }
                 }
+            }
+        }
+    }
+
+    // pi's packages: yours, or a project's own.
+    Component {
+        id: packagesPage
+        ColumnLayout {
+            id: pkgs
+            spacing: 0
+            readonly property var projects: (Workspace.projectsRevision >= 0 ? JSON.parse(Workspace.projectsJson()) : []).filter(p => !p.remote)
+            // "" for yours, else a project's folder.
+            property string folder: ""
+            readonly property var chosen: projects.find(p => p.path === folder) || null
+            SectionHeader {
+                subtitle: "Extensions, skills, prompt templates and themes for pi, installed with pi's own commands from npm, git or a folder. Yours load in every project; a project's own load only there, for everyone who works on it with pi."
+            }
+            RowLayout {
+                Layout.topMargin: 12
+                spacing: 8
+                Label { text: "Packages of"; color: Theme.muted; font.pixelSize: Theme.px(12.5) }
+                FlatButton {
+                    objectName: "packagesScope"
+                    text: (pkgs.chosen ? pkgs.chosen.name : "yours") + "  ▾"
+                    font.pixelSize: Theme.px(12)
+                    onClicked: scopeMenu.popup()
+                    AppMenu {
+                        id: scopeMenu
+                        AppMenuItem { text: "Yours"; marked: pkgs.folder === ""; onTriggered: pkgs.folder = "" }
+                        AppMenuSeparator { visible: pkgs.projects.length > 0 }
+                        Repeater {
+                            model: pkgs.projects
+                            AppMenuItem {
+                                required property var modelData
+                                text: modelData.name
+                                marked: pkgs.folder === modelData.path
+                                onTriggered: pkgs.folder = modelData.path
+                            }
+                        }
+                    }
+                }
+            }
+            Loader {
+                Layout.fillWidth: true
+                Layout.topMargin: 14
+                // (A new one for each choice: its own list.)
+                sourceComponent: pkgs.folder === "" ? yours : theirs
+                Component { id: yours; PiPackages { folder: "" } }
+                Component { id: theirs; PiPackages { folder: pkgs.folder; project: true } }
             }
         }
     }

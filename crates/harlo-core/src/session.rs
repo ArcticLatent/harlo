@@ -293,6 +293,9 @@ struct DriverState {
     goal: Value,
     /// Tool calls of omp's `todo` tool still running.
     todo_calls: std::collections::HashSet<String>,
+    /// Asked for the session file during this run (a new session gets
+    /// one only once its first message is under way).
+    file_asked: bool,
     sinks: Vec<(u64, Box<dyn SessionSink>)>,
     /// Complete messages (history plus finished live ones) for reports.
     messages: Vec<Value>,
@@ -425,6 +428,7 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
         todos: Value::Null,
         goal: Value::Null,
         todo_calls: Default::default(),
+        file_asked: false,
         sinks: Vec::new(),
         messages: Vec::new(),
         message_index: Default::default(),
@@ -679,6 +683,12 @@ fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<Sessi
     if matches!(ev, HarnessEvent::ToolStart { .. }) && st.status == SessionStatus::Busy {
         tokio::spawn(fetch_stats(harness.clone(), aux.clone()));
     }
+    // A new session's file, as soon as its first run is under way (else the
+    // sidebar lists the running session and its file apart until it ends).
+    if st.status == SessionStatus::Busy && st.meta.session_file.is_none() && !st.file_asked && !matches!(ev, HarnessEvent::RunStarted) {
+        st.file_asked = true;
+        tokio::spawn(fetch_state(harness.clone(), aux.clone()));
+    }
     match ev {
         HarnessEvent::Ready => {
             set_status(st, SessionStatus::Idle, pending);
@@ -705,6 +715,7 @@ fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<Sessi
         HarnessEvent::RunStarted => {
             st.run_error = None;
             st.aborted = false;
+            st.file_asked = false;
             set_status(st, SessionStatus::Busy, pending);
         }
         HarnessEvent::Settled => {

@@ -4,6 +4,7 @@
 mod demo;
 pub mod acp;
 mod acp_run;
+mod ask_bridge;
 pub mod branches;
 pub mod claude;
 mod claude_run;

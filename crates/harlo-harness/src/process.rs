@@ -13,6 +13,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, oneshot};
 
+use crate::ask_bridge::{Action, AskBridge};
 use crate::event::{HarnessEvent, HarnessKind, Translator};
 use crate::framing::{ChunkAssembler, read_record};
 use crate::protocol_log::ProtocolLog;
@@ -109,6 +110,8 @@ pub struct Harness {
     tx: mpsc::UnboundedSender<Outgoing>,
     pending: Pending,
     next_id: AtomicU64,
+    /// pi: its `ask_user_question` dialogs as harlo's question card.
+    ask: Arc<Mutex<AskBridge>>,
 }
 
 const STDERR_TAIL_LINES: usize = 80;
@@ -196,17 +199,18 @@ impl Harness {
         let stderr_tail: Arc<Mutex<VecDeque<String>>> = Arc::default();
         let (ready_tx, ready_rx) = oneshot::channel::<Value>();
 
-        let reader = tokio::spawn(read_loop(cfg.kind, stdout, events_tx.clone(), pending.clone(), ready_tx, log.clone()));
+        let ask: Arc<Mutex<AskBridge>> = Arc::default();
+        let reader = tokio::spawn(read_loop(cfg.kind, stdout, events_tx.clone(), pending.clone(), ready_tx, log.clone(), (cfg.kind == HarnessKind::Pi).then(|| (ask.clone(), tx.clone()))));
         tokio::spawn(stderr_loop(stderr, stderr_tail.clone(), log.clone()));
         let (kill_tx, kill_rx) = oneshot::channel();
         tokio::spawn(write_loop(cfg.kind, stdin, rx, ready_rx, events_tx.clone(), kill_tx, log));
         tokio::spawn(wait_loop(child, reader, kill_rx, events_tx, stderr_tail));
 
-        Ok((Self { kind: cfg.kind, tx, pending, next_id: AtomicU64::new(1) }, events_rx))
+        Ok((Self { kind: cfg.kind, tx, pending, next_id: AtomicU64::new(1), ask }, events_rx))
     }
 
     pub(crate) fn from_parts(kind: HarnessKind, tx: mpsc::UnboundedSender<Outgoing>, pending: Pending) -> Self {
-        Self { kind, tx, pending, next_id: AtomicU64::new(1) }
+        Self { kind, tx, pending, next_id: AtomicU64::new(1), ask: Arc::default() }
     }
 
     pub fn kind(&self) -> HarnessKind {
@@ -274,6 +278,10 @@ impl Harness {
             Value::Array(_) => json!({ "answers": answer }),
             other => json!({ "value": other }),
         };
+        if let Some(response) = self.ask.lock().unwrap().answer(request_id, &answer) {
+            let _ = self.tx.send(Outgoing::Frame(response));
+            return;
+        }
         answer["type"] = json!("extension_ui_response");
         answer["id"] = json!(request_id);
         // Not a command: no id of our own, no response expected.
@@ -366,6 +374,8 @@ async fn read_loop(
     pending: Pending,
     ready_tx: oneshot::Sender<Value>,
     log: Option<Arc<ProtocolLog>>,
+    // pi: its question dialogs, and where their answers go.
+    ask: Option<(Arc<Mutex<AskBridge>>, mpsc::UnboundedSender<Outgoing>)>,
 ) {
     let mut reader = BufReader::with_capacity(256 * 1024, stdout);
     let mut buf = Vec::new();
@@ -426,6 +436,29 @@ async fn read_loop(
                 }
             }
             _ => {}
+        }
+
+        // pi's `ask_user_question`: harlo's question card.
+        if let Some((ask, out)) = &ask {
+            let action = if frame["type"] == "extension_ui_request" {
+                ask.lock().unwrap().on_request(&frame)
+            } else {
+                ask.lock().unwrap().on_event(&frame);
+                Action::Pass
+            };
+            match action {
+                Action::Pass => {}
+                Action::Show(card) => {
+                    if events.send(HarnessEvent::UiRequest(card)).is_err() {
+                        return;
+                    }
+                    continue;
+                }
+                Action::Answer(response) => {
+                    let _ = out.send(Outgoing::Frame(response));
+                    continue;
+                }
+            }
         }
 
         for ev in translator.translate(frame) {

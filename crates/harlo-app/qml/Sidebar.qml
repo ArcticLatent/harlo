@@ -134,11 +134,14 @@ Rectangle {
         property bool pinned: false
         property bool live: false
         property string branch: ""
+        // On its project's Settled shelf.
+        property bool settled: false
         // Repository of the session's folder ("" outside one).
         property string repo: ""
         property bool repoIgnored: false
         AppMenuItem { text: sessionMenu.pinned ? "Unpin" : "Pin"; onTriggered: Workspace.setPinned(sessionMenu.key, !sessionMenu.pinned) }
         AppMenuItem { text: "Rename…"; onTriggered: renameDialog.ask(sessionMenu.key, sessionMenu.sessionTitle) }
+        AppMenuItem { objectName: "sessionPutBack"; text: "Put back"; visible: sessionMenu.settled; onTriggered: Workspace.putBack(sessionMenu.key) }
         AppMenuItem { text: "Archive"; onTriggered: Workspace.setArchived(sessionMenu.key, true) }
         AppMenuItem { objectName: "sessionExport"; text: "Export as Markdown…"; onTriggered: root.exportRequested(sessionMenu.key, sessionMenu.sessionTitle) }
         AppMenuItem { objectName: "sessionCopyMarkdown"; text: "Copy as Markdown"; onTriggered: Workspace.copyMarkdown(sessionMenu.key) }
@@ -286,6 +289,34 @@ Rectangle {
                         onClicked: Workspace.showMore(projectId)
                     }
                 }
+                // A project's Settled shelf: its finished worktree sessions.
+                DelegateChoice {
+                    roleValue: "shelf"
+                    ItemDelegate {
+                        id: shelfRow
+                        required property string rowKey
+                        required property bool collapsed
+                        required property int count
+                        objectName: "shelfRow-" + rowKey
+                        width: ListView.view.width
+                        height: 30
+                        leftPadding: 30
+                        leftInset: 6
+                        rightInset: 6
+                        hoverEnabled: true
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Worktree sessions whose pull request was merged or closed, or with no activity for a week. Working in one brings it back."
+                        ToolTip.delay: 700
+                        contentItem: RowLayout {
+                            spacing: 6
+                            Icon { name: shelfRow.collapsed ? "arrow-right-s" : "arrow-down-s"; color: Theme.textFaint; implicitWidth: 13; implicitHeight: 13 }
+                            Icon { name: "archive-stack"; color: Theme.textFaint; implicitWidth: 13; implicitHeight: 13 }
+                            Label { Layout.fillWidth: true; text: "Settled · " + shelfRow.count; color: Theme.muted; font.pixelSize: Theme.px(12); elide: Text.ElideRight }
+                        }
+                        background: Rectangle { radius: 8; color: shelfRow.hovered ? Theme.hover : "transparent" }
+                        onClicked: Workspace.toggleCollapsed(rowKey)
+                    }
+                }
                 DelegateChoice {
                     roleValue: "session"
                     ItemDelegate {
@@ -299,9 +330,11 @@ Rectangle {
                         required property bool pinned
                         required property string branch
                         required property int changes
+                        required property string settled
                         readonly property bool active: rowKey === Workspace.activeKey
-                        // On hover: the cwd (other sessions) and/or the worktree branch.
-                        readonly property string detail: (branch !== "" ? "⎇ " + branch : "") + (branch !== "" && subtitle !== "" ? "  ·  " : "") + subtitle
+                        // On hover: the cwd (other sessions) and/or the worktree
+                        // branch, and why it's settled.
+                        readonly property string detail: [branch !== "" ? "⎇ " + branch : "", subtitle, settled].filter(t => t !== "").join("  ·  ")
                         width: ListView.view.width
                         height: 42
                         hoverEnabled: true
@@ -380,6 +413,7 @@ Rectangle {
                                 sessionMenu.pinned = sessionRow.pinned
                                 sessionMenu.live = sessionRow.rowKey.startsWith("live:")
                                 sessionMenu.branch = sessionRow.branch
+                                sessionMenu.settled = sessionRow.settled !== ""
                                 sessionMenu.repo = Workspace.sessionRepo(sessionRow.rowKey)
                                 sessionMenu.repoIgnored = sessionMenu.repo !== "" && Workspace.isRepoIgnored(sessionMenu.repo)
                                 sessionMenu.popup()

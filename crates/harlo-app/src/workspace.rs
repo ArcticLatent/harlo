@@ -113,7 +113,8 @@ pub mod qobject {
         fn remove_project(self: Pin<&mut Workspace>, id: i32);
         #[qinvokable]
         fn set_project_harness(self: Pin<&mut Workspace>, id: i32, harness: &QString);
-        /// Collapses or expands a project (`project:<id>`) or `group:other`.
+        /// Collapses or expands a project (`project:<id>`), `group:other`,
+        /// or a project's Settled shelf (`shelf:<id>`).
         #[qinvokable]
         fn toggle_collapsed(self: Pin<&mut Workspace>, key: &QString);
         #[qinvokable]
@@ -132,6 +133,10 @@ pub mod qobject {
         fn set_archived(self: Pin<&mut Workspace>, key: &QString, archived: bool);
         #[qinvokable]
         fn set_pinned(self: Pin<&mut Workspace>, key: &QString, pinned: bool);
+        /// Takes a session off its project's Settled shelf (it stays off
+        /// until there's newer work in it and a reason again).
+        #[qinvokable]
+        fn put_back(self: Pin<&mut Workspace>, key: &QString);
         /// A session's shared plan: `{ enabled, commits, steps: [{ id,
         /// title, detail, status, summary, commit, commitNote,
         /// editedByUser }] }` (`enabled`: the plan is on for its project).
@@ -152,6 +157,10 @@ pub mod qobject {
         /// comes back to the session. The problem, if any.
         #[qinvokable]
         fn review_step(self: Pin<&mut Workspace>, key: &QString, id: i32, agent: &QString) -> QString;
+        /// Settings → Worktrees: the Settled shelf on (sessions go on it
+        /// now) or off (all come back).
+        #[qinvokable]
+        fn set_settling(self: Pin<&mut Workspace>, on: bool);
         /// Stops the session's harness process; the session stays on disk.
         #[qinvokable]
         fn close_session(self: Pin<&mut Workspace>, key: &QString);
@@ -667,6 +676,7 @@ const ROLE_BRANCH: i32 = 0x10c;
 const ROLE_CHANGES: i32 = 0x10d;
 const ROLE_ICON: i32 = 0x10e;
 const ROLE_COLOR: i32 = 0x10f;
+const ROLE_SETTLED: i32 = 0x110;
 
 const SCAN_INTERVAL: Duration = Duration::from_secs(2);
 /// Remote hosts' session folders are listed this often (over SSH).
@@ -777,7 +787,11 @@ pub struct WorkspaceRust {
     filter: String,
     other_collapsed: bool,
     expanded: Vec<i64>,
+    /// Projects whose Settled shelf is open.
+    shelves_open: Vec<i64>,
     plans_revision: i32,
+    /// A settling pass is looking up pull requests.
+    settling: bool,
     rows: Vec<SidebarRow>,
     window_active: bool,
     tabs: QStringList,
@@ -965,6 +979,18 @@ impl cxx_qt::Initialize for Workspace {
                     break;
                 }
                 tokio::time::sleep(WORKTREE_INTERVAL).await;
+            }
+        });
+
+        // The Settled shelf: a minute after starting, then every half hour.
+        let settle_thread = self.qt_thread();
+        crate::runtime().spawn(async move {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            loop {
+                if settle_thread.queue(|this| this.settle_sessions()).is_err() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_secs(30 * 60)).await;
             }
         });
 
@@ -1384,6 +1410,17 @@ impl Workspace {
 
     pub fn toggle_collapsed(mut self: Pin<&mut Self>, key: &QString) {
         let key = key.to_string();
+        if let Some(id) = key.strip_prefix("shelf:").and_then(|s| s.parse::<i64>().ok()) {
+            let open = &mut self.as_mut().rust_mut().shelves_open;
+            match open.iter().position(|p| *p == id) {
+                Some(i) => {
+                    open.remove(i);
+                }
+                None => open.push(id),
+            }
+            self.rebuild();
+            return;
+        }
         if key == "group:other" {
             let collapsed = !self.other_collapsed;
             self.as_mut().rust_mut().other_collapsed = collapsed;
@@ -1995,6 +2032,10 @@ impl Workspace {
         self.update_meta(&key.to_string(), |m| m.archived = archived);
     }
 
+    pub fn put_back(self: Pin<&mut Self>, key: &QString) {
+        self.update_meta(&key.to_string(), |m| m.settled_why.clear());
+    }
+
     /// What a session's project has on: `(cwd, specs, plan, commits)`
     /// (sessions on this computer in a harlo project only).
     fn features_of(&self, key: &str) -> Option<(PathBuf, bool, bool, bool)> {
@@ -2103,6 +2144,102 @@ impl Workspace {
         // (Its progress shows in the session's Subagents box.)
         send_first_prompt(&child, FirstPrompt { text: prompt, ..Default::default() }, Some(self.qt_thread()));
         QString::default()
+    }
+
+    pub fn set_settling(mut self: Pin<&mut Self>, on: bool) {
+        self.save_setting("settle_sessions", if on { "1" } else { "0" });
+        if on {
+            return self.settle_sessions();
+        }
+        let shelved: Vec<PathBuf> = self.meta.iter().filter(|(_, m)| !m.settled_why.is_empty()).map(|(p, _)| p.clone()).collect();
+        for file in shelved {
+            let mut meta = self.meta.get(&file).cloned().unwrap_or_default();
+            meta.settled_why.clear();
+            let r = self.db().map(|db| db.set_session_meta(&file, &meta)).transpose();
+            self.as_mut().report(r);
+            self.as_mut().rust_mut().meta.insert(file, meta);
+        }
+        self.rebuild();
+    }
+
+    /// The Settled shelf (`harlo_core::shelf`): puts done and quiet
+    /// worktree sessions on their project's shelf, and takes off those
+    /// worked in again. Pull requests are looked up in the background.
+    fn settle_sessions(mut self: Pin<&mut Self>) {
+        if self.settling || self.setting_str("settle_sessions") == "0" {
+            return;
+        }
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+        let unix = |t: SystemTime| t.duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+        let live: HashSet<PathBuf> = self.live.values().filter_map(|e| e.info.session_file.clone()).collect();
+        // Sessions in a worktree on this computer that could go on the
+        // shelf, by worktree; and those worked in since they went.
+        struct Tree {
+            path: PathBuf,
+            branch: String,
+            /// Session files, with their last activity.
+            sessions: Vec<(PathBuf, i64)>,
+        }
+        let mut by_tree: Vec<Tree> = Vec::new();
+        let mut back: Vec<PathBuf> = Vec::new();
+        for s in self.sessions.values() {
+            let meta = self.meta.get(&s.path).cloned().unwrap_or_default();
+            let modified = unix(s.modified);
+            if !meta.settled_why.is_empty() {
+                if modified > meta.settled_at {
+                    back.push(s.path.clone());
+                }
+                continue;
+            }
+            if meta.archived || meta.pinned || meta.settled_at == modified || live.contains(&s.path) {
+                continue;
+            }
+            let Some(w) = self.worktrees.iter().filter(|w| !w.removed && s.cwd.starts_with(&w.path)).max_by_key(|w| w.path.components().count()) else { continue };
+            if harlo_core::remote::is_remote(&w.path) || !w.path.is_dir() {
+                continue;
+            }
+            match by_tree.iter_mut().find(|t| t.path == w.path) {
+                Some(t) => t.sessions.push((s.path.clone(), modified)),
+                None => by_tree.push(Tree { path: w.path.clone(), branch: w.branch.clone(), sessions: vec![(s.path.clone(), modified)] }),
+            }
+        }
+        for file in back {
+            let mut meta = self.meta.get(&file).cloned().unwrap_or_default();
+            meta.settled_why.clear();
+            let r = self.db().map(|db| db.set_session_meta(&file, &meta)).transpose();
+            self.as_mut().report(r);
+            self.as_mut().rust_mut().meta.insert(file, meta);
+        }
+        if by_tree.is_empty() {
+            self.rebuild();
+            return;
+        }
+        self.as_mut().rust_mut().settling = true;
+        let thread = self.qt_thread();
+        crate::runtime().spawn_blocking(move || {
+            let mut settled: Vec<(PathBuf, i64, &'static str)> = Vec::new();
+            for tree in by_tree {
+                let review = crate::ci::review(&tree.path, &tree.branch);
+                settled.extend(tree.sessions.into_iter().filter_map(|(file, modified)| harlo_core::shelf::why(modified, now, review).map(|why| (file, modified, why))));
+            }
+            let _ = thread.queue(move |mut this| {
+                this.as_mut().rust_mut().settling = false;
+                for (file, modified, why) in settled {
+                    // Unless it changed meanwhile (opened, archived, pinned).
+                    let mut meta = this.meta.get(&file).cloned().unwrap_or_default();
+                    let now_modified = this.sessions.get(&file).map(|s| unix(s.modified));
+                    if meta.archived || meta.pinned || now_modified != Some(modified) || this.live.values().any(|e| e.info.session_file.as_ref() == Some(&file)) {
+                        continue;
+                    }
+                    meta.settled_why = why.to_owned();
+                    meta.settled_at = modified;
+                    let r = this.db().map(|db| db.set_session_meta(&file, &meta)).transpose();
+                    this.as_mut().report(r);
+                    this.as_mut().rust_mut().meta.insert(file, meta);
+                }
+                this.rebuild();
+            });
+        });
     }
 
     pub fn set_pinned(self: Pin<&mut Self>, key: &QString, pinned: bool) {
@@ -4357,6 +4494,7 @@ impl Workspace {
             show_archived: false,
             other_collapsed: false,
             expanded: &expanded,
+            shelves_open: &[],
         });
         let mut group = String::new();
         let mut list = Vec::new();
@@ -4377,7 +4515,7 @@ impl Workspace {
                         "requests": requests,
                     }))
                 }
-                SidebarKind::More => {}
+                SidebarKind::More | SidebarKind::Shelf => {}
             }
         }
         crate::phone_bridge::publish_sessions(serde_json::Value::Array(list));
@@ -4401,6 +4539,7 @@ impl Workspace {
             show_archived: false,
             other_collapsed: self.other_collapsed,
             expanded: &self.expanded,
+            shelves_open: &self.shelves_open,
         });
         let mut new_rows = new_rows;
         let mut unchecked = false;
@@ -4476,6 +4615,7 @@ impl Workspace {
             ROLE_CHANGES => QVariant::from(&(r.changes as i32)),
             ROLE_ICON => s(harlo_core::project_icons::shown(&r.icon)),
             ROLE_COLOR => s(&r.color),
+            ROLE_SETTLED => s(harlo_core::shelf::why_text(&r.settled)),
             _ => QVariant::default(),
         }
     }
@@ -4499,6 +4639,7 @@ impl Workspace {
             (ROLE_CHANGES, "changes"),
             (ROLE_ICON, "projectIcon"),
             (ROLE_COLOR, "projectColor"),
+            (ROLE_SETTLED, "settled"),
         ] {
             roles.insert(role, QByteArray::from(name));
         }

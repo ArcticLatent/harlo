@@ -36,6 +36,8 @@ pub enum SidebarKind {
     Session,
     OtherGroup,
     More,
+    /// A project's Settled shelf (its sessions follow when it's open).
+    Shelf,
 }
 
 impl SidebarKind {
@@ -45,6 +47,7 @@ impl SidebarKind {
             Self::Session => "session",
             Self::OtherGroup => "group",
             Self::More => "more",
+            Self::Shelf => "shelf",
         }
     }
 }
@@ -77,6 +80,8 @@ pub struct SidebarRow {
     /// Project: its icon and colour (see `db::Project`).
     pub icon: String,
     pub color: String,
+    /// Session on a Settled shelf: why ("merged", "closed", "quiet").
+    pub settled: String,
 }
 
 pub struct SidebarInput<'a> {
@@ -91,6 +96,8 @@ pub struct SidebarInput<'a> {
     pub other_collapsed: bool,
     /// Project ids (and -1 for the other group) whose full list is shown.
     pub expanded: &'a [i64],
+    /// Project ids whose Settled shelf is open.
+    pub shelves_open: &'a [i64],
 }
 
 struct Entry {
@@ -104,6 +111,8 @@ struct Entry {
     status: String,
     modified: i64,
     pinned: bool,
+    /// On its project's Settled shelf: why.
+    settled: String,
 }
 
 pub fn build(input: &SidebarInput<'_>) -> Vec<SidebarRow> {
@@ -130,6 +139,9 @@ pub fn build(input: &SidebarInput<'_>) -> Vec<SidebarRow> {
             None => (s.path.to_string_lossy().into_owned(), String::new()),
         };
         let title = live.filter(|l| !l.name.is_empty()).map(|l| l.name.clone()).unwrap_or_else(|| s.display_title().to_owned());
+        // Settled: on the shelf until there's newer work in it (or it's
+        // working, waiting on you, or pinned).
+        let settled = if !meta.settled_why.is_empty() && !meta.pinned && !active && unix(s.modified) <= meta.settled_at { meta.settled_why.clone() } else { String::new() };
         entries.push(Entry {
             key,
             path: Some(s.path.clone()),
@@ -141,6 +153,7 @@ pub fn build(input: &SidebarInput<'_>) -> Vec<SidebarRow> {
             pinned: meta.pinned,
             branch: String::new(),
             owner: None,
+            settled,
         });
     }
     // Live sessions whose file is not on disk yet (new, nothing sent).
@@ -167,6 +180,7 @@ pub fn build(input: &SidebarInput<'_>) -> Vec<SidebarRow> {
             pinned: false,
             branch: String::new(),
             owner: None,
+            settled: String::new(),
         });
     }
 
@@ -207,8 +221,8 @@ pub fn build(input: &SidebarInput<'_>) -> Vec<SidebarRow> {
     let filtering = !filter.is_empty();
     let mut rows = Vec::new();
     for p in input.projects {
-        let sessions = by_project.remove(&p.id).unwrap_or_default();
-        if filtering && sessions.is_empty() {
+        let (shelf, sessions): (Vec<&Entry>, Vec<&Entry>) = by_project.remove(&p.id).unwrap_or_default().into_iter().partition(|e| !e.settled.is_empty());
+        if filtering && sessions.is_empty() && shelf.is_empty() {
             continue;
         }
         let collapsed = p.collapsed && !filtering;
@@ -230,9 +244,36 @@ pub fn build(input: &SidebarInput<'_>) -> Vec<SidebarRow> {
             changes: 0,
             icon: p.icon.clone(),
             color: p.color.clone(),
+            settled: String::new(),
         });
         if !collapsed {
             push_sessions(&mut rows, &sessions, p.id, false, filtering || input.expanded.contains(&p.id));
+            if !shelf.is_empty() {
+                let open = filtering || input.shelves_open.contains(&p.id);
+                rows.push(SidebarRow {
+                    kind: SidebarKind::Shelf,
+                    key: format!("shelf:{}", p.id),
+                    project_id: p.id,
+                    title: "Settled".into(),
+                    subtitle: String::new(),
+                    harness: String::new(),
+                    status: String::new(),
+                    path: String::new(),
+                    modified: shelf[0].modified,
+                    collapsed: !open,
+                    pinned: false,
+                    count: shelf.len(),
+                    branch: String::new(),
+                    cwd: PathBuf::new(),
+                    changes: 0,
+                    icon: String::new(),
+                    color: String::new(),
+                    settled: String::new(),
+                });
+                if open {
+                    push_sessions(&mut rows, &shelf, p.id, false, true);
+                }
+            }
         }
     }
     if !other.is_empty() {
@@ -255,6 +296,7 @@ pub fn build(input: &SidebarInput<'_>) -> Vec<SidebarRow> {
             changes: 0,
             icon: String::new(),
             color: String::new(),
+            settled: String::new(),
         });
         if !collapsed {
             push_sessions(&mut rows, &other, -1, true, filtering || input.expanded.contains(&-1));
@@ -290,6 +332,7 @@ fn push_sessions(rows: &mut Vec<SidebarRow>, sessions: &[&Entry], project_id: i6
             changes: 0,
             icon: String::new(),
             color: String::new(),
+            settled: e.settled.clone(),
         });
     }
     if hidden > 0 {
@@ -311,6 +354,7 @@ fn push_sessions(rows: &mut Vec<SidebarRow>, sessions: &[&Entry], project_id: i6
             changes: 0,
             icon: String::new(),
             color: String::new(),
+            settled: String::new(),
         });
     }
 }
@@ -393,7 +437,7 @@ mod tests {
             session("/s/c", "/elsewhere", "stray", 1),
         ];
         let meta = HashMap::new();
-        let rows = build(&SidebarInput { projects: &projects, worktrees: &[], sessions: &sessions, live: &[], meta: &meta, filter: "", show_archived: false, other_collapsed: false, expanded: &[] });
+        let rows = build(&SidebarInput { projects: &projects, worktrees: &[], sessions: &sessions, live: &[], meta: &meta, filter: "", show_archived: false, other_collapsed: false, expanded: &[], shelves_open: &[] });
         let shape: Vec<(SidebarKind, &str)> = rows.iter().map(|r| (r.kind, r.title.as_str())).collect();
         assert_eq!(shape, [
             (SidebarKind::Project, "w"),
@@ -422,7 +466,7 @@ mod tests {
             started_at: SystemTime::now(),
         }];
         let meta = HashMap::new();
-        let rows = build(&SidebarInput { projects: &projects, worktrees: &[], sessions: &sessions, live: &live, meta: &meta, filter: "", show_archived: false, other_collapsed: false, expanded: &[] });
+        let rows = build(&SidebarInput { projects: &projects, worktrees: &[], sessions: &sessions, live: &live, meta: &meta, filter: "", show_archived: false, other_collapsed: false, expanded: &[], shelves_open: &[] });
         assert_eq!(rows.len(), 2);
         assert_eq!((rows[1].key.as_str(), rows[1].status.as_str()), ("live:1", "busy"));
         assert_eq!(rows[0].status, "busy", "project shows the most urgent child status");
@@ -434,9 +478,35 @@ mod tests {
         let worktrees = [WorktreeRecord { path: PathBuf::from("/data/trees/w/feat"), project_id: 1, branch: "feat".into(), base: "main".into(), removed: false }];
         let sessions = [session("/s/a", "/data/trees/w/feat/src", "in worktree", 1), session("/s/b", "/w", "in main", 2)];
         let meta = HashMap::new();
-        let rows = build(&SidebarInput { projects: &projects, worktrees: &worktrees, sessions: &sessions, live: &[], meta: &meta, filter: "", show_archived: false, other_collapsed: false, expanded: &[] });
+        let rows = build(&SidebarInput { projects: &projects, worktrees: &worktrees, sessions: &sessions, live: &[], meta: &meta, filter: "", show_archived: false, other_collapsed: false, expanded: &[], shelves_open: &[] });
         let shape: Vec<(&str, &str)> = rows.iter().map(|r| (r.title.as_str(), r.branch.as_str())).collect();
         assert_eq!(shape, [("w", ""), ("in worktree", "feat"), ("in main", "")]);
+    }
+
+    #[test]
+    fn settled_sessions_go_on_their_projects_shelf() {
+        let projects = [project(1, "/w")];
+        let sessions = [session("/s/a", "/w", "done", 100), session("/s/b", "/w", "current", 50), session("/s/c", "/w", "worked in again", 10)];
+        let now = unix(SystemTime::now());
+        let mut meta = HashMap::new();
+        meta.insert(PathBuf::from("/s/a"), SessionMeta { settled_why: "merged".into(), settled_at: now - 100, ..Default::default() });
+        meta.insert(PathBuf::from("/s/c"), SessionMeta { settled_why: "quiet".into(), settled_at: now - 1000, ..Default::default() });
+        let rows = |open: &[i64], filter: &str| {
+            build(&SidebarInput { projects: &projects, worktrees: &[], sessions: &sessions, live: &[], meta: &meta, filter, show_archived: false, other_collapsed: false, expanded: &[], shelves_open: open })
+                .into_iter()
+                .map(|r| (r.kind, r.title, r.count, r.settled))
+                .collect::<Vec<_>>()
+        };
+        let row = |k, t: &str, c, s: &str| (k, t.to_owned(), c, s.to_owned());
+        assert_eq!(rows(&[], ""), [
+            row(SidebarKind::Project, "w", 2, ""),
+            row(SidebarKind::Session, "worked in again", 0, ""),
+            row(SidebarKind::Session, "current", 0, ""),
+            row(SidebarKind::Shelf, "Settled", 1, ""),
+        ]);
+        assert_eq!(rows(&[1], "")[4], row(SidebarKind::Session, "done", 0, "merged"));
+        // Searching finds them on the shelf.
+        assert_eq!(rows(&[], "don"), [row(SidebarKind::Project, "w", 0, ""), row(SidebarKind::Shelf, "Settled", 1, ""), row(SidebarKind::Session, "done", 0, "merged")]);
     }
 
     #[test]
@@ -445,9 +515,9 @@ mod tests {
         let sessions = [session("/s/a", "/w", "alpha", 1), session("/s/b", "/w", "beta", 2)];
         let mut meta = HashMap::new();
         meta.insert(PathBuf::from("/s/a"), SessionMeta { archived: true, ..Default::default() });
-        let rows = build(&SidebarInput { projects: &projects, worktrees: &[], sessions: &sessions, live: &[], meta: &meta, filter: "", show_archived: false, other_collapsed: false, expanded: &[] });
+        let rows = build(&SidebarInput { projects: &projects, worktrees: &[], sessions: &sessions, live: &[], meta: &meta, filter: "", show_archived: false, other_collapsed: false, expanded: &[], shelves_open: &[] });
         assert_eq!(rows.iter().filter(|r| r.kind == SidebarKind::Session).count(), 1);
-        let rows = build(&SidebarInput { projects: &projects, worktrees: &[], sessions: &sessions, live: &[], meta: &meta, filter: "zzz", show_archived: true, other_collapsed: false, expanded: &[] });
+        let rows = build(&SidebarInput { projects: &projects, worktrees: &[], sessions: &sessions, live: &[], meta: &meta, filter: "zzz", show_archived: true, other_collapsed: false, expanded: &[], shelves_open: &[] });
         assert!(rows.is_empty());
     }
 
@@ -470,7 +540,7 @@ mod tests {
                 unread: false,
                 started_at: SystemTime::now(),
             }];
-            build(&SidebarInput { projects: &projects, worktrees: &[], sessions: &sessions, live: &live, meta: &meta, filter: "", show_archived: false, other_collapsed: false, expanded: &[] })
+            build(&SidebarInput { projects: &projects, worktrees: &[], sessions: &sessions, live: &live, meta: &meta, filter: "", show_archived: false, other_collapsed: false, expanded: &[], shelves_open: &[] })
                 .iter()
                 .any(|r| r.kind == SidebarKind::Session)
         };
@@ -484,7 +554,7 @@ mod tests {
         let projects = [project(1, "/w")];
         let sessions: Vec<_> = (0..20).map(|i| session(&format!("/s/{i}"), "/w", "x", i)).collect();
         let meta = HashMap::new();
-        let rows = build(&SidebarInput { projects: &projects, worktrees: &[], sessions: &sessions, live: &[], meta: &meta, filter: "", show_archived: false, other_collapsed: false, expanded: &[] });
+        let rows = build(&SidebarInput { projects: &projects, worktrees: &[], sessions: &sessions, live: &[], meta: &meta, filter: "", show_archived: false, other_collapsed: false, expanded: &[], shelves_open: &[] });
         assert_eq!(rows.len(), 1 + SESSIONS_PER_PROJECT + 1);
         assert_eq!(rows.last().unwrap().kind, SidebarKind::More);
     }
