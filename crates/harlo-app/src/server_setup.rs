@@ -37,6 +37,8 @@ pub mod qobject {
         #[qproperty(QString, job)]
         /// The setup's full output (its "Show output" panel).
         #[qproperty(QString, output)]
+        /// The engines' latest versions: `{ <engine id>: { latest, available } }`.
+        #[qproperty(QString, updates)]
         type ServerSetup = super::ServerSetupRust;
     }
 
@@ -66,6 +68,10 @@ pub mod qobject {
         /// Stops the setup going on (a server it started too).
         #[qinvokable]
         fn cancel(self: Pin<&mut ServerSetup>);
+        /// Looks for newer versions of the engines installed here, at most
+        /// once an hour unless `force` (`updates` follows).
+        #[qinvokable]
+        fn check_updates(self: Pin<&mut ServerSetup>, force: bool);
     }
 }
 
@@ -89,6 +95,8 @@ pub struct ServerSetupRust {
     hf_models: QString,
     ggufs: QString,
     job: QString,
+    updates: QString,
+    checked: Option<std::time::Instant>,
     stop: Arc<AtomicBool>,
 }
 
@@ -228,6 +236,13 @@ fn library_dirs(dir: &Path, out: &mut Vec<PathBuf>, depth: usize) {
     }
 }
 
+/// Where a llama.cpp build's libraries are (its `LD_LIBRARY_PATH`).
+fn llamacpp_libs(program: &Path) -> String {
+    let mut libs = Vec::new();
+    library_dirs(program.parent().and_then(Path::parent).unwrap_or(Path::new("/")), &mut libs, 4);
+    libs.iter().map(|d| d.to_string_lossy().into_owned()).collect::<Vec<_>>().join(":")
+}
+
 /// The models a llama.cpp server serves now: its preset's, or (one set up
 /// before presets) the one its command loads, with its name and context.
 fn llamacpp_models(base: &str, preset: &Path) -> Vec<engines::PresetModel> {
@@ -294,6 +309,111 @@ fn install(engine: Engine, hw: &engines::Hardware, report: &Report, stop: &Atomi
         }
         _ => engines::installed(engine).filter(|i| i.harlo).map(|i| i.program).ok_or_else(|| format!("{} unpacked, but harlo can't find its program.", engine.name())),
     }
+}
+
+/// Updates an engine to its latest version (blocking). A new version goes in
+/// a folder of its own and its servers move to it: those running stop only
+/// when it's ready, and start again on it; if one doesn't, they all stay on
+/// the version they had. Strata and vLLM update in place: their servers stop
+/// first.
+fn update(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value, String> {
+    let engine = engines::ENGINES.iter().copied().find(|e| req["update"] == e.id()).ok_or("harlo doesn't know that engine.")?;
+    let name = engine.name();
+    let hw = engines::detect();
+    let before = engines::installed(engine).ok_or_else(|| format!("{name} isn't installed."))?;
+    let servers = crate::accounts::servers_of(name);
+    let running: Vec<String> = servers.iter().filter(|u| harlo_core::model_servers::answers(u)).cloned().collect();
+    let in_place = matches!(engine, Engine::Strata | Engine::Vllm);
+    let stop_them = |report: &Report| {
+        for url in &running {
+            report.step(&format!("Stopping the server at {url}"));
+            crate::accounts::stop_any(url);
+        }
+    };
+    let start_them = |report: &Report| -> Result<(), String> {
+        for url in &running {
+            report.step(&format!("Starting the server at {url} again"));
+            crate::accounts::ensure_running(url)?;
+        }
+        Ok(())
+    };
+    let root = engines::engines_dir().join(engine.id());
+    let folder_of = |program: &Path| program.strip_prefix(&root).ok().and_then(|rest| rest.components().next()).map(|c| root.join(c));
+    let old_folder = folder_of(&before.program);
+
+    if in_place {
+        stop_them(report);
+    }
+    let program = match install(engine, &hw, report, stop) {
+        Ok(p) => p,
+        Err(e) => {
+            if in_place {
+                let _ = start_them(report);
+            } else if let Ok(tag) = engines::latest_version(engine)
+                && Some(root.join(&tag)) != old_folder
+            {
+                // (What it got of the new version.)
+                let _ = std::fs::remove_dir_all(root.join(&tag));
+            }
+            return Err(e);
+        }
+    };
+    let now = engines::installed(engine).map(|i| i.version).unwrap_or_default();
+    let new_folder = folder_of(&program);
+    let drop_new = || {
+        if let Some(f) = new_folder.as_ref().filter(|f| Some(*f) != old_folder.as_ref()) {
+            let _ = std::fs::remove_dir_all(f);
+        }
+    };
+
+    if in_place {
+        start_them(report).map_err(|e| format!("{name} is updated to {now}, but its server didn't start: {e}"))?;
+    } else {
+        // Basalt reads one format of pack: the models it serves must suit.
+        if engine == Engine::Basalt
+            && let Some(reads) = engines::basalt_build_format(&program)
+        {
+            for url in &servers {
+                let pack = crate::accounts::model_files(url).first().and_then(|f| engines::basalt_format(f));
+                if pack.is_some_and(|p| p != reads) {
+                    drop_new();
+                    return Err(format!("Basalt {now} reads format {reads}, and the model at {url} is in format {}: it stays on {}.", pack.unwrap_or_default(), before.version));
+                }
+            }
+        }
+        // Its servers on the new version (a llama.cpp's libraries too).
+        let libs = (engine == Engine::LlamaCpp).then(|| (llamacpp_libs(&before.program), llamacpp_libs(&program)));
+        let (old_program, new_program) = (before.program.to_string_lossy().into_owned(), program.to_string_lossy().into_owned());
+        let moved = |text: &str| {
+            let text = text.replace(&old_program, &new_program);
+            match &libs {
+                Some((old, new)) if !old.is_empty() => text.replace(old, new),
+                _ => text,
+            }
+        };
+        let saved: Vec<(String, String, String)> = servers.iter().map(|u| { let (start, stop) = crate::accounts::commands(u); (u.clone(), start, stop) }).collect();
+        stop_them(report);
+        for (url, start, stop) in &saved {
+            crate::accounts::save_commands(url, &moved(start), &moved(stop));
+        }
+        if let Err(e) = start_them(report) {
+            report.line(&format!("{name} {now} didn't start: {e}"));
+            stop_them(report);
+            for (url, start, stop) in &saved {
+                crate::accounts::save_commands(url, start, stop);
+            }
+            drop_new();
+            let _ = start_them(report);
+            return Err(format!("{name} {now} didn't start, so its servers stay on {}: {e}", before.version));
+        }
+        // (The old version: nothing uses it now.)
+        if let Some(old) = old_folder.as_ref().filter(|f| Some(*f) != new_folder.as_ref()) {
+            report.line(&format!("Removing {}", old.display()));
+            let _ = std::fs::remove_dir_all(old);
+        }
+    }
+    let again = if running.is_empty() { String::new() } else { " Its running servers started again.".to_owned() };
+    Ok(json!({ "message": format!("{name} is updated: {} → {now}.{again}", before.version), "models": [] }))
 }
 
 /// vLLM with uv (blocking): a Python of its own and vLLM with PyTorch for
@@ -374,7 +494,7 @@ fn install_vllm(dir: &Path, report: &Report, stop: &AtomicBool) -> Result<PathBu
     let env_s = env.to_string_lossy().into_owned();
     run(&uv, &["venv", "--python", "3.12", "--managed-python", "--allow-existing", &env_s], "Setting up Python for vLLM")?;
     let python = env.join("bin/python").to_string_lossy().into_owned();
-    run(&uv, &["pip", "install", "--python", &python, "vllm", "--torch-backend=auto"], "Installing vLLM and PyTorch (several GB)")?;
+    run(&uv, &["pip", "install", "--python", &python, "--upgrade-package", "vllm", "vllm", "--torch-backend=auto"], "Installing vLLM and PyTorch (several GB)")?;
     // Its prebuilt GPU kernels, where this vLLM has the command (else it
     // fetches them when it starts: not worth failing the setup for).
     if let Err(e) = run(&env.join("bin/vllm"), &["download-kernels"], "Fetching vLLM's GPU kernels") {
@@ -724,9 +844,7 @@ fn setup_server(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value
             }
             let alias = Path::new(&model).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or(model.clone());
             let alias = alias.split("-0000").next().unwrap_or(&alias).to_owned();
-            let mut libs = Vec::new();
-            library_dirs(program.parent().and_then(Path::parent).unwrap_or(Path::new("/")), &mut libs, 4);
-            let libs = libs.iter().map(|d| d.to_string_lossy().into_owned()).collect::<Vec<_>>().join(":");
+            let libs = llamacpp_libs(&program);
             // Its models in a preset (llama.cpp's router mode: one server,
             // several models, one loaded at a time, switched as asked for);
             // adding one: those it serves, and this. A context per model
@@ -1025,7 +1143,8 @@ impl ServerSetup {
                 .iter()
                 .map(|e| {
                     let (fit, why) = e.fit(&hw);
-                    let installed = engines::installed(*e).map(|i| json!({ "program": i.program.to_string_lossy(), "version": i.version, "harlo": i.harlo }));
+                    // (harlo updates what it installed; Strata's own installer works over any install of it.)
+                    let installed = engines::installed(*e).map(|i| json!({ "program": i.program.to_string_lossy(), "version": i.version, "harlo": i.harlo, "updatable": i.harlo || *e == Engine::Strata }));
                     json!({ "id": e.id(), "name": e.name(), "tagline": e.tagline(), "fit": fit, "why": why, "installed": installed })
                 })
                 .collect();
@@ -1145,12 +1264,12 @@ impl ServerSetup {
         let req: Value = serde_json::from_str(&request.to_string()).unwrap_or_default();
         let stop = Arc::new(AtomicBool::new(false));
         self.as_mut().rust_mut().stop = stop.clone();
-        let first = json!({ "state": "running", "step": "Starting", "progress": -1, "detail": "", "result": null });
+        let first = json!({ "state": "running", "step": "Starting", "progress": -1, "detail": "", "result": null, "update": req["update"].is_string() });
         self.as_mut().set_job(QString::from(&first.to_string()));
         self.as_mut().set_output(QString::default());
         let report = Report { thread: self.qt_thread(), state: Arc::new(std::sync::Mutex::new(first)), output: Default::default() };
         crate::runtime().spawn_blocking(move || {
-            let outcome = setup(&req, &report, &stop);
+            let outcome = if req["update"].is_string() { update(&req, &report, &stop) } else { setup(&req, &report, &stop) };
             // (The end, in the output too: and all of it shown now.)
             match &outcome {
                 Ok(_) => report.line("✓ Done."),
@@ -1179,6 +1298,30 @@ impl ServerSetup {
 
     pub fn cancel(self: Pin<&mut Self>) {
         self.stop.store(true, Ordering::Relaxed);
+    }
+
+    pub fn check_updates(mut self: Pin<&mut Self>, force: bool) {
+        if !force && self.checked.is_some_and(|t| t.elapsed() < Duration::from_secs(3600)) {
+            return;
+        }
+        self.as_mut().rust_mut().checked = Some(std::time::Instant::now());
+        let thread = self.qt_thread();
+        crate::runtime().spawn_blocking(move || {
+            let mut updates = serde_json::Map::new();
+            for e in engines::ENGINES {
+                let Some(i) = engines::installed(e).filter(|i| i.harlo || e == Engine::Strata) else { continue };
+                // (Offline, or GitHub's limit: nothing to say about this one.)
+                match engines::latest_version(e) {
+                    Ok(latest) => {
+                        let available = engines::update_available(e, &i.version, &latest);
+                        updates.insert(e.id().to_owned(), json!({ "latest": latest.trim_start_matches('v'), "available": available }));
+                    }
+                    Err(err) => tracing::info!("{} update check: {err}", e.name()),
+                }
+            }
+            let text = Value::Object(updates).to_string();
+            let _ = thread.queue(move |mut this| this.as_mut().set_updates(QString::from(&text)));
+        });
     }
 }
 

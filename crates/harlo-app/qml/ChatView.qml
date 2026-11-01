@@ -615,7 +615,7 @@ Rectangle {
             visible: plan.enabled && steps.length > 0 && !root.covered
         }
 
-        // omp's todo list.
+        // The agent's todo list.
         TodoDock {
             id: todoDock
             Layout.fillWidth: true

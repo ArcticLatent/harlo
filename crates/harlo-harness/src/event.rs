@@ -3,7 +3,7 @@
 //! This module is the only place that knows pi/omp event shapes. Everything
 //! downstream (reducer, UI) consumes [`HarnessEvent`].
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HarnessKind {
@@ -158,11 +158,15 @@ pub struct Translator {
     kind: HarnessKind,
     msg_seq: u64,
     current_msg: Option<String>,
+    /// pi's subagent package: its running calls' arguments, and each
+    /// background run's last status.
+    subagent_calls: std::collections::HashMap<String, Value>,
+    subagent_runs: std::collections::HashMap<String, String>,
 }
 
 impl Translator {
     pub fn new(kind: HarnessKind) -> Self {
-        Self { kind, msg_seq: 0, current_msg: None }
+        Self { kind, msg_seq: 0, current_msg: None, subagent_calls: Default::default(), subagent_runs: Default::default() }
     }
 
     fn message_id(&mut self, frame: &Value, starting: bool) -> String {
@@ -184,6 +188,7 @@ impl Translator {
     pub fn translate(&mut self, frame: Value) -> Vec<HarnessEvent> {
         use HarnessEvent as E;
         let ty = frame["type"].as_str().unwrap_or_default().to_owned();
+        let mut also = if self.kind == HarnessKind::Pi { self.pi_subagents(&ty, &frame) } else { Vec::new() };
         let ev = match ty.as_str() {
             "agent_start" => E::RunStarted,
             "agent_end" => E::RunEnded,
@@ -282,7 +287,59 @@ impl Translator {
             },
             _ => E::Other(frame),
         };
-        vec![ev]
+        also.insert(0, ev);
+        also
+    }
+
+    /// pi's subagent package as the subagent dock's events: what a call
+    /// started, how its background runs are doing (a snapshot in the widget
+    /// it keeps for clients without its terminal UI), and where each one's
+    /// session is when it's done.
+    fn pi_subagents(&mut self, ty: &str, frame: &Value) -> Vec<HarnessEvent> {
+        let event = |payload: Value| HarnessEvent::SubagentActivity(json!({ "type": "subagent_lifecycle", "payload": payload }));
+        match ty {
+            "tool_execution_start" if frame["toolName"] == "subagent" => {
+                self.subagent_calls.insert(str_of(frame, "toolCallId"), frame["args"].clone());
+                Vec::new()
+            }
+            "tool_execution_end" if frame["toolName"] == "subagent" => {
+                let call = str_of(frame, "toolCallId");
+                let args = self.subagent_calls.remove(&call).unwrap_or_default();
+                let Some(id) = frame["result"]["details"]["asyncId"].as_str() else { return Vec::new() };
+                self.subagent_runs.entry(id.to_owned()).or_insert_with(|| "running".to_owned());
+                let task = args["task"].as_str().unwrap_or_default();
+                let description: String = task.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default().chars().take(120).collect();
+                vec![event(json!({ "id": id, "agent": args["agent"], "task": task, "description": description, "parentToolCallId": call, "detached": true, "canCancel": false, "canSteer": false }))]
+            }
+            "extension_ui_request" if frame["method"] == "setWidget" && frame["widgetKey"] == "subagent-async" => {
+                let line = frame["widgetLines"][0].as_str().unwrap_or_default();
+                let snapshot: Value = line.strip_prefix("PI_SUBAGENT_ASYNC_JSON:").and_then(|j| serde_json::from_str(j).ok()).unwrap_or_default();
+                let mut out = Vec::new();
+                for run in snapshot["runs"].as_array().into_iter().flatten() {
+                    let Some(id) = run["id"].as_str() else { continue };
+                    let status = match run["state"].as_str().unwrap_or_default() {
+                        "complete" | "completed" => "completed",
+                        "failed" | "error" => "failed",
+                        "cancelled" | "canceled" | "aborted" | "interrupted" => "cancelled",
+                        _ => "running",
+                    };
+                    let before = self.subagent_runs.insert(id.to_owned(), status.to_owned());
+                    // (Runs that ended before this session started stay out.)
+                    if before.as_deref() != Some(status) && (before.is_some() || status == "running") {
+                        out.push(event(json!({ "id": id, "agent": run["label"], "status": status, "detached": true, "canCancel": false, "canSteer": false })));
+                    }
+                }
+                out
+            }
+            "message_end" if frame["message"]["customType"] == "subagent-notify" => frame["message"]["details"]["runs"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|run| run["runId"].is_string() && run["sessionLabel"] == "Session file")
+                .map(|run| event(json!({ "id": run["runId"], "status": run["status"], "sessionFile": run["sessionValue"] })))
+                .collect(),
+            _ => Vec::new(),
+        }
     }
 }
 
@@ -393,5 +450,37 @@ mod tests {
         let mut t = Translator::new(HarnessKind::Omp);
         assert!(matches!(t.translate(json!({"type":"session_settled"}))[0], HarnessEvent::Settled));
         assert!(matches!(t.translate(json!({"type":"agent_settled"}))[0], HarnessEvent::Settled));
+    }
+
+    #[test]
+    fn pis_subagent_package_reaches_the_dock() {
+        let mut t = Translator::new(HarnessKind::Pi);
+        let payloads = |events: Vec<HarnessEvent>| -> Vec<Value> {
+            events.into_iter().filter_map(|e| if let HarnessEvent::SubagentActivity(f) = e { Some(f["payload"].clone()) } else { None }).collect()
+        };
+        let snapshot = |state: &str| json!({
+            "type": "extension_ui_request", "id": "w", "method": "setWidget", "widgetKey": "subagent-async",
+            "widgetLines": [format!("PI_SUBAGENT_ASYNC_JSON:{}", json!({ "runs": [{ "id": "r1", "label": "worker", "state": state }] }))],
+        });
+        t.translate(json!({ "type": "tool_execution_start", "toolCallId": "c1", "toolName": "subagent", "args": { "agent": "worker", "task": "Write a poem\nwith two lines" } }));
+        let first = payloads(t.translate(snapshot("queued")));
+        assert_eq!((first[0]["id"].as_str(), first[0]["status"].as_str(), first[0]["canCancel"].as_bool()), (Some("r1"), Some("running"), Some(false)));
+        // The same again says nothing.
+        assert!(payloads(t.translate(snapshot("running"))).is_empty());
+        let started = payloads(t.translate(json!({ "type": "tool_execution_end", "toolCallId": "c1", "toolName": "subagent", "isError": false, "result": { "details": { "asyncId": "r1" } } })));
+        assert_eq!((started[0]["id"].as_str(), started[0]["description"].as_str(), started[0]["parentToolCallId"].as_str()), (Some("r1"), Some("Write a poem"), Some("c1")));
+        assert_eq!(payloads(t.translate(snapshot("complete")))[0]["status"], "completed");
+        let done = payloads(t.translate(json!({ "type": "message_end", "message": { "role": "custom", "customType": "subagent-notify", "details": { "runs": [
+            { "runId": "r1", "status": "completed", "sessionLabel": "Session file", "sessionValue": "/s/run-0/session.jsonl" },
+        ] } } })));
+        assert_eq!(done[0]["sessionFile"], "/s/run-0/session.jsonl");
+        // A run that ended before this session started stays out.
+        let old = json!({ "type": "extension_ui_request", "id": "w", "method": "setWidget", "widgetKey": "subagent-async",
+            "widgetLines": [format!("PI_SUBAGENT_ASYNC_JSON:{}", json!({ "runs": [{ "id": "r0", "label": "worker", "state": "complete" }] }))] });
+        assert!(payloads(t.translate(old)).is_empty());
+        // Clearing it, or another harness: nothing.
+        assert!(payloads(t.translate(json!({ "type": "extension_ui_request", "id": "w", "method": "setWidget", "widgetKey": "subagent-async" }))).is_empty());
+        let mut omp = Translator::new(HarnessKind::Omp);
+        assert!(payloads(omp.translate(snapshot("running"))).is_empty());
     }
 }

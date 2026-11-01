@@ -860,6 +860,16 @@ pub struct WorkspaceRust {
 /// Remote project folders, grouped by host name.
 type RemoteRoots = Vec<(String, Vec<PathBuf>)>;
 
+/// Whether the agent's sessions have a shield. pi's is its permission
+/// extension, when it's on (here: harlo doesn't look on other machines).
+fn has_shield(harness: &str, cwd: &Path) -> bool {
+    match harness {
+        "omp" | "demo" | "claude" | "opencode" | "hermes" => true,
+        "pi" => harlo_core::remote::host_of(cwd).is_none() && harlo_core::pi_packages::enabled(harlo_core::pi_packages::PERMISSIONS),
+        _ => false,
+    }
+}
+
 /// A session's approval mode (None: the omp config's) and plan mode.
 #[derive(Default, Clone)]
 struct SessionModes {
@@ -3377,7 +3387,7 @@ impl Workspace {
     pub fn approval_mode(&self, key: &QString) -> QString {
         let key = key.to_string();
         let Some(entry) = self.live.get(&key) else { return QString::default() };
-        if !matches!(entry.info.harness.as_str(), "omp" | "demo" | "claude" | "opencode" | "hermes") {
+        if !has_shield(&entry.info.harness, &entry.info.cwd) {
             return QString::default();
         }
         if let Some(mode) = self.modes.get(&key).and_then(|m| m.approval.clone()) {
@@ -3388,18 +3398,18 @@ impl Workspace {
 
     pub fn draft_approval(&self, harness: &QString, project_id: i32) -> QString {
         let harness = harness.to_string();
-        if !matches!(harness.as_str(), "omp" | "demo" | "claude" | "opencode" | "hermes") {
+        let cwd = self.projects.iter().find(|p| p.id == project_id as i64).map(|p| p.path.clone()).unwrap_or_else(|| self.instance_home());
+        if !has_shield(&harness, &cwd) {
             return QString::default();
         }
-        let cwd = self.projects.iter().find(|p| p.id == project_id as i64).map(|p| p.path.clone()).unwrap_or_else(|| self.instance_home());
         self.starting_approval(&harness, &cwd)
     }
 
     /// The shield's mode a session starts in, before it's switched.
     fn starting_approval(&self, harness: &str, cwd: &Path) -> QString {
         // Claude asks first unless told otherwise (its own settings may
-        // differ); for OpenCode and Hermes the shield answers what they ask.
-        if matches!(harness, "claude" | "opencode" | "hermes") {
+        // differ); for pi, OpenCode and Hermes the shield answers what they ask.
+        if matches!(harness, "pi" | "claude" | "opencode" | "hermes") {
             return QString::from("always-ask");
         }
         // On a remote host: that machine's omp config (read with its overlay).
@@ -3456,8 +3466,8 @@ impl Workspace {
             self.as_mut().save_overlay(path, model, modes);
         }
         // Claude switches its permission mode, OpenCode its agent, Hermes its
-        // mode, on the spot.
-        if self.live.get(key).is_some_and(|e| matches!(e.info.harness.as_str(), "claude" | "opencode" | "hermes"))
+        // mode, on the spot; pi's permission prompts are answered by harlo.
+        if self.live.get(key).is_some_and(|e| matches!(e.info.harness.as_str(), "pi" | "claude" | "opencode" | "hermes"))
             && let Some(live) = registry::get(key)
         {
             let modes = self.modes.get(key).cloned().unwrap_or_default();
@@ -4041,7 +4051,7 @@ impl Workspace {
     fn save_overlay(self: Pin<&mut Self>, path: PathBuf, model: String, modes: SessionModes) {
         let (goal, subagents) = (self.setting_str("goal_continue") != "0", self.setting_str("subagent_fallback") != "0");
         let Some(host) = harlo_core::remote::host_of(&path) else {
-            let text = overlay_text(&user_omp_config(), goal, subagents, &model, &modes);
+            let text = overlay_text(&user_omp_config(), true, goal, subagents, &model, &modes);
             if let Err(e) = std::fs::write(&path, text) {
                 tracing::warn!("could not write {}: {e}", path.display());
             }
@@ -4050,7 +4060,7 @@ impl Workspace {
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
             let config = harlo_core::remote::home_file_cached(&host, OMP_CONFIG, Duration::from_secs(60));
-            if let Err(e) = harlo_core::remote::write(&path, overlay_text(&config, goal, subagents, &model, &modes).as_bytes()) {
+            if let Err(e) = harlo_core::remote::write(&path, overlay_text(&config, false, goal, subagents, &model, &modes).as_bytes()) {
                 tracing::warn!("could not write {}: {e:#}", path.display());
             }
             let _ = thread.queue(|mut this| {
@@ -4883,9 +4893,23 @@ fn question_text(r: &harlo_core::UiRequest) -> String {
 /// omp's config file, relative to the home folder.
 const OMP_CONFIG: &str = ".omp/agent/config.yml";
 
-/// An overlay's text, with the user's omp config (`config`) merged in.
-fn overlay_text(config: &str, goal: bool, subagents: bool, model: &str, modes: &SessionModes) -> String {
-    let roles = harlo_core::omp_overlay::model_roles(config);
+/// An overlay's text, with the user's omp config (`config`) merged in. (On
+/// this computer: without the models of local engines that are gone, which
+/// its subagents would try first.)
+fn overlay_text(config: &str, here: bool, goal: bool, subagents: bool, model: &str, modes: &SessionModes) -> String {
+    let mut roles = harlo_core::omp_overlay::model_roles(config);
+    if here {
+        let mut seen = std::collections::HashMap::new();
+        roles = harlo_core::omp_overlay::without_models(&roles, |provider, id| {
+            let port = match provider {
+                "llama.cpp" => 8080,
+                "ollama" => 11434,
+                "lm-studio" => 1234,
+                _ => return false,
+            };
+            harlo_core::model_servers::stale_discovered(provider, id, &format!("http://127.0.0.1:{port}"), &mut seen)
+        });
+    }
     let policies = harlo_core::omp_overlay::tool_policies(config);
     harlo_core::omp_overlay::Overlay {
         goal_continue: goal,

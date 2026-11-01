@@ -13,6 +13,7 @@ pub mod file_blocks;
 pub mod framing;
 pub mod opencode;
 mod opencode_run;
+mod permission_bridge;
 pub mod process;
 pub mod protocol_log;
 pub mod store;

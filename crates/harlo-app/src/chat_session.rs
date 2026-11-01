@@ -1065,7 +1065,11 @@ impl ChatSession {
             let hermes = (this.harness.to_string() == "hermes").then(|| harlo_core::model_servers::servers(HarnessKind::Hermes));
             let mut seen = std::collections::HashMap::new();
             for m in data["models"].as_array().into_iter().flatten() {
-                // (omp's leftovers from a local engine that's gone.)
+                // (omp's leftovers from a local engine that's gone; Claude
+                // through a Claude Code that isn't here.)
+                if harlo_core::pi_packages::hidden_model(m["provider"].as_str().unwrap_or_default()) {
+                    continue;
+                }
                 if harlo_core::model_servers::stale_discovered(m["provider"].as_str().unwrap_or_default(), m["id"].as_str().unwrap_or_default(), m["baseUrl"].as_str().unwrap_or_default(), &mut seen) {
                     continue;
                 }

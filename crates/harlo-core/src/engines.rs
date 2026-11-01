@@ -271,7 +271,7 @@ fn on_path(prog: &str) -> Option<PathBuf> {
 fn harlo_install(engine: Engine) -> Option<PathBuf> {
     let dir = engines_dir().join(engine.id());
     let mut versions: Vec<PathBuf> = std::fs::read_dir(&dir).ok()?.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
-    versions.sort();
+    versions.sort_by_key(|p| version_key(&p.file_name().unwrap_or_default().to_string_lossy()));
     let prog = match engine {
         Engine::Ollama => "ollama",
         Engine::LlamaCpp => "llama-server",
@@ -288,6 +288,41 @@ fn harlo_install(engine: Engine) -> Option<PathBuf> {
         }
     };
     versions.iter().rev().find_map(|v| find_file(v, prog, 4))
+}
+
+/// A version's numbers, to compare ("v0.2.10" after "v0.2.9", "b12024").
+fn version_key(version: &str) -> Vec<u64> {
+    version.split(|c: char| !c.is_ascii_digit()).filter_map(|n| n.parse().ok()).collect()
+}
+
+/// Whether `latest` is newer than what's installed. (NInfer's versions are
+/// commits, `<date>-<sha>`: any other commit is its newest.)
+pub fn update_available(engine: Engine, installed: &str, latest: &str) -> bool {
+    if engine == Engine::Ninfer {
+        return installed.trim() != latest.trim();
+    }
+    let (now, new) = (version_key(installed), version_key(latest));
+    !now.is_empty() && new > now
+}
+
+/// An engine's latest version, as `plan` would install it (uv only delivers
+/// vLLM: its version is PyPI's).
+pub fn latest_version(engine: Engine) -> Result<String, String> {
+    match engine {
+        Engine::Ninfer => Ok(ninfer_latest()?.0),
+        Engine::Vllm => get_json("https://pypi.org/pypi/vllm/json")?["info"]["version"].as_str().map(str::to_owned).ok_or_else(|| "PyPI doesn't say vLLM's version.".to_owned()),
+        _ => release(engine)?["tag_name"].as_str().filter(|t| !t.is_empty()).map(str::to_owned).ok_or_else(|| format!("{} has no release.", engine.name())),
+    }
+}
+
+/// NInfer's latest commit: its version (the date first, so the newest build
+/// is last among harlo's) and its full id.
+fn ninfer_latest() -> Result<(String, String), String> {
+    let commits = get_json(&format!("https://api.github.com/repos/{}/commits?per_page=1", Engine::Ninfer.repo()))?;
+    let latest = &commits[0];
+    let sha = latest["sha"].as_str().filter(|s| s.len() >= 8).ok_or("NInfer's repository has no commits to build.")?;
+    let date = latest["commit"]["committer"]["date"].as_str().unwrap_or_default().split('T').next().unwrap_or_default().replace('-', "");
+    Ok((format!("{date}-{}", &sha[..8]), sha.to_owned()))
 }
 
 fn find_file(dir: &Path, name: &str, depth: usize) -> Option<PathBuf> {
@@ -412,7 +447,12 @@ fn http(timeout: Duration) -> ureq::Agent {
 }
 
 fn get_json(url: &str) -> Result<Value, String> {
-    let mut resp = http(Duration::from_secs(30)).get(url).header("User-Agent", "harlo").header("Accept", "application/vnd.github+json").call().map_err(|e| format!("{url}: {e}"))?;
+    get_json_as(url, "application/vnd.github+json")
+}
+
+/// (npm refuses GitHub's kind of `Accept`.)
+pub(crate) fn get_json_as(url: &str, accept: &str) -> Result<Value, String> {
+    let mut resp = http(Duration::from_secs(30)).get(url).header("User-Agent", "harlo").header("Accept", accept).call().map_err(|e| format!("{url}: {e}"))?;
     if resp.status().as_u16() != 200 {
         return Err(format!("{url}: HTTP {}", resp.status().as_u16()));
     }
@@ -470,14 +510,10 @@ pub fn llamacpp_build(hw: &Hardware, tag: &str) -> (String, Option<String>) {
 /// What installing an engine downloads (its release's files for here), and
 /// the version.
 pub fn plan(engine: Engine, hw: &Hardware) -> Result<(String, Vec<Asset>), String> {
-    // NInfer has no releases: its source at its latest commit (the date first,
-    // so the newest build is last among harlo's), built here.
+    // NInfer has no releases: its source at its latest commit, built here.
     if engine == Engine::Ninfer {
-        let commits = get_json(&format!("https://api.github.com/repos/{}/commits?per_page=1", engine.repo()))?;
-        let latest = &commits[0];
-        let sha = latest["sha"].as_str().filter(|s| s.len() >= 8).ok_or("NInfer's repository has no commits to build.")?;
-        let date = latest["commit"]["committer"]["date"].as_str().unwrap_or_default().split('T').next().unwrap_or_default().replace('-', "");
-        return Ok((format!("{date}-{}", &sha[..8]), vec![Asset { name: format!("ninfer-{}.tar.gz", &sha[..8]), url: format!("https://codeload.github.com/{}/tar.gz/{sha}", engine.repo()), sha256: String::new(), size: 0 }]));
+        let (tag, sha) = ninfer_latest()?;
+        return Ok((tag, vec![Asset { name: format!("ninfer-{}.tar.gz", &sha[..8]), url: format!("https://codeload.github.com/{}/tar.gz/{sha}", engine.repo()), sha256: String::new(), size: 0 }]));
     }
     let rel = release(engine)?;
     let tag = rel["tag_name"].as_str().unwrap_or_default().to_owned();
@@ -1362,6 +1398,30 @@ mod tests {
     fn hw(vendor: &str, vram_gb: u64, ram_gb: u64, driver: &str) -> Hardware {
         let gpus = if vendor.is_empty() { vec![] } else { vec![Gpu { vendor: vendor.into(), name: "card".into(), vram_mb: vram_gb * 1024, arch: String::new() }] };
         Hardware { gpus, ram_mb: ram_gb * 1024, disk_free_mb: 500 * 1024, avx2: true, nvidia_driver: driver.into() }
+    }
+
+    #[test]
+    #[ignore = "online"]
+    fn latest_versions_online() {
+        for e in ENGINES {
+            let latest = latest_version(e).unwrap();
+            let here = installed(e).map(|i| i.version).unwrap_or_default();
+            println!("{}: here {here:?}, latest {latest:?}, update {}", e.id(), update_available(e, &here, &latest));
+            assert!(!latest.is_empty());
+        }
+    }
+
+    #[test]
+    fn compares_versions() {
+        assert!(update_available(Engine::Strata, "0.2.9", "v0.2.10"));
+        assert!(!update_available(Engine::Strata, "0.2.9", "v0.2.9"));
+        // (Strata's 0.2.7.1 came out under the tag v0.2.7.)
+        assert!(!update_available(Engine::Strata, "0.2.7.1", "v0.2.7"));
+        assert!(update_available(Engine::LlamaCpp, "b12024", "b12100"));
+        assert!(update_available(Engine::Vllm, "0.13.6", "0.14.0"));
+        assert!(!update_available(Engine::Ollama, "", "v0.40.13"));
+        assert!(update_available(Engine::Ninfer, "20261029-1882c6ad", "20261031-aaaaaaaa"));
+        assert!(!update_available(Engine::Ninfer, "20261029-1882c6ad", "20261029-1882c6ad"));
     }
 
     #[test]

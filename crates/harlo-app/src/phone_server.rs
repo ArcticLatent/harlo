@@ -363,7 +363,7 @@ async fn session_op(op: &str, msg: &Value, live: &crate::registry::LiveRef) -> V
         }
         "models" => {
             return match live.handle.request(json!({ "type": "get_available_models" })).await {
-                Ok(data) => json!({ "models": data["models"].as_array().into_iter().flatten().map(|m| json!({
+                Ok(data) => json!({ "models": data["models"].as_array().into_iter().flatten().filter(|m| !harlo_core::pi_packages::hidden_model(m["provider"].as_str().unwrap_or_default())).map(|m| json!({
                     "provider": m["provider"], "id": m["id"], "name": m["name"], "reasoning": m["reasoning"].as_bool() == Some(true),
                 })).collect::<Vec<_>>() }),
                 Err(e) => failed(e),

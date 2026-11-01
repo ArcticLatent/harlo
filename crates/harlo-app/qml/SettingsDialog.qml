@@ -45,7 +45,7 @@ Popup {
         { id: "about", title: "About Harlo", icon: "information", group: "about", keywords: "about version release licence license mit website source code github changelog what's new report problem issue bug logs" },
         { id: "providers", title: "Providers", icon: "robot-2", group: "agents", keywords: "providers harnesses claude opencode pi omp oh my pi binary path program agent models version enable disable debug log logs protocol crash diagnostics goal subagent model role sign in login log in account accounts api key oauth credentials" },
         { id: "servers", title: "Model servers", icon: "server", group: "agents", keywords: "model servers local models ollama lm studio llama.cpp vllm sglang gateway openai compatible custom provider models.json models.yml opencode.json pi omp opencode hermes basalt" },
-        { id: "packages", title: "pi packages", icon: "code-box", group: "agents", keywords: "pi packages extensions skills prompts themes install update remove npm git project" },
+        { id: "packages", title: "Extensions", icon: "code-box", group: "agents", keywords: "pi packages extensions permissions guardrails subagents web todo claude update" },
     ]
     // (About goes last, under no heading.)
     readonly property var groups: [["harlo", "harlo"], ["workspace", "Workspace"], ["agents", "Agents"], ["about", ""]]
@@ -2895,7 +2895,13 @@ Popup {
             readonly property var states: Accounts.serverStates !== "" ? JSON.parse(Accounts.serverStates) : ({})
             function check() { Accounts.checkServers(JSON.stringify([...new Set(srv.list.filter(r => r.place !== "online").map(r => r.baseUrl))])) }
             // (What harlo read last shows at once; read again in the background.)
-            Component.onCompleted: { Accounts.loadServers(); check() }
+            Component.onCompleted: { Accounts.loadServers(); check(); lookAtEngines() }
+            onVisibleChanged: if (visible) lookAtEngines()
+            // The engines on this computer, and whether they have a newer version.
+            function lookAtEngines() { ServerSetup.refresh(); ServerSetup.checkUpdates(false) }
+            readonly property var engines: (setupServer.cat.engines || []).filter(e => e.installed !== null)
+            readonly property var updates: ServerSetup.updates !== "" ? JSON.parse(ServerSetup.updates) : ({})
+            readonly property bool jobRunning: setupServer.job !== null && setupServer.job.state === "running"
             Connections { target: Accounts; function onRevisionChanged() { srv.check() } }
             Timer { interval: 3000; repeat: true; running: srv.visible; onTriggered: srv.check() }
             SectionHeader {
@@ -2921,7 +2927,7 @@ Popup {
                         Label { text: "Run a model on this computer"; color: Theme.foreground; font.pixelSize: Theme.px(14); font.weight: Font.DemiBold }
                     }
                     Hint {
-                        text: "harlo installs an engine (llama.cpp, Ollama or Strata), downloads a model that fits your graphics card, starts it and adds it to your agents. Start and Stop it here or from the left bar."
+                        text: "harlo installs an engine, downloads a model that fits your graphics card, starts it and adds it to your agents. Start and Stop it here or from the left bar."
                     }
                     RowLayout {
                         Layout.topMargin: 6
@@ -3165,6 +3171,84 @@ Popup {
                 }
             }
             Label {
+                visible: srv.engines.length > 0
+                Layout.topMargin: 18
+                text: "ENGINES"
+                color: Theme.blend(Theme.textMuted, Theme.accent, 0.7)
+                font.pixelSize: Theme.px(11.5)
+                font.weight: Font.DemiBold
+                font.letterSpacing: Theme.px(11.5) * 0.07
+            }
+            Group {
+                visible: srv.engines.length > 0
+                Repeater {
+                    model: srv.engines
+                    // An engine: its version, whether a newer one is out, and Update.
+                    Item {
+                        id: engineItem
+                        required property var modelData
+                        required property int index
+                        readonly property var latest: srv.updates[modelData.id] || null
+                        readonly property bool updatable: modelData.installed.updatable === true
+                        readonly property bool newer: updatable && latest !== null && latest.available === true
+                        readonly property string version: modelData.installed.version.replace(/^v/, "")
+                        // (Built on this computer: several minutes.)
+                        readonly property bool built: modelData.id === "basalt" || modelData.id === "ninfer"
+                        Layout.fillWidth: true
+                        implicitHeight: 56
+                        objectName: "engineRow-" + modelData.id
+                        Rectangle { visible: engineItem.index > 0; width: parent.width; height: 1; color: Theme.hairline }
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 16
+                            anchors.rightMargin: 16
+                            spacing: 12
+                            Rectangle {
+                                implicitWidth: 32
+                                implicitHeight: 32
+                                radius: 9
+                                color: Theme.controlFill
+                                ProviderLogo {
+                                    anchors.centerIn: parent
+                                    implicitWidth: 18
+                                    implicitHeight: 18
+                                    provider: engineItem.modelData.name.toLowerCase()
+                                    color: Theme.textMuted
+                                }
+                            }
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 2
+                                Label { text: engineItem.modelData.name; color: Theme.foreground; font.pixelSize: Theme.px(13); font.weight: Font.Medium }
+                                Label {
+                                    Layout.fillWidth: true
+                                    elide: Text.ElideRight
+                                    text: engineItem.newer ? engineItem.version + " → " + engineItem.latest.latest
+                                        : !engineItem.updatable ? engineItem.version + " · installed outside harlo"
+                                        : engineItem.latest !== null ? engineItem.version + " · up to date"
+                                        : engineItem.version
+                                    color: engineItem.newer ? Theme.accent : Theme.textMuted
+                                    font.pixelSize: Theme.px(12)
+                                }
+                            }
+                            FlatButton {
+                                objectName: "engineUpdate-" + engineItem.modelData.id
+                                visible: engineItem.newer
+                                enabled: !srv.jobRunning
+                                text: "Update"
+                                variant: "primary"
+                                font.pixelSize: Theme.px(12)
+                                onClicked: setupServer.updateEngine(engineItem.modelData.id)
+                                ToolTip.visible: hovered
+                                ToolTip.delay: 400
+                                ToolTip.text: (engineItem.built ? "harlo builds the new version here (several minutes)" : "harlo downloads the new version")
+                                    + ". Its servers that are running stop and start again, so a message on them now would be cut off."
+                            }
+                        }
+                    }
+                }
+            }
+            Label {
                 visible: srv.agents.length > 0 && srv.list.length === 0
                 Layout.topMargin: 12
                 Layout.fillWidth: true
@@ -3201,53 +3285,10 @@ Popup {
         }
     }
 
-    // pi's packages: yours, or a project's own.
+    // The extensions harlo offers for pi.
     Component {
         id: packagesPage
-        ColumnLayout {
-            id: pkgs
-            spacing: 0
-            readonly property var projects: (Workspace.projectsRevision >= 0 ? JSON.parse(Workspace.projectsJson()) : []).filter(p => !p.remote)
-            // "" for yours, else a project's folder.
-            property string folder: ""
-            readonly property var chosen: projects.find(p => p.path === folder) || null
-            SectionHeader {
-                subtitle: "Extensions, skills, prompt templates and themes for pi, installed with pi's own commands from npm, git or a folder. Yours load in every project; a project's own load only there, for everyone who works on it with pi."
-            }
-            RowLayout {
-                Layout.topMargin: 12
-                spacing: 8
-                Label { text: "Packages of"; color: Theme.muted; font.pixelSize: Theme.px(12.5) }
-                FlatButton {
-                    objectName: "packagesScope"
-                    text: (pkgs.chosen ? pkgs.chosen.name : "yours") + "  ▾"
-                    font.pixelSize: Theme.px(12)
-                    onClicked: scopeMenu.popup()
-                    AppMenu {
-                        id: scopeMenu
-                        AppMenuItem { text: "Yours"; marked: pkgs.folder === ""; onTriggered: pkgs.folder = "" }
-                        AppMenuSeparator { visible: pkgs.projects.length > 0 }
-                        Repeater {
-                            model: pkgs.projects
-                            AppMenuItem {
-                                required property var modelData
-                                text: modelData.name
-                                marked: pkgs.folder === modelData.path
-                                onTriggered: pkgs.folder = modelData.path
-                            }
-                        }
-                    }
-                }
-            }
-            Loader {
-                Layout.fillWidth: true
-                Layout.topMargin: 14
-                // (A new one for each choice: its own list.)
-                sourceComponent: pkgs.folder === "" ? yours : theirs
-                Component { id: yours; PiPackages { folder: "" } }
-                Component { id: theirs; PiPackages { folder: pkgs.folder; project: true } }
-            }
-        }
+        PiPackages {}
     }
 
     Component {

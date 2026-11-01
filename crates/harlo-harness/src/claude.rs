@@ -191,9 +191,28 @@ pub fn read_session(path: &Path) -> Option<SessionInfo> {
     session_from_text(path, size, meta.modified().unwrap_or(SystemTime::UNIX_EPOCH), &head, &tail)
 }
 
+/// Whether a transcript is the Claude extension for pi's: it runs Claude Code
+/// for a pi session, whose copy this is (the conversation is pi's, and listed
+/// as pi's). Its file doesn't name it, so this goes by how it runs: a history
+/// it wrote in itself has its library's message ids; else Claude Code was
+/// started through the SDK, bypassing permissions, with none of its own tools
+/// and only the extension's. (The quotes can't match text in a message: there
+/// they're escaped.)
+fn pi_extensions_copy(head: &str) -> bool {
+    if head.contains(r#""id":"msg_syn_"#) {
+        return true;
+    }
+    let first = head.lines().filter(|l| l.contains(r#""type":"user""#)).find_map(|l| serde_json::from_str::<Value>(l).ok());
+    first.is_some_and(|e| e["entrypoint"] == "sdk-ts" && e["turnOrigin"] == "sdk" && e["permissionMode"] == "bypassPermissions")
+        && (head.contains(r#""mcp__custom-tools__"#) || !head.contains("deferred_tools_delta"))
+}
+
 /// `read_session` from a transcript's start and end (a remote host's, read
 /// over SSH).
 pub fn session_from_text(path: &Path, size: u64, modified: SystemTime, head: &str, tail: &str) -> Option<SessionInfo> {
+    if pi_extensions_copy(head) {
+        return None;
+    }
     let id = path.file_stem()?.to_string_lossy().into_owned();
     let (mut cwd, mut first, mut created, mut name) = (None, String::new(), String::new(), String::new());
     for line in head.lines() {
@@ -486,6 +505,30 @@ mod tests {
         let long = format!("/nonexistent/{}", "x".repeat(250));
         let name = project_dir_name(Path::new(&long));
         assert!(name.len() > 200 && name.starts_with("-nonexistent-xxx"));
+    }
+
+    #[test]
+    fn leaves_out_the_pi_extensions_copies() {
+        let user = |entry: &str, origin: &str, mode: &str| format!(r#"{{"type":"user","entrypoint":"{entry}","turnOrigin":"{origin}","permissionMode":"{mode}","cwd":"/w","timestamp":"2026-11-01T08:00:00Z","isSidechain":false,"message":{{"role":"user","content":"how are you"}}}}"#);
+        let listed = |text: &str| session_from_text(Path::new("/p/s.jsonl"), 0, SystemTime::UNIX_EPOCH, text, "").is_some();
+        let tools = r#"{"type":"attachment","attachment":{"type":"deferred_tools_delta","addedNames":["WebFetch"]}}"#;
+        let its_tools = r#"{"type":"attachment","attachment":{"type":"deferred_tools_delta","addedNames":["mcp__custom-tools__read"]}}"#;
+
+        // Started by the extension, without its tools listed or with them.
+        assert!(!listed(&user("sdk-ts", "sdk", "bypassPermissions")));
+        assert!(!listed(&format!("{}\n{its_tools}", user("sdk-ts", "sdk", "bypassPermissions"))));
+        // History it wrote: its library says "cli", with made-up ids.
+        let written = r#"{"type":"assistant","entrypoint":"cli","isSidechain":false,"message":{"id":"msg_syn_0123","role":"assistant","content":[]}}"#;
+        assert!(!listed(&format!("{}\n{written}", user("cli", "human", "default"))));
+
+        // harlo's own Claude, bypassing permissions or not, and in a terminal.
+        assert!(listed(&format!("{}\n{tools}", user("sdk-ts", "human", "bypassPermissions"))));
+        assert!(listed(&format!("{}\n{tools}", user("sdk-ts", "sdk", "default"))));
+        assert!(listed(&format!("{}\n{tools}", user("sdk-ts", "sdk", "bypassPermissions"))));
+        assert!(listed(&user("cli", "human", "auto")));
+        // A message about these names is only a message.
+        let about = r#"{"type":"assistant","isSidechain":false,"message":{"role":"assistant","content":[{"type":"text","text":"\"id\":\"msg_syn_ and \"mcp__custom-tools__"}]}}"#;
+        assert!(listed(&format!("{}\n{tools}\n{about}", user("sdk-ts", "human", "bypassPermissions"))));
     }
 
     #[test]

@@ -3,8 +3,8 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import harlo
 
-// omp's todo list: progress and the task in hand on one line; the phases
-// and their tasks when expanded.
+// The agent's todo list (omp's, or pi's todo extension's): progress and the
+// task in hand on one line; the phases and their tasks when expanded.
 Rectangle {
     id: root
     property ChatSession session

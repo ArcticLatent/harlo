@@ -22,6 +22,10 @@ const KEEP_FILES: usize = 40;
 
 static DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
 
+/// Held by a test that has the log on, and one that starts a process.
+#[cfg(test)]
+pub(crate) static TEST_DIR: Mutex<()> = Mutex::new(());
+
 /// Turns the log on (into `dir`) or off (`None`).
 pub fn set_dir(dir: Option<PathBuf>) {
     *DIR.lock().unwrap() = dir;
@@ -102,6 +106,7 @@ mod tests {
 
     #[test]
     fn writes_frames_and_prunes() {
+        let _dir = TEST_DIR.lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!("harlo-protocol-log-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();

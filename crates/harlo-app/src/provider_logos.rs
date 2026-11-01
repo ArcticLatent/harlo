@@ -9,7 +9,7 @@ include!(concat!(env!("OUT_DIR"), "/provider_logos.rs"));
 fn alias(id: &str) -> &str {
     match id {
         "openai-codex" | "codex" | "chatgpt" | "azure-openai" => "openai",
-        "claude" => "anthropic",
+        "claude" | "claude-bridge" => "anthropic",
         "gemini" | "google-gemini-cli" | "google-vertex" | "vertex" => "google",
         "copilot" => "github-copilot",
         "ollama-cloud" => "ollama",

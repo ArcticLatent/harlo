@@ -14,6 +14,7 @@ use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::ask_bridge::{Action, AskBridge};
+use crate::permission_bridge::PermissionBridge;
 use crate::event::{HarnessEvent, HarnessKind, Translator};
 use crate::framing::{ChunkAssembler, read_record};
 use crate::protocol_log::ProtocolLog;
@@ -112,6 +113,7 @@ pub struct Harness {
     next_id: AtomicU64,
     /// pi: its `ask_user_question` dialogs as harlo's question card.
     ask: Arc<Mutex<AskBridge>>,
+    permissions: Arc<Mutex<PermissionBridge>>,
 }
 
 const STDERR_TAIL_LINES: usize = 80;
@@ -200,17 +202,18 @@ impl Harness {
         let (ready_tx, ready_rx) = oneshot::channel::<Value>();
 
         let ask: Arc<Mutex<AskBridge>> = Arc::default();
-        let reader = tokio::spawn(read_loop(cfg.kind, stdout, events_tx.clone(), pending.clone(), ready_tx, log.clone(), (cfg.kind == HarnessKind::Pi).then(|| (ask.clone(), tx.clone()))));
-        tokio::spawn(stderr_loop(stderr, stderr_tail.clone(), log.clone()));
+        let permissions: Arc<Mutex<PermissionBridge>> = Arc::default();
+        let reader = tokio::spawn(read_loop(cfg.kind, stdout, events_tx.clone(), pending.clone(), ready_tx, log.clone(), (cfg.kind == HarnessKind::Pi).then(|| (ask.clone(), permissions.clone(), tx.clone()))));
+        let stderr_done = tokio::spawn(stderr_loop(stderr, stderr_tail.clone(), log.clone()));
         let (kill_tx, kill_rx) = oneshot::channel();
         tokio::spawn(write_loop(cfg.kind, stdin, rx, ready_rx, events_tx.clone(), kill_tx, log));
-        tokio::spawn(wait_loop(child, reader, kill_rx, events_tx, stderr_tail));
+        tokio::spawn(wait_loop(child, reader, kill_rx, events_tx, stderr_done, stderr_tail));
 
-        Ok((Self { kind: cfg.kind, tx, pending, next_id: AtomicU64::new(1), ask }, events_rx))
+        Ok((Self { kind: cfg.kind, tx, pending, next_id: AtomicU64::new(1), ask, permissions }, events_rx))
     }
 
     pub(crate) fn from_parts(kind: HarnessKind, tx: mpsc::UnboundedSender<Outgoing>, pending: Pending) -> Self {
-        Self { kind, tx, pending, next_id: AtomicU64::new(1), ask: Arc::default() }
+        Self { kind, tx, pending, next_id: AtomicU64::new(1), ask: Arc::default(), permissions: Arc::default() }
     }
 
     pub fn kind(&self) -> HarnessKind {
@@ -232,6 +235,15 @@ impl Harness {
 
     /// Sends a command and waits for its response `data`.
     pub async fn request(&self, mut cmd: Value) -> Result<Value> {
+        // pi: the shield is harlo's own, for its permission prompts.
+        if self.kind == HarnessKind::Pi && cmd["type"] == "harlo_set_modes" {
+            self.permissions.lock().unwrap().set_shield(cmd["approval"].as_str().unwrap_or_default());
+            return Ok(Value::Null);
+        }
+        // pi has no such command: its package's subagents come as events.
+        if self.kind == HarnessKind::Pi && cmd["type"] == "get_subagents" {
+            return Ok(json!({ "subagents": [] }));
+        }
         let id = self.next_id();
         cmd["id"] = Value::String(id.clone());
         let (tx, rx) = oneshot::channel();
@@ -278,7 +290,8 @@ impl Harness {
             Value::Array(_) => json!({ "answers": answer }),
             other => json!({ "value": other }),
         };
-        if let Some(response) = self.ask.lock().unwrap().answer(request_id, &answer) {
+        let bridged = self.permissions.lock().unwrap().answer(request_id, &answer).or_else(|| self.ask.lock().unwrap().answer(request_id, &answer));
+        if let Some(response) = bridged {
             let _ = self.tx.send(Outgoing::Frame(response));
             return;
         }
@@ -374,8 +387,8 @@ async fn read_loop(
     pending: Pending,
     ready_tx: oneshot::Sender<Value>,
     log: Option<Arc<ProtocolLog>>,
-    // pi: its question dialogs, and where their answers go.
-    ask: Option<(Arc<Mutex<AskBridge>>, mpsc::UnboundedSender<Outgoing>)>,
+    // pi: its question and permission dialogs, and where their answers go.
+    bridges: Option<(Arc<Mutex<AskBridge>>, Arc<Mutex<PermissionBridge>>, mpsc::UnboundedSender<Outgoing>)>,
 ) {
     let mut reader = BufReader::with_capacity(256 * 1024, stdout);
     let mut buf = Vec::new();
@@ -438,10 +451,15 @@ async fn read_loop(
             _ => {}
         }
 
-        // pi's `ask_user_question`: harlo's question card.
-        if let Some((ask, out)) = &ask {
+        // pi's `ask_user_question`: harlo's question card. Its permission
+        // package's prompts (a subagent's can come at any time): harlo's
+        // approvals.
+        if let Some((ask, permissions, out)) = &bridges {
             let action = if frame["type"] == "extension_ui_request" {
-                ask.lock().unwrap().on_request(&frame)
+                match permissions.lock().unwrap().on_request(&frame) {
+                    Action::Pass => ask.lock().unwrap().on_request(&frame),
+                    action => action,
+                }
             } else {
                 ask.lock().unwrap().on_event(&frame);
                 Action::Pass
@@ -565,6 +583,7 @@ async fn wait_loop(
     reader: tokio::task::JoinHandle<()>,
     kill_rx: oneshot::Receiver<()>,
     events: mpsc::UnboundedSender<HarnessEvent>,
+    stderr_done: tokio::task::JoinHandle<()>,
     stderr_tail: Arc<Mutex<VecDeque<String>>>,
 ) {
     // Drain stdout fully before reporting the exit so no events are lost.
@@ -580,6 +599,8 @@ async fn wait_loop(
         }
     }
     let code = child.wait().await.ok().and_then(|s| s.code());
+    // What it said last (a child that kept stderr open isn't waited for).
+    let _ = tokio::time::timeout(std::time::Duration::from_millis(500), stderr_done).await;
     let stderr_tail = stderr_tail.lock().unwrap().iter().cloned().collect::<Vec<_>>().join("\n");
     let _ = events.send(HarnessEvent::Exited { code, stderr_tail });
 }
@@ -634,6 +655,34 @@ mod tests {
         assert_eq!(script, r#"PATH="$HOME/.local/bin:$PATH"; cd '/home/me/my proj' && exec env 'A=1 2' omp --mode rpc-ui --resume '/s/it'\''s.jsonl'"#);
         remote.cleanup = "rm -f /tmp/x".into();
         assert_eq!(remote_script(&remote, "pi", &[], Path::new("/w"), &[]), r#"PATH="$HOME/.local/bin:$PATH"; cd /w && pi; status=$?; rm -f /tmp/x; exit $status"#);
+    }
+
+    /// A pi that reads and never answers: harlo's own replies don't wait on
+    /// it, and what's left unanswered ends when it's stopped.
+    #[tokio::test]
+    async fn pi_gets_its_subagent_list_from_harlo() {
+        let dir = std::env::temp_dir().join(format!("harlo-silent-pi-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let program = dir.join("pi");
+        std::fs::write(&program, "#!/bin/sh\nwhile read -r _; do :; done\n").unwrap();
+        std::fs::set_permissions(&program, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        let cfg = HarnessConfig { kind: HarnessKind::Pi, program: Some(program), cwd: dir.clone(), session: SessionTarget::Ephemeral, extra_args: vec![], env: vec![], remote: None };
+        let spawned = {
+            let _dir = crate::protocol_log::TEST_DIR.lock().unwrap_or_else(|e| e.into_inner());
+            Harness::spawn(cfg)
+        };
+        let (harness, _events) = spawned.unwrap();
+        let wait = Duration::from_secs(5);
+        let listed = tokio::time::timeout(wait, harness.request(json!({ "type": "get_subagents" }))).await.expect("no waiting on pi").unwrap();
+        assert_eq!(listed, json!({ "subagents": [] }));
+
+        let asked = harness.request(json!({ "type": "get_available_models" }));
+        tokio::pin!(asked);
+        assert!(tokio::time::timeout(Duration::from_millis(200), &mut asked).await.is_err(), "it never answers");
+        harness.kill();
+        let stopped = tokio::time::timeout(wait, asked).await.expect("ended by the stop").unwrap_err();
+        assert_eq!(stopped.to_string(), "harness exited before responding");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// omp on a real SSH server, no prompts (not run by default):

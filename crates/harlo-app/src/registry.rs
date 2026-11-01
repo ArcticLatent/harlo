@@ -35,6 +35,14 @@ pub fn restart_idle(harness: &str) {
     }
 }
 
+/// The same for a change no session should go on without: a working one
+/// starts again once it has finished.
+pub fn restart_when_idle(harness: &str) {
+    for live in map().lock().unwrap().values().filter(|l| l.harness == harness) {
+        live.handle.restart_when_idle();
+    }
+}
+
 /// Forgets a session. Its harness stops once no view holds the handle.
 pub fn remove(key: &str) -> Option<LiveRef> {
     map().lock().unwrap().remove(key)

@@ -249,6 +249,8 @@ ApplicationWindow {
     Component.onCompleted: {
         // Phone access, if it's on.
         Phone.autostart()
+        // pi's extensions, once.
+        if (win.selftestDir === "") Accounts.setUpPackages()
         updateNotesProject()
         syncGitFolder()
         fitPanes()

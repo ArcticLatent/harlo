@@ -677,7 +677,8 @@ Rectangle {
             tip: "Goal, side question, Ask first"
             onClicked: moreMenu.popup(this, 0, -moreMenu.implicitHeight - 6)
         }
-        // omp: what runs without asking (tools.approvalMode); click cycles.
+        // What runs without asking (omp's tools.approvalMode; for pi, its
+        // permission extension's prompts that harlo answers); click cycles.
         ComposerIconButton {
             id: permissionsButton
             objectName: "permissionsButton"

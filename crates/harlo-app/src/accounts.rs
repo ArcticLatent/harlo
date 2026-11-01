@@ -143,19 +143,30 @@ pub mod qobject {
         /// The log of a server harlo starts (its output; "" before one).
         #[qinvokable]
         fn server_log(self: &Accounts, url: &QString) -> QString;
-        /// pi's packages as seen from `folder` ("" for yours alone): `{
-        /// state: "loading" | "ready", list: [{ source, path, project,
-        /// version, description, adds }], error, job: { action, source,
-        /// state: "running" | "done" | "failed", message } }`.
+        /// The extensions harlo sets up for pi: `{ state: "loading" | "ready",
+        /// list: [{ name, title, what, tokens, optional, note, enabled, version,
+        /// latest, newer }], error, job:
+        /// { source, state: "running" | "done" | "failed", message } }`.
         #[qinvokable]
-        fn packages(self: &Accounts, folder: &QString) -> QString;
-        /// Reads pi's packages again (`packages` follows).
+        fn packages(self: &Accounts) -> QString;
+        /// Reads them again (`packages` follows), then asks npm what's latest.
         #[qinvokable]
-        fn load_packages(self: Pin<&mut Accounts>, folder: &QString);
-        /// `pi install|update|remove <source>` ("update" of "all": every
-        /// package), yours or (`project`) the project's own in `folder`.
+        fn load_packages(self: Pin<&mut Accounts>);
+        /// Installs the latest version of one (`name`), or of each that has a
+        /// newer one ("all"). On or off stays as it is.
         #[qinvokable]
-        fn change_package(self: Pin<&mut Accounts>, folder: &QString, action: &QString, source: &QString, project: bool);
+        fn update_package(self: Pin<&mut Accounts>, name: &QString);
+        /// Turns one on (installed then, if it isn't) or off, for new sessions
+        /// and, as soon as they're idle, open ones.
+        #[qinvokable]
+        fn set_package_enabled(self: Pin<&mut Accounts>, name: &QString, on: bool);
+        /// Installs the extensions not set up yet, off, in the background, if
+        /// pi is here (at start: it's once, and after that only a new one).
+        #[qinvokable]
+        fn set_up_packages(self: Pin<&mut Accounts>);
+        /// The file with the permission rules, there or not.
+        #[qinvokable]
+        fn package_rules_file(self: &Accounts) -> QString;
     }
 }
 
@@ -167,6 +178,7 @@ use std::time::{Duration, Instant};
 
 use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::QString;
+use harlo_core::pi_packages;
 use harlo_core::{model_servers, signin};
 use harlo_harness::HarnessKind;
 use serde_json::{Value, json};
@@ -191,8 +203,8 @@ pub struct AccountsRust {
     /// `extra_usage` per agent: the answer, and when it came (`None`:
     /// being checked).
     extra_usage: HashMap<String, (bool, Option<Instant>)>,
-    /// `packages` per folder.
-    packages: HashMap<String, Value>,
+    /// `packages`.
+    packages: Value,
     /// `servers` per agent, as last read (`load_servers`).
     servers: HashMap<String, Value>,
 }
@@ -738,6 +750,8 @@ fn remove(name: &str, url: &str, delete_files: bool, step: &dyn Fn(&str, usize, 
         }
     }
     let files = if delete_files { model_files(url) } else { Vec::new() };
+    // (Empty folders go up to here: harlo's models folder, or Strata's.)
+    let root = strata_model(&start_command(url)).map_or_else(models_dir, |m| m.data);
     step("Stopping the server", 0, 0);
     stop_any(url);
     // (A llama.cpp router's preset, Basalt's settings file, too.)
@@ -764,8 +778,7 @@ fn remove(name: &str, url: &str, delete_files: bool, step: &dyn Fn(&str, usize, 
     if count > 0 {
         summary.push(format!("Deleted {count} model {} ({}).", if count == 1 { "file" } else { "files" }, gb(freed)));
     }
-    // Its folder too, once empty (harlo's models folder stays).
-    let root = models_dir();
+    // Its folder too, once empty (the models folder stays).
     for f in &files {
         let mut dir = f.parent();
         while let Some(d) = dir.filter(|d| d.starts_with(&root) && *d != root) {
@@ -829,8 +842,12 @@ pub(crate) fn shell_word(s: &str) -> String {
 
 /// The model files of a server harlo set up with llama.cpp: the GGUF its
 /// start command loads (`-m '…'`) and its other parts, in harlo's folder.
-fn model_files(url: &str) -> Vec<PathBuf> {
+pub(crate) fn model_files(url: &str) -> Vec<PathBuf> {
     let start = commands_of(url)["start"].as_str().unwrap_or_default().to_owned();
+    // (Strata's: the set's folders in its own data folder.)
+    if start.contains(" launch --family ") {
+        return strata_model(&start).map(|m| strata_files(url, &m)).unwrap_or_default();
+    }
     // (Basalt's: the pack its settings file names.)
     if let Some(rest) = start.split(" serve --config ").nth(1).filter(|_| start.contains("basalt")) {
         let settings: Value = std::fs::read_to_string(shell_word(rest)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
@@ -849,15 +866,7 @@ fn model_files(url: &str) -> Vec<PathBuf> {
         if !dir.starts_with(models_dir()) || dir == models_dir() {
             return Vec::new();
         }
-        let mut files = Vec::new();
-        let mut dirs = vec![dir];
-        while let Some(d) = dirs.pop() {
-            for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
-                let p = e.path();
-                if p.is_dir() { dirs.push(p) } else { files.push(p) }
-            }
-        }
-        return files;
+        return files_under(&dir);
     }
     // (A router's: each model of its preset.)
     let paths: Vec<PathBuf> = match start.split(" --models-preset ").nth(1) {
@@ -871,6 +880,88 @@ fn model_files(url: &str) -> Vec<PathBuf> {
         .flat_map(|(dir, file)| harlo_core::engines::gguf_parts(&file).into_iter().map(move |p| dir.join(p)))
         .filter(|p| p.is_file())
         .collect()
+}
+
+/// Every file in a folder, however deep.
+fn files_under(dir: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let mut dirs = vec![dir.to_path_buf()];
+    while let Some(d) = dirs.pop() {
+        for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+            let p = e.path();
+            if p.is_dir() { dirs.push(p) } else { files.push(p) }
+        }
+    }
+    files
+}
+
+/// A set of Strata's on this computer, as its setup left it.
+struct StrataModel {
+    /// `--model`, in lower case.
+    name: String,
+    deepseek: bool,
+    /// Strata's data folder (models, packs, mtp).
+    data: PathBuf,
+    pack: PathBuf,
+    /// Its settings file and start script (in Strata's install folder).
+    own: Vec<PathBuf>,
+}
+
+/// The set a Strata start command names, from the settings Strata wrote.
+fn strata_model(start: &str) -> Option<StrataModel> {
+    strata_model_in(&PathBuf::from(std::env::var_os("HOME")?).join(".local/share/strata/install"), start)
+}
+
+fn strata_model_in(install: &Path, start: &str) -> Option<StrataModel> {
+    if !start.contains(" launch --family ") {
+        return None;
+    }
+    let name = shell_word(start.split(" --model ").nth(1)?).to_lowercase();
+    let deepseek = start.split(" --family ").nth(1).is_some_and(|rest| shell_word(rest) == "deepseek41");
+    let (file, stem) = std::fs::read_dir(install).ok()?.flatten().find_map(|e| {
+        let file = e.file_name().to_string_lossy().into_owned();
+        let stem = file.strip_prefix("strata-")?.strip_suffix(".json")?.to_owned();
+        (stem == name || stem.ends_with(&format!("-{name}"))).then_some((e.path(), stem))
+    })?;
+    let config: Value = serde_json::from_str(&std::fs::read_to_string(&file).ok()?).ok()?;
+    let args = config["args"].as_array()?;
+    let pack = args.iter().position(|a| a == "--pack").and_then(|i| args.get(i + 1)?.as_str()).map(PathBuf::from)?;
+    let data = pack.parent().filter(|p| p.ends_with("packs"))?.parent()?.to_path_buf();
+    Some(StrataModel { name, deepseek, data, pack, own: vec![file, install.join(format!("run-{stem}.sh"))] })
+}
+
+/// A Strata set's files: its model and pack folders, unless another of
+/// harlo's servers uses the set; what the sets of its family share, with the
+/// last of them.
+fn strata_files(url: &str, model: &StrataModel) -> Vec<PathBuf> {
+    let others: Vec<StrataModel> = set_up_servers().into_iter().filter(|(u, _)| u != url).filter_map(|(_, v)| strata_model(v["start"].as_str()?)).collect();
+    strata_set_files(model, &others)
+}
+
+fn strata_set_files(model: &StrataModel, other_servers: &[StrataModel]) -> Vec<PathBuf> {
+    if other_servers.iter().any(|o| o.name == model.name) {
+        return Vec::new();
+    }
+    let in_folder = |dir: &Path| -> Vec<PathBuf> { std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path()).collect() };
+    let name_of = |p: &Path| p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+    let models = in_folder(&model.data.join("models"));
+    let mut files = files_under(&model.pack);
+    for m in models.iter().filter(|m| m.is_dir() && (name_of(m) == model.name || name_of(m).ends_with(&format!("-{}", model.name)))) {
+        files.extend(files_under(m));
+    }
+    // (Others of its family with a pack here need what they share.)
+    let packs = in_folder(&model.data.join("packs"));
+    let others = packs.iter().filter(|p| **p != model.pack && name_of(p).starts_with("deepseek") == model.deepseek).count();
+    if others == 0 {
+        if model.deepseek {
+            files.extend(models.iter().filter(|m| name_of(m) == "deepseek-v4.1-flash-shared").flat_map(|m| files_under(m)));
+        } else {
+            files.extend(models.iter().filter(|m| m.is_file() && name_of(m).starts_with("mmproj-qwen")).cloned());
+            files.extend(files_under(&model.data.join("mtp")));
+        }
+    }
+    files.extend(model.own.iter().filter(|f| f.is_file()).cloned());
+    files
 }
 
 // ---- starting and stopping model servers --------------------------------------
@@ -1241,6 +1332,17 @@ pub(crate) fn ensure_running(url: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The servers harlo set up on an engine (its name, as `engine_of` says it).
+pub(crate) fn servers_of(engine: &str) -> Vec<String> {
+    set_up_servers().into_iter().map(|(url, _)| url).filter(|url| engine_of(url) == engine).collect()
+}
+
+/// A server's start and stop commands.
+pub(crate) fn commands(url: &str) -> (String, String) {
+    let v = commands_of(url);
+    (v["start"].as_str().unwrap_or_default().to_owned(), v["stop"].as_str().unwrap_or_default().to_owned())
+}
+
 /// Whether a server has to be started before a message: it's down, or its
 /// engine faulted.
 pub(crate) fn needs_start(url: &str) -> bool {
@@ -1516,76 +1618,149 @@ impl Accounts {
     }
 }
 
-fn package_json(p: &harlo_core::pi_packages::Package) -> Value {
-    json!({ "source": p.source, "path": p.path.to_string_lossy(), "project": p.project, "version": p.version, "description": p.description, "adds": p.adds })
-}
-
 impl Accounts {
-    pub fn packages(&self, folder: &QString) -> QString {
-        let v = self.rust().packages.get(&folder.to_string()).cloned().unwrap_or_else(|| json!({ "state": "loading", "list": [], "error": "", "job": null }));
+    pub fn packages(&self) -> QString {
+        let v = &self.rust().packages;
+        if v.is_null() {
+            return QString::from(&json!({ "state": "loading", "list": [], "error": "", "job": null }).to_string());
+        }
         QString::from(&v.to_string())
     }
 
-    pub fn load_packages(mut self: Pin<&mut Self>, folder: &QString) {
-        let folder = folder.to_string();
-        let mut v = self.rust().packages.get(&folder).cloned().unwrap_or_else(|| json!({ "list": [], "job": null }));
-        v["state"] = json!("loading");
-        self.as_mut().rust_mut().packages.insert(folder.clone(), v);
+    pub fn package_rules_file(&self) -> QString {
+        QString::from(&harlo_core::pi_packages::policy_file().to_string_lossy().into_owned())
+    }
+
+    pub fn load_packages(mut self: Pin<&mut Self>) {
+        if self.rust().packages.is_null() {
+            self.as_mut().rust_mut().packages = json!({ "list": [], "job": null, "error": "" });
+        }
+        self.as_mut().rust_mut().packages["state"] = json!("loading");
         self.as_mut().bump();
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
-            let result = program(HarnessKind::Pi).ok_or_else(|| "pi isn't installed.".to_owned()).and_then(|pi| harlo_core::pi_packages::list(&pi, &package_dir(&folder)));
-            let _ = thread.queue(move |mut this| {
-                let mut v = this.rust().packages.get(&folder).cloned().unwrap_or_else(|| json!({ "job": null }));
+            let installed = program(HarnessKind::Pi).ok_or_else(|| "pi isn't installed.".to_owned()).and_then(|pi| pi_packages::list(&pi, &home()));
+            let row = |e: &pi_packages::Extension, version: &str, latest: &str| {
+                json!({ "name": e.name, "title": e.title, "what": e.what, "tokens": e.tokens, "optional": e.optional, "note": e.note, "enabled": pi_packages::enabled(e.name), "version": version, "latest": latest, "newer": pi_packages::is_newer(version, latest) })
+            };
+            let error = installed.as_ref().err().cloned().unwrap_or_default();
+            let installed = installed.unwrap_or_default();
+            let version = |name: &str| installed.iter().find(|p| !p.project && pi_packages::name_of(&p.source) == name).map(|p| p.version.clone()).unwrap_or_default();
+            let list: Vec<Value> = pi_packages::EXTENSIONS.iter().map(|e| row(e, &version(e.name), "")).collect();
+            let shown = thread.queue(move |mut this| {
+                let v = &mut this.as_mut().rust_mut().packages;
                 v["state"] = json!("ready");
-                match result {
-                    Ok(list) => {
-                        v["list"] = Value::Array(list.iter().map(package_json).collect());
-                        v["error"] = json!("");
-                    }
-                    Err(e) => v["error"] = json!(e),
-                }
-                this.as_mut().rust_mut().packages.insert(folder, v);
+                v["list"] = json!(list);
+                v["error"] = json!(error);
+                this.bump();
+            });
+            if shown.is_err() {
+                return;
+            }
+            // What's latest comes after (npm may be slow, or out of reach).
+            let list: Vec<Value> = pi_packages::EXTENSIONS.iter().map(|e| row(e, &version(e.name), &pi_packages::latest(e.name).unwrap_or_default())).collect();
+            let _ = thread.queue(move |mut this| {
+                this.as_mut().rust_mut().packages["list"] = json!(list);
                 this.bump();
             });
         });
     }
 
-    pub fn change_package(mut self: Pin<&mut Self>, folder: &QString, action: &QString, source: &QString, project: bool) {
-        let (folder, action, source) = (folder.to_string(), action.to_string(), source.to_string().trim().to_owned());
-        let mut v = self.rust().packages.get(&folder).cloned().unwrap_or_else(|| json!({ "state": "ready", "list": [], "error": "" }));
-        if v["job"]["state"] == "running" {
+    pub fn update_package(mut self: Pin<&mut Self>, name: &QString) {
+        let name = name.to_string();
+        if self.rust().packages["job"]["state"] == "running" {
             return;
         }
-        v["job"] = json!({ "action": action, "source": source, "state": "running", "message": "" });
-        self.as_mut().rust_mut().packages.insert(folder.clone(), v);
+        let list = self.rust().packages["list"].as_array().cloned().unwrap_or_default();
+        self.as_mut().rust_mut().packages["job"] = json!({ "source": name, "state": "running", "message": "" });
         self.as_mut().bump();
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
-            let result = program(HarnessKind::Pi)
-                .ok_or_else(|| "pi isn't installed.".to_owned())
-                .and_then(|pi| harlo_core::pi_packages::change(&pi, &package_dir(&folder), &action, &source, project));
+            let result = program(HarnessKind::Pi).ok_or_else(|| "pi isn't installed.".to_owned()).and_then(|pi| {
+                let mut failed = Vec::new();
+                for row in list.iter().filter(|r| name == "all" && r["newer"] == true || r["name"] == name.as_str()) {
+                    let (package, latest) = (row["name"].as_str().unwrap_or_default(), row["latest"].as_str().unwrap_or_default());
+                    if !latest.is_empty()
+                        && let Err(why) = pi_packages::install(&pi, &home(), package, latest)
+                    {
+                        failed.push(format!("{}: {why}", row["title"].as_str().unwrap_or(package)));
+                    }
+                }
+                if failed.is_empty() { Ok(()) } else { Err(failed.join("\n")) }
+            });
             let _ = thread.queue(move |mut this| {
-                let mut v = this.rust().packages.get(&folder).cloned().unwrap_or_default();
                 let (state, message) = match result {
-                    Ok(()) => ("done", match action.as_str() {
-                        "install" => "Installed. New pi sessions have it.",
-                        "remove" => "Removed. New pi sessions are without it.",
-                        _ => "Updated. New pi sessions use the new version.",
-                    }.to_owned()),
-                    Err(e) => ("failed", e),
+                    Ok(()) => {
+                        crate::registry::restart_when_idle("pi");
+                        ("done", "Done. New pi sessions use it; open ones as soon as they're idle.".to_owned())
+                    }
+                    Err(why) => ("failed", why),
                 };
-                v["job"] = json!({ "action": action, "source": source, "state": state, "message": message });
-                this.as_mut().rust_mut().packages.insert(folder.clone(), v);
-                this.load_packages(&QString::from(&folder));
+                this.as_mut().rust_mut().packages["job"] = json!({ "source": name, "state": state, "message": message });
+                this.load_packages();
+            });
+        });
+    }
+
+    pub fn set_package_enabled(mut self: Pin<&mut Self>, name: &QString, on: bool) {
+        let name = name.to_string();
+        if self.rust().packages["job"]["state"] == "running" {
+            return;
+        }
+        self.as_mut().rust_mut().packages["job"] = json!({ "source": name, "state": "running", "message": "" });
+        self.as_mut().bump();
+        let thread = self.qt_thread();
+        crate::runtime().spawn_blocking(move || {
+            let result = program(HarnessKind::Pi).ok_or_else(|| "pi isn't installed.".to_owned()).and_then(|pi| pi_packages::switch(&pi, &home(), &name, on));
+            let _ = thread.queue(move |mut this| {
+                let (state, message) = match result {
+                    Ok(()) => {
+                        crate::registry::restart_when_idle("pi");
+                        ("done", if on { "On. New pi sessions have it; open ones as soon as they're idle." } else { "Off. New pi sessions are without it; open ones as soon as they're idle." }.to_owned())
+                    }
+                    Err(why) => ("failed", why),
+                };
+                this.as_mut().rust_mut().packages["job"] = json!({ "source": name, "state": state, "message": message });
+                this.load_packages();
+            });
+        });
+    }
+
+    pub fn set_up_packages(mut self: Pin<&mut Self>) {
+        let Some(pi) = program(HarnessKind::Pi) else { return };
+        if pi_packages::to_set_up().is_empty() {
+            return;
+        }
+        if self.rust().packages.is_null() {
+            self.as_mut().rust_mut().packages = json!({ "state": "loading", "list": [], "error": "" });
+        }
+        self.as_mut().rust_mut().packages["job"] = json!({ "source": "all", "state": "running", "message": "Installing pi's extensions (they stay off until you turn them on)…" });
+        self.as_mut().bump();
+        let thread = self.qt_thread();
+        crate::runtime().spawn_blocking(move || {
+            let adding = thread.clone();
+            let result = pi_packages::ensure(&pi, &home(), &|e: &pi_packages::Extension| {
+                let message = format!("Installing pi's extensions (they stay off until you turn them on): {}…", e.title);
+                let _ = adding.queue(move |mut this| {
+                    this.as_mut().rust_mut().packages["job"]["message"] = json!(message);
+                    this.bump();
+                });
+            });
+            let _ = thread.queue(move |mut this| {
+                let (state, message) = match result {
+                    Ok(()) => ("done", "pi's extensions are installed. Turn on the ones you want.".to_owned()),
+                    Err(why) => ("failed", format!("Couldn't install all of pi's extensions; harlo tries again next time it starts.\n{why}")),
+                };
+                this.as_mut().rust_mut().packages["job"] = json!({ "source": "all", "state": state, "message": message });
+                this.load_packages();
             });
         });
     }
 }
 
-/// Where pi's package commands run: the project, or (yours) your home.
-fn package_dir(folder: &str) -> PathBuf {
-    if folder.is_empty() { std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/")) } else { PathBuf::from(folder) }
+/// Where pi's package commands run.
+fn home() -> PathBuf {
+    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
 }
 
 /// Whether the agent uses Claude through a Claude subscription (blocking):
@@ -2193,6 +2368,71 @@ fn opencode_sign_in(provider: &str, method: &str, answers: &Value, report: &Repo
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_strata_sets_files_are_its_own() {
+        use std::path::Path;
+        let root = std::env::temp_dir().join(format!("harlo-strata-files-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (install, data) = (root.join("install"), root.join("data"));
+        let touch = |p: &Path| {
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, "x").unwrap();
+        };
+        for f in [
+            "models/deepseek-v4.1-flash-IST-DAS-2.00bpw/a.gguf",
+            "models/deepseek-v4.1-flash-IST-DAS-2.25bpw/b.gguf",
+            "models/deepseek-v4.1-flash-shared/engram.gguf",
+            "models/IQ2_XS/q.gguf",
+            "models/IQ3_S/partial.gguf",
+            "models/mmproj-Qwen3.8-Flash-Next-BF16.gguf",
+            "mtp/mtp-q2_0.gguf",
+            "packs/deepseek-v4.1-flash-ist-das-2.00bpw/tokenizer/t.json",
+            "packs/iq2_xs/ds.txt",
+        ] {
+            touch(&data.join(f));
+        }
+        let config = |file: &str, pack: &str| {
+            let pack = data.join("packs").join(pack);
+            std::fs::create_dir_all(&install).unwrap();
+            std::fs::write(install.join(file), serde_json::json!({ "args": ["--pack", pack.to_string_lossy(), "--eos", "1"] }).to_string()).unwrap();
+        };
+        config("strata-deepseek-v4.1-flash-ist-das-2.00bpw.json", "deepseek-v4.1-flash-ist-das-2.00bpw");
+        config("strata-iq2_xs.json", "iq2_xs");
+        touch(&install.join("run-iq2_xs.sh"));
+        let start = |family: &str, model: &str| format!("/x/strata launch --family {family} --model {model} --port 8080 --access local");
+        let deepseek = super::strata_model_in(&install, &start("deepseek41", "ist-das-2.00bpw")).unwrap();
+        let qwen = super::strata_model_in(&install, &start("qwen", "iq2_xs")).unwrap();
+        assert_eq!(deepseek.data, data);
+        assert!(super::strata_model_in(&install, "exec /x/llama-server --models-preset y").is_none());
+        let names = |files: Vec<std::path::PathBuf>| -> Vec<String> {
+            let mut n: Vec<String> = files.iter().map(|f| f.strip_prefix(&root).unwrap().to_string_lossy().into_owned()).collect();
+            n.sort();
+            n
+        };
+        // The last DeepSeek set: what the sets share too; never Qwen's or another set's.
+        assert_eq!(
+            names(super::strata_set_files(&deepseek, &[])),
+            [
+                "data/models/deepseek-v4.1-flash-IST-DAS-2.00bpw/a.gguf",
+                "data/models/deepseek-v4.1-flash-shared/engram.gguf",
+                "data/packs/deepseek-v4.1-flash-ist-das-2.00bpw/tokenizer/t.json",
+                "install/strata-deepseek-v4.1-flash-ist-das-2.00bpw.json",
+            ]
+        );
+        // The last Qwen set: its shared parts; not another size left half-downloaded.
+        assert_eq!(
+            names(super::strata_set_files(&qwen, &[])),
+            ["data/models/IQ2_XS/q.gguf", "data/models/mmproj-Qwen3.8-Flash-Next-BF16.gguf", "data/mtp/mtp-q2_0.gguf", "data/packs/iq2_xs/ds.txt", "install/run-iq2_xs.sh", "install/strata-iq2_xs.json"]
+        );
+        // Another DeepSeek pack: the shared parts stay.
+        touch(&data.join("packs/deepseek-v4.1-flash-ist-das-2.25bpw/ds.txt"));
+        assert!(!names(super::strata_set_files(&deepseek, &[])).iter().any(|n| n.contains("shared")));
+        // Another server on the same set: nothing goes.
+        let again = super::strata_model_in(&install, &start("deepseek41", "ist-das-2.00bpw")).unwrap();
+        assert!(super::strata_set_files(&deepseek, &[again]).is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn says_why_a_server_did_not_start() {
         let said = super::start_failure("12:05:13 FATAL server failed during startup | Device budget cannot hold model weights and required execution resources");

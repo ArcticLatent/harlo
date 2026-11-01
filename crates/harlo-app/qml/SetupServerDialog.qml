@@ -130,6 +130,15 @@ AppDialog {
     /// its models): nothing to add there.
     readonly property bool ompFindsIt: !!job && !!job.result && engine !== null && engine.id === "ollama" && /:11434\/v1$/.test(job.result.baseUrl)
     /// Hermes refuses models with under 64k tokens of context.
+    /// Updating an engine (`Settings → Model servers`): this dialog shows how
+    /// it goes, without the setup's steps and agents.
+    readonly property bool updating: job !== null && job.update === true
+    readonly property bool updateEnded: updating && job.state !== "running"
+    onUpdateEndedChanged: if (updateEnded) { ServerSetup.refresh(); ServerSetup.checkUpdates(true); added() }
+    function updateEngine(id) {
+        ServerSetup.start(JSON.stringify({ update: id }))
+        open()
+    }
     readonly property bool hermesFits: !job || !job.result || job.result.models.length === 0 || job.result.models.some(m => !m.context || m.context >= 64000)
     function addToAgents() {
         const r = job.result
@@ -143,7 +152,7 @@ AppDialog {
         added()
     }
 
-    title: addTo !== null ? "Add a model to " + (engine ? engine.name : "the server") : page === "engine" ? "Set up a model server" : engine ? "Set up " + engine.name : ""
+    title: page === "run" && updating ? "Update the engine" : addTo !== null ? "Add a model to " + (engine ? engine.name : "the server") : page === "engine" ? "Set up a model server" : engine ? "Set up " + engine.name : ""
     standardButtons: Dialog.NoButton
     width: Math.min(640, (Overlay.overlay ? Overlay.overlay.width : 700) - 40)
     onAboutToShow: {
@@ -536,7 +545,7 @@ AppDialog {
             spacing: 8
             Label {
                 Layout.fillWidth: true
-                text: !dlg.job ? "" : dlg.job.state === "done" ? "It works." : dlg.job.state === "failed" ? "It didn't work." : dlg.job.state === "cancelled" ? "Cancelled." : dlg.job.step
+                text: !dlg.job ? "" : dlg.job.state === "done" ? (dlg.updating ? dlg.job.result.message : "It works.") : dlg.job.state === "failed" ? "It didn't work." : dlg.job.state === "cancelled" ? "Cancelled." : dlg.job.step
                 color: dlg.job && dlg.job.state === "failed" ? Theme.error : Theme.foreground
                 font.pixelSize: Theme.px(13.5)
                 font.weight: Font.Medium
@@ -619,7 +628,7 @@ AppDialog {
             }
             // Done: the test, then the agents.
             ColumnLayout {
-                visible: dlg.job !== null && dlg.job.state === "done"
+                visible: dlg.job !== null && dlg.job.state === "done" && !dlg.updating
                 Layout.fillWidth: true
                 spacing: 6
                 Note {
@@ -654,14 +663,14 @@ AppDialog {
             }
             RowLayout {
                 Layout.topMargin: 6
-                FlatButton { visible: dlg.job !== null && dlg.job.state !== "running" && dlg.job.state !== "done"; text: "Back"; outlined: false; font.pixelSize: Theme.px(12); onClicked: dlg.page = "model" }
+                FlatButton { visible: dlg.job !== null && dlg.job.state !== "running" && dlg.job.state !== "done" && !dlg.updating; text: "Back"; outlined: false; font.pixelSize: Theme.px(12); onClicked: dlg.page = "model" }
                 Item { Layout.fillWidth: true }
-                FlatButton { visible: dlg.job !== null && dlg.job.state === "running"; text: "Cancel setup"; accent: Theme.error; font.pixelSize: Theme.px(12); onClicked: ServerSetup.cancel() }
+                FlatButton { visible: dlg.job !== null && dlg.job.state === "running"; text: dlg.updating ? "Cancel update" : "Cancel setup"; accent: Theme.error; font.pixelSize: Theme.px(12); onClicked: ServerSetup.cancel() }
                 FlatButton { visible: dlg.job !== null && dlg.job.state === "running"; text: "Hide"; outlined: false; accent: Theme.muted; font.pixelSize: Theme.px(12); onClicked: dlg.close() }
                 FlatButton { visible: dlg.job !== null && dlg.job.state !== "running"; text: "Close"; outlined: false; accent: Theme.muted; font.pixelSize: Theme.px(12); onClicked: dlg.close() }
                 FlatButton {
                     objectName: "setupAdd"
-                    visible: dlg.job !== null && dlg.job.state === "done"
+                    visible: dlg.job !== null && dlg.job.state === "done" && !dlg.updating
                     text: "Add to the agents"
                     enabled: dlg.chosen.some(x => (x !== "hermes" || dlg.hermesFits) && !(x === "omp" && dlg.ompFindsIt))
                     accent: Theme.primary

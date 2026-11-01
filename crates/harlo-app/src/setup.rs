@@ -421,10 +421,30 @@ impl Setup {
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
             // (Installers download a lot; a stuck one is stopped after 20 minutes.)
-            let (state, message) = match crate::jobs::wait(job, Duration::from_secs(20 * 60)) {
+            let (state, mut message) = match crate::jobs::wait(job, Duration::from_secs(20 * 60)) {
                 Ok(()) => ("done", format!("{label} is installed.")),
                 Err(why) => ("failed", format!("Installing {label} failed: {why}")),
             };
+            // pi comes with the extensions harlo offers for it, off.
+            if state == "done" && agent == "pi"
+                && let Some(pi) = harlo_harness::resolve_program(HarnessKind::Pi)
+            {
+                let progress = thread.clone();
+                let home = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_else(|| "/".into());
+                let result = harlo_core::pi_packages::ensure(&pi, &home, &|e: &harlo_core::pi_packages::Extension| {
+                    let text = format!("Installing pi's extensions (they stay off until you turn them on): {}…", e.title);
+                    let _ = progress.queue(move |mut this| {
+                        if let Some(i) = this.as_mut().rust_mut().installs.get_mut("pi") {
+                            i.message = text;
+                        }
+                        this.bump();
+                    });
+                });
+                message = match result {
+                    Ok(()) => format!("{message} Its extensions are ready: turn on the ones you want in Settings → Extensions."),
+                    Err(why) => format!("{message} Some of its extensions couldn't be set up; harlo tries again next time it starts.\n{why}"),
+                };
+            }
             let _ = thread.queue(move |mut this| {
                 if let Some(i) = this.as_mut().rust_mut().installs.get_mut(&agent) {
                     i.state = state.into();

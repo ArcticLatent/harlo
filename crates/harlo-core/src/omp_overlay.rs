@@ -40,6 +40,27 @@ fn root(config_yaml: &str) -> Yaml {
     YamlLoader::load_from_str(config_yaml).ok().and_then(|d| d.into_iter().next()).unwrap_or(Yaml::Null)
 }
 
+/// Roles without the models `gone(provider, model)` rules out, from their
+/// comma lists of `provider/model[:thinking]`; a role left with none goes.
+pub fn without_models(roles: &BTreeMap<String, String>, mut gone: impl FnMut(&str, &str) -> bool) -> BTreeMap<String, String> {
+    let mut left = BTreeMap::new();
+    for (role, value) in roles {
+        let kept: Vec<&str> = value
+            .split(',')
+            .map(str::trim)
+            .filter(|entry| {
+                let Some((provider, model)) = entry.split_once('/') else { return true };
+                let model = model.rsplit_once(':').filter(|(_, level)| ["off", "minimal", "low", "medium", "high", "xhigh"].contains(level)).map_or(model, |(m, _)| m);
+                !gone(provider, model)
+            })
+            .collect();
+        if !kept.is_empty() {
+            left.insert(role.clone(), kept.join(","));
+        }
+    }
+    left
+}
+
 /// A map of strings in the config (empty if none).
 fn string_map(node: &Yaml) -> BTreeMap<String, String> {
     let Yaml::Hash(map) = node else { return BTreeMap::new() };
@@ -128,6 +149,25 @@ fn quote(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn leaves_out_models_that_are_gone() {
+        let roles: BTreeMap<String, String> = [
+            ("default".to_owned(), "llama.cpp/qwen:medium".to_owned()),
+            ("task".to_owned(), "llama.cpp/qwen:medium, openai/gpt".to_owned()),
+            ("smol".to_owned(), "ollama/hf.co/a/b:Q4".to_owned()),
+        ]
+        .into();
+        let mut asked = Vec::new();
+        let left = without_models(&roles, |provider, model| {
+            asked.push(model.to_owned());
+            provider == "llama.cpp"
+        });
+        assert!(!left.contains_key("default"));
+        assert_eq!(left["task"], "openai/gpt");
+        assert_eq!(left["smol"], "ollama/hf.co/a/b:Q4");
+        assert!(asked.contains(&"qwen".to_owned()) && asked.contains(&"hf.co/a/b:Q4".to_owned()));
+    }
 
     #[test]
     fn reads_model_roles() {
