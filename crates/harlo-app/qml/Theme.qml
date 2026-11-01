@@ -177,6 +177,11 @@ QtObject {
         if (!sv) return null
         return { name: sv.name, engine: sv.engine === "Your command" ? "" : (sv.engine || ""), address: sv.baseUrl.replace(/^https?:\/\//, "").replace(/\/v1\/?$/, ""), place: sv.place }
     }
+    /// The engine a model on one of your servers runs on ("" for any other).
+    function modelEngine(harness, modelId) {
+        const sv = serverOf(harness, modelId)
+        return sv ? sv.engine : ""
+    }
     function toolLabel(name) {
         const m = /^mcp__([^_]+(?:_[^_]+)*?)__(.+)$/.exec(name || "")
         return m ? m[1] + " " + m[2].replace(/_/g, " ") : name

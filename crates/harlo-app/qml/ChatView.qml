@@ -367,7 +367,7 @@ Rectangle {
                         }
                         Label {
                             // A model on one of your servers: the engine it runs on.
-                            readonly property string engine: { const sv = Theme.serverOf(session.harness, session.modelId); return sv ? sv.engine : "" }
+                            readonly property string engine: Theme.modelEngine(session.harness, session.modelId)
                             visible: session.modelName !== ""
                             // (Its thinking level; none said when it's off.)
                             text: Theme.modelLabel(session.modelName) + (engine ? " on " + engine : "") + (session.thinking && session.thinking !== "off" ? " · " + session.thinking : "")

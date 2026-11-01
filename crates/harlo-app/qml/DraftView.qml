@@ -484,9 +484,11 @@ Rectangle {
                                             elide: Text.ElideRight
                                             Layout.fillWidth: true
                                         }
+                                        // (A local model: its engine.)
                                         Label {
-                                            visible: dmRow.modelData.id.indexOf("/") > 0
-                                            text: Theme.providerOf(dmRow.modelData.id)
+                                            readonly property string engine: dmRow.modelData.local ? Theme.modelEngine(root.effectiveHarness, dmRow.modelData.id) : ""
+                                            visible: engine !== "" || dmRow.modelData.id.indexOf("/") > 0
+                                            text: engine || Theme.providerOf(dmRow.modelData.id)
                                             color: Theme.muted
                                             font.pixelSize: Theme.px(11)
                                         }

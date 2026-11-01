@@ -194,9 +194,11 @@ AppDialog {
                             font.pixelSize: Theme.px(12.5)
                             elide: Text.ElideRight
                         }
+                        // (A local model: its engine.)
                         Label {
-                            visible: mRow.modelData.id !== "" && mRow.modelData.id !== mRow.modelData.name
-                            text: Theme.providerOf(mRow.modelData.id)
+                            readonly property string engine: mRow.modelData.local ? Theme.modelEngine(dlg.harness, mRow.modelData.id) : ""
+                            visible: engine !== "" || (mRow.modelData.id !== "" && mRow.modelData.id !== mRow.modelData.name)
+                            text: engine || Theme.providerOf(mRow.modelData.id)
                             color: Theme.muted
                             font.pixelSize: Theme.px(11)
                         }

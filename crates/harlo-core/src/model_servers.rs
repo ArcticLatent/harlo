@@ -32,6 +32,9 @@ pub struct Found {
     /// It thinks before it answers (harlo's test saw it): pi, Oh My Pi and
     /// OpenCode then show its thinking and offer thinking levels.
     pub reasoning: bool,
+    /// Its server tells low, medium and high apart (Basalt): offered, where
+    /// the others have only on and off. For writing an agent's file.
+    pub levels: bool,
 }
 
 /// What a server serves, and the address its models answer at.
@@ -286,7 +289,7 @@ fn details_in(kind: HarnessKind, all: &Value, name: &str) -> Option<(String, Str
         }
         .unwrap_or(false)
     };
-    let models = server.models.iter().map(|id| Found { id: id.clone(), context: context(id), reasoning: reasoning(id) }).collect();
+    let models = server.models.iter().map(|id| Found { id: id.clone(), context: context(id), reasoning: reasoning(id), ..Default::default() }).collect();
     Some((server.base_url, key, models))
 }
 
@@ -339,6 +342,59 @@ fn set_context_in(kind: HarnessKind, file: &Path, name: &str, context: u64) -> R
     };
     write(file, &out).map_err(|e| format!("Couldn't write {shown}: {e}"))?;
     Ok(true)
+}
+
+/// OpenCode's thinking choices for a model that thinks.
+fn opencode_variants(levels: bool) -> Value {
+    if levels {
+        json!({ "off": { "reasoningEffort": "none" }, "low": { "reasoningEffort": "low" }, "medium": { "reasoningEffort": "medium" }, "high": { "reasoningEffort": "high" } })
+    } else {
+        json!({ "off": { "reasoningEffort": "none" } })
+    }
+}
+
+/// pi's thinking levels for a model that thinks (null: not offered).
+fn pi_levels(levels: bool) -> Value {
+    if levels {
+        json!({ "off": "none", "minimal": null, "low": "low", "medium": "medium", "high": "high" })
+    } else {
+        json!({ "off": "none", "minimal": null, "low": null, "medium": null, "high": "high" })
+    }
+}
+
+/// Offers thinking levels for a server's thinking models in the agent's file,
+/// where it was added without them: whether it changed anything.
+pub fn offer_levels(kind: HarnessKind, name: &str) -> Result<bool, String> {
+    let f = file(kind).ok_or("harlo can't change this agent's model servers.")?;
+    offer_levels_in(kind, &f, name)
+}
+
+fn offer_levels_in(kind: HarnessKind, file: &Path, name: &str) -> Result<bool, String> {
+    let shown = file.display();
+    let text = std::fs::read_to_string(file).map_err(|e| format!("Couldn't read {shown}: {e}"))?;
+    let mut v: Value = serde_json::from_str(&text).map_err(|e| format!("{shown} isn't valid JSON ({e})"))?;
+    let (top, field, wanted) = match kind {
+        HarnessKind::OpenCode => ("provider", "variants", opencode_variants(true)),
+        HarnessKind::Pi => ("providers", "thinkingLevelMap", pi_levels(true)),
+        _ => return Ok(false),
+    };
+    let Some(models) = v.get_mut(top).and_then(|p| p.get_mut(name)).and_then(|p| p.get_mut("models")) else { return Ok(false) };
+    let models: Vec<&mut Value> = match models {
+        Value::Object(m) => m.values_mut().collect(),
+        Value::Array(m) => m.iter_mut().collect(),
+        _ => return Ok(false),
+    };
+    let mut changed = false;
+    for m in models.into_iter().filter(|m| m["reasoning"] == true) {
+        if m[field] != wanted {
+            m[field] = wanted.clone();
+            changed = true;
+        }
+    }
+    if changed {
+        write(file, &(serde_json::to_string_pretty(&v).unwrap_or_default() + "\n")).map_err(|e| format!("Couldn't write {shown}: {e}"))?;
+    }
+    Ok(changed)
 }
 
 /// Takes a server out of the agent's file (its other settings as they are).
@@ -584,10 +640,11 @@ fn opencode_with(text: &str, name: &str, base_url: &str, key: &str, models: &[Fo
                 e["limit"] = json!({ "context": c, "output": c.min(32_768) });
             }
             // A model that thinks: OpenCode's thinking button offers "off",
-            // which local servers (llama.cpp, Ollama) honour; levels they don't.
+            // which local servers (llama.cpp, Ollama) honour; levels only
+            // where they tell them apart.
             if m.reasoning {
                 e["reasoning"] = json!(true);
-                e["variants"] = json!({ "off": { "reasoningEffort": "none" } });
+                e["variants"] = opencode_variants(m.levels);
             }
             (m.id.clone(), e)
         })
@@ -629,11 +686,11 @@ fn pi_with(text: &str, name: &str, base_url: &str, key: &str, models: &[Found]) 
                 e.insert("contextWindow".into(), json!(c));
             }
             // A model that thinks: pi's "off" sends "none" (else it sends
-            // nothing and the model thinks anyway); its levels in between,
-            // which local servers don't tell apart, unoffered.
+            // nothing and the model thinks anyway); its levels in between
+            // only where the server tells them apart.
             if m.reasoning {
                 e.insert("reasoning".into(), json!(true));
-                e.insert("thinkingLevelMap".into(), json!({ "off": "none", "minimal": null, "low": null, "medium": null, "high": "high" }));
+                e.insert("thinkingLevelMap".into(), pi_levels(m.levels));
             }
             Value::Object(e)
         })
@@ -721,8 +778,46 @@ fn write(file: &Path, text: &str) -> std::io::Result<()> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn offers_thinking_levels() {
+        let dir = std::env::temp_dir().join(format!("harlo-levels-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let thinking = Found { reasoning: true, ..found("qwen", Some(65536)) };
+        let models = [thinking.clone(), found("small", None)];
+        for (kind, file) in [(HarnessKind::Pi, "models.json"), (HarnessKind::OpenCode, "opencode.json")] {
+            let f = dir.join(file);
+            add_to(kind, &f, "other", "http://10.0.0.2:8000/v1", "", &[thinking.clone()], &[]).unwrap();
+            add_to(kind, &f, "basalt", "http://127.0.0.1:8080/v1", "", &models, &[]).unwrap();
+            // Added before harlo offered them: put in, once, and only there.
+            assert!(offer_levels_in(kind, &f, "basalt").unwrap(), "{kind:?}");
+            assert!(!offer_levels_in(kind, &f, "basalt").unwrap(), "{kind:?}");
+            assert!(!offer_levels_in(kind, &f, "absent").unwrap(), "{kind:?}");
+            let updated = std::fs::read_to_string(&f).unwrap();
+            let v: Value = serde_json::from_str(&updated).unwrap();
+            assert!(!updated.contains("absent"), "{kind:?}");
+            if kind == HarnessKind::OpenCode {
+                let p = &v["provider"];
+                assert_eq!(p["basalt"]["models"]["qwen"]["variants"].as_object().unwrap().keys().collect::<Vec<_>>(), ["off", "low", "medium", "high"]);
+                assert_eq!(p["basalt"]["models"]["qwen"]["variants"]["low"]["reasoningEffort"], "low");
+                assert!(p["basalt"]["models"]["small"].get("variants").is_none());
+                assert!(p["other"]["models"]["qwen"]["variants"].get("low").is_none());
+            } else {
+                let p = &v["providers"];
+                let map = &p["basalt"]["models"][0]["thinkingLevelMap"];
+                assert!(map["off"] == "none" && map["low"] == "low" && map["medium"] == "medium" && map["high"] == "high" && map["minimal"].is_null());
+                assert!(p["basalt"]["models"][1].get("thinkingLevelMap").is_none());
+                assert!(p["other"]["models"][0]["thinkingLevelMap"]["low"].is_null());
+            }
+            // Added with them: the same file.
+            let with = [Found { levels: true, ..thinking.clone() }, found("small", None)];
+            add_to(kind, &f, "basalt", "http://127.0.0.1:8080/v1", "", &with, &["basalt".to_owned()]).unwrap();
+            assert!(!offer_levels_in(kind, &f, "basalt").unwrap(), "{kind:?}");
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     fn found(id: &str, context: Option<u64>) -> Found {
-        Found { id: id.into(), context, reasoning: false }
+        Found { id: id.into(), context, ..Default::default() }
     }
 
     #[test]

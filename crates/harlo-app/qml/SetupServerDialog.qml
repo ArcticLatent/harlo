@@ -30,8 +30,12 @@ AppDialog {
     /// llama.cpp's context (tokens; 0: as much as fits) and the model's own.
     property int context: 0
     property int maxContext: 0
-    readonly property var contexts: maxContext === 0 ? [0, 16384, 32768, 65536, 131072]
+    // (Basalt has no "as much as fits": a size, 64k to start with.)
+    readonly property var contexts: fixedRepo !== "" ? [32768, 65536, 131072, 262144]
+        : maxContext === 0 ? [0, 16384, 32768, 65536, 131072]
         : [0].concat([16384, 32768, 65536, 131072, 262144, 524288].filter(c => c < maxContext), [maxContext])
+    /// Basalt: its one model's packs, from its own repository.
+    readonly property string fixedRepo: engine !== null && engine.id === "basalt" ? "jesdga/Qwen3.8-Flash-Next-Basalt" : ""
     readonly property bool fromHf: engine !== null && (engine.id === "ollama" || engine.id === "llamacpp" || engine.id === "vllm")
     /// vLLM: a repository as it is (no GGUF sizes to pick from).
     readonly property bool wholeRepo: engine !== null && engine.id === "vllm"
@@ -47,7 +51,7 @@ AppDialog {
     property bool nameEdited: false
     function defaultName() {
         if (!engine) return ""
-        const usual = engine.id === "ollama" ? 11434 : engine.id === "vllm" ? 8000 : 8080
+        const usual = engine.id === "ollama" ? 11434 : engine.id === "vllm" ? 8000 : 8080 // (llama.cpp, Strata, Basalt)
         const port = parseInt(portField.text)
         return engine.id + (port && port !== usual ? "-" + port : "")
     }
@@ -55,8 +59,9 @@ AppDialog {
     function count(n) { return n >= 1e9 ? +(n / 1e9).toFixed(n < 10e9 ? 1 : 0) + "B" : n >= 1e6 ? +(n / 1e6).toFixed(n < 10e6 ? 1 : 0) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "k" : "" + n }
     /// Tokens, as models count them: 128k, 1M.
     function ctxText(n) { return n >= 1048576 ? +(n / 1048576).toFixed(1) + "M" : Math.round(n / 1024) + "k" }
-    function fitText(fit) { return fit === "gpu" ? "Fits your graphics card" : fit === "ram" ? "Partly in RAM (slower)" : fit === "no" ? "Too big for this computer" : "" }
-    function fitColor(fit) { return fit === "gpu" ? Theme.success : fit === "ram" ? Theme.warning : Theme.muted }
+    // ("runs": Basalt's, on the card and in RAM together by design.)
+    function fitText(fit) { return fit === "gpu" ? "Fits your graphics card" : fit === "ram" ? "Partly in RAM (slower)" : fit === "runs" ? "Runs here" : fit === "no" ? "Too big for this computer" : "" }
+    function fitColor(fit) { return fit === "gpu" || fit === "runs" ? Theme.success : fit === "ram" ? Theme.warning : Theme.muted }
     function chooseRepo(m) {
         repo = m.repo
         maxContext = m.context || 0
@@ -86,6 +91,12 @@ AppDialog {
         error = ""
         modelSearch.text = ""
         if (e.id === "ollama" || e.id === "llamacpp" || e.id === "vllm") ServerSetup.findModels("", e.id)
+        // (Basalt: its packs straight away, 64k of context.)
+        if (e.id === "basalt") {
+            repo = "jesdga/Qwen3.8-Flash-Next-Basalt"
+            context = 65536
+            ServerSetup.listGgufs(repo)
+        }
         portField.text = ServerSetup.freePort(e.id === "ollama" ? 11434 : e.id === "vllm" ? 8000 : 8080)
         nameEdited = false
         nameField.text = defaultName()
@@ -219,17 +230,24 @@ AppDialog {
                 ToolTip.delay: 400
             }
             Note { visible: dlg.addTo === null && dlg.engine !== null && (dlg.engine.installed === null || !dlg.useInstalled)
-                text: dlg.wholeRepo ? "harlo installs uv (checked against its published checksum), then a Python of its own with vLLM and PyTorch for your card, in harlo's folder: several GB, a few minutes."
+                text: dlg.engine && dlg.engine.id === "basalt" ? "Basalt has no ready-made builds: harlo downloads its latest release's source from GitHub and builds it here with CMake and your CUDA toolkit (several minutes), then gives its server a Python of its own, in harlo's folder."
+                    : dlg.wholeRepo ? "harlo installs uv (checked against its published checksum), then a Python of its own with vLLM and PyTorch for your card, in harlo's folder: several GB, a few minutes."
                     : "harlo downloads the latest release for this computer's card, checks it against its published checksum and keeps it in its own folder." }
 
             // Ollama and llama.cpp: a model from Hugging Face, then its size.
             ColumnLayout {
-                visible: dlg.fromHf
+                visible: dlg.fromHf || dlg.fixedRepo !== ""
                 Layout.fillWidth: true
                 spacing: 6
-                FieldName { text: "Model" }
+                FieldName { text: dlg.fixedRepo !== "" ? "Qwen3.8-Flash-Next, in the size that fits" : "Model" }
+                // (Basalt: one model, its sizes; the memory they count.)
+                Note {
+                    visible: dlg.fixedRepo !== ""
+                    text: "Each size, graphics memory and RAM together: this computer has " + Math.round(dlg.memoryGb) + " GB (" + Math.round(dlg.vramGb) + " GB graphics + " + Math.round(dlg.memoryGb - dlg.vramGb) + " GB RAM). The download is the size shown, once."
+                }
                 AppTextField {
                     id: modelSearch
+                    visible: dlg.fromHf
                     objectName: "setupModelSearch"
                     Layout.fillWidth: true
                     placeholderText: "Search Hugging Face, or pick a popular one"
@@ -240,8 +258,10 @@ AppDialog {
                 }
                 ListView {
                     id: modelList
+                    // (Basalt: no list to pick from.)
+                    enabled: dlg.fromHf
                     objectName: "setupModels"
-                    visible: dlg.hm.models.length > 0
+                    visible: dlg.fromHf && dlg.hm.models.length > 0
                     Layout.fillWidth: true
                     Layout.preferredHeight: Math.min(contentHeight, 210)
                     clip: true
@@ -284,7 +304,7 @@ AppDialog {
                     }
                 }
                 Note {
-                    visible: text !== ""
+                    visible: text !== "" && dlg.fromHf
                     color: dlg.hm.state === "failed" ? Theme.error : Theme.muted
                     text: dlg.hm.state === "failed" ? dlg.hm.error
                         : dlg.hm.state === "finding" && dlg.hm.models.length === 0 ? "Finding models…"
@@ -333,7 +353,8 @@ AppDialog {
                 Note {
                     visible: dlg.file !== "" && !dlg.wholeRepo
                     readonly property var f: dlg.files.find(x => x.file === dlg.file)
-                    text: f ? dlg.fitText(f.fit) + ". Q4 and up are close to the full model; Q2 and Q3 lose some quality." : ""
+                    text: !f ? "" : dlg.fixedRepo !== "" ? dlg.fitText(f.fit) + ": " + dlg.gb(f.size) + " to download. The GSQ-RCO sizes are the small ones; the bigger the size, the closer to the full model."
+                        : dlg.fitText(f.fit) + ". Q4 and up are close to the full model; Q2 and Q3 lose some quality."
                 }
                 // vLLM: what the repository holds, and what it needs.
                 Note {
@@ -346,7 +367,7 @@ AppDialog {
             // llama.cpp and Ollama: how much it reads at once (each llama.cpp
             // model its own; Ollama's is the server's, not asked when adding).
             ColumnLayout {
-                visible: dlg.fromHf && !(dlg.addTo !== null && dlg.engine.id === "ollama")
+                visible: (dlg.fromHf || dlg.fixedRepo !== "") && !(dlg.addTo !== null && dlg.engine.id === "ollama")
                 Layout.fillWidth: true
                 spacing: 6
                 FieldName { Layout.topMargin: 4; text: "Context" }
@@ -384,6 +405,7 @@ AppDialog {
                             ? "Ollama picks it from your graphics memory (32k on cards with 24 GB or more), up to the model's own" + (dlg.maxContext ? " " + dlg.ctxText(dlg.maxContext) : "") + "."
                             : "llama.cpp gives it as much as fits on your card next to the model" + (dlg.maxContext ? ", up to its own " + dlg.ctxText(dlg.maxContext) : "") + ", and not less than 16k.")
                         : dlg.wholeRepo ? "How much of the conversation and files the model keeps in mind, in tokens. vLLM keeps it all on your card with the model: if they don't fit together, it says so when it starts."
+                        : dlg.fixedRepo !== "" ? "How much of the conversation and files the model keeps in mind, in tokens. Basalt keeps it on your card (8 bits a value), next to the model's busiest parts: more context, more graphics memory."
                         : "How much of the conversation and files the model keeps in mind, in tokens. If the model and " + dlg.ctxText(dlg.context) + " don't fit on your card together, " + (dlg.engine && dlg.engine.id === "ollama" ? "Ollama" : "llama.cpp") + " keeps part of the model in RAM, which is slower."
                             + (dlg.engine && dlg.engine.id === "ollama" ? " (It's Ollama's for every model it serves.)" : "")
                 }
@@ -503,6 +525,52 @@ AppDialog {
                     font.pixelSize: Theme.px(12)
                     font.weight: Font.DemiBold
                     font.features: { "tnum": 1 }
+                }
+            }
+            // The whole process (installers, downloads, the server's log), a
+            // panel to open; open or not is remembered.
+            FlatButton {
+                id: outputToggle
+                objectName: "setupOutputToggle"
+                property bool open: Workspace.setting("setup_output") === "1"
+                visible: dlg.job !== null
+                text: open ? "Hide output" : "Show output"
+                outlined: false
+                accent: Theme.accent
+                font.pixelSize: Theme.px(12)
+                onClicked: { open = !open; Workspace.setSetting("setup_output", open ? "1" : "0") }
+                Layout.leftMargin: -8
+            }
+            Rectangle {
+                objectName: "setupOutput"
+                visible: dlg.job !== null && outputToggle.open
+                Layout.fillWidth: true
+                Layout.preferredHeight: 240
+                radius: 8
+                color: Theme.codeBg
+                border.color: Theme.hairline
+                ScrollView {
+                    id: outputScroll
+                    anchors.fill: parent
+                    anchors.margins: 1
+                    clip: true
+                    TextArea {
+                        id: outputText
+                        readOnly: true
+                        selectByMouse: true
+                        wrapMode: TextEdit.WrapAnywhere
+                        text: ServerSetup.output
+                        color: Theme.textMuted
+                        font.family: Theme.mono
+                        font.pixelSize: Theme.px(11)
+                        background: null
+                        leftPadding: 10
+                        rightPadding: 10
+                        topPadding: 8
+                        bottomPadding: 8
+                        // (The newest lines in view.)
+                        onTextChanged: cursorPosition = length
+                    }
                 }
             }
             // Done: the test, then the agents.

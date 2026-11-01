@@ -151,6 +151,7 @@ fn main() {
         platform::set_desktop_file_name(&QString::from("harlo"));
     }
     platform::set_window_icon(&QString::from(":/qt/qml/harlo/icons/app/harlo.svg"));
+    accounts::offer_levels();
     let mut engine = QQmlApplicationEngine::new();
     if let Some(mut engine) = engine.as_mut() {
         // No window to draw (a QML error): says nothing about the graphics.
@@ -168,6 +169,10 @@ fn main() {
     instance::cleanup();
     // Orchestration's socket.
     let _ = std::fs::remove_file(harlo_core::orchestration::socket_path());
+    // The QML engine, then what's left to delete, then the application, in
+    // that order (Qt's own exit order crashed on quit).
+    drop(engine);
+    platform::shutdown_application();
 }
 
 /// Whether harlo.desktop is installed where desktops look for it: the

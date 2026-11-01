@@ -345,7 +345,13 @@ Rectangle {
                             font.pixelSize: Theme.px(13)
                         }
                         Item { Layout.fillWidth: true }
-                        Label { text: Theme.providerOf(mrow.modelData.provider + ":" + mrow.modelData.id); color: Theme.muted; font.pixelSize: Theme.px(11) }
+                        // (A local model: its engine.)
+                        Label {
+                            readonly property string engine: mrow.modelData.local ? Theme.modelEngine(root.session.harness, mrow.modelData.provider + (root.session.harness === "hermes" ? ":" : "/") + mrow.modelData.id) : ""
+                            text: engine || Theme.providerOf(mrow.modelData.provider + ":" + mrow.modelData.id)
+                            color: Theme.muted
+                            font.pixelSize: Theme.px(11)
+                        }
                     }
                     onClicked: modelList.pick(index)
                 }

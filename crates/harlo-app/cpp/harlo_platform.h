@@ -6,6 +6,7 @@
 #include <QtGui/QKeySequence>
 #include <QtWidgets/QApplication>
 #include <QtCore/QByteArray>
+#include <QtCore/QEvent>
 #include <QtCore/QString>
 #include <QtCore/QStringList>
 #include <QtCore/QDateTime>
@@ -40,6 +41,16 @@ inline void create_application(const QStringList &args)
 inline int exec_application()
 {
     return QApplication::exec();
+}
+
+// After the event loop and the QML engine: the objects still waiting to be
+// deleted (deleteLater), then the application itself. Left to the process's
+// exit, Qt deletes those after the application and the engine are gone,
+// and a Quick item's destructor reads freed type data (a crash on quit).
+inline void shutdown_application()
+{
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    delete qApp;
 }
 
 // The icon of every window (from a resource or file path).

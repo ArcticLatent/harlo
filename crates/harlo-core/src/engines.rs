@@ -139,9 +139,10 @@ pub enum Engine {
     LlamaCpp,
     Strata,
     Vllm,
+    Basalt,
 }
 
-pub const ENGINES: [Engine; 4] = [Engine::Ollama, Engine::LlamaCpp, Engine::Vllm, Engine::Strata];
+pub const ENGINES: [Engine; 5] = [Engine::Ollama, Engine::LlamaCpp, Engine::Vllm, Engine::Strata, Engine::Basalt];
 
 impl Engine {
     pub fn id(self) -> &'static str {
@@ -150,6 +151,7 @@ impl Engine {
             Engine::LlamaCpp => "llamacpp",
             Engine::Strata => "strata",
             Engine::Vllm => "vllm",
+            Engine::Basalt => "basalt",
         }
     }
 
@@ -163,6 +165,7 @@ impl Engine {
             Engine::LlamaCpp => "llama.cpp",
             Engine::Strata => "Strata",
             Engine::Vllm => "vLLM",
+            Engine::Basalt => "Basalt",
         }
     }
 
@@ -172,6 +175,7 @@ impl Engine {
             Engine::LlamaCpp => "Any GGUF model from Hugging Face, fast on one computer, every setting yours.",
             Engine::Strata => "Qwen3.8-Flash-Next on consumer hardware, tuned for your card.",
             Engine::Vllm => "The fastest when several sessions run at once, on an NVIDIA card: Hugging Face models in their own format, full or quantized.",
+            Engine::Basalt => "Qwen3.8-Flash-Next on an NVIDIA Blackwell card, its experts in RAM where the card is full. Built on this computer.",
         }
     }
 
@@ -182,6 +186,7 @@ impl Engine {
             Engine::Strata => "Niko1221/Strata",
             // (Installed with uv, Python's fast installer: its release.)
             Engine::Vllm => "astral-sh/uv",
+            Engine::Basalt => "jesdga95/basalt",
         }
     }
 
@@ -208,6 +213,21 @@ impl Engine {
                 "amd" => ("no", "vLLM on AMD cards isn't set up in harlo yet; llama.cpp or Ollama run here.".into()),
                 _ => ("no", "Needs an NVIDIA card.".into()),
             },
+            // A Blackwell card (compute 12.x), the tools to build it, and room
+            // for its smallest model (about 70 GB) in the card and RAM.
+            Engine::Basalt => {
+                if !hw.gpus.iter().any(|g| g.vendor == "nvidia" && g.arch.starts_with("12.")) {
+                    return ("no", "Needs an NVIDIA Blackwell card (RTX 50 series).".into());
+                }
+                let missing = basalt_tools_missing();
+                if !missing.is_empty() {
+                    return ("no", format!("harlo builds it here, which needs {} installed first.", missing.join(", ")));
+                }
+                if total_gb < 78 {
+                    return ("no", format!("Its smallest model needs about 70 GB of RAM and graphics memory together; this computer has {total_gb} GB."));
+                }
+                ("ok", String::new())
+            }
         }
     }
 }
@@ -241,6 +261,10 @@ fn harlo_install(engine: Engine) -> Option<PathBuf> {
         Engine::Strata => return None,
         // (Its own Python environment: one, updated in place.)
         Engine::Vllm => return Some(vllm_env().join("bin/vllm")).filter(|p| p.is_file()),
+        // (Built from its source: <release>/<source>/bin/basalt.)
+        Engine::Basalt => {
+            return versions.iter().rev().find_map(|v| std::fs::read_dir(v).ok()?.flatten().map(|e| e.path().join("bin/basalt")).find(|p| p.is_file()));
+        }
     };
     versions.iter().rev().find_map(|v| find_file(v, prog, 4))
 }
@@ -274,6 +298,26 @@ fn vllm_version(program: &Path) -> Option<String> {
     })
 }
 
+/// What building Basalt here needs and this computer lacks: the CUDA
+/// toolkit (nvcc), CMake, a C++ compiler, Python.
+pub fn basalt_tools_missing() -> Vec<&'static str> {
+    let cuda = on_path("nvcc").is_some() || ["/opt/cuda/bin/nvcc", "/usr/local/cuda/bin/nvcc"].iter().any(|p| Path::new(p).is_file());
+    let mut missing = Vec::new();
+    if !cuda {
+        missing.push("the CUDA 13 toolkit (nvcc)");
+    }
+    if on_path("cmake").is_none() {
+        missing.push("CMake");
+    }
+    if on_path("g++").is_none() && on_path("clang++").is_none() {
+        missing.push("a C++ compiler (g++ or clang++)");
+    }
+    if on_path("python3").is_none() {
+        missing.push("Python 3");
+    }
+    missing
+}
+
 /// vLLM's Python environment (harlo's): `bin/vllm` in it.
 pub fn vllm_env() -> PathBuf {
     engines_dir().join("vllm").join("env")
@@ -288,6 +332,7 @@ pub fn installed(engine: Engine) -> Option<Installed> {
             Engine::LlamaCpp => "llama-server",
             Engine::Strata => "strata",
             Engine::Vllm => "vllm",
+            Engine::Basalt => "basalt",
         })?),
     };
     // (vLLM: its package's version, not `vllm --version`: that starts Python
@@ -403,6 +448,14 @@ pub fn plan(engine: Engine, hw: &Hardware) -> Result<(String, Vec<Asset>), Strin
             let sums = rel["assets"].as_array().into_iter().flatten().find(|a| a["name"] == "SHA256SUMS.txt").and_then(|a| a["browser_download_url"].as_str()).map(get_text).transpose()?;
             vec![asset_named(&rel, "install.sh", sums.as_deref()).ok_or_else(|| format!("Strata {tag} has no install.sh with a checksum."))?]
         }
+        // Its source at the release (GitHub publishes no checksum for it: it
+        // comes over HTTPS from GitHub), built here.
+        Engine::Basalt => vec![Asset {
+            name: format!("basalt-{tag}.tar.gz"),
+            url: format!("https://codeload.github.com/{}/tar.gz/refs/tags/{tag}", engine.repo()),
+            sha256: String::new(),
+            size: 0,
+        }],
         // uv, which then installs vLLM (and its Python) from PyPI.
         Engine::Vllm => {
             let name = "uv-x86_64-unknown-linux-gnu.tar.gz";
@@ -821,6 +874,10 @@ pub fn vllm_parsers(model_type: &str, repo: &str) -> (&'static str, Option<&'sta
 /// A GGUF file's quantization ("Qwen3-4B-UD-Q4_K_XL.gguf" → "UD-Q4_K_XL"),
 /// as Ollama names it in `hf.co/<repo>:<quant>`.
 pub fn quant_of(file: &str) -> String {
+    // (Basalt's packs: "Qwen3.8-FN-GSQ-RCO-IQ3_S.basalt" → "GSQ-RCO-IQ3_S".)
+    if let Some(stem) = file.rsplit('/').next().unwrap_or(file).strip_suffix(".basalt") {
+        return stem.split_once("-FN-").map_or(stem, |(_, q)| q).trim_end_matches("_v2").to_owned();
+    }
     let name = file.rsplit('/').next().unwrap_or(file).trim_end_matches(".gguf");
     let name = name.split("-0000").next().unwrap_or(name);
     let parts: Vec<&str> = name.split('-').collect();
@@ -880,7 +937,7 @@ pub fn hf_ggufs(repo: &str) -> Result<Vec<(String, u64)>, String> {
     let mut files: Vec<(String, u64)> = Vec::new();
     for f in tree.as_array().into_iter().flatten() {
         let path = f["path"].as_str().unwrap_or_default();
-        if !path.ends_with(".gguf") || path.contains("mmproj") {
+        if !(path.ends_with(".gguf") || path.ends_with(".basalt")) || path.contains("mmproj") {
             continue;
         }
         let size = f["lfs"]["size"].as_u64().or(f["size"].as_u64()).unwrap_or(0);
@@ -893,8 +950,48 @@ pub fn hf_ggufs(repo: &str) -> Result<Vec<(String, u64)>, String> {
             None => files.push((path.to_owned(), size)),
         }
     }
+    // Basalt's packs: a build reads one format, the latest release the newest,
+    // and a repository can hold both (the name doesn't say).
+    if files.iter().any(|(f, _)| f.ends_with(".basalt")) {
+        let formats: Vec<Option<u32>> = std::thread::scope(|s| {
+            let reads: Vec<_> = files.iter().map(|(f, _)| s.spawn(|| basalt_format_online(repo, f))).collect();
+            reads.into_iter().map(|r| r.join().ok().flatten()).collect()
+        });
+        let newest = formats.iter().flatten().max().copied();
+        let mut format = formats.into_iter();
+        files.retain(|_| format.next().flatten().is_none_or(|v| Some(v) == newest));
+    }
     files.sort_by_key(|a| a.1);
     Ok(files)
+}
+
+/// The format of a `.basalt` pack, from its first bytes (`BASALTMF`, then the
+/// version, little-endian).
+fn basalt_format_in(head: &[u8]) -> Option<u32> {
+    let version = head.strip_prefix(b"BASALTMF")?.first_chunk::<4>()?;
+    Some(u32::from_le_bytes(*version))
+}
+
+/// The format of a pack on this computer.
+pub fn basalt_format(path: &Path) -> Option<u32> {
+    let mut head = [0u8; 12];
+    std::fs::File::open(path).ok()?.read_exact(&mut head).ok()?;
+    basalt_format_in(&head)
+}
+
+/// The format of a pack on Hugging Face, without downloading it.
+pub fn basalt_format_online(repo: &str, file: &str) -> Option<u32> {
+    let resp = http(Duration::from_secs(20)).get(&hf_url(repo, file)).header("User-Agent", "harlo").header("Range", "bytes=0-11").call().ok()?;
+    let mut head = Vec::new();
+    resp.into_body().into_reader().take(12).read_to_end(&mut head).ok()?;
+    basalt_format_in(&head)
+}
+
+/// The pack format a Basalt build reads, from the reader in its source
+/// (`<source>/bin/basalt`, `<source>/tools/model_file.py`).
+pub fn basalt_build_format(program: &Path) -> Option<u32> {
+    let reader = std::fs::read_to_string(program.parent()?.parent()?.join("tools/model_file.py")).ok()?;
+    reader.lines().find_map(|l| l.strip_prefix("VERSION = ")?.trim().parse().ok())
 }
 
 /// A split GGUF's first part (`…-00001-of-0000N.gguf`).
@@ -1189,6 +1286,8 @@ mod tests {
         assert_eq!(quant_of("gpt-oss-20b-F16.gguf"), "F16");
         assert_eq!(quant_of("model-IQ2_XXS.gguf"), "IQ2_XXS");
         assert_eq!(quant_of("gpt-oss-20b-MXFP4.gguf"), "MXFP4");
+        assert_eq!(quant_of("Qwen3.8-FN-GSQ-RCO-IQ3_S.basalt"), "GSQ-RCO-IQ3_S");
+        assert_eq!(quant_of("Qwen3.8-FN-NVFP4.basalt"), "NVFP4");
         let gb = |n: u64| n * 1024 * 1024 * 1024;
         let files = vec![("a-Q2_K.gguf".to_owned(), gb(10)), ("a-Q4_K_M.gguf".to_owned(), gb(18)), ("a-Q8_0.gguf".to_owned(), gb(33)), ("a-F16.gguf".to_owned(), gb(60))];
         // Q4 where it fits, on the card or partly in RAM.
@@ -1249,6 +1348,46 @@ mod tests {
         assert!(download(&format!("http://{addr}/file.bin"), &dest, Some("00"), &mut |_, _, _| {}, &|| false).unwrap_err().contains("checksum"));
         assert!(!dest.exists() && !dest.with_extension("part").exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[ignore = "network"]
+    fn lists_basalt_packs_of_one_format() {
+        let files = hf_ggufs("jesdga/Qwen3.8-Flash-Next-Basalt").unwrap();
+        let formats: Vec<_> = files.iter().map(|(f, _)| basalt_format_online("jesdga/Qwen3.8-Flash-Next-Basalt", f).unwrap()).collect();
+        println!("{files:?} {formats:?}");
+        assert!(!files.is_empty());
+        assert!(formats.iter().all(|v| *v == formats[0]));
+    }
+
+    #[test]
+    fn reads_basalt_formats() {
+        assert_eq!(basalt_format_in(b"BASALTMF\x02\0\0\0\x12\0\0\0"), Some(2));
+        assert_eq!(basalt_format_in(b"BASALTMF\x01\0\0\0"), Some(1));
+        assert_eq!(basalt_format_in(b"BASALTMF\x01"), None);
+        assert_eq!(basalt_format_in(b"GGUF\x03\0\0\0\0\0\0\0"), None);
+        assert_eq!(quant_of("Qwen3.8-FN-GSQ-RCO-Q2_0_v2.basalt"), "GSQ-RCO-Q2_0");
+
+        let dir = std::env::temp_dir().join(format!("harlo-basalt-format-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("bin")).unwrap();
+        std::fs::create_dir_all(dir.join("tools")).unwrap();
+        std::fs::write(dir.join("tools/model_file.py"), "MAGIC = b\"BASALTMF\"\nVERSION = 2\n").unwrap();
+        assert_eq!(basalt_build_format(&dir.join("bin/basalt")), Some(2));
+        assert_eq!(basalt_build_format(Path::new("/usr/bin/basalt")), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn basalt_needs_a_blackwell_card() {
+        let mut hw = hw("nvidia", 32, 93, "580.1");
+        hw.gpus[0].arch = "8.9".into();
+        assert_eq!(Engine::Basalt.fit(&hw).0, "no");
+        hw.gpus[0].arch = "12.0".into();
+        // (The build tools: this computer's.)
+        let fit = Engine::Basalt.fit(&hw);
+        assert!(fit.0 == "ok" || fit.1.contains("installed first"), "{fit:?}");
+        let small = { let mut h = hw.clone(); h.ram_mb = 16 * 1024; h };
+        assert!(Engine::Basalt.fit(&small).0 == "no");
     }
 
     #[test]
@@ -1392,7 +1531,7 @@ mod tests {
             match plan(e, &hw) {
                 Ok((tag, assets)) => {
                     for a in assets {
-                        println!("  {tag}: {} ({} MB, sha256 {}…)", a.name, a.size / 1_000_000, &a.sha256[..12]);
+                        println!("  {tag}: {} ({} MB, sha256 {}…)", a.name, a.size / 1_000_000, a.sha256.get(..12).unwrap_or("none"));
                     }
                 }
                 Err(err) => println!("  plan failed: {err}"),

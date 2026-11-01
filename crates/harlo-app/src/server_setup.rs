@@ -35,6 +35,8 @@ pub mod qobject {
         /// result: { baseUrl, name, models: [{ id, context }], answer,
         /// speed } }`; "" before one.
         #[qproperty(QString, job)]
+        /// The setup's full output (its "Show output" panel).
+        #[qproperty(QString, output)]
         type ServerSetup = super::ServerSetupRust;
     }
 
@@ -83,6 +85,7 @@ use qobject::ServerSetup;
 #[derive(Default)]
 pub struct ServerSetupRust {
     catalog: QString,
+    output: QString,
     hf_models: QString,
     ggufs: QString,
     job: QString,
@@ -94,9 +97,83 @@ pub struct ServerSetupRust {
 struct Report {
     thread: CxxQtThread<ServerSetup>,
     state: Arc<std::sync::Mutex<Value>>,
+    output: Arc<std::sync::Mutex<Output>>,
+}
+
+/// The setup's full output, for its "Show output" panel: what it ran and
+/// said, then the server's own log while it starts.
+#[derive(Default)]
+struct Output {
+    lines: Vec<String>,
+    /// How far a download is: its own line, rewritten as it moves.
+    live: String,
+    server: String,
+    shown: Option<std::time::Instant>,
+    /// A later update is already on its way.
+    pending: bool,
 }
 
 impl Report {
+    /// A line of output (kept: the last few thousand).
+    fn line(&self, text: &str) {
+        let mut o = self.output.lock().unwrap();
+        let live = std::mem::take(&mut o.live);
+        if !live.is_empty() {
+            o.lines.push(live);
+        }
+        o.lines.push(text.to_owned());
+        let excess = o.lines.len().saturating_sub(3000);
+        o.lines.drain(..excess);
+        drop(o);
+        self.show_output(false);
+    }
+
+    /// The server's log as it is now (its last lines).
+    fn server_log(&self, path: &Path) {
+        let text = std::fs::read_to_string(path).unwrap_or_default();
+        let lines: Vec<&str> = text.lines().flat_map(|l| l.rsplit('\r').next()).collect();
+        let tail = lines[lines.len().saturating_sub(400)..].join("\n");
+        let mut o = self.output.lock().unwrap();
+        if o.server == tail {
+            return;
+        }
+        o.server = tail;
+        drop(o);
+        self.show_output(false);
+    }
+
+    /// To the dialog, a few times a second at most (or now, at the end).
+    fn show_output(&self, now: bool) {
+        let text = {
+            let mut o = self.output.lock().unwrap();
+            if !now && o.shown.is_some_and(|t| t.elapsed() < Duration::from_millis(250)) {
+                // (Shown a moment later: nothing may wait for a next line.)
+                if !o.pending {
+                    o.pending = true;
+                    let report = self.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(Duration::from_millis(250));
+                        report.show_output(true);
+                    });
+                }
+                return;
+            }
+            o.pending = false;
+            o.shown = Some(std::time::Instant::now());
+            let mut t = o.lines[o.lines.len().saturating_sub(800)..].join("\n");
+            if !o.live.is_empty() {
+                t.push('\n');
+                t.push_str(&o.live);
+            }
+            if !o.server.is_empty() {
+                t.push_str("\n── the server ──\n");
+                t.push_str(&o.server);
+            }
+            t
+        };
+        let _ = self.thread.queue(move |mut this| this.as_mut().set_output(QString::from(&text)));
+    }
+
     fn update(&self, f: impl FnOnce(&mut Value)) {
         let text = {
             let mut v = self.state.lock().unwrap();
@@ -107,6 +184,7 @@ impl Report {
     }
 
     fn step(&self, step: &str) {
+        self.line(&format!("▸ {step}"));
         let step = step.to_owned();
         self.update(|v| {
             v["step"] = json!(step);
@@ -118,6 +196,8 @@ impl Report {
     fn progress(&self, done: u64, total: u64) {
         let p = if total > 0 { done as f64 / total as f64 } else { -1.0 };
         let detail = if total > 0 { format!("{:.1} of {:.1} GB", done as f64 / 1e9, total as f64 / 1e9) } else { format!("{:.1} GB", done as f64 / 1e9) };
+        self.output.lock().unwrap().live = if total > 0 { format!("{detail} ({:.0}%)", p * 100.0) } else { detail.clone() };
+        self.show_output(false);
         self.update(|v| {
             v["progress"] = json!(p);
             v["detail"] = json!(detail);
@@ -161,6 +241,14 @@ fn llamacpp_models(base: &str, preset: &Path) -> Vec<engines::PresetModel> {
     vec![engines::PresetModel { name, path: PathBuf::from(path), context: after("-c").and_then(|c| c.parse().ok()) }]
 }
 
+/// The format of the Basalt pack a setup will use: the copy here, or Hugging
+/// Face's. (Unknown: the engine says, when it starts.)
+fn basalt_pack_format(repo: &str, model: &str) -> Option<u32> {
+    let folder = engines::engines_dir().parent()?.join("models").join(repo.replace('/', "__"));
+    let here = folder.join(model);
+    if here.exists() { engines::basalt_format(&here) } else { engines::basalt_format_online(repo, model) }
+}
+
 /// Installs an engine from its release (blocking): its program.
 fn install(engine: Engine, hw: &engines::Hardware, report: &Report, stop: &AtomicBool) -> Result<PathBuf, String> {
     report.step(&format!("Finding {}'s latest release", engine.name()));
@@ -177,7 +265,10 @@ fn install(engine: Engine, hw: &engines::Hardware, report: &Report, stop: &Atomi
             }
             report.progress(d, t);
         };
-        engines::download(&a.url, &file, Some(&a.sha256), &mut progress, &|| stop.load(Ordering::Relaxed))?;
+        // (A file with no published checksum, Basalt's source: as it comes.)
+        report.line(&format!("{} from {}", a.name, a.url));
+        engines::download(&a.url, &file, Some(a.sha256.as_str()).filter(|s| !s.is_empty()), &mut progress, &|| stop.load(Ordering::Relaxed))?;
+        report.line(if a.sha256.is_empty() { "Downloaded (no published checksum to check it against)." } else { "Downloaded; it matches its published SHA-256." });
         if engine != Engine::Strata {
             report.step(&format!("Unpacking {}", a.name));
             engines::unpack(&file, &dir)?;
@@ -186,11 +277,15 @@ fn install(engine: Engine, hw: &engines::Hardware, report: &Report, stop: &Atomi
     }
     match engine {
         Engine::Vllm => install_vllm(&dir, report, stop),
+        Engine::Basalt => install_basalt(&dir, report, stop),
         Engine::Strata => {
             // Its own installer (checked above): ~/.local/share/strata, ~/.local/bin/strata.
             report.step("Running Strata's installer");
             let out = std::process::Command::new("sh").arg(dir.join("install.sh")).stdin(std::process::Stdio::null()).output().map_err(|e| e.to_string())?;
             let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+            for l in said.lines() {
+                report.line(&harlo_core::signin::plain(l));
+            }
             if !out.status.success() {
                 return Err(said.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("Strata's installer failed.").trim().to_owned());
             }
@@ -251,6 +346,7 @@ fn install_vllm(dir: &Path, report: &Report, stop: &AtomicBool) -> Result<PathBu
                     if line.starts_with("Downloading ") {
                         total += announced_size(&line);
                     }
+                    report.line(&line);
                     last = line;
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
@@ -286,6 +382,114 @@ fn install_vllm(dir: &Path, report: &Report, stop: &AtomicBool) -> Result<PathBu
     // (The downloaded wheels: not needed now.)
     let _ = std::fs::remove_dir_all(&cache);
     engines::installed(Engine::Vllm).filter(|i| i.harlo).map(|i| i.program).ok_or_else(|| "vLLM installed, but harlo can't find its program.".into())
+}
+
+/// Builds Basalt from its source (blocking): CMake with this computer's
+/// CUDA toolkit, then a Python of its own for its server (`.venv` in the
+/// source folder, where `basalt serve` looks). Its program, `bin/basalt`.
+fn install_basalt(dir: &Path, report: &Report, stop: &AtomicBool) -> Result<PathBuf, String> {
+    let src = std::fs::read_dir(dir).map_err(|e| e.to_string())?.flatten().map(|e| e.path()).find(|p| p.join("CMakeLists.txt").is_file()).ok_or("Basalt's source unpacked, but harlo can't find it.")?;
+    // (The CUDA toolkit where distributions put it, if it isn't on PATH.)
+    let path = format!("{}:/opt/cuda/bin:/usr/local/cuda/bin", std::env::var("PATH").unwrap_or_default());
+    let build = src.join("build");
+    let mut configure = vec!["-S".to_owned(), src.to_string_lossy().into_owned(), "-B".to_owned(), build.to_string_lossy().into_owned(), "-DCMAKE_BUILD_TYPE=Release".to_owned()];
+    if engines_on_path("ninja") {
+        configure.extend(["-G".to_owned(), "Ninja".to_owned()]);
+    }
+    run_streamed(Path::new("cmake"), &configure, &path, "Preparing Basalt's build", report, stop, |_| None)?;
+    let jobs = std::thread::available_parallelism().map_or(4, |n| n.get()).to_string();
+    // Its own count: "[ 42%] Building …" (make) or "[123/456] …" (Ninja).
+    let built = run_streamed(Path::new("cmake"), &["--build".to_owned(), build.to_string_lossy().into_owned(), "-j".to_owned(), jobs], &path, "Building Basalt (several minutes)", report, stop, |line| {
+        let inner = line.strip_prefix('[')?.split(']').next()?.trim();
+        match inner.split_once('/') {
+            Some((a, b)) => Some(a.trim().parse::<f64>().ok()? / b.trim().parse::<f64>().ok()?.max(1.0)),
+            None => Some(inner.trim_end_matches('%').trim().parse::<f64>().ok()? / 100.0),
+        }
+    });
+    built?;
+    let venv = src.join(".venv");
+    let venv_s = venv.to_string_lossy().into_owned();
+    run_streamed(Path::new("python3"), &["-m".to_owned(), "venv".to_owned(), venv_s], &path, "Setting up Python for Basalt", report, stop, |_| None)?;
+    let requirements = src.join("requirements.txt").to_string_lossy().into_owned();
+    run_streamed(&venv.join("bin/python"), &["-m".to_owned(), "pip".to_owned(), "install".to_owned(), "--disable-pip-version-check".to_owned(), "-r".to_owned(), requirements], &path, "Installing Basalt's server", report, stop, |_| None)?;
+    engines::installed(Engine::Basalt).filter(|i| i.harlo).map(|i| i.program).ok_or_else(|| "Basalt built, but harlo can't find bin/basalt.".into())
+}
+
+fn engines_on_path(prog: &str) -> bool {
+    std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(prog).is_file()))
+}
+
+/// Runs a program (blocking), its output a line at a time under the bar;
+/// `progress` reads how far a line says it is (0–1). What it said last when
+/// it fails.
+fn run_streamed(program: &Path, args: &[String], path: &str, step: &str, report: &Report, stop: &AtomicBool, progress: impl Fn(&str) -> Option<f64>) -> Result<(), String> {
+    report.step(step);
+    let mut child = std::process::Command::new(program)
+        .args(args)
+        .env("PATH", path)
+        .env("NO_COLOR", "1")
+        .env("CLICOLOR", "0")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Couldn't run {}: {e}", program.display()))?;
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    for pipe in [child.stdout.take().map(|o| Box::new(o) as Box<dyn std::io::Read + Send>), child.stderr.take().map(|e| Box::new(e) as Box<dyn std::io::Read + Send>)].into_iter().flatten() {
+        let tx = tx.clone();
+        std::thread::spawn(move || {
+            use std::io::BufRead;
+            for line in std::io::BufReader::new(pipe).lines().map_while(Result::ok) {
+                let _ = tx.send(line);
+            }
+        });
+    }
+    drop(tx);
+    let mut last = String::new();
+    let mut errors: Vec<String> = Vec::new();
+    // What it's on: its last line that says how far ("[203/247] Building
+    // …"), and since when; its other lines (a compiler's warnings) only
+    // before there is one.
+    let mut status: Option<(String, std::time::Instant)> = None;
+    loop {
+        match rx.recv_timeout(Duration::from_millis(400)) {
+            Ok(line) => {
+                let line = harlo_core::signin::plain(&line).trim().to_owned();
+                if line.is_empty() {
+                    continue;
+                }
+                report.line(&line);
+                if line.contains("error") || line.contains("Error") {
+                    errors.push(line.clone());
+                }
+                if let Some(p) = progress(&line) {
+                    report.update(|v| v["progress"] = json!(p.clamp(0.0, 1.0)));
+                    status = Some((line.chars().take(110).collect(), std::time::Instant::now()));
+                } else if status.is_none() {
+                    let shown: String = line.chars().take(120).collect();
+                    report.update(|v| v["detail"] = json!(shown));
+                }
+                last = line;
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+        }
+        if let Some((line, since)) = &status {
+            let secs = since.elapsed().as_secs();
+            let text = if secs >= 5 { format!("{line} · {}:{:02}", secs / 60, secs % 60) } else { line.clone() };
+            report.update(|v| v["detail"] = json!(text));
+        }
+        if stop.load(Ordering::Relaxed) {
+            let _ = child.kill();
+            return Err("Cancelled.".into());
+        }
+    }
+    let status = child.wait().map_err(|e| e.to_string())?;
+    if status.success() {
+        return Ok(());
+    }
+    // (A build's first error says more than its last line.)
+    Err(errors.first().cloned().unwrap_or(if last.is_empty() { format!("{step} failed.") } else { last }))
 }
 
 /// The bytes this computer has received (all its network but loopback),
@@ -406,10 +610,29 @@ fn setup_server(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value
     if !adding && engines::free_port(port) != port {
         return Err(format!("Port {port} is in use: pick another."));
     }
-    let program = match engines::installed(engine).filter(|_| req["useInstalled"] == true) {
+    // (Another server's port, stopped or not: it would take its place.)
+    if !adding && let Some((_, other)) = crate::accounts::ports_in_use().into_iter().find(|(p, n)| *p == port && *n != name) {
+        return Err(format!("Port {port} belongs to {other}: pick another port."));
+    }
+    // Basalt reads one format of pack: the model's, known before anything's
+    // downloaded (a build too old for it: the latest release, built here).
+    let pack = (engine == Engine::Basalt).then(|| basalt_pack_format(req["repo"].as_str().unwrap_or_default().trim(), &model)).flatten();
+    let mut use_installed = engines::installed(engine).filter(|_| req["useInstalled"] == true);
+    if let (Some(i), Some(pack)) = (&use_installed, pack)
+        && let Some(reads) = engines::basalt_build_format(&i.program).filter(|reads| *reads < pack)
+    {
+        report.line(&format!("This model is in Basalt's format {pack}; Basalt {} reads {reads}: building the latest release.", i.version));
+        use_installed = None;
+    }
+    let program = match use_installed {
         Some(i) => i.program,
         None => install(engine, &hw, report, stop)?,
     };
+    if let Some(pack) = pack
+        && let Some(reads) = engines::basalt_build_format(&program).filter(|reads| *reads != pack)
+    {
+        return Err(format!("This model is in Basalt's format {pack} and this Basalt reads {reads}: pick another model."));
+    }
     let prog = quote(&program.to_string_lossy());
 
     // The start (and stop) command, as Start on the page runs it.
@@ -442,7 +665,9 @@ fn setup_server(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value
                         }
                         report.progress(d, t);
                     };
+                    report.line(&format!("{} → {}", engines::hf_url(&repo, part), dest.display()));
                     engines::download_parallel(&engines::hf_url(&repo, part), &dest, None, 8, &mut progress, &cancelled)?;
+                    report.line("Downloaded; it matches Hugging Face's SHA-256.");
                 }
             }
             let alias = Path::new(&model).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or(model.clone());
@@ -472,6 +697,42 @@ fn setup_server(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value
             format!("{prog} launch --stop"),
             String::new(),
         ),
+        // Basalt: its pack (one file: weights, tokenizer, drafter, vision),
+        // and its settings file: the model, where it listens, its name and
+        // context (it has no "as much as fits": 64k unless picked).
+        Engine::Basalt => {
+            let repo = req["repo"].as_str().unwrap_or_default().trim().to_owned();
+            let folder = engines::engines_dir().parent().unwrap_or(Path::new(".")).join("models").join(repo.replace('/', "__"));
+            let need = req["size"].as_u64().unwrap_or(0) / (1024 * 1024);
+            if need > hw.disk_free_mb {
+                return Err(format!("It's {} GB and only {} GB are free.", need / 1024, hw.disk_free_mb / 1024));
+            }
+            let dest = folder.join(&model);
+            if !dest.exists() {
+                report.step("Downloading the model");
+                let mut checking = false;
+                let mut progress = |phase: &str, d: u64, t: u64| {
+                    if phase == "check" && !checking {
+                        checking = true;
+                        report.step("Checking the model against Hugging Face's checksum");
+                    }
+                    report.progress(d, t);
+                };
+                report.line(&format!("{} → {}", engines::hf_url(&repo, &model), dest.display()));
+                engines::download_parallel(&engines::hf_url(&repo, &model), &dest, None, 8, &mut progress, &cancelled)?;
+                report.line("Downloaded; it matches Hugging Face's SHA-256.");
+            }
+            let alias = Path::new(&model).file_stem().map(|s| s.to_string_lossy().trim_end_matches("_v2").to_owned()).unwrap_or(model.clone());
+            let context = req["context"].as_u64().filter(|c| *c >= 2048).unwrap_or(65536);
+            let config = engines::engines_dir().join("basalt").join("servers").join(format!("basalt-{port}.json"));
+            let settings = json!({
+                "server": { "model": dest.to_string_lossy(), "host": "127.0.0.1", "port": port, "alias": alias },
+                "engine": { "max-context": context, "kv": "int8" },
+            });
+            std::fs::create_dir_all(config.parent().unwrap_or(Path::new("/"))).map_err(|e| e.to_string())?;
+            std::fs::write(&config, serde_json::to_string_pretty(&settings).unwrap_or_default()).map_err(|e| format!("Couldn't write {}: {e}", config.display()))?;
+            (format!("exec {prog} serve --config {}", quote(&config.to_string_lossy())), String::new(), alias)
+        }
         // vLLM: the repository's files in harlo's models folder, served with
         // its family's parsers (agents need its tool calls read).
         Engine::Vllm => {
@@ -501,7 +762,9 @@ fn setup_server(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value
                     };
                     // (Big files: 8 connections at once, checked.)
                     if *size > 64 << 20 {
+                        report.line(&format!("{} → {}", engines::hf_url(&repo, path), dest.display()));
                         engines::download_parallel(&engines::hf_url(&repo, path), &dest, None, 8, &mut progress, &cancelled)?;
+                        report.line("Downloaded; it matches Hugging Face's SHA-256.");
                     } else {
                         engines::download(&engines::hf_url(&repo, path), &dest, None, &mut progress, &cancelled)?;
                     }
@@ -566,6 +829,7 @@ fn setup_server(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value
             &base,
             limit,
             &mut |line| {
+                report.server_log(&crate::accounts::log_path(&base));
                 let pct = line.split('%').next().and_then(|head| head.rsplit(|c: char| !c.is_ascii_digit()).next()).and_then(|n| n.parse::<f64>().ok()).filter(|p| line.contains("%|") && *p <= 100.0).map(|p| p / 100.0);
                 if let Some(p) = pct {
                     report.update(|v| v["progress"] = json!(p));
@@ -611,6 +875,7 @@ fn setup_server(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value
             &cancelled,
         );
         if let Err(e) = waited {
+            report.server_log(&crate::accounts::log_path(&base));
             crate::accounts::stop_launched(&base);
             return Err(e);
         }
@@ -625,6 +890,7 @@ fn setup_server(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value
             // (Its steps between the downloads: "verifying sha256 digest"…)
             if total == 0 && status != phase {
                 phase = status.to_owned();
+                report.line(status);
                 report.detail(status);
             } else if total > 0 {
                 report.progress(done, total);
@@ -636,11 +902,13 @@ fn setup_server(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value
     let listing = harlo_core::model_servers::find(&base, "")?;
     let id = if model_id.is_empty() { listing.models.first().map(|m| m.id.clone()).unwrap_or_default() } else { model_id };
     let (answer, speed, thinks) = engines::test_chat(&base, &id)?;
+    report.line(&format!("{id} answered “{answer}” at {speed:.0} tokens/s{}", if thinks { ", thinking first" } else { "" }));
     // The context it set (llama.cpp's /props, Ollama's loaded model): not
     // in /models.
     let served = match engine {
-        // (vLLM's /models says it: max_model_len.)
+        // (vLLM's /models says it: max_model_len; Basalt's is what harlo set.)
         Engine::Strata | Engine::Vllm => None,
+        Engine::Basalt => Some(req["context"].as_u64().filter(|c| *c >= 2048).unwrap_or(65536)),
         Engine::LlamaCpp => engines::served_context_of(&base, &id),
         Engine::Ollama => engines::served_context(&base),
     };
@@ -751,7 +1019,8 @@ impl ServerSetup {
                                 "file": f, "size": s, "quant": engines::quant_of(f),
                                 // Ollama takes neither a split model nor one in a folder.
                                 "split": engines::gguf_parts(f).len() > 1 || f.contains('/'),
-                                "fit": engines::fit(*s, hw.vram_mb(), hw.ram_mb),
+                                // (Basalt's: the card and RAM together, by design.)
+                                "fit": if f.ends_with(".basalt") { if *s / (1 << 20) <= (hw.vram_mb() + hw.ram_mb) * 9 / 10 { "runs" } else { "no" } } else { engines::fit(*s, hw.vram_mb(), hw.ram_mb) },
                             })
                         })
                         .collect();
@@ -772,7 +1041,16 @@ impl ServerSetup {
     }
 
     pub fn free_port(&self, from: i32) -> i32 {
-        engines::free_port(from.clamp(1024, 65000) as u16) as i32
+        // (Free now, and not a port of a server harlo knows, stopped or not.)
+        let taken: Vec<u16> = crate::accounts::ports_in_use().into_iter().map(|(p, _)| p).collect();
+        let mut port = from.clamp(1024, 65000) as u16;
+        loop {
+            port = engines::free_port(port);
+            if !taken.contains(&port) || port >= 65000 {
+                return port as i32;
+            }
+            port += 1;
+        }
     }
 
     pub fn start(mut self: Pin<&mut Self>, request: &QString) {
@@ -784,9 +1062,16 @@ impl ServerSetup {
         self.as_mut().rust_mut().stop = stop.clone();
         let first = json!({ "state": "running", "step": "Starting", "progress": -1, "detail": "", "result": null });
         self.as_mut().set_job(QString::from(&first.to_string()));
-        let report = Report { thread: self.qt_thread(), state: Arc::new(std::sync::Mutex::new(first)) };
+        self.as_mut().set_output(QString::default());
+        let report = Report { thread: self.qt_thread(), state: Arc::new(std::sync::Mutex::new(first)), output: Default::default() };
         crate::runtime().spawn_blocking(move || {
             let outcome = setup(&req, &report, &stop);
+            // (The end, in the output too: and all of it shown now.)
+            match &outcome {
+                Ok(_) => report.line("✓ Done."),
+                Err(e) => report.line(&format!("✗ {e}")),
+            }
+            report.show_output(true);
             report.update(|v| {
                 match outcome {
                     Ok(result) => {

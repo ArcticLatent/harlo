@@ -16,6 +16,11 @@ pub mod ffi {
         #[namespace = "harlo"]
         fn exec_application() -> i32;
 
+        /// After the event loop and the QML engine: what's waiting to be
+        /// deleted, then the application.
+        #[namespace = "harlo"]
+        fn shutdown_application();
+
         #[namespace = "harlo"]
         fn set_window_icon(path: &QString);
         #[namespace = "harlo"]
@@ -29,4 +34,4 @@ pub mod ffi {
     }
 }
 
-pub use ffi::{create_application, exec_application, install_message_log, key_sequence_text, set_desktop_file_name, set_window_icon};
+pub use ffi::{create_application, exec_application, install_message_log, key_sequence_text, set_desktop_file_name, set_window_icon, shutdown_application};

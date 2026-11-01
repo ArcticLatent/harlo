@@ -567,8 +567,9 @@ impl Accounts {
             .and_then(|v| v.as_array().cloned())
             .unwrap_or_default()
             .iter()
-            .filter_map(|m| Some(model_servers::Found { id: m["id"].as_str()?.to_owned(), context: m["context"].as_u64(), reasoning: m["reasoning"] == true }))
+            .filter_map(|m| Some(model_servers::Found { id: m["id"].as_str()?.to_owned(), context: m["context"].as_u64(), reasoning: m["reasoning"] == true, ..Default::default() }))
             .collect();
+        let models = with_levels(&base_url.to_string(), models);
         let taken: Vec<String> = serde_json::from_str(&taken.to_string()).unwrap_or_default();
         match model_servers::add(k, &name.to_string(), &base_url.to_string(), &key.to_string(), &models, &taken) {
             // OpenCode's sessions read it when its server starts again.
@@ -606,6 +607,7 @@ impl Accounts {
                 (url, String::new(), models)
             }
         };
+        let models = with_levels(&url, models);
         let taken: Vec<String> = serde_json::from_str(&taken.to_string()).unwrap_or_default();
         match model_servers::add(to, &name, &url, &key, &models, &taken) {
             Ok(()) if !reread(to) => QString::from("OPENCODE_BUSY"),
@@ -738,9 +740,11 @@ fn remove(name: &str, url: &str, delete_files: bool, step: &dyn Fn(&str, usize, 
     let files = if delete_files { model_files(url) } else { Vec::new() };
     step("Stopping the server", 0, 0);
     stop_any(url);
-    // (A llama.cpp router's preset too.)
-    if let Some(preset) = start_command(url).split(" --models-preset ").nth(1).map(shell_word) {
-        let _ = std::fs::remove_file(preset);
+    // (A llama.cpp router's preset, Basalt's settings file, too.)
+    for flag in [" --models-preset ", " serve --config "] {
+        if let Some(file) = start_command(url).split(flag).nth(1).map(shell_word).filter(|f| f.contains("/harlo/")) {
+            let _ = std::fs::remove_file(file);
+        }
     }
     save_commands(url, "", "");
     let _ = std::fs::remove_file(log_path(url));
@@ -827,6 +831,11 @@ pub(crate) fn shell_word(s: &str) -> String {
 /// start command loads (`-m '…'`) and its other parts, in harlo's folder.
 fn model_files(url: &str) -> Vec<PathBuf> {
     let start = commands_of(url)["start"].as_str().unwrap_or_default().to_owned();
+    // (Basalt's: the pack its settings file names.)
+    if let Some(rest) = start.split(" serve --config ").nth(1).filter(|_| start.contains("basalt")) {
+        let settings: Value = std::fs::read_to_string(shell_word(rest)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+        return settings["server"]["model"].as_str().map(PathBuf::from).filter(|p| p.starts_with(models_dir()) && p.is_file()).into_iter().collect();
+    }
     // (vLLM's: the model's folder, all of it.)
     if let Some(rest) = start.split(" serve ").nth(1).filter(|_| start.contains("vllm")) {
         let dir = PathBuf::from(shell_word(rest));
@@ -875,7 +884,7 @@ fn commands_of(url: &str) -> Value {
 }
 
 /// Where a server's output goes: harlo's logs folder.
-fn log_path(url: &str) -> PathBuf {
+pub(crate) fn log_path(url: &str) -> PathBuf {
     let name: String = url.split("://").last().unwrap_or(url).chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
     harlo_core::db::default_path().parent().map(|d| d.join("logs/servers")).unwrap_or_default().join(format!("{}.log", name.trim_matches('-')))
 }
@@ -883,7 +892,10 @@ fn log_path(url: &str) -> PathBuf {
 fn log_tail(url: &str) -> String {
     let text = std::fs::read_to_string(log_path(url)).unwrap_or_default();
     let lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
-    lines[lines.len().saturating_sub(3)..].join("\n")
+    let tail = &lines[lines.len().saturating_sub(3)..];
+    // (Its error, without what it printed before it.)
+    let from = tail.iter().position(|l| l.to_lowercase().contains("error:")).unwrap_or(0);
+    tail[from..].join("\n")
 }
 
 /// Saves a server's start and stop commands (empty ones: harlo forgets it).
@@ -952,6 +964,8 @@ fn engine_of(url: &str) -> &'static str {
         "Ollama"
     } else if start.contains("strata") {
         "Strata"
+    } else if start.contains("basalt") {
+        "Basalt"
     } else if start.contains("vllm") {
         "vLLM"
     } else if start.is_empty() {
@@ -971,6 +985,30 @@ pub(crate) fn restore_server_record(url: &str, v: &Value) {
     if let Ok(db) = harlo_core::db::Db::open(&harlo_core::db::default_path()) {
         let _ = db.set(&server_key(url), &v.to_string());
     }
+}
+
+/// The ports of this computer's model servers harlo knows (set up by it, or
+/// in an agent's config), running or not: a new one doesn't take them.
+pub(crate) fn ports_in_use() -> Vec<(u16, String)> {
+    let port = |url: &str| url.split("://").nth(1)?.split('/').next()?.rsplit_once(':')?.1.parse::<u16>().ok();
+    let mut out: Vec<(u16, String)> = Vec::new();
+    for (url, v) in set_up_servers() {
+        if let Some(p) = port(&url) {
+            out.push((p, v["name"].as_str().filter(|n| !n.is_empty()).map_or_else(|| engine_of(&url).to_lowercase(), str::to_owned)));
+        }
+    }
+    for k in [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::OpenCode, HarnessKind::Hermes] {
+        for s in model_servers::servers(k) {
+            let host = s.base_url.split("://").nth(1).unwrap_or_default().split(['/', ':']).next().unwrap_or_default().to_owned();
+            if ["127.0.0.1", "localhost"].contains(&host.as_str())
+                && let Some(p) = port(&s.base_url)
+                && !out.iter().any(|(q, _)| *q == p)
+            {
+                out.push((p, s.name));
+            }
+        }
+    }
+    out
 }
 
 /// A server's start command ("" for one harlo didn't set up).
@@ -1003,7 +1041,28 @@ pub(crate) fn saved_models_of(url: &str) -> Vec<model_servers::Found> {
 }
 
 fn saved_models(v: &Value) -> Vec<model_servers::Found> {
-    v["models"].as_array().into_iter().flatten().filter_map(|m| Some(model_servers::Found { id: m["id"].as_str()?.to_owned(), context: m["context"].as_u64(), reasoning: m["reasoning"] == true })).collect()
+    v["models"].as_array().into_iter().flatten().filter_map(|m| Some(model_servers::Found { id: m["id"].as_str()?.to_owned(), context: m["context"].as_u64(), reasoning: m["reasoning"] == true, ..Default::default() })).collect()
+}
+
+/// A server's models as an agent's file gets them: Basalt tells thinking
+/// levels apart.
+fn with_levels(url: &str, models: Vec<model_servers::Found>) -> Vec<model_servers::Found> {
+    let levels = engine_of(url) == "Basalt";
+    models.into_iter().map(|m| model_servers::Found { levels, ..m }).collect()
+}
+
+/// Basalt servers agents got before harlo offered their levels: offered now,
+/// before any agent reads its file.
+pub(crate) fn offer_levels() {
+    for (url, _) in set_up_servers().into_iter().filter(|(url, _)| engine_of(url) == "Basalt") {
+        for k in [HarnessKind::Pi, HarnessKind::OpenCode] {
+            for s in model_servers::servers(k).into_iter().filter(|s| s.base_url == url) {
+                if let Err(e) = model_servers::offer_levels(k, &s.name) {
+                    tracing::warn!("thinking levels for {}: {e}", s.name);
+                }
+            }
+        }
+    }
 }
 
 /// Starts a process from one thread that lives as long as harlo: the
