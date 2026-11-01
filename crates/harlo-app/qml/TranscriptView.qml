@@ -75,7 +75,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             spacing: 8
             Label { text: Theme.harnessLabel(root.session.harness); color: Theme.text; font.pixelSize: Theme.px(14.5); font.weight: Font.DemiBold }
-            Label { visible: root.session.modelName !== ""; text: "· " + root.session.modelName; color: Theme.textFaint; font.pixelSize: Theme.px(13); anchors.baseline: parent.children[0].baseline }
+            Label { visible: root.session.modelName !== ""; text: "· " + Theme.modelLabel(root.session.modelName); color: Theme.textFaint; font.pixelSize: Theme.px(13); anchors.baseline: parent.children[0].baseline }
         }
     }
     /// A run of tool calls and thoughts: folded or open as set by hand,

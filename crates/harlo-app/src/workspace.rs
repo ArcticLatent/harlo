@@ -681,8 +681,10 @@ const ROLE_SETTLED: i32 = 0x110;
 const SCAN_INTERVAL: Duration = Duration::from_secs(2);
 /// Remote hosts' session folders are listed this often (over SSH).
 const REMOTE_SCAN_INTERVAL: Duration = Duration::from_secs(10);
-/// A host that didn't answer is tried again after this.
+/// A host that didn't answer is tried again after this, doubling up to
+/// `REMOTE_RETRY_MAX` while it keeps not answering.
 const REMOTE_RETRY: Duration = Duration::from_secs(60);
+const REMOTE_RETRY_MAX: Duration = Duration::from_secs(30 * 60);
 const WORKTREE_INTERVAL: Duration = Duration::from_secs(20);
 /// How often the sidebar's uncommitted-change counts are refreshed (sooner
 /// when a turn ends, the window comes back, or new folders show up).
@@ -1139,12 +1141,14 @@ impl cxx_qt::Initialize for Workspace {
         let (roots, kick) = (self.remote_roots.clone(), self.remote_kick.clone());
         crate::runtime().spawn(async move {
             let mut scanner = harlo_core::remote_sessions::RemoteScanner::default();
-            let mut retry_at: HashMap<String, std::time::Instant> = HashMap::new();
+            // A host that doesn't answer: tried again later each time (one
+            // minute, doubling to half an hour), and logged once.
+            let mut retry_at: HashMap<String, (std::time::Instant, u32)> = HashMap::new();
             let mut scanned: HashSet<String> = HashSet::new();
             loop {
                 let hosts = roots.lock().unwrap().clone();
                 for (name, host_roots) in hosts {
-                    if retry_at.get(&name).is_some_and(|t| std::time::Instant::now() < *t) {
+                    if retry_at.get(&name).is_some_and(|(t, _)| std::time::Instant::now() < *t) {
                         continue;
                     }
                     let host = harlo_core::remote::host(&name);
@@ -1163,20 +1167,32 @@ impl cxx_qt::Initialize for Workspace {
                     let (name, result) = result;
                     match result {
                         Ok(delta) => {
-                            retry_at.remove(&name);
+                            if retry_at.remove(&name).is_some() {
+                                tracing::debug!("remote sessions on {name}: reachable again");
+                            }
                             let first = scanned.insert(name);
                             if (first || !delta.is_empty()) && thread.queue(move |this| this.apply_scan(delta)).is_err() {
                                 return;
                             }
                         }
                         Err(e) => {
-                            tracing::info!("remote sessions on {name}: {e:#}");
-                            retry_at.insert(name, std::time::Instant::now() + REMOTE_RETRY);
+                            let failures = retry_at.get(&name).map_or(0, |(_, n)| *n) + 1;
+                            // (Background work nobody asked for: the debug log only.)
+                            if failures == 1 {
+                                tracing::debug!("remote sessions on {name}: {e:#} (trying again later, less and less often)");
+                            }
+                            let wait = REMOTE_RETRY.saturating_mul(1 << (failures - 1).min(5)).min(REMOTE_RETRY_MAX);
+                            retry_at.insert(name, (std::time::Instant::now() + wait, failures));
                         }
                     }
                 }
                 tokio::select! {
-                    _ = kick.notified() => {}
+                    // Asked for (a host connected, its instance shown): now.
+                    _ = kick.notified() => {
+                        for (t, _) in retry_at.values_mut() {
+                            *t = std::time::Instant::now();
+                        }
+                    }
                     _ = tokio::time::sleep(REMOTE_SCAN_INTERVAL) => {}
                 }
             }
@@ -1216,8 +1232,16 @@ impl Workspace {
                 }
             }
         }
-        *self.remote_roots.lock().unwrap() = roots;
-        self.remote_kick.notify_one();
+        // (Only when they changed: collapsing a project changes nothing there.)
+        let changed = {
+            let mut current = self.remote_roots.lock().unwrap();
+            let changed = *current != roots;
+            *current = roots;
+            changed
+        };
+        if changed {
+            self.remote_kick.notify_one();
+        }
         self.rebuild();
     }
 
@@ -1706,6 +1730,10 @@ impl Workspace {
         let (keys, active) = self.as_mut().rust_mut().instance_tabs.remove(&name).unwrap_or_default();
         self.as_mut().rust_mut().tab_keys = keys;
         self.as_mut().set_instance(QString::from(&name));
+        // Its sessions now, even if it didn't answer a while ago.
+        if !name.is_empty() {
+            self.remote_kick.notify_one();
+        }
         let active = if self.tab_keys.contains(&active) { active } else { self.tab_keys.first().cloned().unwrap_or_default() };
         self.as_mut().set_active_key(QString::from(&active));
         self.as_mut().update_active_title();

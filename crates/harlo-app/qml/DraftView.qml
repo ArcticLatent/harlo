@@ -73,6 +73,10 @@ Rectangle {
     Connections {
         target: Workspace
         function onBranchesReady(id, list) { if (id === root.projectId) root.branches = list }
+        function onProjectsRevisionChanged() {
+            if (!root.visible) return
+            root.projects = JSON.parse(Workspace.projectsJson())
+        }
         function onProvidersRevisionChanged() { root.defaultAgent = Workspace.defaultAgent() }
     }
     onVisibleChanged: if (visible) refresh()
@@ -90,16 +94,21 @@ Rectangle {
     /// setup guide) until one is picked. Not for a remote project (its host's
     /// agent).
     property string model: ""
-    function defaultModel() { return project && project.remote ? "" : Workspace.setting("default_model_" + effectiveHarness) }
+    function defaultModel() {
+        if (project && project.remote) return ""
+        // The project's for this agent (Add a project, Settings → Projects).
+        const own = project ? Workspace.setting("project_model_" + project.id + "_" + effectiveHarness) : ""
+        return own !== "" ? own : Workspace.setting("default_model_" + effectiveHarness)
+    }
     onEffectiveHarnessChanged: model = defaultModel()
     readonly property var modelChoices: {
         if (project && project.remote) return []
         const p = (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()) : []).find(x => x.id === effectiveHarness)
         if (!p) return []
-        // Models served on this computer or the local network last, under
-        // "Local" in the list.
+        // Models served on this computer or the local network first, under
+        // "Local" in the list; then the rest, under "Online".
         const all = (p.modelIds || []).map((id, i) => ({ id: id, name: (p.models || [])[i] || id, local: (p.localIds || []).indexOf(id) >= 0 }))
-        return all.filter(m => !m.local).concat(all.filter(m => m.local))
+        return all.filter(m => m.local).concat(all.filter(m => !m.local))
     }
     readonly property string modelName: { const m = modelChoices.find(x => x.id === model); return m ? m.name : model }
     readonly property var starters: JSON.parse(Workspace.starters())
@@ -137,12 +146,14 @@ Rectangle {
 
     // Opens the page for a project (-1: home folder), keeping any draft text.
     function openFor(id) {
-        if (id !== projectId) {
+        const other = id !== projectId
+        if (other) {
             projectId = id
             harness = ""
             useWorktree = false
         }
         refresh()
+        if (other) model = defaultModel()
         input.forceActiveFocus()
     }
     function reset() {
@@ -392,7 +403,7 @@ Rectangle {
                     visible: !root.parallel && !(root.project && root.project.remote)
                     iconName: "sparkling"
                     iconColor: root.model !== "" ? Theme.primary : Theme.muted
-                    text: root.model !== "" ? root.modelName : "Default model"
+                    text: root.model !== "" ? Theme.modelLabel(root.modelName) : "Default model"
                     // (The agents' models are read when first asked for.)
                     onClicked: { Workspace.ensureProviders(); modelPopup.open() }
                     ToolTip.visible: hovered && root.model === ""
@@ -445,8 +456,10 @@ Rectangle {
                                     required property var modelData
                                     required property int index
                                     objectName: "draftModel-" + modelData.id
-                                    // The first local model: "Local" above it.
-                                    readonly property real heading: !!modelData.local && (index === 0 || !ListView.view.model[index - 1].local) ? 30 : 0
+                                    // The first of each group: its name above it (when
+                                    // there are local models; "Default model" has none).
+                                    readonly property real heading: root.modelChoices.length > 0 && root.modelChoices[0].local && modelData.id !== ""
+                                        && (index === 0 || ListView.view.model[index - 1].id === "" || !!ListView.view.model[index - 1].local !== !!modelData.local) ? 30 : 0
                                     width: ListView.view.width
                                     height: 30 + heading
                                     topInset: heading
@@ -457,7 +470,7 @@ Rectangle {
                                         visible: dmRow.heading > 0
                                         x: 8
                                         y: dmRow.heading - height - 3
-                                        text: "LOCAL"
+                                        text: dmRow.modelData.local ? "LOCAL" : "ONLINE"
                                         color: Theme.label
                                         font.pixelSize: Theme.px(11)
                                         font.weight: Font.Medium
@@ -465,7 +478,7 @@ Rectangle {
                                     }
                                     contentItem: RowLayout {
                                         Label {
-                                            text: dmRow.modelData.name + (dmRow.modelData.id === root.model ? "  ✓" : "")
+                                            text: (dmRow.modelData.id === "" ? dmRow.modelData.name : Theme.modelLabel(dmRow.modelData.name)) + (dmRow.modelData.id === root.model ? "  ✓" : "")
                                             color: dmRow.modelData.id === "" ? Theme.muted : Theme.foreground
                                             font.pixelSize: Theme.px(13)
                                             elide: Text.ElideRight
@@ -473,7 +486,7 @@ Rectangle {
                                         }
                                         Label {
                                             visible: dmRow.modelData.id.indexOf("/") > 0
-                                            text: dmRow.modelData.id.split("/")[0]
+                                            text: Theme.providerOf(dmRow.modelData.id)
                                             color: Theme.muted
                                             font.pixelSize: Theme.px(11)
                                         }

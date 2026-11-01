@@ -19,10 +19,19 @@ Rectangle {
     FolderDialog {
         id: folderDialog
         title: "Add project folder"
-        onAccepted: Workspace.addProject(selectedFolder.toString())
+        onAccepted: addProjectDialog.setFolder(selectedFolder.toString())
     }
     // A folder of the instance shown: this computer's, or the host's.
-    RemoteFolderDialog { id: remoteFolderDialog; onPicked: path => Workspace.addProject(path) }
+    RemoteFolderDialog { id: remoteFolderDialog; onPicked: path => addProjectDialog.setFolder(path) }
+    // Its folder, agent and model; then the new-session page for it.
+    AddProjectDialog {
+        id: addProjectDialog
+        onChooseFolder: {
+            if (Workspace.instance === "") folderDialog.open()
+            else remoteFolderDialog.openFor(Workspace.instance)
+        }
+        onAdded: id => root.newSessionRequested(id)
+    }
     signal manageInstancesRequested()
 
     AppDialog {
@@ -50,16 +59,18 @@ Rectangle {
         property string harness: ""
         readonly property bool opencode: harness === "opencode"
         readonly property bool listOnly: harness === "hermes"
-        title: opencode ? "Delete session?" : listOnly ? "Remove session from harlo?" : "Move session to trash?"
+        // (One name for it everywhere; what it does here, said below.)
+        title: "Delete session?"
         modal: true
         anchors.centerIn: Overlay.overlay
         footer: AppButtonBox {
             DialogButton { text: "Cancel"; DialogButtonBox.buttonRole: DialogButtonBox.RejectRole }
-            DialogButton { text: trashDialog.opencode ? "Delete" : trashDialog.listOnly ? "Remove" : "Move to trash"; DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole; accent: false; destructive: true }
+            DialogButton { text: "Delete"; DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole; accent: false; destructive: true }
         }
         Label {
-            text: trashDialog.label + (trashDialog.opencode ? "\n\nOpenCode deletes it with its subagents' sessions. This can't be undone."
-                                     : trashDialog.listOnly ? "\n\n" + Theme.harnessLabel(trashDialog.harness) + " keeps it; harlo stops listing it." : "")
+            text: trashDialog.label + "\n\n" + (trashDialog.opencode ? "OpenCode deletes it with its subagents' sessions. This can't be undone."
+                                     : trashDialog.listOnly ? Theme.harnessLabel(trashDialog.harness) + " can't delete sessions, so it keeps its own copy; harlo stops listing it."
+                                     : "Its file goes to the trash, so you can still restore it from there.")
             width: 360; wrapMode: Text.Wrap; color: Theme.muted
         }
         onAccepted: Workspace.trashSession(key)
@@ -79,10 +90,7 @@ Rectangle {
     property alias renameDialog: renameDialog
     property alias trashDialog: trashDialog
     property alias worktreeDialogs: worktreeDialogs
-    function openAddProject() {
-        if (Workspace.instance === "") folderDialog.open()
-        else remoteFolderDialog.openFor(Workspace.instance)
-    }
+    function openAddProject() { addProjectDialog.open() }
     // Test hook.
     property alias remoteFolderDialog: remoteFolderDialog
     property alias addProjectButtonItem: addProjectButton
@@ -158,7 +166,7 @@ Rectangle {
         }
         AppMenuSeparator { }
         AppMenuItem {
-            text: sessionMenu.harness === "opencode" ? "Delete…" : sessionMenu.harness === "hermes" ? "Remove from harlo…" : "Move to trash…"
+            text: "Delete session…"
             danger: true
             onTriggered: { trashDialog.key = sessionMenu.key; trashDialog.label = sessionMenu.sessionTitle; trashDialog.harness = sessionMenu.harness; trashDialog.open() }
         }
@@ -534,14 +542,15 @@ Rectangle {
                     font.pixelSize: Theme.px(12)
                 }
             }
-            // A section label: small, uppercase, spaced.
+            // A section label: small, uppercase, spaced; set apart from the
+            // sessions in the theme's accent, toned down (as Settings' sections).
             Label {
                 Layout.fillWidth: true
                 Layout.leftMargin: 2
                 text: groupRow.title
-                color: groupRow.hovered ? Theme.textMuted : Theme.label
+                color: groupRow.hovered ? Theme.blend(Theme.text, Theme.accent, 0.5) : Theme.blend(Theme.textMuted, Theme.accent, 0.7)
                 font.pixelSize: Theme.px(12)
-                font.weight: Font.Medium
+                font.weight: Font.DemiBold
                 font.capitalization: Font.AllUppercase
                 font.letterSpacing: Theme.px(12) * 0.07
                 elide: Text.ElideRight

@@ -89,7 +89,8 @@ Popup {
         property string subtitle
         Layout.fillWidth: true
         spacing: 3
-        Label { text: parent.title; color: Theme.text; font.pixelSize: Theme.px(16); font.weight: Font.DemiBold; font.letterSpacing: -0.1 }
+        // (None: a page's first section, under the page's own title.)
+        Label { visible: parent.title !== ""; text: parent.title; color: Theme.text; font.pixelSize: Theme.px(16); font.weight: Font.DemiBold; font.letterSpacing: -0.1 }
         Label { visible: parent.subtitle !== ""; text: parent.subtitle; color: Theme.textMuted; font.pixelSize: Theme.px(12.5); wrapMode: Text.Wrap; Layout.fillWidth: true }
     }
     component Rule: Rectangle { Layout.fillWidth: true; Layout.topMargin: 22; Layout.bottomMargin: 18; implicitHeight: 1; color: Theme.hairline }
@@ -279,9 +280,10 @@ Popup {
                                 Label {
                                     visible: !root.compact && groupBlock.modelData[1] !== ""
                                     text: groupBlock.modelData[1].toUpperCase()
-                                    color: Theme.label
+                                    // (Set apart from the pages: the theme's accent, toned down.)
+                                    color: Theme.blend(Theme.textMuted, Theme.accent, 0.7)
                                     font.pixelSize: Theme.px(11.5)
-                                    font.weight: Font.Medium
+                                    font.weight: Font.DemiBold
                                     font.letterSpacing: Theme.px(11.5) * 0.07
                                     Layout.topMargin: 12
                                     Layout.bottomMargin: 4
@@ -386,7 +388,6 @@ Popup {
                 Layout.leftMargin: 16
                 Layout.topMargin: 24
                 Layout.bottomMargin: 4
-                title: "Usage"
                 subtitle: "Your plans' limits, and totals across all pi and omp sessions."
             }
             PlanLimits {
@@ -2194,6 +2195,48 @@ Popup {
                             }
                         }
                     }
+                    // Its agent's model here (each agent remembers its own).
+                    SettingRow {
+                        id: projModel
+                        objectName: "projectModel"
+                        visible: proj.p !== null && !proj.p.remote
+                        divider: true
+                        title: "Model"
+                        detail: "What " + (proj.p ? Theme.harnessLabel(proj.p.harness) : "the agent") + " starts with here."
+                        icon: "sparkling"
+                        property int revision: 0
+                        readonly property string key: proj.p ? "project_model_" + proj.p.id + "_" + proj.p.harness : ""
+                        readonly property string current: revision >= 0 && key !== "" ? Workspace.setting(key) : ""
+                        readonly property var choices: {
+                            const p = proj.p ? (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()) : []).find(x => x.id === proj.p.harness) : null
+                            if (!p) return []
+                            const all = (p.modelIds || []).map((id, i) => ({ id: id, name: (p.models || [])[i] || id, local: (p.localIds || []).indexOf(id) >= 0 }))
+                            return all.filter(m => m.local).concat(all.filter(m => !m.local))
+                        }
+                        function choose(id) { Workspace.setSetting(key, id); revision++ }
+                        FlatButton {
+                            id: projModelButton
+                            readonly property var m: projModel.choices.find(x => x.id === projModel.current)
+                            text: projModel.current === "" ? "Default model" : Theme.modelLabel(m ? m.name : projModel.current)
+                            font.pixelSize: Theme.px(12)
+                            onClicked: { Workspace.ensureProviders(); projModelMenu.popup(projModelButton, 0, projModelButton.height + 4) }
+                            AppMenu {
+                                id: projModelMenu
+                                AppMenuItem { text: "Default model"; marked: projModel.current === ""; onTriggered: projModel.choose("") }
+                                AppMenuSeparator { visible: projModel.choices.length > 0 }
+                                Repeater {
+                                    model: projModel.choices
+                                    AppMenuItem {
+                                        required property var modelData
+                                        text: Theme.modelLabel(modelData.name)
+                                        hint: modelData.local ? "Local" : Theme.providerOf(modelData.id)
+                                        marked: projModel.current === modelData.id
+                                        onTriggered: projModel.choose(modelData.id)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 Rule { }
 
@@ -2426,7 +2469,6 @@ Popup {
                 Remotes.connectHost(name)
             }
             SectionHeader {
-                title: "Remote Instances"
                 subtitle: "Work on other machines over SSH. Each one is an instance, with its own projects and sessions: switch to it from the instance menu at the top of the sidebar, then + Project adds its folders; its chats, terminal, git and files work there. harlo signs in with your SSH keys or agent. Each connected machine shows which agents it has (omp, pi, Claude, OpenCode), installs the missing ones for you, and opens a terminal there to sign Claude in."
             }
             RowLayout {

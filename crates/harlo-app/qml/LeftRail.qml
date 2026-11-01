@@ -58,15 +58,22 @@ Rectangle {
                     }
                 return out
             }
+            // Used last, with no limits to show (a model on your own server,
+            // or a provider harlo reads no limits for): its logo, no ring.
+            readonly property string lastOther: Workspace.meterPin === "" && Workspace.meterLast !== "" && !providers.some(p => p.provider === Workspace.meterLast) ? Workspace.meterLast : ""
+            readonly property bool lastLocal: lastOther !== "" && Accounts.revision >= 0
+                && ["pi", "omp", "opencode", "hermes", ""].some(a => JSON.parse(Accounts.servers(a)).some(s => s.name === lastOther && s.place !== "online"))
+                || ["ollama", "llama.cpp", "lm-studio"].includes(lastOther)
             // Pinned, else the last used, else the fullest.
             readonly property var shown: {
+                if (lastOther !== "") return null
                 const pick = id => id !== "" ? providers.find(p => p.provider === id) : undefined
                 return pick(Workspace.meterPin) || pick(Workspace.meterLast) || providers.reduce((w, p) => !w || p.f > w.f ? p : w, null)
             }
             readonly property real f: shown ? Math.min(1, shown.f) : 0
             readonly property color tint: !shown ? Theme.accent : shown.reached || shown.f >= 0.95 ? Theme.error : shown.f >= 0.75 ? Theme.warning : Theme.accent
             function percent(p) { return Math.round(p.f * 100) + "%" }
-            visible: shown !== null && shown !== undefined
+            visible: (shown !== null && shown !== undefined) || lastOther !== ""
             width: 38
             height: meterCol.implicitHeight + 10
             Rectangle { anchors.fill: parent; radius: 10; color: meterHover.hovered || meterMenu.visible ? Theme.rowHover : "transparent"; Behavior on color { ColorAnimation { duration: Theme.hoverMotion } } }
@@ -113,8 +120,8 @@ Rectangle {
                     ProviderLogo {
                         objectName: "planMeterLogo"
                         anchors.centerIn: parent
-                        visible: !!planMeter.shown && planMeter.shown.provider !== "Claude"
-                        provider: planMeter.shown ? planMeter.shown.provider : ""
+                        visible: planMeter.lastOther !== "" || (!!planMeter.shown && planMeter.shown.provider !== "Claude")
+                        provider: planMeter.lastOther !== "" ? planMeter.lastOther : planMeter.shown ? planMeter.shown.provider : ""
                         color: Theme.textMuted
                         implicitWidth: 16
                         implicitHeight: 16
@@ -123,7 +130,7 @@ Rectangle {
                 Label {
                     objectName: "planMeterPercent"
                     anchors.horizontalCenter: parent.horizontalCenter
-                    text: planMeter.shown ? planMeter.percent(planMeter.shown) : ""
+                    text: planMeter.lastOther !== "" ? (planMeter.lastLocal ? "local" : "—") : planMeter.shown ? planMeter.percent(planMeter.shown) : ""
                     color: Theme.textMuted
                     font.pixelSize: Theme.px(10)
                 }
@@ -131,7 +138,8 @@ Rectangle {
             HoverHandler { id: meterHover; cursorShape: Qt.PointingHandCursor }
             TapHandler { onTapped: meterMenu.popup(planMeter, planMeter.width + 8, 0) }
             ToolTip.visible: meterHover.hovered && !meterMenu.visible
-            ToolTip.text: planMeter.shown ? planMeter.shown.provider + ": " + planMeter.percent(planMeter.shown) + " of the " + planMeter.shown.label + " limit" + (planMeter.shown.reached ? " (limit reached)" : "")
+            ToolTip.text: planMeter.lastOther !== "" ? planMeter.lastOther + " (used last): " + (planMeter.lastLocal ? "runs on your own server, no usage limits" : "no usage limits harlo can read") + "\nClick to switch"
+                : planMeter.shown ? planMeter.shown.provider + ": " + planMeter.percent(planMeter.shown) + " of the " + planMeter.shown.label + " limit" + (planMeter.shown.reached ? " (limit reached)" : "")
                 + (Workspace.meterPin === planMeter.shown.provider ? " (pinned)" : Workspace.meterLast === planMeter.shown.provider ? " (used last)" : "") + "\nClick to switch" : ""
             ToolTip.delay: 400
             // Whose limits to show.

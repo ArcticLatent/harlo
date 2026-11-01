@@ -303,13 +303,13 @@ Rectangle {
                 Layout.fillHeight: true
                 clip: true
                 highlightMoveDuration: 0
-                // Models served on this computer or the local network last,
-                // under "Local".
+                // Models served on this computer or the local network first,
+                // under "Local"; then the rest, under "Online".
                 model: {
                     const all = root.session.models
                         .map(m => { const p = m.split("\t"); return { provider: p[0], id: p[1], name: p[2] || p[1], reasoning: p[3] === "1", local: p[4] === "1" } })
                         .filter(m => (m.provider + " " + m.id + " " + m.name).toLowerCase().includes(modelFilter.text.toLowerCase()))
-                    return all.filter(m => !m.local).concat(all.filter(m => m.local))
+                    return all.filter(m => m.local).concat(all.filter(m => !m.local))
                 }
                 function pick(i) {
                     const m = model[i]
@@ -319,8 +319,9 @@ Rectangle {
                     id: mrow
                     required property var modelData
                     required property int index
-                    // The first local model: "Local" above it.
-                    readonly property real heading: modelData.local && (index === 0 || !ListView.view.model[index - 1].local) ? 30 : 0
+                    // The first of each group: its name above it (when there
+                    // are local models at all).
+                    readonly property real heading: ListView.view.model[0].local && (index === 0 || ListView.view.model[index - 1].local !== modelData.local) ? 30 : 0
                     width: ListView.view.width
                     height: 30 + heading
                     topInset: heading
@@ -331,7 +332,7 @@ Rectangle {
                         visible: mrow.heading > 0
                         x: 8
                         y: mrow.heading - height - 3
-                        text: "LOCAL"
+                        text: mrow.modelData.local ? "LOCAL" : "ONLINE"
                         color: Theme.label
                         font.pixelSize: Theme.px(11)
                         font.weight: Font.Medium
@@ -339,12 +340,12 @@ Rectangle {
                     }
                     contentItem: RowLayout {
                         Label {
-                            text: mrow.modelData.name + (mrow.modelData.name === root.session.modelName ? "  ✓" : "")
+                            text: Theme.modelLabel(mrow.modelData.name) + (mrow.modelData.name === root.session.modelName ? "  ✓" : "")
                             color: Theme.foreground
                             font.pixelSize: Theme.px(13)
                         }
                         Item { Layout.fillWidth: true }
-                        Label { text: mrow.modelData.provider; color: Theme.muted; font.pixelSize: Theme.px(11) }
+                        Label { text: Theme.providerOf(mrow.modelData.provider + ":" + mrow.modelData.id); color: Theme.muted; font.pixelSize: Theme.px(11) }
                     }
                     onClicked: modelList.pick(index)
                 }
@@ -743,7 +744,7 @@ Rectangle {
             readonly property string full: root.session.modelId !== "" ? root.session.modelId : root.session.modelName
             readonly property string provider: full.indexOf("/") > 0 ? full.split("/")[0] : ""
             // Tight: the provider's logo alone (the name is in the tooltip).
-            text: bar.tight && provider !== "" ? "" : root.session.modelName !== "" ? root.session.modelName.split("/").pop() : "Model"
+            text: bar.tight && provider !== "" ? "" : root.session.modelName !== "" ? Theme.modelLabel(root.session.modelName).split("/").pop() : "Model"
             maxLabel: bar.tight ? 90 : bar.narrow ? 140 : 240
             // Short of room, the model's name elides before Send is pushed off.
             // (A layout keeps an item that doesn't fill at its preferred width.)

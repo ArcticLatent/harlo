@@ -219,12 +219,18 @@ pub fn build(input: &SidebarInput<'_>) -> Vec<SidebarRow> {
     }
 
     let filtering = !filter.is_empty();
-    let mut rows = Vec::new();
+    // Each project's rows and when it was last worked in: the project with
+    // the latest session goes first (those without any last, as added);
+    // "Other sessions" after them all.
+    let mut groups: Vec<(i64, Vec<SidebarRow>)> = Vec::new();
+    let latest = |list: &[&Entry]| list.iter().map(|e| e.modified).max().unwrap_or(0);
     for p in input.projects {
         let (shelf, sessions): (Vec<&Entry>, Vec<&Entry>) = by_project.remove(&p.id).unwrap_or_default().into_iter().partition(|e| !e.settled.is_empty());
         if filtering && sessions.is_empty() && shelf.is_empty() {
             continue;
         }
+        let mut rows = Vec::new();
+        let worked = latest(&sessions).max(latest(&shelf));
         let collapsed = p.collapsed && !filtering;
         rows.push(SidebarRow {
             kind: SidebarKind::Project,
@@ -275,8 +281,11 @@ pub fn build(input: &SidebarInput<'_>) -> Vec<SidebarRow> {
                 }
             }
         }
+        groups.push((worked, rows));
     }
+    groups.sort_by_key(|(worked, _)| std::cmp::Reverse(*worked));
     if !other.is_empty() {
+        let mut rows = Vec::new();
         let collapsed = input.other_collapsed && !filtering;
         rows.push(SidebarRow {
             kind: SidebarKind::OtherGroup,
@@ -301,8 +310,9 @@ pub fn build(input: &SidebarInput<'_>) -> Vec<SidebarRow> {
         if !collapsed {
             push_sessions(&mut rows, &other, -1, true, filtering || input.expanded.contains(&-1));
         }
+        groups.push((0, rows));
     }
-    rows
+    groups.into_iter().flat_map(|(_, rows)| rows).collect()
 }
 
 fn push_sessions(rows: &mut Vec<SidebarRow>, sessions: &[&Entry], project_id: i64, show_cwd: bool, all: bool) {
@@ -439,6 +449,8 @@ mod tests {
         let meta = HashMap::new();
         let rows = build(&SidebarInput { projects: &projects, worktrees: &[], sessions: &sessions, live: &[], meta: &meta, filter: "", show_archived: false, other_collapsed: false, expanded: &[], shelves_open: &[] });
         let shape: Vec<(SidebarKind, &str)> = rows.iter().map(|r| (r.kind, r.title.as_str())).collect();
+        // The project worked in last first ("in w" is newer than "in app");
+        // "Other sessions" after the projects, however new.
         assert_eq!(shape, [
             (SidebarKind::Project, "w"),
             (SidebarKind::Session, "in w"),

@@ -121,6 +121,7 @@ fn main() {
                 "qml/AddHostDialog.qml",
                 "qml/ModelServerDialog.qml",
                 "qml/SetupServerDialog.qml",
+                "qml/AddProjectDialog.qml",
                 "qml/PiPackages.qml",
                 "qml/SpecsPanel.qml",
                 "qml/PlanDock.qml",
