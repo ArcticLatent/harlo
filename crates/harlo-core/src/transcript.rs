@@ -138,9 +138,9 @@ pub struct Transcript {
     tools: HashMap<String, ToolRun>,
     tool_owner: HashMap<String, usize>,
     notice_seq: u64,
+    /// The compaction under way: its line, which says how it went.
+    compacting: Option<String>,
     md: MarkdownRenderer,
-    /// Last snapshot's rows that carry a run, so unchanged ones keep their `Arc`.
-    grouped: HashMap<String, Arc<Row>>,
 }
 
 impl Transcript {
@@ -247,15 +247,31 @@ impl Transcript {
                 false
             }
             E::Notice { level, text, .. } => self.push_notice(*level, text.clone()),
-            E::Compaction { started: true, reason, .. } => self.push_notice(
-                NoticeLevel::Info,
-                format!("Compacting context{}…", reason.as_deref().map(|r| format!(" ({r})")).unwrap_or_default()),
-            ),
-            E::Compaction { started: false, error: Some(err), .. } => {
-                self.push_notice(NoticeLevel::Error, format!("Compaction failed: {err}"))
+            // One line for each compaction (an agent may say it's compacting
+            // more than once), which then says how it went.
+            E::Compaction { started: true, .. } if self.compacting.is_some() => false,
+            E::Compaction { started: true, reason, .. } => {
+                let changed = self.push_notice(
+                    NoticeLevel::Info,
+                    format!("Compacting context{}…", reason.as_deref().map(|r| format!(" ({r})")).unwrap_or_default()),
+                );
+                self.compacting = Some(format!("notice-{}", self.notice_seq));
+                changed
             }
-            E::Compaction { started: false, error: None, .. } => {
-                self.push_notice(NoticeLevel::Info, "Context compacted".into())
+            E::Compaction { started: false, error, .. } => {
+                let (level, text) = match error {
+                    Some(err) => (NoticeLevel::Error, format!("Compaction failed: {err}")),
+                    None => (NoticeLevel::Info, "Context compacted".to_owned()),
+                };
+                match self.compacting.take().and_then(|id| self.item_mut(&id)) {
+                    Some(item) => {
+                        item.role = Role::Notice(level);
+                        item.blocks = vec![Block::Text(text)];
+                        item.rev += 1;
+                        true
+                    }
+                    None => self.push_notice(level, text),
+                }
             }
             E::Retry { started: true, attempt, max_attempts, error } => {
                 let text = match max_attempts {
@@ -432,60 +448,49 @@ impl Transcript {
 
     /// Current display rows. Rows of unchanged items are reused.
     pub fn rows(&mut self) -> Vec<Arc<Row>> {
-        let mut out = Vec::new();
-        for i in 0..self.items.len() {
-            let fresh = matches!(&self.items[i].rows, Some((rev, _)) if *rev == self.items[i].rev);
-            if !fresh {
-                let rows = self.build_rows(i);
-                let item = &mut self.items[i];
-                item.rows = Some((item.rev, rows));
-            }
-            out.extend(self.items[i].rows.as_ref().expect("rows built").1.iter().cloned());
-        }
-        self.group_runs(out)
+        self.rows_from(0)
     }
 
-    /// Marks the runs of tool calls and thoughts (see [`Row::group`]).
-    fn group_runs(&mut self, mut rows: Vec<Arc<Row>>) -> Vec<Arc<Row>> {
-        let activity = |r: &Row| matches!(r.kind, RowKind::Tool | RowKind::Thinking);
-        let mut grouped = HashMap::new();
-        let mut i = 0;
-        while i < rows.len() {
-            if !activity(&rows[i]) {
-                i += 1;
-                continue;
-            }
-            let start = i;
-            while i < rows.len() && activity(&rows[i]) {
-                i += 1;
-            }
-            if i - start < 2 {
-                continue;
-            }
-            let run = &rows[start..i];
-            let group = run[0].key.clone();
-            let summary = run_summary(run);
-            let open = i == rows.len() || run.iter().any(|r| r.kind == RowKind::Tool && matches!(r.state.as_str(), "running" | "pending"));
-            // How long it took: from its first step to what came next (or
-            // its last call's return).
-            let end = rows.get(i).map(|r| r.time).into_iter().chain(run.iter().map(|r| r.ended)).max().unwrap_or(0);
-            let run_ms = if open || run[0].time == 0 { 0 } else { (end - run[0].time).max(0) };
-            for (n, slot) in rows[start..i].iter_mut().enumerate() {
-                let mut r = (**slot).clone();
-                r.group = group.clone();
-                r.summary = if n == 0 { summary.clone() } else { String::new() };
-                r.run_ms = if n == 0 { run_ms } else { 0 };
-                r.group_open = open;
-                let r = match self.grouped.get(&r.key) {
-                    Some(prev) if **prev == r => prev.clone(),
-                    _ => Arc::new(r),
-                };
-                grouped.insert(r.key.clone(), r.clone());
-                *slot = r;
+    /// The rows of the latest messages: at least `count` (all there are, if
+    /// fewer), from one of your prompts on. What a long session shows first,
+    /// before [`Self::rows`] has the rest above them, the same rows.
+    pub fn last_rows(&mut self, count: usize) -> Vec<Arc<Row>> {
+        let (mut first, mut n) = (self.items.len(), 0);
+        while first > 0 {
+            first -= 1;
+            n += self.fresh_rows(first).len();
+            if n >= count && self.items[first].role == Role::User {
+                break;
             }
         }
-        self.grouped = grouped;
-        rows
+        self.rows_from(first)
+    }
+
+    /// Item `i`'s rows, built if it changed since.
+    fn fresh_rows(&mut self, i: usize) -> &[Arc<Row>] {
+        let fresh = matches!(&self.items[i].rows, Some((rev, _)) if *rev == self.items[i].rev);
+        if !fresh {
+            let rows = self.build_rows(i);
+            let item = &mut self.items[i];
+            item.rows = Some((item.rev, rows));
+        }
+        &self.items[i].rows.as_ref().expect("rows built").1
+    }
+
+    fn rows_from(&mut self, first: usize) -> Vec<Arc<Row>> {
+        let mut out = Vec::new();
+        for i in first..self.items.len() {
+            let rows = self.fresh_rows(i);
+            out.extend(rows.iter().cloned());
+        }
+        group_runs(&mut out);
+        // Each item keeps its rows as shown, so none is held twice and one
+        // that stays in its run isn't copied again.
+        let mut shown = out.iter();
+        for row in self.items[first..].iter_mut().flat_map(|item| item.rows.iter_mut().flat_map(|(_, rows)| rows)) {
+            *row = shown.next().expect("a row for each kept").clone();
+        }
+        out
     }
 
     fn build_rows(&mut self, i: usize) -> Vec<Arc<Row>> {
@@ -781,6 +786,50 @@ pub fn escape_html(s: &str) -> String {
 
 /// What a run of tool calls and thoughts did, in words: "Thought, read 2
 /// files, ran 1 command" (and how many failed).
+/// Marks the runs of tool calls and thoughts (see [`Row::group`]).
+fn group_runs(rows: &mut [Arc<Row>]) {
+    let activity = |r: &Row| matches!(r.kind, RowKind::Tool | RowKind::Thinking);
+    let mut i = 0;
+    while i < rows.len() {
+        if !activity(&rows[i]) {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < rows.len() && activity(&rows[i]) {
+            i += 1;
+        }
+        if i - start < 2 {
+            set_run(&mut rows[start], "", "", false, 0);
+            continue;
+        }
+        let run = &rows[start..i];
+        let group = run[0].key.clone();
+        let summary = run_summary(run);
+        let open = i == rows.len() || run.iter().any(|r| r.kind == RowKind::Tool && matches!(r.state.as_str(), "running" | "pending"));
+        // How long it took: from its first step to what came next (or
+        // its last call's return).
+        let end = rows.get(i).map(|r| r.time).into_iter().chain(run.iter().map(|r| r.ended)).max().unwrap_or(0);
+        let run_ms = if open || run[0].time == 0 { 0 } else { (end - run[0].time).max(0) };
+        for (n, slot) in rows[start..i].iter_mut().enumerate() {
+            let first = n == 0;
+            set_run(slot, &group, if first { &summary } else { "" }, open, if first { run_ms } else { 0 });
+        }
+    }
+}
+
+/// A row's place in its run. (Copied only if that changed and the list on
+/// screen has it.)
+fn set_run(row: &mut Arc<Row>, group: &str, summary: &str, open: bool, run_ms: i64) {
+    if row.group != group || row.summary != summary || row.group_open != open || row.run_ms != run_ms {
+        let r = Arc::make_mut(row);
+        r.group = group.to_owned();
+        r.summary = summary.to_owned();
+        r.group_open = open;
+        r.run_ms = run_ms;
+    }
+}
+
 fn run_summary(run: &[Arc<Row>]) -> String {
     // (verb phrase, singular, plural) in the order they're told.
     const KINDS: [(&str, &str, &str); 8] = [
@@ -909,6 +958,43 @@ mod tests {
         assert_eq!(rows[0].text, "2 background jobs have completed.");
     }
 
+    /// A long session's latest rows come first; the whole list then only adds
+    /// the earlier ones above them, the rows shown staying as they are.
+    #[test]
+    fn the_latest_rows_come_first_and_the_rest_goes_above() {
+        let mut messages = Vec::new();
+        for i in 0..30 {
+            messages.push(json!({"role":"user","content":[{"type":"text","text":format!("prompt {i}")}]}));
+            let blocks: Vec<Value> = std::iter::once(json!({"type":"thinking","thinking":"hm"}))
+                .chain((0..3).map(|c| json!({"type":"toolCall","id":format!("c{i}-{c}"),"name":"bash","arguments":{"command":"ls"}})))
+                .collect();
+            messages.push(json!({"role":"assistant","content":blocks}));
+            for c in 0..3 {
+                messages.push(json!({"role":"toolResult","toolCallId":format!("c{i}-{c}"),"content":[{"type":"text","text":"ok"}],"isError":false}));
+            }
+            messages.push(json!({"role":"assistant","content":[{"type":"text","text":format!("answer **{i}**")}]}));
+        }
+        for (n, m) in messages.iter_mut().enumerate() {
+            m["timestamp"] = json!(1_000 + n as i64);
+        }
+        let mut whole = Transcript::default();
+        whole.load_messages(&messages);
+        let all = whole.rows();
+
+        let mut t = Transcript::default();
+        t.load_messages(&messages);
+        let first = t.last_rows(10);
+        assert!(first.len() >= 10 && first.len() < all.len());
+        assert_eq!(first[0].kind, RowKind::User, "from a prompt on");
+        assert_eq!(first, all[all.len() - first.len()..], "the end of the whole list, runs and all");
+        let rest = t.rows();
+        assert_eq!(rest, all);
+        let changes = diff_rows(&first, &rest);
+        assert!(matches!(changes.as_slice(), [ListChange::Insert { at: 0, rows }] if rows.len() == all.len() - first.len()), "{} changes", changes.len());
+        assert!(rest[all.len() - first.len()..].iter().zip(&first).all(|(a, b)| Arc::ptr_eq(a, b)), "the same rows");
+        assert_eq!(Transcript::default().last_rows(10), Vec::<Arc<Row>>::new());
+    }
+
     #[test]
     fn streaming_text_updates_only_the_tail() {
         let mut t = Transcript::new();
@@ -968,6 +1054,25 @@ mod tests {
         t.apply(&HarnessEvent::Notice { level: NoticeLevel::Warning, text: "MCP server failed".into(), system: true });
         t.apply(&retry(1));
         assert_eq!(t.rows().len(), 3);
+    }
+
+    #[test]
+    fn a_compaction_is_one_line() {
+        let mut t = Transcript::new();
+        let compaction = |started, error: Option<&str>| HarnessEvent::Compaction { started, reason: None, error: error.map(str::to_owned) };
+        for _ in 0..3 {
+            t.apply(&compaction(true, None));
+        }
+        assert_eq!(t.rows().len(), 1);
+        t.apply(&compaction(false, None));
+        let rows = t.rows();
+        assert_eq!(rows.len(), 1);
+        assert!(format!("{rows:?}").contains("Context compacted") && !format!("{rows:?}").contains("Compacting"), "{rows:?}");
+        t.apply(&compaction(true, None));
+        t.apply(&compaction(false, Some("too long")));
+        let rows = t.rows();
+        assert_eq!(rows.len(), 2, "the next is a line of its own");
+        assert!(format!("{:?}", rows[1]).contains("Compaction failed: too long"), "{rows:?}");
     }
 
     #[test]

@@ -46,6 +46,12 @@ pub mod qobject {
         /// "42% · 115k/272k · $0.31"
         #[qproperty(QString, context_text, cxx_name = "contextText")]
         #[qproperty(f64, context_fraction, cxx_name = "contextFraction")]
+        /// Where it compacts, as a share of the window (0: it won't, or
+        /// isn't known).
+        #[qproperty(f64, compact_fraction, cxx_name = "compactFraction")]
+        /// "12k tokens left before the context compacts" when it's near
+        /// (the last 15% of the way); "" otherwise.
+        #[qproperty(QString, compact_note, cxx_name = "compactNote")]
         /// `name\tdescription\thint` per command.
         #[qproperty(QStringList, commands)]
         /// `provider\tid\tname\treasoning(0|1)` per model.
@@ -145,9 +151,10 @@ pub mod qobject {
         /// omp: copies the session up to this message into a new session.
         #[qinvokable]
         fn fork_at(self: Pin<&mut ChatSession>, row: i32);
-        /// Index of the first row whose key starts with `prefix`, or -1.
+        /// Row index of the block of a message (keys with this prefix) that
+        /// a search found, or -1.
         #[qinvokable]
-        fn index_of_key_prefix(self: &ChatSession, prefix: &QString) -> i32;
+        fn index_of_hit(self: &ChatSession, prefix: &QString, query: &QString) -> i32;
         /// Row index of the row with this key, or -1.
         #[qinvokable]
         fn index_of_key(self: &ChatSession, key: &QString) -> i32;
@@ -157,10 +164,10 @@ pub mod qobject {
         /// Your messages, for the prompt rail: JSON `[{i: row, text: preview}]`.
         #[qinvokable]
         fn user_prompts(self: &ChatSession) -> QString;
-        /// omp: drops a queued message (`queued` index).
+        /// Drops a queued message (`queued` index).
         #[qinvokable]
         fn remove_queued(self: Pin<&mut ChatSession>, index: i32);
-        /// omp: sends a queued follow-up now, as steering.
+        /// Sends a queued follow-up now, as steering.
         #[qinvokable]
         fn promote_queued(self: Pin<&mut ChatSession>, index: i32);
         /// omp goal mode: `op` is create (with `objective`, and a token
@@ -327,6 +334,8 @@ pub struct ChatSessionRust {
     starting_server: QString,
     context_text: QString,
     context_fraction: f64,
+    compact_fraction: f64,
+    compact_note: QString,
     commands: QStringList,
     models: QStringList,
     thinking_levels: QStringList,
@@ -423,6 +432,7 @@ impl ChatSession {
             Self::set_status,
             Self::set_harness,
             Self::set_context_text,
+            Self::set_compact_note,
             Self::set_cwd,
             Self::set_undo_json,
             Self::set_undo_plan,
@@ -440,6 +450,7 @@ impl ChatSession {
             setter(self.as_mut(), QStringList::default());
         }
         self.as_mut().set_context_fraction(0.0);
+        self.as_mut().set_compact_fraction(0.0);
         self.as_mut().set_context_json(QString::default());
         self.as_mut().set_key(key.clone());
 
@@ -550,9 +561,19 @@ impl ChatSession {
         });
     }
 
-    pub fn index_of_key_prefix(&self, prefix: &QString) -> i32 {
+    pub fn index_of_hit(&self, prefix: &QString, query: &QString) -> i32 {
         let prefix = prefix.to_string();
-        self.rows.iter().position(|r| r.key.starts_with(&prefix)).map_or(-1, |i| i as i32)
+        let Some(first) = self.rows.iter().position(|r| r.key.starts_with(&prefix)) else { return -1 };
+        // (What's searched: a message's text, not its thinking or tools.)
+        let blocks: Vec<(usize, String)> = self
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.key.starts_with(&prefix) && matches!(r.kind, RowKind::User | RowKind::Markdown | RowKind::Code))
+            .map(|(i, r)| (i, if r.html.is_empty() { r.text.clone() } else { harlo_core::markdown::plain_text(&r.html) }))
+            .collect();
+        let texts: Vec<&str> = blocks.iter().map(|(_, text)| text.as_str()).collect();
+        blocks.get(harlo_core::search::best_block(&texts, &query.to_string())).map_or(first, |(i, _)| *i) as i32
     }
 
     pub fn index_of_key(&self, key: &QString) -> i32 {
@@ -1149,9 +1170,12 @@ impl ChatSession {
                     self.as_mut().set_model_name(QString::from(&m.model));
                     self.as_mut().set_model_id(QString::from(&m.model_id));
                     self.as_mut().set_thinking(QString::from(&m.thinking));
-                    let (text, fraction) = context_summary(m.context_tokens, m.context_window, m.cost);
+                    let (text, fraction) = context_summary(m.context_tokens, m.context_window, m.compact_at, m.cost);
                     self.as_mut().set_context_text(QString::from(&text));
                     self.as_mut().set_context_fraction(fraction);
+                    let compact = if m.context_window > 0 { m.compact_at as f64 / m.context_window as f64 } else { 0.0 };
+                    self.as_mut().set_compact_fraction(compact);
+                    self.as_mut().set_compact_note(QString::from(&compact_note(m.context_tokens, m.compact_at)));
                     let title = if !m.name.is_empty() { m.name } else { m.first_message };
                     self.as_mut().set_title(QString::from(&title));
                 }
@@ -1187,7 +1211,8 @@ impl ChatSession {
                 SessionUpdate::Todos(todos) => self.as_mut().set_todos_json(QString::from(&todos.to_string())),
                 SessionUpdate::Goal(goal) => self.as_mut().apply_goal(&goal),
                 // (The workspace notifies.)
-                SessionUpdate::Notable(_) => {}
+                // (The workspace has these.)
+                SessionUpdate::Notable(_) | SessionUpdate::Limits(_) => {}
                 SessionUpdate::Btw(frame) => self.as_mut().apply_btw(frame),
                 SessionUpdate::UiRequest(req) => {
                     self.as_mut().rust_mut().requests.push_back(req);
@@ -1351,18 +1376,34 @@ impl ChatSession {
 }
 
 /// "42% · 115k/272k · $0.31" and the used fraction (0..1).
-fn context_summary(tokens: u64, window: u64, cost: f64) -> (String, f64) {
-    fn k(n: u64) -> String {
-        if n >= 1000 { format!("{}k", (n + 500) / 1000) } else { n.to_string() }
-    }
+fn k(n: u64) -> String {
+    if n >= 1000 { format!("{}k", (n + 500) / 1000) } else { n.to_string() }
+}
+
+/// What the context bar's tooltip says.
+fn context_summary(tokens: u64, window: u64, compact_at: u64, cost: f64) -> (String, f64) {
     let mut parts = Vec::new();
     let mut fraction = 0.0;
     if window > 0 {
         fraction = tokens as f64 / window as f64;
         parts.push(format!("{:.0}% · {}/{}", fraction * 100.0, k(tokens), k(window)));
+        if compact_at > 0 {
+            parts.push(format!("compacts at {}", k(compact_at)));
+        }
     }
     if cost > 0.0 {
         parts.push(format!("${cost:.2}"));
     }
     (parts.join(" · "), fraction)
+}
+
+/// The line above the composer as the context nears where it compacts.
+fn compact_note(tokens: u64, compact_at: u64) -> String {
+    if compact_at == 0 || tokens == 0 || (tokens as f64) < compact_at as f64 * 0.85 {
+        return String::new();
+    }
+    match compact_at.saturating_sub(tokens) {
+        0 => "The context is at its limit: it compacts next".to_owned(),
+        left => format!("{} tokens left before the context compacts", k(left)),
+    }
 }

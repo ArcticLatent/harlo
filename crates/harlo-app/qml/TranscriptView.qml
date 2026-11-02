@@ -159,7 +159,10 @@ Item {
     }
     function copyToClipboard(t) { clipboardHelper.copyText(t) }
     /// Scrolls like the scrollbar does (sets contentY directly; for tests).
-    function scrollBy(dy) { view.contentY = Math.max(view.originY - view.topMargin, view.contentY + dy) }
+    function scrollBy(dy) {
+        if (dy < 0) view.follow = false
+        view.contentY = Math.max(view.originY - view.topMargin, view.contentY + dy)
+    }
     readonly property bool atEnd: view.nearEnd()
     /// [row index, its y within the viewport] for the row at the viewport's middle (tests).
     /// How far past the bottom limit the view sits (positive = out of bounds; tests).
@@ -255,7 +258,7 @@ Item {
         // fractional pixels, which makes text shimmer by a pixel.
         pixelAligned: true
         // Grabbing the scrollbar always means "stop following".
-        ScrollBar.vertical: ScrollBar { onPressedChanged: if (pressed) view.follow = false }
+        ScrollBar.vertical: ScrollBar { id: vbar; onPressedChanged: if (pressed) view.follow = false }
         // A new message, card or reply fades in (not a whole session as it
         // opens: that's a reset).
         add: Transition {
@@ -298,25 +301,41 @@ Item {
         // row heights ListView's origin drifts away from 0 in long lists.
         function nearEnd() { return contentY + height >= originY + contentHeight + bottomMargin - 48 }
         // Deferred, so several changes in one frame scroll once. Re-check
-        // `follow`: the user may have scrolled away in the meantime.
-        function followEnd() { if (follow) scrollToEnd() }
-        // Any scroll we didn't cause decides follow from position alone, so
-        // the scrollbar, wheel, keys and flicks all count the same.
+        // `follow`: the user may have scrolled away in the meantime. Not
+        // while you drag, flick or turn the wheel: that would undo it.
+        function followEnd() { if (follow && !moving) scrollToEnd() }
+        // Following stops only by your doing: scrolling up (a drag, a flick
+        // or the wheel: `moving`), the scrollbar or a jump (they say so).
+        // It starts again when a scroll down ends at the bottom, the
+        // scrollbar is taken there, or Latest. ListView moves contentY itself
+        // too, by a pixel or more as it measures rows: never taken for yours
+        // (that stopped the following mid-reply, and pulled a first scroll up
+        // a long session back down).
+        property real lastY: 0
+        property real moveStart: 0
+        onMovementStarted: moveStart = contentY
+        onMovementEnded: {
+            if (contentY > moveStart && nearEnd()) follow = true
+            followEnd()
+        }
         onContentYChanged: {
-            if (!autoScrolling) follow = nearEnd()
+            if (!autoScrolling) {
+                if (moving) {
+                    if (contentY < lastY) follow = false
+                    // A scroll down that reaches the end (as the reply
+                    // still grows below it: no waiting for it to stop).
+                    else if (contentY > moveStart && nearEnd()) follow = true
+                } else if (vbar.pressed) {
+                    follow = nearEnd()
+                } else if (follow && !nearEnd()) {
+                    // (Moved off the end by ListView: back to it.)
+                    Qt.callLater(followEnd)
+                }
+            }
+            lastY = contentY
             Qt.callLater(root.updateActivePrompt)
         }
-        // Follow only real new content. ListView also changes contentHeight
-        // whenever it re-estimates unmeasured rows (e.g. the first scroll up
-        // a freshly opened session); treating that as new content snapped
-        // the view back to the end mid-scroll.
-        property bool contentChanging: false
-        Timer { id: settleTimer; interval: 400; onTriggered: view.contentChanging = false }
-        function noteContent() {
-            contentChanging = true
-            settleTimer.restart()
-            if (follow) Qt.callLater(followEnd)
-        }
+        function noteContent() { if (follow) Qt.callLater(followEnd) }
         Connections {
             target: root.session
             function onRowsInserted() { view.noteContent(); promptsTimer.restart() }
@@ -324,7 +343,11 @@ Item {
             function onDataChanged() { view.noteContent() }
             function onModelReset() { view.noteContent(); promptsTimer.restart() }
         }
-        onContentHeightChanged: if (follow && contentChanging) Qt.callLater(followEnd)
+        // Any growth while following, new text or not (a row measuring
+        // itself, a running tool's line): it stays at the end. (Scrolling up
+        // has stopped the following first, so a row measured then doesn't
+        // pull the view back.)
+        onContentHeightChanged: if (follow) Qt.callLater(followEnd)
 
 
         footer: Item {

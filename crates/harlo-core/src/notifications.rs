@@ -4,7 +4,7 @@
 use serde_json::{Value, json};
 
 /// The events, in the order Settings shows them.
-pub const EVENTS: [&str; 4] = ["completion", "subagent", "error", "question"];
+pub const EVENTS: [&str; 5] = ["completion", "subagent", "error", "question", "limits"];
 
 /// Template variables, in the order Settings lists them.
 pub const VARIABLES: [&str; 7] = ["project_name", "worktree", "branch", "session_name", "agent_name", "model_name", "last_message"];
@@ -20,6 +20,18 @@ pub fn default_template(event: &str) -> (&'static str, &'static str) {
     }
 }
 
+/// The sounds a plan limit's reset can play (the sound theme's name, and
+/// what Settings calls it); "" plays none.
+pub const RESET_SOUNDS: [(&str, &str); 7] = [
+    ("desktop-login", "Login tune"),
+    ("service-login", "Chime"),
+    ("completion-success", "Success"),
+    ("outcome-success", "Fanfare"),
+    ("bell-window-system", "Bell"),
+    ("alarm-clock-elapsed", "Alarm clock"),
+    ("", "No sound"),
+];
+
 /// The notification settings, as saved (JSON in the "notify" setting).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Settings {
@@ -31,6 +43,9 @@ pub struct Settings {
     /// Per event: on, title, message ("" = the default template).
     pub events: Vec<(String, bool, String, String)>,
     pub quiet: Quiet,
+    /// What a plan limit's reset plays (one of [`RESET_SOUNDS`]), whether or
+    /// not the others play a sound.
+    pub reset_sound: String,
 }
 
 /// Quiet hours: between `from` and `to` (minutes after midnight, local
@@ -83,6 +98,7 @@ impl Default for Settings {
             sound: false,
             events: EVENTS.iter().map(|e| ((*e).to_owned(), true, String::new(), String::new())).collect(),
             quiet: Quiet::default(),
+            reset_sound: RESET_SOUNDS[0].0.to_owned(),
         }
     }
 }
@@ -118,6 +134,9 @@ impl Settings {
             to: minute(&q["to"], s.quiet.to),
             asks: q["asks"].as_bool().unwrap_or(s.quiet.asks),
         };
+        if let Some(sound) = v["resetSound"].as_str().filter(|n| RESET_SOUNDS.iter().any(|(id, _)| id == n)) {
+            s.reset_sound = sound.to_owned();
+        }
         for (name, on, title, message) in &mut s.events {
             let e = &v["events"][name.as_str()];
             *on = e["on"].as_bool().unwrap_or(*on);
@@ -138,7 +157,7 @@ impl Settings {
         }
         let q = &self.quiet;
         json!({ "enabled": self.enabled, "whileFocused": self.while_focused, "sound": self.sound, "events": events,
-                "quiet": { "on": q.on, "from": q.from, "to": q.to, "asks": q.asks } })
+                "quiet": { "on": q.on, "from": q.from, "to": q.to, "asks": q.asks }, "resetSound": self.reset_sound })
     }
 
     /// The event's switch and templates (defaults for empty ones).
@@ -215,6 +234,17 @@ pub fn summary(text: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_resets_sound_is_kept() {
+        assert_eq!(Settings::default().reset_sound, "desktop-login");
+        let picked = Settings::parse(r#"{"resetSound":"bell-window-system"}"#);
+        assert_eq!(picked.reset_sound, "bell-window-system");
+        assert_eq!(Settings::parse(&picked.to_json().to_string()), picked);
+        assert_eq!(Settings::parse(r#"{"resetSound":""}"#).reset_sound, "", "none");
+        assert_eq!(Settings::parse(r#"{"resetSound":"../../x"}"#).reset_sound, "desktop-login", "only the ones offered");
+        assert!(Settings::default().event("limits").is_some_and(|e| e.0), "plan limits notify unless turned off");
+    }
 
     #[test]
     fn renders_templates() {

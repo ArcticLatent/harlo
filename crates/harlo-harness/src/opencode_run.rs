@@ -287,6 +287,10 @@ struct State {
     subagents: HashMap<String, Value>,
     /// A name given before the session exists (it's created with it).
     pending_title: Option<String>,
+    /// Your messages waiting in OpenCode's inbox for the turn under way:
+    /// id, whether it steers into the turn (else it waits for its end),
+    /// text.
+    inbox: Vec<(String, bool, String)>,
     /// harlo's permission shield: always-ask, write (edits), yolo.
     approval: String,
     children: HashMap<String, String>,
@@ -299,6 +303,9 @@ struct State {
     /// The models' variants (`provider/id` → ids) and context sizes.
     variants: HashMap<String, Vec<String>>,
     windows: HashMap<String, u64>,
+    /// What OpenCode counts a model's prompt against (its input limit,
+    /// when it has one under its window).
+    usable: HashMap<String, u64>,
 }
 
 struct Session {
@@ -557,8 +564,13 @@ async fn load_catalog(s: &Arc<Session>) {
         for m in models["data"].as_array().into_iter().flatten() {
             let key = format!("{}/{}", m["providerID"].as_str().unwrap_or_default(), m["modelID"].as_str().or_else(|| m["id"].as_str()).unwrap_or_default());
             st.variants.insert(key.clone(), m["variants"].as_array().into_iter().flatten().filter_map(|v| v["id"].as_str().map(str::to_owned)).collect());
-            if let Some(w) = m["limit"]["context"].as_u64() {
-                st.windows.insert(key, w);
+            let (context, input) = (m["limit"]["context"].as_u64().unwrap_or(0), m["limit"]["input"].as_u64().unwrap_or(0));
+            let usable = if context > 0 && input > 0 { context.min(input) } else { context.max(input) };
+            if usable > 0 {
+                st.usable.insert(key.clone(), usable);
+            }
+            if context > 0 {
+                st.windows.insert(key, context);
             }
         }
         break;
@@ -632,6 +644,28 @@ async fn command(s: &Arc<Session>, pending: &Pending, cmd: Value) {
             }
             reply(true, Value::Null, "");
         }
+        // A waiting message: dropped from OpenCode's inbox, or sent into
+        // the turn under way (it says so as each changes).
+        "remove_queued_message" | "promote_queued_message" => {
+            let (sid, item) = {
+                let st = s.state.lock().unwrap();
+                let text = cmd["message"].as_str().unwrap_or_default();
+                let steer = cmd["queue"] == "steering";
+                let item = st.inbox.iter().find(|(_, st, t)| t == text && (ty == "promote_queued_message" || *st == steer)).map(|(id, _, _)| id.clone());
+                (st.session_id.clone(), item)
+            };
+            let Some(item) = item else { return reply(false, Value::Null, "That message has been sent already.") };
+            let path = format!("/api/session/{sid}/inbox/{item}");
+            let result = if ty == "remove_queued_message" {
+                s.api("DELETE", path, None).await
+            } else {
+                s.api("PATCH", path, Some(json!({ "delivery": "steer" }))).await
+            };
+            match result {
+                Ok(_) => reply(true, Value::Null, ""),
+                Err(e) => reply(false, Value::Null, &format!("{e:#}")),
+            }
+        }
         "get_state" => {
             let st = s.state.lock().unwrap();
             let model = if st.model.id.is_empty() { Value::Null } else { json!({ "provider": st.model.provider, "id": st.model.id, "name": st.model.id }) };
@@ -639,9 +673,20 @@ async fn command(s: &Arc<Session>, pending: &Pending, cmd: Value) {
             reply(true, json!({ "model": model, "thinkingLevel": st.model.variant, "sessionId": st.session_id, "sessionFile": file, "isStreaming": st.running }), "");
         }
         "get_session_stats" => {
+            // Its compaction settings, from each config file (yours, the
+            // project's…), lowest first (from its server, if it's running).
+            let running = s.hub.lock().unwrap().is_some();
+            let config = if running { s.api("GET", "/api/config".into(), None).await.ok() } else { None };
             let st = s.state.lock().unwrap();
-            let window = st.windows.get(&format!("{}/{}", st.model.provider, st.model.id)).copied().unwrap_or(0);
-            reply(true, json!({ "contextUsage": { "tokens": st.context_tokens, "contextWindow": window }, "cost": st.cost }), "");
+            let key = format!("{}/{}", st.model.provider, st.model.id);
+            let window = st.windows.get(&key).copied().unwrap_or(0);
+            let mut usage = json!({ "tokens": st.context_tokens, "contextWindow": window });
+            if let Some(config) = &config
+                && let Some(at) = compact_at(st.usable.get(&key).copied().unwrap_or(window), config)
+            {
+                usage["compactAt"] = json!(at);
+            }
+            reply(true, json!({ "contextUsage": usage, "cost": st.cost }), "");
         }
         "get_available_models" => {
             let list = match s.api("GET", "/api/model".into(), None).await {
@@ -990,6 +1035,27 @@ fn event(s: &Arc<Session>, ev: &Value) {
                 out.push(HarnessEvent::Retry { started: true, attempt: d["attempt"].as_u64().unwrap_or(0), max_attempts: 0, error: d["error"]["message"].as_str().map(str::to_owned) });
             }
             "session.renamed" => out.push(HarnessEvent::Renamed(d["title"].as_str().map(str::to_owned))),
+            // Your messages while it works (one sent when it's idle starts
+            // the turn straight away: not listed).
+            "session.inbox.enqueued" if d["item"]["type"] == "user" && st.running => {
+                let item = (d["inboxID"].as_str().unwrap_or_default().to_owned(), d["item"]["delivery"] == "steer", d["item"]["payload"]["text"].as_str().unwrap_or_default().to_owned());
+                st.inbox.push(item);
+                out.push(inbox_changed(&st));
+            }
+            "session.inbox.delivered" | "session.inbox.cancelled" => {
+                let id = d["inboxID"].as_str().unwrap_or_default();
+                if let Some(at) = st.inbox.iter().position(|(i, _, _)| i == id) {
+                    st.inbox.remove(at);
+                    out.push(inbox_changed(&st));
+                }
+            }
+            "session.inbox.delivery.changed" => {
+                let id = d["inboxID"].as_str().unwrap_or_default();
+                if let Some(item) = st.inbox.iter_mut().find(|(i, _, _)| i == id) {
+                    item.1 = d["delivery"] == "steer";
+                    out.push(inbox_changed(&st));
+                }
+            }
             "session.compaction.started" => out.push(HarnessEvent::Compaction { started: true, reason: None, error: None }),
             "session.compaction.ended" => out.push(HarnessEvent::Compaction { started: false, reason: None, error: None }),
             "session.compaction.failed" => out.push(HarnessEvent::Compaction { started: false, reason: None, error: d["error"]["message"].as_str().map(str::to_owned) }),
@@ -1202,6 +1268,42 @@ async fn answer(s: &Arc<Session>, cmd: &Value) {
     let _ = s.api("POST", format!("/api/session/{sid}/form/{oc_id}/reply"), Some(json!({ "answer": answer }))).await;
 }
 
+/// The inbox as harlo's queue: steering first, then what waits for the
+/// turn's end.
+fn inbox_changed(st: &State) -> HarnessEvent {
+    let pick = |steer: bool| st.inbox.iter().filter(|(_, s, _)| *s == steer).map(|(_, _, t)| t.clone()).collect();
+    HarnessEvent::QueueChanged { steering: pick(true), follow_up: pick(false) }
+}
+
+/// Where OpenCode compacts on its own (0: it won't): the model's usable
+/// context less `compaction.buffer` ("20%" of it, or a token count), else
+/// less 15% of it (at least 16k for one of 32k or more). `config`: what
+/// `/api/config` answers.
+fn compact_at(usable: u64, config: &Value) -> Option<u64> {
+    let (mut auto, mut buffer) = (true, Value::Null);
+    for doc in config.as_array().into_iter().flatten().filter(|d| d["type"] == "document") {
+        let c = &doc["info"]["compaction"];
+        auto = c["auto"].as_bool().unwrap_or(auto);
+        if !c["buffer"].is_null() {
+            buffer = c["buffer"].clone();
+        }
+    }
+    if !auto {
+        return Some(0);
+    }
+    if usable == 0 {
+        return None;
+    }
+    let kept = match &buffer {
+        Value::String(p) => p.strip_suffix('%').and_then(|p| p.parse::<f64>().ok()).map(|p| (usable as f64 * p / 100.0).round() as u64),
+        v => v.as_u64(),
+    };
+    Some(match kept.filter(|n| *n < usable) {
+        Some(n) => usable - n,
+        None => usable - ((usable as f64 * 0.15).floor() as u64).max(if usable >= 32_000 { 16_000 } else { 0 }),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1210,6 +1312,58 @@ mod tests {
         let (events, rx) = mpsc::unbounded_channel();
         let (inbox, _) = mpsc::unbounded_channel();
         (Arc::new(Session { state: Mutex::new(State::default()), events, hub: Mutex::new(None), dir: "/work".into(), program: "opencode".into(), inbox, remote: None }), rx)
+    }
+
+    #[test]
+    fn its_inbox_is_the_queue() {
+        let (s, mut rx) = session();
+        {
+            let mut st = s.state.lock().unwrap();
+            st.session_id = "ses_1".into();
+        }
+        let ev = |ty: &str, data: Value| json!({ "type": ty, "data": data });
+        let enqueued = |id: &str, delivery: &str, text: &str| {
+            ev("session.inbox.enqueued", json!({ "sessionID": "ses_1", "inboxID": id, "item": { "type": "user", "delivery": delivery, "payload": { "text": text } } }))
+        };
+        let queue = |rx: &mut mpsc::UnboundedReceiver<HarnessEvent>| {
+            let mut last = None;
+            while let Ok(e) = rx.try_recv() {
+                if let HarnessEvent::QueueChanged { steering, follow_up } = e {
+                    last = Some((steering, follow_up));
+                }
+            }
+            last
+        };
+        event(&s, &enqueued("i0", "queue", "idle"));
+        assert_eq!(queue(&mut rx), None, "one sent while idle starts the turn");
+        s.state.lock().unwrap().running = true;
+        event(&s, &enqueued("i1", "queue", "after"));
+        event(&s, &enqueued("i2", "steer", "now"));
+        assert_eq!(queue(&mut rx), Some((vec!["now".to_owned()], vec!["after".to_owned()])));
+        event(&s, &ev("session.inbox.delivery.changed", json!({ "sessionID": "ses_1", "inboxID": "i1", "delivery": "steer" })));
+        assert_eq!(queue(&mut rx), Some((vec!["after".to_owned(), "now".to_owned()], vec![])));
+        event(&s, &ev("session.inbox.delivered", json!({ "sessionID": "ses_1", "inboxID": "i2" })));
+        event(&s, &ev("session.inbox.cancelled", json!({ "sessionID": "ses_1", "inboxID": "i1" })));
+        assert_eq!(queue(&mut rx), Some((vec![], vec![])));
+    }
+
+    #[test]
+    fn compacts_where_its_config_says() {
+        assert_eq!(compact_at(200_000, &json!([])), Some(170_000), "15% kept free");
+        assert_eq!(compact_at(64_000, &json!([])), Some(48_000), "at least 16k");
+        assert_eq!(compact_at(20_000, &json!([])), Some(17_000));
+        let docs = json!([
+            { "type": "document", "info": { "compaction": { "buffer": "20%" } } },
+            { "type": "directory", "path": "/x" },
+        ]);
+        assert_eq!(compact_at(200_000, &docs), Some(160_000));
+        let docs = json!([
+            { "type": "document", "info": { "compaction": { "buffer": "20%" } } },
+            { "type": "document", "info": { "compaction": { "buffer": 30000 } } },
+        ]);
+        assert_eq!(compact_at(200_000, &docs), Some(170_000), "the project's wins");
+        assert_eq!(compact_at(200_000, &json!([{ "type": "document", "info": { "compaction": { "auto": false } } }])), Some(0));
+        assert_eq!(compact_at(0, &json!([])), None);
     }
 
     /// A real OpenCode 2.0.25 recording (a shell call and a write, each

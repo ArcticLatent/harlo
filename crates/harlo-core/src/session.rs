@@ -19,6 +19,10 @@ use crate::transcript::{Row, RowChange, Transcript, diff_rows};
 /// While events keep arriving, flush at most this often. Text is only
 /// revealed in whole lines anyway, so faster flushes buy nothing.
 const STREAM_FLUSH: Duration = Duration::from_millis(100);
+/// Rows a long saved session shows before the rest of it.
+const SHOWN_FIRST: usize = 200;
+/// How long after a session ends its memory is handed back.
+const GIVE_BACK_AFTER: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionStatus {
@@ -80,6 +84,9 @@ pub struct SessionMetaInfo {
     /// Context used by the next request, from `get_session_stats`.
     pub context_tokens: u64,
     pub context_window: u64,
+    /// The context size the agent compacts at on its own (0: it won't, or
+    /// isn't known).
+    pub compact_at: u64,
     /// Session cost in USD so far.
     pub cost: f64,
 }
@@ -117,6 +124,8 @@ pub enum SessionUpdate {
     Goal(Value),
     /// Worth a desktop notification (questions come as `UiRequest`).
     Notable(Notable),
+    /// Claude's plan limits, as it last said (see `HarnessEvent::Limits`).
+    Limits(Value),
 }
 
 /// Events the app may notify about.
@@ -128,22 +137,6 @@ pub enum Notable {
     Error { message: String },
     /// An omp subagent finished (`status`: completed, failed, aborted).
     SubagentDone { id: String, agent: String, status: String, task: String },
-}
-
-/// The last assistant reply's text in `messages` (plain, trimmed).
-pub fn last_assistant_text(messages: &[Value]) -> String {
-    messages
-        .iter()
-        .rev()
-        .filter(|m| m["role"] == "assistant")
-        .map(|m| match &m["content"] {
-            Value::String(s) => s.clone(),
-            Value::Array(blocks) => blocks.iter().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join("\n"),
-            _ => String::new(),
-        })
-        .find(|t| !t.trim().is_empty())
-        .map(|t| t.trim().to_owned())
-        .unwrap_or_default()
 }
 
 /// Receives batched updates on the session task. Implementations forward
@@ -206,7 +199,15 @@ impl SessionHandle {
 
     fn launch(cfg: HarnessConfig, spawn_now: bool) -> Self {
         let (control, control_rx) = mpsc::unbounded_channel();
-        tokio::spawn(drive(cfg, spawn_now, control_rx));
+        tokio::spawn(async move {
+            let long = drive(cfg, spawn_now, control_rx).await;
+            // A long session's memory back, once the window has let go of its
+            // rows too.
+            if long {
+                tokio::time::sleep(GIVE_BACK_AFTER).await;
+                let _ = tokio::task::spawn_blocking(harlo_harness::store::give_back).await;
+            }
+        });
         Self { control, next_sub: AtomicU64::new(1), hold: Default::default() }
     }
 
@@ -312,9 +313,7 @@ struct DriverState {
     /// one only once its first message is under way).
     file_asked: bool,
     sinks: Vec<(u64, Box<dyn SessionSink>)>,
-    /// Complete messages (history plus finished live ones) for reports.
-    messages: Vec<Value>,
-    message_index: std::collections::HashMap<String, usize>,
+    messages: KeptMessages,
     /// Why the current run failed, if it did (reported when it settles).
     run_error: Option<String>,
     /// Subagents already reported as finished.
@@ -323,20 +322,62 @@ struct DriverState {
     aborted: bool,
 }
 
-impl DriverState {
-    fn set_messages(&mut self, messages: &[Value]) {
-        self.messages = messages.to_vec();
-        self.message_index.clear();
+/// Complete messages (history plus finished live ones) for reports, as JSON
+/// text: only reports read them, and parsed they take twice the memory.
+#[derive(Default)]
+struct KeptMessages {
+    list: Vec<Box<str>>,
+    index: std::collections::HashMap<String, usize>,
+}
+
+impl KeptMessages {
+    /// From this many, what parsing them used goes back to the system.
+    const MANY: usize = 2000;
+
+    fn set(&mut self, messages: Vec<Value>) {
+        self.list = messages.iter().map(|m| m.to_string().into_boxed_str()).collect();
+        self.index.clear();
+        drop(messages);
+        self.release();
     }
 
-    fn upsert_message(&mut self, id: &str, message: &Value) {
-        match self.message_index.get(id) {
-            Some(&i) => self.messages[i] = message.clone(),
+    fn upsert(&mut self, id: &str, message: &Value) {
+        let text = message.to_string().into_boxed_str();
+        match self.index.get(id) {
+            Some(&i) => self.list[i] = text,
             None => {
-                self.message_index.insert(id.to_owned(), self.messages.len());
-                self.messages.push(message.clone());
+                self.index.insert(id.to_owned(), self.list.len());
+                self.list.push(text);
             }
         }
+    }
+
+    fn all(&self) -> Vec<Value> {
+        self.list.iter().filter_map(|m| serde_json::from_str(m).ok()).collect()
+    }
+
+    /// After using `all`.
+    fn release(&self) {
+        if self.list.len() >= Self::MANY {
+            harlo_harness::store::give_back();
+        }
+    }
+
+    /// The last assistant reply's text (plain, trimmed).
+    fn last_reply(&self) -> String {
+        self.list
+            .iter()
+            .rev()
+            .filter_map(|m| serde_json::from_str::<Value>(m).ok())
+            .filter(|m| m["role"] == "assistant")
+            .map(|m| match &m["content"] {
+                Value::String(s) => s.clone(),
+                Value::Array(blocks) => blocks.iter().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join("\n"),
+                _ => String::new(),
+            })
+            .find(|t| !t.trim().is_empty())
+            .map(|t| t.trim().to_owned())
+            .unwrap_or_default()
     }
 }
 
@@ -380,6 +421,8 @@ struct Driver {
     aux_tx: mpsc::UnboundedSender<Aux>,
     /// pi: the shield last set, for when it's started again.
     modes: Option<Value>,
+    /// Claude: the thinking level to start on.
+    thinking: Option<String>,
     /// Stop it once it has finished what it's doing.
     restart_settled: bool,
     /// omp wouldn't reopen the session: the model it's on isn't there. The
@@ -416,23 +459,35 @@ impl Driver {
         if let Some(model) = self.model_instead.take() {
             cfg.extra_args.extend(["--model".to_owned(), model]);
         }
+        if let Some(level) = &self.thinking {
+            cfg.extra_args.push(format!("{}{level}", harlo_harness::claude::THINKING_ARG));
+        }
+        let gone = (cfg.remote.is_none() && !cfg.cwd.is_dir()).then(|| cfg.cwd.clone());
         match Harness::spawn(cfg) {
             Ok((harness, events)) => {
                 let harness = Arc::new(harness);
                 self.harness = Some(harness.clone());
                 self.events = Some(events);
                 set_status(st, SessionStatus::Starting, pending);
-                // pi: the shield it was on, started again.
+                // The shield it's on: pi's is harlo's own; the others', before
+                // anything they're sent.
                 if let Some(modes) = self.modes.clone() {
-                    let h = harness.clone();
-                    tokio::spawn(async move {
-                        let _ = h.request(modes).await;
-                    });
+                    if harness.kind() == HarnessKind::Pi {
+                        let h = harness.clone();
+                        tokio::spawn(async move {
+                            let _ = h.request(modes).await;
+                        });
+                    } else {
+                        harness.send(modes);
+                    }
                 }
                 Some(harness)
             }
             Err(e) => {
-                st.transcript.apply(&HarnessEvent::ProtocolError(format!("{e:#}")));
+                st.transcript.apply(&match gone {
+                    Some(cwd) => HarnessEvent::Notice { level: harlo_harness::NoticeLevel::Error, text: format!("This session can't continue: its folder, {}, is gone.", cwd.display()), system: false },
+                    None => HarnessEvent::ProtocolError(format!("{e:#}")),
+                });
                 set_status(st, SessionStatus::Exited, pending);
                 None
             }
@@ -468,7 +523,8 @@ fn set_status(st: &mut DriverState, s: SessionStatus, pending: &mut Vec<SessionU
     }
 }
 
-async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::UnboundedReceiver<Control>) {
+/// Runs a session until it's dropped; true if it was a long one.
+async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::UnboundedReceiver<Control>) -> bool {
     let kind = cfg.kind;
     let session_file = match &cfg.session {
         SessionTarget::Resume(p) => Some(p.clone()),
@@ -491,8 +547,7 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
         todo_calls: Default::default(),
         file_asked: false,
         sinks: Vec::new(),
-        messages: Vec::new(),
-        message_index: Default::default(),
+        messages: KeptMessages::default(),
         run_error: None,
         subagents_done: Default::default(),
         aborted: false,
@@ -504,6 +559,7 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
         events: None,
         aux_tx: aux_tx.clone(),
         modes: None,
+        thinking: None,
         restart_settled: false,
         model_gone: None,
         model_instead: None,
@@ -538,15 +594,20 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                 return;
             }
             // A remote session's file comes over SSH.
-            let text = if crate::remote::is_remote(&path) {
-                crate::remote::read(&path).map(|b| String::from_utf8_lossy(&b).into_owned())
+            let (saved, size) = if crate::remote::is_remote(&path) {
+                match crate::remote::read(&path) {
+                    Ok(b) => (Ok(harlo_harness::store::parse_saved_for(kind, &String::from_utf8_lossy(&b))), b.len() as u64),
+                    Err(e) => (Err(e), 0),
+                }
             } else {
-                std::fs::read_to_string(&path).map_err(anyhow::Error::from)
+                let size = std::fs::metadata(&path).map_or(0, |m| m.len());
+                (harlo_harness::store::read_saved_for(kind, &path).map_err(anyhow::Error::from), size)
             };
-            let saved = text.map(|t| harlo_harness::store::parse_saved_for(kind, &t)).unwrap_or_else(|e| {
+            let saved = saved.unwrap_or_else(|e| {
                 tracing::warn!("reading {}: {e:#}", path.display());
                 Default::default()
             });
+            harlo_harness::store::after_reading(size);
             let _ = tx.send(Aux::Loaded(saved));
         });
     }
@@ -593,7 +654,6 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
             }
             Some(aux) = aux_rx.recv() => match aux {
                 Aux::Loaded(saved) => {
-                    st.set_messages(&saved.messages);
                     st.transcript.load_messages(&saved.messages);
                     st.meta.first_message = first_user_text(&saved.messages);
                     if !saved.name.is_empty() {
@@ -604,18 +664,41 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                     if st.meta.model_id.is_empty() {
                         st.meta.model_id = saved.model_id;
                     }
-                    st.meta.thinking = saved.thinking;
+                    st.meta.thinking = driver.thinking.clone().unwrap_or(saved.thinking);
+                    // Claude's context before it runs: the last reply's, in
+                    // the window Claude said last time for its model.
+                    if kind == HarnessKind::Claude && st.meta.context_window == 0
+                        && let Some((window, at)) = harlo_harness::claude::known_context(&st.meta.model)
+                    {
+                        (st.meta.context_tokens, st.meta.context_window, st.meta.compact_at) = (harlo_harness::claude::context_used(&saved.messages), window, at);
+                    }
+                    // None set: what Claude's settings have it on.
+                    if kind == HarnessKind::Claude && st.meta.thinking.is_empty() && driver.cfg.remote.is_none() {
+                        st.meta.thinking = harlo_harness::claude::default_effort();
+                    }
                     pending.push(SessionUpdate::Meta(st.meta.clone()));
                     if st.status == SessionStatus::Loading {
                         set_status(&mut st, SessionStatus::Offline, &mut pending);
                     }
+                    // A long one: its latest rows at once, the rest above them
+                    // once they're built.
+                    if saved.messages.len() >= KeptMessages::MANY {
+                        let first = st.transcript.last_rows(SHOWN_FIRST);
+                        let changes = diff_rows(&st.shown, &first);
+                        st.shown = first;
+                        if !changes.is_empty() {
+                            pending.push(SessionUpdate::Rows(changes));
+                        }
+                        st.broadcast(std::mem::take(&mut pending));
+                        last_flush = Instant::now();
+                    }
+                    st.messages.set(saved.messages);
                     for reply in exports.drain(..) {
                         let _ = reply.send(export(&st, &driver));
                     }
                     dirty = true;
                 }
                 Aux::History(messages) => {
-                    st.set_messages(&messages);
                     st.transcript.load_messages(&messages);
                     // pi: its to-do list, from the last time it changed (none
                     // while the extension is off: it wouldn't be kept up).
@@ -630,6 +713,7 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                         st.meta.first_message = first_user_text(&messages);
                         pending.push(SessionUpdate::Meta(st.meta.clone()));
                     }
+                    st.messages.set(messages);
                     dirty = true;
                 }
                 Aux::State(state) => {
@@ -661,6 +745,9 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                 Aux::Stats(stats) => {
                     let mut meta = st.meta.clone();
                     apply_stats(&mut meta, &stats);
+                    if stats["contextUsage"].get("compactAt").is_none() {
+                        meta.compact_at = compact_at(&driver.cfg, &meta);
+                    }
                     if meta != st.meta {
                         st.meta = meta;
                         pending.push(SessionUpdate::Meta(st.meta.clone()));
@@ -709,10 +796,21 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                     pending.push(SessionUpdate::UiCleared(id));
                 }
                 Some(Control::Raw(cmd)) => {
-                    if kind == HarnessKind::Pi && cmd["type"] == "harlo_set_modes" {
+                    let modes = cmd["type"] == "harlo_set_modes";
+                    if modes {
                         driver.modes = Some(cmd.clone());
                     }
-                    if let Some(h) = driver.ensure_harness(&mut st, &mut pending) {
+                    let thinking = kind == HarnessKind::Claude && cmd["type"] == "set_thinking_level";
+                    if thinking {
+                        driver.thinking = cmd["level"].as_str().map(str::to_owned);
+                    }
+                    // Not running: for when it starts, nothing starts for this.
+                    if !st.status.has_process() && (modes || thinking) {
+                        if thinking {
+                            st.meta.thinking = driver.thinking.clone().unwrap_or_default();
+                            pending.push(SessionUpdate::Meta(st.meta.clone()));
+                        }
+                    } else if let Some(h) = driver.ensure_harness(&mut st, &mut pending) {
                         let aux = driver.aux_tx.clone();
                         tokio::spawn(async move {
                             let changes_state = matches!(
@@ -729,7 +827,8 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                 }
                 Some(Control::ContextReport(reply)) => {
                     let live = (st.meta.context_window > 0).then_some((st.meta.context_tokens, st.meta.context_window, st.meta.cost));
-                    let _ = reply.send(crate::context::report(&st.messages, live));
+                    let _ = reply.send(crate::context::report(&st.messages.all(), live));
+                    st.messages.release();
                 }
                 // (A saved session still loading: once it has.)
                 Some(Control::Export(reply)) if st.status == SessionStatus::Loading => exports.push(reply),
@@ -752,6 +851,11 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                     } else {
                         driver.restart_settled = driver.harness.is_some();
                     }
+                }
+                // Claude's levels go by the model: no need to start it.
+                Some(Control::Request(cmd, reply)) if kind == HarnessKind::Claude && cmd["type"] == "get_available_thinking_levels" && !st.status.has_process() => {
+                    let model = if st.meta.model_id.is_empty() { &st.meta.model } else { &st.meta.model_id };
+                    let _ = reply.send(Ok(json!({ "levels": harlo_harness::claude::thinking_levels(model) })));
                 }
                 Some(Control::Request(cmd, reply)) => match driver.ensure_harness(&mut st, &mut pending) {
                     Some(h) => {
@@ -790,6 +894,7 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
             last_flush = Instant::now();
         }
     }
+    st.messages.list.len() >= KeptMessages::MANY
 }
 
 fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<SessionUpdate>, driver: &mut Driver) {
@@ -797,7 +902,8 @@ fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<Sessi
     let aux = &driver.aux_tx;
     // Its cost so far, at each tool call (spending limits; the turn's end
     // fetches it too).
-    if matches!(ev, HarnessEvent::ToolStart { .. }) && st.status == SessionStatus::Busy {
+    // And after a compaction, the context left.
+    if matches!(ev, HarnessEvent::ToolStart { .. } | HarnessEvent::Compaction { started: false, .. }) && st.status == SessionStatus::Busy {
         tokio::spawn(fetch_stats(harness.clone(), aux.clone()));
     }
     // A new session's file, as soon as its first run is under way (else the
@@ -849,7 +955,7 @@ fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<Sessi
                 let notable = match st.run_error.take() {
                     Some(message) => Some(Notable::Error { message }),
                     None if aborted => None,
-                    None => Some(Notable::Completed { last_message: last_assistant_text(&st.messages) }),
+                    None => Some(Notable::Completed { last_message: st.messages.last_reply() }),
                 };
                 pending.extend(notable.map(SessionUpdate::Notable));
             }
@@ -862,7 +968,7 @@ fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<Sessi
             if message["role"] == "assistant" && message["stopReason"] == "error" {
                 st.run_error = Some(message["errorMessage"].as_str().unwrap_or("The model returned an error.").to_owned());
             }
-            st.upsert_message(id, message);
+            st.messages.upsert(id, message);
         }
         HarnessEvent::Retry { started: false, error: Some(error), .. } => st.run_error = Some(error.clone()),
         HarnessEvent::Notice { level: harlo_harness::NoticeLevel::Error, text, system: false } => {
@@ -871,6 +977,7 @@ fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<Sessi
         HarnessEvent::CommandsChanged(list) => {
             let _ = aux.send(Aux::Commands(list.clone()));
         }
+        HarnessEvent::Limits(info) => pending.push(SessionUpdate::Limits(info.clone())),
         HarnessEvent::Exited { code, stderr_tail } => {
             if driver.cfg.kind == HarnessKind::Omp && !driver.fell_back {
                 driver.model_gone = gone_model(stderr_tail);
@@ -929,6 +1036,9 @@ fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<Sessi
         HarnessEvent::ModelChanged(_) | HarnessEvent::ThinkingLevel(_) => {
             tokio::spawn(fetch_state(harness.clone(), aux.clone()));
         }
+        HarnessEvent::ContextChanged => {
+            tokio::spawn(fetch_stats(harness.clone(), aux.clone()));
+        }
         HarnessEvent::MessageStart { message, .. } if st.meta.first_message.is_empty() && message["role"] == "user" => {
             st.meta.first_message = first_user_text(std::slice::from_ref(message));
             pending.push(SessionUpdate::Meta(st.meta.clone()));
@@ -976,7 +1086,9 @@ fn export(st: &DriverState, driver: &Driver) -> String {
         model: st.meta.model.clone(),
         folder: crate::sidebar::tilde(&driver.cfg.cwd),
     };
-    crate::export::markdown(&st.messages, &info)
+    let markdown = crate::export::markdown(&st.messages.all(), &info);
+    st.messages.release();
+    markdown
 }
 
 /// Refreshes model, thinking level, session file/name and context stats.
@@ -1001,7 +1113,30 @@ fn apply_stats(meta: &mut SessionMetaInfo, stats: &Value) {
     let usage = &stats["contextUsage"];
     meta.context_tokens = usage["tokens"].as_u64().unwrap_or(0);
     meta.context_window = usage["contextWindow"].as_u64().unwrap_or(0);
+    meta.compact_at = usage["compactAt"].as_u64().unwrap_or(0);
     meta.cost = stats["cost"].as_f64().unwrap_or(0.0);
+}
+
+/// Where the agent compacts, from its settings here (a remote host's aren't
+/// read for this).
+fn compact_at(cfg: &HarnessConfig, meta: &SessionMetaInfo) -> u64 {
+    if cfg.remote.is_some() || meta.context_window == 0 {
+        return 0;
+    }
+    let window = meta.context_window;
+    let at = match cfg.kind {
+        HarnessKind::Pi => {
+            let dir = cfg.env.iter().find(|(k, _)| k == "PI_CODING_AGENT_DIR").map(|(_, v)| std::path::Path::new(v));
+            crate::compaction::pi(dir, &cfg.cwd, &meta.model_id, window)
+        }
+        HarnessKind::Omp => crate::compaction::omp(&meta.model_id, window),
+        HarnessKind::Hermes => {
+            let (provider, model) = meta.model_id.split_once('/').unwrap_or(("", &meta.model_id));
+            crate::compaction::hermes(model, provider, window)
+        }
+        _ => None,
+    };
+    at.unwrap_or(0)
 }
 
 fn parse_commands(list: &Value) -> Vec<SlashCommand> {
@@ -1026,16 +1161,19 @@ fn parse_commands(list: &Value) -> Vec<SlashCommand> {
 
 fn apply_state(meta: &mut SessionMetaInfo, state: &Value) {
     let model = &state["model"];
-    meta.model = model["name"]
-        .as_str()
-        .or_else(|| model["id"].as_str())
-        .or_else(|| model.as_str())
-        .unwrap_or("")
-        .to_owned();
-    meta.model_id = match (model["provider"].as_str(), model["id"].as_str()) {
-        (Some(p), Some(id)) => format!("{p}/{id}"),
-        _ => String::new(),
-    };
+    // (Not known yet, as an agent starts: what's shown stays.)
+    if !model.is_null() {
+        meta.model = model["name"]
+            .as_str()
+            .or_else(|| model["id"].as_str())
+            .or_else(|| model.as_str())
+            .unwrap_or("")
+            .to_owned();
+        meta.model_id = match (model["provider"].as_str(), model["id"].as_str()) {
+            (Some(p), Some(id)) => format!("{p}/{id}"),
+            _ => String::new(),
+        };
+    }
     meta.thinking = state["thinkingLevel"].as_str().unwrap_or("").to_owned();
     if let Some(f) = state["sessionFile"].as_str() {
         meta.session_file = Some(PathBuf::from(f));
@@ -1133,6 +1271,29 @@ fn ui_request(raw: &Value) -> UiRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kept_messages_read_back_as_they_were() {
+        let (user, reply, partial) = (
+            json!({ "role": "user", "content": "hi", "timestamp": 1_792_000_000_000_i64 }),
+            json!({ "role": "assistant", "content": [{ "type": "text", "text": " one " }, { "type": "text", "text": "two" }], "usage": { "cost": { "total": 0.0125 } } }),
+            json!({ "role": "assistant", "content": [{ "type": "toolCall", "name": "bash" }] }),
+        );
+        let mut kept = KeptMessages::default();
+        kept.set(vec![user.clone(), reply.clone()]);
+        assert_eq!(kept.all(), [user.clone(), reply.clone()]);
+        assert_eq!(kept.last_reply(), "one \ntwo", "plain and trimmed");
+
+        kept.upsert("live", &partial);
+        assert_eq!(kept.last_reply(), "one \ntwo", "a reply without text is passed over");
+        let done = json!({ "role": "assistant", "content": "done" });
+        kept.upsert("live", &done);
+        assert_eq!(kept.all(), [user, reply, done], "the same message again replaces it");
+        assert_eq!(kept.last_reply(), "done");
+
+        kept.set(Vec::new());
+        assert_eq!(kept.last_reply(), "");
+    }
 
     use harlo_harness::HarnessKind;
 
@@ -1307,5 +1468,7 @@ mod tests {
         apply_state(&mut meta, &json!({"model":{"name":"GPT"},"thinkingLevel":"high","sessionFile":"/s/a.jsonl","sessionId":"id1","sessionName":"Fix"}));
         assert_eq!(meta.session_file.as_deref(), Some(std::path::Path::new("/s/a.jsonl")));
         assert_eq!((meta.model.as_str(), meta.thinking.as_str(), meta.name.as_str()), ("GPT", "high", "Fix"));
+        apply_state(&mut meta, &json!({"model":null,"thinkingLevel":"high"}));
+        assert_eq!(meta.model, "GPT", "a model not known yet leaves what's shown");
     }
 }

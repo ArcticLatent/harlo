@@ -1151,6 +1151,7 @@ Popup {
                 { name: "subagent", title: "Subagent completion", detail: "An omp subagent finishes." },
                 { name: "error", title: "Agent errors", detail: "A reply fails, the harness stops unexpectedly, or a subagent fails." },
                 { name: "question", title: "Agent questions", detail: "The agent asks you something or wants a tool approved." },
+                { name: "limits", title: "Plan limits", detail: "A plan limit (Claude's, ChatGPT's) is used up, and when one you'd nearly or fully used resets, with a sound of its own.", fixed: true },
             ]
             property string testNote: ""
 
@@ -1173,7 +1174,7 @@ Popup {
                     visible: notify.cfg.enabled
                     divider: true
                     title: "Play a sound"
-                    detail: "If your desktop's notifications play sounds."
+                    detail: "harlo's own, the same on any desktop."
                     icon: "volume-up"
                     AppSwitch { objectName: "notifySound"; checked: notify.cfg.sound; onToggled: notify.setTop("sound", checked) }
                 }
@@ -1261,6 +1262,35 @@ Popup {
                         }
                     }
                 }
+                // What a limit's reset plays (harlo plays it, whatever the
+                // switch for sounds above says).
+                SettingRow {
+                    id: resetSoundRow
+                    readonly property var sounds: notify.info.resetSounds || []
+                    readonly property string current: notify.cfg.resetSound !== undefined ? notify.cfg.resetSound : "desktop-login"
+                    visible: notify.cfg.events.limits && notify.cfg.events.limits.on
+                    divider: true
+                    title: "Sound when a limit resets"
+                    detail: "Plays even with the sound switch above off."
+                    icon: "volume-up"
+                    RowLayout {
+                        spacing: 8
+                        FlatButton {
+                            objectName: "resetSoundPlay"
+                            text: "Play"
+                            enabled: resetSoundRow.current !== ""
+                            font.pixelSize: Theme.px(12)
+                            onClicked: Workspace.playSound(resetSoundRow.current)
+                        }
+                        ComboField {
+                            objectName: "resetSound"
+                            implicitWidth: 150
+                            model: resetSoundRow.sounds.map(s => s.label)
+                            currentIndex: Math.max(0, resetSoundRow.sounds.findIndex(s => s.id === resetSoundRow.current))
+                            onActivated: i => { notify.setTop("resetSound", resetSoundRow.sounds[i].id); if (resetSoundRow.sounds[i].id !== "") Workspace.playSound(resetSoundRow.sounds[i].id) }
+                        }
+                    }
+                }
             }
 
             Rule { visible: notify.cfg.enabled }
@@ -1293,7 +1323,7 @@ Popup {
                 columnSpacing: 14
                 rowSpacing: 14
                 Repeater {
-                    model: notify.eventRows
+                    model: notify.eventRows.filter(e => !e.fixed)
                     Rectangle {
                         id: card
                         required property var modelData

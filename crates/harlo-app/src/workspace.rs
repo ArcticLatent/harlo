@@ -187,6 +187,9 @@ pub mod qobject {
         /// Settings → Notifications → Send test notification.
         #[qinvokable]
         fn send_test_notification(self: Pin<&mut Workspace>);
+        /// Plays one of the sound theme's sounds (Settings: a reset's sound).
+        #[qinvokable]
+        fn play_sound(self: &Workspace, name: &QString);
         /// The notification settings: `{ enabled, whileFocused, sound,
         /// events: { completion: { on, title, message }, … } }` ("" titles
         /// and messages use the defaults).
@@ -263,6 +266,10 @@ pub mod qobject {
         /// Re-reads plan limits (`omp usage --json`) in the background.
         #[qinvokable]
         fn refresh_quota(self: Pin<&mut Workspace>);
+        /// Every half minute: a limit nearly or fully used that has reset
+        /// is told of (a sound of its own), and its numbers asked for again.
+        #[qinvokable]
+        fn check_limits(self: Pin<&mut Workspace>);
         /// Pins the meter to an account's limits ("" follows the last used).
         #[qinvokable]
         fn pin_meter(self: Pin<&mut Workspace>, provider: &QString);
@@ -288,6 +295,13 @@ pub mod qobject {
         /// Switches it; the running omp re-reads its overlay.
         #[qinvokable]
         fn set_approval_mode(self: Pin<&mut Workspace>, key: &QString, mode: &QString);
+        /// The thinking level set on a session, kept for next time.
+        #[qinvokable]
+        fn remember_thinking(self: Pin<&mut Workspace>, key: &QString, level: &QString);
+        /// What's on the clipboard to attach: its local files, or its image
+        /// saved to a file. Empty when it's text.
+        #[qinvokable]
+        fn paste_files(self: &Workspace) -> QStringList;
         /// Plan mode: the agent plans and doesn't change files.
         #[qinvokable]
         fn plan_mode(self: &Workspace, key: &QString) -> bool;
@@ -787,6 +801,13 @@ pub struct WorkspaceRust {
     /// Remote files being copied here (`localCopy`).
     copying: std::cell::RefCell<HashSet<PathBuf>>,
     quota_loading: bool,
+    /// When limits were last asked for (a turn on a provider with limits
+    /// asks again, a minute apart at most).
+    limits_asked: Option<std::time::Instant>,
+    /// Resets told of ("provider|label|when"), and when harlo started (unix
+    /// ms; resets before then aren't).
+    limits_told: std::collections::HashSet<String>,
+    limits_since: i64,
     /// Scheduled prompts (Settings → Schedules).
     schedules: Vec<harlo_core::schedules::Schedule>,
     /// The first schedule check after starting handles missed runs.
@@ -855,6 +876,17 @@ pub struct WorkspaceRust {
     /// Remote session files as last read for their branches (the branch
     /// dialog previews and continues from these).
     branch_texts: Arc<std::sync::Mutex<HashMap<String, String>>>,
+    branch_reads: Arc<std::sync::Mutex<BranchReads>>,
+}
+
+/// Local session files' branches: reading a long one takes a while, and asking
+/// again while it's unchanged or still being read shouldn't start another.
+#[derive(Default)]
+struct BranchReads {
+    /// Being read, and whether it was asked for again meanwhile.
+    running: HashMap<String, bool>,
+    /// The answer for a file as it was (modified, size).
+    known: HashMap<String, ((std::time::SystemTime, u64), String)>,
 }
 
 /// Remote project folders, grouped by host name.
@@ -875,6 +907,8 @@ fn has_shield(harness: &str, cwd: &Path) -> bool {
 struct SessionModes {
     approval: Option<String>,
     plan: bool,
+    /// Set by hand (Claude: its session file doesn't record it).
+    thinking: Option<String>,
 }
 
 /// Forwards the parts of a live session's updates the sidebar needs.
@@ -896,6 +930,7 @@ impl SessionSink for WorkspaceSink {
                         | SessionUpdate::UiCleared(_)
                         | SessionUpdate::Notable(_)
                         | SessionUpdate::Goal(_)
+                        | SessionUpdate::Limits(_)
                 )
             })
             .collect();
@@ -964,6 +999,7 @@ impl cxx_qt::Initialize for Workspace {
                 if let Some(cached) = db.get("cache.quota").ok().flatten() {
                     this.quota_json = QString::from(&cached);
                 }
+                this.limits_since = chrono::Local::now().timestamp_millis();
                 let mut saved_tabs = saved_tabs;
                 if let Some(a) = &active_tab
                     && !saved_tabs.contains(a) {
@@ -1088,7 +1124,7 @@ impl cxx_qt::Initialize for Workspace {
                         let _ = tokio::task::spawn_blocking(move || {
                             let kinds: HashMap<PathBuf, HarnessKind> = list.iter().map(|(p, _, _, k)| (p.clone(), *k)).collect();
                             let files: Vec<(PathBuf, i64, i64)> = list.into_iter().map(|(p, m, s, _)| (p, m, s)).collect();
-                            if let Err(e) = index.lock().unwrap().update_with(&files, |p| session_messages(p, kinds.get(p).copied().unwrap_or(HarnessKind::Pi))) {
+                            if let Err(e) = index.lock().unwrap().update_parts(&files, |p, resume| session_part(p, kinds.get(p).copied().unwrap_or(HarnessKind::Pi), resume)) {
                                 tracing::warn!("search index: {e:#}");
                             }
                         })
@@ -1626,6 +1662,7 @@ impl Workspace {
             if let Some(path) = overlay {
                 self.as_mut().rust_mut().overlays.insert(key.clone(), (path, String::new()));
             }
+            self.as_mut().restore_modes(&key, &info.path);
             key
         };
         Some(live_key)
@@ -3289,10 +3326,17 @@ impl Workspace {
     /// Plan limits: omp's accounts (`omp usage`) and Claude Code's (its own
     /// `/usage`).
     /// Each source keeps its last numbers when it can't be asked.
-    pub fn refresh_quota(mut self: Pin<&mut Self>) {
+    pub fn refresh_quota(self: Pin<&mut Self>) {
+        self.refresh_limits(true);
+    }
+
+    /// [`Self::refresh_quota`]; `claude` false keeps Claude's numbers as they
+    /// are (a running session keeps them current).
+    fn refresh_limits(mut self: Pin<&mut Self>, ask_claude: bool) {
         if self.quota_loading {
             return;
         }
+        self.as_mut().rust_mut().limits_asked = Some(std::time::Instant::now());
         // Each when it's on (Settings → Providers) and there.
         let omp = self
             .provider_enabled(HarnessKind::Omp)
@@ -3305,7 +3349,9 @@ impl Workspace {
             .flatten()
             .filter(|p| p.is_file())
             .zip(harlo_harness::claude::config_dir());
-        if omp.is_none() && claude.is_none() {
+        let keep_claude = !ask_claude && claude.is_some();
+        let claude = claude.filter(|_| ask_claude);
+        if omp.is_none() && claude.is_none() && !keep_claude {
             self.as_mut().set_quota_json(QString::from(&serde_json::json!({ "accounts": [], "error": "" }).to_string()));
             return;
         }
@@ -3327,6 +3373,7 @@ impl Workspace {
                 let (mut accounts, mut errors) = (Vec::new(), Vec::new());
                 match from_claude {
                     Some(Ok(Some(a))) => accounts.push(a),
+                    None if keep_claude => accounts.extend(kept(true)),
                     Some(Ok(None)) | None => {}
                     Some(Err(e)) => {
                         accounts.extend(kept(true));
@@ -3350,6 +3397,82 @@ impl Workspace {
                 this.as_mut().set_quota_json(QString::from(&json.to_string()));
             });
         });
+    }
+
+    /// The limits shown, with `change` made to their accounts (`fresh`: as
+    /// they are now); kept for next time as well.
+    fn change_limits(mut self: Pin<&mut Self>, fresh: bool, change: impl FnOnce(&mut Vec<serde_json::Value>)) {
+        let mut json: serde_json::Value = serde_json::from_str(&self.quota_json.to_string()).unwrap_or_else(|_| json!({ "accounts": [] }));
+        let mut accounts: Vec<serde_json::Value> = json["accounts"].as_array().cloned().unwrap_or_default();
+        change(&mut accounts);
+        json["accounts"] = json!(accounts);
+        if fresh {
+            json["updatedAt"] = json!(chrono::Local::now().timestamp_millis());
+        }
+        if let Some(db) = self.db.as_ref() {
+            let _ = db.set("cache.quota", &json!({ "accounts": json["accounts"], "updatedAt": json["updatedAt"], "error": "" }).to_string());
+        }
+        self.as_mut().set_quota_json(QString::from(&json.to_string()));
+    }
+
+    /// What a running Claude session said of its limits, shown at once.
+    fn apply_live_limits(mut self: Pin<&mut Self>, info: &serde_json::Value) {
+        let mut ran_out = Vec::new();
+        self.as_mut().change_limits(true, |accounts| ran_out = harlo_core::quota::apply_claude_live(accounts, info));
+        for label in ran_out {
+            let when = info["unifiedWindows"].as_object().into_iter().flat_map(|w| w.values()).filter(|w| w["status"] == "rejected").filter_map(|w| w["resetsAt"].as_i64()).max();
+            let body = when.map_or_else(|| "Claude stops until it resets.".to_owned(), |s| format!("It resets at {}.", harlo_core::quota::reset_time(s * 1000)));
+            self.as_mut().notify_limit(&format!("limit-{label}"), &format!("{} is used up", harlo_core::quota::limit_name("Claude", &label)), &body, false);
+        }
+    }
+
+    /// A turn on a provider whose limits omp reads: asked for again (at most
+    /// once a minute).
+    fn after_limited_turn(self: Pin<&mut Self>, provider: &str) {
+        let known = serde_json::from_str::<serde_json::Value>(&self.quota_json.to_string())
+            .ok()
+            .is_some_and(|j| j["accounts"].as_array().into_iter().flatten().any(|a| a["provider"] == provider));
+        if known && self.limits_asked.is_none_or(|t| t.elapsed() >= Duration::from_secs(60)) {
+            self.refresh_limits(false);
+        }
+    }
+
+    pub fn check_limits(mut self: Pin<&mut Self>) {
+        let now = chrono::Local::now().timestamp_millis();
+        let json: serde_json::Value = serde_json::from_str(&self.quota_json.to_string()).unwrap_or_default();
+        let accounts: Vec<serde_json::Value> = json["accounts"].as_array().cloned().unwrap_or_default();
+        let due: Vec<_> = harlo_core::quota::resets_due(&accounts, self.limits_since, now)
+            .into_iter()
+            .filter(|(p, l, at)| self.as_mut().rust_mut().limits_told.insert(format!("{p}|{l}|{at}")))
+            .collect();
+        if due.is_empty() {
+            return;
+        }
+        self.as_mut().change_limits(false, |accounts| {
+            for (provider, label, _) in &due {
+                harlo_core::quota::mark_reset(accounts, provider, label);
+            }
+        });
+        for (provider, label, at) in &due {
+            let name = harlo_core::quota::limit_name(provider, label);
+            self.as_mut().notify_limit(&format!("reset-{provider}-{label}-{at}"), &format!("{name} has reset"), "You can use it again.", true);
+        }
+        self.refresh_quota();
+    }
+
+    /// A plan limit's notification (Settings → Notifications → Plan limits);
+    /// a reset has a sound of its own.
+    fn notify_limit(self: Pin<&mut Self>, tag: &str, title: &str, body: &str, reset: bool) {
+        let settings = harlo_core::notifications::Settings::load(&self.setting_str("notify"), &self.setting_str("notifications"));
+        if !settings.enabled || !settings.event("limits").is_some_and(|e| e.0) || settings.quiet.hushes_now(false) {
+            return;
+        }
+        if self.window_active && !settings.while_focused {
+            return;
+        }
+        // (A reset's sound is the one picked, whether or not the others play.)
+        let sound = if reset { Some(settings.reset_sound.as_str()) } else { settings.sound.then_some("dialog-warning") };
+        self.deliver_with(tag, "limits", "", title, body, sound);
     }
 
     pub fn pin_meter(mut self: Pin<&mut Self>, provider: &QString) {
@@ -3447,6 +3570,68 @@ impl Workspace {
         }
         self.as_mut().rust_mut().modes.entry(key.clone()).or_default().approval = Some(mode);
         self.as_mut().modes_changed(&key);
+        self.remember_modes(&key);
+    }
+
+    pub fn remember_thinking(mut self: Pin<&mut Self>, key: &QString, level: &QString) {
+        let key = key.to_string();
+        if self.live.get(&key).is_some_and(|e| e.info.harness == "claude") {
+            self.as_mut().rust_mut().modes.entry(key.clone()).or_default().thinking = Some(level.to_string());
+            self.remember_modes(&key);
+        }
+    }
+
+    /// Keeps a session's permission mode and thinking level with its file (a
+    /// new session's once it has one).
+    fn remember_modes(mut self: Pin<&mut Self>, key: &str) {
+        let Some(file) = self.live.get(key).and_then(|e| e.info.session_file.clone()) else { return };
+        let Some(modes) = self.modes.get(key).cloned() else { return };
+        let mut meta = self.meta.get(&file).cloned().unwrap_or_default();
+        let before = (meta.approval.clone(), meta.thinking.clone());
+        if let Some(approval) = modes.approval {
+            meta.approval = approval;
+        }
+        if let Some(thinking) = modes.thinking {
+            meta.thinking = thinking;
+        }
+        if (meta.approval.clone(), meta.thinking.clone()) == before {
+            return;
+        }
+        if let Some(db) = self.db() {
+            let _ = db.set_session_meta(&file, &meta);
+        }
+        self.as_mut().rust_mut().meta.insert(file, meta);
+    }
+
+    /// What a session was left on, when it's opened again. Nothing starts for
+    /// this: its agent gets them when it does.
+    fn restore_modes(mut self: Pin<&mut Self>, key: &str, file: &Path) {
+        let Some(saved) = self.meta.get(file).cloned() else { return };
+        if harlo_core::omp_overlay::APPROVAL_MODES.contains(&saved.approval.as_str()) {
+            self.as_mut().rust_mut().modes.entry(key.to_owned()).or_default().approval = Some(saved.approval);
+            self.as_mut().modes_changed(key);
+        }
+        if !saved.thinking.is_empty() && self.live.get(key).is_some_and(|e| e.info.harness == "claude") {
+            self.as_mut().rust_mut().modes.entry(key.to_owned()).or_default().thinking = Some(saved.thinking.clone());
+            if let Some(live) = registry::get(key) {
+                live.handle.send_raw(serde_json::json!({ "type": "set_thinking_level", "level": saved.thinking }));
+            }
+        }
+    }
+
+    pub fn paste_files(&self) -> QStringList {
+        let mut list = crate::platform::clipboard_files();
+        if list.is_empty() {
+            let dir = harlo_core::db::default_path().with_file_name("pasted");
+            let _ = std::fs::create_dir_all(&dir);
+            prune_pasted(&dir);
+            let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis());
+            let saved = crate::platform::clipboard_image_to(&QString::from(&dir.join(format!("paste-{stamp}")).to_string_lossy().into_owned()));
+            if !saved.is_empty() {
+                list.append(saved);
+            }
+        }
+        list
     }
 
     pub fn plan_mode(&self, key: &QString) -> bool {
@@ -3887,18 +4072,39 @@ impl Workspace {
     }
 
     pub fn request_session_branches(&self, path: &QString) {
-        let (path, thread, texts) = (path.to_string(), self.qt_thread(), Arc::clone(&self.branch_texts));
+        let (path, thread, texts, reads) = (path.to_string(), self.qt_thread(), Arc::clone(&self.branch_texts), Arc::clone(&self.branch_reads));
         crate::runtime().spawn_blocking(move || {
             let p = Path::new(&path);
-            let list = if harlo_core::remote::is_remote(p) {
+            let json = if harlo_core::remote::is_remote(p) {
                 let text = harlo_core::remote::read(p).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
                 let list = harlo_harness::branches::branches_text(&text);
                 texts.lock().unwrap().insert(path.clone(), text);
-                list
+                branches_json(list)
             } else {
-                harlo_harness::branches::branches(p).unwrap_or_default()
+                if let Some(again) = reads.lock().unwrap().running.get_mut(&path) {
+                    *again = true; // answered when that read ends
+                    return;
+                }
+                reads.lock().unwrap().running.insert(path.clone(), false);
+                loop {
+                    let stamp = std::fs::metadata(p).ok().and_then(|m| Some((m.modified().ok()?, m.len())));
+                    let known = reads.lock().unwrap().known.get(&path).filter(|(at, _)| Some(*at) == stamp).map(|(_, json)| json.clone());
+                    let json = known.unwrap_or_else(|| {
+                        let json = branches_json(harlo_harness::branches::branches(p).unwrap_or_default());
+                        if let Some(stamp) = stamp {
+                            reads.lock().unwrap().known.insert(path.clone(), (stamp, json.clone()));
+                            harlo_harness::store::after_reading(stamp.1);
+                        }
+                        json
+                    });
+                    let mut reads = reads.lock().unwrap();
+                    if reads.running.get(&path) != Some(&true) {
+                        reads.running.remove(&path);
+                        break json;
+                    }
+                    reads.running.insert(path.clone(), false);
+                }
             };
-            let json = branches_json(list);
             let _ = thread.queue(move |this| this.session_branches_ready(&QString::from(&path), &QString::from(&json)));
         });
     }
@@ -4269,7 +4475,12 @@ impl Workspace {
     }
 
     /// Shows a notification (self-tests only record it).
-    fn deliver(mut self: Pin<&mut Self>, tag: &str, kind: &str, key: &str, title: &str, body: &str, sound: bool) {
+    fn deliver(self: Pin<&mut Self>, tag: &str, kind: &str, key: &str, title: &str, body: &str, sound: bool) {
+        self.deliver_with(tag, kind, key, title, body, sound.then_some("message-new-instant"));
+    }
+
+    /// [`Self::deliver`] with the sound theme's name for its sound.
+    fn deliver_with(mut self: Pin<&mut Self>, tag: &str, kind: &str, key: &str, title: &str, body: &str, sound: Option<&str>) {
         self.as_mut().set_last_notification(QString::from(&json!({ "kind": kind, "key": key, "title": title, "body": body }).to_string()));
         if std::env::args().any(|a| a.starts_with("--selftest")) {
             return;
@@ -4306,7 +4517,12 @@ impl Workspace {
                 ((*e).to_owned(), json!({ "title": title, "message": message }))
             })
             .collect();
-        QString::from(&json!({ "variables": VARIABLES, "defaults": defaults }).to_string())
+        let sounds: Vec<serde_json::Value> = harlo_core::notifications::RESET_SOUNDS.iter().map(|(id, label)| json!({ "id": id, "label": label })).collect();
+        QString::from(&json!({ "variables": VARIABLES, "defaults": defaults, "resetSounds": sounds }).to_string())
+    }
+
+    pub fn play_sound(&self, name: &QString) {
+        crate::notify::play_sound(&name.to_string());
     }
 
     pub fn send_test_notification(self: Pin<&mut Self>) {
@@ -4325,7 +4541,10 @@ impl Workspace {
         let mut cost: Option<f64> = None;
         let mut notes: Vec<Note> = Vec::new();
         let mut answered = false;
+        // Claude's limits as it just said (a host's may be another account's).
+        let mut limits: Option<serde_json::Value> = None;
         let needed_input = entry.info.needs_input;
+        let file_before = entry.info.session_file.clone();
         for u in updates {
             match u {
                 SessionUpdate::Status(s) => {
@@ -4363,28 +4582,34 @@ impl Workspace {
                     entry.requests.retain(|(q, _)| q.id != id);
                     answered |= entry.requests.len() != before;
                 }
+                SessionUpdate::Limits(info) if !harlo_core::remote::is_remote(&entry.info.cwd) => limits = Some(info),
                 _ => {}
             }
         }
         entry.info.needs_input = !entry.requests.is_empty();
         let _ = needed_input;
+        let file_changed = entry.info.session_file != file_before;
         // Whose limits it's using: Claude's sign-in, or (omp, pi, OpenCode)
         // the model's provider, as omp names its accounts (OpenCode's
         // "openai" is the ChatGPT sign-in, omp's "openai-codex").
-        let used = became_busy
-            .then(|| match entry.info.harness.as_str() {
-                "claude" => Some("Claude".to_owned()),
-                "omp" | "pi" | "opencode" => entry.model_id.split_once('/').map(|(p, _)| p.to_owned()).filter(|p| !p.is_empty()),
-                _ => None,
-            })
-            .flatten()
-            .map(|p| if entry.info.harness == "opencode" && p == "openai" { "openai-codex".to_owned() } else { p });
+        let limited_by = match entry.info.harness.as_str() {
+            "claude" => Some("Claude".to_owned()),
+            "omp" | "pi" | "opencode" => entry.model_id.split_once('/').map(|(p, _)| p.to_owned()).filter(|p| !p.is_empty()),
+            _ => None,
+        }
+        .map(|p| if entry.info.harness == "opencode" && p == "openai" { "openai-codex".to_owned() } else { p });
+        let used = limited_by.clone().filter(|_| became_busy);
+        // A turn on a provider whose limits are asked for (Claude says its own).
+        let turn_on = limited_by.filter(|p| became_idle && p != "Claude");
         if became_idle && !active {
             entry.info.unread = true;
         }
         if became_idle {
             // The agent may have edited files.
             this.change_kick.notify_one();
+        }
+        if file_changed {
+            self.as_mut().remember_modes(key);
         }
         // A run lane's session file: remember it for the run.
         if let Some(file) = lane_file
@@ -4410,6 +4635,12 @@ impl Workspace {
             self.as_mut().set_meter_last(QString::from(&used));
         }
         self.as_mut().rebuild();
+        if let Some(info) = limits {
+            self.as_mut().apply_live_limits(&info);
+        }
+        if let Some(provider) = turn_on {
+            self.as_mut().after_limited_turn(&provider);
+        }
         // A session an agent started: its state, and its last reply back.
         if became_busy || became_idle {
             self.as_mut().child_progress(key, became_idle, &notes);
@@ -4896,6 +5127,16 @@ const OMP_CONFIG: &str = ".omp/agent/config.yml";
 /// An overlay's text, with the user's omp config (`config`) merged in. (On
 /// this computer: without the models of local engines that are gone, which
 /// its subagents would try first.)
+/// Pasted images from before last week: they've been sent or dropped by now.
+fn prune_pasted(dir: &Path) {
+    let week = std::time::Duration::from_secs(7 * 24 * 3600);
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        if entry.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > week) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 fn overlay_text(config: &str, here: bool, goal: bool, subagents: bool, model: &str, modes: &SessionModes) -> String {
     let mut roles = harlo_core::omp_overlay::model_roles(config);
     if here {
@@ -4988,11 +5229,23 @@ fn session_messages(path: &Path, kind: HarnessKind) -> Vec<serde_json::Value> {
     if harlo_harness::acp::is_acp(kind) {
         return harlo_harness::acp::cached(path).map(|s| s.messages).unwrap_or_default();
     }
-    let text = match remote {
-        Some(_) => harlo_core::remote::read(path).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default(),
-        None => std::fs::read_to_string(path).unwrap_or_default(),
-    };
-    harlo_harness::store::parse_saved_for(kind, &text).messages
+    match remote {
+        Some(_) => {
+            let text = harlo_core::remote::read(path).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
+            harlo_harness::store::parse_saved_for(kind, &text).messages
+        }
+        None => harlo_harness::store::read_saved_for(kind, path).map(|s| s.messages).unwrap_or_default(),
+    }
+}
+
+/// What the search index needs of a session: a local Claude transcript only
+/// grows, so it's read on from `resume`. (pi's and Oh My Pi's are trees: what
+/// was added can change which messages came before.)
+fn session_part(path: &Path, kind: HarnessKind, resume: Option<&harlo_harness::claude::Resume>) -> harlo_harness::claude::Part {
+    if kind == HarnessKind::Claude && !harlo_core::remote::is_remote(path) {
+        return harlo_harness::claude::read_part(path, resume).unwrap_or_default();
+    }
+    harlo_harness::claude::Part { messages: session_messages(path, kind), ..Default::default() }
 }
 
 impl Workspace {

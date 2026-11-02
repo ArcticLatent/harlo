@@ -3,12 +3,14 @@
 //! files. Hits name the message's position on the session's current branch,
 //! which is how the transcript keys saved rows (`h<index>`).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use anyhow::Result;
-use rusqlite::{Connection, params};
+use harlo_harness::claude::{Part, Resume};
+use harlo_harness::store::{BIG_FILE, after_reading};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
 
 /// One matching message.
@@ -22,8 +24,13 @@ pub struct Hit {
     pub snippet: String,
 }
 
+/// How often one big file that's being written to is read again.
+const BIG_FILE_INTERVAL: Duration = Duration::from_secs(60);
+
 pub struct SearchIndex {
     conn: Connection,
+    /// When each big file was last read.
+    big_reads: HashMap<String, Instant>,
 }
 
 pub fn default_path() -> PathBuf {
@@ -66,13 +73,30 @@ fn message_text(message: &Value) -> Option<(String, String)> {
 
 /// FTS5 query for what the user typed: every word must appear (as a prefix).
 fn fts_query(input: &str) -> Option<String> {
-    let words: Vec<String> = input
+    let words: Vec<String> = query_words(input).map(|w| format!("\"{w}\"*")).collect();
+    (!words.is_empty()).then(|| words.join(" "))
+}
+
+fn query_words(input: &str) -> impl Iterator<Item = String> {
+    input
         .split_whitespace()
         .map(|w| w.chars().filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-' || *c == '.').collect::<String>())
         .filter(|w| !w.is_empty())
-        .map(|w| format!("\"{}\"*", w.replace('"', "")))
-        .collect();
-    (!words.is_empty()).then(|| words.join(" "))
+}
+
+/// Which of a message's blocks a search for `input` found: the first with the
+/// most of its words (0 if none has any).
+pub fn best_block<S: AsRef<str>>(blocks: &[S], input: &str) -> usize {
+    let words: Vec<String> = query_words(input).map(|w| w.to_lowercase()).collect();
+    let mut best = (0, 0);
+    for (i, block) in blocks.iter().enumerate() {
+        let text = block.as_ref().to_lowercase();
+        let found = words.iter().filter(|w| text.contains(w.as_str())).count();
+        if found > best.1 {
+            best = (i, found);
+        }
+    }
+    best.0
 }
 
 fn snippet_html(raw: &str) -> String {
@@ -104,7 +128,15 @@ impl SearchIndex {
                  text, path UNINDEXED, idx UNINDEXED, role UNINDEXED,
                  tokenize = 'unicode61 remove_diacritics 2');",
         )?;
-        Ok(SearchIndex { conn })
+        let has_resume = conn.prepare("SELECT 1 FROM pragma_table_info('files') WHERE name = 'resume_offset'")?.exists([])?;
+        if !has_resume {
+            conn.execute_batch(
+                "ALTER TABLE files ADD COLUMN resume_offset INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE files ADD COLUMN resume_index INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE files ADD COLUMN resume_check BLOB;",
+            )?;
+        }
+        Ok(SearchIndex { conn, big_reads: HashMap::new() })
     }
 
     /// Re-indexes session files that changed since last time and forgets
@@ -117,6 +149,13 @@ impl SearchIndex {
     /// `update` for sessions anywhere: each with the stamp it has (a remote
     /// host's, an OpenCode database row's), read by `read` when it changed.
     pub fn update_with(&mut self, files: &[(PathBuf, i64, i64)], read: impl Fn(&Path) -> Vec<Value>) -> Result<usize> {
+        self.update_parts(files, |p, _| Part { messages: read(p), ..Default::default() })
+    }
+
+    /// `update_with` where `read` may read on from where a file was left
+    /// (it's given that place; what it returns replaces the messages from
+    /// its `first_index` on).
+    pub fn update_parts(&mut self, files: &[(PathBuf, i64, i64)], read: impl Fn(&Path, Option<&Resume>) -> Part) -> Result<usize> {
         let wanted: HashSet<&Path> = files.iter().map(|p| p.0.as_path()).collect();
         let known: Vec<(String, i64, i64)> = {
             let mut stmt = self.conn.prepare("SELECT path, modified, size FROM files")?;
@@ -128,27 +167,43 @@ impl SearchIndex {
             tx.execute("DELETE FROM files WHERE path = ?1", params![path])?;
         }
         let mut indexed = 0;
+        let mut biggest = 0;
         for (file, modified, size) in files {
             let (modified, size) = (*modified, *size);
             let key = file.to_string_lossy();
             if known.iter().any(|(p, m, s)| *p == key && *m == modified && *s == size) {
                 continue;
             }
-            let messages = read(file);
-            tx.execute("DELETE FROM messages WHERE path = ?1", params![key])?;
-            for (i, m) in messages.iter().enumerate() {
+            // (A big one that's being written to: it's caught up on later.)
+            if size as u64 >= BIG_FILE {
+                if self.big_reads.get(key.as_ref()).is_some_and(|at| at.elapsed() < BIG_FILE_INTERVAL) {
+                    continue;
+                }
+                self.big_reads.insert(key.to_string(), Instant::now());
+                biggest = biggest.max(size as u64);
+            }
+            let resume = tx
+                .query_row("SELECT resume_offset, resume_index, resume_check FROM files WHERE path = ?1 AND resume_offset > 0", params![key], |r| {
+                    Ok(Resume { offset: r.get::<_, i64>(0)? as u64, index: r.get(1)?, check: r.get::<_, Option<Vec<u8>>>(2)?.unwrap_or_default() })
+                })
+                .optional()?;
+            let part = read(file, resume.as_ref());
+            tx.execute("DELETE FROM messages WHERE path = ?1 AND idx >= ?2", params![key, part.first_index])?;
+            for (i, m) in part.messages.iter().enumerate() {
                 if let Some((role, text)) = message_text(m) {
-                    tx.execute("INSERT INTO messages (text, path, idx, role) VALUES (?1, ?2, ?3, ?4)", params![text, key, i as i64, role])?;
+                    tx.execute("INSERT INTO messages (text, path, idx, role) VALUES (?1, ?2, ?3, ?4)", params![text, key, part.first_index + i as i64, role])?;
                 }
             }
             tx.execute(
-                "INSERT INTO files (path, modified, size) VALUES (?1, ?2, ?3)
-                 ON CONFLICT(path) DO UPDATE SET modified = excluded.modified, size = excluded.size",
-                params![key, modified, size],
+                "INSERT INTO files (path, modified, size, resume_offset, resume_index, resume_check) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(path) DO UPDATE SET modified = excluded.modified, size = excluded.size,
+                     resume_offset = excluded.resume_offset, resume_index = excluded.resume_index, resume_check = excluded.resume_check",
+                params![key, modified, size, part.resume.offset as i64, part.resume.index, part.resume.check],
             )?;
             indexed += 1;
         }
         tx.commit()?;
+        after_reading(biggest);
         Ok(indexed)
     }
 
@@ -213,6 +268,74 @@ mod tests {
         index.update(&[a]).unwrap();
         assert!(index.search("parser", 10).unwrap().is_empty(), "deleted sessions drop out");
         assert!(index.search("  \"\" ", 10).unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_hit_lands_on_the_block_with_its_words() {
+        let blocks = ["I fixed the quit crash.", "If it crashes again, run coredumpctl", "run COREDUMPCTL info with its id"];
+        assert_eq!(best_block(&blocks, "coredumpctl info"), 2, "the most of its words, in any case");
+        assert_eq!(best_block(&blocks, "coredumpctl"), 1, "the first of equals");
+        assert_eq!(best_block(&blocks, "nothing here"), 0);
+        assert_eq!(best_block(&blocks, ""), 0);
+    }
+
+    /// A Claude transcript that grows: what was there isn't read again, and
+    /// hits still name the message's place in the whole conversation.
+    #[test]
+    fn indexes_only_what_was_added() {
+        use harlo_harness::claude::read_part;
+        let dir = std::env::temp_dir().join(format!("harlo-search-parts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let line = |kind: &str, id: &str, text: &str| match kind {
+            "user" => format!(r#"{{"type":"user","message":{{"role":"user","content":"{text}"}}}}"#) + "\n",
+            _ => format!(r#"{{"type":"assistant","message":{{"id":"{id}","model":"m","content":[{{"type":"text","text":"{text}"}}]}}}}"#) + "\n",
+        };
+        let path = dir.join("s.jsonl");
+        let mut text = line("user", "", "walrus") + &line("assistant", "a", "narwhal") + &line("user", "", "puffin");
+        std::fs::write(&path, &text).unwrap();
+        let stamped = |size: usize, at: i64| vec![(path.clone(), at, size as i64)];
+        let mut index = SearchIndex::open(&dir.join("search.db")).unwrap();
+        let read_from = std::cell::Cell::new(None);
+        let read = |p: &Path, r: Option<&Resume>| {
+            read_from.set(Some(r.map_or(0, |r| r.offset)));
+            read_part(p, r).unwrap()
+        };
+        index.update_parts(&stamped(text.len(), 1), read).unwrap();
+        assert_eq!(read_from.get(), Some(0));
+        assert_eq!(index.search("puffin", 10).unwrap()[0].index, 2);
+
+        text += &line("assistant", "b", "ptarmigan");
+        text += &line("user", "", "lemming");
+        std::fs::write(&path, &text).unwrap();
+        index.update_parts(&stamped(text.len(), 2), read).unwrap();
+        assert!(read_from.get().unwrap() > 0, "read on from the last prompt");
+        for (word, at) in [("walrus", 0), ("narwhal", 1), ("puffin", 2), ("ptarmigan", 3), ("lemming", 4)] {
+            let hits = index.search(word, 10).unwrap();
+            assert_eq!(hits.len(), 1, "{word} once");
+            assert_eq!(hits[0].index, at, "{word}");
+        }
+
+        // Another conversation in its place: read whole.
+        std::fs::write(&path, line("user", "", "albatross")).unwrap();
+        index.update_parts(&stamped(1, 3), read).unwrap();
+        assert!(index.search("walrus", 10).unwrap().is_empty());
+        assert_eq!(index.search("albatross", 10).unwrap()[0].index, 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn opens_an_index_from_before_it_read_on() {
+        let dir = std::env::temp_dir().join(format!("harlo-search-old-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("search.db");
+        Connection::open(&db).unwrap().execute_batch("CREATE TABLE files (path TEXT PRIMARY KEY, modified INTEGER NOT NULL, size INTEGER NOT NULL); INSERT INTO files VALUES ('/x', 1, 2);").unwrap();
+        drop(SearchIndex::open(&db).unwrap());
+        let mut index = SearchIndex::open(&db).unwrap();
+        let unchanged = index.update_parts(&[(PathBuf::from("/x"), 1, 2)], |_, _| panic!("unchanged")).unwrap();
+        assert_eq!(unchanged, 0);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

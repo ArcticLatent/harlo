@@ -28,10 +28,17 @@ pub mod ffi {
         /// A key press as shortcut text (`Ctrl+Shift+T`).
         #[namespace = "harlo"]
         fn key_sequence_text(key: i32, modifiers: i32) -> QString;
+        /// The clipboard's files, if it holds only files on this machine.
+        #[namespace = "harlo"]
+        fn clipboard_files() -> QStringList;
+        /// Saves the clipboard's image as `base`.png (.jpg if that'd be too
+        /// big to send), and returns its path: "" if it holds text, or nothing.
+        #[namespace = "harlo"]
+        fn clipboard_image_to(base: &QString) -> QString;
         /// Copies Qt/QML messages into the log file at `path`.
         #[namespace = "harlo"]
         fn install_message_log(path: &QString);
     }
 }
 
-pub use ffi::{create_application, exec_application, install_message_log, key_sequence_text, set_desktop_file_name, set_window_icon, shutdown_application};
+pub use ffi::{clipboard_files, clipboard_image_to, create_application, exec_application, install_message_log, key_sequence_text, set_desktop_file_name, set_window_icon, shutdown_application};

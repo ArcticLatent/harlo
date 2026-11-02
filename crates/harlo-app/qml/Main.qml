@@ -183,6 +183,7 @@ ApplicationWindow {
     }
     Timer { interval: 1500; running: win.selftestDir === ""; onTriggered: Workspace.refreshQuota() }
     Timer { interval: 600000; running: win.selftestDir === ""; repeat: true; onTriggered: Workspace.refreshQuota() }
+    Timer { interval: 30000; running: win.selftestDir === ""; repeat: true; onTriggered: Workspace.checkLimits() }
     // Scheduled prompts: due ones start every 30 s; the first check, soon
     // after starting, catches up runs missed while harlo was closed.
     Timer { interval: 4000; running: true; onTriggered: Workspace.tickSchedules() }
@@ -758,9 +759,9 @@ ApplicationWindow {
 
     SearchDialog {
         id: searchDialog
-        onPicked: (path, index) => {
+        onPicked: (path, index, query) => {
             Workspace.open(path)
-            chat.revealMessage(index)
+            chat.revealMessage(index, query)
         }
     }
     PairDeviceDialog { id: pairDeviceDialog }

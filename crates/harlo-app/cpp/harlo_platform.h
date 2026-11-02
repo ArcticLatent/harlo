@@ -1,8 +1,11 @@
 // App-level platform bits: window icon and desktop app id.
 #pragma once
 
+#include <QtGui/QClipboard>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QIcon>
+#include <QtGui/QImage>
+#include <QtGui/QPainter>
 #include <QtGui/QKeySequence>
 #include <QtWidgets/QApplication>
 #include <QtCore/QByteArray>
@@ -11,6 +14,9 @@
 #include <QtCore/QStringList>
 #include <QtCore/QDateTime>
 #include <QtCore/QFile>
+#include <QtCore/QFileInfo>
+#include <QtCore/QMimeData>
+#include <QtCore/QUrl>
 #include <QtCore/QMutex>
 #include <QtCore/QTextStream>
 
@@ -35,6 +41,52 @@ inline void create_application(const QStringList &args)
     new QApplication(argc, argv.data());
     QCoreApplication::setOrganizationName(QStringLiteral("harlo"));
     QCoreApplication::setApplicationName(QStringLiteral("harlo"));
+}
+
+// The clipboard's files, if it holds only files on this machine.
+inline QStringList clipboard_files()
+{
+    const QMimeData *mime = QGuiApplication::clipboard()->mimeData();
+    QStringList files;
+    if (!mime || !mime->hasUrls())
+        return files;
+    for (const QUrl &url : mime->urls()) {
+        if (!url.isLocalFile())
+            return {};
+        files.append(url.toLocalFile());
+    }
+    return files;
+}
+
+// Saves the clipboard's image as `base`.png, or `base`.jpg when a PNG would be
+// over what agents take (5 MB once encoded). Returns its path; "" when the
+// clipboard holds text (a browser's copied image may carry its address too, a
+// spreadsheet's cells carry a picture of themselves).
+inline QString clipboard_image_to(const QString &base)
+{
+    const QMimeData *mime = QGuiApplication::clipboard()->mimeData();
+    if (!mime || !mime->hasImage())
+        return {};
+    const QString text = mime->text().trimmed();
+    if (!text.isEmpty() && !(text.startsWith(QStringLiteral("http")) && !text.contains(QLatin1Char(' '))))
+        return {};
+    QImage image = qvariant_cast<QImage>(mime->imageData());
+    if (image.isNull())
+        return {};
+    const int largest = 2000; // Bigger ones are refused next to other images.
+    if (image.width() > largest || image.height() > largest)
+        image = image.scaled(largest, largest, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    const QString png = base + QStringLiteral(".png");
+    if (!image.save(png, "PNG"))
+        return {};
+    if (QFileInfo(png).size() <= 3500 * 1024)
+        return png;
+    QImage flat(image.size(), QImage::Format_RGB32);
+    flat.fill(Qt::white);
+    QPainter(&flat).drawImage(0, 0, image);
+    const QString jpg = base + QStringLiteral(".jpg");
+    QFile::remove(png);
+    return flat.save(jpg, "JPEG", 85) ? jpg : QString();
 }
 
 // Runs the event loop until the app quits.

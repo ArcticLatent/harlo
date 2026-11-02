@@ -698,6 +698,14 @@ Rectangle {
                         background: null
                         padding: 4
                         Keys.onPressed: event => {
+                            // An image or files on the clipboard: attached, not typed.
+                            if (event.matches(StandardKey.Paste)) {
+                                const files = Workspace.pasteFiles()
+                                for (let i = 0; i < files.length; i++)
+                                    if (!root.attachments.includes(files[i])) root.attachments = root.attachments.concat([files[i]])
+                                if (files.length > 0) event.accepted = true
+                                return
+                            }
                             if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && !(event.modifiers & Qt.ShiftModifier)) {
                                 root.send()
                                 event.accepted = true

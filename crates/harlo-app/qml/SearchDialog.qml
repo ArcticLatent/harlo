@@ -7,7 +7,7 @@ import harlo
 // are grouped by session; picking one opens the session at that message.
 Popup {
     id: root
-    signal picked(string path, int index)
+    signal picked(string path, int index, string query)
 
     property var hits: []
     property int current: 0
@@ -41,7 +41,7 @@ Popup {
         const h = hits[i]
         if (!h) return
         close()
-        root.picked(h.path, h.index)
+        root.picked(h.path, h.index, field.text)
     }
     // Test hook.
     property alias query: field.text

@@ -6,6 +6,7 @@ pub mod actions;
 pub mod attach;
 pub mod autostart;
 pub mod commitmsg;
+pub mod compaction;
 pub mod context;
 pub mod db;
 pub mod dictation;

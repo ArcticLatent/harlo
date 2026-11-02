@@ -431,11 +431,11 @@ Rectangle {
                     event.accepted = true
                 }
             }
-            readonly property int middle: 30
-            readonly property int ruler: 14
+            readonly property int middleWidth: 30
+            readonly property int rulerWidth: 14
             // A new file has no old side: its lines take the whole width.
             readonly property bool added: dg.splitLeft.replace(/\n/g, "") === "" && dg.splitRight.trim() !== ""
-            readonly property real paneWidth: (width - middle - ruler) / (added ? 1 : 2)
+            readonly property real paneWidth: (width - middleWidth - rulerWidth) / (added ? 1 : 2)
 
             DiffPane {
                 id: leftPane
@@ -451,7 +451,7 @@ Rectangle {
             Item {
                 id: middle
                 x: leftPane.width
-                width: sides.middle
+                width: sides.middleWidth
                 height: sides.height
                 clip: true
                 Rectangle { anchors.horizontalCenter: parent.horizontalCenter; width: 1; height: parent.height; color: Theme.border }
@@ -503,7 +503,7 @@ Rectangle {
                 id: rightPane
                 isLeft: false
                 text: root.view.right
-                x: leftPane.width + sides.middle
+                x: leftPane.width + sides.middleWidth
                 width: sides.paneWidth
                 height: sides.height
                 onScrolled: y => { if (leftPane.flick.contentY !== y) leftPane.flick.contentY = y }
@@ -512,8 +512,8 @@ Rectangle {
             Item {
                 id: ruler
                 objectName: "diffRuler"
-                x: sides.width - sides.ruler
-                width: sides.ruler
+                x: sides.width - sides.rulerWidth
+                width: sides.rulerWidth
                 height: sides.height
                 Rectangle { width: 1; height: parent.height; color: Theme.border }
                 readonly property real rowScale: root.rows.length > 0 ? height / root.rows.length : 0

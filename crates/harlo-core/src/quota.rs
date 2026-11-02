@@ -188,9 +188,165 @@ pub fn parse_claude(body: &Value, plan: &str, account: &str) -> Value {
     json!({ "provider": "Claude", "plan": plan, "account": account, "limitReached": reached, "windows": windows })
 }
 
+/// From this much of a window used, harlo warns, and says when it resets.
+pub const NEARLY: f64 = 0.9;
+
+/// A running Claude session's word on its limits (`rate_limit_info`, after
+/// each request) into its account in `accounts` (added when there's none
+/// yet): the 5-hour and weekly windows, the rest as they were. Returns the
+/// windows that have just run out.
+pub fn apply_claude_live(accounts: &mut Vec<Value>, info: &Value) -> Vec<String> {
+    let mut seen: Vec<(&str, &Value)> = Vec::new();
+    for (key, label) in [("five_hour", "Session (5 h)"), ("seven_day", "Weekly")] {
+        let w = &info["unifiedWindows"][key];
+        if w["utilization"].is_number() {
+            seen.push((label, w));
+        } else if info["rateLimitType"] == key && info["utilization"].is_number() {
+            seen.push((label, info));
+        }
+    }
+    if seen.is_empty() {
+        return Vec::new();
+    }
+    let at = match accounts.iter().position(|a| a["provider"] == "Claude") {
+        Some(i) => i,
+        None => {
+            accounts.insert(0, json!({ "provider": "Claude", "plan": "", "account": "", "limitReached": false, "windows": [] }));
+            0
+        }
+    };
+    let account = &mut accounts[at];
+    if !account["windows"].is_array() {
+        account["windows"] = json!([]);
+    }
+    let windows = account["windows"].as_array_mut().expect("an array");
+    let mut ran_out = Vec::new();
+    for (label, w) in seen {
+        let used = w["utilization"].as_f64().unwrap_or(0.0);
+        let out = used >= 1.0 || w["status"] == "rejected";
+        let reset = w["resetsAt"].as_i64().map(|s| s * 1000);
+        let window = json!({ "label": label, "usedFraction": used, "used": (used * 100.0).round(), "limit": 100, "unit": "percent",
+                             "resetsAt": reset, "status": if out { "exhausted" } else { "ok" } });
+        match windows.iter_mut().find(|x| x["label"] == label) {
+            Some(x) => {
+                if out && x["status"] != "exhausted" {
+                    ran_out.push(label.to_owned());
+                }
+                *x = window;
+            }
+            None => {
+                if out {
+                    ran_out.push(label.to_owned());
+                }
+                let place = if label == "Weekly" { windows.len().min(1) } else { 0 };
+                windows.insert(place, window);
+            }
+        }
+    }
+    let reached = windows.iter().any(|w| w["status"] == "exhausted" || w["usedFraction"].as_f64().unwrap_or(0.0) >= 1.0);
+    account["limitReached"] = json!(reached);
+    ran_out
+}
+
+/// The windows (provider, label, when) that were nearly or fully used and
+/// have reset by `now`, at a time after `since` (unix ms).
+pub fn resets_due(accounts: &[Value], since: i64, now: i64) -> Vec<(String, String, i64)> {
+    let mut out = Vec::new();
+    for a in accounts {
+        for w in a["windows"].as_array().into_iter().flatten() {
+            let Some(at) = w["resetsAt"].as_i64() else { continue };
+            let used = w["usedFraction"].as_f64().unwrap_or(0.0);
+            if at > since && at <= now && (used >= NEARLY || w["status"] == "exhausted") {
+                out.push((a["provider"].as_str().unwrap_or_default().to_owned(), w["label"].as_str().unwrap_or_default().to_owned(), at));
+            }
+        }
+    }
+    out
+}
+
+/// A window that has reset: nothing used, until fresh numbers come.
+pub fn mark_reset(accounts: &mut [Value], provider: &str, label: &str) {
+    for a in accounts.iter_mut().filter(|a| a["provider"] == provider) {
+        for w in a["windows"].as_array_mut().into_iter().flatten().filter(|w| w["label"] == label) {
+            w["usedFraction"] = json!(0.0);
+            w["used"] = json!(0);
+            w["status"] = json!("ok");
+            w["resetsAt"] = Value::Null;
+        }
+        let reached = a["windows"].as_array().into_iter().flatten().any(|w| w["status"] == "exhausted");
+        a["limitReached"] = json!(reached);
+    }
+}
+
+/// When a limit resets (unix ms), as a notification says it: "18:30", or
+/// "Thu 09:00" further off than a day.
+pub fn reset_time(at: i64) -> String {
+    use chrono::TimeZone;
+    let Some(t) = chrono::Local.timestamp_millis_opt(at).single() else { return String::new() };
+    if t - chrono::Local::now() > chrono::Duration::hours(20) { t.format("%a %H:%M").to_string() } else { t.format("%H:%M").to_string() }
+}
+
+/// How a provider's limit reads in a notification: "Claude's 5-hour limit".
+pub fn limit_name(provider: &str, label: &str) -> String {
+    let who = match provider {
+        "Claude" => "Claude",
+        "openai-codex" => "ChatGPT",
+        "anthropic" => "Claude",
+        "google-gemini-cli" | "google-antigravity" => "Gemini",
+        p => p,
+    };
+    let what = match label {
+        "Session (5 h)" => "5-hour limit".to_owned(),
+        "Weekly" => "weekly limit".to_owned(),
+        l if l.starts_with("Weekly · ") => format!("weekly {} limit", &l["Weekly · ".len()..]),
+        l => format!("{l} limit"),
+    };
+    format!("{who}'s {what}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_running_session_says_its_limits() {
+        let info = |five: f64, status: &str| json!({ "status": status, "rateLimitType": "five_hour", "unifiedWindows": {
+            "five_hour": { "utilization": five, "resetsAt": 1793653800, "status": status },
+            "seven_day": { "utilization": 0.06, "resetsAt": 1794229200, "status": "allowed" } } });
+        // None asked for yet: the account comes from it.
+        let mut accounts = vec![json!({ "provider": "openai-codex", "windows": [] })];
+        assert!(apply_claude_live(&mut accounts, &info(0.92, "allowed_warning")).is_empty());
+        let a = &accounts[0];
+        assert_eq!(a["provider"], "Claude");
+        assert_eq!(a["windows"][0]["label"], "Session (5 h)");
+        assert_eq!(a["windows"][0]["usedFraction"], 0.92);
+        assert_eq!(a["windows"][0]["resetsAt"], 1793653800000_i64);
+        assert_eq!(a["windows"][1]["label"], "Weekly");
+        assert_eq!(a["limitReached"], false);
+        // Asked for earlier: its per-model windows stay.
+        accounts[0]["windows"].as_array_mut().unwrap().push(json!({ "label": "Weekly · Opus", "usedFraction": 0.3, "status": "ok" }));
+        assert_eq!(apply_claude_live(&mut accounts, &info(1.01, "rejected")), ["Session (5 h)"]);
+        assert_eq!(accounts[0]["windows"].as_array().unwrap().len(), 3);
+        assert_eq!(accounts[0]["windows"][0]["status"], "exhausted");
+        assert_eq!(accounts[0]["limitReached"], true);
+        assert!(apply_claude_live(&mut accounts, &info(1.02, "rejected")).is_empty(), "said once");
+        assert!(apply_claude_live(&mut accounts, &json!({ "status": "allowed" })).is_empty());
+        assert_eq!(accounts.len(), 2);
+
+        // It resets: said once it's past, then nothing's used until fresh numbers.
+        let at = 1793653800000_i64;
+        assert!(resets_due(&accounts, 0, at - 1).is_empty());
+        assert_eq!(resets_due(&accounts, 0, at), [("Claude".to_owned(), "Session (5 h)".to_owned(), at)]);
+        assert!(resets_due(&accounts, at, at + 10).is_empty(), "not one that reset before harlo started");
+        mark_reset(&mut accounts, "Claude", "Session (5 h)");
+        assert_eq!(accounts[0]["windows"][0]["usedFraction"], 0.0);
+        assert_eq!(accounts[0]["limitReached"], false);
+        assert!(resets_due(&accounts, 0, at + 10).is_empty());
+        // (A window hardly used resets without a word.)
+        assert_eq!(limit_name("Claude", "Session (5 h)"), "Claude's 5-hour limit");
+        assert_eq!(limit_name("openai-codex", "7 days"), "ChatGPT's 7 days limit");
+        assert_eq!(limit_name("Claude", "Weekly · Opus"), "Claude's weekly Opus limit");
+    }
 
     #[test]
     fn parses_omp_usage() {

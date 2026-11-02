@@ -126,6 +126,12 @@ pub enum HarnessEvent {
     ModelChanged(Value),
     /// omp pushes its slash-command list when it changes.
     CommandsChanged(Value),
+    /// Claude: its plan limits after a request (`rate_limit_info`: each
+    /// window's `utilization`, `resetsAt` in seconds and `status`).
+    Limits(Value),
+    /// The context's size or window became known outside a turn (ask
+    /// `get_session_stats`).
+    ContextChanged,
 
     /// `system` is true for the harness's own status notices (omp `notice`,
     /// e.g. "xd://: mounted …"), as opposed to command output or extension

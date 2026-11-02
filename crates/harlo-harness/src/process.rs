@@ -234,7 +234,7 @@ impl Harness {
     }
 
     /// Sends a command and waits for its response `data`.
-    pub async fn request(&self, mut cmd: Value) -> Result<Value> {
+    pub async fn request(&self, cmd: Value) -> Result<Value> {
         // pi: the shield is harlo's own, for its permission prompts.
         if self.kind == HarnessKind::Pi && cmd["type"] == "harlo_set_modes" {
             self.permissions.lock().unwrap().set_shield(cmd["approval"].as_str().unwrap_or_default());
@@ -244,6 +244,36 @@ impl Harness {
         if self.kind == HarnessKind::Pi && cmd["type"] == "get_subagents" {
             return Ok(json!({ "subagents": [] }));
         }
+        // pi can only clear its whole queue: what's kept goes back in, in
+        // order (as text: a queued message's images don't come back).
+        if self.kind == HarnessKind::Pi && matches!(cmd["type"].as_str(), Some("remove_queued_message" | "promote_queued_message")) {
+            let promote = cmd["type"] == "promote_queued_message";
+            let text = cmd["message"].as_str().unwrap_or_default();
+            let queue = if promote { "followUp" } else { cmd["queue"].as_str().unwrap_or("followUp") };
+            let had = self.rpc(json!({ "type": "clear_queue" })).await?;
+            let list = |key: &str| had[key].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect::<Vec<_>>();
+            let (mut steering, mut follow_up) = (list("steering"), list("followUp"));
+            let from = if queue == "steering" { &mut steering } else { &mut follow_up };
+            let taken = from.iter().position(|t| t == text).map(|at| from.remove(at));
+            if promote && let Some(t) = &taken {
+                steering.push(t.clone());
+            }
+            for t in &steering {
+                self.rpc(json!({ "type": "steer", "message": t })).await?;
+            }
+            for t in &follow_up {
+                self.rpc(json!({ "type": "follow_up", "message": t })).await?;
+            }
+            return match taken {
+                Some(_) => Ok(Value::Null),
+                None => Err(anyhow!("That message has been sent already.")),
+            };
+        }
+        self.rpc(cmd).await
+    }
+
+    /// One command to the harness, and its answer.
+    async fn rpc(&self, mut cmd: Value) -> Result<Value> {
         let id = self.next_id();
         cmd["id"] = Value::String(id.clone());
         let (tx, rx) = oneshot::channel();

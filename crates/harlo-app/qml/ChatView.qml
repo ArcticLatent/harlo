@@ -181,15 +181,17 @@ Rectangle {
             composer.text = text
             composer.focusInput()
         }
-        function onStatusChanged() { root.refreshBranches() }
+        // (Not while it's writing: going idle reads it again.)
+        function onStatusChanged() { if (root.session.status !== "busy") root.refreshBranches() }
         function onSendFailed(message) { Workspace.showNotice(message, true) }
     }
     // Branches of the active session's file (header button when > 1).
     property int branchCount: 0
-    // (Read off the UI thread: a remote session's file over SSH.)
+    // (Read off the UI thread: a remote session's file over SSH. Only pi's and
+    // Oh My Pi's sessions branch.)
     function refreshBranches() {
         const file = Workspace.sessionFile(Workspace.activeKey)
-        if (file === "") branchCount = 0
+        if (file === "" || !["pi", "omp", "demo"].includes(session.harness)) branchCount = 0
         else Workspace.requestSessionBranches(file)
     }
     Connections {
@@ -225,11 +227,14 @@ Rectangle {
         function onActiveKeyChanged() { root.bindActive() }
     }
 
-    // A search result: open at message `index` once its rows have loaded.
+    // A search result: open at message `index`, on the block `query` found,
+    // once its rows have loaded.
     property string pendingReveal: ""
+    property string revealQuery: ""
     property int revealTries: 0
-    function revealMessage(index) {
+    function revealMessage(index, query) {
         pendingReveal = "h" + index + ":"
+        revealQuery = query
         revealTries = 0
         revealTimer.restart()
     }
@@ -238,7 +243,7 @@ Rectangle {
         interval: 150
         repeat: true
         onTriggered: {
-            const i = session.indexOfKeyPrefix(root.pendingReveal)
+            const i = session.indexOfHit(root.pendingReveal, root.revealQuery)
             if (i >= 0) { transcript.revealIndex(i); stop(); root.pendingReveal = "" }
             else if (++root.revealTries > 40) { stop(); root.pendingReveal = "" }
         }
@@ -656,8 +661,8 @@ Rectangle {
                     id: queuedRow
                     required property string modelData
                     required property int index
-                    // omp can drop queued messages and send follow-ups now.
-                    readonly property bool editable: session.harness === "omp" || session.harness === "demo"
+                    // Every agent's can be dropped, and a follow-up sent now.
+                    readonly property bool editable: ["omp", "claude", "pi", "opencode", "hermes", "demo"].includes(session.harness)
                     width: parent.width
                     implicitHeight: 22
                     HoverHandler { id: queuedHover }
@@ -835,6 +840,92 @@ Rectangle {
                 }
             }
             Label { id: dropHint; visible: text !== ""; color: Theme.warning; font.pixelSize: Theme.px(12) }
+        }
+
+        // A plan limit this session uses, nearly or fully used: how much,
+        // and when it resets.
+        RowLayout {
+            id: limitLine
+            objectName: "limitLine"
+            // Whose limits: Claude's sign-in, else the model's provider (as
+            // omp names its accounts; OpenCode's "openai" is ChatGPT's).
+            readonly property string provider: {
+                if (session.harness === "claude") return "Claude"
+                if (!["pi", "omp", "opencode"].includes(session.harness)) return ""
+                const p = (session.modelId || "").split("/")[0]
+                return session.harness === "opencode" && p === "openai" ? "openai-codex" : p
+            }
+            // Its fullest window of 90% or more.
+            readonly property var worst: {
+                if (provider === "") return null
+                let accounts = []
+                try { accounts = JSON.parse(Workspace.quotaJson || "{}").accounts || [] } catch (e) {}
+                let w = null
+                for (const a of accounts.filter(a => a.provider === provider))
+                    for (const x of a.windows || [])
+                        if ((x.usedFraction >= 0.9 || x.status === "exhausted") && (!w || x.usedFraction > w.usedFraction)) w = x
+                return w
+            }
+            readonly property bool out: !!worst && (worst.status === "exhausted" || worst.usedFraction >= 1)
+            function name(label) {
+                return label === "Session (5 h)" ? "5-hour limit" : label === "Weekly" ? "weekly limit"
+                     : label.indexOf("Weekly · ") === 0 ? "weekly " + label.slice(9) + " limit" : label + " limit"
+            }
+            function when(ms) {
+                if (!ms) return ""
+                const d = new Date(ms)
+                const far = ms - Date.now() > 20 * 3600 * 1000
+                return " · resets " + (far ? d.toLocaleDateString(Qt.locale(), "ddd") + " " : "at ") + d.toLocaleTimeString(Qt.locale(), "HH:mm")
+            }
+            Layout.fillWidth: true
+            Layout.leftMargin: transcript.gutter + 4
+            Layout.rightMargin: transcript.gutter + 4
+            Layout.topMargin: 6
+            visible: !!worst && !root.covered
+            spacing: 6
+            Icon { name: "alert"; color: limitLine.out ? Theme.error : Theme.warning; implicitWidth: 14; implicitHeight: 14 }
+            Label {
+                Layout.fillWidth: true
+                text: !limitLine.worst ? ""
+                    : (limitLine.out ? "You've used up your " + limitLine.name(limitLine.worst.label)
+                                     : "You've used " + Math.floor(limitLine.worst.usedFraction * 100) + "% of your " + limitLine.name(limitLine.worst.label))
+                      + limitLine.when(limitLine.worst.resetsAt)
+                color: limitLine.out ? Theme.error : Theme.warning
+                elide: Text.ElideRight
+                font.pixelSize: Theme.px(12)
+            }
+        }
+
+        // Near where the agent compacts the conversation on its own.
+        RowLayout {
+            objectName: "compactLine"
+            Layout.fillWidth: true
+            Layout.leftMargin: transcript.gutter + 4
+            Layout.rightMargin: transcript.gutter + 4
+            Layout.topMargin: 6
+            visible: session.compactNote !== "" && !root.covered
+            spacing: 6
+            Icon { name: "alert"; color: Theme.warning; implicitWidth: 14; implicitHeight: 14 }
+            Label {
+                Layout.fillWidth: true
+                text: session.compactNote
+                color: Theme.muted
+                elide: Text.ElideRight
+                font.pixelSize: Theme.px(12)
+            }
+        }
+
+        // While it works: what sending does with what you've typed.
+        Label {
+            Layout.fillWidth: true
+            Layout.leftMargin: transcript.gutter + 4
+            Layout.rightMargin: transcript.gutter + 4
+            Layout.topMargin: 6
+            visible: session.status === "busy" && composer.text.trim() !== "" && !root.covered
+            text: "Enter sends this when the current turn ends  ·  Ctrl+Enter sends it now, into this turn"
+            color: Theme.muted
+            elide: Text.ElideRight
+            font.pixelSize: Theme.px(12)
         }
 
         Composer {

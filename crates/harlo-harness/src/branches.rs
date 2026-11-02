@@ -24,6 +24,8 @@ pub struct BranchInfo {
     pub timestamp: String,
 }
 
+/// Every entry whole, to copy a branch (when one's chosen: this is many times
+/// the file's size for a long session).
 struct Tree {
     header: Option<Value>,
     entries: Vec<Value>,
@@ -67,14 +69,87 @@ impl Tree {
     }
 }
 
-fn user_text(entry: &Value) -> Option<String> {
-    let m = &entry["message"];
-    if entry["type"] != "message" || m["role"] != "user" {
+/// What the branch list needs of an entry, read off its line: nothing else of
+/// a long session is kept.
+struct Node {
+    id: String,
+    parent: Option<String>,
+    message: bool,
+    /// A user message's first line.
+    user: Option<String>,
+    timestamp: String,
+}
+
+#[derive(serde::Deserialize)]
+struct NodeLine {
+    #[serde(rename = "type", default)]
+    kind: Value,
+    #[serde(default)]
+    id: Value,
+    #[serde(rename = "parentId", default)]
+    parent: Value,
+    #[serde(default)]
+    timestamp: Value,
+    #[serde(default)]
+    message: Value,
+}
+
+#[derive(Default)]
+struct Outline {
+    nodes: Vec<Node>,
+    index: HashMap<String, usize>,
+}
+
+impl Outline {
+    fn add(&mut self, line: &str) {
+        let Ok(entry) = serde_json::from_str::<NodeLine>(line) else { return };
+        let Some(id) = entry.id.as_str().filter(|_| entry.kind != "session") else { return };
+        let message = entry.kind == "message";
+        self.index.insert(id.to_owned(), self.nodes.len());
+        self.nodes.push(Node {
+            id: id.to_owned(),
+            parent: entry.parent.as_str().map(str::to_owned),
+            message,
+            user: if message { user_text(&entry.message) } else { None },
+            timestamp: entry.timestamp.as_str().unwrap_or_default().to_owned(),
+        });
+    }
+
+    fn of_file(path: &Path) -> std::io::Result<Outline> {
+        let mut outline = Outline::default();
+        crate::store::for_each_line(path, 0, &mut |_, line| outline.add(line))?;
+        Ok(outline)
+    }
+
+    fn of_text(text: &str) -> Outline {
+        let mut outline = Outline::default();
+        text.lines().for_each(|line| outline.add(line));
+        outline
+    }
+
+    /// Node indices from the root to `leaf`.
+    fn path(&self, leaf: usize) -> Vec<usize> {
+        let mut out = Vec::new();
+        let mut cursor = Some(leaf);
+        while let Some(i) = cursor {
+            if out.len() > self.nodes.len() {
+                break; // a cycle
+            }
+            out.push(i);
+            cursor = self.nodes[i].parent.as_deref().and_then(|p| self.index.get(p).copied());
+        }
+        out.reverse();
+        out
+    }
+}
+
+fn user_text(message: &Value) -> Option<String> {
+    if message["role"] != "user" {
         return None;
     }
-    let text = match &m["content"] {
+    let text = match &message["content"] {
         Value::String(s) => s.clone(),
-        Value::Array(blocks) => blocks.iter().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join("\n"),
+        Value::Array(blocks) => blocks.iter().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join(""),
         _ => String::new(),
     };
     let line = crate::file_blocks::title_text(&text);
@@ -83,35 +158,34 @@ fn user_text(entry: &Value) -> Option<String> {
 
 /// Every branch that contains a user message, newest first.
 pub fn branches(path: &Path) -> std::io::Result<Vec<BranchInfo>> {
-    Ok(branches_in(&load(path)?))
+    Ok(branches_in(&Outline::of_file(path)?))
 }
 
 /// `branches` of a session file's text (a remote host's, read over SSH).
 pub fn branches_text(text: &str) -> Vec<BranchInfo> {
-    branches_in(&parse(text))
+    branches_in(&Outline::of_text(text))
 }
 
-fn branches_in(tree: &Tree) -> Vec<BranchInfo> {
-    let parents: HashSet<&str> = tree.entries.iter().filter_map(|e| e["parentId"].as_str()).collect();
-    let current_leaf = tree.entries.len().checked_sub(1);
+fn branches_in(tree: &Outline) -> Vec<BranchInfo> {
+    let parents: HashSet<&str> = tree.nodes.iter().filter_map(|n| n.parent.as_deref()).collect();
+    let current_leaf = tree.nodes.len().checked_sub(1);
     let current_path: HashSet<usize> = current_leaf.map(|l| tree.path(l).into_iter().collect()).unwrap_or_default();
     let mut out = Vec::new();
-    for (i, entry) in tree.entries.iter().enumerate() {
-        let Some(id) = entry["id"].as_str() else { continue };
-        if parents.contains(id) {
+    for (i, node) in tree.nodes.iter().enumerate() {
+        if parents.contains(node.id.as_str()) {
             continue;
         }
         let path = tree.path(i);
-        let users: Vec<(usize, String)> = path.iter().filter_map(|&j| user_text(&tree.entries[j]).map(|t| (j, t))).collect();
-        let Some((_, last_user)) = users.last().cloned() else { continue };
+        let users: Vec<(usize, &str)> = path.iter().filter_map(|&j| tree.nodes[j].user.as_deref().map(|t| (j, t))).collect();
+        let Some(&(_, last_user)) = users.last() else { continue };
         let current = Some(i) == current_leaf;
         out.push(BranchInfo {
-            leaf: id.to_owned(),
+            leaf: node.id.clone(),
             current,
-            messages: path.iter().filter(|&&j| tree.entries[j]["type"] == "message").count(),
-            last_user,
-            diverges_at: if current { String::new() } else { users.iter().find(|(j, _)| !current_path.contains(j)).map(|(_, t)| t.clone()).unwrap_or_default() },
-            timestamp: entry["timestamp"].as_str().unwrap_or_default().to_owned(),
+            messages: path.iter().filter(|&&j| tree.nodes[j].message).count(),
+            last_user: last_user.to_owned(),
+            diverges_at: if current { String::new() } else { users.iter().find(|(j, _)| !current_path.contains(j)).map(|(_, t)| (*t).to_owned()).unwrap_or_default() },
+            timestamp: node.timestamp.clone(),
         });
     }
     out.sort_by(|a, b| b.current.cmp(&a.current).then(b.timestamp.cmp(&a.timestamp)));
@@ -121,19 +195,17 @@ fn branches_in(tree: &Tree) -> Vec<BranchInfo> {
 /// Entry ids of the user messages on the current branch, in order. (omp's
 /// `get_branch_messages` lists the user messages of every branch.)
 pub fn current_user_entries(path: &Path) -> std::io::Result<Vec<String>> {
-    Ok(current_user_entries_text(&std::fs::read_to_string(path)?))
+    Ok(current_users(&Outline::of_file(path)?))
 }
 
 /// `current_user_entries` of a session file's text.
 pub fn current_user_entries_text(text: &str) -> Vec<String> {
-    let tree = parse(text);
-    let Some(leaf) = tree.entries.len().checked_sub(1) else { return Vec::new() };
-    tree
-        .path(leaf)
-        .into_iter()
-        .filter(|&j| user_text(&tree.entries[j]).is_some())
-        .filter_map(|j| tree.entries[j]["id"].as_str().map(str::to_owned))
-        .collect()
+    current_users(&Outline::of_text(text))
+}
+
+fn current_users(tree: &Outline) -> Vec<String> {
+    let Some(leaf) = tree.nodes.len().checked_sub(1) else { return Vec::new() };
+    tree.path(leaf).into_iter().filter(|&j| tree.nodes[j].user.is_some()).map(|j| tree.nodes[j].id.clone()).collect()
 }
 
 /// The messages from the root to `leaf` (as `read_saved` shows them).

@@ -227,9 +227,72 @@ pub struct SavedSession {
     pub name: String,
 }
 
+/// A file this big is worth handing its memory back for, once it's read.
+pub const BIG_FILE: u64 = 32 * 1024 * 1024;
+
+/// After reading a file of `size` bytes: what a big one needed goes back to
+/// the system (freed memory otherwise stays with the process, gigabytes of it
+/// after a huge session).
+pub fn after_reading(size: u64) {
+    if size >= BIG_FILE {
+        give_back();
+    }
+}
+
+/// Returns freed memory to the system.
+pub fn give_back() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        unsafe extern "C" {
+            fn malloc_trim(pad: usize) -> i32;
+        }
+        // SAFETY: only returns free memory to the system.
+        unsafe { malloc_trim(0) };
+    }
+}
+
+/// Every line of a file from `from` on, with where it starts, one at a time
+/// (a session file can be bigger than anything worth holding at once). A line
+/// that isn't text is passed over.
+pub(crate) fn for_each_line(path: &Path, from: u64, each: &mut dyn FnMut(u64, &str)) -> std::io::Result<()> {
+    use std::io::{BufRead, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path)?;
+    file.seek(SeekFrom::Start(from))?;
+    let mut reader = std::io::BufReader::with_capacity(1024 * 1024, file);
+    let (mut offset, mut line) = (from, Vec::new());
+    loop {
+        line.clear();
+        let read = reader.read_until(b'\n', &mut line)?;
+        if read == 0 {
+            return Ok(());
+        }
+        if let Ok(text) = std::str::from_utf8(&line) {
+            each(offset, text.trim_end_matches(['\n', '\r']));
+        }
+        offset += read as u64;
+    }
+}
+
+/// [`for_each_line`] for text already read.
+pub(crate) fn for_each_text_line(text: &str, each: &mut dyn FnMut(u64, &str)) {
+    for line in text.lines() {
+        each((line.as_ptr() as usize - text.as_ptr() as usize) as u64, line);
+    }
+}
+
 /// Reads the current branch plus the last model and thinking level.
 pub fn read_saved(path: &Path) -> std::io::Result<SavedSession> {
-    Ok(parse_saved(&std::fs::read_to_string(path)?))
+    // (Missing or unreadable: said now. Lines are read twice below.)
+    drop(std::fs::File::open(path)?);
+    Ok(saved_from(&|each| {
+        let _ = for_each_line(path, 0, each);
+    }))
+}
+
+/// [`read_saved`] for any harness's session file (a long Claude one from
+/// its cache).
+pub fn read_saved_for(kind: HarnessKind, path: &Path) -> std::io::Result<SavedSession> {
+    if kind == HarnessKind::Claude { crate::claude::saved_file_cached(path) } else { read_saved(path) }
 }
 
 /// [`parse_saved`] for any harness's session file.
@@ -239,61 +302,90 @@ pub fn parse_saved_for(kind: HarnessKind, text: &str) -> SavedSession {
 
 /// [`read_saved`] from the file's text.
 pub fn parse_saved(text: &str) -> SavedSession {
-    let mut entries: Vec<Value> = Vec::new();
+    saved_from(&|each| for_each_text_line(text, each))
+}
+
+/// What's read of each entry at first: most of a long session isn't on the
+/// current branch, or isn't a message.
+#[derive(serde::Deserialize)]
+struct EntryHead {
+    #[serde(rename = "type", default)]
+    kind: Value,
+    #[serde(default)]
+    id: Value,
+    #[serde(rename = "parentId", default)]
+    parent: Value,
+    #[serde(default)]
+    name: Value,
+    #[serde(rename = "modelId", default)]
+    model_id: Value,
+    #[serde(default)]
+    model: Value,
+    #[serde(default)]
+    provider: Value,
+    #[serde(rename = "thinkingLevel", default)]
+    thinking: Value,
+}
+
+/// The current branch from `lines` (which calls back with each line and where
+/// it starts): the tree first, then only the messages on that branch.
+fn saved_from(lines: &dyn Fn(&mut dyn FnMut(u64, &str))) -> SavedSession {
+    let mut entries: Vec<(u64, Option<String>)> = Vec::new();
     let mut index: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let (mut model, mut thinking, mut name) = (String::new(), String::new(), String::new());
     let mut model_id = String::new();
-    for line in text.lines() {
-        let Ok(entry) = serde_json::from_str::<Value>(line) else { continue };
-        match entry["type"].as_str() {
+    lines(&mut |offset, line| {
+        let Ok(entry) = serde_json::from_str::<EntryHead>(line) else { return };
+        match entry.kind.as_str() {
             // pi: the latest session_info wins.
-            Some("session_info") => name = entry["name"].as_str().unwrap_or_default().trim().to_owned(),
+            Some("session_info") => name = entry.name.as_str().unwrap_or_default().trim().to_owned(),
             Some("model_change") => {
-                model = entry["modelId"].as_str().or_else(|| entry["model"].as_str()).unwrap_or_default().to_owned();
+                model = entry.model_id.as_str().or_else(|| entry.model.as_str()).unwrap_or_default().to_owned();
                 // pi: `provider` + `modelId`; omp: `model` as `provider/id`.
-                model_id = match entry["provider"].as_str() {
+                model_id = match entry.provider.as_str() {
                     Some(p) if !p.is_empty() && !model.is_empty() => format!("{p}/{model}"),
                     _ => model.clone(),
                 };
             }
             Some("thinking_level_change") => {
-                thinking = entry["thinkingLevel"].as_str().unwrap_or_default().to_owned();
+                thinking = entry.thinking.as_str().unwrap_or_default().to_owned();
             }
             _ => {}
         }
-        if let Some(id) = entry["id"].as_str().filter(|_| entry["type"] != "session") {
+        if let Some(id) = entry.id.as_str().filter(|_| entry.kind != "session") {
             index.insert(id.to_owned(), entries.len());
-            entries.push(entry);
+            entries.push((offset, entry.parent.as_str().map(str::to_owned)));
         }
-    }
+    });
     let mut branch = Vec::new();
     let mut cursor = entries.len().checked_sub(1);
     let mut guard = 0;
     while let Some(i) = cursor {
         branch.push(i);
-        cursor = entries[i]["parentId"].as_str().and_then(|p| index.get(p).copied());
+        cursor = entries[i].1.as_deref().and_then(|p| index.get(p).copied());
         guard += 1;
         if guard > entries.len() {
             break; // cycle
         }
     }
     branch.reverse();
-    let messages = branch
-        .into_iter()
-        .filter_map(|i| {
-            let e = &entries[i];
-            match e["type"].as_str() {
-                Some("message") => Some(e["message"].clone()),
-                // omp's own messages (e.g. background job results).
-                Some("custom_message") => Some(serde_json::json!({
-                    "role": "custom", "customType": e["customType"], "content": e["content"], "display": e["display"].as_bool().unwrap_or(true),
-                })),
-                Some("compaction") => Some(serde_json::json!({"role": "compactionSummary", "summary": e["summary"]})),
-                Some("branch_summary") => Some(serde_json::json!({"role": "branchSummary", "summary": e["summary"]})),
-                _ => None,
-            }
-        })
-        .collect::<Vec<Value>>();
+    let places: std::collections::HashMap<u64, usize> = branch.iter().enumerate().map(|(place, &i)| (entries[i].0, place)).collect();
+    let mut found: Vec<Option<Value>> = vec![None; branch.len()];
+    lines(&mut |offset, line| {
+        let Some(&place) = places.get(&offset) else { return };
+        let Ok(mut e) = serde_json::from_str::<Value>(line) else { return };
+        found[place] = match e["type"].as_str() {
+            Some("message") => Some(e["message"].take()),
+            // omp's own messages (e.g. background job results).
+            Some("custom_message") => Some(serde_json::json!({
+                "role": "custom", "customType": e["customType"], "content": e["content"], "display": e["display"].as_bool().unwrap_or(true),
+            })),
+            Some("compaction") => Some(serde_json::json!({"role": "compactionSummary", "summary": e["summary"]})),
+            Some("branch_summary") => Some(serde_json::json!({"role": "branchSummary", "summary": e["summary"]})),
+            _ => None,
+        };
+    });
+    let messages: Vec<Value> = found.into_iter().flatten().collect();
     // No model change in it: the model of its last reply.
     if !model_id.contains('/') {
         let last = messages.iter().rev().find(|m| m["role"] == "assistant" && m["provider"].is_string() && m["model"].is_string());

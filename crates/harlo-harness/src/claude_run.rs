@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 
-use crate::claude::{self, MODELS};
+use crate::claude::{self, MODELS, THINKING_ARG};
 use crate::event::{BlockKind, HarnessEvent, HarnessKind, NoticeLevel};
 use crate::process::{Harness, HarnessConfig, Outgoing, Pending, SessionTarget};
 use crate::protocol_log::ProtocolLog;
@@ -62,9 +62,20 @@ struct State {
     next: u64,
     context_tokens: u64,
     context_window: u64,
+    /// Where Claude compacts on its own, as it said for `compact_model` (0:
+    /// it won't).
+    compact_at: Option<u64>,
+    compact_model: String,
     cost: f64,
     /// The conversation so far (pi's message shape), for `get_messages`.
     messages: Vec<Value>,
+    /// The model the transcript last used (`anthropic/…`).
+    saved_model: String,
+    /// Sent while it works: each goes when the turn before it ends. A run you
+    /// stop leaves them here, for you to send or remove.
+    queued: Vec<Held>,
+    /// Stopped by you: what's queued doesn't follow.
+    aborted: bool,
     /// Text the current turn showed (a `result` with none shows its own).
     turn_text: bool,
     /// Subagents, by the id of the Task / Agent call that started them (as
@@ -73,6 +84,12 @@ struct State {
     tasks: HashMap<String, String>,
     /// A name given before the transcript exists (written once it does).
     pending_title: Option<String>,
+}
+
+/// A message waiting for the turn to end.
+struct Held {
+    text: String,
+    content: Vec<Value>,
 }
 
 struct Shared {
@@ -111,6 +128,11 @@ impl Shared {
     fn transcript(&self, id: &str) -> Option<PathBuf> {
         if id.is_empty() {
             return None;
+        }
+        // A resumed session stays where it was found, whichever folder it
+        // runs in now.
+        if let SessionTarget::Resume(path) = &self.cfg.session {
+            return Some(path.with_file_name(format!("{id}.jsonl")));
         }
         match (&self.cfg.remote, &self.remote_config) {
             (Some(r), Some(dir)) => {
@@ -247,12 +269,13 @@ pub(crate) fn spawn(cfg: HarnessConfig, program: PathBuf) -> Result<(Harness, mp
     let pending: Pending = Arc::default();
     let harness = Harness::from_parts(HarnessKind::Claude, tx, Arc::clone(&pending));
     let (model, _) = split_args(&cfg.extra_args);
+    let thinking = cfg.extra_args.iter().find_map(|a| a.strip_prefix(THINKING_ARG)).unwrap_or_default().to_owned();
     let session_id = match &cfg.session {
         SessionTarget::Resume(path) => path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
         _ => String::new(),
     };
     let shared = Arc::new(Shared {
-        state: Mutex::new(State { model: model.unwrap_or_default(), session_id, permission_mode: "default".into(), ..Default::default() }),
+        state: Mutex::new(State { model: model.unwrap_or_default(), thinking, session_id, permission_mode: "default".into(), ..Default::default() }),
         events,
         stdin: tokio::sync::Mutex::new(None),
         child: tokio::sync::Mutex::new(None),
@@ -263,10 +286,19 @@ pub(crate) fn spawn(cfg: HarnessConfig, program: PathBuf) -> Result<(Harness, mp
         remote_config,
     });
     // A resumed session: its conversation so far.
-    if let SessionTarget::Resume(path) = &shared.cfg.session
-        && let Some(text) = shared.read_file(path)
-    {
-        shared.state.lock().unwrap().messages = claude::history(&text);
+    if let SessionTarget::Resume(path) = &shared.cfg.session {
+        let saved = if shared.cfg.remote.is_none() { claude::saved_file_cached(path).ok() } else { shared.read_file(path).map(|text| claude::saved(&text)) };
+        if let Some(saved) = saved {
+            let mut st = shared.state.lock().unwrap();
+            st.context_tokens = claude::context_used(&saved.messages);
+            st.messages = saved.messages;
+            st.saved_model = saved.model;
+            // Its window and where it compacts, as Claude said last time.
+            if let Some((window, at)) = claude::known_context(&model_id(&st)) {
+                (st.context_window, st.compact_at, st.compact_model) = (window, Some(at), st.model.clone());
+            }
+        }
+        crate::store::after_reading(std::fs::metadata(path).map_or(0, |m| m.len()));
     }
     {
         // (A new session: nothing else holds these yet.)
@@ -326,7 +358,7 @@ fn start(shared: &Arc<Shared>, stdin_slot: &mut Option<tokio::process::ChildStdi
     if !st.session_id.is_empty() {
         args.push(format!("--resume={}", st.session_id));
     }
-    args.extend(extra.into_iter().filter(|a| !a.starts_with("--config")));
+    args.extend(extra.into_iter().filter(|a| !a.starts_with("--config") && !a.starts_with(THINKING_ARG)));
     drop(st);
 
     // As the SDK runs it.
@@ -404,6 +436,13 @@ fn start(shared: &Arc<Shared>, stdin_slot: &mut Option<tokio::process::ChildStdi
             s.emit(HarnessEvent::RunEnded);
             s.emit(HarnessEvent::Settled);
         }
+        // It can't send what was waiting: say so, and what.
+        let held = std::mem::take(&mut s.state.lock().unwrap().queued);
+        if !held.is_empty() {
+            held_changed(&s);
+            let texts: Vec<String> = held.into_iter().map(|h| h.text).collect();
+            s.emit(HarnessEvent::Notice { level: NoticeLevel::Error, text: format!("Claude stopped before these were sent:\n\n{}", texts.join("\n\n")), system: false });
+        }
         s.emit(HarnessEvent::Exited { code, stderr_tail: String::new() });
     });
 
@@ -437,6 +476,7 @@ fn start(shared: &Arc<Shared>, stdin_slot: &mut Option<tokio::process::ChildStdi
         }
         s.emit(HarnessEvent::CommandsChanged(s.state.lock().unwrap().commands.clone()));
         s.emit(HarnessEvent::Ready);
+        ask_compact_at(&s);
     });
     Ok(())
 }
@@ -465,24 +505,43 @@ async fn restart(shared: &Arc<Shared>) {
     }
 }
 
+/// The model it's on: as told or as Claude said, else what the transcript last
+/// used (until Claude says).
+fn model_id(st: &State) -> String {
+    if st.model.is_empty() { st.saved_model.strip_prefix("anthropic/").unwrap_or(&st.saved_model).to_owned() } else { st.model.clone() }
+}
+
 fn current_model(st: &State) -> Value {
-    let id = st.model.clone();
+    let id = model_id(st);
     let name = MODELS.iter().find(|m| m.id == id).map(|m| m.label.to_owned()).unwrap_or_else(|| id.clone());
     if id.is_empty() { Value::Null } else { json!({ "provider": "anthropic", "id": id, "name": name }) }
 }
 
-fn thinking_levels(model: &str) -> Vec<&'static str> {
-    let m = MODELS.iter().find(|m| m.id == model);
-    let mut levels = Vec::new();
-    if m.is_none_or(|m| m.thinking_off) {
-        levels.push("off");
+/// Sends a message to Claude and shows it in the conversation. `steer`: into
+/// the turn under way, at its next step.
+async fn send_message(shared: &Arc<Shared>, content: Vec<Value>, steer: bool) {
+    let uuid = new_uuid();
+    let mut line = json!({ "type": "user", "message": { "role": "user", "content": content }, "parent_tool_use_id": null, "uuid": uuid,
+                           "session_id": shared.state.lock().unwrap().session_id });
+    if steer {
+        line["priority"] = json!("next");
     }
-    levels.extend(["low", "medium", "high"]);
-    if m.is_none_or(|m| m.xhigh) {
-        levels.push("xhigh");
-    }
-    levels.push("max");
-    levels
+    let message = json!({ "role": "user", "content": content.iter().map(to_pi_block).collect::<Vec<_>>() });
+    shared.state.lock().unwrap().messages.push(message.clone());
+    shared.emit(HarnessEvent::MessageEnd { id: format!("u{uuid}"), message });
+    shared.send(line).await;
+}
+
+fn take_held(shared: &Arc<Shared>, text: &str) -> Option<Held> {
+    let mut st = shared.state.lock().unwrap();
+    let at = st.queued.iter().position(|h| h.text == text)?;
+    Some(st.queued.remove(at))
+}
+
+/// Tells harlo what's waiting.
+fn held_changed(shared: &Arc<Shared>) {
+    let follow_up = shared.state.lock().unwrap().queued.iter().map(|h| h.text.clone()).collect();
+    shared.emit(HarnessEvent::QueueChanged { steering: Vec::new(), follow_up });
 }
 
 /// harlo's commands.
@@ -502,21 +561,45 @@ async fn command(shared: &Arc<Shared>, pending: &Pending, cmd: Value) {
                 content.push(json!({ "type": "image", "source": { "type": "base64", "media_type": img["mimeType"], "data": img["data"] } }));
             }
             content.push(json!({ "type": "text", "text": text }));
-            let uuid = new_uuid();
-            let mut line = json!({ "type": "user", "message": { "role": "user", "content": content }, "parent_tool_use_id": null, "uuid": uuid,
-                                   "session_id": shared.state.lock().unwrap().session_id });
-            if cmd["streamingBehavior"] == "steer" {
-                line["priority"] = json!("next");
+            // For after this turn: it waits here, and shows as waiting.
+            let hold = cmd["streamingBehavior"] == "followUp" && {
+                let mut st = shared.state.lock().unwrap();
+                if st.running {
+                    st.queued.push(Held { text, content: content.clone() });
+                }
+                st.running
+            };
+            if hold {
+                held_changed(shared);
+                return reply(true, json!({ "disposition": "queued" }), "");
             }
-            let message = json!({ "role": "user", "content": content.iter().map(to_pi_block).collect::<Vec<_>>() });
-            shared.state.lock().unwrap().messages.push(message.clone());
-            shared.emit(HarnessEvent::MessageEnd { id: format!("u{uuid}"), message });
-            shared.send(line).await;
+            send_message(shared, content, cmd["streamingBehavior"] == "steer").await;
             reply(true, json!({ "disposition": "started" }), "");
+        }
+        "remove_queued_message" => {
+            let text = cmd["message"].as_str().unwrap_or_default();
+            let removed = take_held(shared, text).is_some();
+            if removed {
+                held_changed(shared);
+            }
+            reply(removed, Value::Null, if removed { "" } else { "That message has been sent already." });
+        }
+        // Sends one now: into the turn under way, or as the next.
+        "promote_queued_message" => {
+            match take_held(shared, cmd["message"].as_str().unwrap_or_default()) {
+                Some(held) => {
+                    held_changed(shared);
+                    let running = shared.state.lock().unwrap().running;
+                    send_message(shared, held.content, running).await;
+                    reply(true, Value::Null, "");
+                }
+                None => reply(false, Value::Null, "That message has been sent already."),
+            }
         }
         "abort" => {
             let running = shared.state.lock().unwrap().running;
             if running {
+                shared.state.lock().unwrap().aborted = true;
                 shared.control(json!({ "subtype": "interrupt" })).await;
                 // Stop ends the subagents the turn waits for (not background ones).
                 let stopped: Vec<String> = shared.state.lock().unwrap().subagents.iter().filter(|(_, e)| e["status"] == "running" && e["detached"] != true).map(|(k, _)| k.clone()).collect();
@@ -529,9 +612,12 @@ async fn command(shared: &Arc<Shared>, pending: &Pending, cmd: Value) {
         "get_state" => {
             let st = shared.state.lock().unwrap();
             let file = shared.transcript(&st.session_id);
+            // None asked for: what its settings have it on (here; a remote
+            // host's aren't read for this).
+            let thinking = if st.thinking.is_empty() && shared.cfg.remote.is_none() { claude::default_effort() } else { st.thinking.clone() };
             reply(
                 true,
-                json!({ "model": current_model(&st), "thinkingLevel": st.thinking, "sessionId": st.session_id,
+                json!({ "model": current_model(&st), "thinkingLevel": thinking, "sessionId": st.session_id,
                         "sessionFile": file.map(|f| f.to_string_lossy().into_owned()), "isStreaming": st.running,
                         "permissionMode": st.permission_mode }),
                 "",
@@ -539,7 +625,11 @@ async fn command(shared: &Arc<Shared>, pending: &Pending, cmd: Value) {
         }
         "get_session_stats" => {
             let st = shared.state.lock().unwrap();
-            reply(true, json!({ "contextUsage": { "tokens": st.context_tokens, "contextWindow": st.context_window }, "cost": st.cost }), "");
+            let mut usage = json!({ "tokens": st.context_tokens, "contextWindow": st.context_window });
+            if let Some(at) = st.compact_at.filter(|_| st.compact_model == st.model) {
+                usage["compactAt"] = json!(at);
+            }
+            reply(true, json!({ "contextUsage": usage, "cost": st.cost }), "");
         }
         "get_available_models" => {
             let version = shared.state.lock().unwrap().version.clone();
@@ -555,14 +645,15 @@ async fn command(shared: &Arc<Shared>, pending: &Pending, cmd: Value) {
             let running = shared.child.lock().await.is_some();
             if running {
                 shared.control(json!({ "subtype": "set_model", "model": model })).await;
+                ask_compact_at(shared);
             }
             let m = current_model(&shared.state.lock().unwrap());
             shared.emit(HarnessEvent::ModelChanged(m.clone()));
             reply(true, m, "");
         }
         "get_available_thinking_levels" => {
-            let model = shared.state.lock().unwrap().model.clone();
-            reply(true, json!({ "levels": thinking_levels(&model) }), "");
+            let model = model_id(&shared.state.lock().unwrap());
+            reply(true, json!({ "levels": claude::thinking_levels(&model) }), "");
         }
         "set_thinking_level" => {
             let level = cmd["level"].as_str().unwrap_or_default().to_owned();
@@ -747,6 +838,7 @@ async fn incoming(shared: &Arc<Shared>, frame: Value) {
         }
         "system" => system(shared, &frame),
         "stream_event" => stream(shared, &frame["event"]),
+        "rate_limit_event" => shared.emit(HarnessEvent::Limits(frame["rate_limit_info"].clone())),
         "assistant" => {
             assistant(shared, &frame["message"]);
             subagents_started(shared, &frame["message"]);
@@ -782,8 +874,12 @@ async fn incoming(shared: &Arc<Shared>, frame: Value) {
                 shared.state.lock().unwrap().messages.push(message.clone());
                 shared.emit(HarnessEvent::MessageEnd { id: shared.next_id("r"), message });
             }
-            if frame["subtype"] != "success" || frame["is_error"] == true {
-                let errors: Vec<&str> = frame["errors"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+            // A stop ends the turn "during execution": nothing went wrong.
+            let stopped = shared.state.lock().unwrap().aborted && frame["subtype"] == "error_during_execution";
+            if !stopped && (frame["subtype"] != "success" || frame["is_error"] == true) {
+                // Claude's own diagnostics aren't for the reader.
+                let errors: Vec<&str> =
+                    frame["errors"].as_array().into_iter().flatten().filter_map(Value::as_str).filter(|e| !e.starts_with("[ede_diagnostic]")).collect();
                 let text = if errors.is_empty() { text.to_owned() } else { errors.join("\n") };
                 if !text.is_empty() {
                     shared.emit(HarnessEvent::Notice { level: NoticeLevel::Error, text, system: false });
@@ -792,12 +888,66 @@ async fn incoming(shared: &Arc<Shared>, frame: Value) {
             // A name given before the transcript existed.
             write_title(shared);
             if ended {
-                shared.emit(HarnessEvent::RunEnded);
-                shared.emit(HarnessEvent::Settled);
+                // What was waiting for this turn: the run goes on with it.
+                let next = {
+                    let mut st = shared.state.lock().unwrap();
+                    let next = (!std::mem::take(&mut st.aborted) && !st.queued.is_empty()).then(|| st.queued.remove(0));
+                    st.running = next.is_some();
+                    next
+                };
+                match next {
+                    Some(held) => {
+                        held_changed(shared);
+                        send_message(shared, held.content, false).await;
+                    }
+                    None => {
+                        shared.emit(HarnessEvent::RunEnded);
+                        shared.emit(HarnessEvent::Settled);
+                    }
+                }
             }
         }
         _ => {}
     }
+}
+
+/// Asks Claude where it compacts with the model it's on, unless it said
+/// already (once for each model: it reads its settings to say), and the
+/// window and context in use when a turn hasn't said yet.
+fn ask_compact_at(shared: &Arc<Shared>) {
+    let model = {
+        let st = shared.state.lock().unwrap();
+        if st.compact_at.is_some() && st.compact_model == st.model {
+            return;
+        }
+        st.model.clone()
+    };
+    let shared = shared.clone();
+    tokio::spawn(async move {
+        let usage = shared.control(json!({ "subtype": "get_context_usage" })).await;
+        let at = match usage["isAutoCompactEnabled"].as_bool() {
+            Some(false) => Some(0),
+            Some(true) => usage["autoCompactThreshold"].as_u64(),
+            None => None,
+        };
+        let Some(at) = at else { return };
+        let window = usage["maxTokens"].as_u64().unwrap_or(0);
+        claude::remember_context(usage["model"].as_str().unwrap_or_default(), window, at);
+        {
+            let mut st = shared.state.lock().unwrap();
+            if st.model != model {
+                return;
+            }
+            (st.compact_at, st.compact_model) = (Some(at), model);
+            if window > 0 {
+                st.context_window = window;
+            }
+            if st.context_tokens == 0 {
+                st.context_tokens = usage["totalTokens"].as_u64().unwrap_or(0);
+            }
+        }
+        shared.emit(HarnessEvent::ContextChanged);
+    });
 }
 
 fn system(shared: &Arc<Shared>, frame: &Value) {
@@ -819,6 +969,7 @@ fn system(shared: &Arc<Shared>, frame: &Value) {
             if started {
                 shared.emit(HarnessEvent::RunStarted);
             }
+            ask_compact_at(shared);
         }
         "status" => {
             if frame["status"] == "compacting" {
@@ -828,7 +979,11 @@ fn system(shared: &Arc<Shared>, frame: &Value) {
                 shared.state.lock().unwrap().permission_mode = m.to_owned();
             }
         }
-        "compact_boundary" => shared.emit(HarnessEvent::Compaction { started: false, reason: None, error: None }),
+        "compact_boundary" => {
+            // What's left, till the next reply says.
+            shared.state.lock().unwrap().context_tokens = frame["compact_metadata"]["post_tokens"].as_u64().unwrap_or(0);
+            shared.emit(HarnessEvent::Compaction { started: false, reason: None, error: None });
+        }
         "task_started" | "task_updated" | "task_progress" | "task_notification" => task_frame(shared, frame),
         _ => {}
     }
@@ -1259,6 +1414,50 @@ mod tests {
 
     /// A real recording (Claude Code 2.1.296: a Bash call, then a reply;
     /// then a second turn) goes through as harlo events.
+    /// Sent while it works: it waits, in the open, and goes when the turn ends;
+    /// after a stop it stays for you to send or remove.
+    #[tokio::test]
+    async fn a_message_sent_while_it_works_waits_for_the_turn() {
+        let (shared, mut rx) = shared();
+        let pending: Pending = Arc::default();
+        let waiting = |rx: &mut mpsc::UnboundedReceiver<HarnessEvent>| {
+            let mut last = None;
+            while let Ok(ev) = rx.try_recv() {
+                if let HarnessEvent::QueueChanged { follow_up, .. } = ev {
+                    last = Some(follow_up);
+                }
+            }
+            last
+        };
+        shared.state.lock().unwrap().running = true;
+        command(&shared, &pending, json!({ "type": "prompt", "message": "next one", "streamingBehavior": "followUp" })).await;
+        assert_eq!(waiting(&mut rx), Some(vec!["next one".to_owned()]));
+        assert!(shared.state.lock().unwrap().messages.is_empty(), "not in the conversation yet");
+
+        incoming(&shared, json!({ "type": "result", "subtype": "success", "result": "done" })).await;
+        assert_eq!(waiting(&mut rx), Some(vec![]));
+        {
+            let st = shared.state.lock().unwrap();
+            assert!(st.running, "the run goes on with it");
+            assert!(st.messages.iter().any(|m| m.to_string().contains("next one")));
+        }
+
+        command(&shared, &pending, json!({ "type": "prompt", "message": "after a stop", "streamingBehavior": "followUp" })).await;
+        command(&shared, &pending, json!({ "type": "prompt", "message": "dropped", "streamingBehavior": "followUp" })).await;
+        shared.state.lock().unwrap().aborted = true;
+        incoming(&shared, json!({ "type": "result", "subtype": "error_during_execution", "errors": ["[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use"] })).await;
+        assert!(!std::iter::from_fn(|| rx.try_recv().ok()).any(|e| matches!(e, HarnessEvent::Notice { .. })), "a stop says nothing");
+        {
+            let st = shared.state.lock().unwrap();
+            assert!(!st.running, "a stop isn't followed by what's waiting");
+            assert_eq!(st.queued.len(), 2);
+        }
+        command(&shared, &pending, json!({ "type": "remove_queued_message", "message": "dropped" })).await;
+        command(&shared, &pending, json!({ "type": "promote_queued_message", "message": "after a stop" })).await;
+        assert!(shared.state.lock().unwrap().queued.is_empty());
+        assert!(shared.state.lock().unwrap().messages.iter().any(|m| m.to_string().contains("after a stop")));
+    }
+
     #[tokio::test]
     async fn replays_a_real_session() {
         let (s, mut rx) = shared();
@@ -1289,8 +1488,8 @@ mod tests {
         assert_eq!(claude_mode("write", true), "plan");
         let (model, rest) = split_args(&["--model".into(), "anthropic/claude-haiku-4-5".into(), "--x".into()]);
         assert_eq!((model.as_deref(), rest), (Some("claude-haiku-4-5"), vec!["--x".to_owned()]));
-        assert_eq!(thinking_levels("claude-haiku-4-5"), ["low", "medium", "high", "max"]);
-        assert_eq!(thinking_levels("claude-opus-4-8"), ["off", "low", "medium", "high", "xhigh", "max"]);
+        assert_eq!(claude::thinking_levels("claude-haiku-4-5"), ["low", "medium", "high", "max"]);
+        assert_eq!(claude::thinking_levels("claude-opus-4-8"), ["off", "low", "medium", "high", "xhigh", "max"]);
         assert_eq!(new_uuid().len(), 36);
     }
 }

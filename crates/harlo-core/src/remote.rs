@@ -697,7 +697,10 @@ fn parse_entries(text: &str) -> Vec<Entry> {
 pub fn trash(path: &Path) -> Result<()> {
     let Some((name, f)) = split(path) else {
         match Command::new("gio").arg("trash").arg("--").arg(path).output() {
-            Ok(out) if out.status.success() => return Ok(()),
+            Ok(out) if out.status.success() => {
+                harlo_harness::claude::forget_cached(path);
+                return Ok(());
+            }
             Ok(out) => bail!("Could not move {} to the trash: {}", path.display(), String::from_utf8_lossy(&out.stderr).trim()),
             Err(_) => bail!("Could not move {} to the trash (needs `gio`).", path.display()),
         }

@@ -65,7 +65,22 @@ struct State {
     title: String,
     /// harlo's own `/title`: its answer isn't shown.
     quiet: bool,
+    /// Sent while it works: each goes when the turn before it ends (the
+    /// agent's own queue can't drop one, and drops their images). A stop
+    /// leaves them, for you to send or remove.
+    held: Vec<Held>,
+    /// Stopped by you: what's held doesn't follow.
+    stopped: bool,
+    /// Steers sent whose "queued for the active turn" isn't shown (your
+    /// message is).
+    steers: u32,
     next: u64,
+}
+
+/// A message waiting for the turn under way to end.
+struct Held {
+    text: String,
+    images: Vec<Value>,
 }
 
 impl State {
@@ -318,29 +333,44 @@ async fn command(s: &Arc<Session>, pending: &Pending, cmd: Value) {
     let sid = s.state.lock().unwrap().session_id.clone();
     match ty.as_str() {
         "prompt" => {
-            let mut text = cmd["message"].as_str().unwrap_or_default().to_owned();
-            let message = json!({ "role": "user", "content": [{ "type": "text", "text": text }] });
-            {
+            let text = cmd["message"].as_str().unwrap_or_default().to_owned();
+            let images = cmd["images"].as_array().cloned().unwrap_or_default();
+            // While it works, one for after the turn waits here.
+            let held = {
                 let mut st = s.state.lock().unwrap();
-                st.messages.push(message.clone());
-                let id = st.next_id("u");
-                s.emit(HarnessEvent::MessageEnd { id, message });
-                // Kept from its first prompt on: harlo lists it.
-                if !std::mem::replace(&mut st.kept, true) {
-                    let first = text.lines().next().unwrap_or_default().to_owned();
-                    acp::remember(&s.sref(&sid), &s.cwd, |e| e.first = first);
+                st.stopped = false;
+                let wait = st.prompts > 0 && cmd["streamingBehavior"] != "steer";
+                if wait {
+                    st.held.push(Held { text: text.clone(), images: images.clone() });
                 }
+                wait
+            };
+            if held {
+                held_changed(s);
+                return reply(true, json!({ "disposition": "queued" }), "");
             }
-            // Steering goes into the running turn.
-            if cmd["streamingBehavior"] == "steer" && s.state.lock().unwrap().prompts > 0 {
-                text = format!("/steer {text}");
-            }
-            let mut blocks = vec![json!({ "type": "text", "text": text })];
-            blocks.extend(cmd["images"].as_array().into_iter().flatten().map(|img| json!({ "type": "image", "data": img["data"], "mimeType": img["mimeType"] })));
-            send_prompt(s, &conn, blocks, false);
+            deliver(s, &conn, &sid, text, &images);
             reply(true, json!({ "disposition": "started" }), "");
         }
+        "remove_queued_message" => {
+            let text = cmd["message"].as_str().unwrap_or_default();
+            let removed = take_held(s, text).is_some();
+            if removed {
+                held_changed(s);
+            }
+            reply(removed, Value::Null, if removed { "" } else { "That message has been sent already." });
+        }
+        // Sends one now: into the turn under way, or as the next.
+        "promote_queued_message" => match take_held(s, cmd["message"].as_str().unwrap_or_default()) {
+            Some(held) => {
+                held_changed(s);
+                deliver(s, &conn, &sid, held.text, &held.images);
+                reply(true, Value::Null, "");
+            }
+            None => reply(false, Value::Null, "That message has been sent already."),
+        },
         "abort" => {
+            s.state.lock().unwrap().stopped = true;
             conn.notify("session/cancel", json!({ "sessionId": sid }));
             // Its open questions: no (the agent stops waiting for them).
             let waiting: Vec<(String, (Value, Vec<(String, String)>))> = s.state.lock().unwrap().waiting.drain().collect();
@@ -494,6 +524,40 @@ async fn quiet(s: &Arc<Session>, conn: &Arc<Conn>, text: &str) -> Result<()> {
 
 /// Sends a prompt; its answer ends the run (once no other is waiting).
 /// `quiet`: harlo's own command, whose reply isn't shown.
+/// Shows `text` as yours and sends it: into the turn under way if there is
+/// one (`/steer`), else as a turn of its own.
+fn deliver(s: &Arc<Session>, conn: &Arc<Conn>, sid: &str, text: String, images: &[Value]) {
+    let message = json!({ "role": "user", "content": [{ "type": "text", "text": text }] });
+    let busy = {
+        let mut st = s.state.lock().unwrap();
+        st.messages.push(message.clone());
+        let id = st.next_id("u");
+        s.emit(HarnessEvent::MessageEnd { id, message });
+        // Kept from its first prompt on: harlo lists it.
+        if !std::mem::replace(&mut st.kept, true) {
+            let first = text.lines().next().unwrap_or_default().to_owned();
+            acp::remember(&s.sref(sid), &s.cwd, |e| e.first = first);
+        }
+        st.steers += u32::from(st.prompts > 0);
+        st.prompts > 0
+    };
+    let text = if busy { format!("/steer {text}") } else { text };
+    let mut blocks = vec![json!({ "type": "text", "text": text })];
+    blocks.extend(images.iter().map(|img| json!({ "type": "image", "data": img["data"], "mimeType": img["mimeType"] })));
+    send_prompt(s, conn, blocks, false);
+}
+
+fn take_held(s: &Arc<Session>, text: &str) -> Option<Held> {
+    let mut st = s.state.lock().unwrap();
+    let at = st.held.iter().position(|h| h.text == text)?;
+    Some(st.held.remove(at))
+}
+
+fn held_changed(s: &Arc<Session>) {
+    let follow_up = s.state.lock().unwrap().held.iter().map(|h| h.text.clone()).collect();
+    s.emit(HarnessEvent::QueueChanged { steering: Vec::new(), follow_up });
+}
+
 fn send_prompt(s: &Arc<Session>, conn: &Arc<Conn>, blocks: Vec<Value>, quiet: bool) {
     let sid = {
         let mut st = s.state.lock().unwrap();
@@ -508,6 +572,7 @@ fn send_prompt(s: &Arc<Session>, conn: &Arc<Conn>, blocks: Vec<Value>, quiet: bo
     tokio::spawn(async move {
         let result = conn.request("session/prompt", json!({ "sessionId": sid, "prompt": blocks })).await;
         let mut out = Vec::new();
+        let mut next = None;
         {
             let mut st = s.state.lock().unwrap();
             st.prompts = st.prompts.saturating_sub(1);
@@ -518,7 +583,11 @@ fn send_prompt(s: &Arc<Session>, conn: &Arc<Conn>, blocks: Vec<Value>, quiet: bo
                 if let Some(step) = st.step.take() {
                     end_step(&mut st, step, None, &mut out);
                 }
-                if !std::mem::take(&mut st.quiet) {
+                st.steers = 0;
+                // What was waiting for this turn: the run goes on with it.
+                next = (!st.stopped && !st.held.is_empty()).then(|| st.held.remove(0));
+                let quiet = std::mem::take(&mut st.quiet);
+                if !quiet && next.is_none() {
                     out.push(HarnessEvent::RunEnded);
                     out.push(HarnessEvent::Settled);
                 }
@@ -537,6 +606,10 @@ fn send_prompt(s: &Arc<Session>, conn: &Arc<Conn>, blocks: Vec<Value>, quiet: bo
         for e in out {
             s.emit(e);
         }
+        if let Some(held) = next {
+            held_changed(&s);
+            deliver(&s, &conn, &sid, held.text, &held.images);
+        }
     });
 }
 
@@ -548,6 +621,9 @@ fn update(s: &Arc<Session>, u: &Value) {
         let mut st = s.state.lock().unwrap();
         let kind = u["sessionUpdate"].as_str().unwrap_or_default();
         match kind {
+            "agent_message_chunk" if st.steers > 0 && u["content"]["text"].as_str().is_some_and(|t| t.trim_start().starts_with("⏩ Steer queued")) => {
+                st.steers -= 1;
+            }
             "agent_message_chunk" | "agent_thought_chunk" if !st.quiet => {
                 let text = u["content"]["text"].as_str().unwrap_or_default().to_owned();
                 let block = if kind == "agent_thought_chunk" { BlockKind::Thinking } else { BlockKind::Text };
@@ -790,6 +866,17 @@ mod tests {
         assert!(messages[2]["content"][1]["text"].as_str().unwrap().contains("Created `hello.txt`"));
         assert!(events.iter().any(|e| matches!(e, HarnessEvent::Renamed(Some(t)) if t == "Create hello.txt and run ls")));
         assert_eq!(s.state.lock().unwrap().context_used, 15135);
+    }
+
+    #[test]
+    fn a_steer_shows_as_yours_alone() {
+        let (s, mut rx) = session();
+        s.state.lock().unwrap().steers = 1;
+        let chunk = |text: &str| json!({ "sessionUpdate": "agent_message_chunk", "messageId": "m1", "content": { "type": "text", "text": text } });
+        update(&s, &chunk("⏩ Steer queued for the active turn: how are you"));
+        assert!(rx.try_recv().is_err(), "its confirmation isn't shown");
+        update(&s, &chunk("⏩ Steer queued for the active turn: again"));
+        assert!(rx.try_recv().is_ok(), "only for a steer harlo sent");
     }
 
     #[test]

@@ -401,7 +401,7 @@ Rectangle {
 
     // The thinking levels, asked for when the model is known (ready for
     // the first click) and again when the menu opens; "reading" until the
-    // agent answers (a second at most).
+    // agent answers (it may have to start first).
     property bool levelsReading: false
     function readLevels() {
         if (!root.session || root.session.harness === "demo") return
@@ -409,7 +409,7 @@ Rectangle {
         levelsWait.restart()
         root.session.loadThinkingLevels()
     }
-    Timer { id: levelsWait; interval: 1500; onTriggered: root.levelsReading = false }
+    Timer { id: levelsWait; interval: 15000; onTriggered: root.levelsReading = false }
     Connections {
         target: root.session
         function onThinkingLevelsChanged() { root.levelsReading = false }
@@ -431,7 +431,10 @@ Rectangle {
                 text: modelData
                 // (No level set yet: the agent's default.)
                 marked: modelData === root.session.thinking || (modelData === "default" && root.session.thinking === "")
-                onTriggered: root.session.setThinkingLevel(modelData)
+                onTriggered: {
+                    root.session.setThinkingLevel(modelData)
+                    Workspace.rememberThinking(root.session.key, modelData)
+                }
             }
         }
     }
@@ -509,6 +512,14 @@ Rectangle {
                 if (event.key === Qt.Key_Escape && root.expanded) {
                     root.expanded = false
                     event.accepted = true
+                    return
+                }
+                // An image or files on the clipboard: attached, not typed.
+                if (event.matches(StandardKey.Paste)) {
+                    const files = Workspace.pasteFiles()
+                    for (let i = 0; i < files.length; i++)
+                        root.session.addAttachment(files[i])
+                    if (files.length > 0) event.accepted = true
                     return
                 }
                 if (event.key === Qt.Key_Escape && root.session.status === "busy") {
@@ -698,18 +709,49 @@ Rectangle {
             onClicked: root.cycleApproval()
         }
 
-        // Context use, then the run's status line, filling the middle.
+        // Context use, then the run's status line, filling the middle. One
+        // outlined bar for every agent: the context used fills it, and the
+        // stretch past where the agent compacts is shaded, behind a line.
         Rectangle {
+            id: ctxBar
             visible: root.session.contextText !== "" && !bar.narrow
-            Layout.preferredWidth: 36
-            Layout.preferredHeight: 4
-            radius: 2
-            color: Theme.border
-            Rectangle {
-                width: parent.width * Math.min(1, root.session.contextFraction)
-                height: parent.height
-                radius: 2
-                color: root.session.contextFraction > 0.85 ? Theme.error : root.session.contextFraction > 0.6 ? Theme.warning : Theme.success
+            Layout.preferredWidth: 52
+            Layout.preferredHeight: 10
+            radius: height / 2
+            color: Theme.well
+            border.width: 1
+            border.color: Theme.textFaint
+            // How far to where it compacts (or to the window's end).
+            readonly property real way: root.session.compactFraction > 0 ? root.session.contextFraction / root.session.compactFraction : root.session.contextFraction
+            readonly property bool marked: root.session.compactFraction > 0 && root.session.compactFraction < 1
+            Item {
+                id: ctxInner
+                anchors.fill: parent
+                anchors.margins: 2
+                // Past where it compacts.
+                Rectangle {
+                    visible: ctxBar.marked
+                    x: Math.round(ctxInner.width * root.session.compactFraction)
+                    width: ctxInner.width - x
+                    height: parent.height
+                    radius: height / 2
+                    color: Theme.controlBorder
+                }
+                Rectangle {
+                    width: Math.max(height, ctxInner.width * Math.min(1, root.session.contextFraction))
+                    visible: root.session.contextFraction > 0
+                    height: parent.height
+                    radius: height / 2
+                    color: ctxBar.way > 0.85 ? Theme.error : ctxBar.way > 0.6 ? Theme.warning : Theme.success
+                }
+                // Where it compacts.
+                Rectangle {
+                    visible: ctxBar.marked
+                    x: Math.round(ctxInner.width * root.session.compactFraction) - 1
+                    width: 1
+                    height: parent.height
+                    color: Theme.textMuted
+                }
             }
             HoverHandler { id: ctxHover }
             ToolTip.visible: ctxHover.hovered
@@ -743,7 +785,7 @@ Rectangle {
             visible: !bar.tight
             iconName: "brain-ai-3"
             // Narrow: the icon alone (the level is in the tooltip).
-            text: bar.narrow ? "" : root.session.thinking || "thinking"
+            text: bar.narrow ? "" : root.session.thinking || "default"
             tint: root.session.thinking && root.session.thinking !== "off" ? Theme.info : Theme.muted
             maxLabel: 120
             enabled: root.session.harness !== "demo"
