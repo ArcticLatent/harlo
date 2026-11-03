@@ -56,7 +56,7 @@ pub fn tools(on_their_own: bool) -> Value {
         },
         {
             "name": "start_session",
-            "description": format!("Starts a new harlo session with a coding agent and sends it a first prompt. {} It becomes your helper: the user sees it, and harlo sends you its report when it finishes (unless notify is false), its questions for you, and when it waits for the user. Start every independent helper, then end your turn: harlo wakes you with what comes back; don't poll. The new agent has none of your context: make the prompt a self-contained briefing.", when_to_start(on_their_own)),
+            "description": format!("Starts a new harlo session with a coding agent and sends it a first prompt. {} It becomes your helper, in your permission mode: the user sees it under your session, and harlo sends you its report when it finishes (unless notify is false), its questions for you, and when it waits for the user. Start every independent helper, then end your turn: harlo wakes you with what comes back; don't poll. The new agent has none of your context: make the prompt a self-contained briefing.", when_to_start(on_their_own)),
             "inputSchema": s(json!({
                 "agent": { "type": "string", "description": "claude, opencode, pi or omp (see list_agents)." },
                 "prompt": { "type": "string", "description": "The first message: the task, its context, the relevant files, what's done and what's left." },

@@ -2477,7 +2477,9 @@ Popup {
                 Layout.topMargin: 22
                 title: "Skills" + orch.where
                 subtitle: orch.info.loading ? "Looking at " + orch.info.host + "…"
-                    : "Skills teach agents when and how to use these tools. harlo installs them into " + orch.info.skillDirs.join(" and ") + ", where Claude, OpenCode, pi and omp find them" + (orch.info.host === "" ? ", and keeps them up to date." : ".") + (orch.info.busy ? " Working…" : "")
+                    : "Optional: orchestration works without them, since the tools explain themselves and the Delegate button sends its own instructions. "
+                      + "Turn on handoff, advisor or committee if you ask for those in your own words (\"get a second opinion from…\"), so agents follow the same recipe each time. "
+                      + "harlo installs them into " + orch.info.skillDirs.join(" and ") + ", where Claude, OpenCode, pi and omp find them, also outside harlo" + (orch.info.host === "" ? "; it keeps them up to date." : ".") + (orch.info.busy ? " Working…" : "")
             }
             Group {
                 visible: Workspace.orchestrationOn

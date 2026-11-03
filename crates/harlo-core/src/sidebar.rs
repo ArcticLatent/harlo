@@ -82,6 +82,10 @@ pub struct SidebarRow {
     pub color: String,
     /// Session on a Settled shelf: why ("merged", "closed", "quiet").
     pub settled: String,
+    /// Session another one started (orchestration), shown under it: that
+    /// session's title, and how deep ([`nest_helpers`]).
+    pub helper_of: String,
+    pub nest: u32,
 }
 
 pub struct SidebarInput<'a> {
@@ -284,6 +288,8 @@ pub fn build(input: &SidebarInput<'_>) -> Vec<SidebarRow> {
             icon: p.icon.clone(),
             color: p.color.clone(),
             settled: String::new(),
+            helper_of: String::new(),
+            nest: 0,
         });
         if !collapsed {
             push_sessions(&mut rows, &sessions, p.id, false, filtering || input.expanded.contains(&p.id));
@@ -308,6 +314,8 @@ pub fn build(input: &SidebarInput<'_>) -> Vec<SidebarRow> {
                     icon: String::new(),
                     color: String::new(),
                     settled: String::new(),
+                    helper_of: String::new(),
+                    nest: 0,
                 });
                 if open {
                     push_sessions(&mut rows, &shelf, p.id, false, true);
@@ -339,6 +347,8 @@ pub fn build(input: &SidebarInput<'_>) -> Vec<SidebarRow> {
             icon: String::new(),
             color: String::new(),
             settled: String::new(),
+            helper_of: String::new(),
+            nest: 0,
         });
         if !collapsed {
             push_sessions(&mut rows, &other, -1, true, filtering || input.expanded.contains(&-1));
@@ -376,6 +386,8 @@ fn push_sessions(rows: &mut Vec<SidebarRow>, sessions: &[&Entry], project_id: i6
             icon: String::new(),
             color: String::new(),
             settled: e.settled.clone(),
+            helper_of: String::new(),
+            nest: 0,
         });
     }
     if hidden > 0 {
@@ -398,6 +410,8 @@ fn push_sessions(rows: &mut Vec<SidebarRow>, sessions: &[&Entry], project_id: i6
             icon: String::new(),
             color: String::new(),
             settled: String::new(),
+            helper_of: String::new(),
+            nest: 0,
         });
     }
 }
@@ -446,11 +460,98 @@ pub fn tilde(p: &Path) -> String {
     p.display().to_string()
 }
 
+/// Puts each session another one started (`parent_of`: key → its
+/// parent's key) right under its parent, when they're in the same part of
+/// the list (one project's sessions, or its Settled shelf), marked with the
+/// parent's title and indented a step deeper. The rest keep their order.
+pub fn nest_helpers(rows: &mut Vec<SidebarRow>, parent_of: &HashMap<String, String>) {
+    // Each row's part of the list: what non-session rows came before it.
+    let mut part = 0usize;
+    let parts: Vec<usize> = rows
+        .iter()
+        .map(|r| {
+            if r.kind != SidebarKind::Session {
+                part += 1;
+            }
+            part
+        })
+        .collect();
+    let at: HashMap<&str, usize> = rows.iter().enumerate().filter(|(_, r)| r.kind == SidebarKind::Session).map(|(i, r)| (r.key.as_str(), i)).collect();
+    // Who is shown under whom (in their order in the list).
+    let mut under: HashMap<usize, Vec<usize>> = HashMap::new();
+    let mut nested = vec![false; rows.len()];
+    for (i, r) in rows.iter().enumerate().filter(|(_, r)| r.kind == SidebarKind::Session) {
+        if let Some(&p) = parent_of.get(&r.key).and_then(|p| at.get(p.as_str()))
+            && p != i
+            && parts[p] == parts[i]
+        {
+            under.entry(p).or_default().push(i);
+            nested[i] = true;
+        }
+    }
+    if under.is_empty() {
+        return;
+    }
+    fn place(i: usize, depth: u32, rows: &[SidebarRow], under: &HashMap<usize, Vec<usize>>, done: &mut [bool], order: &mut Vec<(usize, u32)>) {
+        if std::mem::replace(&mut done[i], true) {
+            return;
+        }
+        order.push((i, depth));
+        for &c in under.get(&i).into_iter().flatten() {
+            place(c, depth + 1, rows, under, done, order);
+        }
+    }
+    let mut done = vec![false; rows.len()];
+    let mut order = Vec::with_capacity(rows.len());
+    for i in 0..rows.len() {
+        if !nested[i] {
+            place(i, 0, rows, &under, &mut done, &mut order);
+        }
+    }
+    // (A loop of parents: left where they were.)
+    for i in 0..rows.len() {
+        if !done[i] {
+            place(i, 0, rows, &under, &mut done, &mut order);
+        }
+    }
+    let titles: HashMap<usize, String> = under.keys().map(|&p| (p, rows[p].title.clone())).collect();
+    let parent_at: HashMap<usize, usize> = under.iter().flat_map(|(&p, cs)| cs.iter().map(move |&c| (c, p))).collect();
+    let mut old: Vec<Option<SidebarRow>> = std::mem::take(rows).into_iter().map(Some).collect();
+    for (i, depth) in order {
+        let mut row = old[i].take().expect("each row placed once");
+        row.nest = depth;
+        row.helper_of = parent_at.get(&i).and_then(|p| titles.get(p)).cloned().unwrap_or_default();
+        rows.push(row);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use harlo_harness::HarnessKind;
     use std::time::Duration;
+
+    fn row(kind: SidebarKind, key: &str) -> SidebarRow {
+        SidebarRow {
+            kind, key: key.into(), project_id: 1, title: format!("T {key}"), subtitle: String::new(), harness: String::new(), status: String::new(),
+            path: String::new(), modified: 0, collapsed: false, pinned: false, count: 0, branch: String::new(), cwd: PathBuf::new(), changes: 0,
+            icon: String::new(), color: String::new(), settled: String::new(), helper_of: String::new(), nest: 0,
+        }
+    }
+
+    #[test]
+    fn helpers_show_under_their_parent() {
+        use SidebarKind::*;
+        let mut rows = vec![row(Project, "p"), row(Session, "child"), row(Session, "other"), row(Session, "lead"), row(Session, "grandchild"), row(Shelf, "s"), row(Session, "settled-child")];
+        let parents: HashMap<String, String> = [("child", "lead"), ("grandchild", "child"), ("settled-child", "lead"), ("orphan", "gone")].map(|(a, b)| (a.to_owned(), b.to_owned())).into();
+        nest_helpers(&mut rows, &parents);
+        let shown: Vec<(&str, u32, &str)> = rows.iter().map(|r| (r.key.as_str(), r.nest, r.helper_of.as_str())).collect();
+        assert_eq!(shown, [
+            ("p", 0, ""), ("other", 0, ""), ("lead", 0, ""), ("child", 1, "T lead"), ("grandchild", 2, "T child"),
+            // On the shelf, its parent isn't: it stays.
+            ("s", 0, ""), ("settled-child", 0, ""),
+        ]);
+    }
 
     fn session(path: &str, cwd: &str, title: &str, age_secs: u64) -> SessionInfo {
         SessionInfo {

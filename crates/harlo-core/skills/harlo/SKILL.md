@@ -18,7 +18,7 @@ The tools exist only inside harlo. If they're missing, tell the user that harlo 
 - `worktree`: a new branch name. The session then works in a new git worktree on that branch, isolated from your checkout. The worktree is made in the background, so the session id comes later (`list_sessions`).
 - `notify`: defaults to true. Its report, its questions for you, and when it waits for the user come back to you. `false`: it's on its own (a handoff).
 
-It returns `{ session, title, agent, folder }`. The session is your helper: the user sees it under your session and can open it. harlo tells it it's a helper, and how to report back.
+It returns `{ session, title, agent, folder }`. The session is your helper: it starts in your permission mode, and the user sees it under your session and can open it. harlo tells it it's a helper, and how to report back.
 
 **`send_message`**: `{ session, message }`. A follow-up, queued if the session is busy.
 

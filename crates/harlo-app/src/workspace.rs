@@ -766,6 +766,8 @@ const ROLE_CHANGES: i32 = 0x10d;
 const ROLE_ICON: i32 = 0x10e;
 const ROLE_COLOR: i32 = 0x10f;
 const ROLE_SETTLED: i32 = 0x110;
+const ROLE_HELPER_OF: i32 = 0x111;
+const ROLE_NEST: i32 = 0x112;
 
 const SCAN_INTERVAL: Duration = Duration::from_secs(2);
 /// Remote hosts' session folders are listed this often (over SSH).
@@ -5733,6 +5735,9 @@ impl Workspace {
             shelves_open: &self.shelves_open,
         });
         let mut new_rows = new_rows;
+        // Sessions agents started: under the session that started them.
+        let parents: HashMap<String, String> = self.orch_children.iter().map(|(k, c)| (k.clone(), c.parent.clone())).collect();
+        sidebar::nest_helpers(&mut new_rows, &parents);
         let mut unchecked = false;
         for r in new_rows.iter_mut().filter(|r| r.kind == SidebarKind::Session) {
             r.changes = self.change_counts.get(&r.cwd).copied().unwrap_or(0);
@@ -5807,6 +5812,8 @@ impl Workspace {
             ROLE_ICON => s(harlo_core::project_icons::shown(&r.icon)),
             ROLE_COLOR => s(&r.color),
             ROLE_SETTLED => s(harlo_core::shelf::why_text(&r.settled)),
+            ROLE_HELPER_OF => s(&r.helper_of),
+            ROLE_NEST => QVariant::from(&(r.nest as i32)),
             _ => QVariant::default(),
         }
     }
@@ -5831,6 +5838,8 @@ impl Workspace {
             (ROLE_ICON, "projectIcon"),
             (ROLE_COLOR, "projectColor"),
             (ROLE_SETTLED, "settled"),
+            (ROLE_HELPER_OF, "helperOf"),
+            (ROLE_NEST, "nest"),
         ] {
             roles.insert(role, QByteArray::from(name));
         }
@@ -6260,6 +6269,8 @@ impl Workspace {
                 let notify = args["notify"].as_bool().unwrap_or(true) && caller.is_some();
                 let model = text("model");
                 let parent = caller.clone().unwrap_or_default();
+                // A helper works as its parent may: the same permission mode.
+                let approval = caller.as_deref().and_then(|c| self.approval_of(c)).filter(|_| has_shield(kind.as_str(), &cwd));
                 // A helper: told what it is and how its result goes back.
                 let prompt = if notify { harlo_core::orchestration::helper_brief(&self.title_of(&parent), &prompt, self.has_harlo_tools(kind, &cwd)) } else { prompt };
                 // In a new worktree: made in the background; it shows when ready.
@@ -6274,7 +6285,7 @@ impl Workspace {
                         &QString::from(&branch),
                         &QString::default(),
                         &QString::from(kind.as_str()),
-                        WorktreeStart { first: Some(first), model, lane: None, parent: caller.as_ref().map(|_| (parent, title.clone(), notify)), approval: None },
+                        WorktreeStart { first: Some(first), model, lane: None, parent: caller.as_ref().map(|_| (parent, title.clone(), notify)), approval },
                     );
                     return Ok(json!({ "status": "creating the worktree; the session starts in it shortly (see list_sessions)", "branch": branch, "title": title }));
                 }
@@ -6285,6 +6296,9 @@ impl Workspace {
                 }
                 if caller.is_some() {
                     self.as_mut().adopt(&key, &parent, &title, kind.as_str(), notify);
+                }
+                if let Some(mode) = &approval {
+                    self.as_mut().set_approval_mode(&QString::from(&key), &QString::from(mode));
                 }
                 send_first_prompt(&key, FirstPrompt { text: prompt, ..Default::default() }, Some(self.qt_thread()));
                 Ok(json!({ "session": key, "title": title, "agent": kind.as_str(), "folder": cwd.to_string_lossy(), "notify": notify }))
@@ -6368,7 +6382,9 @@ impl Workspace {
     /// `key` was started by `parent`'s agent: it's that session's subagent.
     fn adopt(mut self: Pin<&mut Self>, key: &str, parent: &str, title: &str, agent: &str, notify: bool) {
         self.as_mut().rust_mut().orch_children.insert(key.to_owned(), OrchChild { parent: parent.to_owned(), title: title.to_owned(), agent: agent.to_owned(), notify, status: "running".into(), report: None, asking: false, told_waiting: false });
-        self.bump_orchestration();
+        self.as_mut().bump_orchestration();
+        // (Shown under its parent in the sidebar.)
+        self.rebuild();
     }
 
     fn bump_orchestration(mut self: Pin<&mut Self>) {
@@ -6446,6 +6462,16 @@ impl Workspace {
             c.status = "running".into();
             self.as_mut().bump_orchestration();
         }
+    }
+
+    /// A session's permission mode (its shield's), if it has one.
+    fn approval_of(&self, key: &str) -> Option<String> {
+        let entry = self.live.get(key)?;
+        if !has_shield(&entry.info.harness, &entry.info.cwd) {
+            return None;
+        }
+        let mode = self.modes.get(key).and_then(|m| m.approval.clone()).unwrap_or_else(|| self.starting_approval(&entry.info.harness, &entry.info.cwd).to_string());
+        harlo_core::omp_overlay::APPROVAL_MODES.contains(&mode.as_str()).then_some(mode)
     }
 
     /// Settings → Orchestration: agents may start sessions on their own

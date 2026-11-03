@@ -340,10 +340,13 @@ Rectangle {
                         required property string branch
                         required property int changes
                         required property string settled
+                        // Started by another session's agent: shown under it.
+                        required property string helperOf
+                        required property int nest
                         readonly property bool active: rowKey === Workspace.activeKey
-                        // On hover: the cwd (other sessions) and/or the worktree
-                        // branch, and why it's settled.
-                        readonly property string detail: [branch !== "" ? "⎇ " + branch : "", subtitle, settled].filter(t => t !== "").join("  ·  ")
+                        // On hover: whose helper it is, the cwd (other sessions)
+                        // and/or the worktree branch, and why it's settled.
+                        readonly property string detail: [helperOf !== "" ? "Helper of “" + helperOf + "”" : "", branch !== "" ? "⎇ " + branch : "", subtitle, settled].filter(t => t !== "").join("  ·  ")
                         width: ListView.view.width
                         height: 42
                         hoverEnabled: true
@@ -355,7 +358,7 @@ Rectangle {
                         rightInset: 10
                         topInset: 1
                         bottomInset: 1
-                        leftPadding: 18
+                        leftPadding: 18 + Math.min(nest, 3) * 14
                         rightPadding: 18
                         topPadding: 2
                         bottomPadding: 2
@@ -367,6 +370,15 @@ Rectangle {
                         }
                         contentItem: RowLayout {
                             spacing: 11
+                            // A helper: hooked under its parent.
+                            Label {
+                                objectName: "sessionHelperMark"
+                                visible: sessionRow.nest > 0
+                                text: "↳"
+                                color: Theme.textFaint
+                                font.pixelSize: Theme.px(13)
+                                Layout.rightMargin: -5
+                            }
                             // What runs it, with its status on the corner.
                             AgentAvatar {
                                 provider: sessionRow.harness
