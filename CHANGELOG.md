@@ -4,6 +4,17 @@ What's new in each harlo release, newest first. `packaging/release.sh`
 releases the version at the top: each section starts with `## <version>`,
 and its text becomes the release's notes.
 
+## 1.1.1
+
+- For the iPhone app's next version: its plan limits (on this computer and
+  each of your machines), Stop and continue at a used-up limit, and
+  notifications when a limit is used up and when it resets. An older app
+  gets nothing it doesn't know.
+- A message sent from the iPhone starts a stopped model server first, as one
+  sent here does; if the server doesn't start, the phone says why.
+- A session started from the iPhone uses the project's own model (Settings →
+  Projects) when you don't pick one.
+
 ## 1.1.0
 
 - Run models yourself: Settings → Model servers sets up llama.cpp, Ollama,
