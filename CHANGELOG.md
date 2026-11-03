@@ -4,6 +4,47 @@ What's new in each harlo release, newest first. `packaging/release.sh`
 releases the version at the top: each section starts with `## <version>`,
 and its text becomes the release's notes.
 
+## 1.1.0
+
+- Run models yourself: Settings → Model servers sets up llama.cpp, Ollama,
+  vLLM, Strata, Basalt or NInfer for your graphics card, downloads a model
+  that fits (checked against its checksum), starts it and adds it to pi, Oh
+  My Pi, OpenCode and Hermes. A stopped server starts before your message,
+  and harlo updates the engines.
+- On your other machines too: set up a model server on a machine you reach
+  over SSH (a GPU box, a NAS), with its own engines, agents and updates. Its
+  agents can use this computer's servers, and this computer's agents can
+  use its, through the SSH connection. Works on x86-64 and ARM machines.
+- Specs and a shared plan, on per project: every agent can find, read and
+  write the project's SPEC.md files, and work through a plan whose steps
+  are committed one by one and reviewed by another agent.
+- Extensions for pi (Settings → Extensions): permissions, questions, a to-do
+  list, subagents and web access, off until you turn them on, shown in
+  harlo's own approval cards and docks.
+- Plan limits as they change, a line above the composer from 90%,
+  notifications when a limit is used up and when it resets (with harlo's own
+  sounds), and Stop and continue at the reset. Each machine has its own
+  meter, and Settings → Plan limits lists every machine.
+- The context bar marks where each agent compacts, and says how many tokens
+  are left near the end.
+- Mermaid diagrams are drawn in the chat.
+- Sessions on other machines work like local ones: sign in to any agent
+  there from harlo, pick that machine's models, use pi's extensions, stats,
+  specs and plans, worktrees, attachments, hand off and committees, and
+  sessions outside a project. A remote session opens from a local copy that
+  only fetches what's new. Quitting harlo closes its connections, and a
+  machine stays disconnected until you connect it.
+- Add a project with its folder, agent and model in one window; remove a
+  project with or without its sessions. Finished worktree sessions go on a
+  Settled shelf.
+- A session keeps its permission mode and thinking level. Messages sent
+  while pi, OpenCode or Hermes works are queued with Remove and Send now.
+  Paste images or files to attach them. Long sessions open at once and
+  scroll smoothly.
+- Hermes signs in from harlo (a link and code, or an API key). The terminal
+  opens links and copies with Ctrl+Shift+C; Copy buttons work again in the
+  sign-in window. Mini chat stays on top on KDE Wayland.
+
 ## 1.0.3
 
 - Hermes Agent: start Hermes sessions like the other agents, with
