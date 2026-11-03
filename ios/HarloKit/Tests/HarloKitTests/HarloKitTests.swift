@@ -553,10 +553,12 @@ final class WidgetTests: XCTestCase {
         var reloads = 0
         m.widgetChanged = { reloads += 1 }
         m.host = PairedHarlo(key: "k", name: "box", endpoints: [])
-        m.sessions = HarloModel.sample().sessions
+        // (One time for both: samples a second apart differ.)
+        let now = Date()
+        m.sessions = HarloModel.sample(now: now).sessions
         XCTAssertEqual(WidgetSnapshot.load(store)?.host, "box")
         XCTAssertEqual(reloads, 1)
-        m.sessions = HarloModel.sample().sessions
+        m.sessions = HarloModel.sample(now: now).sessions
         XCTAssertEqual(reloads, 1, "the same: not written again")
         m.forget()
         XCTAssertEqual(WidgetSnapshot.load(store)?.items.count, 0, "unpaired: empty")
