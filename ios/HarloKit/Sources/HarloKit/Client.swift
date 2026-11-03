@@ -111,7 +111,7 @@ public actor HarloClient {
 
     /// What this app shows of what harlo sends (in the hello): harlo leaves
     /// out the rest.
-    public static let shows = ["limits"]
+    public static let shows = ["limits", "settled"]
 
     /// The connection never left the phone: no network, or (the first time
     /// a LAN address is tried) iOS showing its Local Network prompt, during
@@ -197,8 +197,9 @@ public actor HarloClient {
 
     /// Starts a session (`project` -1: the home folder; "" agent or model:
     /// the default) with its first message. Its live key and agent.
-    public func newSession(project: Int64, agent: String, model: String, approval: String = "", text: String, photos: [Photo]) async throws -> (key: String, harness: String) {
-        let r = try check(await call("new", ["project": .int(project), "agent": .string(agent), "model": .string(model), "approval": .string(approval),
+    /// (`host`: without a project, that machine's home folder.)
+    public func newSession(project: Int64, host: String = "", agent: String, model: String, approval: String = "", text: String, photos: [Photo]) async throws -> (key: String, harness: String) {
+        let r = try check(await call("new", ["project": .int(project), "host": .string(host), "agent": .string(agent), "model": .string(model), "approval": .string(approval),
                                              "text": .string(text), "images": .array(photos.map(\.json))]))
         return (r["key"].text, r["harness"].text)
     }
@@ -259,6 +260,29 @@ public actor HarloClient {
 
     public func pin(_ key: String, _ pinned: Bool) async throws {
         try check(await call("pin", ["key": .string(key), "pinned": .bool(pinned)]))
+    }
+
+    /// A settled session back among its project's others.
+    public func putBack(_ key: String) async throws {
+        try check(await call("putBack", ["key": .string(key)]))
+    }
+
+    /// Connects harlo to one of its other machines (as picking it in harlo
+    /// does): what's there.
+    public func connect(_ host: String) async throws -> RemoteMachine {
+        let r = try check(await call("connect", ["host": .string(host)]))
+        return RemoteMachine(host: r["host"].string ?? host, connected: true, home: r["home"].text, agents: (r["agents"].array ?? []).compactMap(\.string))
+    }
+
+    /// The model servers harlo set up, on its computer and each machine
+    /// connected.
+    public func modelServers() async throws -> [ModelServers] {
+        ModelServers.list(try check(await call("servers")))
+    }
+
+    /// Starts one (until it serves) or stops it: whether it runs now.
+    public func setServer(host: String, url: String, running: Bool) async throws -> Bool {
+        try check(await call(running ? "startServer" : "stopServer", ["host": .string(host), "url": .string(url)]))["running"].bool ?? false
     }
 
     /// Your messages in the open session a turn can be undone to: row key →

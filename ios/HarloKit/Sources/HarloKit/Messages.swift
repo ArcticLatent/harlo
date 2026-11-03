@@ -18,6 +18,11 @@ public struct SessionSummary: Equatable, Sendable, Identifiable {
     public var pinned: Bool
     /// Questions and approvals it waits on, oldest first.
     public var requests: [UIRequest]
+    /// The machine it runs on: "" harlo's computer, else a remote host.
+    public var host: String
+    /// Why harlo put it on its project's Settled shelf ("Merged", …), "" when
+    /// it isn't.
+    public var settled: String
 
     public var id: String { key }
 
@@ -32,6 +37,8 @@ public struct SessionSummary: Equatable, Sendable, Identifiable {
         location = v["where"].text
         pinned = v["pinned"].bool ?? false
         requests = (v["requests"].array ?? []).map(UIRequest.init)
+        host = v["host"].text
+        settled = v["settled"].text
     }
 
     public static func list(_ v: JSON) -> [SessionSummary] {

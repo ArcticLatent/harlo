@@ -40,6 +40,10 @@ pub mod qobject {
         fn connect_host(self: Pin<&mut Remotes>, name: &QString);
         #[qinvokable]
         fn disconnect_host(self: Pin<&mut Remotes>, name: &QString);
+        /// A host something else connected (the phone): shown connected,
+        /// from that check.
+        #[qinvokable]
+        fn adopt_host(self: Pin<&mut Remotes>, name: &QString);
         /// Measures a connected host's round trip (`ping` in `hosts_json`).
         #[qinvokable]
         fn ping_host(self: Pin<&mut Remotes>, name: &QString);
@@ -249,6 +253,17 @@ impl Remotes {
                 }
             });
         });
+    }
+
+    pub fn adopt_host(mut self: Pin<&mut Self>, name: &QString) {
+        let host = name.to_string();
+        let Some(info) = remote::info_of(&host).filter(|_| !remote::is_disconnected(&host)) else { return };
+        if self.states.get(&host).is_some_and(|s| s.state == "connected") {
+            return;
+        }
+        self.as_mut().rust_mut().states.insert(host, HostState { state: "connected".into(), message: String::new(), info, ping: None });
+        self.as_mut().bump();
+        self.ping_host(name);
     }
 
     pub fn install_agent(mut self: Pin<&mut Self>, host: &QString, agent: &QString) {

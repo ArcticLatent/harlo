@@ -310,7 +310,7 @@ fn event(key: &str, u: &SessionUpdate) -> Option<Value> {
 /// (sessions say their machine), `settled` (settled sessions, for a phone
 /// that says it shows them), `limits` (plan limits: the `limits` call and
 /// event), `compaction` (a session's meta says where it compacts).
-const FEATURES: &[&str] = &["serverStart", "machines", "settled", "limits", "compaction"];
+const FEATURES: &[&str] = &["serverStart", "machines", "settled", "limits", "compaction", "connect", "modelServers", "putBack"];
 
 /// The session list for one phone: settled sessions only for one that
 /// shows them.
@@ -372,6 +372,107 @@ async fn send_after_server(msg: Value) -> Value {
             created
         }
         None => sent,
+    }
+}
+
+/// Connects one of harlo's machines (as picking it on the desktop does):
+/// `{ host, home, agents }` once it answers, else why not.
+async fn connect_machine(msg: &Value) -> Value {
+    use harlo_core::remote;
+    let name = msg["host"].as_str().unwrap_or_default().to_owned();
+    let Some(host) = remote::host(&name) else { return json!({ "error": "harlo doesn't have that machine." }) };
+    let was_off = remote::is_disconnected(&name);
+    remote::set_disconnected(&name, false);
+    match tokio::task::spawn_blocking(move || remote::check(&host)).await {
+        Ok(Ok(_)) => crate::phone_bridge::call(json!({ "op": "hostConnected", "host": name })).await,
+        failed => {
+            // (Left as it was: harlo's background work stays away from it.)
+            if was_off {
+                remote::set_disconnected(&name, true);
+            }
+            let why = match failed {
+                Ok(Err(e)) => format!("{e:#}"),
+                _ => "It didn't answer.".to_owned(),
+            };
+            json!({ "error": format!("Couldn't connect to {name}: {why}") })
+        }
+    }
+}
+
+/// The machines' connected now (`""` this computer).
+fn connected_machines() -> Vec<String> {
+    use harlo_core::remote;
+    let mut hosts = vec![String::new()];
+    hosts.extend(remote::hosts().into_iter().map(|h| h.name).filter(|n| !remote::is_disconnected(n) && remote::info_of(n).is_some()));
+    hosts
+}
+
+/// A server as phones show it.
+fn server_json(s: &Value) -> Value {
+    let models: Vec<Value> = s["models"].as_array().into_iter().flatten().filter_map(|m| m["id"].as_str().or_else(|| m.as_str())).map(|m| json!(m)).collect();
+    json!({ "url": s["baseUrl"], "name": s["name"], "engine": s["engine"], "models": models, "running": s["running"].as_bool().unwrap_or(false) })
+}
+
+/// The model servers harlo set up, on this computer and each machine
+/// connected: `{ machines: [{ host, servers: [{ url, name, engine, models,
+/// running }], error? }] }`.
+async fn model_servers() -> Value {
+    let asks = connected_machines().into_iter().map(|host| {
+        tokio::task::spawn_blocking(move || {
+            let found = if host.is_empty() {
+                Ok(harlo_core::servers::list())
+            } else {
+                harlo_core::engine_host::json_if_there(&host, &["servers"], std::time::Duration::from_secs(30))
+                    .map(|v| v.and_then(|v| v.as_array().cloned()).unwrap_or_default())
+                    .map_err(|e| format!("{e:#}"))
+            };
+            match found {
+                Ok(list) => json!({ "host": host, "servers": list.iter().map(server_json).collect::<Vec<_>>() }),
+                Err(e) => json!({ "host": host, "servers": [], "error": e }),
+            }
+        })
+    });
+    let mut machines = Vec::new();
+    for ask in asks.collect::<Vec<_>>() {
+        if let Ok(m) = ask.await {
+            machines.push(m);
+        }
+    }
+    json!({ "machines": machines })
+}
+
+/// Starts (until it serves) or stops one of harlo's model servers, here or
+/// on a machine connected: `{ running }`, or why not.
+async fn start_or_stop_server(msg: &Value, start: bool) -> Value {
+    let (host, url) = (msg["host"].as_str().unwrap_or_default().to_owned(), msg["url"].as_str().unwrap_or_default().to_owned());
+    if !connected_machines().contains(&host) {
+        return json!({ "error": format!("Connect to {host} first.") });
+    }
+    let done = tokio::task::spawn_blocking(move || -> Result<bool, String> {
+        if host.is_empty() {
+            if !harlo_core::servers::set_up_servers().iter().any(|(u, _)| *u == url) {
+                return Err("harlo didn't set up that server.".into());
+            }
+            if start {
+                harlo_core::servers::ensure_running(&url)?;
+            } else {
+                harlo_core::servers::stop_any(&url);
+            }
+            return Ok(harlo_core::model_servers::answers(&url));
+        }
+        let limit = std::time::Duration::from_secs(if start { 20 * 60 } else { 60 });
+        let v = harlo_core::engine_host::json(&host, &[if start { "start" } else { "stop" }, &url], limit).map_err(|e| format!("{e:#}"))?;
+        if let Some(e) = v["error"].as_str() {
+            return Err(e.to_owned());
+        }
+        Ok(harlo_core::engine_host::json(&host, &["needs-start", &url], std::time::Duration::from_secs(30)).is_ok_and(|v| v == false))
+    })
+    .await
+    .unwrap_or_else(|_| Err("It stopped partway.".into()));
+    match done {
+        Ok(running) if running != start => json!({ "running": running, "error": if start { "It didn't start." } else { "It still answers." } }),
+        Ok(running) => json!({ "running": running }),
+        Err(e) => json!({ "error": e }),
     }
 }
 
@@ -801,7 +902,21 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
                         });
                         Value::Null
                     }
-                    "projects" | "limitOf" | "resumeAtReset" | "cancelResume" | "modes" | "setModes" | "rename" | "archive" | "pin" | "theme" | "setAvatar" => crate::phone_bridge::call(msg.clone()).await,
+                    // (Off the loop: machines and model servers are asked over SSH.)
+                    "connect" | "servers" | "startServer" | "stopServer" => {
+                        let (msg, later, id) = (msg.clone(), later_tx.clone(), id.clone());
+                        tokio::spawn(async move {
+                            let mut reply = match msg["op"].as_str().unwrap_or_default() {
+                                "connect" => connect_machine(&msg).await,
+                                "servers" => model_servers().await,
+                                op => start_or_stop_server(&msg, op == "startServer").await,
+                            };
+                            reply["id"] = id;
+                            let _ = later.send(reply);
+                        });
+                        Value::Null
+                    }
+                    "projects" | "limitOf" | "resumeAtReset" | "cancelResume" | "modes" | "setModes" | "rename" | "archive" | "pin" | "putBack" | "theme" | "setAvatar" => crate::phone_bridge::call(msg.clone()).await,
                     // Edit & resend (`fork` false) or fork from one of the user's messages.
                     "branch" => match (crate::registry::get(msg["key"].as_str().unwrap_or_default()), &open) {
                         (Some(live), Some((key, _))) if key == msg["key"].as_str().unwrap_or_default() => {

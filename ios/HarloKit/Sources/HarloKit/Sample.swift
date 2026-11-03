@@ -13,10 +13,10 @@ extension HarloModel {
         m.state = .connected
         let t = Int64(now.timeIntervalSince1970)
         func s(_ key: String, _ title: String, _ project: String, _ harness: String, _ status: String, _ ago: Int64, branch: String = "", pinned: Bool = false,
-               requests: [JSON] = []) -> SessionSummary {
+               requests: [JSON] = [], host: String = "", settled: String = "") -> SessionSummary {
             SessionSummary(["key": .string(key), "title": .string(title), "project": .string(project), "harness": .string(harness),
                             "status": .string(status), "modified": .int(t - ago), "branch": .string(branch), "where": "~/Projects/harlo", "pinned": .bool(pinned),
-                            "requests": .array(requests)])
+                            "requests": .array(requests), "host": .string(host), "settled": .string(settled)])
         }
         let approval: JSON = ["id": "r1", "method": "select", "title": "Allow tool: bash", "message": "bash: rm -rf target/debug/incremental",
                               "options": ["Approve", "Deny"], "approval": true, "asked": .int((t - 120) * 1000)]
@@ -28,7 +28,8 @@ extension HarloModel {
             s("live:3", "Why does the relay drop idle phones?", "harlo", "opencode", "unread", 3600),
             s("/s/4", "Release notes for 0.4", "harlo", "pi", "", 86400 * 2),
             s("/s/5", "Tidy the README", "website", "claude", "", 86400 * 5),
-            s("/s/6", "Benchmark the markdown renderer", "", "omp", "", 86400 * 12),
+            s("/s/6", "Benchmark the markdown renderer", "", "omp", "", 86400 * 12, host: "nas"),
+            s("/s/7", "Split the relay's config", "harlo", "claude", "", 86400 * 3, branch: "relay-config", settled: "Merged"),
         ]
         if busier {
             m.sessions.insert(s("live:5", "Run the relay's tests", "harlo", "claude", "input", 600, requests: [command]), at: 2)
@@ -114,6 +115,16 @@ extension HarloModel {
     }
 }
 
+extension HarloModel {
+    /// Model servers for the samples: one running here, one stopped.
+    static let sampleServers = [
+        ModelServers(host: "", servers: [
+            ModelServer(url: "http://127.0.0.1:8080/v1", name: "llama.cpp", engine: "llama.cpp", models: ["qwen3-coder-30b"], running: true),
+            ModelServer(url: "http://127.0.0.1:11434/v1", name: "ollama", engine: "Ollama", models: ["gpt-oss:20b"], running: false),
+        ]),
+    ]
+}
+
 /// What a sample model answers instead of asking harlo.
 public struct Samples: Sendable {
     public var choices: NewSessionChoices
@@ -144,6 +155,7 @@ public struct Samples: Sendable {
                                                  ["id": 2, "name": "website", "where": "~/Projects/website", "agent": "claude"]],
                                     "agents": [["id": "claude", "label": "Claude"], ["id": "opencode", "label": "OpenCode"], ["id": "pi", "label": "Pi"], ["id": "omp", "label": "Oh My Pi"]],
                                     "defaultAgent": "omp",
+                                    "machines": [["host": "nas", "connected": false]],
                                     "approvals": ["claude": "always-ask", "opencode": "always-ask", "pi": "", "omp": "write"],
                                     "models": [["harness": "omp", "model": "anthropic/claude-sonnet-4-5"], ["harness": "omp", "model": "openai/gpt-5"]],
                                     "templates": [["id": "t1", "name": "Review a PR", "harness": "claude", "approval": "always-ask", "text": "Review the open pull request: correctness first, then tests."],

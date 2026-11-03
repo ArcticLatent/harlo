@@ -2,7 +2,8 @@ import HarloKit
 import SwiftUI
 
 /// The New Session tab: a greeting, and a composer that starts a session in
-/// harlo: where (a project, or the home folder), with which agent, model
+/// harlo: where (a project, or a machine's home folder; another machine is
+/// connected first), with which agent, model
 /// and permissions, and its first message (with photos). The session then
 /// opens in this tab.
 struct NewSessionView: View {
@@ -11,8 +12,10 @@ struct NewSessionView: View {
     @Binding var tab: AppTab
     @State private var choices: NewSessionChoices?
     @State private var loading = true
-    /// The project's id; -1: the home folder.
-    @State private var projectId: Int64 = -1
+    /// A project, or a machine's home folder.
+    @State private var place: SessionPlace = .home("")
+    /// The machine being connected to.
+    @State private var connecting: String?
     @State private var agent = ""
     /// `provider/model`; "": the agent's default.
     @State private var modelId = ""
@@ -27,11 +30,45 @@ struct NewSessionView: View {
     /// Your name, for the greeting (Settings).
     @AppStorage("yourName") private var name = ""
 
-    var project: Project? { choices?.projects.first { $0.id == projectId } }
+    var project: Project? { choices?.project(place) }
+    /// The machine it starts on ("" harlo's computer).
+    var host: String { choices?.host(place) ?? "" }
 
     var canStart: Bool {
-        !starting && !agent.isEmpty && model.state == .connected
+        !starting && !agent.isEmpty && model.state == .connected && connecting == nil && choices?.needsConnecting(place) != true
             && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !photos.isEmpty)
+    }
+
+    /// The place picker's text.
+    var placeText: String {
+        if let h = connecting { return "Connecting to \(h)…" }
+        if let pr = project { return pr.host.isEmpty ? pr.name : "\(pr.name) · \(pr.host)" }
+        return host.isEmpty ? "Home folder" : "Home · \(host)"
+    }
+
+    /// Where it starts, under the composer.
+    var placePath: String {
+        if let pr = project { return pr.location }
+        guard !host.isEmpty, let home = choices?.machine(host)?.home, !home.isEmpty else { return "" }
+        return "\(host): \(home)"
+    }
+
+    /// Connects to the machine picked, then its agents are the choices
+    /// (back to this computer if it doesn't connect: harlo says why).
+    func connect(_ host: String) {
+        connecting = host
+        Task {
+            let m = await model.connect(host)
+            if m != nil, var c = await model.newSessionChoices() {
+                // (A harlo that hasn't looked yet: what the connect said.)
+                if let m, c.machine(host)?.connected != true { c.connected(m) }
+                choices = c
+                agent = c.agent(for: place)
+            } else if m == nil {
+                place = .home("")
+            }
+            connecting = nil
+        }
     }
 
     /// "Default model", or the project's own for this agent (what harlo
@@ -74,7 +111,8 @@ struct NewSessionView: View {
             loading = false
             guard let c else { return }
             choices = c
-            if agent.isEmpty || !c.agents.contains(where: { $0.id == agent }) { agent = c.agent(for: project) }
+            if c.project(place) == nil, case .project = place { place = .home("") }
+            if agent.isEmpty || !c.agents(for: place).contains(where: { $0.id == agent }) { agent = c.agent(for: place) }
         }
     }
 
@@ -97,30 +135,39 @@ struct NewSessionView: View {
             // second line when they don't fit, all in sight).
             Flow(spacing: 8) {
                     Menu {
-                        // By machine: this computer's, then each remote host's.
-                        Picker("Project", selection: $projectId) {
-                            Label("Home folder", systemImage: "house").tag(Int64(-1))
+                        // By machine: this computer's, then each other one's
+                        // (its home folder too, from a harlo that starts there).
+                        Picker("Where", selection: $place) {
                             ForEach(c.machines, id: \.host) { m in
-                                Section(m.host.isEmpty ? "This computer" : m.host) {
+                                Section(machineTitle(m.host, c)) {
+                                    if m.host.isEmpty || (c.machine(m.host) != nil && model.canConnect) {
+                                        Label("Home folder", systemImage: "house").tag(SessionPlace.home(m.host))
+                                    }
                                     ForEach(m.projects) { pr in
-                                        Label(pr.name, systemImage: m.host.isEmpty ? "folder" : "server.rack").tag(pr.id)
+                                        Label(pr.name, systemImage: "folder").tag(SessionPlace.project(pr.id))
                                     }
                                 }
                             }
                         }
                     } label: {
-                        PickerChip(text: project.map { $0.host.isEmpty ? $0.name : "\($0.name) · \($0.host)" } ?? "Home folder") {
-                            Image(systemName: project == nil ? "house" : project?.host.isEmpty == false ? "server.rack" : "folder").font(.system(size: 13))
+                        PickerChip(text: placeText) {
+                            if connecting != nil {
+                                ProgressView().controlSize(.mini)
+                            } else {
+                                Image(systemName: !host.isEmpty ? "server.rack" : project == nil ? "house" : "folder").font(.system(size: 13))
+                            }
                         }
                     }
-                    .onChange(of: projectId) { _, _ in
-                        agent = c.agent(for: project)
+                    .disabled(connecting != nil)
+                    .onChange(of: place) { _, now in
+                        agent = c.agent(for: now)
                         modelId = ""
                         approval = ""
+                        if c.needsConnecting(now) && model.canConnect { connect(c.host(now)) }
                     }
                     Menu {
                         Picker("Agent", selection: $agent) {
-                            ForEach(c.agents(for: project)) { a in
+                            ForEach(c.agents(for: place)) { a in
                                 Text(a.label).tag(a.id)
                             }
                         }
@@ -138,7 +185,7 @@ struct NewSessionView: View {
                     Menu {
                         Picker("Model", selection: $modelId) {
                             Text(defaultModel(c)).tag("")
-                            ForEach(project?.host.isEmpty == false ? [] : c.modelChoices(for: agent), id: \.id) { m in
+                            ForEach(!host.isEmpty ? [] : c.modelChoices(for: agent), id: \.id) { m in
                                 Text(m.name).tag(m.id)
                             }
                         }
@@ -193,8 +240,8 @@ struct NewSessionView: View {
             }
             .padding(12)
             .card(p, radius: 18, fill: p.background)
-            if let pr = project {
-                Text(pr.location)
+            if !placePath.isEmpty {
+                Text(placePath)
                     .font(Style.mono(11))
                     .foregroundStyle(Color(p.faint))
                     .lineLimit(1)
@@ -206,6 +253,12 @@ struct NewSessionView: View {
         .card(p, radius: 24)
         .padding(.horizontal, 10)
         .padding(.bottom, 8)
+    }
+
+    /// A machine's section in the place picker.
+    func machineTitle(_ host: String, _ c: NewSessionChoices) -> String {
+        if host.isEmpty { return "This computer" }
+        return c.machine(host)?.connected == false ? "\(host) · connects first" : host
     }
 
     /// Templates saved in harlo: one fills the composer (send it when ready).
@@ -233,11 +286,11 @@ struct NewSessionView: View {
     }
 
     func apply(_ t: SessionTemplate, _ c: NewSessionChoices) {
-        let wanted = c.agents(for: project).contains { $0.id == t.agent } ? t.agent : c.agent(for: project)
+        let wanted = c.agents(for: place).contains { $0.id == t.agent } ? t.agent : c.agent(for: place)
         if wanted != agent { keepPicks = true }
         agent = wanted
         // (Another machine's agent picks its own model.)
-        modelId = project?.host.isEmpty == false ? "" : t.model
+        modelId = !host.isEmpty ? "" : t.model
         approval = c.approval(for: wanted, in: project).isEmpty ? "" : t.approval
         text = t.text
         focused = true
@@ -248,7 +301,7 @@ struct NewSessionView: View {
         focused = false
         Task {
             let starts = choices?.approval(for: agent, in: project) ?? ""
-            let ok = await model.startSession(project: project, agent: agent, model: modelId, approval: starts.isEmpty ? "" : approval,
+            let ok = await model.startSession(project: project, host: host, agent: agent, model: modelId, approval: starts.isEmpty ? "" : approval,
                                               text: text, photos: photos)
             starting = false
             if ok {

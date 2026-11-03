@@ -146,6 +146,17 @@ struct SettingsView: View {
                 if model.host != nil && !model.demo {
                     notifications
                 }
+                if model.hasModelServers && model.host != nil {
+                    Section {
+                        NavigationLink {
+                            ModelServersView()
+                        } label: {
+                            Label("Model servers", systemImage: "cpu")
+                        }
+                    } footer: {
+                        Text("Start or stop the model servers harlo set up, on your computer and on the machines it's connected to.")
+                    }
+                }
                 Section {
                     LabeledContent("This phone's key", value: model.fingerprint)
                         .font(Style.mono(13))

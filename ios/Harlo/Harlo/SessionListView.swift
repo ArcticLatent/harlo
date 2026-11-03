@@ -23,28 +23,81 @@ struct DashboardView: View {
     /// The recent ones: what works or waits first, then the newest.
     static let recentCount = 8
 
+    /// The projects whose Settled shelf is open.
+    @State private var openShelves: Set<String> = []
+
     struct SessionGroup: Identifiable {
         let id: String
+        var name: String
         var sessions: [SessionSummary]
+        /// On its Settled shelf (by project only).
+        var settled: [SessionSummary] = []
     }
 
     var groups: [SessionGroup] {
+        let working = ["busy", "starting", "input"]
         if !all {
-            let busy = model.sessions.filter { ["busy", "starting", "input"].contains($0.status) }
-            let rest = model.sessions.filter { !["busy", "starting", "input"].contains($0.status) }.sorted { $0.modified > $1.modified }
-            return [SessionGroup(id: "", sessions: Array((busy + rest).prefix(max(Self.recentCount, busy.count))))]
+            // (Settled ones are done with, unless they work again.)
+            let shown = model.sessions.filter { $0.settled.isEmpty || working.contains($0.status) }
+            let busy = shown.filter { working.contains($0.status) }
+            let rest = shown.filter { !working.contains($0.status) }.sorted { $0.modified > $1.modified }
+            return [SessionGroup(id: "", name: "", sessions: Array((busy + rest).prefix(max(Self.recentCount, busy.count))))]
         }
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
-        let found = model.sessions.filter { s in q.isEmpty || "\(s.title) \(s.project) \(s.branch) \(s.location)".lowercased().contains(q) }
+        let found = model.sessions.filter { s in q.isEmpty || "\(s.title) \(s.project) \(s.branch) \(s.location) \(s.host)".lowercased().contains(q) }
         if groupBy == "day" {
-            return SessionSummary.byDay(found).map { SessionGroup(id: $0.name, sessions: $0.sessions) }
+            return SessionSummary.byDay(found).map { SessionGroup(id: $0.name, name: $0.name, sessions: $0.sessions) }
         }
+        // By project, as harlo's sidebar: each on its machine, settled ones
+        // on a shelf at the end (open while searching).
         var out: [SessionGroup] = []
         for s in found {
-            let name = s.project.isEmpty ? "Other sessions" : s.project
-            if let i = out.firstIndex(where: { $0.id == name }) { out[i].sessions.append(s) } else { out.append(SessionGroup(id: name, sessions: [s])) }
+            let id = s.host + "/" + s.project
+            if out.firstIndex(where: { $0.id == id }) == nil {
+                let name = s.project.isEmpty ? "Other sessions" : s.project
+                out.append(SessionGroup(id: id, name: s.host.isEmpty ? name : "\(name) · \(s.host)", sessions: []))
+            }
+            let i = out.firstIndex { $0.id == id }!
+            if s.settled.isEmpty || working.contains(s.status) { out[i].sessions.append(s) } else { out[i].settled.append(s) }
         }
         return out
+    }
+
+    func shelfOpen(_ g: SessionGroup) -> Bool {
+        openShelves.contains(g.id) || !search.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    /// A project's Settled shelf: its sessions when it's open.
+    @ViewBuilder
+    func shelf(_ g: SessionGroup) -> some View {
+        let open = shelfOpen(g)
+        Button {
+            withAnimation(.easeOut(duration: 0.2)) {
+                if openShelves.contains(g.id) { openShelves.remove(g.id) } else { openShelves.insert(g.id) }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.seal")
+                    .font(.system(size: 13))
+                Text("Settled · \(g.settled.count)")
+                    .font(.system(size: 14.5, weight: .medium))
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .rotationEffect(.degrees(open ? 90 : 0))
+                Spacer()
+            }
+            .foregroundStyle(Color(p.muted))
+            .padding(.horizontal, 6)
+            .frame(height: 34)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Settled sessions, \(g.settled.count)")
+        .accessibilityValue(open ? "Shown" : "Hidden")
+        .plainRow(top: 2, bottom: 2)
+        if open {
+            ForEach(g.settled) { s in card(s) }
+        }
     }
 
     var body: some View {
@@ -121,13 +174,14 @@ struct DashboardView: View {
                 .plainRow(bottom: 4)
             }
             ForEach(groups) { g in
-                if !g.id.isEmpty {
-                    SectionLabel(text: g.id)
+                if !g.name.isEmpty {
+                    SectionLabel(text: g.name)
                         .plainRow(top: 12, bottom: 2)
                 }
                 ForEach(g.sessions) { s in
                     card(s)
                 }
+                if !g.settled.isEmpty { shelf(g) }
             }
             if all && !search.isEmpty && groups.isEmpty {
                 ContentUnavailableView.search(text: search)
@@ -207,6 +261,13 @@ struct DashboardView: View {
             } label: {
                 Label(model.isUnread(s) ? "Mark as read" : "Mark as unread", systemImage: model.isUnread(s) ? "envelope.open" : "envelope.badge")
             }
+            if !s.settled.isEmpty && model.canPutBack {
+                Button {
+                    Task { await model.putBack(s) }
+                } label: {
+                    Label("Put back", systemImage: "arrow.uturn.backward")
+                }
+            }
             Button {
                 Task { await model.archive(s) }
             } label: {
@@ -240,7 +301,10 @@ struct SessionCard: View {
     var detail: String {
         var parts = [Style.harnessLabel(session.harness)]
         if showProject && !session.project.isEmpty { parts.append(session.project) }
+        // (Grouped by project, the group says its machine.)
+        if showProject && !session.host.isEmpty { parts.append(session.host) }
         if !session.branch.isEmpty { parts.append(session.branch) }
+        if !session.settled.isEmpty { parts.append(session.settled) }
         return parts.joined(separator: " · ")
     }
 

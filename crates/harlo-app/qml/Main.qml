@@ -171,6 +171,7 @@ ApplicationWindow {
             else if (command === "setup") { win.showMainWindow(); win.openSetupGuide() }
             else win.showMainWindow()
         }
+        function onHostConnected(host) { Remotes.adoptHost(host) }
     }
     // Plan limits (omp usage): soon after starting, then every 10 minutes.
     // Self-tests leave the real accounts alone.

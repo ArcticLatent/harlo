@@ -44,6 +44,88 @@ public struct Project: Equatable, Sendable, Identifiable {
     }
 }
 
+/// One of harlo's other machines (its Remote machines), for a new session
+/// there.
+public struct RemoteMachine: Equatable, Sendable, Identifiable {
+    public var host: String
+    /// harlo is connected to it now (else it connects first).
+    public var connected: Bool
+    /// Its home folder there ("" until it's connected).
+    public var home: String
+    /// The agents found there (empty until it's connected).
+    public var agents: [String]
+
+    public var id: String { host }
+
+    public init(host: String, connected: Bool, home: String = "", agents: [String] = []) {
+        self.host = host
+        self.connected = connected
+        self.home = home
+        self.agents = agents
+    }
+
+    public init(_ v: JSON) {
+        host = v["host"].text
+        connected = v["connected"].bool ?? false
+        home = v["home"].text
+        agents = (v["agents"].array ?? []).compactMap(\.string)
+    }
+}
+
+/// A model server harlo set up (its Model servers), on a machine.
+public struct ModelServer: Equatable, Sendable, Identifiable {
+    public var url: String
+    public var name: String
+    /// "llama.cpp", "Ollama", "Strata", …
+    public var engine: String
+    public var models: [String]
+    public var running: Bool
+
+    public var id: String { url }
+
+    public init(url: String, name: String, engine: String = "", models: [String] = [], running: Bool = false) {
+        self.url = url
+        self.name = name
+        self.engine = engine
+        self.models = models
+        self.running = running
+    }
+
+    public init(_ v: JSON) {
+        url = v["url"].text
+        name = v["name"].text
+        engine = v["engine"].text
+        models = (v["models"].array ?? []).compactMap(\.string)
+        running = v["running"].bool ?? false
+    }
+}
+
+/// The model servers on one machine ("" harlo's computer).
+public struct ModelServers: Equatable, Sendable, Identifiable {
+    public var host: String
+    public var servers: [ModelServer]
+    /// Why that machine's couldn't be listed.
+    public var error: String
+
+    public var id: String { host }
+
+    public init(host: String, servers: [ModelServer], error: String = "") {
+        self.host = host
+        self.servers = servers
+        self.error = error
+    }
+
+    public static func list(_ v: JSON) -> [ModelServers] {
+        (v["machines"].array ?? []).map { ModelServers(host: $0["host"].text, servers: ($0["servers"].array ?? []).map(ModelServer.init), error: $0["error"].text) }
+    }
+}
+
+/// Where a new session starts: a machine's home folder, or a project.
+public enum SessionPlace: Hashable, Sendable {
+    case home(String)
+    case project(Int64)
+}
+
 /// An agent harlo can start sessions with.
 public struct Agent: Equatable, Sendable, Identifiable {
     public var id: String
@@ -126,8 +208,11 @@ public struct NewSessionChoices: Equatable, Sendable {
     /// Every model each agent offers (as harlo's Settings → Providers reads
     /// them): `provider/model` and its name.
     public var agentModels: [String: [(id: String, name: String)]]
+    /// harlo's other machines (empty from a harlo before 1.2).
+    public var hosts: [RemoteMachine]
 
     public init(_ v: JSON) {
+        hosts = (v["machines"].array ?? []).map(RemoteMachine.init).filter { !$0.host.isEmpty }
         projects = (v["projects"].array ?? []).map(Project.init)
         templates = (v["templates"].array ?? []).map(SessionTemplate.init).filter { !$0.id.isEmpty && !$0.name.isEmpty }
         agents = (v["agents"].array ?? []).map { Agent(id: $0["id"].text, label: $0["label"].text) }
@@ -155,13 +240,59 @@ public struct NewSessionChoices: Equatable, Sendable {
         return offered.contains { $0.id == wanted } ? wanted : (offered.first?.id ?? wanted)
     }
 
-    /// The machines with projects, this computer first: their names ("" this
-    /// computer), each with its projects.
+    /// The project a place is (nil: a home folder).
+    public func project(_ place: SessionPlace) -> Project? {
+        guard case .project(let id) = place else { return nil }
+        return projects.first { $0.id == id }
+    }
+
+    /// The machine a place is on ("" harlo's computer).
+    public func host(_ place: SessionPlace) -> String {
+        switch place {
+        case .home(let h): return h
+        case .project: return project(place)?.host ?? ""
+        }
+    }
+
+    /// One of harlo's other machines (nil: harlo's computer, or one it
+    /// doesn't list).
+    public func machine(_ host: String) -> RemoteMachine? {
+        host.isEmpty ? nil : hosts.first { $0.host == host }
+    }
+
+    /// A place on another machine harlo has to connect to first.
+    public func needsConnecting(_ place: SessionPlace) -> Bool {
+        machine(host(place)).map { !$0.connected } ?? false
+    }
+
+    /// The agents a new session there can use (that machine's).
+    public func agents(for place: SessionPlace) -> [Agent] {
+        if case .home(let h) = place, let m = machine(h) {
+            return agents.filter { m.agents.contains($0.id) }
+        }
+        return agents(for: project(place))
+    }
+
+    /// The agent a new session there starts with.
+    public func agent(for place: SessionPlace) -> String {
+        guard case .home(let h) = place, !h.isEmpty else { return agent(for: project(place)) }
+        let offered = agents(for: place)
+        return offered.contains { $0.id == defaultAgent } ? defaultAgent : (offered.first?.id ?? defaultAgent)
+    }
+
+    /// The machines, this computer first: their names ("" this computer),
+    /// each with its projects (and the machines without any).
     public var machines: [(host: String, projects: [Project])] {
-        var order: [String] = []
+        var order: [String] = [""]
         for p in projects where !order.contains(p.host) { order.append(p.host) }
+        for m in hosts where !order.contains(m.host) { order.append(m.host) }
         order.sort { a, b in a.isEmpty != b.isEmpty ? a.isEmpty : a < b }
         return order.map { h in (h, projects.filter { $0.host == h }) }
+    }
+
+    /// A machine connected now: what it says, into the choices.
+    public mutating func connected(_ m: RemoteMachine) {
+        if let i = hosts.firstIndex(where: { $0.host == m.host }) { hosts[i] = m } else { hosts.append(m) }
     }
 
     /// Models used before with `agent`.

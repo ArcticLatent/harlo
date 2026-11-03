@@ -51,9 +51,11 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
     public static let unpaired = WidgetSnapshot(host: "", items: [], working: 0, waiting: 0, total: 0)
 
     /// From the session list: what waits on you first, then what works,
-    /// what finished unseen, then the most recent.
+    /// what finished unseen, then the most recent (settled ones only while
+    /// they work or wait).
     public static func of(host: String, sessions: [SessionSummary], unread: (SessionSummary) -> Bool, now: Date = Date()) -> WidgetSnapshot {
-        let items = sessions.map { s -> Item in
+        let listed = sessions.filter { $0.settled.isEmpty || ["busy", "starting", "input"].contains($0.status) || !$0.requests.isEmpty }
+        let items = listed.map { s -> Item in
             let status = ["busy", "starting"].contains(s.status) ? "busy" : s.status == "input" || !s.requests.isEmpty ? "input" : unread(s) ? "unread" : ""
             return Item(key: s.key, title: s.title.isEmpty ? "New session" : s.title, harness: s.harness, status: status, modified: s.modified)
         }

@@ -636,6 +636,10 @@ pub mod qobject {
         #[cxx_name = "remoteCommand"]
         fn remote_command(self: Pin<&mut Workspace>, command: &QString);
         /// A notification was clicked: the window should come forward.
+        /// A phone connected a machine: the desktop shows it connected too.
+        #[qsignal]
+        #[cxx_name = "hostConnected"]
+        fn host_connected(self: Pin<&mut Workspace>, host: &QString);
         #[qsignal]
         #[cxx_name = "raiseRequested"]
         fn raise_requested(self: Pin<&mut Workspace>);
@@ -5414,8 +5418,16 @@ impl Workspace {
                     })
                     .collect();
                 let templates: serde_json::Value = serde_json::from_str(&self.templates_json.to_string()).unwrap_or_default();
+                // Your other machines: connected (and looked at) or not, and
+                // the agents found there.
+                let machines: Vec<serde_json::Value> = harlo_core::remote::hosts().iter().map(|h| {
+                    let connected = !harlo_core::remote::is_disconnected(&h.name) && harlo_core::remote::info_of(&h.name).is_some();
+                    let home = harlo_core::remote::info_of(&h.name).map(|i| i.home).unwrap_or_default();
+                    json!({ "host": h.name, "connected": connected, "home": home,
+                            "agents": if connected { self.agents_at(&self.home_on(&h.name)) } else { Vec::new() } })
+                }).collect();
                 json!({ "projects": projects, "agents": agents, "defaultAgent": self.default_harness(), "models": models, "agentModels": all, "approvals": approvals(-1),
-                        "templates": templates })
+                        "templates": templates, "machines": machines })
             }
             "new" => {
                 let project = msg["project"].as_i64().unwrap_or(-1);
@@ -5424,8 +5436,17 @@ impl Workspace {
                     a if a.is_empty() => project.as_ref().map(|p| p.harness.clone()).unwrap_or_else(|| self.default_harness()),
                     a => a,
                 };
-                // (No project: this computer's home folder, whichever machine the window shows.)
-                let cwd = project.as_ref().map(|p| p.path.clone()).unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_else(|| "/".into())));
+                // (No project: the home folder of the machine asked for, this
+                // computer's by default, whichever machine the window shows.)
+                let host = text("host");
+                if project.is_none() && !host.is_empty() && (harlo_core::remote::is_disconnected(&host) || harlo_core::remote::info_of(&host).is_none()) {
+                    return fail(&format!("Connect to {host} first."));
+                }
+                let cwd = match &project {
+                    Some(p) => p.path.clone(),
+                    None if !host.is_empty() => self.home_on(&host),
+                    None => PathBuf::from(std::env::var_os("HOME").unwrap_or_else(|| "/".into())),
+                };
                 // (On the project's own machine: its agents.)
                 let Some(kind) = HarnessKind::parse(&agent).filter(|k| self.agents_at(&cwd).contains(&k.as_str())) else {
                     return fail(&format!("harlo can't start {agent} sessions there."));
@@ -5481,6 +5502,17 @@ impl Workspace {
             }
             // A running session's agent, model (`provider/id`, "" not known
             // yet) and machine ("" this one), for its model's server.
+            // A phone connected a machine (see `phone_server`): its
+            // sessions and limits, and what it can start a session with.
+            "hostConnected" => {
+                let host = text("host");
+                self.as_mut().host_connected(&QString::from(&host));
+                self.remote_kick.notify_one();
+                self.as_mut().refresh_host_limits(&host, true, false);
+                let home = self.home_on(&host);
+                let shown = harlo_core::remote::info_of(&host).map(|i| i.home).unwrap_or_default();
+                json!({ "host": host, "home": shown, "agents": self.agents_at(&home) })
+            }
             "serverOf" => match self.live.get(&key) {
                 Some(e) => json!({ "agent": e.info.harness, "model": e.model_id,
                                    "host": harlo_core::remote::host_of(&e.info.cwd).unwrap_or_default() }),
@@ -5528,6 +5560,11 @@ impl Workspace {
                 }
                 let on = msg["archived"].as_bool().unwrap_or(true);
                 self.as_mut().update_meta(&key, |m| m.archived = on);
+                json!({ "ok": true })
+            }
+            // A settled session back among the others.
+            "putBack" => {
+                self.as_mut().put_back(&QString::from(&key));
                 json!({ "ok": true })
             }
             "pin" => {

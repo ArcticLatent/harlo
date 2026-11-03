@@ -56,6 +56,16 @@ func run(_ link: String) async {
     await model.continueAtReset()
     check(model.alert == "This session's limit isn't used up.", "continue at the reset needs a used-up limit (\(model.alert ?? "no alert"))")
     model.alert = nil
+    // Machines and model servers: none on a scratch computer.
+    check(model.canConnect && model.hasModelServers && model.canPutBack, "harlo connects machines and starts model servers from here (\(model.features.sorted()))")
+    let servers = await model.modelServers()
+    check(servers?.map(\.host) == [""] && servers?.first?.servers.isEmpty == true, "model servers: this computer's, none set up (\(servers.map { "\($0.map(\.host))" } ?? model.alert ?? "-"))")
+    let nowhere = await model.connect("no-such-machine")
+    check(nowhere == nil && model.alert == "harlo doesn't have that machine.", "connecting a machine harlo doesn't have says so (\(model.alert ?? "no alert"))")
+    model.alert = nil
+    let choices = await model.newSessionChoices()
+    check(choices?.hosts.isEmpty == true && choices?.machines.map(\.host) == [""], "a new session's places: this computer only (\(choices?.machines.map(\.host) ?? []))")
+    check(model.sessions.allSatisfy { $0.host.isEmpty }, "its sessions run on this computer")
 
     await model.send("fast: hello from the phone")
     let replied = await waitFor(8) {

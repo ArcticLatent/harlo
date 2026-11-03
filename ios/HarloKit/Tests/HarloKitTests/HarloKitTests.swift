@@ -320,7 +320,7 @@ final class ModelPartsTests: XCTestCase {
     func testSample() {
         let m = HarloModel.sample()
         XCTAssertEqual(m.state, .connected)
-        XCTAssertEqual(m.sessions.count, 6)
+        XCTAssertEqual(m.sessions.count, 7)
         m.openSample(asking: true)
         XCTAssertEqual(m.session?.requests.count, 1)
         XCTAssertTrue(m.session?.items.contains { if case .run = $0 { return true }; return false } ?? false)
@@ -650,5 +650,67 @@ final class LimitsTests: XCTestCase {
 
     @MainActor func testSamplesHaveLimits() {
         XCTAssertFalse(HarloModel.sample().limits.isEmpty)
+    }
+}
+
+final class MachinesTests: XCTestCase {
+    func testSessionsSayTheirMachineAndShelf() {
+        let s = SessionSummary(["key": "k", "host": "nas", "settled": "Merged"])
+        XCTAssertEqual(s.host, "nas")
+        XCTAssertEqual(s.settled, "Merged")
+        let old = SessionSummary(["key": "k"])
+        XCTAssertEqual(old.host, "")
+        XCTAssertEqual(old.settled, "")
+    }
+
+    func testPlacesOnOtherMachines() {
+        var c = NewSessionChoices(["projects": [["id": 1, "name": "web", "agent": "claude"], ["id": 2, "name": "pipeline", "host": "nas", "agent": "claude", "agents": ["pi"]]],
+                                   "agents": [["id": "claude", "label": "Claude"], ["id": "pi", "label": "Pi"], ["id": "omp", "label": "Oh My Pi"]], "defaultAgent": "claude",
+                                   "machines": [["host": "nas", "connected": true, "home": "/home/r", "agents": ["pi", "omp"]], ["host": "box", "connected": false]]])
+        XCTAssertEqual(c.machines.map(\.host), ["", "box", "nas"], "machines without projects too, this computer first")
+        XCTAssertEqual(c.host(.home("box")), "box")
+        XCTAssertEqual(c.host(.project(2)), "nas")
+        XCTAssertEqual(c.host(.project(1)), "")
+        XCTAssertTrue(c.needsConnecting(.home("box")))
+        XCTAssertFalse(c.needsConnecting(.project(2)))
+        XCTAssertFalse(c.needsConnecting(.home("")))
+        XCTAssertEqual(c.agents(for: .home("nas")).map(\.id), ["pi", "omp"], "that machine's agents")
+        XCTAssertEqual(c.agent(for: .home("nas")), "pi", "claude isn't there: its first")
+        XCTAssertEqual(c.agent(for: .home("")), "claude")
+        XCTAssertEqual(c.agent(for: .project(2)), "pi")
+        XCTAssertTrue(c.agents(for: .home("box")).isEmpty, "not connected: nothing known")
+        c.connected(RemoteMachine(host: "box", connected: true, home: "/root", agents: ["omp"]))
+        XCTAssertFalse(c.needsConnecting(.home("box")))
+        XCTAssertEqual(c.agent(for: .home("box")), "omp")
+        // An older harlo: no machines, only those with projects.
+        let old = NewSessionChoices(["projects": [["id": 2, "name": "pipeline", "host": "nas"]]])
+        XCTAssertTrue(old.hosts.isEmpty)
+        XCTAssertEqual(old.machines.map(\.host), ["", "nas"])
+        XCTAssertFalse(old.needsConnecting(.project(2)))
+    }
+
+    func testModelServersFromHarlo() {
+        let v = try! JSON.parse(#"""
+        { "machines": [
+            { "host": "", "servers": [{ "url": "http://127.0.0.1:8080/v1", "name": "llama.cpp", "engine": "llama.cpp", "models": ["qwen"], "running": true }] },
+            { "host": "nas", "servers": [], "error": "It didn't answer." } ] }
+        """#)
+        let list = ModelServers.list(v)
+        XCTAssertEqual(list.map(\.host), ["", "nas"])
+        XCTAssertEqual(list[0].servers.first?.models, ["qwen"])
+        XCTAssertEqual(list[0].servers.first?.running, true)
+        XCTAssertEqual(list[1].error, "It didn't answer.")
+    }
+
+    @MainActor func testDemoStartsAndStopsServers() async {
+        let m = HarloModel(store: MemoryStore(), deviceName: "iPhone")
+        m.startDemo()
+        let before = await m.modelServers()
+        XCTAssertEqual(before?.first?.servers.map(\.running), [true, false])
+        let now = await m.setServer(host: "", url: "http://127.0.0.1:11434/v1", running: true)
+        XCTAssertEqual(now, true)
+        let after = await m.modelServers()
+        XCTAssertEqual(after?.first?.servers.map(\.running), [true, true])
+        XCTAssertNotNil(m.sessions.first { !$0.settled.isEmpty }, "a settled sample")
     }
 }

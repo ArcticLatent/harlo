@@ -18,6 +18,7 @@ extension HarloModel {
         host = PairedHarlo(key: sample.host?.key ?? "", name: Self.demoName, endpoints: [])
         sessions = sample.sessions
         limits = sample.limits
+        demoServers = Self.sampleServers
         session = nil
         answered = []
         state = .connected

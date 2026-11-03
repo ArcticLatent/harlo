@@ -247,6 +247,7 @@ public final class HarloModel {
     /// The demo: sample sessions, no harlo (see Demo.swift).
     public internal(set) var demo = false
     @ObservationIgnored var demoCount = 0
+    @ObservationIgnored var demoServers: [ModelServers] = []
     /// Sessions marked unread here (kept), until opened.
     public private(set) var unreadMarks: Set<String> = []
 
@@ -804,12 +805,13 @@ public final class HarloModel {
 
     /// Starts a session and opens it.
     @discardableResult
-    public func startSession(project: Project?, agent: String, model: String, approval: String = "", text: String, photos: [Photo] = []) async -> Bool {
+    /// (`host`: without a project, that machine's home folder.)
+    public func startSession(project: Project?, host: String = "", agent: String, model: String, approval: String = "", text: String, photos: [Photo] = []) async -> Bool {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty || !photos.isEmpty else { return false }
         if demo { return demoStart(project: project, agent: agent, model: model, text: t) }
         guard let r = await with(session: false, { c, _ in
-            try await c.newSession(project: project?.id ?? -1, agent: agent, model: model, approval: approval, text: t, photos: photos)
+            try await c.newSession(project: project?.id ?? -1, host: project == nil ? host : "", agent: agent, model: model, approval: approval, text: t, photos: photos)
         }) else { return false }
         let title = String(t.split(separator: "\n").first ?? "").prefix(80)
         let open = OpenSession(key: r.key, title: String(title), harness: r.harness)
@@ -968,6 +970,52 @@ public final class HarloModel {
     public func pin(_ s: SessionSummary, _ on: Bool) async {
         if demo, let i = sessions.firstIndex(where: { $0.key == s.key }) { sessions[i].pinned = on; return }
         _ = await with(session: false) { c, _ in try await c.pin(s.key, on) }
+    }
+
+    /// harlo can put a settled session back (an older one can't).
+    public var canPutBack: Bool { demo || samples != nil || features.contains("putBack") }
+
+    /// A settled session back among its project's others.
+    public func putBack(_ s: SessionSummary) async {
+        if demo, let i = sessions.firstIndex(where: { $0.key == s.key }) { sessions[i].settled = ""; return }
+        _ = await with(session: false) { c, _ in try await c.putBack(s.key) }
+    }
+
+    // ---- other machines and model servers --------------------------------------------
+
+    /// harlo can connect its machines and start its model servers from here
+    /// (an older one can't).
+    public var canConnect: Bool { demo || samples != nil || features.contains("connect") }
+    public var hasModelServers: Bool { demo || samples != nil || features.contains("modelServers") }
+
+    /// Connects harlo to one of its other machines: what's there (nil: it
+    /// didn't connect, and `alert` says why).
+    public func connect(_ host: String) async -> RemoteMachine? {
+        if demo || samples != nil {
+            try? await Task.sleep(for: .milliseconds(600))
+            return RemoteMachine(host: host, connected: true, home: "/home/robin", agents: ["claude", "pi"])
+        }
+        return await with(session: false) { c, _ in try await c.connect(host) }
+    }
+
+    /// The model servers on harlo's computer and each machine connected.
+    public func modelServers() async -> [ModelServers]? {
+        if demo { return demoServers }
+        if samples != nil { return Self.sampleServers }
+        return await with(session: false) { c, _ in try await c.modelServers() }
+    }
+
+    /// Starts a model server (until it serves) or stops it: whether it runs
+    /// now (nil: it went wrong, and `alert` says why).
+    public func setServer(host: String, url: String, running: Bool) async -> Bool? {
+        if demo {
+            try? await Task.sleep(for: .seconds(1))
+            for (i, m) in demoServers.enumerated() where m.host == host {
+                for (j, s) in m.servers.enumerated() where s.url == url { demoServers[i].servers[j].running = running }
+            }
+            return running
+        }
+        return await with(session: false) { c, _ in try await c.setServer(host: host, url: url, running: running) }
     }
 
     /// Unread: finished since you looked (harlo says), or marked so here.
