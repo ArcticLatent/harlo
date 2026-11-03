@@ -6,6 +6,9 @@ import SwiftUI
 /// and its state. Swipe or long-press a card to rename, pin, mark unread or
 /// archive it.
 struct DashboardView: View {
+    /// The plan limits card, from the header's gauge (off at first).
+    @AppStorage(DashboardView.showLimitsKey) private var showLimits = false
+    static let showLimitsKey = "dashboard.showLimits"
     @Environment(HarloModel.self) private var model
     @Environment(\.palette) private var p
     @Binding var tab: AppTab
@@ -47,7 +50,7 @@ struct DashboardView: View {
     var body: some View {
         List {
             VStack(alignment: .leading, spacing: 22) {
-                AppHeader { tab = .approvals }
+                AppHeader(bell: { tab = .approvals }, limits: $showLimits)
                 BigTitle(text: "Dashboard")
             }
             .plainRow(top: 8, bottom: 6)
@@ -60,8 +63,8 @@ struct DashboardView: View {
                     .card(p, radius: 16)
                     .plainRow()
             }
-            // Plan limits (when harlo says them): before the sessions.
-            if !all && !model.limits.isEmpty {
+            // Plan limits (the header's gauge shows them): before the sessions.
+            if showLimits && !all && !model.limits.isEmpty {
                 Text("Plan limits")
                     .font(.system(size: 21, weight: .semibold))
                     .plainRow(top: 14, bottom: 4)

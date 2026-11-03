@@ -54,7 +54,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         case "allow", "deny":
             await model.answer(fromNotification: content, allow: action == "allow")
         default:
-            // Tapped: its session (or the list, for a test or a plan limit).
+            // Tapped: its session (or the list, for a test; for a plan limit,
+            // with the limits showing).
+            if content.isLimit { UserDefaults.standard.set(true, forKey: DashboardView.showLimitsKey) }
             guard !content.session.isEmpty, !content.isLimit else { return }
             let summary = model.sessions.first { $0.key == content.session }
                 ?? SessionSummary(["key": .string(content.session), "title": .string(content.title)])

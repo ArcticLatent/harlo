@@ -369,6 +369,8 @@ struct AppHeader: View {
     @Environment(HarloModel.self) private var model
     @Environment(\.palette) private var p
     var bell: (() -> Void)?
+    /// The dashboard's plan limits shown (nil: no button).
+    var limits: Binding<Bool>?
 
     var body: some View {
         HStack(spacing: 10) {
@@ -381,6 +383,27 @@ struct AppHeader: View {
                 .lineLimit(1)
             StatusDot(status: model.state == .connected ? "live" : "exited")
             Spacer(minLength: 8)
+            // (Only when harlo says limits.)
+            if let limits, !model.limits.isEmpty {
+                let near = model.limits.machines.contains { $0.accounts.contains { $0.windows.contains(where: \.nearly) } }
+                Button {
+                    UISelectionFeedbackGenerator().selectionChanged()
+                    withAnimation(.easeOut(duration: 0.2)) { limits.wrappedValue.toggle() }
+                } label: {
+                    Image(systemName: "gauge.with.dots.needle.67percent")
+                        .font(.system(size: 17, weight: .regular))
+                        .frame(width: 40, height: 40)
+                        .background(Circle().fill(Color(limits.wrappedValue ? p.accentSoft.over(p.raised) : p.raised)))
+                        .overlay(alignment: .topTrailing) {
+                            if near {
+                                Circle().fill(Color(p.warning)).frame(width: 9, height: 9).offset(x: -6, y: 6)
+                            }
+                        }
+                        .foregroundStyle(Color(limits.wrappedValue ? p.primary : p.foreground))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(limits.wrappedValue ? "Hide plan limits" : "Show plan limits")
+            }
             if let bell {
                 Button(action: bell) {
                     Image(systemName: "bell")
