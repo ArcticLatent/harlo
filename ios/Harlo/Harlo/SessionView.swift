@@ -602,30 +602,28 @@ struct Composer: View {
                     session.draft = Mention.insert(f, into: session.draft)
                 }
             }
-            // Photos beside it; in it what to say, the session's settings and
-            // send or stop.
-            VStack(alignment: .leading, spacing: 8) {
-                    if !photos.isEmpty { PhotoStrip(photos: $photos) }
-                    TextField(placeholder, text: $session.draft, axis: .vertical)
-                        .lineLimit(1...6)
-                        .font(.system(size: 16.5))
-                        .focused($focused)
-                        .padding(.horizontal, 6)
-                        .padding(.top, 6)
-                    HStack(spacing: 8) {
-                        PhotoButton(photos: $photos, size: 34)
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 6) {
-                                if session.busy { steerOrQueue }
-                                settings
-                            }
-                        }
-                        MicButton(text: $session.draft, size: 34)
-                        sendOrStop
-                    }
+            // What to say; the session's settings (wrapping onto more lines
+            // when they don't fit); then photos, steer or queue, dictation,
+            // and send or stop.
+            VStack(alignment: .leading, spacing: 10) {
+                if !photos.isEmpty { PhotoStrip(photos: $photos) }
+                TextField(placeholder, text: $session.draft, axis: .vertical)
+                    .lineLimit(1...6)
+                    .font(.system(size: 16.5))
+                    .focused($focused)
+                    .padding(.horizontal, 6)
+                    .padding(.top, 6)
+                Flow(spacing: 6) { settings }
+                HStack(spacing: 10) {
+                    PhotoButton(photos: $photos, size: 36)
+                    if session.busy { steerOrQueue }
+                    Spacer(minLength: 0)
+                    MicButton(text: $session.draft, size: 36)
+                    sendOrStop
                 }
-                .padding(10)
-                .card(p, radius: 22)
+            }
+            .padding(10)
+            .card(p, radius: 22)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -706,6 +704,8 @@ struct Composer: View {
                 Text(session.model.isEmpty ? "Model" : session.model)
                     .font(.system(size: 13, weight: .medium))
                     .lineLimit(1)
+                    .frame(maxWidth: 180, alignment: .leading)
+                    .fixedSize(horizontal: true, vertical: false)
                 Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).foregroundStyle(Color(p.muted))
             }
             .padding(.leading, 5)
