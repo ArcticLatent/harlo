@@ -172,7 +172,8 @@ Rectangle {
         }
     }
 
-    // Unsent text per session, so switching sessions keeps drafts.
+    // Unsent text and attachments per session ({ text, files }), so
+    // switching sessions keeps drafts.
     property var drafts: ({})
 
     // A branch or fork hands the message back for editing.
@@ -214,11 +215,17 @@ Rectangle {
         }
         if (covered)
             return
-        if (session.key !== "")
-            drafts[session.key] = composer.text
+        if (session.key !== "") {
+            const files = []
+            for (let i = 0; i < session.attachments.length; i++) files.push(session.attachments[i])
+            drafts[session.key] = { text: composer.text, files: files }
+        }
         session.bind(Workspace.activeKey)
         Qt.callLater(root.refreshBranches)
-        composer.text = drafts[Workspace.activeKey] || ""
+        const draft = drafts[Workspace.activeKey] || { text: "", files: [] }
+        composer.text = draft.text
+        // (Files gone since, such as a pasted image cleaned up, are left out.)
+        for (const f of draft.files) session.addAttachment(f)
         transcript.scrollToEnd()
         composer.focusInput()
     }
@@ -259,7 +266,7 @@ Rectangle {
         const busy = session.status === "busy"
         session.send(text, busy ? (mode === "steer" ? "steer" : "followUp") : "normal")
         composer.text = ""
-        drafts[session.key] = ""
+        delete drafts[session.key]
         transcript.scrollToEnd()
     }
 
