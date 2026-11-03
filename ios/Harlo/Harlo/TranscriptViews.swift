@@ -348,11 +348,27 @@ struct UserBubble: View {
         HStack(alignment: .bottom, spacing: 8) {
             Spacer(minLength: 36)
             VStack(alignment: .trailing, spacing: 5) {
-                Text(row.text)
-                    .font(.system(size: 16.5))
+                // What came with it: photos and files (by name), and tags
+                // ("1 image", "Plan").
+                let files = row.title.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
+                if !files.isEmpty || !row.subtitle.isEmpty {
+                    Flow(spacing: 6) {
+                        ForEach(files, id: \.self) { f in
+                            attachment(f)
+                        }
+                        if !row.subtitle.isEmpty {
+                            Text(row.subtitle).font(.system(size: 12.5, weight: .medium)).opacity(0.8)
+                        }
+                    }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
+                }
+                if !row.text.isEmpty {
+                    Text(row.text)
+                        .font(.system(size: 16.5))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
                 if row.time > 0 {
                     Text(Style.clock(row.time))
                         .font(.system(size: 12))
@@ -367,6 +383,21 @@ struct UserBubble: View {
             UserAvatar(size: 30)
         }
         .padding(.top, 8)
+    }
+
+    /// An attachment: a photo (as the phone names them, or an image file)
+    /// or a file, by its name.
+    func attachment(_ path: String) -> some View {
+        let name = path.split(separator: "/").last.map(String.init) ?? path
+        let ext = name.split(separator: ".").last.map { $0.lowercased() } ?? ""
+        let photo = name.hasPrefix("Photo ") || ["png", "jpg", "jpeg", "gif", "webp", "heic"].contains(ext)
+        return HStack(spacing: 5) {
+            Image(systemName: photo ? "photo" : "doc").font(.system(size: 12, weight: .semibold))
+            Text(name).font(.system(size: 13, weight: .medium)).lineLimit(1).truncationMode(.middle)
+        }
+        .padding(.horizontal, 9)
+        .frame(height: 26)
+        .background(Capsule().fill(.primary.opacity(0.15)))
     }
 }
 

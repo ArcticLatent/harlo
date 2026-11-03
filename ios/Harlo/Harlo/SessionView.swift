@@ -569,6 +569,8 @@ struct Composer: View {
     var openSheet: (SessionSheet) -> Void
     var onSend: () -> Void
     @State private var photos: [Photo] = []
+    /// Photos sent and not yet with harlo (shown, dimmed, until they are).
+    @State private var sendingPhotos: [Photo] = []
     @State private var levels: [String] = []
     @State private var pickingLevel = false
     /// Files matching the `@` being typed.
@@ -606,6 +608,16 @@ struct Composer: View {
             // when they don't fit); then photos, steer or queue, dictation,
             // and send or stop.
             VStack(alignment: .leading, spacing: 10) {
+                if !sendingPhotos.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        PhotoStrip(photos: .constant(sendingPhotos), sending: true)
+                        Text(sendingPhotos.count == 1 ? "Sending 1 photo…" : "Sending \(sendingPhotos.count) photos…")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(Color(p.muted))
+                            .padding(.horizontal, 6)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
                 if !photos.isEmpty { PhotoStrip(photos: $photos) }
                 TextField(placeholder, text: $session.draft, axis: .vertical)
                     .lineLimit(1...6)
@@ -760,10 +772,13 @@ struct Composer: View {
         let (t, ph) = (text, photos)
         session.draft = ""
         photos = []
+        sendingPhotos = ph
         onSend()
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         Task {
-            if await model.send(t, photos: ph) {
+            let sent = await model.send(t, photos: ph)
+            sendingPhotos = []
+            if sent {
                 // On the lock screen while it works.
                 LiveActivities.start(for: session, model: model)
             } else {
