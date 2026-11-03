@@ -262,6 +262,35 @@ public actor HarloClient {
         try check(await call("pin", ["key": .string(key), "pinned": .bool(pinned)]))
     }
 
+    /// A session's shared plan.
+    public func plan(_ key: String) async throws -> Plan {
+        Plan(try check(await call("plan", ["key": .string(key)])))
+    }
+
+    /// Changes a session's plan: the plan after it.
+    public func editPlan(_ key: String, _ edit: PlanEdit) async throws -> Plan {
+        Plan(try check(await call("planEdit", ["key": .string(key), "edit": edit.json])))
+    }
+
+    /// Has another agent review a finished step's commit (its review comes
+    /// back to the session).
+    public func reviewStep(_ key: String, step: Int64, agent: String) async throws {
+        try check(await call("reviewStep", ["key": .string(key), "id": .int(step), "agent": .string(agent)]))
+    }
+
+    /// The specs of a session's repository.
+    public func specs(_ key: String) async throws -> Specs {
+        Specs(try check(await call("specs", ["key": .string(key)])))
+    }
+
+    /// A Mermaid diagram drawn by harlo, in these colours (`background`,
+    /// `surface`, `text`, `muted`, `accent` as `#rrggbb`).
+    public func diagram(_ source: String, light: Bool, colors: [String: String]) async throws -> DiagramPicture {
+        let r = try check(await call("diagram", ["source": .string(source), "light": .bool(light), "colors": .object(colors.mapValues { .string($0) })]))
+        guard let png = Data(base64Encoded: r["png"].text), !png.isEmpty else { throw HarloError.closed("harlo sent no picture.") }
+        return DiagramPicture(png: png, width: r["width"].double ?? 0, height: r["height"].double ?? 0)
+    }
+
     /// A settled session back among its project's others.
     public func putBack(_ key: String) async throws {
         try check(await call("putBack", ["key": .string(key)]))

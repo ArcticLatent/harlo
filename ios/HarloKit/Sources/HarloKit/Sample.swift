@@ -67,6 +67,7 @@ extension HarloModel {
         s.liveKey = "live:1"
         s.loading = false
         s.status = "busy"
+        s.plan = samplePlan()
         var info = SessionInfo()
         info.title = s.title
         info.model = "Claude Sonnet 4.5"

@@ -52,6 +52,21 @@ pub fn watch_limits() -> watch::Receiver<Value> {
     limits().subscribe()
 }
 
+/// Bumped when a session's shared plan changes (phones with one open ask
+/// for it again).
+fn plans() -> &'static watch::Sender<u64> {
+    static P: OnceLock<watch::Sender<u64>> = OnceLock::new();
+    P.get_or_init(|| watch::channel(0).0)
+}
+
+pub fn plans_changed() {
+    plans().send_modify(|n| *n += 1);
+}
+
+pub fn watch_plans() -> watch::Receiver<u64> {
+    plans().subscribe()
+}
+
 /// Whether a phone server runs (the workspace only builds the list then).
 pub fn active() -> bool {
     sessions().receiver_count() > 0

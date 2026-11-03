@@ -719,3 +719,52 @@ final class MachinesTests: XCTestCase {
         XCTAssertNotNil(m.sessions.first { !$0.settled.isEmpty }, "a settled sample")
     }
 }
+
+final class PlanTests: XCTestCase {
+    func testPlanFromHarlo() {
+        let v = try! JSON.parse(#"""
+        { "enabled": true, "commits": true, "reviewers": [{ "id": "claude", "label": "Claude" }, { "id": "omp", "label": "Oh My Pi" }],
+          "steps": [{ "id": 1, "title": "One", "status": "done", "commit": "abc123", "summary": "did it" },
+                    { "id": 2, "title": "Two", "status": "active", "detail": "how" },
+                    { "id": 3, "title": "Three", "status": "skipped", "editedByUser": true },
+                    { "id": 4, "title": "Four" }] }
+        """#)
+        let plan = Plan(v)
+        XCTAssertTrue(plan.shows)
+        XCTAssertEqual(plan.finished, 2, "done and skipped")
+        XCTAssertEqual(plan.current?.title, "Two")
+        XCTAssertEqual(plan.steps[3].status, "pending")
+        XCTAssertTrue(plan.steps[3].open)
+        XCTAssertFalse(plan.steps[0].open)
+        XCTAssertEqual(plan.reviewers(for: "claude").map(\.id), ["omp", "claude"], "another agent first")
+        XCTAssertFalse(Plan(["enabled": false, "steps": []]).shows)
+    }
+
+    func testPlanEditsAsHarloTakesThem() {
+        XCTAssertEqual(PlanEdit.add(title: "T", detail: "", after: 3).json, ["op": "add", "title": "T", "detail": "", "after": 3])
+        XCTAssertEqual(PlanEdit.add(title: "T", detail: "d", after: nil).json, ["op": "add", "title": "T", "detail": "d"])
+        XCTAssertEqual(PlanEdit.skip(id: 2, skipped: true).json, ["op": "skip", "id": 2, "skipped": true])
+        XCTAssertEqual(PlanEdit.shift(id: 2, by: -1).json, ["op": "shift", "id": 2, "by": -1])
+    }
+
+    func testDemoEdits() {
+        var plan = HarloModel.samplePlan()
+        plan = HarloModel.demoEdit(plan, .add(title: "New", detail: "", after: 1))
+        XCTAssertEqual(plan.steps.map(\.title)[1], "New")
+        XCTAssertTrue(plan.steps[1].editedByUser)
+        plan = HarloModel.demoEdit(plan, .skip(id: 3, skipped: true))
+        XCTAssertEqual(plan.steps.first { $0.id == 3 }?.status, "skipped")
+        plan = HarloModel.demoEdit(plan, .remove(id: 3))
+        XCTAssertNil(plan.steps.first { $0.id == 3 })
+    }
+
+    func testSpecsAndThePlanEvent() {
+        let specs = Specs(["enabled": true, "specs": [["path": "SPEC.md", "title": "harlo", "summary": "s"]]])
+        XCTAssertEqual(specs.specs.first?.path, "SPEC.md")
+        if case .plan(let key)? = Event(["ev": "plan", "key": "live:1"]) { XCTAssertEqual(key, "live:1") } else { XCTFail("a plan event") }
+    }
+
+    func testColoursAsHex() {
+        XCTAssertEqual(RGBA(hex: "#5b9bf0")?.hex, "#5b9bf0")
+    }
+}

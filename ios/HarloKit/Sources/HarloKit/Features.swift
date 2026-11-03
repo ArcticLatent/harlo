@@ -614,6 +614,12 @@ public struct RGBA: Codable, Equatable, Sendable {
     }
 
     public var luminance: Double { 0.2126 * r + 0.7152 * g + 0.0722 * b }
+
+    /// `#rrggbb` (opaque).
+    public var hex: String {
+        let c = { (v: Double) in String(format: "%02x", Int((max(0, min(1, v)) * 255).rounded())) }
+        return "#" + c(r) + c(g) + c(b)
+    }
 }
 
 /// One variant (dark or light) of a theme, as the desktop's Theme.qml

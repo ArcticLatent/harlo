@@ -119,3 +119,46 @@ extension HarloModel {
         if let i = sessions.firstIndex(where: { $0.key == key }) { sessions[i].status = status }
     }
 }
+
+extension HarloModel {
+    /// A plan edit in the demo (and the screenshots), done here.
+    nonisolated static func demoEdit(_ plan: Plan, _ edit: PlanEdit) -> Plan {
+        var p = plan
+        func at(_ id: Int64) -> Int? { p.steps.firstIndex { $0.id == id } }
+        switch edit {
+        case .add(let t, let d, let after):
+            var step = PlanStep(["id": .int((p.steps.map(\.id).max() ?? 0) + 1), "title": .string(t), "detail": .string(d), "editedByUser": true])
+            step.status = "pending"
+            let i = after.flatMap(at).map { $0 + 1 } ?? p.steps.count
+            p.steps.insert(step, at: i)
+        case .edit(let id, let t, let d):
+            if let i = at(id) { p.steps[i].title = t; p.steps[i].detail = d; p.steps[i].editedByUser = true }
+        case .remove(let id):
+            p.steps.removeAll { $0.id == id }
+        case .shift(let id, let by):
+            if let i = at(id) {
+                let j = max(0, min(p.steps.count - 1, i + by))
+                p.steps.swapAt(i, j)
+            }
+        case .skip(let id, let skipped):
+            if let i = at(id) { p.steps[i].status = skipped ? "skipped" : "pending" }
+        }
+        return p
+    }
+
+    nonisolated static let sampleSpecs = Specs(specs: [
+        Spec(path: "SPEC.md", title: "harlo", summary: "What harlo is and how its parts fit."),
+        Spec(path: "crates/harlo-core/SPEC.md", title: "harlo-core", summary: "Sessions, transcripts and the sidebar."),
+    ])
+
+    nonisolated static func samplePlan() -> Plan {
+        var plan = Plan(steps: [
+            PlanStep(["id": 1, "title": "Keep the list's rows on a status change", "status": "done", "summary": "Rows are merged by key instead of rebuilt.", "commit": "3f9a2c41d0"]),
+            PlanStep(["id": 2, "title": "Keep the scroll position", "status": "active", "detail": "Anchor to the first visible row."]),
+            PlanStep(["id": 3, "title": "A test for reordering", "status": "pending"]),
+        ])
+        plan.commits = true
+        plan.reviewers = [Agent(id: "claude", label: "Claude"), Agent(id: "opencode", label: "OpenCode")]
+        return plan
+    }
+}

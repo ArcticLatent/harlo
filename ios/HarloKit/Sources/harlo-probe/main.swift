@@ -66,6 +66,15 @@ func run(_ link: String) async {
     let choices = await model.newSessionChoices()
     check(choices?.hosts.isEmpty == true && choices?.machines.map(\.host) == [""], "a new session's places: this computer only (\(choices?.machines.map(\.host) ?? []))")
     check(model.sessions.allSatisfy { $0.host.isEmpty }, "its sessions run on this computer")
+    // The plan and specs (a session outside a project has neither), and a
+    // diagram harlo draws for the phone.
+    check(model.hasPlans && s.plan?.enabled == false && s.plan?.steps.isEmpty == true, "a session outside a project: its plan is off (\(String(describing: s.plan)))")
+    await model.loadSpecs()
+    check(s.specs != nil, "its specs can be asked for (\(s.specs?.specs.count ?? -1))")
+    let drawn = await model.diagram("flowchart LR\n  A[phone] --> B[harlo]", light: true, colors: ["background": "#ffffff", "text": "#111111"])
+    check((drawn.picture?.width ?? 0) > 50 && UInt8(drawn.picture?.png.dropFirst().first ?? 0) == UInt8(ascii: "P"), "harlo draws a Mermaid diagram for the phone (\(drawn.picture.map { "\(Int($0.width))x\(Int($0.height)), \($0.png.count) bytes" } ?? drawn.why))")
+    let bad = await model.diagram("not a diagram at all", light: false, colors: [:])
+    check(bad.picture == nil && !bad.why.isEmpty, "one it can't draw says why (\(bad.why))")
     let stopped = await model.stoppedModels(agent: "pi", models: ["nowhere/nothing"])
     check(model.features.contains("stoppedModels") && stopped.isEmpty, "a model on no server of harlo's isn't marked stopped (\(stopped))")
 

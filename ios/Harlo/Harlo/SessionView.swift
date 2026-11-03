@@ -145,6 +145,7 @@ struct SessionContent: View {
                     ActivityLine(session: session)
                     LimitLine(session: session)
                     CompactLine(session: session)
+                    PlanLine(session: session) { sheet = .plan }
                     ActivityBar(session: session) { sheet = $0 }
                     if let req = session.requests.first {
                         RequestCard(request: req)
@@ -236,6 +237,13 @@ struct SessionContent: View {
                     } label: {
                         Label("Share as Markdown", systemImage: "square.and.arrow.up")
                     }
+                    if model.hasPlans {
+                        Button {
+                            sheet = .plan
+                        } label: {
+                            Label("Plan and specs", systemImage: "list.bullet.clipboard")
+                        }
+                    }
                     if !session.todos.isEmpty || !session.subagents.isEmpty {
                         Button {
                             sheet = .activity
@@ -302,6 +310,7 @@ struct SessionContent: View {
                 case .file(let path, let line): FileView(path: path, line: line)
                 case .branches: BranchesView(busy: session.busy) { branch = $0 }
                 case .changes: ChangesView()
+                case .plan: PlanSheet(session: session)
                 case .activity: ActivityView(session: session)
                 case .actions: ActionLogView(session: session)
                 case .share(let url): ShareSheet(items: [url])
@@ -423,7 +432,7 @@ extension SessionContent {
 
 /// The sheets a session opens.
 enum SessionSheet: Identifiable {
-    case changes, activity, models, actions
+    case changes, activity, models, actions, plan
     /// The session as a Markdown file, to share.
     case share(URL)
     /// What waits on you in other sessions.
@@ -441,6 +450,7 @@ enum SessionSheet: Identifiable {
         case .file(let path, let line): return "file:\(path):\(line)"
         case .branches: return "branches"
         case .changes: return "changes"
+        case .plan: return "plan"
         case .activity: return "activity"
         case .actions: return "actions"
         case .share(let url): return "share:\(url.path)"

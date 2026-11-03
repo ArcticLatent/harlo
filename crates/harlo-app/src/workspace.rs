@@ -2666,6 +2666,7 @@ impl Workspace {
     pub(crate) fn plans_changed(mut self: Pin<&mut Self>) {
         let next = self.plans_revision + 1;
         self.as_mut().set_plans_revision(next);
+        crate::phone_bridge::plans_changed();
     }
 
     pub fn review_step(mut self: Pin<&mut Self>, key: &QString, id: i32, agent: &QString) -> QString {
@@ -5562,6 +5563,24 @@ impl Workspace {
                 self.as_mut().update_meta(&key, |m| m.archived = on);
                 json!({ "ok": true })
             }
+            // A session's shared plan (as the dock above the desktop's
+            // composer), the agents that can review a step, and its edits.
+            "plan" | "planEdit" => {
+                if msg["op"] == "planEdit" {
+                    self.as_mut().plan_edit(&QString::from(&key), &QString::from(&msg["edit"].to_string()));
+                }
+                let mut plan: serde_json::Value = serde_json::from_str(&self.plan_json(&QString::from(&key)).to_string()).unwrap_or_default();
+                plan["reviewers"] = HarnessKind::PROVIDERS.iter().filter(|&&k| self.usable_harness(k)).map(|k| json!({ "id": k.as_str(), "label": k.label() })).collect();
+                plan
+            }
+            "reviewStep" => {
+                let id = msg["id"].as_i64().unwrap_or(-1) as i32;
+                match self.as_mut().review_step(&QString::from(&key), id, &QString::from(&text("agent"))).to_string() {
+                    e if !e.is_empty() => fail(&e),
+                    _ => json!({ "ok": true }),
+                }
+            }
+            "specs" => serde_json::from_str(&self.specs_json(&QString::from(&key)).to_string()).unwrap_or_default(),
             // A settled session back among the others.
             "putBack" => {
                 self.as_mut().put_back(&QString::from(&key));

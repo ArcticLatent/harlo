@@ -230,6 +230,8 @@ public enum Event: Equatable, Sendable {
     case subagents(key: String, subagents: [Subagent])
     /// Plan limits changed (this computer's or a machine's).
     case limits(PlanLimits)
+    /// The open session's shared plan changed: ask for it again.
+    case plan(key: String)
     /// This phone was removed in harlo.
     case revoked
 
@@ -251,6 +253,7 @@ public enum Event: Equatable, Sendable {
         case "todos": self = .todos(key: key, phases: TodoPhase.list(v["phases"]))
         case "subagents": self = .subagents(key: key, subagents: (v["subagents"].array ?? []).map(Subagent.init))
         case "limits": self = .limits(PlanLimits(v))
+        case "plan": self = .plan(key: key)
         case "revoked": self = .revoked
         default: return nil
         }

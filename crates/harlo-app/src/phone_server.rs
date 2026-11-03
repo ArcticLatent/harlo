@@ -310,7 +310,7 @@ fn event(key: &str, u: &SessionUpdate) -> Option<Value> {
 /// (sessions say their machine), `settled` (settled sessions, for a phone
 /// that says it shows them), `limits` (plan limits: the `limits` call and
 /// event), `compaction` (a session's meta says where it compacts).
-const FEATURES: &[&str] = &["serverStart", "machines", "settled", "limits", "compaction", "connect", "modelServers", "putBack", "stoppedModels"];
+const FEATURES: &[&str] = &["serverStart", "machines", "settled", "limits", "compaction", "connect", "modelServers", "putBack", "stoppedModels", "plan", "diagrams"];
 
 /// The session list for one phone: settled sessions only for one that
 /// shows them.
@@ -425,6 +425,19 @@ async fn stopped_models(agent: String, host: String, models: Vec<String>) -> std
     })
     .await
     .unwrap_or_default()
+}
+
+/// A Mermaid diagram drawn for the phone: `{ png (base64), width, height }`
+/// (points), in the phone's colours (`colors`: `{ background, surface,
+/// text, muted, accent }`).
+async fn diagram(msg: &Value) -> Value {
+    use base64::Engine as _;
+    let (source, light, colors) = (msg["source"].as_str().unwrap_or_default().to_owned(), msg["light"].as_bool().unwrap_or(false), msg["colors"].clone());
+    match tokio::task::spawn_blocking(move || crate::diagrams::for_phone(&source, light, &colors)).await {
+        Ok(Ok((png, w, h))) => json!({ "png": base64::engine::general_purpose::STANDARD.encode(png), "width": w, "height": h }),
+        Ok(Err(e)) => json!({ "error": e }),
+        Err(_) => json!({ "error": "merman couldn't draw this diagram." }),
+    }
 }
 
 /// A server as phones show it.
@@ -875,6 +888,9 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
     let mut wants_sessions = false;
     let mut limits = crate::phone_bridge::watch_limits();
     let mut wants_limits = false;
+    // (A phone that asked for a plan hears when one changes.)
+    let mut plans = crate::phone_bridge::watch_plans();
+    let mut wants_plans = false;
     // The open session's subagents, from their frames.
     let mut subagents: Vec<Value> = Vec::new();
     // The open session's rows the phone has.
@@ -934,12 +950,13 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
                         Value::Null
                     }
                     // (Off the loop: machines and model servers are asked over SSH.)
-                    "connect" | "servers" | "stoppedModels" | "startServer" | "stopServer" => {
+                    "connect" | "servers" | "stoppedModels" | "startServer" | "stopServer" | "diagram" => {
                         let (msg, later, id) = (msg.clone(), later_tx.clone(), id.clone());
                         tokio::spawn(async move {
                             let mut reply = match msg["op"].as_str().unwrap_or_default() {
                                 "connect" => connect_machine(&msg).await,
                                 "servers" => model_servers().await,
+                                "diagram" => diagram(&msg).await,
                                 "stoppedModels" => {
                                     let models: Vec<String> = msg["models"].as_array().into_iter().flatten().filter_map(|m| m.as_str().map(str::to_owned)).collect();
                                     let (agent, host) = (msg["agent"].as_str().unwrap_or_default().to_owned(), msg["host"].as_str().unwrap_or_default().to_owned());
@@ -952,7 +969,11 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
                         });
                         Value::Null
                     }
-                    "projects" | "limitOf" | "resumeAtReset" | "cancelResume" | "modes" | "setModes" | "rename" | "archive" | "pin" | "putBack" | "theme" | "setAvatar" => crate::phone_bridge::call(msg.clone()).await,
+                    "projects" | "limitOf" | "resumeAtReset" | "cancelResume" | "modes" | "setModes" | "rename" | "archive" | "pin" | "putBack" | "reviewStep" | "specs" | "theme" | "setAvatar" => crate::phone_bridge::call(msg.clone()).await,
+                    "plan" | "planEdit" => {
+                        wants_plans = true;
+                        crate::phone_bridge::call(msg.clone()).await
+                    }
                     // Edit & resend (`fork` false) or fork from one of the user's messages.
                     "branch" => match (crate::registry::get(msg["key"].as_str().unwrap_or_default()), &open) {
                         (Some(live), Some((key, _))) if key == msg["key"].as_str().unwrap_or_default() => {
@@ -1020,6 +1041,13 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
                 }
             }
             Some(reply) = later.recv() => vec![reply],
+            Ok(()) = plans.changed(), if wants_plans => {
+                plans.borrow_and_update();
+                match &open {
+                    Some((key, _)) => vec![json!({ "ev": "plan", "key": key })],
+                    None => Vec::new(),
+                }
+            }
             Ok(()) = limits.changed(), if wants_limits => {
                 let mut ev = limits.borrow_and_update().clone();
                 ev["ev"] = json!("limits");

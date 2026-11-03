@@ -153,9 +153,15 @@ fn fonts() -> Result<NativeFontContext, String> {
 
 /// Draws a diagram (blocking): the PNG, at twice its size.
 fn draw(source: &str, light: bool, colors: &Value) -> Result<Vec<u8>, String> {
+    draw_within(source, light, colors, (6000, 6000))
+}
+
+/// Draws a diagram at twice its size, made smaller to fit `fit` (in
+/// pixels before it's doubled).
+fn draw_within(source: &str, light: bool, colors: &Value, fit: (u32, u32)) -> Result<Vec<u8>, String> {
     let environment = SvgEnvironment::deterministic().with_native_font_context(fonts()?).map_err(|e| e.to_string())?;
     let renderer = Renderer::new().with_engine(Engine::new().with_site_config(MermaidConfig::from_value(mermaid_config(light, colors))));
-    let raster = RasterOptions::default().with_scale(2.0).with_fit_to(RasterFitBox::contain(6000, 6000));
+    let raster = RasterOptions::default().with_scale(2.0).with_fit_to(RasterFitBox::contain(fit.0, fit.1));
     let request = RenderRequest::png(source, OperationControl::new(), PngRequest { svg: SvgRequest { environment, ..Default::default() }, options: raster });
     // merman is new: a failure in it stays a failure of this diagram.
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| renderer.render(request))).map_err(|_| "merman couldn't draw this diagram.".to_owned())?;
@@ -271,6 +277,35 @@ impl Diagrams {
     }
 }
 
+/// The most a phone's picture of a diagram may be (a relay carries 4 MB a
+/// message, in base64 twice).
+const PHONE_BYTES: usize = 2 << 20;
+
+/// A diagram for a phone (blocking): its PNG and size in points (drawn at
+/// twice that, at most 2400 × 4800 pixels), from the cache when it was
+/// drawn before. `colors` as `diagram` takes them.
+pub fn for_phone(source: &str, light: bool, colors: &Value) -> Result<(Vec<u8>, u32, u32), String> {
+    if source.trim().is_empty() {
+        return Err("It's empty.".into());
+    }
+    let key = key_of(&format!("{source}\n%% phone"), light, colors);
+    let file = cache().join(format!("{key}.png"));
+    let png = match std::fs::read(&file) {
+        Ok(png) if png_size(&png).is_some() => png,
+        _ => {
+            let png = draw_within(source, light, colors, (1200, 2400))?;
+            let _ = std::fs::create_dir_all(cache());
+            let _ = std::fs::write(&file, &png);
+            png
+        }
+    };
+    if png.len() > PHONE_BYTES {
+        return Err("This diagram is too big to send to the phone.".into());
+    }
+    let (w, h) = png_size(&png).ok_or("The picture was empty.")?;
+    Ok((png, w / 2, h / 2))
+}
+
 /// `harlo --check-diagram`: draws a small diagram and says how it went
 /// (the release checks it on each system).
 pub fn check() -> i32 {
@@ -317,6 +352,9 @@ mod tests {
             let (w, h) = png_size(&png).unwrap();
             assert!(w > 100 && h > 50, "{source}: {w}x{h}");
         }
+        let png = draw_within("flowchart LR\n  A[one] --> B[two] --> C[three] --> D[four] --> E[five] --> F[six] --> G[seven]", false, &Value::Null, (400, 400)).unwrap();
+        let (w, h) = png_size(&png).unwrap();
+        assert!(w <= 800 && h <= 800 && w > 200, "made to fit, then doubled: {w}x{h}");
         assert!(draw("flowchart LR\n  A --> ", true, &Value::Null).is_err());
         assert!(draw("not a diagram at all", true, &Value::Null).is_err());
     }

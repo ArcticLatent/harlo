@@ -83,6 +83,10 @@ public final class OpenSession {
     /// When it continues on its own after its limit resets (unix ms, 0 if
     /// it isn't going to).
     public internal(set) var resumesAt: Int64 = 0
+    /// Its shared plan (nil: harlo hasn't said, or doesn't have plans).
+    public internal(set) var plan: Plan?
+    /// Its repository's specs (nil: not asked yet).
+    public internal(set) var specs: Specs?
     /// Your messages a turn can be undone to (row key → snapshot).
     public internal(set) var undoable: [String: String] = [:]
     /// Its folder is a git repository (or holds some): its changes have
@@ -499,6 +503,8 @@ public final class HarloModel {
         case .limits(let l):
             limits = l
             if let s = session { Task { await refreshLimit(s) } }
+        case .plan(let key):
+            if let s = session, s.liveKey == key { Task { await refreshPlan(s) } }
         case .meta(_, let info):
             // Another model can be another plan's.
             let before = session?.info.modelId
@@ -685,6 +691,7 @@ public final class HarloModel {
             s.opened(liveKey: r.key, harness: r.harness)
             s.modes = try? await c.modes(r.key)
             await refreshLimit(s)
+            await refreshPlan(s)
         } catch {
             s.error = Self.describe(error)
             s.loading = false
@@ -728,6 +735,61 @@ public final class HarloModel {
         do { return try await body(c, key) } catch {
             alert = Self.describe(error)
             return nil
+        }
+    }
+
+    // ---- the plan, specs and diagrams --------------------------------------------
+
+    /// harlo has plans, specs and diagrams for the phone (an older one hasn't).
+    public var hasPlans: Bool { demo || samples != nil || features.contains("plan") }
+    public var drawsDiagrams: Bool { demo || samples != nil || features.contains("diagrams") }
+
+    /// The open session's plan, from harlo.
+    func refreshPlan(_ s: OpenSession) async {
+        guard features.contains("plan"), let c = client, !s.liveKey.isEmpty,
+              let plan = try? await c.plan(s.liveKey), session === s else { return }
+        s.plan = plan
+    }
+
+    /// Changes the open session's plan.
+    public func editPlan(_ edit: PlanEdit) async {
+        guard let s = session else { return }
+        if demo || samples != nil { s.plan = Self.demoEdit(s.plan ?? Plan(), edit); return }
+        if let plan = await with({ c, k in try await c.editPlan(k, edit) }) { s.plan = plan }
+    }
+
+    /// Has another agent review a finished step's commit: true when it
+    /// started (its review comes back to the session).
+    public func reviewStep(_ step: PlanStep, with agent: String) async -> Bool {
+        if demo || samples != nil { return true }
+        return await with { c, k in try await c.reviewStep(k, step: step.id, agent: agent) } != nil
+    }
+
+    /// The open session's repository's specs.
+    public func loadSpecs() async {
+        guard let s = session else { return }
+        if demo || samples != nil { s.specs = Self.sampleSpecs; return }
+        guard features.contains("plan") else { return }
+        if let specs = await with({ c, k in try await c.specs(k) }) { s.specs = specs }
+    }
+
+    /// Diagrams drawn this run (by source, mode and colours).
+    @ObservationIgnored var diagrams: [String: DiagramPicture] = [:]
+
+    /// A Mermaid diagram drawn by harlo in these colours (nil: it can't be,
+    /// `why` says why).
+    public func diagram(_ source: String, light: Bool, colors: [String: String]) async -> (picture: DiagramPicture?, why: String) {
+        let key = "\(light)|\(colors.sorted { $0.key < $1.key })|\(source)"
+        if let d = diagrams[key] { return (d, "") }
+        if demo || samples != nil { return (nil, "harlo draws diagrams on your computer.") }
+        guard features.contains("diagrams") else { return (nil, "This harlo doesn't draw diagrams for the phone.") }
+        guard let c = client else { return (nil, "Not connected to harlo.") }
+        do {
+            let d = try await c.diagram(source, light: light, colors: colors)
+            diagrams[key] = d
+            return (d, "")
+        } catch {
+            return (nil, Self.describe(error))
         }
     }
 
@@ -1089,7 +1151,7 @@ extension Event {
     public var sessionKey: String? {
         switch self {
         case .reset(let k, _, _), .rows(let k, _), .status(let k, _), .meta(let k, _), .request(let k, _), .cleared(let k, _),
-             .commands(let k, _), .queue(let k, _, _), .todos(let k, _), .subagents(let k, _): return k
+             .commands(let k, _), .queue(let k, _, _), .todos(let k, _), .subagents(let k, _), .plan(let k): return k
         case .sessions, .limits, .revoked: return nil
         }
     }

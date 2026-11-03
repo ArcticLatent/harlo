@@ -262,6 +262,7 @@ struct ToolCard: View {
 }
 
 struct RowView: View {
+    @Environment(HarloModel.self) private var model
     @Environment(\.palette) private var p
     let row: Row
 
@@ -272,7 +273,11 @@ struct RowView: View {
         case "markdown":
             RichTextView(blocks: RichCache.blocks(row.html))
         case "code":
-            CodeBlock(spans: codeSpans, language: row.title, raw: row.text)
+            if row.title.lowercased() == "mermaid" && model.drawsDiagrams {
+                DiagramBlock(source: row.text, code: CodeBlock(spans: codeSpans, language: row.title, raw: row.text))
+            } else {
+                CodeBlock(spans: codeSpans, language: row.title, raw: row.text)
+            }
         case "thinking":
             ThinkingRow(row: row)
         case "tool":
