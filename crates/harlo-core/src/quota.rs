@@ -338,6 +338,42 @@ pub fn resets_due(accounts: &[Value], since: i64, now: i64) -> Vec<(String, Stri
     out
 }
 
+/// Whose limits a session draws on: Claude's sign-in, else its model's
+/// provider (as omp names its accounts; OpenCode's "openai" is ChatGPT's).
+/// "" for an agent without plan limits.
+pub fn session_provider(harness: &str, model_id: &str) -> String {
+    if harness == "claude" {
+        return "Claude".to_owned();
+    }
+    if !matches!(harness, "pi" | "omp" | "opencode") {
+        return String::new();
+    }
+    let p = model_id.split('/').next().unwrap_or_default();
+    if harness == "opencode" && p == "openai" { "openai-codex".to_owned() } else { p.to_owned() }
+}
+
+/// A session's plan limit as the line above the composer says it (None:
+/// under 90% everywhere): its fullest window of 90% or more (`label`,
+/// `usedFraction`, `resetsAt`), whether one is used up (`out`), and when
+/// work can go on (`resetAt`: when the last used-up window resets, 0 when
+/// none is used up). `accounts` are its machine's.
+pub fn session_limit(accounts: &[Value], harness: &str, model_id: &str) -> Option<Value> {
+    let provider = session_provider(harness, model_id);
+    if provider.is_empty() {
+        return None;
+    }
+    let windows: Vec<&Value> = accounts.iter().filter(|a| a["provider"] == provider.as_str()).flat_map(|a| a["windows"].as_array().into_iter().flatten()).collect();
+    let used = |w: &Value| w["usedFraction"].as_f64().unwrap_or(0.0);
+    let gone = |w: &Value| w["status"] == "exhausted" || used(w) >= 1.0;
+    let worst = windows.iter().copied().filter(|w| used(w) >= NEARLY || gone(w)).fold(None::<&Value>, |best, w| match best {
+        Some(b) if used(b) >= used(w) => Some(b),
+        _ => Some(w),
+    })?;
+    let out = gone(worst);
+    let reset_at = if out { windows.iter().copied().filter(|w| gone(w)).filter_map(|w| w["resetsAt"].as_i64()).max().unwrap_or(0) } else { 0 };
+    Some(json!({ "provider": provider, "label": worst["label"], "usedFraction": used(worst), "resetsAt": worst["resetsAt"], "out": out, "resetAt": reset_at }))
+}
+
 /// A window that has reset: nothing used, until fresh numbers come.
 pub fn mark_reset(accounts: &mut [Value], provider: &str, label: &str) {
     for a in accounts.iter_mut().filter(|a| a["provider"] == provider) {
@@ -380,6 +416,24 @@ pub fn limit_name(provider: &str, label: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_sessions_limit() {
+        let accounts = vec![
+            json!({ "provider": "Claude", "windows": [
+                { "label": "Session (5 h)", "usedFraction": 1.0, "status": "exhausted", "resetsAt": 2000 },
+                { "label": "Weekly", "usedFraction": 0.95, "status": "ok", "resetsAt": 9000 },
+            ] }),
+            json!({ "provider": "openai-codex", "windows": [{ "label": "Weekly", "usedFraction": 0.5, "status": "ok", "resetsAt": 5000 }] }),
+        ];
+        let claude = session_limit(&accounts, "claude", "").unwrap();
+        assert_eq!((claude["label"].as_str(), claude["out"].as_bool(), claude["resetAt"].as_i64()), (Some("Session (5 h)"), Some(true), Some(2000)));
+        // Under 90%, an agent without plan limits, a provider with none here.
+        assert!(session_limit(&accounts, "opencode", "openai/gpt-6").is_none());
+        assert!(session_limit(&accounts, "hermes", "anthropic/x").is_none());
+        assert!(session_limit(&accounts, "pi", "anthropic/x").is_none());
+        assert_eq!(session_provider("opencode", "openai/gpt-6"), "openai-codex");
+    }
+
     #[test]
     fn a_machine_says_how_pi_signs_in_to_openai() {
         let (plan, rest) = super::split_host_report(b"pi-openai:oauth\n{\"reports\":[]}");

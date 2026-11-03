@@ -60,6 +60,14 @@ struct DashboardView: View {
                     .card(p, radius: 16)
                     .plainRow()
             }
+            // Plan limits (when harlo says them): before the sessions.
+            if !all && !model.limits.isEmpty {
+                Text("Plan limits")
+                    .font(.system(size: 21, weight: .semibold))
+                    .plainRow(top: 14, bottom: 4)
+                PlanLimitsCard(limits: model.limits)
+                    .plainRow()
+            }
             HStack {
                 Text(all ? "All sessions" : "Recent sessions")
                     .font(.system(size: 21, weight: .semibold))

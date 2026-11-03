@@ -48,6 +48,15 @@ func run(_ link: String) async {
     let opened = await waitFor(5) { !s.liveKey.isEmpty && !s.loading }
     check(opened && s.harness == "demo", "a session opens (\(s.harness), \(s.error ?? "no error"))")
 
+    // This harlo's features; plan limits (none on a scratch computer), and a
+    // session's (the demo agent has no plan).
+    check(["limits", "compaction", "serverStart"].allSatisfy(model.features.contains), "harlo says what it does (\(model.features.sorted()))")
+    check(model.limits.isEmpty && model.limits.machines.map(\.host) == [""], "plan limits: this computer's, none here (\(model.limits.machines.map(\.host)))")
+    check(s.limit == nil && s.resumesAt == 0, "a session's plan limit: none for an agent without a plan")
+    await model.continueAtReset()
+    check(model.alert == "This session's limit isn't used up.", "continue at the reset needs a used-up limit (\(model.alert ?? "no alert"))")
+    model.alert = nil
+
     await model.send("fast: hello from the phone")
     let replied = await waitFor(8) {
         s.rows.contains { $0.kind == "user" && $0.text.contains("hello from the phone") }

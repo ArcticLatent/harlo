@@ -205,6 +205,11 @@ struct SettingsView: View {
             } else if let push = model.push {
                 Toggle("Questions and approvals", isOn: Binding(get: { push.asks }, set: { on in Task { await model.setPushWants(asks: on, done: push.done) } }))
                 Toggle("Finished runs", isOn: Binding(get: { push.done }, set: { on in Task { await model.setPushWants(asks: push.asks, done: on) } }))
+                // (An older harlo doesn't send them.)
+                if model.features.contains("limits") {
+                    Toggle("Plan limits used up and reset", isOn: Binding(get: { push.limits },
+                                                                          set: { on in Task { await model.setPushWants(asks: push.asks, done: push.done, limits: on) } }))
+                }
             } else if let problem = Notifications.problem {
                 Text(problem).foregroundStyle(Color(p.warning))
             } else {

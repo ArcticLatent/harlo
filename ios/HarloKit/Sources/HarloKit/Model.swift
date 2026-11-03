@@ -78,6 +78,11 @@ public final class OpenSession {
     public internal(set) var earlier = 0
     /// Questions and approvals waiting, oldest first.
     public internal(set) var requests: [UIRequest] = []
+    /// Its plan limit, from 90% (nil: under it, or harlo doesn't say).
+    public internal(set) var limit: SessionLimit?
+    /// When it continues on its own after its limit resets (unix ms, 0 if
+    /// it isn't going to).
+    public internal(set) var resumesAt: Int64 = 0
     /// Your messages a turn can be undone to (row key → snapshot).
     public internal(set) var undoable: [String: String] = [:]
     /// Its folder is a git repository (or holds some): its changes have
@@ -231,6 +236,12 @@ public final class HarloModel {
     /// Where this phone's notifications go, and what it wants (kept; harlo
     /// gets it on each connection).
     public private(set) var push: PushRegistration?
+    /// What the harlo it's connected to does beyond the first app's (see
+    /// `Ready.features`).
+    public internal(set) var features: Set<String> = []
+    /// Plan limits on harlo's computer and each machine (empty until harlo
+    /// says, or when it doesn't).
+    public internal(set) var limits = PlanLimits()
     /// Answers without a harlo (screenshots of the app, the demo).
     @ObservationIgnored public var samples: Samples?
     /// The demo: sample sessions, no harlo (see Demo.swift).
@@ -363,6 +374,7 @@ public final class HarloModel {
         if !ready.harloName.isEmpty { h.name = ready.harloName }
         h.learn(ready.endpoints)
         setHost(h)
+        features = ready.features
         startLoop(with: c)
         await old.close()
         return true
@@ -455,12 +467,18 @@ public final class HarloModel {
         if !ready.harloName.isEmpty { h.name = ready.harloName }
         h.learn(ready.endpoints)
         setHost(h)
+        features = ready.features
         return c
     }
 
     private func connected(_ c: HarloClient) async {
         if let p = push { _ = try? await c.call("push", p.json) }
         if let s = try? await c.sessions() { sessions = s }
+        if !features.contains("limits") {
+            limits = PlanLimits()
+        } else if let l = try? await c.limits() {
+            limits = l
+        }
         // In the background (a notification's Allow) only what's asked: the
         // open session comes back when the app does.
         if active, let s = session { await reopen(s) }
@@ -477,6 +495,14 @@ public final class HarloModel {
         case .revoked:
             forgetHost()
             alert = "This phone was removed in harlo. Pair it again to use it."
+        case .limits(let l):
+            limits = l
+            if let s = session { Task { await refreshLimit(s) } }
+        case .meta(_, let info):
+            // Another model can be another plan's.
+            let before = session?.info.modelId
+            session?.take(ev)
+            if let s = session, before != info.modelId || info.limitRefused { Task { await refreshLimit(s) } }
         default:
             session?.take(ev)
         }
@@ -491,6 +517,7 @@ public final class HarloModel {
         hangUp()
         setHost(nil)
         sessions = []
+        limits = PlanLimits()
         session = nil
         state = .unpaired
     }
@@ -510,11 +537,12 @@ public final class HarloModel {
         await savePush(p)
     }
 
-    /// Which notifications this phone wants.
-    public func setPushWants(asks: Bool, done: Bool) async {
+    /// Which notifications this phone wants (`limits` nil: as it was).
+    public func setPushWants(asks: Bool, done: Bool, limits: Bool? = nil) async {
         guard var p = push else { return }
         p.asks = asks
         p.done = done
+        if let l = limits { p.limits = l }
         await savePush(p)
     }
 
@@ -589,6 +617,7 @@ public final class HarloModel {
                 session = nil
             }
             setHost(h)
+            features = ready.features
             active = true
             retry = 1
             startLoop(with: c)
@@ -654,6 +683,7 @@ public final class HarloModel {
             guard session === s else { return }
             s.opened(liveKey: r.key, harness: r.harness)
             s.modes = try? await c.modes(r.key)
+            await refreshLimit(s)
         } catch {
             s.error = Self.describe(error)
             s.loading = false
@@ -698,6 +728,29 @@ public final class HarloModel {
             alert = Self.describe(error)
             return nil
         }
+    }
+
+    // ---- plan limits ------------------------------------------------------------
+
+    /// The open session's plan limit, as harlo works it out.
+    func refreshLimit(_ s: OpenSession) async {
+        guard features.contains("limits"), let c = client, !s.liveKey.isEmpty,
+              let r = try? await c.limit(of: s.liveKey), session === s else { return }
+        s.limit = r.limit
+        s.resumesAt = r.resumesAt
+    }
+
+    /// Stop and continue (or, when it's stopped, just continue) once the
+    /// open session's used-up limit resets.
+    public func continueAtReset() async {
+        guard let s = session else { return }
+        if let at = await with({ c, k in try await c.continueAtReset(k) }) { s.resumesAt = at }
+    }
+
+    /// The open session doesn't continue at the reset after all.
+    public func cancelContinue() async {
+        guard let s = session else { return }
+        if await with({ c, k in try await c.cancelContinue(k) }) != nil { s.resumesAt = 0 }
     }
 
     // ---- the queue, and branching -------------------------------------------------
@@ -980,7 +1033,7 @@ extension Event {
         switch self {
         case .reset(let k, _, _), .rows(let k, _), .status(let k, _), .meta(let k, _), .request(let k, _), .cleared(let k, _),
              .commands(let k, _), .queue(let k, _, _), .todos(let k, _), .subagents(let k, _): return k
-        case .sessions, .revoked: return nil
+        case .sessions, .limits, .revoked: return nil
         }
     }
 }

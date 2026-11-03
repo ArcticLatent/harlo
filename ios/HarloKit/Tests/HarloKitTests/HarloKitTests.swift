@@ -583,3 +583,72 @@ final class ReviewTests: XCTestCase {
         """)
     }
 }
+
+final class LimitsTests: XCTestCase {
+    func testPlanLimitsFromHarlo() {
+        let v = try! JSON.parse(#"""
+        { "here": { "accounts": [{ "provider": "Claude", "plan": "max", "windows": [
+            { "label": "Session (5 h)", "usedFraction": 1.0, "status": "exhausted", "resetsAt": 1700000000000 },
+            { "label": "Weekly · Opus", "usedFraction": 0.95, "resetsAt": null } ] }], "updatedAt": 5 },
+          "hosts": { "nas": { "accounts": [{ "provider": "openai-codex", "windows": [] }] }, "empty": { "accounts": [] } } }
+        """#)
+        let l = PlanLimits(v)
+        XCTAssertEqual(l.machines.map(\.host), ["", "nas"])
+        let w = l.machines[0].accounts[0].windows
+        XCTAssertTrue(w[0].usedUp)
+        XCTAssertEqual(w[1].name, "weekly Opus limit")
+        XCTAssertEqual(w[1].resetsAt, 0)
+        XCTAssertEqual(l.machines[1].accounts[0].name, "ChatGPT")
+        XCTAssertFalse(l.isEmpty)
+        XCTAssertTrue(PlanLimits(JSON.null).isEmpty)
+        XCTAssertEqual(Event(["ev": "limits", "here": ["accounts": []], "hosts": [:]]), .limits(PlanLimits(machines: [.init(host: "", accounts: [], updatedAt: 0)])))
+    }
+
+    func testSessionLimit() {
+        XCTAssertNil(SessionLimit(.null))
+        let l = SessionLimit(["provider": "Claude", "label": "Weekly", "usedFraction": .double(1), "resetsAt": 9, "out": true, "resetAt": 9])
+        XCTAssertEqual(l?.window.name, "weekly limit")
+        XCTAssertEqual(l?.out, true)
+        XCTAssertEqual(l?.resetAt, 9)
+    }
+
+    func testCompactNote() {
+        var i = SessionInfo()
+        i.contextWindow = 200_000
+        i.compactAt = 160_000
+        i.contextTokens = 100_000
+        XCTAssertEqual(i.compactNote, "")
+        i.contextTokens = 148_600
+        XCTAssertEqual(i.compactNote, "11k tokens left before the context compacts")
+        i.contextTokens = 170_000
+        XCTAssertEqual(i.compactNote, "The context is at its limit: it compacts next")
+        XCTAssertEqual(i.compactMark, 0.8, accuracy: 1e-9)
+        let meta = SessionInfo(["compactAt": 160000, "limitRefused": true])
+        XCTAssertEqual(meta.compactAt, 160_000)
+        XCTAssertTrue(meta.limitRefused)
+    }
+
+    func testResetTime() {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        XCTAssertEqual(resetTime(1_700_003_600_000, now: now, calendar: cal), "at 23:13")
+        XCTAssertEqual(resetTime(1_700_000_000_000 + 2 * 86_400_000, now: now, calendar: cal), "Thu 22:13")
+    }
+
+    /// An older app's saved registration has no `limits`: on.
+    func testPushRegistrationFromAnOlderApp() throws {
+        let old = #"{"token":"ab","sandbox":false,"asks":true,"done":false}"#
+        let p = try JSONDecoder().decode(PushRegistration.self, from: Data(old.utf8))
+        XCTAssertFalse(p.done)
+        XCTAssertTrue(p.limits)
+        XCTAssertEqual(p.json["limits"], .bool(true))
+        let c = PushContent(["k": "reset", "s": "limit-Weekly", "t": "Claude's weekly limit has reset"])
+        XCTAssertTrue(c.isLimit)
+        XCTAssertEqual(c.lines.title, "Claude's weekly limit has reset")
+    }
+
+    @MainActor func testSamplesHaveLimits() {
+        XCTAssertFalse(HarloModel.sample().limits.isEmpty)
+    }
+}

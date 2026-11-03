@@ -1139,6 +1139,7 @@ impl cxx_qt::Initialize for Workspace {
                 if let Some(cached) = db.get("cache.quota").ok().flatten() {
                     this.quota_json = QString::from(&cached);
                 }
+                publish_phone_limits(&this.quota_json, &this.host_limits_json);
                 this.limits_since = chrono::Local::now().timestamp_millis();
                 let mut saved_tabs = saved_tabs;
                 if let Some(a) = &active_tab
@@ -3790,6 +3791,7 @@ impl Workspace {
         let claude = claude.filter(|_| ask_claude);
         if omp.is_none() && claude.is_none() && !keep_claude {
             self.as_mut().set_quota_json(QString::from(&serde_json::json!({ "accounts": [], "error": "" }).to_string()));
+            self.publish_phone_limits();
             return;
         }
         self.as_mut().rust_mut().quota_loading = true;
@@ -3797,6 +3799,7 @@ impl Workspace {
         let mut current: serde_json::Value = serde_json::from_str(&self.quota_json.to_string()).unwrap_or_else(|_| serde_json::json!({ "accounts": [] }));
         current["loading"] = serde_json::json!(true);
         self.as_mut().set_quota_json(QString::from(&current.to_string()));
+        self.publish_phone_limits();
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
             let from_omp = omp.map(|p| harlo_core::quota::fetch(&p));
@@ -3832,6 +3835,7 @@ impl Workspace {
                     let _ = db.set("cache.quota", &serde_json::json!({ "accounts": json["accounts"], "updatedAt": json["updatedAt"], "error": "" }).to_string());
                 }
                 this.as_mut().set_quota_json(QString::from(&json.to_string()));
+                this.publish_phone_limits();
             });
         });
     }
@@ -3850,6 +3854,7 @@ impl Workspace {
             let _ = db.set("cache.quota", &json!({ "accounts": json["accounts"], "updatedAt": json["updatedAt"], "error": "" }).to_string());
         }
         self.as_mut().set_quota_json(QString::from(&json.to_string()));
+        self.publish_phone_limits();
     }
 
     /// What a Claude session on `host` said of its limits: that machine's
@@ -3864,6 +3869,7 @@ impl Workspace {
             let _ = db.set("cache.host_quota", &text);
         }
         self.as_mut().set_host_limits_json(QString::from(&text));
+        self.publish_phone_limits();
         for label in ran_out {
             let when = info["unifiedWindows"].as_object().into_iter().flat_map(|w| w.values()).filter(|w| w["status"] == "rejected").filter_map(|w| w["resetsAt"].as_i64()).max();
             let body = when.map_or_else(|| "Claude stops there until it resets.".to_owned(), |s| format!("It resets at {}.", harlo_core::quota::reset_time(s * 1000)));
@@ -3978,6 +3984,7 @@ impl Workspace {
             let _ = db.set("cache.host_quota", &kept.to_string());
         }
         self.as_mut().set_host_limits_json(QString::from(&text));
+        self.publish_phone_limits();
     }
 
     pub fn refresh_host_quota(self: Pin<&mut Self>, host: &QString) {
@@ -4076,6 +4083,11 @@ impl Workspace {
     /// a reset has a sound of its own.
     fn notify_limit(self: Pin<&mut Self>, tag: &str, title: &str, body: &str, reset: bool) {
         let settings = harlo_core::notifications::Settings::load(&self.setting_str("notify"), &self.setting_str("notifications"));
+        // Phones that want limits (their own switch; quiet hours: silently).
+        crate::phone_push::send(crate::phone_push::Alert {
+            what: crate::phone_push::What::Limit { reset }, key: tag.to_owned(), title: title.to_owned(), body: body.to_owned(),
+            badge: self.waiting_count(), quiet: settings.quiet.hushes_now(false),
+        });
         if !settings.enabled || !settings.event("limits").is_some_and(|e| e.0) || settings.quiet.hushes_now(false) {
             return;
         }
@@ -5385,7 +5397,11 @@ impl Workspace {
                     .iter()
                     .map(|p| json!({ "id": p.id, "name": p.name, "where": where_on_host(&p.path), "agent": p.harness, "icon": p.icon, "color": p.color,
                                      "approvals": approvals(p.id), "host": harlo_core::remote::host_of(&p.path).unwrap_or_default(),
-                                     "agents": self.agents_at(&p.path) }))
+                                     "agents": self.agents_at(&p.path),
+                                     // Its own model per agent (Settings → Projects), where it has one.
+                                     "ownModels": self.agents_at(&p.path).iter()
+                                         .map(|a| (a.to_string(), self.setting_str(&format!("project_model_{}_{a}", p.id))))
+                                         .filter(|(_, m)| !m.is_empty()).map(|(a, m)| (a, json!(m))).collect::<serde_json::Map<_, _>>() }))
                     .collect();
                 let models: serde_json::Value = serde_json::from_str(&self.known_models().to_string()).unwrap_or_default();
                 // Every model each agent offers (Settings → Providers reads them).
@@ -5415,10 +5431,14 @@ impl Workspace {
                     return fail(&format!("harlo can't start {agent} sessions there."));
                 };
                 let (first, images) = (text("text"), phone_images(&msg["images"]));
-                // The model picked, else the agent's default from Settings (the
-                // setup guide; not on another machine: its agent's own).
+                // The model picked, else the project's own for that agent
+                // (Settings → Projects), else the agent's default from
+                // Settings (the setup guide; not on another machine: its
+                // agent's own).
                 let remote = harlo_core::remote::host_of(&cwd).is_some();
+                let own = project.as_ref().map(|p| self.setting_str(&format!("project_model_{}_{}", p.id, kind.as_str()))).unwrap_or_default();
                 let model = match text("model") {
+                    m if m.is_empty() && !own.is_empty() => own,
                     m if m.is_empty() && !remote => self.setting_str(&format!("default_model_{}", kind.as_str())),
                     m => m,
                 };
@@ -5433,10 +5453,39 @@ impl Workspace {
                     && let Some(live) = registry::get(&key)
                     && !live.handle.prompt(&format!("{}{first}", image_blocks(images.len())), images, harlo_harness::SendMode::Normal)
                 {
-                    return json!({ "key": key, "harness": kind.as_str(), "error": live.handle.held().unwrap_or_default() });
+                    return json!({ "key": key, "harness": kind.as_str(), "model": model, "error": live.handle.held().unwrap_or_default() });
                 }
-                json!({ "key": key, "harness": kind.as_str() })
+                json!({ "key": key, "harness": kind.as_str(), "model": model })
             }
+            // A session's plan limit, as the line above the composer says it
+            // (`limit` null: under 90%), and when it continues (`resumesAt`,
+            // unix ms, 0 if it isn't going to).
+            "limitOf" => json!({ "limit": self.limit_of(&key), "resumesAt": self.resume_at_for(&QString::from(&key)) as i64 }),
+            // Stop (when it works) and continue once its used-up limit resets.
+            "resumeAtReset" => {
+                let at = self.limit_of(&key).and_then(|l| l["resetAt"].as_i64()).unwrap_or(0);
+                if at <= chrono::Local::now().timestamp_millis() {
+                    return fail("This session's limit isn't used up.");
+                }
+                if self.live.get(&key).is_some_and(|e| e.info.status == harlo_core::SessionStatus::Busy)
+                    && let Some(live) = registry::get(&key)
+                {
+                    live.handle.abort();
+                }
+                self.as_mut().resume_at_reset(&QString::from(&key), at as f64);
+                json!({ "ok": true, "resumesAt": at })
+            }
+            "cancelResume" => {
+                self.as_mut().cancel_resume(&QString::from(&key));
+                json!({ "ok": true })
+            }
+            // A running session's agent, model (`provider/id`, "" not known
+            // yet) and machine ("" this one), for its model's server.
+            "serverOf" => match self.live.get(&key) {
+                Some(e) => json!({ "agent": e.info.harness, "model": e.model_id,
+                                   "host": harlo_core::remote::host_of(&e.info.cwd).unwrap_or_default() }),
+                None => fail("That session isn't running."),
+            },
             "send" => {
                 let Some(live) = registry::get(&key) else { return fail("That session isn't running.") };
                 let mode = match msg["mode"].as_str() {
@@ -5523,6 +5572,24 @@ impl Workspace {
     }
 
     /// Every session (projects expanded, no "show more"), for phones.
+    /// A running session's plan limit (see `quota::session_limit`), from its
+    /// machine's accounts.
+    fn limit_of(&self, key: &str) -> Option<serde_json::Value> {
+        let e = self.live.get(key)?;
+        let parse = |v: &QString| serde_json::from_str::<serde_json::Value>(&v.to_string()).unwrap_or_default();
+        let accounts = match harlo_core::remote::host_of(&e.info.cwd) {
+            None => parse(&self.quota_json)["accounts"].clone(),
+            Some(h) => parse(&self.host_limits_json)[h.as_str()]["accounts"].clone(),
+        };
+        harlo_core::quota::session_limit(accounts.as_array().map(Vec::as_slice).unwrap_or_default(), &e.info.harness, &e.model_id)
+    }
+
+    /// The plan limits for phones (this computer's and each machine's), as
+    /// Settings → Plan limits shows them.
+    fn publish_phone_limits(&self) {
+        publish_phone_limits(&self.quota_json, &self.host_limits_json);
+    }
+
     fn publish_phone_sessions(&self) {
         let sessions: Vec<SessionInfo> = self.sessions.values().cloned().collect();
         let live: Vec<LiveInfo> = self.live.values().map(|e| e.info.clone()).collect();
@@ -5539,7 +5606,8 @@ impl Workspace {
             show_archived: false,
             other_collapsed: false,
             expanded: &expanded,
-            shelves_open: &[],
+            // (Settled sessions too: a phone that shows them, as a shelf.)
+            shelves_open: &expanded,
         });
         let mut group = String::new();
         let mut list = Vec::new();
@@ -5557,6 +5625,8 @@ impl Workspace {
                         "key": r.key, "title": r.title, "project": group, "harness": r.harness,
                         "status": r.status, "modified": r.modified, "branch": r.branch, "pinned": r.pinned,
                         "where": if r.cwd.as_os_str().is_empty() { String::new() } else { sidebar::tilde(&r.cwd) },
+                        // Its machine ("" this one), and why it's settled ("" not).
+                        "host": harlo_core::remote::host_of(&r.cwd).unwrap_or_default(), "settled": r.settled,
                         "requests": requests,
                     }))
                 }
@@ -5777,6 +5847,17 @@ fn send_first_prompt(key: &str, first: FirstPrompt, notify: Option<CxxQtThread<W
             }
         });
     });
+}
+
+/// The plan limits for phones, from this computer's (`quota_json`) and each
+/// machine's (`host_limits_json`).
+fn publish_phone_limits(quota: &QString, hosts: &QString) {
+    let parse = |v: &QString| serde_json::from_str::<serde_json::Value>(&v.to_string()).unwrap_or_default();
+    let (here, hosts) = (parse(quota), parse(hosts));
+    crate::phone_bridge::publish_limits(json!({
+        "here": { "accounts": here["accounts"].as_array().cloned().unwrap_or_default(), "updatedAt": here["updatedAt"] },
+        "hosts": if hosts.is_object() { hosts } else { json!({}) },
+    }));
 }
 
 /// Photos a phone sent (`[{ data, mimeType }]`, base64) as image contents;

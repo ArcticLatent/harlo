@@ -34,6 +34,13 @@ struct NewSessionView: View {
             && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !photos.isEmpty)
     }
 
+    /// "Default model", or the project's own for this agent (what harlo
+    /// starts it with when none is picked).
+    func defaultModel(_ c: NewSessionChoices) -> String {
+        guard let own = project?.ownModels[agent], !own.isEmpty else { return "Default model" }
+        return c.modelChoices(for: agent).first { $0.id == own }?.name ?? own
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
@@ -130,13 +137,13 @@ struct NewSessionView: View {
                     // Used before first, then every model the agent offers.
                     Menu {
                         Picker("Model", selection: $modelId) {
-                            Text("Default model").tag("")
+                            Text(defaultModel(c)).tag("")
                             ForEach(project?.host.isEmpty == false ? [] : c.modelChoices(for: agent), id: \.id) { m in
                                 Text(m.name).tag(m.id)
                             }
                         }
                     } label: {
-                        PickerChip(text: c.modelChoices(for: agent).first { $0.id == modelId }?.name ?? "Default model") {
+                        PickerChip(text: c.modelChoices(for: agent).first { $0.id == modelId }?.name ?? defaultModel(c)) {
                             Image(systemName: "cpu").font(.system(size: 13))
                         }
                     }

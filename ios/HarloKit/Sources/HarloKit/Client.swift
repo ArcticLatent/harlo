@@ -11,6 +11,9 @@ public struct Ready: Equatable, Sendable {
     public var endpoint: URL
     /// Every place harlo can be reached now (its addresses, Funnel, relay).
     public var endpoints: [URL] = []
+    /// What this harlo does beyond the first app's ("limits", "compaction",
+    /// "serverStart", "machines", "settled"): an older one says none.
+    public var features: Set<String> = []
 }
 
 /// One encrypted connection to harlo (phone_server.rs's `connection`): the
@@ -61,7 +64,8 @@ public actor HarloClient {
 
     private func hello(code: String?, deviceName: String, timeout: TimeInterval, endpoint: URL) async throws -> Ready {
         task.resume()
-        var hello: JSON = ["type": "hello", "key": .string(Base64.encode(identity.publicKey))]
+        var hello: JSON = ["type": "hello", "key": .string(Base64.encode(identity.publicKey)),
+                           "features": .array(HarloClient.shows.map { .string($0) })]
         if let code, !code.isEmpty {
             hello["code"] = .string(code)
             hello["name"] = .string(deviceName)
@@ -94,7 +98,8 @@ public actor HarloClient {
             startReading()
             startPinging()
             return Ready(harloName: reply["name"].text, deviceName: reply["device"].text, endpoint: endpoint,
-                         endpoints: (reply["endpoints"].array ?? []).compactMap { $0.string.flatMap(URL.init(string:)) })
+                         endpoints: (reply["endpoints"].array ?? []).compactMap { $0.string.flatMap(URL.init(string:)) },
+                         features: Set((reply["features"].array ?? []).compactMap(\.string)))
         case "denied":
             task.cancel(with: .normalClosure, reason: nil)
             throw HarloError.denied(reply["reason"].string ?? "harlo refused this phone.")
@@ -103,6 +108,10 @@ public actor HarloClient {
             throw HarloError.badFrame("harlo answered something unexpected")
         }
     }
+
+    /// What this app shows of what harlo sends (in the hello): harlo leaves
+    /// out the rest.
+    public static let shows = ["limits"]
 
     /// The connection never left the phone: no network, or (the first time
     /// a LAN address is tried) iOS showing its Local Network prompt, during
@@ -308,6 +317,30 @@ public actor HarloClient {
     /// A Live Activity for the session: its push token ("" ended).
     public func activity(_ key: String, token: String, sandbox: Bool) async throws {
         try check(await call("activity", ["key": .string(key), "token": .string(token), "sandbox": .bool(sandbox)]))
+    }
+
+    /// Plan limits on harlo's computer and each machine (then the `limits`
+    /// event as they change).
+    public func limits() async throws -> PlanLimits {
+        PlanLimits(try check(await call("limits")))
+    }
+
+    /// A running session's plan limit (nil: under 90%), and when it
+    /// continues on its own (unix ms, 0 if it isn't going to).
+    public func limit(of key: String) async throws -> (limit: SessionLimit?, resumesAt: Int64) {
+        let r = try check(await call("limitOf", ["key": .string(key)]))
+        return (SessionLimit(r["limit"]), r["resumesAt"].int ?? 0)
+    }
+
+    /// Stops the session if it works, and continues it once its used-up
+    /// limit resets (even if harlo restarts meanwhile): when, unix ms.
+    public func continueAtReset(_ key: String) async throws -> Int64 {
+        try check(await call("resumeAtReset", ["key": .string(key)]))["resumesAt"].int ?? 0
+    }
+
+    /// It doesn't continue at the reset after all.
+    public func cancelContinue(_ key: String) async throws {
+        _ = try check(await call("cancelResume", ["key": .string(key)]))
     }
 
     /// The desktop's theme (nil: harlo sent none it could read).

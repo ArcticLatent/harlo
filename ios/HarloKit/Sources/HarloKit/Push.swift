@@ -4,7 +4,8 @@ import Foundation
 /// `phone_push`): the app's notification extension opens it, and Allow /
 /// Deny on the lock screen answer its request.
 public struct PushContent: Equatable, Sendable {
-    /// "ask", "done", "failed" or "test".
+    /// "ask", "done", "failed", "test", or a plan limit's "limit" (used up)
+    /// and "reset" (`session` is then the limit's tag, `title` what it says).
     public var kind: String
     /// The session's key.
     public var session: String
@@ -35,6 +36,9 @@ public struct PushContent: Equatable, Sendable {
         PushContent(try Sealed.open(sealed, store: store))
     }
 
+    /// About a plan limit, not a session.
+    public var isLimit: Bool { kind == "limit" || kind == "reset" }
+
     /// Allow / Deny can answer it from the notification.
     public var canApprove: Bool {
         guard let r = request else { return false }
@@ -51,6 +55,8 @@ public struct PushContent: Equatable, Sendable {
             return (name, "Finished", body)
         case "failed":
             return (name, "Stopped with an error", body)
+        case "limit", "reset":
+            return (name, "", body)
         default:
             return (title.isEmpty ? "harlo" : title, "", body)
         }
@@ -66,12 +72,25 @@ public struct PushRegistration: Codable, Equatable, Sendable {
     public var sandbox: Bool
     public var asks: Bool
     public var done: Bool
+    /// Plan limits used up, and reset.
+    public var limits: Bool
 
-    public init(token: String, sandbox: Bool, asks: Bool = true, done: Bool = true) {
+    public init(token: String, sandbox: Bool, asks: Bool = true, done: Bool = true, limits: Bool = true) {
         self.token = token
         self.sandbox = sandbox
         self.asks = asks
         self.done = done
+        self.limits = limits
+    }
+
+    // (Kept by an older app: without `limits`, on.)
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        token = try c.decode(String.self, forKey: .token)
+        sandbox = try c.decode(Bool.self, forKey: .sandbox)
+        asks = try c.decodeIfPresent(Bool.self, forKey: .asks) ?? true
+        done = try c.decodeIfPresent(Bool.self, forKey: .done) ?? true
+        limits = try c.decodeIfPresent(Bool.self, forKey: .limits) ?? true
     }
 
     public static func hex(_ token: Data) -> String {
@@ -79,7 +98,7 @@ public struct PushRegistration: Codable, Equatable, Sendable {
     }
 
     var json: JSON {
-        ["token": .string(token), "sandbox": .bool(sandbox), "asks": .bool(asks), "done": .bool(done)]
+        ["token": .string(token), "sandbox": .bool(sandbox), "asks": .bool(asks), "done": .bool(done), "limits": .bool(limits)]
     }
 }
 

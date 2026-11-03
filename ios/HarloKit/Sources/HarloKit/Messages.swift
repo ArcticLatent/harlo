@@ -221,6 +221,8 @@ public enum Event: Equatable, Sendable {
     case queue(key: String, steering: [String], followUp: [String])
     case todos(key: String, phases: [TodoPhase])
     case subagents(key: String, subagents: [Subagent])
+    /// Plan limits changed (this computer's or a machine's).
+    case limits(PlanLimits)
     /// This phone was removed in harlo.
     case revoked
 
@@ -241,6 +243,7 @@ public enum Event: Equatable, Sendable {
         case "queue": self = .queue(key: key, steering: (v["steering"].array ?? []).compactMap(\.string), followUp: (v["followUp"].array ?? []).compactMap(\.string))
         case "todos": self = .todos(key: key, phases: TodoPhase.list(v["phases"]))
         case "subagents": self = .subagents(key: key, subagents: (v["subagents"].array ?? []).map(Subagent.init))
+        case "limits": self = .limits(PlanLimits(v))
         case "revoked": self = .revoked
         default: return nil
         }

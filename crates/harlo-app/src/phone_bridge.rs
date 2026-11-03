@@ -30,6 +30,28 @@ pub fn watch_sessions() -> watch::Receiver<Value> {
     sessions().subscribe()
 }
 
+/// The plan limits, as phones show them: `{ here: { accounts, updatedAt },
+/// hosts: { <machine>: { accounts, updatedAt } } }` (see
+/// `Workspace::publish_phone_limits`).
+fn limits() -> &'static watch::Sender<Value> {
+    static L: OnceLock<watch::Sender<Value>> = OnceLock::new();
+    L.get_or_init(|| watch::channel(json!({ "here": { "accounts": [] }, "hosts": {} })).0)
+}
+
+pub fn publish_limits(all: Value) {
+    limits().send_if_modified(|current| {
+        if *current == all {
+            return false;
+        }
+        *current = all;
+        true
+    });
+}
+
+pub fn watch_limits() -> watch::Receiver<Value> {
+    limits().subscribe()
+}
+
 /// Whether a phone server runs (the workspace only builds the list then).
 pub fn active() -> bool {
     sessions().receiver_count() > 0

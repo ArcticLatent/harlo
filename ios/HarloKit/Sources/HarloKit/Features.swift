@@ -21,6 +21,9 @@ public struct Project: Equatable, Sendable, Identifiable {
     public var host: String
     /// The agents a session here can use (that machine's; empty: unknown).
     public var agents: [String]
+    /// Its own model per agent (harlo's Settings → Projects): what "Default
+    /// model" starts with here.
+    public var ownModels: [String: String]
 
     public init(_ v: JSON) {
         id = v["id"].int ?? -1
@@ -32,6 +35,7 @@ public struct Project: Equatable, Sendable, Identifiable {
         approvals = Self.modes(v["approvals"])
         host = v["host"].text
         agents = (v["agents"].array ?? []).compactMap(\.string)
+        ownModels = Self.modes(v["ownModels"])
     }
 
     static func modes(_ v: JSON) -> [String: String] {
@@ -241,6 +245,11 @@ public struct SessionInfo: Equatable, Sendable {
     public var contextWindow: Int64 = 0
     /// USD so far.
     public var cost: Double = 0
+    /// The context size the agent compacts at on its own (0: it won't, or
+    /// harlo doesn't know).
+    public var compactAt: Int64 = 0
+    /// Its last message was refused: its plan's limit is used up.
+    public var limitRefused = false
 
     public init() {}
 
@@ -252,6 +261,8 @@ public struct SessionInfo: Equatable, Sendable {
         contextTokens = v["contextTokens"].int ?? 0
         contextWindow = v["contextWindow"].int ?? 0
         cost = v["cost"].double ?? 0
+        compactAt = v["compactAt"].int ?? 0
+        limitRefused = v["limitRefused"].bool ?? false
     }
 
     /// How full the context is, 0…1 (0 when unknown).

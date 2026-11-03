@@ -31,6 +31,9 @@ pub enum What {
     Badge,
     /// Settings' "Send a test notification".
     Test,
+    /// A plan limit used up (`reset` false) or reset (`key` is the limit's
+    /// tag, `title` what it says).
+    Limit { reset: bool },
 }
 
 #[derive(Debug, Clone)]
@@ -123,7 +126,7 @@ pub async fn deliver(alert: &Alert, everyone: bool) -> Result<usize, String> {
     let devices: Vec<Device> = {
         let online = shared.online.lock().unwrap();
         shared.devices.lock().unwrap().list.iter()
-            .filter(|d| d.push.as_ref().is_some_and(|p| wants(&alert.what, p.asks, p.done)))
+            .filter(|d| d.push.as_ref().is_some_and(|p| wants(&alert.what, p.asks, p.done, p.limits)))
             .filter(|d| everyone || !online.contains_key(&d.id))
             .cloned()
             .collect()
@@ -144,6 +147,8 @@ pub async fn deliver(alert: &Alert, everyone: bool) -> Result<usize, String> {
         let body = payload(alert, &shared.identity.channel(&key));
         let collapse = match &alert.what {
             What::Ask(r) => r["id"].as_str().map(|id| id.chars().take(64).collect::<String>()),
+            // (Its reset replaces its "used up".)
+            What::Limit { .. } => Some(alert.key.chars().take(64).collect::<String>()),
             _ => None,
         };
         let result = forward(&apns::Push { device_token: &push.token, sandbox: push.sandbox, topic: TOPIC, payload: &body, collapse_id: collapse.as_deref(), kind: apns::Kind::Alert }).await;
@@ -180,12 +185,13 @@ pub async fn forward(push: &apns::Push<'_>) -> apns::Sent {
     }
 }
 
-fn wants(what: &What, asks: bool, done: bool) -> bool {
+fn wants(what: &What, asks: bool, done: bool, limits: bool) -> bool {
     match what {
         What::Ask(_) => asks,
         What::Done | What::Failed => done,
         What::Badge => asks || done,
         What::Test => true,
+        What::Limit { .. } => limits,
     }
 }
 
@@ -207,6 +213,8 @@ pub fn payload(alert: &Alert, channel: &phone::Channel) -> Value {
         What::Done => ("done", "A session finished", ""),
         What::Failed => ("failed", "A session stopped with an error", ""),
         What::Test => ("test", "harlo can reach this phone", ""),
+        What::Limit { reset: false } => ("limit", "A plan limit is used up", ""),
+        What::Limit { reset: true } => ("reset", "A plan limit has reset", ""),
         What::Badge => unreachable!(),
     };
     let mut content = json!({ "k": kind, "s": alert.key, "t": clip(&alert.title, 80), "b": clip(&alert.body, 300) });
@@ -262,5 +270,16 @@ mod tests {
         assert!(hushed["aps"].get("sound").is_none() && hushed["aps"]["interruption-level"] == "passive", "quiet hours: {hushed}");
         let badge = payload(&Alert { what: What::Badge, key: String::new(), title: String::new(), body: String::new(), badge: 1, quiet: false }, &to_phone);
         assert_eq!(badge, json!({ "aps": { "badge": 1 } }));
+        let limit = payload(&Alert { what: What::Limit { reset: true }, key: "limit-Weekly".into(), title: "Claude's weekly limit has reset".into(), body: String::new(), badge: 0, quiet: false }, &to_phone);
+        let content: Value = serde_json::from_slice(&at_phone.open(limit["h"].as_str().unwrap()).unwrap()).unwrap();
+        assert_eq!((content["k"].as_str(), content["t"].as_str()), (Some("reset"), Some("Claude's weekly limit has reset")));
+    }
+
+    /// Limits only for a phone that asked for them (an older app doesn't know them).
+    #[test]
+    fn limits_for_phones_that_want_them() {
+        assert!(!wants(&What::Limit { reset: false }, true, true, false));
+        assert!(wants(&What::Limit { reset: true }, false, false, true));
+        assert!(!wants(&What::Done, true, false, true));
     }
 }

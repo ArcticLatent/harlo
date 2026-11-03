@@ -145,6 +145,8 @@ struct SessionContent: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
                     ActivityLine(session: session)
+                    LimitLine(session: session)
+                    CompactLine(session: session)
                     ActivityBar(session: session) { sheet = $0 }
                     if let req = session.requests.first {
                         RequestCard(request: req)
@@ -759,7 +761,8 @@ struct Composer: View {
         }
         if session.info.contextWindow > 0 {
             Chip(icon: "gauge.with.dots.needle.33percent", text: "\(Int(session.info.contextUsed * 100))%")
-                .accessibilityLabel("Context \(Style.tokens(session.info.contextTokens)) of \(Style.tokens(session.info.contextWindow))")
+                .accessibilityLabel("Context \(Style.tokens(session.info.contextTokens)) of \(Style.tokens(session.info.contextWindow))"
+                    + (session.info.compactAt > 0 ? ", compacts at \(Style.tokens(session.info.compactAt))" : ""))
         }
     }
 

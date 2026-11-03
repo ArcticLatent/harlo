@@ -54,8 +54,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         case "allow", "deny":
             await model.answer(fromNotification: content, allow: action == "allow")
         default:
-            // Tapped: its session (or the list, for a test).
-            guard !content.session.isEmpty else { return }
+            // Tapped: its session (or the list, for a test or a plan limit).
+            guard !content.session.isEmpty, !content.isLimit else { return }
             let summary = model.sessions.first { $0.key == content.session }
                 ?? SessionSummary(["key": .string(content.session), "title": .string(content.title)])
             model.open(summary)

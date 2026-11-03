@@ -33,7 +33,24 @@ extension HarloModel {
         if busier {
             m.sessions.insert(s("live:5", "Run the relay's tests", "harlo", "claude", "input", 600, requests: [command]), at: 2)
         }
+        m.limits = sampleLimits(now: now)
         return m
+    }
+
+    /// Plan limits for the samples: a Claude plan nearly at its 5-hour limit,
+    /// a ChatGPT plan with room.
+    static func sampleLimits(now: Date) -> PlanLimits {
+        let ms = Int64(now.timeIntervalSince1970 * 1000)
+        return PlanLimits(machines: [PlanLimits.Machine(host: "", accounts: [
+            LimitAccount(provider: "Claude", plan: "max", windows: [
+                LimitWindow(label: "Session (5 h)", usedFraction: 0.92, resetsAt: ms + 95 * 60_000),
+                LimitWindow(label: "Weekly", usedFraction: 0.41, resetsAt: ms + 3 * 86_400_000),
+            ]),
+            LimitAccount(provider: "openai-codex", plan: "plus", windows: [
+                LimitWindow(label: "Session (5 h)", usedFraction: 0.18, resetsAt: ms + 4 * 3_600_000),
+                LimitWindow(label: "Weekly", usedFraction: 0.33, resetsAt: ms + 5 * 86_400_000),
+            ]),
+        ], updatedAt: ms)])
     }
 
     /// Opens a sample session: a finished exchange, a run of tool calls,

@@ -219,6 +219,9 @@ pub struct PushTarget {
     pub asks: bool,
     /// Wants finished (and failed) runs.
     pub done: bool,
+    /// Wants plan limits used up and reset (off for an app that doesn't
+    /// say: it wouldn't know them).
+    pub limits: bool,
 }
 
 impl PushTarget {
@@ -230,11 +233,12 @@ impl PushTarget {
             sandbox: v["sandbox"].as_bool().unwrap_or(false),
             asks: v["asks"].as_bool().unwrap_or(true),
             done: v["done"].as_bool().unwrap_or(true),
+            limits: v["limits"].as_bool().unwrap_or(false),
         })
     }
 
     fn to_json(&self) -> Value {
-        json!({ "token": self.token, "sandbox": self.sandbox, "asks": self.asks, "done": self.done })
+        json!({ "token": self.token, "sandbox": self.sandbox, "asks": self.asks, "done": self.done, "limits": self.limits })
     }
 }
 
@@ -313,7 +317,7 @@ impl Devices {
         Ok(removed)
     }
 
-    /// A phone's push registration (`{ token, sandbox, asks, done }`; no
+    /// A phone's push registration (`{ token, sandbox, asks, done, limits }`; no
     /// token: none). False when it isn't one.
     pub fn set_push(&mut self, id: &str, push: &Value) -> bool {
         let target = PushTarget::from_json(push);

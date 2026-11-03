@@ -292,7 +292,9 @@ fn event(key: &str, u: &SessionUpdate) -> Option<Value> {
     Some(match u {
         SessionUpdate::Status(s) => json!({ "ev": "status", "key": key, "status": s.as_str() }),
         SessionUpdate::Meta(m) => json!({ "ev": "meta", "key": key, "title": if m.name.is_empty() { &m.first_message } else { &m.name }, "model": m.model,
-            "modelId": m.model_id, "thinking": m.thinking, "contextTokens": m.context_tokens, "contextWindow": m.context_window, "cost": m.cost }),
+            "modelId": m.model_id, "thinking": m.thinking, "contextTokens": m.context_tokens, "contextWindow": m.context_window, "cost": m.cost,
+            // Where it compacts on its own (0 not known); its plan's limit used up.
+            "compactAt": m.compact_at, "limitRefused": m.limit_refused }),
         SessionUpdate::Commands(list) => json!({ "ev": "commands", "key": key,
             "commands": list.iter().map(|c| json!({ "name": c.name, "description": c.description, "hint": c.hint })).collect::<Vec<_>>() }),
         SessionUpdate::Queue { steering, follow_up } => json!({ "ev": "queue", "key": key, "steering": steering, "followUp": follow_up }),
@@ -301,6 +303,76 @@ fn event(key: &str, u: &SessionUpdate) -> Option<Value> {
         SessionUpdate::UiCleared(id) => json!({ "ev": "cleared", "key": key, "id": id }),
         _ => return None,
     })
+}
+
+/// What harlo can do for a phone, beyond the first app's (in `ready`):
+/// `serverStart` (a message starts its model's server first), `machines`
+/// (sessions say their machine), `settled` (settled sessions, for a phone
+/// that says it shows them), `limits` (plan limits: the `limits` call and
+/// event), `compaction` (a session's meta says where it compacts).
+const FEATURES: &[&str] = &["serverStart", "machines", "settled", "limits", "compaction"];
+
+/// The session list for one phone: settled sessions only for one that
+/// shows them.
+fn for_phone(list: Value, shows_settled: bool) -> Value {
+    match list {
+        Value::Array(rows) if !shows_settled => Value::Array(rows.into_iter().filter(|r| r["settled"].as_str().is_none_or(str::is_empty)).collect()),
+        list => list,
+    }
+}
+
+/// A phone's message (`send`, or `new` with a first message), its
+/// model's server started first when harlo can start it and it's stopped,
+/// as the desktop sends one. (A server that doesn't start: the message
+/// isn't sent, and the reply says why.)
+async fn send_after_server(msg: Value) -> Value {
+    let has_message = msg["text"].as_str().is_some_and(|t| !t.trim().is_empty()) || msg["images"].as_array().is_some_and(|a| !a.is_empty());
+    // A new session starts first, without its message.
+    let created = if msg["op"] == "new" {
+        let mut bare = msg.clone();
+        bare["text"] = json!("");
+        bare["images"] = json!([]);
+        let created = crate::phone_bridge::call(bare).await;
+        if !has_message || created.get("error").is_some() {
+            return created;
+        }
+        Some(created)
+    } else {
+        None
+    };
+    let key = created.as_ref().map_or(&msg["key"], |c| &c["key"]).as_str().unwrap_or_default().to_owned();
+    let of = crate::phone_bridge::call(json!({ "op": "serverOf", "key": key })).await;
+    let model = match of["model"].as_str().unwrap_or_default() {
+        "" => created.as_ref().and_then(|c| c["model"].as_str()).unwrap_or_default().to_owned(),
+        m => m.to_owned(),
+    };
+    let (agent, host) = (of["agent"].as_str().unwrap_or_default().to_owned(), of["host"].as_str().unwrap_or_default().to_owned());
+    let started = tokio::task::spawn_blocking(move || {
+        if agent.is_empty() || model.is_empty() {
+            return Ok(());
+        }
+        let server = if host.is_empty() { crate::accounts::managed_server(&agent, &model) } else { crate::accounts::host_server(&host, &agent, &model) };
+        match server.filter(|s| s.needs_start()) {
+            Some(s) => s.start().map_err(|e| format!("{} didn't start, so your message wasn't sent: {e}", s.name())),
+            None => Ok(()),
+        }
+    })
+    .await
+    .unwrap_or(Ok(()));
+    let sent = match started {
+        Ok(()) => crate::phone_bridge::call(json!({ "op": "send", "key": key, "text": msg["text"], "images": msg["images"], "mode": msg["mode"] })).await,
+        Err(e) => json!({ "error": e }),
+    };
+    match created {
+        // (The session started: the phone opens it, with what went wrong.)
+        Some(mut created) => {
+            if let Some(e) = sent.get("error") {
+                created["error"] = e.clone();
+            }
+            created
+        }
+        None => sent,
+    }
 }
 
 /// A question or approval, as phones show it.
@@ -657,7 +729,10 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
     shared.devices.lock().unwrap().touch(&device.id, now());
     let conn = phone::random_id(12);
     let mut session = Session::new(shared.identity.channel(&key), conn.clone());
-    let ready = json!({ "type": "ready", "conn": conn, "name": shared.name, "device": device.name, "endpoints": shared.endpoints() });
+    let ready = json!({ "type": "ready", "conn": conn, "name": shared.name, "device": device.name, "endpoints": shared.endpoints(), "features": FEATURES });
+    // What the phone shows of what harlo sends (an older app: none of the
+    // later things, so harlo leaves them out).
+    let shows_settled = hello["features"].as_array().is_some_and(|f| f.iter().any(|f| f == "settled"));
     if !send_plain(&link, ready).await {
         return;
     }
@@ -666,6 +741,8 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
     let mut sessions = crate::phone_bridge::watch_sessions();
     let mut devices = shared.devices_changed.subscribe();
     let mut wants_sessions = false;
+    let mut limits = crate::phone_bridge::watch_limits();
+    let mut wants_limits = false;
     // The open session's subagents, from their frames.
     let mut subagents: Vec<Value> = Vec::new();
     // The open session's rows the phone has.
@@ -673,6 +750,8 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
     // The session this phone has open: its live key, subscription, updates.
     let mut open: Option<(String, u64)> = None;
     let (updates_tx, mut updates) = mpsc::unbounded_channel::<Vec<SessionUpdate>>();
+    // Replies that come later (a message waiting on its model's server).
+    let (later_tx, mut later) = mpsc::unbounded_channel::<Value>();
     let close_open = |open: &mut Option<(String, u64)>| {
         if let Some((key, sub)) = open.take()
             && let Some(live) = crate::registry::get(&key)
@@ -697,7 +776,7 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
                     "sessions" => {
                         wants_sessions = true;
                         let _ = crate::phone_bridge::call(json!({ "op": "publish" })).await;
-                        json!({ "sessions": sessions.borrow_and_update().clone() })
+                        json!({ "sessions": for_phone(sessions.borrow_and_update().clone(), shows_settled) })
                     }
                     "open" => {
                         close_open(&mut open);
@@ -712,7 +791,17 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
                             None => json!({ "error": "That session isn't available." }),
                         }
                     }
-                    "send" | "projects" | "new" | "modes" | "setModes" | "rename" | "archive" | "pin" | "theme" | "setAvatar" => crate::phone_bridge::call(msg.clone()).await,
+                    // (Off the loop: a model's server may start first.)
+                    "send" | "new" => {
+                        let (msg, later, id) = (msg.clone(), later_tx.clone(), id.clone());
+                        tokio::spawn(async move {
+                            let mut reply = send_after_server(msg).await;
+                            reply["id"] = id;
+                            let _ = later.send(reply);
+                        });
+                        Value::Null
+                    }
+                    "projects" | "limitOf" | "resumeAtReset" | "cancelResume" | "modes" | "setModes" | "rename" | "archive" | "pin" | "theme" | "setAvatar" => crate::phone_bridge::call(msg.clone()).await,
                     // Edit & resend (`fork` false) or fork from one of the user's messages.
                     "branch" => match (crate::registry::get(msg["key"].as_str().unwrap_or_default()), &open) {
                         (Some(live), Some((key, _))) if key == msg["key"].as_str().unwrap_or_default() => {
@@ -763,14 +852,29 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
                         Ok(()) => json!({ "ok": true }),
                         Err(e) => json!({ "error": e }),
                     },
+                    // Plan limits: this computer's and each machine's (then as they change).
+                    "limits" => {
+                        wants_limits = true;
+                        limits.borrow_and_update().clone()
+                    }
                     "ping" => json!({ "pong": true }),
                     other => json!({ "error": format!("unknown op {other}") }),
                 };
-                let mut reply = reply;
-                reply["id"] = id;
-                vec![reply]
+                if reply.is_null() {
+                    Vec::new()
+                } else {
+                    let mut reply = reply;
+                    reply["id"] = id;
+                    vec![reply]
+                }
             }
-            Ok(()) = sessions.changed(), if wants_sessions => vec![json!({ "ev": "sessions", "sessions": sessions.borrow_and_update().clone() })],
+            Some(reply) = later.recv() => vec![reply],
+            Ok(()) = limits.changed(), if wants_limits => {
+                let mut ev = limits.borrow_and_update().clone();
+                ev["ev"] = json!("limits");
+                vec![ev]
+            }
+            Ok(()) = sessions.changed(), if wants_sessions => vec![json!({ "ev": "sessions", "sessions": for_phone(sessions.borrow_and_update().clone(), shows_settled) })],
             Some(batch) = updates.recv() => match &open {
                 Some((key, _)) => {
                     let mut out: Vec<Value> = Vec::new();
@@ -915,6 +1019,15 @@ pub(crate) mod tests {
         let last = frames.last().unwrap()["changes"][0]["rows"].as_array().unwrap().last().unwrap()["text"].as_str().unwrap().to_owned();
         assert!(last.len() < ROW_BYTES + 100 && last.ends_with("in harlo on your computer)"));
     }
+    /// Settled sessions only reach a phone that says it shows them.
+    #[test]
+    fn settled_sessions_for_phones_that_show_them() {
+        let list = json!([{ "key": "a", "settled": "" }, { "key": "b", "settled": "merged" }, { "key": "c" }]);
+        let keys = |v: Value| v.as_array().unwrap().iter().map(|r| r["key"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+        assert_eq!(keys(for_phone(list.clone(), false)), ["a", "c"]);
+        assert_eq!(keys(for_phone(list, true)), ["a", "b", "c"]);
+    }
+
     use crypto_box::aead::OsRng;
     use futures_util::{SinkExt, StreamExt};
     use tokio_tungstenite::tungstenite::Message as WsMessage;
@@ -1000,6 +1113,7 @@ pub(crate) mod tests {
         let code = shared.new_code();
         let (mut phone, ready) = Phone::connect(server.addr, &secret, &harlo_public, &code).await;
         assert_eq!((ready["type"].as_str(), ready["name"].as_str()), (Some("ready"), Some("desk")));
+        assert!(ready["features"].as_array().unwrap().iter().any(|f| f == "limits"));
         assert_eq!(shared.devices.lock().unwrap().list.len(), 1);
         let other = crypto_box::SecretKey::generate(&mut OsRng);
         assert_eq!(Phone::connect(server.addr, &other, &harlo_public, &code).await.1["type"], "denied");
@@ -1012,6 +1126,15 @@ pub(crate) mod tests {
         crate::phone_bridge::publish_sessions(json!([{ "key": "live:1", "title": "Fix it" }, { "key": "live:2", "title": "New" }]));
         let ev = phone.next().await;
         assert_eq!((ev["ev"].as_str(), ev["sessions"].as_array().map(|a| a.len())), (Some("sessions"), Some(2)));
+
+        // Plan limits: asked, then as they change.
+        crate::phone_bridge::publish_limits(json!({ "here": { "accounts": [{ "provider": "Claude" }] }, "hosts": {} }));
+        let reply = phone.call(json!({ "id": 2, "op": "limits" })).await;
+        assert_eq!((reply["id"].as_i64(), reply["here"]["accounts"][0]["provider"].as_str()), (Some(2), Some("Claude")));
+        crate::phone_bridge::publish_limits(json!({ "here": { "accounts": [] }, "hosts": { "nas": { "accounts": [] } } }));
+        let ev = phone.next().await;
+        assert_eq!(ev["ev"], "limits");
+        assert!(ev["hosts"]["nas"].is_object());
 
         // Known now: no code needed.
         let (mut again, ready) = Phone::connect(server.addr, &secret, &harlo_public, "").await;

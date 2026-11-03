@@ -17,6 +17,7 @@ extension HarloModel {
         // (In memory only: a real pairing replaces it, a restart forgets it.)
         host = PairedHarlo(key: sample.host?.key ?? "", name: Self.demoName, endpoints: [])
         sessions = sample.sessions
+        limits = sample.limits
         session = nil
         answered = []
         state = .connected
@@ -28,6 +29,7 @@ extension HarloModel {
         samples = nil
         session = nil
         sessions = []
+        limits = PlanLimits()
         answered = []
         host = nil
         state = .unpaired
