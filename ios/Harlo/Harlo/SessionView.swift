@@ -572,7 +572,6 @@ struct Composer: View {
     /// Photos sent and not yet with harlo (shown, dimmed, until they are).
     @State private var sendingPhotos: [Photo] = []
     @State private var levels: [String] = []
-    @State private var pickingLevel = false
     /// Files matching the `@` being typed.
     @State private var fileMatches: [String] = []
     @FocusState private var focused: Bool
@@ -604,10 +603,10 @@ struct Composer: View {
                     session.draft = Mention.insert(f, into: session.draft)
                 }
             }
-            // What to say; the session's settings (wrapping onto more lines
-            // when they don't fit); then photos, steer or queue, dictation,
-            // and send or stop.
-            VStack(alignment: .leading, spacing: 10) {
+            // What to say, then one line: photos, the model (while it works:
+            // steer or queue), the session's options in one menu, the
+            // context, dictation, and send or stop.
+            VStack(alignment: .leading, spacing: 6) {
                 if !sendingPhotos.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
                         PhotoStrip(photos: .constant(sendingPhotos), sending: true)
@@ -624,17 +623,19 @@ struct Composer: View {
                     .font(.system(size: 16.5))
                     .focused($focused)
                     .padding(.horizontal, 6)
-                    .padding(.top, 6)
-                Flow(spacing: 6) { settings }
-                HStack(spacing: 10) {
-                    PhotoButton(photos: $photos, size: 36)
-                    if session.busy { steerOrQueue }
+                    .padding(.top, 4)
+                HStack(spacing: 6) {
+                    PhotoButton(photos: $photos, size: 34)
+                    if session.busy { steerOrQueue } else { modelChip }
+                    options
                     Spacer(minLength: 0)
-                    MicButton(text: $session.draft, size: 36)
+                    context
+                    MicButton(text: $session.draft, size: 34)
                     sendOrStop
                 }
             }
-            .padding(10)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
             .card(p, radius: 22)
         }
         .padding(.horizontal, 10)
@@ -650,10 +651,13 @@ struct Composer: View {
             let found = await model.files(matching: q)
             if !Task.isCancelled { fileMatches = found }
         }
-        .confirmationDialog("Thinking", isPresented: $pickingLevel, titleVisibility: .visible) {
-            ForEach(levels, id: \.self) { l in
-                Button(l == session.info.thinking ? "\(l) ✓" : l) { Task { await model.setThinking(l) } }
+        // The thinking levels its model has (for the options menu).
+        .task(id: session.liveKey + "|" + session.info.modelId) {
+            guard !session.liveKey.isEmpty, !session.info.thinking.isEmpty else {
+                levels = []
+                return
             }
+            levels = await model.thinkingLevels()
         }
     }
 
@@ -668,7 +672,7 @@ struct Composer: View {
                     Text(steer ? "Steer" : "Queue")
                         .font(.system(size: 13, weight: .semibold))
                         .padding(.horizontal, 10)
-                        .frame(height: 28)
+                        .frame(height: 32)
                         .background(Color(session.steer == steer ? p.primary : p.subtle))
                         .foregroundStyle(Color(session.steer == steer ? p.onPrimary : p.muted))
                 }
@@ -688,8 +692,8 @@ struct Composer: View {
                 Task { await model.stop() }
             } label: {
                 Image(systemName: "stop.fill")
-                    .font(.system(size: 15, weight: .bold))
-                    .frame(width: 40, height: 40)
+                    .font(.system(size: 13, weight: .bold))
+                    .frame(width: 36, height: 36)
                     .background(Circle().fill(Color(p.error)))
                     .foregroundStyle(Color.white)
             }
@@ -697,8 +701,8 @@ struct Composer: View {
         } else {
             Button(action: send) {
                 Image(systemName: "arrow.up")
-                    .font(.system(size: 18, weight: .bold))
-                    .frame(width: 40, height: 40)
+                    .font(.system(size: 16, weight: .bold))
+                    .frame(width: 36, height: 36)
                     .background(Circle().fill(Color(canSend ? p.primary : p.subtle)))
                     .foregroundStyle(Color(canSend ? p.onPrimary : p.muted))
             }
@@ -707,64 +711,91 @@ struct Composer: View {
         }
     }
 
-    /// The model, thinking level, approval mode and Plan, as the desktop's
-    /// composer shows them.
-    @ViewBuilder var settings: some View {
+    /// The model: its agent's tile and name; tap to pick another.
+    var modelChip: some View {
         Button { openSheet(.models) } label: {
             HStack(spacing: 6) {
                 AgentTile(harness: session.harness, size: 20)
                 Text(session.model.isEmpty ? "Model" : session.model)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 13.5, weight: .medium))
                     .lineLimit(1)
-                    .frame(maxWidth: 180, alignment: .leading)
+                    .frame(maxWidth: 120, alignment: .leading)
                     .fixedSize(horizontal: true, vertical: false)
                 Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).foregroundStyle(Color(p.muted))
             }
-            .padding(.leading, 5)
+            .padding(.leading, 6)
             .padding(.trailing, 10)
-            .frame(height: 30)
-            .background(RoundedRectangle(cornerRadius: 9).fill(Color(p.raised.mix(p.foreground, 0.04))))
-            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Color(p.hairline), lineWidth: 1))
-            .contentShape(RoundedRectangle(cornerRadius: 9))
+            .frame(height: 34)
+            .background(Capsule().fill(Color(p.raised.mix(p.foreground, 0.04))))
+            .overlay(Capsule().strokeBorder(Color(p.hairline), lineWidth: 1))
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Model: \(session.model.isEmpty ? "default" : session.model)")
-        if !session.info.thinking.isEmpty {
-            Button {
-                Task {
-                    levels = await model.thinkingLevels()
-                    if !levels.isEmpty { pickingLevel = true }
-                }
-            } label: {
-                Chip(icon: "brain", text: session.info.thinking)
-            }
-            .buttonStyle(.plain)
-        }
-        if let m = session.modes, !m.approvals.isEmpty {
+    }
+
+    /// The thinking level, approval mode and Plan, in one menu: its icon
+    /// lights up while Plan is on or nothing asks first.
+    @ViewBuilder var options: some View {
+        let m = session.modes
+        let approvals = m?.approvals ?? []
+        if !levels.isEmpty || !approvals.isEmpty {
+            let plan = m?.plan == true, yolo = m?.approval == "yolo"
             Menu {
-                ForEach(m.approvals, id: \.self) { mode in
-                    Button {
-                        Task { await model.setApproval(mode) }
+                if !levels.isEmpty {
+                    Picker(selection: Binding(get: { session.info.thinking }, set: { l in Task { await model.setThinking(l) } })) {
+                        ForEach(levels, id: \.self) { Text($0.capitalized).tag($0) }
                     } label: {
-                        if mode == m.approval { Label(Modes.label(mode), systemImage: "checkmark") } else { Text(Modes.label(mode)) }
+                        Label("Thinking: \(session.info.thinking.capitalized)", systemImage: "brain")
+                    }
+                    .pickerStyle(.menu)
+                }
+                if let m, !approvals.isEmpty {
+                    Picker(selection: Binding(get: { m.approval }, set: { a in Task { await model.setApproval(a) } })) {
+                        ForEach(approvals, id: \.self) { Text(Modes.label($0)).tag($0) }
+                    } label: {
+                        Label("Approvals: \(Modes.short(m.approval))", systemImage: yolo ? "bolt.shield" : "shield")
+                    }
+                    .pickerStyle(.menu)
+                    Toggle(isOn: Binding(get: { m.plan }, set: { on in Task { await model.setPlan(on) } })) {
+                        Label("Plan first", systemImage: "list.bullet.clipboard")
                     }
                 }
             } label: {
-                Chip(icon: m.approval == "yolo" ? "bolt.shield" : "shield", text: Modes.short(m.approval), on: m.approval == "yolo")
-                    .accessibilityLabel("Approval: \(Modes.label(m.approval))")
+                Image(systemName: plan ? "list.bullet.clipboard" : yolo ? "bolt.shield" : "slider.horizontal.3")
+                    .font(.system(size: 15, weight: .medium))
+                    .frame(width: 34, height: 34)
+                    .background(Circle().fill(Color(plan || yolo ? p.accentSoft.over(p.raised) : p.raised.mix(p.foreground, 0.04))))
+                    .overlay(Circle().strokeBorder(Color(plan || yolo ? p.primary.mix(p.raised, 0.4) : p.hairline), lineWidth: 1))
+                    .foregroundStyle(Color(plan || yolo ? p.primary : p.muted))
             }
-            Button {
-                UISelectionFeedbackGenerator().selectionChanged()
-                Task { await model.setPlan(!m.plan) }
-            } label: {
-                Chip(icon: "list.bullet.clipboard", text: "Plan", on: m.plan)
-            }
-            .buttonStyle(.plain)
+            .accessibilityLabel("Options: thinking \(session.info.thinking), approvals \(Modes.label(m?.approval ?? "")), Plan \(plan ? "on" : "off")")
         }
-        if session.info.contextWindow > 0 {
-            Chip(icon: "gauge.with.dots.needle.33percent", text: "\(Int(session.info.contextUsed * 100))%")
-                .accessibilityLabel("Context \(Style.tokens(session.info.contextTokens)) of \(Style.tokens(session.info.contextWindow))"
-                    + (session.info.compactAt > 0 ? ", compacts at \(Style.tokens(session.info.compactAt))" : ""))
+    }
+
+    /// How full the context is, as a ring (amber near where it compacts);
+    /// tap for the numbers.
+    @ViewBuilder var context: some View {
+        let i = session.info
+        if i.contextWindow > 0 {
+            let near = !i.compactNote.isEmpty || i.contextUsed >= 0.9
+            Menu {
+                Text("Context: \(Style.tokens(i.contextTokens)) of \(Style.tokens(i.contextWindow)) (\(Int(i.contextUsed * 100))%)")
+                if i.compactAt > 0 { Text("Compacts at \(Style.tokens(i.compactAt))") }
+                if i.cost > 0 { Text(String(format: "$%.2f so far", i.cost)) }
+            } label: {
+                ZStack {
+                    Circle().stroke(Color(p.border), lineWidth: 3)
+                    Circle().trim(from: 0, to: i.contextUsed)
+                        .stroke(Color(near ? p.warning : p.primary), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                }
+                .frame(width: 20, height: 20)
+                .frame(width: 30, height: 34)
+                .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Context \(Int(i.contextUsed * 100))%, \(Style.tokens(i.contextTokens)) of \(Style.tokens(i.contextWindow))"
+                + (i.compactAt > 0 ? ", compacts at \(Style.tokens(i.compactAt))" : ""))
         }
     }
 
