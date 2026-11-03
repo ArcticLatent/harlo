@@ -248,7 +248,10 @@ struct NewSessionView: View {
             .padding(12)
             .card(p, radius: 18, fill: p.background)
             if let server = stopped[modelId] {
-                Label("\(server) is stopped: harlo starts it before your message", systemImage: "pause.circle")
+                HStack(spacing: 4) {
+                    Image(systemName: "pause.circle")
+                    Text("\(server) is stopped: harlo starts it before your message")
+                }
                     .font(.system(size: 12.5))
                     .foregroundStyle(Color(p.warning))
                     .padding(.horizontal, 4)

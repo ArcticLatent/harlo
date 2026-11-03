@@ -145,7 +145,6 @@ struct SessionContent: View {
                     ActivityLine(session: session)
                     LimitLine(session: session)
                     CompactLine(session: session)
-                    PlanLine(session: session) { sheet = .plan }
                     ActivityBar(session: session) { sheet = $0 }
                     if let req = session.requests.first {
                         RequestCard(request: req)
@@ -481,8 +480,12 @@ struct ActivityBar: View {
 
     var body: some View {
         let queued = session.steering + session.followUp
-        if todo != nil || running > 0 || !queued.isEmpty {
+        let plan = session.plan.flatMap { $0.shows ? $0 : nil }
+        if plan != nil || todo != nil || running > 0 || !queued.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
+                if let plan {
+                    PlanLine(plan: plan) { open(.plan) }
+                }
                 if let t = todo {
                     Button { open(.activity) } label: {
                         HStack(spacing: 8) {

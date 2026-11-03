@@ -41,9 +41,12 @@ struct ModelPicker: View {
                                         Text(m.name).font(.system(size: 15))
                                         Text(m.modelId).font(Style.mono(11)).foregroundStyle(Color(p.muted))
                                         if !m.stoppedServer.isEmpty {
-                                            Label("\(m.stoppedServer) is stopped: it starts with your next message", systemImage: "pause.circle")
-                                                .font(.system(size: 12))
-                                                .foregroundStyle(Color(p.warning))
+                                            HStack(spacing: 4) {
+                                                Image(systemName: "pause.circle")
+                                                Text("\(m.stoppedServer) is stopped: it starts with your next message")
+                                            }
+                                            .font(.system(size: 12))
+                                            .foregroundStyle(Color(p.warning))
                                         }
                                     }
                                     Spacer()

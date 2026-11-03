@@ -1,41 +1,36 @@
 import HarloKit
 import SwiftUI
 
-/// Above the composer, while the session has a shared plan: how far along
-/// it is and the step in hand; tap for the whole plan.
+/// The first line of the activity card above the composer, while the
+/// session has a shared plan: how far along it is and the step in hand;
+/// tap for the whole plan.
 struct PlanLine: View {
     @Environment(\.palette) private var p
-    let session: OpenSession
+    let plan: Plan
     var open: () -> Void
 
     var body: some View {
-        if let plan = session.plan, plan.shows {
-            Button(action: open) {
-                HStack(spacing: 8) {
-                    Image(systemName: "list.bullet.clipboard")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(Color(p.primary))
-                    Text("Plan \(plan.finished)/\(plan.steps.count)")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Color(p.muted))
-                        .monospacedDigit()
-                    Meter(fraction: Double(plan.finished) / Double(max(plan.steps.count, 1)), color: p.success)
-                        .frame(width: 44)
-                    Text(plan.current?.title ?? (plan.finished == plan.steps.count ? "All done" : ""))
-                        .font(.system(size: 13))
-                        .foregroundStyle(Color(p.foreground))
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.up").font(.system(size: 10, weight: .semibold)).foregroundStyle(Color(p.muted))
-                }
-                .padding(.horizontal, 18)
-                .padding(.top, 8)
-                .contentShape(Rectangle())
+        Button(action: open) {
+            HStack(spacing: 8) {
+                Image(systemName: "list.bullet.clipboard")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color(p.primary))
+                    .frame(width: 14)
+                Text("\(plan.finished)/\(plan.steps.count)")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color(p.muted))
+                    .monospacedDigit()
+                Text(plan.current?.title ?? (plan.finished == plan.steps.count ? "All done" : "Plan"))
+                    .font(.system(size: 13))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.up").font(.system(size: 10, weight: .semibold)).foregroundStyle(Color(p.muted))
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Plan, \(plan.finished) of \(plan.steps.count) done\(plan.current.map { ", now: \($0.title)" } ?? "")")
-            .accessibilityHint("Shows the plan")
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Plan, \(plan.finished) of \(plan.steps.count) done\(plan.current.map { ", now: \($0.title)" } ?? "")")
+        .accessibilityHint("Shows the plan")
     }
 }
 
