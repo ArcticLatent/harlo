@@ -150,6 +150,10 @@ final class RichTextTests: XCTestCase {
         XCTAssertEqual(q, [.paragraph([Span("quoted")])])
         XCTAssertEqual(RichText.parse("<hr />"), [.rule])
         XCTAssertEqual(RichText.parse("plain <b>text</b>"), [.paragraph([Span("plain "), Span("text", bold: true)])])
+        // A reply's prose comes as one row: its blocks one after another.
+        let reply = RichText.parse("<p>Done:</p>\n<ul>\n<li>one</li>\n</ul>\n<h2>Next</h2>\n<p>More.</p>")
+        XCTAssertEqual(reply.count, 4, "\(reply)")
+        XCTAssertEqual(reply.last, .paragraph([Span("More.")]))
     }
 
     func testCodeKeepsLinesAndTokens() {

@@ -229,6 +229,9 @@ QtObject {
         return "<style>"
             // Room between the lines of prose (not code).
             + "p,li{line-height:150%;}"
+            // A reply's paragraphs, lists and headings are one text (to
+            // select across): 8px between them, as between rows.
+            + "p,ul,ol,h1,h2,h3,h4,h5,h6,blockquote,table,hr{margin-top:8px;margin-bottom:8px;}"
             // Tables: hairlines, as the rest of the interface.
             + "table{border-color:" + rgb(hairline) + ";border-style:solid;}"
             + "td,th{border-color:" + rgb(hairline) + ";border-style:solid;padding:6px 10px;}"

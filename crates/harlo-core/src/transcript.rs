@@ -559,12 +559,9 @@ impl Transcript {
                         Block::Text(text) => {
                             // Only the block still being written is held back.
                             let shown = if streaming && Some(bi) == last_text { committed_prefix(text) } else { text };
-                            for (mi, md) in self.md.render(shown).into_iter().enumerate() {
-                                let kind = if md.kind == MdBlockKind::Code { RowKind::Code } else { RowKind::Markdown };
+                            for (mi, kind, html, code, lang) in md_rows(&self.md.render(shown)) {
                                 let mut r = row(format!("{id}:{bi}:{mi}"), kind);
-                                r.html = md.html.clone();
-                                r.text = md.code.clone();
-                                r.title = md.lang.clone();
+                                (r.html, r.text, r.title) = (html, code, lang);
                                 rows.push(Arc::new(r));
                             }
                         }
@@ -606,12 +603,9 @@ impl Transcript {
                             if name == "yield"
                                 && let Some(result) = yield_markdown(args)
                             {
-                                for (mi, md) in self.md.render(&result).into_iter().enumerate() {
-                                    let kind = if md.kind == MdBlockKind::Code { RowKind::Code } else { RowKind::Markdown };
+                                for (mi, kind, html, code, lang) in md_rows(&self.md.render(&result)) {
                                     let mut r = row(format!("{id}:{bi}:y{mi}"), kind);
-                                    r.html = md.html.clone();
-                                    r.text = md.code.clone();
-                                    r.title = md.lang.clone();
+                                    (r.html, r.text, r.title) = (html, code, lang);
                                     rows.push(Arc::new(r));
                                 }
                             }
@@ -725,6 +719,30 @@ fn yield_markdown(args: &Value) -> Option<String> {
 /// One-line summary of tool arguments: the obvious field for common tools
 /// (`command`, `path`, …), otherwise compact `key=value` pairs. MCP proxy
 /// calls (`{tool, args}`) show the inner tool name first.
+
+/// How much prose goes in one row before the next starts (a row is laid
+/// out whole; very long replies stay quick to scroll).
+const MD_ROW_BYTES: usize = 40_000;
+
+/// A text's rows: its prose in one row between code blocks (so it can be
+/// selected across paragraphs, lists and headings), each code block in its
+/// own. Each with the index of its first block (its key, steady while the
+/// text streams), its kind, HTML, and code and language (code).
+fn md_rows(blocks: &[Arc<crate::markdown::MdBlock>]) -> Vec<(usize, RowKind, String, String, String)> {
+    let mut out: Vec<(usize, RowKind, String, String, String)> = Vec::new();
+    for (mi, md) in blocks.iter().enumerate() {
+        if md.kind == MdBlockKind::Code {
+            out.push((mi, RowKind::Code, md.html.clone(), md.code.clone(), md.lang.clone()));
+        } else if let Some(last) = out.last_mut().filter(|l| l.1 == RowKind::Markdown && l.2.len() < MD_ROW_BYTES) {
+            last.2.push('\n');
+            last.2.push_str(&md.html);
+        } else {
+            out.push((mi, RowKind::Markdown, md.html.clone(), String::new(), String::new()));
+        }
+    }
+    out
+}
+
 fn summarize_args(args: &Value) -> String {
     for key in ["command", "path", "file_path", "filePath", "pattern", "query", "url"] {
         if let Some(s) = args[key].as_str() {
@@ -1007,10 +1025,26 @@ mod tests {
         t.apply(&HarnessEvent::BlockDelta { id: "m2".into(), index: 0, kind: BlockKind::Text, delta: " two.\n".into() });
         let b = t.rows();
         let changes = diff_rows(&a, &b);
-        assert!(matches!(changes.as_slice(), [RowChange::Insert { at: 2, .. }]), "{changes:?}");
+        // (The reply's prose is one row: it grows.)
+        assert!(matches!(changes.as_slice(), [RowChange::Update { at: 1, .. }]), "{changes:?}");
+        assert!(b[1].html.contains("Para one.") && b[1].html.contains("Para two."), "{:?}", b[1].html);
         let mut applied = a.clone();
         apply_changes(&mut applied, changes);
         assert_eq!(applied, b);
+    }
+
+    #[test]
+    fn a_replys_prose_is_one_row_between_code_blocks() {
+        let mut t = Transcript::new();
+        let text = "Done:\n\n- one\n- two\n\n## Next\n\nMore.\n\n```sh\nls\n```\n\nAfter the code.\n\nThe end.";
+        t.apply(&HarnessEvent::MessageStart { id: "m".into(), message: json!({"role":"assistant","content":[]}) });
+        t.apply(&HarnessEvent::MessageEnd { id: "m".into(), message: json!({"role":"assistant","content":[{"type":"text","text":text}]}) });
+        let rows = t.rows();
+        let kinds: Vec<RowKind> = rows.iter().map(|r| r.kind).collect();
+        assert_eq!(kinds, [RowKind::Markdown, RowKind::Code, RowKind::Markdown], "{rows:?}");
+        assert!(rows[0].html.contains("Done:") && rows[0].html.contains("<li>two</li>") && rows[0].html.contains("More."), "{}", rows[0].html);
+        assert_eq!(rows[1].text, "ls");
+        assert!(rows[2].html.contains("After the code.") && rows[2].html.contains("The end."));
     }
 
     #[test]
