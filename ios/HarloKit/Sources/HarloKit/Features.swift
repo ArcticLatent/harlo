@@ -324,6 +324,9 @@ public struct ModelChoice: Equatable, Sendable, Identifiable {
     public var name: String
     /// It thinks (thinking levels apply).
     public var reasoning: Bool
+    /// The model server it's on, when that's stopped (harlo starts it with
+    /// the next message); "" otherwise.
+    public var stoppedServer: String
 
     public var id: String { provider + "/" + modelId }
 
@@ -332,6 +335,7 @@ public struct ModelChoice: Equatable, Sendable, Identifiable {
         modelId = v["id"].text
         name = v["name"].string.flatMap { $0.isEmpty ? nil : $0 } ?? v["id"].text
         reasoning = v["reasoning"].bool ?? false
+        stoppedServer = v["stoppedServer"].text
     }
 }
 

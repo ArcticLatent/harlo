@@ -274,6 +274,13 @@ public actor HarloClient {
         return RemoteMachine(host: r["host"].string ?? host, connected: true, home: r["home"].text, agents: (r["agents"].array ?? []).compactMap(\.string))
     }
 
+    /// Which of an agent's models (`provider/model`) are on a model server
+    /// that's stopped: model → that server's name.
+    public func stoppedModels(agent: String, host: String = "", models: [String]) async throws -> [String: String] {
+        let r = try check(await call("stoppedModels", ["agent": .string(agent), "host": .string(host), "models": .array(models.map { .string($0) })]))
+        return (r["stopped"].object ?? [:]).compactMapValues(\.string)
+    }
+
     /// The model servers harlo set up, on its computer and each machine
     /// connected.
     public func modelServers() async throws -> [ModelServers] {

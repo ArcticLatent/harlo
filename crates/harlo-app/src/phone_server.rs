@@ -310,7 +310,7 @@ fn event(key: &str, u: &SessionUpdate) -> Option<Value> {
 /// (sessions say their machine), `settled` (settled sessions, for a phone
 /// that says it shows them), `limits` (plan limits: the `limits` call and
 /// event), `compaction` (a session's meta says where it compacts).
-const FEATURES: &[&str] = &["serverStart", "machines", "settled", "limits", "compaction", "connect", "modelServers", "putBack"];
+const FEATURES: &[&str] = &["serverStart", "machines", "settled", "limits", "compaction", "connect", "modelServers", "putBack", "stoppedModels"];
 
 /// The session list for one phone: settled sessions only for one that
 /// shows them.
@@ -405,6 +405,26 @@ fn connected_machines() -> Vec<String> {
     let mut hosts = vec![String::new()];
     hosts.extend(remote::hosts().into_iter().map(|h| h.name).filter(|n| !remote::is_disconnected(n) && remote::info_of(n).is_some()));
     hosts
+}
+
+/// Which of an agent's models (`provider/id`) are on a model server harlo
+/// can start that's stopped now: model → that server's name. (Each server
+/// asked once.)
+async fn stopped_models(agent: String, host: String, models: Vec<String>) -> std::collections::HashMap<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let mut down: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+        let mut out = std::collections::HashMap::new();
+        for id in models {
+            let server = if host.is_empty() { crate::accounts::managed_server(&agent, &id) } else { crate::accounts::host_server(&host, &agent, &id) };
+            let Some(server) = server else { continue };
+            if *down.entry(format!("{server:?}")).or_insert_with(|| server.needs_start()) {
+                out.insert(id, server.name().to_owned());
+            }
+        }
+        out
+    })
+    .await
+    .unwrap_or_default()
 }
 
 /// A server as phones show it.
@@ -535,12 +555,23 @@ async fn session_op(op: &str, msg: &Value, live: &crate::registry::LiveRef) -> V
             }
         }
         "models" => {
-            return match live.handle.request(json!({ "type": "get_available_models" })).await {
-                Ok(data) => json!({ "models": data["models"].as_array().into_iter().flatten().filter(|m| !harlo_core::pi_packages::hidden_model(m["provider"].as_str().unwrap_or_default())).map(|m| json!({
-                    "provider": m["provider"], "id": m["id"], "name": m["name"], "reasoning": m["reasoning"].as_bool() == Some(true),
-                })).collect::<Vec<_>>() }),
-                Err(e) => failed(e),
+            let data = match live.handle.request(json!({ "type": "get_available_models" })).await {
+                Ok(data) => data,
+                Err(e) => return failed(e),
             };
+            let mut models: Vec<Value> = data["models"].as_array().into_iter().flatten().filter(|m| !harlo_core::pi_packages::hidden_model(m["provider"].as_str().unwrap_or_default())).map(|m| json!({
+                "provider": m["provider"], "id": m["id"], "name": m["name"], "reasoning": m["reasoning"].as_bool() == Some(true),
+            })).collect();
+            // Those on a model server that's stopped (it starts with the next message).
+            let of = crate::phone_bridge::call(json!({ "op": "serverOf", "key": msg["key"] })).await;
+            let ids: Vec<String> = models.iter().map(|m| format!("{}/{}", m["provider"].as_str().unwrap_or_default(), m["id"].as_str().unwrap_or_default())).collect();
+            let stopped = stopped_models(live.harness.clone(), of["host"].as_str().unwrap_or_default().to_owned(), ids.clone()).await;
+            for (m, id) in models.iter_mut().zip(&ids) {
+                if let Some(server) = stopped.get(id) {
+                    m["stoppedServer"] = json!(server);
+                }
+            }
+            return json!({ "models": models });
         }
         // The session as Markdown (to share).
         "markdown" => {
@@ -903,12 +934,17 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
                         Value::Null
                     }
                     // (Off the loop: machines and model servers are asked over SSH.)
-                    "connect" | "servers" | "startServer" | "stopServer" => {
+                    "connect" | "servers" | "stoppedModels" | "startServer" | "stopServer" => {
                         let (msg, later, id) = (msg.clone(), later_tx.clone(), id.clone());
                         tokio::spawn(async move {
                             let mut reply = match msg["op"].as_str().unwrap_or_default() {
                                 "connect" => connect_machine(&msg).await,
                                 "servers" => model_servers().await,
+                                "stoppedModels" => {
+                                    let models: Vec<String> = msg["models"].as_array().into_iter().flatten().filter_map(|m| m.as_str().map(str::to_owned)).collect();
+                                    let (agent, host) = (msg["agent"].as_str().unwrap_or_default().to_owned(), msg["host"].as_str().unwrap_or_default().to_owned());
+                                    json!({ "stopped": stopped_models(agent, host, models).await })
+                                }
                                 op => start_or_stop_server(&msg, op == "startServer").await,
                             };
                             reply["id"] = id;

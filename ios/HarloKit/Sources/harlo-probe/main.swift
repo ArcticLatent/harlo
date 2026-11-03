@@ -66,6 +66,8 @@ func run(_ link: String) async {
     let choices = await model.newSessionChoices()
     check(choices?.hosts.isEmpty == true && choices?.machines.map(\.host) == [""], "a new session's places: this computer only (\(choices?.machines.map(\.host) ?? []))")
     check(model.sessions.allSatisfy { $0.host.isEmpty }, "its sessions run on this computer")
+    let stopped = await model.stoppedModels(agent: "pi", models: ["nowhere/nothing"])
+    check(model.features.contains("stoppedModels") && stopped.isEmpty, "a model on no server of harlo's isn't marked stopped (\(stopped))")
 
     await model.send("fast: hello from the phone")
     let replied = await waitFor(8) {

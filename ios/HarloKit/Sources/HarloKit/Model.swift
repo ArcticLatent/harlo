@@ -998,6 +998,15 @@ public final class HarloModel {
         return await with(session: false) { c, _ in try await c.connect(host) }
     }
 
+    /// Which of an agent's models on harlo's computer are on a model server
+    /// that's stopped: model → that server's name (none from an older harlo).
+    public func stoppedModels(agent: String, models: [String]) async -> [String: String] {
+        guard !models.isEmpty else { return [:] }
+        if demo || samples != nil { return models.contains("openai/gpt-5") ? ["openai/gpt-5": "ollama"] : [:] }
+        guard features.contains("stoppedModels"), let c = client else { return [:] }
+        return (try? await c.stoppedModels(agent: agent, models: models)) ?? [:]
+    }
+
     /// The model servers on harlo's computer and each machine connected.
     public func modelServers() async -> [ModelServers]? {
         if demo { return demoServers }

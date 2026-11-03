@@ -16,6 +16,8 @@ struct NewSessionView: View {
     @State private var place: SessionPlace = .home("")
     /// The machine being connected to.
     @State private var connecting: String?
+    /// The agent's models on a stopped model server: model → its server.
+    @State private var stopped: [String: String] = [:]
     @State private var agent = ""
     /// `provider/model`; "": the agent's default.
     @State private var modelId = ""
@@ -99,6 +101,11 @@ struct NewSessionView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .scrollDismissesKeyboard(.interactively)
+        // Which of this computer's models wait on a stopped server.
+        .task(id: "\(agent)|\(host)|\(choices != nil)") {
+            guard let c = choices, host.isEmpty, !agent.isEmpty else { stopped = [:]; return }
+            stopped = await model.stoppedModels(agent: agent, models: c.modelChoices(for: agent).map(\.id))
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if let c = choices { composer(c) }
         }
@@ -186,7 +193,7 @@ struct NewSessionView: View {
                         Picker("Model", selection: $modelId) {
                             Text(defaultModel(c)).tag("")
                             ForEach(!host.isEmpty ? [] : c.modelChoices(for: agent), id: \.id) { m in
-                                Text(m.name).tag(m.id)
+                                Text(stopped[m.id].map { "\(m.name) (\($0) stopped)" } ?? m.name).tag(m.id)
                             }
                         }
                     } label: {
@@ -240,6 +247,12 @@ struct NewSessionView: View {
             }
             .padding(12)
             .card(p, radius: 18, fill: p.background)
+            if let server = stopped[modelId] {
+                Label("\(server) is stopped: harlo starts it before your message", systemImage: "pause.circle")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Color(p.warning))
+                    .padding(.horizontal, 4)
+            }
             if !placePath.isEmpty {
                 Text(placePath)
                     .font(Style.mono(11))

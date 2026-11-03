@@ -163,7 +163,7 @@ public struct Samples: Sendable {
         models: [ModelChoice(["provider": "anthropic", "id": "claude-sonnet-4-5", "name": "Claude Sonnet 4.5", "reasoning": true]),
                  ModelChoice(["provider": "anthropic", "id": "claude-haiku-4-5", "name": "Claude Haiku 4.5", "reasoning": true]),
                  ModelChoice(["provider": "openai", "id": "gpt-5", "name": "GPT-5", "reasoning": true]),
-                 ModelChoice(["provider": "openai", "id": "gpt-5-mini", "name": "GPT-5 mini", "reasoning": false])],
+                 ModelChoice(["provider": "openai", "id": "gpt-5-mini", "name": "GPT-5 mini", "reasoning": false, "stoppedServer": "ollama"])],
         changes: Changes(["branch": "main", "ahead": 1, "files": [
             ["path": "crates/harlo-core/src/sidebar.rs", "status": "M"],
             ["path": "crates/harlo-app/qml/Sidebar.qml", "status": "M"],

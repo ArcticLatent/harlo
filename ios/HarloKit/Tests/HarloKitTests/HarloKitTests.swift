@@ -689,6 +689,11 @@ final class MachinesTests: XCTestCase {
         XCTAssertFalse(old.needsConnecting(.project(2)))
     }
 
+    func testModelsOnAStoppedServer() {
+        XCTAssertEqual(ModelChoice(["provider": "llama", "id": "q", "stoppedServer": "llama.cpp"]).stoppedServer, "llama.cpp")
+        XCTAssertEqual(ModelChoice(["provider": "llama", "id": "q"]).stoppedServer, "")
+    }
+
     func testModelServersFromHarlo() {
         let v = try! JSON.parse(#"""
         { "machines": [
