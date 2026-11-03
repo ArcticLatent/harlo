@@ -22,7 +22,7 @@ Switch {
             radius: 7
             y: 3
             x: sw.checked ? parent.width - width - 3 : 3
-            color: sw.checked ? Theme.onPrimary : Theme.muted
+            color: sw.checked ? Theme.textOnPrimary : Theme.muted
             Behavior on x { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
         }
     }

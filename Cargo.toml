@@ -15,7 +15,7 @@ harlo-apns = { path = "crates/harlo-apns" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time", "signal"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 cxx = "1"

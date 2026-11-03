@@ -704,7 +704,7 @@ Rectangle {
                     Label {
                         anchors.centerIn: parent
                         text: rowItem.commented ? "💬" : "+"
-                        color: rowItem.commented ? Theme.onPrimary : Theme.text
+                        color: rowItem.commented ? Theme.textOnPrimary : Theme.text
                         font.pixelSize: rowItem.commented ? Theme.px(8) : Theme.px(11)
                     }
                 }

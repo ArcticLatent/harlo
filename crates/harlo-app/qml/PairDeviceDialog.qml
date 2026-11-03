@@ -104,7 +104,7 @@ AppDialog {
         spacing: 10
         // For Copy. (In here: the dialog takes its height from its one
         // content item, so it can't have a second one beside it.)
-        TextEdit { id: clip; visible: false; function copyText(t) { text = t; selectAll(); copy(); deselect(); text = "" } }
+        TextEdit { id: copier; visible: false; function copyText(t) { text = t; selectAll(); copy(); deselect(); text = "" } }
 
         // Phone access is off: ask first.
         ColumnLayout {
@@ -326,7 +326,7 @@ AppDialog {
                             Layout.fillWidth: true
                             spacing: 6
                             AppTextField { Layout.fillWidth: true; readOnly: true; text: dlg.fw.command || ""; font.family: Theme.mono; font.pixelSize: Theme.px(11) }
-                            FlatButton { text: "Copy"; font.pixelSize: Theme.px(12); onClicked: clip.copyText(dlg.fw.command) }
+                            FlatButton { text: "Copy"; font.pixelSize: Theme.px(12); onClicked: copier.copyText(dlg.fw.command) }
                         }
                         Label {
                             objectName: "firewallError"
@@ -389,7 +389,7 @@ AppDialog {
                             Layout.fillWidth: true
                             spacing: 6
                             AppTextField { Layout.fillWidth: true; readOnly: true; text: dlg.fwOther.command || ""; font.family: Theme.mono; font.pixelSize: Theme.px(11) }
-                            FlatButton { text: "Copy"; font.pixelSize: Theme.px(12); onClicked: clip.copyText(dlg.fwOther.command) }
+                            FlatButton { text: "Copy"; font.pixelSize: Theme.px(12); onClicked: copier.copyText(dlg.fwOther.command) }
                         }
                         Label {
                             Layout.fillWidth: true
@@ -441,7 +441,7 @@ AppDialog {
                         property bool done: false
                         text: done ? "Copied" : "Copy"
                         font.pixelSize: Theme.px(12)
-                        onClicked: { clip.copyText(dlg.pairing.url); done = true; copyTimer.restart() }
+                        onClicked: { copier.copyText(dlg.pairing.url); done = true; copyTimer.restart() }
                         Timer { id: copyTimer; interval: 1500; onTriggered: copyButton.done = false }
                     }
                 }

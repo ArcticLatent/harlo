@@ -29,32 +29,64 @@ pub struct Spec {
 /// Folders never searched (without git to say what's ignored).
 const SKIP: [&str; 9] = ["node_modules", "target", "dist", "build", "vendor", ".venv", "venv", "__pycache__", ".git"];
 
-/// The repository a folder is in (its top), else the folder.
+/// The repository a folder is in (its top), else the folder; here or on
+/// its host.
 pub fn root_of(folder: &Path) -> PathBuf {
-    let out = Command::new("git").arg("-C").arg(folder).args(["rev-parse", "--show-toplevel"]).output();
-    match out {
-        Ok(o) if o.status.success() => PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()),
-        _ => folder.to_path_buf(),
-    }
+    crate::git::repo_root(folder).unwrap_or_else(|| folder.to_path_buf())
 }
 
 /// The specs under `root`: what git tracks or would (ignored files left
 /// out), else a walk, never in dependencies; the root's first, then by
 /// path.
 pub fn find(root: &Path) -> Vec<Spec> {
-    let out = Command::new("git").arg("-C").arg(root).args(["ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", FILE, &format!("**/{FILE}")]).output();
-    let mut paths: Vec<String> = match out {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).split('\0').filter(|p| !p.is_empty() && root.join(p).is_file()).map(str::to_owned).collect(),
-        _ => {
-            let mut found = Vec::new();
-            walk(root, root, 0, &mut found);
-            found
+    load(root).iter().map(|(p, text)| describe(p, text)).collect()
+}
+
+/// The specs' texts under `root`, ordered as [`find`] lists them: `(path
+/// from the root, text)`. On another machine, all in one command.
+fn load(root: &Path) -> Vec<(String, String)> {
+    let mut texts: Vec<(String, String)> = match crate::remote::split(root) {
+        Some((host, dir)) => load_on(&host, &dir),
+        None => {
+            let out = Command::new("git").arg("-C").arg(root).args(["ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", FILE, &format!("**/{FILE}")]).output();
+            let paths: Vec<String> = match out {
+                Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).split('\0').filter(|p| !p.is_empty() && root.join(p).is_file()).map(str::to_owned).collect(),
+                _ => {
+                    let mut found = Vec::new();
+                    walk(root, root, 0, &mut found);
+                    found
+                }
+            };
+            paths.into_iter().map(|p| {
+                let text = std::fs::read_to_string(root.join(&p)).unwrap_or_default();
+                (p, text)
+            }).collect()
         }
     };
-    paths.retain(|p| !p.split('/').any(|c| SKIP.contains(&c)));
-    paths.sort_by_key(|p| (p != FILE, p.matches('/').count(), p.clone()));
-    paths.dedup();
-    paths.into_iter().map(|p| describe(root, &p)).collect()
+    texts.retain(|(p, _)| !p.split('/').any(|c| SKIP.contains(&c)));
+    texts.sort_by_key(|(p, _)| (p != FILE, p.matches('/').count(), p.clone()));
+    texts.dedup_by(|a, b| a.0 == b.0);
+    texts
+}
+
+/// [`load`] on `host`: each spec's path, then its text (at most 256 KB).
+fn load_on(host: &str, dir: &str) -> Vec<(String, String)> {
+    let Some(host) = crate::remote::host(host) else { return Vec::new() };
+    let q = crate::remote::quote;
+    let prune = SKIP.iter().map(|d| format!("-name {}", q(d))).collect::<Vec<_>>().join(" -o ");
+    let script = format!(
+        r#"cd {dir} || exit 0
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then git -c core.quotePath=false ls-files --cached --others --exclude-standard -- {file} '**/{file}'
+else find . -maxdepth 13 \( {prune} -o -name '.?*' \) -prune -o -name {file} -type f -print | sed 's|^\./||'; fi | head -n 2000 | while IFS= read -r f; do [ -f "$f" ] || continue; printf '%s\037' "$f"; head -c 262144 -- "$f"; printf '\036'; done; true"#,
+        dir = q(dir),
+        file = FILE,
+    );
+    let Ok(out) = crate::remote::run(&host, &script, std::time::Duration::from_secs(60)) else { return Vec::new() };
+    String::from_utf8_lossy(&out.stdout)
+        .split('\u{1e}')
+        .filter_map(|r| r.split_once('\u{1f}'))
+        .map(|(p, t)| (p.trim_start_matches('\n').to_owned(), t.to_owned()))
+        .collect()
 }
 
 fn walk(root: &Path, dir: &Path, depth: usize, out: &mut Vec<String>) {
@@ -80,9 +112,8 @@ fn walk(root: &Path, dir: &Path, depth: usize, out: &mut Vec<String>) {
 /// Its title (frontmatter `title:`, else its first heading, else its
 /// folder's name) and summary (frontmatter `summary:`, else its first
 /// paragraph).
-fn describe(root: &Path, rel: &str) -> Spec {
-    let text = std::fs::read_to_string(root.join(rel)).unwrap_or_default();
-    let (front, body) = split_front(&text);
+fn describe(rel: &str, text: &str) -> Spec {
+    let (front, body) = split_front(text);
     let field = |k: &str| front.lines().find_map(|l| l.strip_prefix(&format!("{k}:"))).map(|v| v.trim().trim_matches(['"', '\'']).to_owned()).filter(|v| !v.is_empty());
     let heading = body.lines().find_map(|l| l.strip_prefix("# ")).map(|h| h.trim().to_owned());
     let folder = Path::new(rel).parent().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned());
@@ -117,8 +148,7 @@ pub fn search(root: &Path, query: &str, limit: usize) -> Vec<Value> {
         return Vec::new();
     }
     let mut hits = Vec::new();
-    for spec in find(root) {
-        let text = std::fs::read_to_string(root.join(&spec.path)).unwrap_or_default();
+    for (path, text) in load(root) {
         let mut heading = String::new();
         for (i, line) in text.lines().enumerate() {
             if line.starts_with('#') {
@@ -126,7 +156,7 @@ pub fn search(root: &Path, query: &str, limit: usize) -> Vec<Value> {
             }
             let lower = line.to_lowercase();
             if words.iter().all(|w| lower.contains(w.as_str())) {
-                hits.push(json!({ "spec": spec.path, "line": i + 1, "section": heading, "text": line.trim() }));
+                hits.push(json!({ "spec": path, "line": i + 1, "section": heading, "text": line.trim() }));
                 if hits.len() >= limit {
                     return hits;
                 }
@@ -143,7 +173,11 @@ pub fn read(root: &Path, rel: &str) -> Result<String, String> {
     if rel.split('/').any(|c| c == "..") || rel.starts_with('/') {
         return Err("Give the spec's path from the repository's root.".into());
     }
-    std::fs::read_to_string(root.join(&rel)).map_err(|_| format!("There's no {rel}. spec_list lists the specs."))
+    let missing = || format!("There's no {rel}. spec_list lists the specs.");
+    if crate::remote::is_remote(root) {
+        return crate::remote::read(&root.join(&rel)).map(|b| String::from_utf8_lossy(&b).into_owned()).map_err(|_| missing());
+    }
+    std::fs::read_to_string(root.join(&rel)).map_err(|_| missing())
 }
 
 /// What harlo tells agents in a project with specs on.
@@ -241,5 +275,37 @@ mod tests {
         assert_eq!(list["specs"][2]["title"], "Sign-in");
         assert_eq!(call(&dir, "spec_read", &json!({ "path": "docs" })).unwrap()["text"], "No heading here, just text.\n");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The same on another machine (`HARLO_TEST_SSH`, e.g. "ssh myhost"):
+    /// a folder of its own there, without git and then with it.
+    #[test]
+    #[ignore]
+    fn remote_specs() {
+        let args = crate::remote::parse_ssh_command(&std::env::var("HARLO_TEST_SSH").expect("HARLO_TEST_SSH")).unwrap();
+        let host = crate::remote::Host { name: "t".into(), ssh: args };
+        crate::remote::set_hosts(vec![host.clone()]);
+        let home = crate::remote::home(&host).unwrap();
+        let dir = format!("{home}/harlo-specs-test-{}", std::process::id());
+        let run = |script: &str| crate::remote::run(&host, script, std::time::Duration::from_secs(30)).unwrap();
+        run(&format!(
+            "mkdir -p {d}/src/auth {d}/node_modules/x {d}/.hidden && printf '# The product\\n\\nDoes things.\\n' > {d}/SPEC.md && printf -- '---\\ntitle: Sign-in\\n---\\nWho may enter.\\n' > {d}/src/auth/SPEC.md && echo no > {d}/node_modules/x/SPEC.md && echo no > {d}/.hidden/SPEC.md",
+            d = crate::remote::quote(&dir)
+        ));
+        let root = crate::remote::join("t", &dir);
+        let check = || {
+            let found = find(&root);
+            assert_eq!(found.iter().map(|s| s.path.as_str()).collect::<Vec<_>>(), ["SPEC.md", "src/auth/SPEC.md"]);
+            assert_eq!(found[0].title, "The product");
+            assert_eq!(found[1].title, "Sign-in");
+            assert_eq!(search(&root, "who ENTER", 5)[0]["spec"], "src/auth/SPEC.md");
+            assert_eq!(read(&root, "src/auth").unwrap(), "---\ntitle: Sign-in\n---\nWho may enter.\n");
+        };
+        assert_eq!(root_of(&root), root);
+        check();
+        run(&format!("cd {} && git init -q && printf 'node_modules\\n.hidden\\n' > .gitignore", crate::remote::quote(&dir)));
+        assert_eq!(root_of(&root.join("src")), root);
+        check();
+        run(&format!("rm -rf {}", crate::remote::quote(&dir)));
     }
 }

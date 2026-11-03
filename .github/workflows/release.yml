@@ -28,11 +28,43 @@ env:
   NFPM_VERSION: "2.43.0"
 
 jobs:
+  # The helper harlo puts on ARM (aarch64) machines to run model servers
+  # there, built on one (Ubuntu 22.04's glibc, as harlo's own).
+  engines-arm64:
+    runs-on: ubuntu-22.04-arm
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - name: Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential cmake pkg-config
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: harlo-engines
+        run: |
+          cargo build --release --locked -p harlo-core --bin harlo-engines --no-default-features
+          mkdir -p helpers
+          strip -o helpers/harlo-engines-aarch64 target/release/harlo-engines
+          file helpers/harlo-engines-aarch64
+          helpers/harlo-engines-aarch64 version
+          helpers/harlo-engines-aarch64 catalog > /dev/null
+      - uses: actions/upload-artifact@v6
+        with:
+          name: harlo-engines-aarch64
+          path: helpers/harlo-engines-aarch64
+
   linux:
+    needs: engines-arm64
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v6
+        with:
+          name: harlo-engines-aarch64
+          path: dist/helpers
 
       - name: Tools
         run: |
@@ -75,6 +107,10 @@ jobs:
 
       - name: Starts (offscreen, from the .deb's tree and the AppImage)
         run: |
+          # The engines helpers for other machines, both kinds, in the tree.
+          test -x dist/opt/harlo/lib/harlo/harlo-engines
+          test -x dist/opt/harlo/lib/harlo/harlo-engines-aarch64
+          dist/opt/harlo/lib/harlo/harlo-engines version
           # It runs and its QML loads: --version prints and quits; a short
           # offscreen start must not report missing modules or libraries.
           QT_QPA_PLATFORM=offscreen dist/opt/harlo/bin/harlo --version

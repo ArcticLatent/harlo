@@ -223,7 +223,7 @@ impl Session {
             let mut st = self.state.lock().unwrap();
             st.models = answer["models"]["availableModels"].as_array().cloned().unwrap_or_default();
             let current = answer["models"]["currentModelId"].as_str().unwrap_or_default().to_owned();
-            let wanted = (!st.model.is_empty() && st.model != current).then(|| st.model.clone());
+            let wanted = Some(acp_model_id(&st.model, &st.models)).filter(|m| !m.is_empty() && *m != current);
             st.model = current;
             options(&mut st, &answer["configOptions"]);
             (wanted, st.session_id.clone())
@@ -235,6 +235,20 @@ impl Session {
             self.state.lock().unwrap().model = model;
         }
         Ok(())
+    }
+}
+
+/// A model as harlo names it (`provider/id`, as `set_model` is given it)
+/// in the agent's own form (`provider:id`, Hermes's): the one it offers.
+/// One already in its form, or not offered, stays as it is.
+fn acp_model_id(model: &str, offered: &[Value]) -> String {
+    let has = |id: &str| offered.iter().any(|m| m["modelId"] == id);
+    if has(model) {
+        return model.to_owned();
+    }
+    match model.split_once('/') {
+        Some((provider, id)) if !provider.contains(':') && has(&format!("{provider}:{id}")) => format!("{provider}:{id}"),
+        _ => model.to_owned(),
     }
 }
 
@@ -391,6 +405,10 @@ async fn command(s: &Arc<Session>, pending: &Pending, cmd: Value) {
             reply(true, json!({ "contextUsage": { "tokens": st.context_used, "contextWindow": st.context_size } }), "");
         }
         "get_available_models" => {
+            // It lists models before it has a provider: until then only those
+            // of its own servers ("custom:<server>:<model>", a local one's
+            // needing no key), none of the providers' it would refuse.
+            let set_up = conn.set_up_now().await;
             let st = s.state.lock().unwrap();
             let reasoning = !st.efforts.is_empty();
             let list: Vec<Value> = st
@@ -398,7 +416,7 @@ async fn command(s: &Arc<Session>, pending: &Pending, cmd: Value) {
                 .iter()
                 .filter_map(|m| {
                     let (provider, id) = acp::split_model(m["modelId"].as_str()?);
-                    Some(json!({ "provider": provider, "id": id, "name": acp::model_name(m["name"].as_str().unwrap_or_default()), "reasoning": reasoning }))
+                    (set_up || provider == "custom").then(|| json!({ "provider": provider, "id": id, "name": acp::model_name(m["name"].as_str().unwrap_or_default()), "reasoning": reasoning }))
                 })
                 .collect();
             reply(true, json!({ "models": list }), "");
@@ -820,6 +838,21 @@ fn end_step(st: &mut State, mut step: Step, error: Option<String>, out: &mut Vec
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_picked_model_is_named_as_the_agent_names_it() {
+        let offered = vec![
+            json!({ "modelId": "openai-codex:gpt-6.1-sol" }),
+            json!({ "modelId": "nous:anthropic/claude-fable-5.1" }),
+            json!({ "modelId": "custom:local:qwen-test" }),
+        ];
+        assert_eq!(acp_model_id("openai-codex/gpt-6.1-sol", &offered), "openai-codex:gpt-6.1-sol");
+        assert_eq!(acp_model_id("nous/anthropic/claude-fable-5.1", &offered), "nous:anthropic/claude-fable-5.1");
+        assert_eq!(acp_model_id("custom/local:qwen-test", &offered), "custom:local:qwen-test");
+        assert_eq!(acp_model_id("openai-codex:gpt-6.1-sol", &offered), "openai-codex:gpt-6.1-sol", "already its own");
+        assert_eq!(acp_model_id("elsewhere/gone", &offered), "elsewhere/gone", "not offered: as it is");
+        assert_eq!(acp_model_id("", &offered), "");
+    }
 
     fn session() -> (Arc<Session>, mpsc::UnboundedReceiver<HarnessEvent>) {
         let (events, rx) = mpsc::unbounded_channel();

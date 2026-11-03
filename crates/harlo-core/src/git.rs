@@ -176,6 +176,38 @@ pub fn output_in(dir: &Path, args: &[&str]) -> String {
     cmd.output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default()
 }
 
+/// A git command in `dir` (here or on its host), with `input` on its stdin:
+/// its stdout, else what it said.
+pub fn run_in(dir: &Path, args: &[&str], input: Option<&[u8]>) -> Result<String, String> {
+    let mut cmd = git(dir);
+    cmd.args(args);
+    if let Some(input) = input {
+        cmd.input(input);
+    }
+    match cmd.output() {
+        Ok(o) if o.status.success() => Ok(String::from_utf8_lossy(&o.stdout).into_owned()),
+        Ok(o) => Err(String::from_utf8_lossy(&o.stderr).trim().to_owned()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Which of `paths` (from `dir`) are files, here or on `dir`'s host.
+pub fn files_among(dir: &Path, paths: &[String]) -> Vec<bool> {
+    let Some((name, on_host)) = crate::remote::split(dir) else { return paths.iter().map(|p| dir.join(p).is_file()).collect() };
+    if paths.is_empty() {
+        return Vec::new();
+    }
+    let q = crate::remote::quote;
+    let script = format!(
+        "cd {} || exit 1; for f in {}; do if [ -f \"$f\" ]; then echo 1; else echo 0; fi; done",
+        q(&on_host),
+        paths.iter().map(|p| q(p)).collect::<Vec<_>>().join(" ")
+    );
+    let out = crate::remote::host(&name).and_then(|h| crate::remote::run(&h, &script, std::time::Duration::from_secs(60)).ok());
+    let lines: Vec<bool> = out.map(|o| String::from_utf8_lossy(&o.stdout).lines().map(|l| l == "1").collect()).unwrap_or_default();
+    if lines.len() == paths.len() { lines } else { vec![false; paths.len()] }
+}
+
 /// A path git printed, on the same machine as `dir` (`ssh://` when remote).
 fn on_same_host(dir: &Path, printed: &str) -> PathBuf {
     match crate::remote::host_of(dir) {
@@ -211,6 +243,11 @@ pub struct ChangeCounter {
 }
 
 impl ChangeCounter {
+    /// The repositories found so far, per folder (another machine's too).
+    pub fn roots(&self) -> &HashMap<PathBuf, PathBuf> {
+        &self.roots
+    }
+
     /// Changed files (as the Changes panel counts them) per directory in
     /// `dirs` that is inside a repository, except repositories in `ignored`
     /// (by top-level path). Others are left out.

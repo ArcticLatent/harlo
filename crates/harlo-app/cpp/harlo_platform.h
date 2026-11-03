@@ -95,6 +95,12 @@ inline int exec_application()
     return QApplication::exec();
 }
 
+// Ends the event loop, from any thread (queued to the application's).
+inline void quit_application()
+{
+    QMetaObject::invokeMethod(qApp, &QCoreApplication::quit, Qt::QueuedConnection);
+}
+
 // After the event loop and the QML engine: the objects still waiting to be
 // deleted (deleteLater), then the application itself. Left to the process's
 // exit, Qt deletes those after the application and the engine are gone,

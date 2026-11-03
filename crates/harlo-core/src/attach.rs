@@ -40,7 +40,7 @@ fn read_inline(path: &Path, size: u64) -> Option<String> {
     Some(text.strip_prefix('\u{feff}').map(str::to_owned).unwrap_or(text))
 }
 
-fn human_size(n: u64) -> String {
+pub(crate) fn human_size(n: u64) -> String {
     match n {
         n if n >= 1 << 20 => format!("{:.1} MB", n as f64 / (1 << 20) as f64),
         n if n >= 1 << 10 => format!("{:.0} KB", n as f64 / (1 << 10) as f64),
@@ -51,6 +51,15 @@ fn human_size(n: u64) -> String {
 /// Builds the `<file>` blocks and image contents for `paths`. Files that
 /// can't be read are noted in their block rather than dropped silently.
 pub fn prepare(paths: &[PathBuf]) -> Prepared {
+    prepare_for(paths, None)
+}
+
+/// A file too big to copy to another machine with a message.
+const COPY_LIMIT: u64 = 200 * 1024 * 1024;
+
+/// [`prepare`] for a session on `host` (None: this machine): a file that
+/// isn't inlined is copied there first (blocking), so its agent can read it.
+pub fn prepare_for(paths: &[PathBuf], host: Option<&str>) -> Prepared {
     let mut out = Prepared::default();
     for path in paths {
         let name = path.display();
@@ -81,13 +90,45 @@ pub fn prepare(paths: &[PathBuf]) -> Prepared {
             out.prefix.push_str(&format!("<file name=\"{name}\">\n{text}\n</file>\n"));
         } else {
             let why = if size > INLINE_LIMIT { "too large to include" } else { "binary" };
-            out.prefix.push_str(&format!(
-                "<file name=\"{name}\">({why}, {}; not included here; read it from disk if needed)</file>\n",
-                human_size(size)
-            ));
+            match host {
+                None => out.prefix.push_str(&format!(
+                    "<file name=\"{name}\">({why}, {}; not included here; read it from disk if needed)</file>\n",
+                    human_size(size)
+                )),
+                // (The agent there can't see this machine's files.)
+                Some(h) => match copy_to(h, path, size) {
+                    Ok(there) => out.prefix.push_str(&format!(
+                        "<file name=\"{there}\">({why}, {}; not included here; read it from disk if needed)</file>\n",
+                        human_size(size)
+                    )),
+                    Err(e) => out.prefix.push_str(&format!("<file name=\"{name}\">({why}, {}; couldn't copy it to {h}: {e})</file>\n", human_size(size))),
+                },
+            }
         }
     }
     out
+}
+
+/// Copies a file to another machine's `~/.cache/harlo/attachments` (blocking):
+/// its path there.
+fn copy_to(host: &str, path: &Path, size: u64) -> Result<String, String> {
+    if size > COPY_LIMIT {
+        return Err(format!("it's over {}", human_size(COPY_LIMIT)));
+    }
+    let h = crate::remote::host(host).ok_or_else(|| format!("there's no machine called {host}"))?;
+    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis());
+    let name = format!("{stamp}-{}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "file".into()));
+    let script = format!(
+        "d=\"$HOME/.cache/harlo/attachments\"; mkdir -p \"$d\" && cat > \"$d\"/{q} && printf '%s/%s' \"$d\" {q}",
+        q = crate::remote::quote(&name)
+    );
+    let out = crate::remote::run_with_input(&h, &script, Some(&bytes), std::time::Duration::from_secs(600)).map_err(|e| format!("{e:#}"))?;
+    let there = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    if !out.status.success() || !there.starts_with('/') {
+        return Err(crate::remote::ssh_error(host, &out));
+    }
+    Ok(there)
 }
 
 pub use harlo_harness::file_blocks::split_blocks;

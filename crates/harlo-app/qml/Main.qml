@@ -31,7 +31,7 @@ ApplicationWindow {
     palette.buttonText: Theme.foreground
     palette.brightText: Theme.foreground
     palette.highlight: Theme.primary
-    palette.highlightedText: Theme.onPrimary
+    palette.highlightedText: Theme.textOnPrimary
     palette.placeholderText: Theme.muted
     palette.toolTipBase: Theme.elevated
     palette.toolTipText: Theme.foreground
@@ -414,6 +414,7 @@ ApplicationWindow {
             ChatView {
                 id: chat
                 onAddProjectRequested: sidebar.openAddProject()
+                onSignInOnHost: (agent, host) => signInDialog.openFor(agent + "@" + host, Theme.harnessLabel(agent) + " on " + host)
                 SplitView.fillHeight: true
                 SplitView.minimumHeight: 200
                 // Changed files (a partly staged file counts once).
@@ -699,7 +700,7 @@ ApplicationWindow {
                 acts.push({ title: "Stop the current run", hint: "Esc", run: () => chat.session.abort() })
             if (Workspace.activeKey.startsWith("live:") && chat.session.status !== "offline")
                 acts.push({ title: "Stop this session's agent process", run: () => Workspace.closeSession(Workspace.activeKey) })
-            if (Workspace.worktreeInfo(Workspace.activeKey) !== "")
+            if (Workspace.inWorktree(Workspace.activeKey))
                 acts.push({ title: "Worktree: merge or remove…", run: () => sidebar.openWorktree(Workspace.activeKey) })
         }
         acts.push({ title: "New demo session", run: () => Workspace.newSession(-1, "demo") })
@@ -767,7 +768,17 @@ ApplicationWindow {
     PairDeviceDialog { id: pairDeviceDialog }
     SignInDialog {
         id: signInDialog
+        // Signed in on a host: what it can use now.
+        onSignedInOnHost: {
+            if (chat.isDraft) chat.draftView.loadHostModels()
+            else chat.session.recheckModels()
+        }
         onClosed: if (!settingsDialog.visible) Accounts.release()
+        onRunInTerminal: (folder, command) => {
+            if (settingsDialog.visible) settingsDialog.close()
+            if (!windowSettings.terminalOpen) win.toggleTerminal()
+            Qt.callLater(() => terminal.runIn(folder, command))
+        }
     }
     // The firewall stops a paired phone on one of harlo's addresses.
     PhoneFirewallToast {
@@ -833,11 +844,6 @@ ApplicationWindow {
         onClosed: if (!signInDialog.visible) Accounts.release()
         onTrayToggled: on => win.setTrayEnabled(on)
         onPromptRailToggled: on => chat.transcript.promptRail = on
-        onRunOnHostRequested: (folder, command) => {
-            settingsDialog.close()
-            if (!windowSettings.terminalOpen) win.toggleTerminal()
-            Qt.callLater(() => terminal.runIn(folder, command))
-        }
         onOpenFileRequested: path => {
             settingsDialog.close()
             chat.requestOpenFile(path)
@@ -1712,7 +1718,7 @@ ApplicationWindow {
             win.miniChat.contentItem.grabToImage(r => r.saveToFile(win.selftestDir + "/clicks-minichat.png"))
             win.clickItem(win.findName("keepOnTop", win.miniChat.contentItem), "📌") } }
         PauseAnimation { duration: 400 }
-        ScriptAction { script: { win.check((win.miniChat.flags & Qt.WindowStaysOnTopHint) === 0 && !win.miniChat.onTop && Workspace.setting("mini_chat_on_top") === "0", "📌 turns keep-on-top off (and on by default)"); TestInput.key(Qt.Key_Escape, 0) } }
+        ScriptAction { script: { win.check((win.miniChat.flags & Qt.WindowStaysOnTopHint) === 0 && !win.miniChat.stayOnTop && Workspace.setting("mini_chat_on_top") === "0", "📌 turns keep-on-top off (and on by default)"); TestInput.key(Qt.Key_Escape, 0) } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: { win.check(!win.miniChat.visible, "Esc hides it"); win.summary(); Qt.quit() } }
     }
@@ -5989,7 +5995,7 @@ ApplicationWindow {
         PauseAnimation { duration: 300 }
         ScriptAction { script: { Workspace.addProject(win.argValue("--cwd=")); win.openDraft(1) } }
         PauseAnimation { duration: 800 }
-        ScriptAction { script: { const d = chat.draftView; win.log("project:", d.project ? d.project.name : "-", "branch:", d.currentBranch, "default:", d.onDefaultBranch, "tab:", Workspace.activeKey); win.shot("draft-project") } }
+        ScriptAction { script: { const d = chat.draftView; win.log("project:", d.project ? d.project.name : "-", "branch:", d.currentBranch, "default:", d.atDefaultBranch, "tab:", Workspace.activeKey); win.shot("draft-project") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: { const d = chat.draftView; d.starter = "explore"; d.text = "Focus on the build setup"; d.harness = "demo" } }
         PauseAnimation { duration: 400 }

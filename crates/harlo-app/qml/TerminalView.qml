@@ -4,7 +4,8 @@ import harlo
 
 // One terminal: a shell in `cwd`, drawn line by line in the code font and
 // the theme's colours. Typing goes to the shell; Ctrl+Shift+C / Ctrl+Shift+V
-// copy and paste; drag selects; the wheel scrolls the history.
+// copy and paste; drag selects; the wheel scrolls the history; a click on a
+// link opens it.
 Rectangle {
     id: root
     property string cwd
@@ -65,16 +66,16 @@ Rectangle {
     onRowsChanged: if (term.running) Qt.callLater(() => term.resize(cols, rows)); else Qt.callLater(start)
 
     // Clipboard: QML has no clipboard API, so go through a hidden TextEdit.
-    TextEdit { id: clip; visible: false }
+    TextEdit { id: copier; visible: false }
     function copySelection() {
         const t = term.selectedText()
         if (t === "") return
-        clip.text = t; clip.selectAll(); clip.copy(); clip.text = ""
+        copier.text = t; copier.selectAll(); copier.copy(); copier.text = ""
     }
     function pasteClipboard() {
-        clip.text = ""; clip.paste()
-        if (clip.text !== "") term.paste(clip.text)
-        clip.text = ""
+        copier.text = ""; copier.paste()
+        if (copier.text !== "") term.paste(copier.text)
+        copier.text = ""
     }
 
     // Keep most Ctrl/Alt keys for the shell (Ctrl+W, Ctrl+B, Ctrl+N…); app
@@ -143,9 +144,23 @@ Rectangle {
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton | Qt.MiddleButton
-        cursorShape: Qt.IBeamCursor
+        hoverEnabled: true
+        cursorShape: link !== "" ? Qt.PointingHandCursor : Qt.IBeamCursor
         property int clicks: 0
         property real lastClick: 0
+        /// The link under the pointer; the one pressed on (opened if
+        /// released there without a drag).
+        property string link: ""
+        property string pressedLink: ""
+        property var pressedAt: null
+        function linkUnder(mouse) {
+            const c = cell(mouse)
+            return c.row >= 0 && c.col >= 0 && c.col < root.cols ? term.linkAt(c.row, c.col) : ""
+        }
+        onExited: link = ""
+        ToolTip.visible: link !== "" && containsMouse && !pressed
+        ToolTip.delay: 600
+        ToolTip.text: "Open " + link
         function cell(mouse) {
             const col = (mouse.x - root.pad) / root.cellW
             return { row: Math.floor((mouse.y - root.pad) / root.cellH), col: Math.floor(col), right: col - Math.floor(col) > 0.5 }
@@ -157,14 +172,25 @@ Rectangle {
             clicks = now - lastClick < 400 ? Math.min(3, clicks + 1) : 1
             lastClick = now
             const c = cell(mouse)
+            pressedLink = clicks === 1 ? linkUnder(mouse) : ""
+            pressedAt = c
             if (clicks === 1) term.selectClear()
             term.selectStart(c.row, c.col, clicks)
             if (clicks > 1) term.selectUpdate(c.row, c.col, true)
         }
         onPositionChanged: mouse => {
-            if (!(mouse.buttons & Qt.LeftButton)) return
+            if (!(mouse.buttons & Qt.LeftButton)) { link = linkUnder(mouse); return }
             const c = cell(mouse)
+            // (A drag: a selection, not a click on the link.)
+            if (pressedAt && (c.row !== pressedAt.row || c.col !== pressedAt.col)) pressedLink = ""
             term.selectUpdate(c.row, c.col, c.right)
+        }
+        onReleased: mouse => {
+            if (mouse.button === Qt.LeftButton && pressedLink !== "") {
+                term.selectClear()
+                Qt.openUrlExternally(pressedLink)
+            }
+            pressedLink = ""
         }
         onWheel: wheel => term.wheel(Math.round(wheel.angleDelta.y / 40))
     }

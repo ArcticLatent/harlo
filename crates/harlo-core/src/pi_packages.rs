@@ -52,32 +52,75 @@ pub fn name_of(source: &str) -> &str {
     }
 }
 
+/// Which machine's pi: this one's, or another's over its SSH connection
+/// (its own folder there, its own `pi`).
+#[derive(Clone, Copy)]
+pub enum At<'a> {
+    Here,
+    On(&'a crate::remote::Host),
+}
+
+/// pi's folder on another machine, in its shell.
+const REMOTE_DIR: &str = r#""${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}""#;
+
+/// A file in pi's folder (`rel`): None when it isn't there.
+fn read_rel(at: At, rel: &str) -> Result<Option<String>, String> {
+    match at {
+        At::Here => match std::fs::read_to_string(agent_dir().join(rel)) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            other => other.map(Some).map_err(|e| e.to_string()),
+        },
+        At::On(host) => {
+            let f = format!("{REMOTE_DIR}/{}", crate::remote::quote(rel));
+            let out = crate::remote::run(host, &format!("f={f}; [ -e \"$f\" ] || exit 3; cat -- \"$f\""), Duration::from_secs(30)).map_err(|e| format!("{e:#}"))?;
+            match out.status.code() {
+                Some(0) => Ok(Some(String::from_utf8_lossy(&out.stdout).into_owned())),
+                Some(3) => Ok(None),
+                _ => Err(crate::remote::ssh_error(&host.name, &out)),
+            }
+        }
+    }
+}
+
+/// Writes a file in pi's folder (its folders made; replaced at once).
+fn write_rel(at: At, rel: &str, text: &str) -> Result<(), String> {
+    match at {
+        At::Here => {
+            let file = agent_dir().join(rel);
+            let temp = file.with_extension("harlo");
+            std::fs::create_dir_all(file.parent().expect("a folder")).map_err(|e| e.to_string())?;
+            std::fs::write(&temp, text).map_err(|e| e.to_string())?;
+            std::fs::rename(&temp, &file).map_err(|e| e.to_string())
+        }
+        At::On(host) => {
+            let f = format!("{REMOTE_DIR}/{}", crate::remote::quote(rel));
+            let script = format!("f={f}; mkdir -p \"$(dirname \"$f\")\" && cat > \"$f.harlo\" && mv -- \"$f.harlo\" \"$f\"");
+            let out = crate::remote::run_with_input(host, &script, Some(text.as_bytes()), Duration::from_secs(30)).map_err(|e| format!("{e:#}"))?;
+            if out.status.success() { Ok(()) } else { Err(crate::remote::ssh_error(&host.name, &out)) }
+        }
+    }
+}
+
 /// pi's own folder (`$PI_CODING_AGENT_DIR`, else `~/.pi/agent`).
 fn agent_dir() -> PathBuf {
     std::env::var_os("PI_CODING_AGENT_DIR").map(PathBuf::from).unwrap_or_else(|| std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".pi/agent"))
 }
 
-fn read_settings() -> Value {
-    std::fs::read_to_string(agent_dir().join("settings.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_else(|| json!({}))
+fn read_settings(at: At) -> Value {
+    read_rel(at, "settings.json").ok().flatten().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_else(|| json!({}))
 }
 
 /// The settings, to change them: one that can't be read isn't replaced.
-fn settings_to_change() -> Result<Value, String> {
-    let text = match std::fs::read_to_string(agent_dir().join("settings.json")) {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(json!({})),
-        other => other.map_err(|e| e.to_string())?,
-    };
+fn settings_to_change(at: At) -> Result<Value, String> {
+    let Some(text) = read_rel(at, "settings.json")? else { return Ok(json!({})) };
     match serde_json::from_str::<Value>(&text) {
         Ok(settings) if settings.is_object() => Ok(settings),
         _ => Err("pi's settings.json isn't valid. Fix it, then try again.".to_owned()),
     }
 }
 
-fn write_settings(settings: &Value) -> Result<(), String> {
-    let (file, temp) = (agent_dir().join("settings.json"), agent_dir().join("settings.json.harlo"));
-    std::fs::create_dir_all(agent_dir()).map_err(|e| e.to_string())?;
-    std::fs::write(&temp, serde_json::to_string_pretty(settings).expect("json") + "\n").map_err(|e| e.to_string())?;
-    std::fs::rename(&temp, &file).map_err(|e| e.to_string())
+fn write_settings(at: At, settings: &Value) -> Result<(), String> {
+    write_rel(at, "settings.json", &(serde_json::to_string_pretty(settings).expect("json") + "\n"))
 }
 
 fn entry_source(entry: &Value) -> Option<&str> {
@@ -112,18 +155,49 @@ fn with_switch(mut settings: Value, name: &str, on: bool) -> Value {
 
 /// Whether pi has the package at all, on or off (reads its settings, not
 /// `pi list`, so it's quick).
-pub fn configured(name: &str) -> bool {
-    entry_of(&read_settings(), name).is_some()
+pub fn configured(at: At, name: &str) -> bool {
+    entry_of(&read_settings(at), name).is_some()
 }
 
 /// Whether sessions load the package.
 pub fn enabled(name: &str) -> bool {
-    entry_of(&read_settings(), name).is_some_and(entry_on)
+    enabled_at(At::Here, name)
+}
+
+/// The same, of that machine's pi (blocking).
+pub fn enabled_at(at: At, name: &str) -> bool {
+    entry_of(&read_settings(at), name).is_some_and(entry_on)
+}
+
+/// The same from settings text already read (another machine's, say).
+pub fn enabled_in(settings: &str, name: &str) -> bool {
+    serde_json::from_str::<Value>(settings).ok().as_ref().and_then(|s| entry_of(s, name)).is_some_and(entry_on)
 }
 
 /// Whether sessions have this list: pi's to-do extension's, if it's on.
 pub fn todos_enabled() -> bool {
     enabled(TODO)
+}
+
+/// pi's settings file in a machine's home folder.
+pub const SETTINGS_REL: &str = ".pi/agent/settings.json";
+const REL: &str = SETTINGS_REL;
+
+/// pi's settings on another machine, as last read (read again in the
+/// background at most every half minute). None until read.
+pub fn settings_on(host: &str) -> Option<String> {
+    crate::remote::home_file_soon(host, REL, Duration::from_secs(30))
+}
+
+/// Whether that machine's pi sessions have the extension: as its settings
+/// were last read; `unknown` until they have been.
+pub fn enabled_on(host: &str, name: &str, unknown: bool) -> bool {
+    settings_on(host).map_or(unknown, |s| enabled_in(&s, name))
+}
+
+/// Whether a session there ("" here) keeps a to-do list.
+pub fn todos_enabled_on(host: &str) -> bool {
+    if host.is_empty() { todos_enabled() } else { enabled_on(host, TODO, true) }
 }
 
 /// A model harlo doesn't offer: Claude through Claude Code, without Claude
@@ -171,29 +245,34 @@ fn policy() -> Value {
     } })
 }
 
-/// The file with the permission package's rules (yours to change).
-pub fn policy_file() -> PathBuf {
-    agent_dir().join("extensions/pi-permission-system/config.json")
+/// The permission package's rules, in pi's folder.
+const POLICY: &str = "extensions/pi-permission-system/config.json";
+
+/// The file with the permission package's rules (yours to change); on
+/// another machine as `ssh://host/…` (its home asked once).
+pub fn policy_file(at: At) -> Result<PathBuf, String> {
+    match at {
+        At::Here => Ok(agent_dir().join(POLICY)),
+        At::On(host) => {
+            let out = crate::remote::run(host, &format!("printf '%s' {REMOTE_DIR}"), Duration::from_secs(20)).map_err(|e| format!("{e:#}"))?;
+            Ok(crate::remote::join(&host.name, &format!("{}/{POLICY}", String::from_utf8_lossy(&out.stdout).trim())))
+        }
+    }
 }
 
-fn write_policy() -> Result<(), String> {
-    let file = policy_file();
-    if file.exists() {
+fn write_policy(at: At) -> Result<(), String> {
+    if read_rel(at, POLICY)?.is_some() {
         return Ok(());
     }
-    std::fs::create_dir_all(file.parent().expect("a folder")).map_err(|e| e.to_string())?;
-    let text = serde_json::to_string_pretty(&policy()).expect("json");
-    std::fs::write(&file, text + "\n").map_err(|e| e.to_string())
+    write_rel(at, POLICY, &(serde_json::to_string_pretty(&policy()).expect("json") + "\n"))
 }
 
 /// What's been set up once (a record next to pi's settings, so an extension
 /// someone removes with pi stays removed, and one harlo adds later comes).
-fn set_up_file() -> PathBuf {
-    agent_dir().join("harlo-extensions.json")
-}
+const SET_UP: &str = "harlo-extensions.json";
 
-fn set_up() -> Vec<String> {
-    let v: Value = std::fs::read_to_string(set_up_file()).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+fn set_up(at: At) -> Vec<String> {
+    let v: Value = read_rel(at, SET_UP).ok().flatten().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
     v["set_up"].as_array().into_iter().flatten().filter_map(|s| s.as_str().map(str::to_owned)).collect()
 }
 
@@ -201,34 +280,34 @@ fn set_up() -> Vec<String> {
 static BUSY: Mutex<()> = Mutex::new(());
 
 /// The extensions to install without being asked, not set up yet.
-pub fn to_set_up() -> Vec<Extension> {
-    let done = set_up();
+pub fn to_set_up(at: At) -> Vec<Extension> {
+    let done = set_up(at);
     EXTENSIONS.into_iter().filter(|e| !e.optional && !done.iter().any(|d| d == e.name)).collect()
 }
 
 /// Installs what's left, off (blocking; one at a time however many ask). An
 /// extension someone already has stays as it is. `progress` hears what's
 /// being added. What failed is tried again next time; its error is returned.
-pub fn ensure(pi: &Path, cwd: &Path, progress: &dyn Fn(&Extension)) -> Result<(), String> {
+pub fn ensure(at: At, pi: &Path, cwd: &Path, progress: &dyn Fn(&Extension)) -> Result<(), String> {
     let _busy = BUSY.lock().unwrap_or_else(|e| e.into_inner());
-    let left = to_set_up();
+    let left = to_set_up(at);
     if left.is_empty() {
         return Ok(());
     }
-    let mut done = set_up();
+    let mut done = set_up(at);
     let mut failed = Vec::new();
     for e in left {
-        let result = if configured(e.name) {
+        let result = if configured(at, e.name) {
             Ok(())
         } else {
             progress(&e);
-            install_off(pi, cwd, &e)
+            install_off(at, pi, cwd, &e)
         };
         match result {
             Ok(()) => {
                 done.push(e.name.to_owned());
                 let text = serde_json::to_string_pretty(&json!({ "set_up": done })).expect("json");
-                std::fs::write(set_up_file(), text + "\n").map_err(|e| e.to_string())?;
+                write_rel(at, SET_UP, &(text + "\n"))?;
             }
             Err(why) => failed.push(format!("{}: {why}", e.title)),
         }
@@ -239,48 +318,48 @@ pub fn ensure(pi: &Path, cwd: &Path, progress: &dyn Fn(&Extension)) -> Result<()
 /// Installs an extension already off: its entry goes first (pi keeps a filter
 /// through an install), so no session can load it meanwhile. A failed one
 /// leaves no entry (pi would try again every time it starts).
-fn install_off(pi: &Path, cwd: &Path, e: &Extension) -> Result<(), String> {
+fn install_off(at: At, pi: &Path, cwd: &Path, e: &Extension) -> Result<(), String> {
     let source = format!("npm:{}@{}", e.name, e.tested);
-    let mut settings = settings_to_change()?;
+    let mut settings = settings_to_change(at)?;
     if !settings["packages"].is_array() {
         settings["packages"] = json!([]);
     }
     settings["packages"].as_array_mut().expect("a list").push(off_entry(&source));
-    write_settings(&settings)?;
-    let result = install(pi, cwd, e.name, e.tested);
+    write_settings(at, &settings)?;
+    let result = install(at, pi, cwd, e.name, e.tested);
     if result.is_err() {
-        let mut settings = settings_to_change()?;
+        let mut settings = settings_to_change(at)?;
         if let Some(list) = settings.get_mut("packages").and_then(Value::as_array_mut) {
             list.retain(|p| entry_source(p).is_none_or(|s| name_of(s) != e.name));
         }
-        write_settings(&settings)?;
+        write_settings(at, &settings)?;
     }
     result
 }
 
 /// Turns an extension on or off for sessions started afterwards. On, it's
 /// installed if it isn't, and permissions get their rules.
-pub fn switch(pi: &Path, cwd: &Path, name: &str, on: bool) -> Result<(), String> {
+pub fn switch(at: At, pi: &Path, cwd: &Path, name: &str, on: bool) -> Result<(), String> {
     let e = EXTENSIONS.iter().find(|e| e.name == name).ok_or("Not one of harlo's extensions.")?;
     let _busy = BUSY.lock().unwrap_or_else(|e| e.into_inner());
     if on {
         if name == PERMISSIONS {
-            write_policy()?;
+            write_policy(at)?;
         }
-        if !list(pi, cwd)?.iter().any(|p| !p.project && name_of(&p.source) == name && !p.version.is_empty()) {
-            install(pi, cwd, name, e.tested)?;
+        if !list(at, pi, cwd)?.iter().any(|p| !p.project && name_of(&p.source) == name && !p.version.is_empty()) {
+            install(at, pi, cwd, name, e.tested)?;
         }
     }
-    write_settings(&with_switch(settings_to_change()?, name, on))
+    write_settings(at, &with_switch(settings_to_change(at)?, name, on))
 }
 
 /// Installs a version with pi (it takes the place of any other of the
 /// package, and stays until the next one is asked for).
-pub fn install(pi: &Path, cwd: &Path, name: &str, version: &str) -> Result<(), String> {
+pub fn install(at: At, pi: &Path, cwd: &Path, name: &str, version: &str) -> Result<(), String> {
     if !EXTENSIONS.iter().any(|e| e.name == name) {
         return Err("Not one of harlo's extensions.".into());
     }
-    run(pi, cwd, &["install", &format!("npm:{name}@{version}")], Duration::from_secs(600)).map(|_| ())
+    run_at(at, pi, cwd, &["install", &format!("npm:{name}@{version}")], Duration::from_secs(600)).map(|_| ())
 }
 
 /// The package's latest version on npm.
@@ -354,7 +433,14 @@ pub fn parse_list(text: &str) -> Vec<Package> {
 
 /// Fills in what the package's own package.json says.
 pub fn describe(p: &mut Package) {
-    let v: Value = std::fs::read_to_string(p.path.join("package.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    let manifest = std::fs::read_to_string(p.path.join("package.json")).unwrap_or_default();
+    let dirs: Vec<&str> = ["extensions", "skills", "prompts", "themes"].into_iter().filter(|k| p.path.join(k).is_dir()).collect();
+    describe_from(p, &manifest, &dirs);
+}
+
+/// The same from its package.json's text and which of its folders are there.
+fn describe_from(p: &mut Package, manifest: &str, dirs: &[&str]) {
+    let v: Value = serde_json::from_str(manifest).unwrap_or_default();
     p.version = v["version"].as_str().unwrap_or_default().to_owned();
     p.description = v["description"].as_str().unwrap_or_default().trim().to_owned();
     // Its manifest (`"pi": { "extensions": [...] }`), else the usual folders.
@@ -362,7 +448,7 @@ pub fn describe(p: &mut Package) {
         .into_iter()
         .filter(|k| match v["pi"].get(*k) {
             Some(list) => list.as_array().is_some_and(|a| !a.is_empty()),
-            None => v["pi"].is_null() && p.path.join(k).is_dir(),
+            None => v["pi"].is_null() && dirs.contains(k),
         })
         .map(str::to_owned)
         .collect();
@@ -405,18 +491,53 @@ pub fn run(pi: &Path, cwd: &Path, args: &[&str], limit: Duration) -> Result<Stri
     if status.success() {
         return Ok(out);
     }
+    Err(failure(&out, &err))
+}
+
+/// Runs pi: this machine's (`pi` in `cwd`), or another's (its `pi`, from
+/// its home folder).
+pub fn run_at(at: At, pi: &Path, cwd: &Path, args: &[&str], limit: Duration) -> Result<String, String> {
+    let At::On(host) = at else { return run(pi, cwd, args, limit) };
+    let args: Vec<String> = args.iter().map(|a| crate::remote::quote(a)).collect();
+    let out = crate::remote::run(host, &format!("cd 2>/dev/null; pi {} </dev/null", args.join(" ")), limit).map_err(|e| format!("{e:#}"))?;
+    let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout).into_owned(), String::from_utf8_lossy(&out.stderr).into_owned());
+    if out.status.success() { Ok(stdout) } else { Err(failure(&stdout, &stderr)) }
+}
+
+/// Why pi failed: the end of what it said.
+fn failure(out: &str, err: &str) -> String {
     let said = crate::signin::plain(&format!("{err}\n{out}"));
     let tail: Vec<&str> = said.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
     let said: String = tail[tail.len().saturating_sub(4)..].join("\n").chars().take(600).collect();
-    Err(if said.is_empty() { "pi failed.".into() } else { said })
+    if said.is_empty() { "pi failed.".into() } else { said }
 }
 
 /// The packages installed for you, and (in a project) the project's own.
-pub fn list(pi: &Path, cwd: &Path) -> Result<Vec<Package>, String> {
-    let text = run(pi, cwd, &["list"], Duration::from_secs(30))?;
+pub fn list(at: At, pi: &Path, cwd: &Path) -> Result<Vec<Package>, String> {
+    let text = run_at(at, pi, cwd, &["list"], Duration::from_secs(30))?;
     let mut list = parse_list(&text);
-    for p in &mut list {
-        describe(p);
+    match at {
+        At::Here => list.iter_mut().for_each(describe),
+        // Their package.json and folders, read there in one go.
+        At::On(host) => {
+            let paths: Vec<String> = list.iter().map(|p| crate::remote::quote(&p.path.to_string_lossy())).collect();
+            if !paths.is_empty() {
+                let script = format!(
+                    "for d in {}; do printf '%s\\037' \"$d\"; tr '\\n' ' ' < \"$d/package.json\" 2>/dev/null; printf '\\037'; for k in extensions skills prompts themes; do [ -d \"$d/$k\" ] && printf '%s ' \"$k\"; done; printf '\\036'; done",
+                    paths.join(" ")
+                );
+                let out = crate::remote::run(host, &script, Duration::from_secs(30)).map_err(|e| format!("{e:#}"))?;
+                let text = String::from_utf8_lossy(&out.stdout);
+                for record in text.split('\u{1e}') {
+                    let mut parts = record.split('\u{1f}');
+                    let (Some(path), Some(manifest), Some(dirs)) = (parts.next(), parts.next(), parts.next()) else { continue };
+                    let dirs: Vec<&str> = dirs.split_whitespace().collect();
+                    for p in list.iter_mut().filter(|p| p.path.to_string_lossy() == path) {
+                        describe_from(p, manifest, &dirs);
+                    }
+                }
+            }
+        }
     }
     Ok(list)
 }
@@ -463,7 +584,7 @@ mod tests {
         assert_eq!(run(sh, Path::new("/"), &["-c", "echo hi"], Duration::from_secs(5)).unwrap(), "hi\n");
         assert_eq!(run(sh, Path::new("/"), &["-c", "echo working; echo 'npm error 404 Not Found' >&2; exit 1"], Duration::from_secs(5)).unwrap_err(), "npm error 404 Not Found\nworking");
         assert!(run(sh, Path::new("/"), &["-c", "sleep 5"], Duration::from_millis(300)).unwrap_err().contains("didn't finish"));
-        assert!(install(sh, Path::new("/"), "not-one-of-ours", "1.0.0").unwrap_err().contains("Not one"));
+        assert!(install(At::Here, sh, Path::new("/"), "not-one-of-ours", "1.0.0").unwrap_err().contains("Not one"));
     }
 
     #[test]
@@ -565,33 +686,33 @@ mod tests {
         let pi = PathBuf::from(std::env::var("HARLO_TEST_PI").expect("HARLO_TEST_PI"));
         let cwd = Path::new(&dir);
         let heard = Mutex::new(Vec::new());
-        ensure(&pi, cwd, &|e| heard.lock().unwrap().push(e.title)).unwrap();
+        ensure(At::Here, &pi, cwd, &|e| heard.lock().unwrap().push(e.title)).unwrap();
         // Each but the optional one, there and off, at its version.
         assert_eq!(heard.lock().unwrap().len(), EXTENSIONS.len() - 1);
-        assert!(to_set_up().is_empty());
-        let listed = list(&pi, cwd).unwrap();
+        assert!(to_set_up(At::Here).is_empty());
+        let listed = list(At::Here, &pi, cwd).unwrap();
         for e in EXTENSIONS.iter().filter(|e| !e.optional) {
             let p = listed.iter().find(|p| name_of(&p.source) == e.name).unwrap();
             assert_eq!(p.version, e.tested, "{}", e.name);
-            assert!(configured(e.name) && !enabled(e.name), "{} is off", e.name);
+            assert!(configured(At::Here, e.name) && !enabled(e.name), "{} is off", e.name);
             assert!(is_newer("0.0.1", &latest(e.name).unwrap()));
         }
-        assert!(!configured("pi-claude-bridge"), "the optional one waits");
-        ensure(&pi, cwd, &|_| panic!("again")).unwrap();
+        assert!(!configured(At::Here, "pi-claude-bridge"), "the optional one waits");
+        ensure(At::Here, &pi, cwd, &|_| panic!("again")).unwrap();
         // Permissions on: its rules, written once.
-        assert!(!policy_file().exists());
-        switch(&pi, cwd, PERMISSIONS, true).unwrap();
-        assert!(enabled(PERMISSIONS) && policy_file().exists());
-        switch(&pi, cwd, PERMISSIONS, false).unwrap();
+        assert!(!policy_file(At::Here).unwrap().exists());
+        switch(At::Here, &pi, cwd, PERMISSIONS, true).unwrap();
+        assert!(enabled(PERMISSIONS) && policy_file(At::Here).unwrap().exists());
+        switch(At::Here, &pi, cwd, PERMISSIONS, false).unwrap();
         assert!(!enabled(PERMISSIONS));
         // A new version of one that's off: it stays off.
-        install(&pi, cwd, TODO, "2.14.0").unwrap();
-        let listed = list(&pi, cwd).unwrap();
+        install(At::Here, &pi, cwd, TODO, "2.14.0").unwrap();
+        let listed = list(At::Here, &pi, cwd).unwrap();
         assert_eq!(listed.iter().filter(|p| name_of(&p.source) == TODO).map(|p| p.version.as_str()).collect::<Vec<_>>(), ["2.14.0"]);
         assert!(!enabled(TODO));
         // The optional one, on: installed then.
-        switch(&pi, cwd, "pi-claude-bridge", true).unwrap();
+        switch(At::Here, &pi, cwd, "pi-claude-bridge", true).unwrap();
         assert!(enabled("pi-claude-bridge"));
-        assert_eq!(list(&pi, cwd).unwrap().iter().find(|p| name_of(&p.source) == "pi-claude-bridge").unwrap().version, "0.9.3");
+        assert_eq!(list(At::Here, &pi, cwd).unwrap().iter().find(|p| name_of(&p.source) == "pi-claude-bridge").unwrap().version, "0.9.3");
     }
 }

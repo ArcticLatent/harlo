@@ -455,7 +455,7 @@ mod tests {
     fn stores_schedules() {
         use crate::schedules::{Repeat, Schedule};
         let db = Db::open_in_memory().unwrap();
-        let mut s = Schedule { id: 0, title: "Morning".into(), prompt: "Summarize yesterday".into(), project_id: 3, harness: "omp".into(), model: String::new(),
+        let mut s = Schedule { id: 0, title: "Morning".into(), prompt: "Summarize yesterday".into(), project_id: 3, host: String::new(), harness: "omp".into(), model: String::new(),
             repeat: Repeat::Days { days: 0x1f, hour: 9, minute: 0 }, enabled: true, catch_up: true, last_run: None, next_run: Some(100) };
         db.save_schedule(&mut s).unwrap();
         assert!(s.id > 0);

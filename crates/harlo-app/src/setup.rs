@@ -431,7 +431,7 @@ impl Setup {
             {
                 let progress = thread.clone();
                 let home = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_else(|| "/".into());
-                let result = harlo_core::pi_packages::ensure(&pi, &home, &|e: &harlo_core::pi_packages::Extension| {
+                let result = harlo_core::pi_packages::ensure(harlo_core::pi_packages::At::Here, &pi, &home, &|e: &harlo_core::pi_packages::Extension| {
                     let text = format!("Installing pi's extensions (they stay off until you turn them on): {}…", e.title);
                     let _ = progress.queue(move |mut this| {
                         if let Some(i) = this.as_mut().rust_mut().installs.get_mut("pi") {

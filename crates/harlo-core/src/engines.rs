@@ -64,11 +64,28 @@ impl Hardware {
         format!("{gpu} · {} GB RAM · {} GB free", (self.ram_mb + 512) / 1024, self.disk_free_mb / 1024)
     }
 
+    /// Read back from [`json`](Self::json) (another machine's, say).
+    pub fn from_json(v: &Value) -> Hardware {
+        let n = |v: &Value| v.as_u64().unwrap_or(0);
+        Hardware {
+            gpus: v["gpus"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|g| Gpu { vendor: g["vendor"].as_str().unwrap_or_default().into(), name: g["name"].as_str().unwrap_or_default().into(), vram_mb: n(&g["vramMb"]), arch: g["arch"].as_str().unwrap_or_default().into() })
+                .collect(),
+            ram_mb: n(&v["ramMb"]),
+            disk_free_mb: n(&v["diskFreeMb"]),
+            avx2: v["avx2"] == true,
+            nvidia_driver: v["nvidiaDriver"].as_str().unwrap_or_default().into(),
+        }
+    }
+
     pub fn json(&self) -> Value {
         json!({
             "summary": self.summary(),
             "gpus": self.gpus.iter().map(|g| json!({ "vendor": g.vendor, "name": g.name, "vramMb": g.vram_mb, "arch": g.arch })).collect::<Vec<_>>(),
-            "ramMb": self.ram_mb, "diskFreeMb": self.disk_free_mb, "avx2": self.avx2,
+            "ramMb": self.ram_mb, "diskFreeMb": self.disk_free_mb, "avx2": self.avx2, "nvidiaDriver": self.nvidia_driver,
         })
     }
 }
@@ -124,7 +141,13 @@ pub fn detect() -> Hardware {
     let (mut gpus, nvidia_driver) = run("nvidia-smi", &["--query-gpu=name,memory.total,compute_cap,driver_version", "--format=csv,noheader,nounits"]).map(|t| nvidia_gpus(&t)).unwrap_or_default();
     gpus.extend(other_gpus());
     let meminfo = std::fs::read_to_string("/proc/meminfo").unwrap_or_default();
-    let ram_mb = meminfo.lines().find_map(|l| l.strip_prefix("MemTotal:")).and_then(|v| v.split_whitespace().next()?.parse::<u64>().ok()).unwrap_or(0) / 1024;
+    let mut ram_mb = meminfo.lines().find_map(|l| l.strip_prefix("MemTotal:")).and_then(|v| v.split_whitespace().next()?.parse::<u64>().ok()).unwrap_or(0) / 1024;
+    // A card that shares the computer's memory (the DGX Spark's, a Jetson's)
+    // reports none of its own: most of the RAM is its, as models go.
+    if let Some(g) = gpus.iter_mut().find(|g| g.vendor == "nvidia" && g.vram_mb == 0) {
+        g.vram_mb = ram_mb * 85 / 100;
+        ram_mb -= g.vram_mb;
+    }
     let avx2 = std::fs::read_to_string("/proc/cpuinfo").unwrap_or_default().split_whitespace().any(|w| w == "avx2");
     let home = std::env::var("HOME").unwrap_or_else(|_| "/".into());
     let disk_free_mb = run("df", &["-Pk", &home]).and_then(|t| t.lines().nth(1)?.split_whitespace().nth(3)?.parse::<u64>().ok()).unwrap_or(0) / 1024;
@@ -205,6 +228,7 @@ impl Engine {
                 _ => ("ok", String::new()),
             },
             Engine::Strata => match hw.vendor() {
+                _ if ARM && !hw.gpus.iter().any(|g| g.vendor == "nvidia" && g.name.contains("GB10")) => ("no", "On an ARM computer, Strata runs on the NVIDIA DGX Spark only.".into()),
                 "" => ("no", "Needs an NVIDIA RTX, a supported AMD Radeon or an Intel Arc card.".into()),
                 "nvidia" if hw.vram_mb() < 12 * 1024 => ("no", "Needs an NVIDIA card with 12 GB or more.".into()),
                 _ if total_gb < 38 => ("warn", format!("Its smallest model needs about 38 GB of RAM and graphics memory together; this computer has {total_gb} GB.")),
@@ -494,16 +518,25 @@ fn asset_named(release: &Value, name: &str, sums: Option<&str>) -> Option<Asset>
     Some(Asset { name: name.to_owned(), url: a["browser_download_url"].as_str()?.to_owned(), sha256: sha.to_lowercase(), size: a["size"].as_u64().unwrap_or(0) })
 }
 
+/// Whether this is an ARM (aarch64) machine: the engines' builds for it.
+pub const ARM: bool = cfg!(target_arch = "aarch64");
+
 /// The llama.cpp build for this computer's card (and its CUDA runtime).
 pub fn llamacpp_build(hw: &Hardware, tag: &str) -> (String, Option<String>) {
+    llamacpp_build_for(hw, tag, ARM)
+}
+
+fn llamacpp_build_for(hw: &Hardware, tag: &str, arm: bool) -> (String, Option<String>) {
+    let arch = if arm { "arm64" } else { "x64" };
     match hw.vendor() {
-        "nvidia" => {
+        // (On ARM, CUDA 13's build only: an older driver takes Vulkan.)
+        "nvidia" if !arm || hw.cuda13() => {
             let cuda = if hw.cuda13() { "13.4" } else { "12.8" };
-            (format!("llama-{tag}-bin-ubuntu-cuda-{cuda}-x64.tar.gz"), Some(format!("cudart-llama-{tag}-bin-ubuntu-cuda-{cuda}-x64.tar.gz")))
+            (format!("llama-{tag}-bin-ubuntu-cuda-{cuda}-{arch}.tar.gz"), Some(format!("cudart-llama-{tag}-bin-ubuntu-cuda-{cuda}-{arch}.tar.gz")))
         }
         // Vulkan works with the usual Mesa drivers (ROCm builds want ROCm).
-        "amd" | "intel" => (format!("llama-{tag}-bin-ubuntu-vulkan-x64.tar.gz"), None),
-        _ => (format!("llama-{tag}-bin-ubuntu-x64.tar.gz"), None),
+        "nvidia" | "amd" | "intel" => (format!("llama-{tag}-bin-ubuntu-vulkan-{arch}.tar.gz"), None),
+        _ => (format!("llama-{tag}-bin-ubuntu-{arch}.tar.gz"), None),
     }
 }
 
@@ -520,7 +553,7 @@ pub fn plan(engine: Engine, hw: &Hardware) -> Result<(String, Vec<Asset>), Strin
     let assets = match engine {
         Engine::Ollama => {
             let sums = rel["assets"].as_array().into_iter().flatten().find(|a| a["name"] == "sha256sum.txt").and_then(|a| a["browser_download_url"].as_str()).map(get_text).transpose()?;
-            let name = if hw.vendor() == "amd" { "ollama-linux-amd64-rocm.tar.zst" } else { "ollama-linux-amd64.tar.zst" };
+            let name = if ARM { "ollama-linux-arm64.tar.zst" } else if hw.vendor() == "amd" { "ollama-linux-amd64-rocm.tar.zst" } else { "ollama-linux-amd64.tar.zst" };
             vec![asset_named(&rel, name, sums.as_deref()).ok_or_else(|| format!("Ollama {tag} has no {name} with a checksum."))?]
         }
         Engine::LlamaCpp => {
@@ -547,7 +580,7 @@ pub fn plan(engine: Engine, hw: &Hardware) -> Result<(String, Vec<Asset>), Strin
         Engine::Ninfer => Vec::new(),
         // uv, which then installs vLLM (and its Python) from PyPI.
         Engine::Vllm => {
-            let name = "uv-x86_64-unknown-linux-gnu.tar.gz";
+            let name = if ARM { "uv-aarch64-unknown-linux-gnu.tar.gz" } else { "uv-x86_64-unknown-linux-gnu.tar.gz" };
             vec![asset_named(&rel, name, None).ok_or_else(|| format!("uv {tag} has no {name} with a checksum."))?]
         }
     };
@@ -1463,7 +1496,11 @@ mod tests {
         assert_eq!(llamacpp_build(&hw("nvidia", 32, 94, "615.1"), "b1"), ("llama-b1-bin-ubuntu-cuda-13.4-x64.tar.gz".into(), Some("cudart-llama-b1-bin-ubuntu-cuda-13.4-x64.tar.gz".into())));
         assert_eq!(llamacpp_build(&hw("nvidia", 12, 32, "560.2"), "b1").0, "llama-b1-bin-ubuntu-cuda-12.8-x64.tar.gz");
         assert_eq!(llamacpp_build(&hw("amd", 20, 64, ""), "b1"), ("llama-b1-bin-ubuntu-vulkan-x64.tar.gz".into(), None));
-        assert_eq!(llamacpp_build(&hw("", 0, 64, ""), "b1").0, "llama-b1-bin-ubuntu-x64.tar.gz");
+        assert_eq!(llamacpp_build_for(&hw("", 0, 64, ""), "b1", false).0, "llama-b1-bin-ubuntu-x64.tar.gz");
+        // ARM: CUDA 13's build, else Vulkan; the CPU's.
+        assert_eq!(llamacpp_build_for(&hw("nvidia", 128, 128, "615.1"), "b1", true), ("llama-b1-bin-ubuntu-cuda-13.4-arm64.tar.gz".into(), Some("cudart-llama-b1-bin-ubuntu-cuda-13.4-arm64.tar.gz".into())));
+        assert_eq!(llamacpp_build_for(&hw("nvidia", 24, 64, "560.2"), "b1", true).0, "llama-b1-bin-ubuntu-vulkan-arm64.tar.gz");
+        assert_eq!(llamacpp_build_for(&hw("", 0, 64, ""), "b1", true).0, "llama-b1-bin-ubuntu-arm64.tar.gz");
     }
 
     #[test]

@@ -17,7 +17,7 @@ Button {
     contentItem: Label {
         text: b.text
         font: b.font
-        color: b.accent ? Theme.onPrimary : b.destructive ? Theme.error : Theme.foreground
+        color: b.accent ? Theme.textOnPrimary : b.destructive ? Theme.error : Theme.foreground
         opacity: b.enabled ? 1 : 0.45
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter

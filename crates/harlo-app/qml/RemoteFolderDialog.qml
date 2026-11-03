@@ -17,7 +17,11 @@ AppDialog {
     readonly property var listing: { try { return JSON.parse(Remotes.foldersJson) } catch (e) { return { path: "", dirs: [], error: "", loading: true } } }
     readonly property bool ready: !listing.loading && listing.error === "" && listing.path.startsWith("ssh://")
 
-    function openFor(name) { host = name; open(); Remotes.requestFolders(name) }
+    // Naming a new folder here: it opens once it's made.
+    property bool naming: false
+    onListingChanged: if (!listing.loading && !listing.createError) { naming = false; newFolderName.text = "" }
+    function createFolder() { if (newFolderName.text.trim() !== "") Remotes.createFolder(listing.path, newFolderName.text) }
+    function openFor(name) { host = name; naming = false; open(); Remotes.requestFolders(name) }
     function openFolder(dir) { Remotes.requestFolders(listing.path.replace(/\/$/, "") + "/" + dir) }
     function up() {
         const p = listing.path, i = p.lastIndexOf("/")
@@ -49,6 +53,48 @@ AppDialog {
                 font.pixelSize: Theme.px(12)
                 elide: Text.ElideMiddle
             }
+            FlatButton {
+                objectName: "remoteFolderNew"
+                text: "New folder"
+                font.pixelSize: Theme.px(12)
+                enabled: dlg.ready
+                onClicked: { dlg.naming = true; newFolderName.forceActiveFocus() }
+            }
+        }
+        RowLayout {
+            visible: dlg.naming
+            Layout.fillWidth: true
+            spacing: 6
+            AppTextField {
+                id: newFolderName
+                objectName: "remoteFolderName"
+                Layout.fillWidth: true
+                placeholderText: "Folder name"
+                enabled: dlg.ready
+                onAccepted: dlg.createFolder()
+                Keys.onEscapePressed: dlg.naming = false
+            }
+            FlatButton {
+                objectName: "remoteFolderCreate"
+                text: "Create"
+                accent: Theme.primary
+                font.pixelSize: Theme.px(12)
+                enabled: dlg.ready && newFolderName.text.trim() !== ""
+                onClicked: dlg.createFolder()
+            }
+            FlatButton {
+                text: "Cancel"
+                font.pixelSize: Theme.px(12)
+                onClicked: dlg.naming = false
+            }
+        }
+        Label {
+            visible: dlg.naming && (dlg.listing.createError || "") !== ""
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+            text: dlg.listing.createError || ""
+            color: Theme.error
+            font.pixelSize: Theme.px(12)
         }
         Rectangle {
             Layout.fillWidth: true

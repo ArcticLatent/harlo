@@ -492,15 +492,21 @@ const FILE_LINES: usize = 5000;
 fn file_json(cwd: &std::path::Path, path: &str) -> Value {
     let wanted = std::path::Path::new(path.trim());
     let base = harlo_core::git::repo_root(cwd).unwrap_or_else(|| cwd.to_owned());
-    let full = if wanted.is_absolute() { wanted.to_owned() } else { cwd.join(wanted) };
+    // (On another machine, an absolute path is that machine's.)
+    let host = harlo_core::remote::host_of(cwd);
+    let absolute = |p: &std::path::Path| match &host {
+        Some(h) => std::path::PathBuf::from(harlo_core::remote::join(h, &p.to_string_lossy())),
+        None => p.to_owned(),
+    };
+    let full = if wanted.is_absolute() { absolute(wanted) } else { cwd.join(wanted) };
     // Relative to the repository when not to the folder (agents write either).
-    let full = if full.exists() || wanted.is_absolute() { full } else { base.join(wanted) };
-    let (Ok(real), Ok(base_real)) = (full.canonicalize(), base.canonicalize()) else { return json!({ "error": format!("{path} isn't there.") }) };
-    let cwd_real = cwd.canonicalize().unwrap_or_else(|_| base_real.clone());
+    let full = if wanted.is_absolute() || real_path(&full).is_some() { full } else { base.join(wanted) };
+    let (Some((real, is_dir)), Some((base_real, _))) = (real_path(&full), real_path(&base)) else { return json!({ "error": format!("{path} isn't there.") }) };
+    let cwd_real = real_path(cwd).map_or_else(|| base_real.clone(), |(p, _)| p);
     if !real.starts_with(&base_real) && !real.starts_with(&cwd_real) {
         return json!({ "error": "Only files in the session's folder open here." });
     }
-    if real.is_dir() {
+    if is_dir {
         return json!({ "error": format!("{path} is a folder.") });
     }
     let shown = real.strip_prefix(&base_real).map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| path.to_owned());
@@ -515,6 +521,26 @@ fn file_json(cwd: &std::path::Path, path: &str) -> Value {
         Ok(harlo_core::files::FileContent::TooLarge(n)) => json!({ "error": format!("{shown} is too big to show here ({} MB).", n / 1_000_000) }),
         Err(e) => json!({ "error": format!("{shown}: {e}") }),
     }
+}
+
+/// A path with its links resolved, and whether it's a folder; None when
+/// it isn't there. On another machine, asked of it (`realpath`).
+fn real_path(path: &std::path::Path) -> Option<(std::path::PathBuf, bool)> {
+    let Some((name, there)) = harlo_core::remote::split(path) else {
+        let real = path.canonicalize().ok()?;
+        let dir = real.is_dir();
+        return Some((real, dir));
+    };
+    let host = harlo_core::remote::host(&name)?;
+    let q = harlo_core::remote::quote(&there);
+    let out = harlo_core::remote::run(&host, &format!("r=$(realpath -e -- {q}) || exit 1; printf '%s\\n' \"$r\"; [ -d \"$r\" ] && echo dir || echo file"), std::time::Duration::from_secs(20)).ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut lines = text.lines();
+    let real = lines.next().filter(|l| l.starts_with('/'))?;
+    Some((std::path::PathBuf::from(harlo_core::remote::join(&name, real)), lines.next() == Some("dir")))
 }
 
 /// A file's diff for a phone: hunks of lines (`k`: `+`, `-`, ` `, `\\`),

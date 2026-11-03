@@ -47,6 +47,10 @@ pub mod qobject {
         /// for its home) into `foldersJson`.
         #[qinvokable]
         fn request_folders(self: Pin<&mut Remotes>, path: &QString);
+        /// Makes a folder in `parent` (`ssh://…`) and lists it into
+        /// `foldersJson`; if it can't be made, `parent` with `createError`.
+        #[qinvokable]
+        fn create_folder(self: Pin<&mut Remotes>, parent: &QString, name: &QString);
         /// Hosts in ~/.ssh/config: `[{ name, hostname, user, port, added }]`
         /// (`added`: a host here already uses that name or command).
         #[qinvokable]
@@ -124,6 +128,11 @@ pub fn load_saved() {
             Some(Host { name, ssh })
         })
         .collect();
+    // None is connected until it's asked for (the instance shown, or picked
+    // from the menu): harlo's background work leaves them alone till then.
+    for h in &hosts {
+        remote::set_disconnected(&h.name, true);
+    }
     remote::set_hosts(hosts);
 }
 
@@ -213,6 +222,8 @@ impl Remotes {
 
     pub fn connect_host(mut self: Pin<&mut Self>, name: &QString) {
         let name = name.to_string();
+        tracing::info!("connecting to {name}");
+        remote::set_disconnected(&name, false);
         let Some(host) = remote::host(&name) else { return };
         self.as_mut().rust_mut().states.insert(name.clone(), HostState { state: "connecting".into(), ..Default::default() });
         self.as_mut().bump();
@@ -312,8 +323,13 @@ impl Remotes {
 
     pub fn disconnect_host(mut self: Pin<&mut Self>, name: &QString) {
         let name = name.to_string();
+        remote::set_disconnected(&name, true);
         if let Some(host) = remote::host(&name) {
-            remote::disconnect(&host);
+            crate::runtime().spawn_blocking(move || {
+                // (Its own connection, so closing the shared one leaves it.)
+                harlo_harness::stop_opencode_on(&host.name);
+                remote::disconnect(&host);
+            });
         }
         self.as_mut().rust_mut().states.remove(&name);
         self.bump();
@@ -327,6 +343,29 @@ impl Remotes {
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
             let result = list_folders(&path);
+            let _ = thread.queue(move |mut this| {
+                if this.folders_generation == generation {
+                    this.as_mut().set_folders(QString::from(&result.to_string()));
+                }
+            });
+        });
+    }
+
+    pub fn create_folder(mut self: Pin<&mut Self>, parent: &QString, name: &QString) {
+        let (parent, name) = (parent.to_string(), name.to_string());
+        self.as_mut().rust_mut().folders_generation += 1;
+        let generation = self.folders_generation;
+        self.as_mut().set_folders(QString::from(&json!({ "path": parent, "display": "", "dirs": [], "error": "", "loading": true }).to_string()));
+        let thread = self.qt_thread();
+        crate::runtime().spawn_blocking(move || {
+            let result = match remote::make_folder(std::path::Path::new(&parent), &name) {
+                Ok(made) => list_folders(&made.to_string_lossy()),
+                Err(e) => {
+                    let mut listed = list_folders(&parent);
+                    listed["createError"] = json!(format!("{e:#}"));
+                    listed
+                }
+            };
             let _ = thread.queue(move |mut this| {
                 if this.folders_generation == generation {
                     this.as_mut().set_folders(QString::from(&result.to_string()));

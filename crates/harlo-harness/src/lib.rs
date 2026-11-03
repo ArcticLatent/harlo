@@ -11,6 +11,7 @@ mod claude_run;
 pub mod event;
 pub mod file_blocks;
 pub mod framing;
+pub mod mirror;
 pub mod opencode;
 mod opencode_run;
 mod permission_bridge;
@@ -21,6 +22,7 @@ pub mod store;
 pub use event::{BlockKind, HarnessEvent, HarnessKind, NoticeLevel, Translator};
 pub use process::{Harness, HarnessConfig, RemoteLaunch, SendMode, SessionTarget, image_from_file, on_host, resolve_program};
 pub use opencode_run::shutdown as stop_opencode;
+pub use opencode_run::shutdown_on as stop_opencode_on;
 pub use opencode_run::reload_if_idle as reload_opencode_if_idle;
 pub use acp::shutdown as stop_acp;
 /// A remote host's OpenCode: its sessions, a saved one, its prompts. And
@@ -84,9 +86,22 @@ pub fn set_remote_bridge(f: RemoteBridge) {
     let _ = REMOTE_BRIDGE.set(f);
 }
 
+/// Before a session starts on a remote host: what harlo forwards there
+/// (this computer's model servers, `harlo_core::model_servers`).
+pub type RemoteStart = fn(&str);
+static REMOTE_START: std::sync::OnceLock<RemoteStart> = std::sync::OnceLock::new();
+
+pub fn set_remote_start(f: RemoteStart) {
+    let _ = REMOTE_START.set(f);
+}
+
 /// The bridge an agent runs for harlo's tools, here or on its host, while
-/// orchestration is on.
+/// orchestration is on. (Called as each session starts: on a host, what
+/// [`set_remote_start`] set runs first.)
 pub(crate) fn mcp_bridge_for(remote: Option<&RemoteLaunch>) -> Option<Vec<String>> {
+    if let (Some(r), Some(start)) = (remote, REMOTE_START.get()) {
+        start(&r.host);
+    }
     match remote {
         None => mcp_bridge(),
         Some(r) if ORCHESTRATION.load(std::sync::atomic::Ordering::SeqCst) => REMOTE_BRIDGE.get()?(&r.host),

@@ -15,8 +15,13 @@ Window {
     minimumWidth: 320
     minimumHeight: 320
     color: Theme.background
-    property bool onTop: Workspace.setting("mini_chat_on_top") !== "0"
-    flags: Qt.Window | (onTop ? Qt.WindowStaysOnTopHint : 0)
+    property bool stayOnTop: Workspace.setting("mini_chat_on_top") !== "0"
+    flags: Qt.Window | (stayOnTop ? Qt.WindowStaysOnTopHint : 0)
+    // (On KDE's Wayland the hint alone does nothing: asked of the desktop,
+    // once the window is up.)
+    onStayOnTopChanged: if (visible) Workspace.keepWindowAbove(title, stayOnTop)
+    onVisibleChanged: if (visible && stayOnTop) keepAbove.restart()
+    Timer { id: keepAbove; interval: 300; onTriggered: Workspace.keepWindowAbove(mini.title, mini.stayOnTop) }
 
     Settings {
         category: "miniChat"
@@ -33,8 +38,8 @@ Window {
         id: content
         anchors.fill: parent
         pinnable: true
-        onTop: mini.onTop
-        onOnTopToggled: on => { mini.onTop = on; Workspace.setSetting("mini_chat_on_top", on ? "1" : "0") }
+        stayOnTop: mini.stayOnTop
+        onStayOnTopToggled: on => { mini.stayOnTop = on; Workspace.setSetting("mini_chat_on_top", on ? "1" : "0") }
         onHideRequested: mini.visible = false
         onOpenInWindowRequested: mini.openInWindowRequested()
     }

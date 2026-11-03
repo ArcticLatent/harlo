@@ -9,7 +9,10 @@ pub mod commitmsg;
 pub mod compaction;
 pub mod context;
 pub mod db;
+#[cfg(feature = "dictation")]
 pub mod dictation;
+pub mod engine_host;
+pub mod engine_setup;
 pub mod engines;
 pub mod export;
 pub mod files;
@@ -38,6 +41,7 @@ pub mod scanner;
 pub mod schedules;
 pub mod search;
 pub mod shelf;
+pub mod servers;
 pub mod session;
 pub mod signin;
 pub mod sidebar;

@@ -13,9 +13,8 @@
 //! changes for you. A finished step can then be reviewed by another
 //! agent.
 
-use std::collections::BTreeMap;
-use std::path::Path;
-use std::process::Command;
+use std::collections::{BTreeMap, HashMap};
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -191,18 +190,18 @@ impl Plan {
 // ---- the repository ----
 
 fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
-    let out = Command::new("git").arg("-C").arg(dir).args(args).output().map_err(|e| e.to_string())?;
-    if out.status.success() {
-        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
-    } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_owned())
-    }
+    crate::git::run_in(dir, args, None)
+}
+
+/// The repository `folder` is in (here or on its host).
+fn top(folder: &Path) -> Result<PathBuf, String> {
+    crate::git::repo_root(folder).ok_or_else(|| "It isn't in a git repository.".to_owned())
 }
 
 /// Modified files (from the repository's root), with their content's hash.
 fn dirty(root: &Path) -> Result<BTreeMap<String, String>, String> {
     let status = git(root, &["status", "--porcelain=v1", "-z", "--untracked-files=all"])?;
-    let mut files = BTreeMap::new();
+    let mut paths = Vec::new();
     let mut entries = status.split('\0').filter(|e| !e.is_empty());
     while let Some(e) = entries.next() {
         let (code, path) = (e.get(..2).unwrap_or(""), e.get(3..).unwrap_or(""));
@@ -210,25 +209,37 @@ fn dirty(root: &Path) -> Result<BTreeMap<String, String>, String> {
         if (code.starts_with('R') || code.starts_with('C'))
             && let Some(old) = entries.next()
         {
-            files.insert(old.to_owned(), String::new());
+            paths.push((old.to_owned(), false));
         }
-        let file = root.join(path);
-        let hash = if file.is_file() { git(root, &["hash-object", "--", path]).map(|h| h.trim().to_owned()).unwrap_or_default() } else { String::new() };
-        files.insert(path.to_owned(), hash);
+        paths.push((path.to_owned(), true));
     }
-    Ok(files)
+    // (Their hashes in one go: on another machine, one command.)
+    let check: Vec<String> = paths.iter().filter(|(_, c)| *c).map(|(p, _)| p.clone()).collect();
+    let present: Vec<String> = check.iter().zip(crate::git::files_among(root, &check)).filter(|(_, f)| *f).map(|(p, _)| p.clone()).collect();
+    let hashes: Vec<String> = if present.is_empty() {
+        Vec::new()
+    } else {
+        let input = present.iter().map(|p| format!("{p}\n")).collect::<String>();
+        git_input(root, &["hash-object", "--stdin-paths"], input.as_bytes())?.lines().map(|h| h.trim().to_owned()).collect()
+    };
+    let hash_of: HashMap<&str, &str> = present.iter().map(String::as_str).zip(hashes.iter().map(String::as_str)).collect();
+    Ok(paths.iter().map(|(p, _)| (p.clone(), hash_of.get(p.as_str()).copied().unwrap_or_default().to_owned())).collect())
+}
+
+fn git_input(dir: &Path, args: &[&str], input: &[u8]) -> Result<String, String> {
+    crate::git::run_in(dir, args, Some(input))
 }
 
 /// The repository a step starts in (None outside one).
 pub fn snapshot(folder: &Path, now: i64) -> Option<Snapshot> {
-    let root = Path::new(git(folder, &["rev-parse", "--show-toplevel"]).ok()?.trim()).to_path_buf();
+    let root = top(folder).ok()?;
     Some(Snapshot { head: git(&root, &["rev-parse", "HEAD"]).map(|h| h.trim().to_owned()).unwrap_or_default(), dirty: dirty(&root).ok()?, at: now })
 }
 
 /// The files a step changed since `start`, or why they aren't provably its
 /// own.
 pub fn changed_since(folder: &Path, start: &Snapshot) -> Result<Vec<String>, String> {
-    let root = Path::new(git(folder, &["rev-parse", "--show-toplevel"])?.trim()).to_path_buf();
+    let root = top(folder)?;
     let head = git(&root, &["rev-parse", "HEAD"]).map(|h| h.trim().to_owned()).unwrap_or_default();
     if head != start.head {
         return Err("The branch moved during the step (a commit or a checkout), so harlo can't tell its changes apart.".into());
@@ -267,7 +278,7 @@ fn list_words(paths: &[String]) -> String {
 /// Commits those files alone (other staged changes stay as they are):
 /// the commit's hash.
 pub fn commit(folder: &Path, files: &[String], subject: &str, body: &str) -> Result<String, String> {
-    let root = Path::new(git(folder, &["rev-parse", "--show-toplevel"])?.trim()).to_path_buf();
+    let root = top(folder)?;
     let mut add = vec!["add", "-A", "--"];
     add.extend(files.iter().map(String::as_str));
     git(&root, &add)?;
@@ -402,5 +413,38 @@ mod tests {
         assert!(changed_since(&dir, &start).unwrap_err().contains("branch moved"));
         assert!(snapshot(&std::env::temp_dir().join("harlo-no-repo-here"), 0).is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The same on another machine (`HARLO_TEST_SSH`, e.g. "ssh myhost").
+    #[test]
+    #[ignore]
+    fn commits_a_steps_own_changes_there() {
+        let args = crate::remote::parse_ssh_command(&std::env::var("HARLO_TEST_SSH").expect("HARLO_TEST_SSH")).unwrap();
+        let host = crate::remote::Host { name: "t".into(), ssh: args };
+        crate::remote::set_hosts(vec![host.clone()]);
+        let there = format!("{}/harlo-plan-test-{}", crate::remote::home(&host).unwrap(), std::process::id());
+        let sh = |script: &str| {
+            let out = crate::remote::run(&host, &format!("cd {} && {script}", crate::remote::quote(&there)), std::time::Duration::from_secs(30)).unwrap();
+            assert!(out.status.success(), "{script}: {}", String::from_utf8_lossy(&out.stderr));
+            String::from_utf8_lossy(&out.stdout).trim().to_owned()
+        };
+        crate::remote::run(&host, &format!("mkdir -p {}/src", crate::remote::quote(&there)), std::time::Duration::from_secs(30)).unwrap();
+        let dir = crate::remote::join("t", &there);
+        sh("git init -q && git config user.email t@example.com && git config user.name T && echo a > a.txt && echo old > old.txt && echo s > 'with space.txt' && git add . && git commit -q -m start");
+        sh("echo mine > notes.txt");
+        let start = snapshot(&dir.join("src"), 1).unwrap();
+        assert_eq!(start.dirty.keys().collect::<Vec<_>>(), ["notes.txt"]);
+        assert!(!start.dirty["notes.txt"].is_empty());
+        sh("echo a2 > a.txt && echo 'fn x() {}' > src/new.rs && rm old.txt && echo s2 > 'with space.txt'");
+        let files = changed_since(&dir, &start).unwrap();
+        assert_eq!(files, ["a.txt", "old.txt", "src/new.rs", "with space.txt"]);
+        let sha = commit(&dir, &files, "Store", "stores it").unwrap();
+        assert_eq!(sh("git log -1 --format=%s%n%b"), "Store\nstores it");
+        assert_eq!(sh(&format!("git show --name-only --format= {sha}")), "a.txt\nold.txt\nsrc/new.rs\nwith space.txt");
+        assert_eq!(sh("git status --porcelain"), "?? notes.txt");
+        let start = snapshot(&dir, 2).unwrap();
+        sh("echo 'mine, then the agent' > notes.txt");
+        assert!(changed_since(&dir, &start).unwrap_err().starts_with("notes.txt had changes from before"));
+        sh(&format!("rm -rf {}", crate::remote::quote(&there)));
     }
 }

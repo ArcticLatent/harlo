@@ -22,6 +22,9 @@ pub struct Schedule {
     pub prompt: String,
     /// -1: the home folder.
     pub project_id: i64,
+    /// Without a project: the machine whose home folder it runs in ("" this
+    /// one), the one shown when it was made.
+    pub host: String,
     /// "" = the project's (or the default) harness.
     pub harness: String,
     /// "" = the harness's default model.
@@ -126,7 +129,7 @@ pub fn parse_time(text: &str) -> Option<(u32, u32)> {
 impl Schedule {
     pub fn to_json(&self) -> Value {
         json!({
-            "id": self.id, "title": self.title, "prompt": self.prompt, "projectId": self.project_id,
+            "id": self.id, "title": self.title, "prompt": self.prompt, "projectId": self.project_id, "host": self.host,
             "harness": self.harness, "model": self.model, "repeat": self.repeat.to_json(),
             "enabled": self.enabled, "catchUp": self.catch_up, "lastRun": self.last_run, "nextRun": self.next_run,
         })
@@ -139,6 +142,7 @@ impl Schedule {
             title: s("title"),
             prompt: s("prompt"),
             project_id: v["projectId"].as_i64().unwrap_or(-1),
+            host: s("host"),
             harness: s("harness"),
             model: s("model"),
             repeat: Repeat::from_json(&v["repeat"])?,
@@ -242,7 +246,7 @@ mod tests {
     }
 
     fn schedule(repeat: Repeat) -> Schedule {
-        Schedule { id: 1, title: "t".into(), prompt: "p".into(), project_id: -1, harness: String::new(), model: String::new(), repeat, enabled: true, catch_up: true, last_run: None, next_run: None }
+        Schedule { id: 1, title: "t".into(), prompt: "p".into(), project_id: -1, host: String::new(), harness: String::new(), model: String::new(), repeat, enabled: true, catch_up: true, last_run: None, next_run: None }
     }
 
     #[test]

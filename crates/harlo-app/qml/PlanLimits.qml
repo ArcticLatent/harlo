@@ -5,10 +5,18 @@ import harlo
 
 // Provider plan limits, from Claude Code's sign-in and from omp (`omp
 // usage`): per account its plan and a bar per limit window, with when it
-// resets.
+// resets. `host`: another machine's, from its own Claude Code and omp.
 ColumnLayout {
     id: root
-    readonly property var report: { try { return JSON.parse(Workspace.quotaJson || "{}") } catch (e) { return {} } }
+    property string host: ""
+    // "Plan limits", or "… on this PC" when other machines are listed too.
+    property string title: host !== "" ? "Plan limits on " + host : "Plan limits"
+    readonly property var report: {
+        try {
+            if (host === "") return JSON.parse(Workspace.quotaJson || "{}")
+            return JSON.parse(Workspace.hostLimitsJson || "{}")[host] || {}
+        } catch (e) { return {} }
+    }
     readonly property var accounts: report.accounts || []
     spacing: 8
 
@@ -29,7 +37,7 @@ ColumnLayout {
     RowLayout {
         Layout.fillWidth: true
         spacing: 8
-        Label { text: "Plan limits"; color: Theme.foreground; font.bold: true; font.pixelSize: Theme.px(14) }
+        Label { text: root.title; color: Theme.foreground; font.bold: true; font.pixelSize: Theme.px(14) }
         Label {
             Layout.fillWidth: true
             text: root.report.loading ? "checking…" : root.updated(root.report.updatedAt)
@@ -37,7 +45,12 @@ ColumnLayout {
             font.pixelSize: Theme.px(12)
             elide: Text.ElideRight
         }
-        FlatButton { text: "Refresh"; font.pixelSize: Theme.px(12); enabled: !root.report.loading; onClicked: Workspace.refreshQuota() }
+        FlatButton {
+            text: "Refresh"
+            font.pixelSize: Theme.px(12)
+            enabled: !root.report.loading
+            onClicked: root.host === "" ? Workspace.refreshQuota() : Workspace.refreshHostQuota(root.host)
+        }
     }
     Label {
         Layout.fillWidth: true
@@ -50,7 +63,9 @@ ColumnLayout {
     Label {
         Layout.fillWidth: true
         visible: root.accounts.length === 0 && !root.report.error && !root.report.loading
-        text: "No limits to show. They come from Claude Code (signed in with a Claude plan) and from omp, for the providers it's signed in to (omp usage)."
+        text: root.host === ""
+            ? "No limits to show. They come from Claude Code (signed in with a Claude plan) and from omp, for the providers it's signed in to (omp usage)."
+            : "No limits from " + root.host + " yet. They come from its own Claude Code (signed in with a Claude plan) and its omp (omp usage), once it's connected."
         color: Theme.muted
         font.pixelSize: Theme.px(12)
         wrapMode: Text.Wrap

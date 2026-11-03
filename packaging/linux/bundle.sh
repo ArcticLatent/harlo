@@ -22,6 +22,9 @@ mkdir -p "$TOOLS"
 # the build machine's.
 export GGML_NATIVE=OFF GGML_AVX=ON GGML_AVX2=ON GGML_FMA=ON GGML_F16C=ON
 cargo build --release --locked -p harlo-app
+# (The helper harlo puts on another machine to run model servers there:
+# without dictation, so it needs no C++ library there.)
+cargo build --release --locked -p harlo-core --bin harlo-engines --no-default-features
 
 fetch() {
     [ -x "$TOOLS/$1" ] || { curl -fsSL -o "$TOOLS/$1" "$2"; chmod +x "$TOOLS/$1"; }
@@ -66,6 +69,13 @@ export PATH="$QTDIR/bin:$PATH"
 "$TOOLS/linuxdeploy" --appdir "$APPDIR" --plugin qt \
     --desktop-file "$APPDIR/usr/share/applications/harlo.desktop" \
     --icon-file "$APPDIR/usr/share/icons/hicolor/256x256/apps/harlo.png"
+# The helper harlo puts on another machine to run model servers there: as
+# built (after linuxdeploy, which changes the programs it finds), stripped.
+install -Dm755 -s "${CARGO_TARGET_DIR:-target}/release/harlo-engines" "$APPDIR/usr/lib/harlo/harlo-engines"
+# ARM machines' (built on one: the release's arm64 job puts it in dist/helpers).
+if [ -f "$OUT/helpers/harlo-engines-aarch64" ]; then
+    install -Dm755 "$OUT/helpers/harlo-engines-aarch64" "$APPDIR/usr/lib/harlo/harlo-engines-aarch64"
+fi
 echo "appimage" > "$APPDIR/usr/install-kind"
 # The AppImage's own icon: a PNG and .DirIcon at its root (appimagetool no
 # longer takes the SVG linuxdeploy links there).

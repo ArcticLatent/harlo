@@ -51,6 +51,8 @@ Rectangle {
         ColumnLayout {
             id: rowCol
             Layout.fillWidth: true
+            // (What the buttons leave: they stay in reach.)
+            Layout.preferredWidth: 0
             spacing: 2
             RowLayout {
                 Layout.fillWidth: true
@@ -74,11 +76,15 @@ Rectangle {
                 Label {
                     Layout.fillWidth: true
                     Layout.minimumWidth: 0
-                    // (Named after its description: the task instead.)
-                    text: (agentRow.a.name && agentRow.a.name === agentRow.a.description ? "" : agentRow.a.description) || agentRow.a.task || ""
+                    // (Takes what's left, never more: a long task is cut.)
+                    Layout.preferredWidth: 0
+                    // (Named after its description: the task instead, on one line.)
+                    text: String((agentRow.a.name && agentRow.a.name === agentRow.a.description ? "" : agentRow.a.description) || agentRow.a.task || "").replace(/\s+/g, " ").trim().slice(0, 300)
                     color: Theme.muted
                     font.pixelSize: Theme.px(12)
                     elide: Text.ElideRight
+                    maximumLineCount: 1
+                    wrapMode: Text.NoWrap
                 }
                 Label {
                     visible: !agentRow.live
@@ -89,7 +95,9 @@ Rectangle {
             }
             Label {
                 Layout.fillWidth: true
+                Layout.preferredWidth: 0
                 visible: text !== ""
+                maximumLineCount: 1
                 text: { const t = agentRow.toolLine(agentRow.a); return t !== "" ? "↳ " + t : "" }
                 color: Theme.muted
                 font.family: Theme.mono

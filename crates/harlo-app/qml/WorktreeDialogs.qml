@@ -28,6 +28,12 @@ Item {
 
     Connections {
         target: Workspace
+        // Another machine's worktree: what it says, once asked there.
+        function onWorktreeInfoReady(key, json) {
+            if (key !== finishDialog.key || !finishDialog.visible) return
+            finishDialog.info = JSON.parse(json)
+            deleteBranch.checked = finishDialog.info.ahead === 0
+        }
         function onBranchesReady(id, list) {
             if (id !== newDialog.projectId) return
             baseBox.model = list
@@ -129,12 +135,12 @@ Item {
         footer: AppButtonBox {
             DialogButton {
                 text: "Merge into " + (finishDialog.info.mainBranch || "main")
-                enabled: finishDialog.info.exists === true && finishDialog.info.ahead > 0 && !!finishDialog.info.mainBranch
+                enabled: !finishDialog.info.loading && finishDialog.info.exists === true && finishDialog.info.ahead > 0 && !!finishDialog.info.mainBranch
                 onClicked: { Workspace.mergeWorktree(finishDialog.key); finishDialog.close() }
             }
             DialogButton {
                 text: finishDialog.info.exists ? "Remove worktree" : "Forget"
-                enabled: !(finishDialog.info.dirty > 0 && !forceBox.checked)
+                enabled: !finishDialog.info.loading && !(finishDialog.info.dirty > 0 && !forceBox.checked)
                 onClicked: { Workspace.removeWorktree(finishDialog.key, deleteBranch.checked, forceBox.checked); finishDialog.close() }
             }
             DialogButton { text: "Close"; DialogButtonBox.buttonRole: DialogButtonBox.RejectRole }
@@ -153,7 +159,9 @@ Item {
             Label {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
-                text: !finishDialog.info.exists
+                text: finishDialog.info.loading
+                    ? "Asking " + (finishDialog.info.path || "").split("/")[2] + " about its commits and changes…"
+                    : !finishDialog.info.exists
                     ? "The worktree folder no longer exists."
                     : (finishDialog.info.ahead || 0) + " commit(s) not in " + (finishDialog.info.base || "the base branch")
                       + (finishDialog.info.behind > 0 ? ", " + finishDialog.info.behind + " behind it" : "")

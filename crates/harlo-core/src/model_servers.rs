@@ -278,12 +278,19 @@ fn providers(kind: HarnessKind) -> Value {
     }
 }
 
+#[cfg(test)]
 fn servers_in(kind: HarnessKind, file: &Path) -> Vec<Server> {
     listed(kind, &providers_in(kind, file))
 }
 
 fn providers_in(kind: HarnessKind, file: &Path) -> Value {
     let Ok(text) = std::fs::read_to_string(file) else { return Value::Null };
+    providers_of(kind, &text)
+}
+
+/// The providers in an agent file's text (pi, omp, OpenCode).
+fn providers_of(kind: HarnessKind, text: &str) -> Value {
+    let text = text.to_owned();
     match kind {
         HarnessKind::Omp => YamlLoader::load_from_str(&text).ok().and_then(|d| d.into_iter().next()).map_or(Value::Null, |doc| yaml_json(&doc["providers"])),
         HarnessKind::OpenCode => serde_json::from_str::<Value>(&crate::mcp::strip_jsonc(&text)).map(|v| v["provider"].clone()).unwrap_or_default(),
@@ -450,26 +457,35 @@ fn remove_from(kind: HarnessKind, file: &Path, name: &str) -> Result<(), String>
                 Err(e) => Err(format!("{e:#}")),
             };
         }
-        HarnessKind::Omp => omp_without(&text, name).map_err(|e| format!("{e} ({shown})"))?,
         HarnessKind::OpenCode if file.extension().is_some_and(|e| e == "jsonc") => {
             return Err(format!("OpenCode's config has comments ({shown}); take the server out there by hand."));
         }
-        _ => {
-            let mut v: Value = serde_json::from_str(&text).map_err(|e| format!("{shown} isn't valid JSON ({e})"))?;
-            let key = if kind == HarnessKind::OpenCode { "provider" } else { "providers" };
-            if v[key].as_object_mut().and_then(|m| m.remove(name)).is_none() {
-                return Ok(());
-            }
-            // OpenCode's default models on it: its own defaults again.
-            if kind == HarnessKind::OpenCode
-                && let Some(root) = v.as_object_mut()
-            {
-                root.retain(|k, val| !(matches!(k.as_str(), "model" | "small_model") && val.as_str().is_some_and(|m| m.starts_with(&format!("{name}/")))));
-            }
-            serde_json::to_string_pretty(&v).unwrap_or_default() + "\n"
-        }
+        _ => match without_server(kind, &text, &shown.to_string(), name)? {
+            Some(out) => out,
+            None => return Ok(()),
+        },
     };
     write(file, &out).map_err(|e| format!("Couldn't write {shown}: {e}"))
+}
+
+/// pi's, omp's or OpenCode's file (`text`) without the provider: None when
+/// it isn't there.
+fn without_server(kind: HarnessKind, text: &str, shown: &str, name: &str) -> Result<Option<String>, String> {
+    if kind == HarnessKind::Omp {
+        return omp_without(text, name).map(Some).map_err(|e| format!("{e} ({shown})"));
+    }
+    let mut v: Value = serde_json::from_str(text).map_err(|e| format!("{shown} isn't valid JSON ({e})"))?;
+    let key = if kind == HarnessKind::OpenCode { "provider" } else { "providers" };
+    if v[key].as_object_mut().and_then(|m| m.remove(name)).is_none() {
+        return Ok(None);
+    }
+    // OpenCode's default models on it: its own defaults again.
+    if kind == HarnessKind::OpenCode
+        && let Some(root) = v.as_object_mut()
+    {
+        root.retain(|k, val| !(matches!(k.as_str(), "model" | "small_model") && val.as_str().is_some_and(|m| m.starts_with(&format!("{name}/")))));
+    }
+    Ok(Some(serde_json::to_string_pretty(&v).unwrap_or_default() + "\n"))
 }
 
 /// omp's file without the provider, taken out as text (its comments and
@@ -584,8 +600,8 @@ pub fn add(kind: HarnessKind, name: &str, base_url: &str, key: &str, models: &[F
     add_to(kind, &f, name, base_url, key, models, taken)
 }
 
-fn add_to(kind: HarnessKind, file: &Path, name: &str, base_url: &str, key: &str, models: &[Found], taken: &[String]) -> Result<(), String> {
-    let name = name.trim();
+/// A name the agent takes, and some models.
+fn check_new(kind: HarnessKind, name: &str, models: &[Found]) -> Result<(), String> {
     // (Hermes' are set by a dotted path: no dots.)
     let dots = kind != HarnessKind::Hermes;
     if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || (dots && c == '.')) {
@@ -594,17 +610,46 @@ fn add_to(kind: HarnessKind, file: &Path, name: &str, base_url: &str, key: &str,
     if models.is_empty() {
         return Err("Pick at least one model.".into());
     }
-    let shown = file.display();
-    let existing = match kind {
-        HarnessKind::Hermes => listed(kind, &hermes_providers(Some(file))),
-        _ => servers_in(kind, file),
-    };
+    Ok(())
+}
+
+fn add_to(kind: HarnessKind, file: &Path, name: &str, base_url: &str, key: &str, models: &[Found], taken: &[String]) -> Result<(), String> {
+    let name = name.trim();
+    check_new(kind, name, models)?;
+    let shown = file.display().to_string();
+    if kind == HarnessKind::Hermes {
+        let existing = listed(kind, &hermes_providers(Some(file)));
+        let again = existing.iter().any(|s| s.name == name && s.base_url == base_url);
+        if !again && (existing.iter().any(|s| s.name == name) || taken.iter().any(|t| t == name)) {
+            return Err(format!("There's already a provider called {name}. Pick another name."));
+        }
+        let entry = hermes_entry(base_url, key, models).to_string();
+        return match crate::mcp::hermes(file, &["config", "set", &format!("providers.{name}"), &entry]) {
+            Ok(Some(_)) => Ok(()),
+            Ok(None) => Err("Hermes isn't installed.".into()),
+            Err(e) => Err(format!("{e:#}")),
+        };
+    }
+    if kind == HarnessKind::OpenCode && file.extension().is_some_and(|e| e == "jsonc") {
+        return Err(format!("OpenCode's config has comments ({shown}); add the server there by hand."));
+    }
+    let text = std::fs::read_to_string(file).unwrap_or_default();
+    let out = with_server(kind, &text, &shown, name, base_url, key, models, taken)?;
+    write(file, &out).map_err(|e| format!("Couldn't write {shown}: {e}"))
+}
+
+/// pi's, omp's or OpenCode's file (`text`; `shown` in errors) with the
+/// server in: a name already there isn't replaced, unless it's the same
+/// server again.
+#[allow(clippy::too_many_arguments)]
+fn with_server(kind: HarnessKind, text: &str, shown: &str, name: &str, base_url: &str, key: &str, models: &[Found], taken: &[String]) -> Result<String, String> {
+    let existing = listed(kind, &providers_of(kind, text));
     // The same server again (set up again): its entry replaced.
     let again = existing.iter().any(|s| s.name == name && s.base_url == base_url);
     if !again && (existing.iter().any(|s| s.name == name) || taken.iter().any(|t| t == name)) {
         return Err(format!("There's already a provider called {name}. Pick another name."));
     }
-    let text = std::fs::read_to_string(file).unwrap_or_default();
+    let text = text.to_owned();
     let text = match kind {
         _ if !again => text,
         HarnessKind::Omp => omp_without(&text, name).map_err(|e| format!("{e} ({shown})"))?,
@@ -616,25 +661,11 @@ fn add_to(kind: HarnessKind, file: &Path, name: &str, base_url: &str, key: &str,
         }
         _ => text,
     };
-    let out = match kind {
-        HarnessKind::Hermes => {
-            let entry = hermes_entry(base_url, key, models).to_string();
-            return match crate::mcp::hermes(file, &["config", "set", &format!("providers.{name}"), &entry]) {
-                Ok(Some(_)) => Ok(()),
-                Ok(None) => Err("Hermes isn't installed.".into()),
-                Err(e) => Err(format!("{e:#}")),
-            };
-        }
-        HarnessKind::OpenCode => {
-            if file.extension().is_some_and(|e| e == "jsonc") {
-                return Err(format!("OpenCode's config has comments ({shown}); add the server there by hand."));
-            }
-            opencode_with(&text, name, base_url, key, models).map_err(|e| format!("{e} ({shown})"))?
-        }
-        HarnessKind::Omp => omp_with(&text, name, base_url, placeholder(key), models).map_err(|e| format!("{e} ({shown})"))?,
-        _ => pi_with(&text, name, base_url, placeholder(key), models).map_err(|e| format!("{e} ({shown})"))?,
-    };
-    write(file, &out).map_err(|e| format!("Couldn't write {shown}: {e}"))
+    match kind {
+        HarnessKind::OpenCode => opencode_with(&text, name, base_url, key, models).map_err(|e| format!("{e} ({shown})")),
+        HarnessKind::Omp => omp_with(&text, name, base_url, placeholder(key), models).map_err(|e| format!("{e} ({shown})")),
+        _ => pi_with(&text, name, base_url, placeholder(key), models).map_err(|e| format!("{e} ({shown})")),
+    }
 }
 
 /// pi and omp offer a provider's models only with a key: one that servers
@@ -792,6 +823,343 @@ fn omp_with(text: &str, name: &str, base_url: &str, key: &str, models: &[Found])
         return Err("Its providers are written in a way harlo can't add to; add the server by hand".into());
     }
     Ok(out)
+}
+
+// This computer's servers for another machine's agents: added to their
+// files there with the same address, `localhost:<port>` forwarded back here
+// over the SSH connection (`ssh -O forward -R`), again before each session
+// starts there (a connection that ended took its forwards with it).
+
+/// The agents there whose files harlo writes servers to.
+pub const ON_HOST: [HarnessKind; 4] = [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::OpenCode, HarnessKind::Hermes];
+
+/// An agent's server file on `host`, as an `ssh://` path (Hermes' is
+/// changed by Hermes there).
+fn file_on(host: &str, kind: HarnessKind) -> Option<PathBuf> {
+    let home = crate::mcp::host_home(host);
+    match kind {
+        HarnessKind::Pi => Some(home.join(".pi/agent/models.json")),
+        HarnessKind::Omp => Some(home.join(".omp/agent/models.yml")),
+        HarnessKind::OpenCode => Some(home.join(".config/opencode/opencode.json")),
+        HarnessKind::Hermes => Some(crate::mcp::config_path(kind, &crate::mcp::Scope::Host(host.to_owned()))),
+        _ => None,
+    }
+}
+
+/// `hermes config …` on the host of `file`.
+fn hermes_there(file: &Path, args: &[&str]) -> Result<String, String> {
+    match crate::mcp::hermes(file, args) {
+        Ok(Some(out)) => Ok(out),
+        Ok(None) => Err("Hermes isn't installed there.".into()),
+        Err(e) => Err(format!("{e:#}")),
+    }
+}
+
+/// A file there: its text, "" when there's none (never when it couldn't be
+/// read: that's an error, so nothing is written over it).
+fn read_on(file: &Path) -> Result<String, String> {
+    let (name, path) = crate::remote::split(file).ok_or("not another machine's file")?;
+    let host = crate::remote::host(&name).ok_or_else(|| format!("unknown host {name}"))?;
+    let q = crate::remote::quote(&path);
+    let out = crate::remote::run(&host, &format!("if [ -f {q} ]; then cat -- {q}; else exit 3; fi"), Duration::from_secs(30)).map_err(|e| format!("{e:#}"))?;
+    match out.status.code() {
+        Some(0) => Ok(String::from_utf8_lossy(&out.stdout).into_owned()),
+        Some(3) => Ok(String::new()),
+        _ => Err(format!("Couldn't read {path} on {name}: {}", String::from_utf8_lossy(&out.stderr).trim())),
+    }
+}
+
+/// Writes a file there whole (its folder made; a new one only for you).
+fn write_on(file: &Path, text: &str) -> Result<(), String> {
+    let (name, path) = crate::remote::split(file).ok_or("not another machine's file")?;
+    let host = crate::remote::host(&name).ok_or_else(|| format!("unknown host {name}"))?;
+    let q = crate::remote::quote;
+    let dir = Path::new(&path).parent().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
+    let tmp = format!("{path}.harlo.tmp");
+    let script = format!(
+        "umask 077; mkdir -p {d} && cat > {t} && {{ [ -f {f} ] && chmod --reference={f} {t} 2>/dev/null; mv -f {t} {f}; }}",
+        d = q(&dir),
+        t = q(&tmp),
+        f = q(&path)
+    );
+    let out = crate::remote::run_with_input(&host, &script, Some(text.as_bytes()), Duration::from_secs(30)).map_err(|e| format!("{e:#}"))?;
+    if !out.status.success() {
+        return Err(format!("Couldn't write {path} on {name}: {}", String::from_utf8_lossy(&out.stderr).trim()));
+    }
+    Ok(())
+}
+
+/// The servers an agent on `host` has.
+pub fn servers_on(host: &str, kind: HarnessKind) -> Result<Vec<Server>, String> {
+    let f = file_on(host, kind).ok_or("harlo doesn't add model servers to this agent there.")?;
+    if kind == HarnessKind::Hermes {
+        let out = hermes_there(&f, &["config", "get", "providers", "--json", "--raw"])?;
+        return Ok(listed(kind, &serde_json::from_str(out.trim()).unwrap_or_default()));
+    }
+    Ok(listed(kind, &providers_of(kind, &read_on(&f)?)))
+}
+
+/// Adds a server to an agent on `host` (see [`add`]). `forward`: it runs on
+/// this computer, its port forwarded there (else it's the machine's own, or
+/// reached at the same address from there).
+pub fn add_on(host: &str, kind: HarnessKind, name: &str, base_url: &str, key: &str, models: &[Found], forward_here: bool) -> Result<(), String> {
+    let f = file_on(host, kind).ok_or("harlo doesn't add model servers to this agent there.")?;
+    let name = name.trim();
+    check_new(kind, name, models)?;
+    if kind == HarnessKind::Hermes {
+        hermes_fits(models)?;
+        // (Another server under that name there: not replaced.)
+        if servers_on(host, kind)?.iter().any(|s| s.name == name && s.base_url != base_url) {
+            return Err(format!("Hermes on {host} already has a provider called {name}."));
+        }
+    }
+    if let Some(port) = local_port(base_url).filter(|_| forward_here) {
+        let mut ports = forwards(host);
+        if !ports.contains(&port) {
+            ports.push(port);
+        }
+        forward(host, port)?;
+        save_forwards(host, &ports);
+    }
+    if kind == HarnessKind::Hermes {
+        let entry = hermes_entry(base_url, key, models).to_string();
+        return hermes_there(&f, &["config", "set", &format!("providers.{name}"), &entry]).map(|_| ());
+    }
+    let text = read_on(&f)?;
+    let out = with_server(kind, &text, &f.to_string_lossy(), name, base_url, key, models, &[])?;
+    write_on(&f, &out)
+}
+
+/// Takes a server out of an agent on `host`; its port stops being
+/// forwarded there once no agent there has a server on it.
+pub fn remove_on(host: &str, kind: HarnessKind, name: &str) -> Result<(), String> {
+    let f = file_on(host, kind).ok_or("harlo doesn't change this agent's model servers there.")?;
+    if kind == HarnessKind::Hermes {
+        if servers_on(host, kind)?.iter().any(|s| s.name == name) {
+            hermes_there(&f, &["config", "unset", &format!("providers.{name}")])?;
+        }
+    } else {
+        let text = read_on(&f)?;
+        if let Some(out) = without_server(kind, &text, &f.to_string_lossy(), name)? {
+            write_on(&f, &out)?;
+        }
+    }
+    let used: Vec<u16> = ON_HOST.iter().filter_map(|k| servers_on(host, *k).ok()).flatten().filter_map(|s| local_port(&s.base_url)).collect();
+    let (kept, dropped): (Vec<u16>, Vec<u16>) = forwards(host).into_iter().partition(|p| used.contains(p));
+    for port in dropped {
+        let _ = forward_control(host, port, "cancel");
+    }
+    save_forwards(host, &kept);
+    Ok(())
+}
+
+/// The port of a server on this computer (`localhost`, `127.0.0.1`…).
+pub fn local_port(base_url: &str) -> Option<u16> {
+    let authority = base_url.split("://").nth(1)?.split('/').next()?;
+    let (host, port) = authority.rsplit_once(':')?;
+    let host = host.trim_matches(['[', ']']);
+    ["127.0.0.1", "localhost", "::1", "0.0.0.0"].contains(&host).then(|| port.parse().ok()).flatten()
+}
+
+/// The ports forwarded to `host` (harlo's settings).
+pub fn forwards(host: &str) -> Vec<u16> {
+    let Ok(db) = crate::db::Db::open(&crate::db::default_path()) else { return Vec::new() };
+    db.get(&format!("host_forwards.{host}")).ok().flatten().and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default()
+}
+
+fn save_forwards(host: &str, ports: &[u16]) {
+    if let Ok(db) = crate::db::Db::open(&crate::db::default_path()) {
+        let _ = db.set(&format!("host_forwards.{host}"), &serde_json::to_string(ports).unwrap_or_default());
+    }
+}
+
+fn forward_control(host: &str, port: u16, op: &str) -> Result<std::process::Output, String> {
+    let h = crate::remote::host(host).ok_or_else(|| format!("unknown host {host}"))?;
+    let args = crate::remote::ssh_args(&h);
+    let (options, destination) = args.split_at(args.len().saturating_sub(1));
+    std::process::Command::new("ssh")
+        .args(options)
+        .args(["-O", op, "-R", &format!("{port}:localhost:{port}")])
+        .args(destination)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| e.to_string())
+}
+
+/// This computer's `port`, as `localhost:<port>` on `host` (its connection
+/// open first).
+fn forward(host: &str, port: u16) -> Result<(), String> {
+    let h = crate::remote::host(host).ok_or_else(|| format!("unknown host {host}"))?;
+    if !crate::remote::connected(&h) {
+        crate::remote::run(&h, "true", Duration::from_secs(30)).map_err(|e| format!("{e:#}"))?;
+    }
+    let out = forward_control(host, port, "forward")?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let err = String::from_utf8_lossy(&out.stderr);
+    // (Asked before on this connection: it's there.)
+    if err.contains("already") {
+        return Ok(());
+    }
+    Err(format!("Couldn't forward port {port} to {host} (is it taken there?): {}", err.trim()))
+}
+
+/// Before a session starts on `host`: this computer's servers its agents
+/// have, forwarded there.
+pub fn forward_to(host: &str) {
+    for port in forwards(host) {
+        if let Err(e) = forward(host, port) {
+            tracing::warn!("model server on {host}: {e}");
+        }
+    }
+}
+
+// ---- Another machine's server, used here ----
+//
+// A server harlo set up on another machine answers on that machine's
+// localhost only; this computer's agents reach it through a port forwarded
+// over the SSH connection (`-L`), at an address of their own here. harlo
+// keeps which (`host_uses`: `{ <address here>: { host, url } }`) and puts the
+// forward back before a message on it, the server started there first.
+
+fn load_uses() -> serde_json::Map<String, Value> {
+    let Ok(db) = crate::db::Db::open(&crate::db::default_path()) else { return Default::default() };
+    db.get("host_uses").ok().flatten().and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default()
+}
+
+fn save_uses(uses: &serde_json::Map<String, Value>) {
+    if let Ok(db) = crate::db::Db::open(&crate::db::default_path()) {
+        let _ = db.set("host_uses", &Value::Object(uses.clone()).to_string());
+    }
+}
+
+/// The machine and its server's address there, for an address here that
+/// reaches one.
+pub fn through(local_url: &str) -> Option<(String, String)> {
+    let uses = load_uses();
+    let v = uses.get(local_url.trim_end_matches('/'))?;
+    Some((v["host"].as_str()?.to_owned(), v["url"].as_str()?.to_owned()))
+}
+
+/// The address here that reaches `url` on `host`, if there's one.
+pub fn used_here(host: &str, url: &str) -> Option<String> {
+    load_uses().into_iter().find(|(_, v)| v["host"] == host && v["url"] == url).map(|(k, _)| k)
+}
+
+/// An address here for `url` on `host` (the one it has, else a free port
+/// here: its own number when that's free), its port forwarded now.
+pub fn use_from(host: &str, url: &str) -> Result<String, String> {
+    if let Some(here) = used_here(host, url) {
+        forward_here(&here)?;
+        return Ok(here);
+    }
+    let port = local_port(url).ok_or("Only a server on that machine's own address can be reached through SSH.")?;
+    let mut uses = load_uses();
+    let taken: Vec<u16> = uses.keys().filter_map(|k| local_port(k)).chain(crate::servers::ports_in_use().into_iter().map(|(p, _)| p)).collect();
+    let mut here_port = port;
+    loop {
+        here_port = crate::engines::free_port(here_port);
+        if !taken.contains(&here_port) || here_port >= 65000 {
+            break;
+        }
+        here_port += 1;
+    }
+    let path = url.split("://").nth(1).and_then(|r| r.find('/').map(|i| r[i..].to_owned())).unwrap_or_default();
+    let here = format!("http://127.0.0.1:{here_port}{path}");
+    uses.insert(here.clone(), serde_json::json!({ "host": host, "url": url }));
+    save_uses(&uses);
+    forward_here(&here)?;
+    Ok(here)
+}
+
+/// Forgets the addresses here no agent here has any more (their forwards
+/// cancelled).
+pub fn forget_unused_uses() {
+    let mut uses = load_uses();
+    let used: Vec<String> = [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::OpenCode, HarnessKind::Hermes]
+        .iter()
+        .flat_map(|k| servers(*k))
+        .map(|s| s.base_url.trim_end_matches('/').to_owned())
+        .collect();
+    let before = uses.len();
+    uses.retain(|here, v| {
+        let keep = used.contains(here);
+        if !keep && let (Some(host), Some(p), Some(rp)) = (v["host"].as_str(), local_port(here), v["url"].as_str().and_then(local_port)) {
+            let _ = local_forward(host, p, rp, "cancel");
+        }
+        keep
+    });
+    if uses.len() != before {
+        save_uses(&uses);
+    }
+}
+
+fn local_forward(host: &str, port: u16, remote_port: u16, op: &str) -> Result<std::process::Output, String> {
+    let h = crate::remote::host(host).ok_or_else(|| format!("unknown host {host}"))?;
+    let args = crate::remote::ssh_args(&h);
+    let (options, destination) = args.split_at(args.len().saturating_sub(1));
+    std::process::Command::new("ssh")
+        .args(options)
+        .args(["-O", op, "-L", &format!("127.0.0.1:{port}:127.0.0.1:{remote_port}")])
+        .args(destination)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| e.to_string())
+}
+
+/// The forward behind an address here (its machine's connection opened
+/// first).
+pub fn forward_here(here: &str) -> Result<(), String> {
+    let (host, url) = through(here).ok_or("harlo doesn't know this address.")?;
+    let (Some(port), Some(remote_port)) = (local_port(here), local_port(&url)) else { return Err("Not an address harlo forwards.".into()) };
+    let h = crate::remote::host(&host).ok_or_else(|| format!("unknown host {host}"))?;
+    if !crate::remote::connected(&h) {
+        crate::remote::run(&h, "true", Duration::from_secs(30)).map_err(|e| format!("{e:#}"))?;
+    }
+    let out = local_forward(&host, port, remote_port, "forward")?;
+    let err = String::from_utf8_lossy(&out.stderr);
+    if out.status.success() || err.contains("already") {
+        return Ok(());
+    }
+    // (Asked before on this connection: the port's its own.)
+    if answers(here) {
+        return Ok(());
+    }
+    Err(format!("Couldn't reach {host}'s server through port {port} here (is it taken?): {}", err.trim()))
+}
+
+/// Before a message on an address here that reaches another machine's
+/// server: the forward back, and the server started there if it's stopped
+/// (blocking).
+pub fn reach(here: &str) -> Result<(), String> {
+    if answers(here) {
+        return Ok(());
+    }
+    forward_here(here)?;
+    if answers(here) {
+        return Ok(());
+    }
+    let (host, url) = through(here).ok_or("harlo doesn't know this address.")?;
+    let v = crate::engine_host::json(&host, &["start", &url], Duration::from_secs(20 * 60)).map_err(|e| format!("{e:#}"))?;
+    if let Some(e) = v["error"].as_str() {
+        return Err(e.to_owned());
+    }
+    Ok(())
+}
+
+/// At start: the forwards to machines harlo is connected to (the others
+/// come back before a message on them).
+pub fn forward_uses() {
+    for (here, v) in load_uses() {
+        let Some(host) = v["host"].as_str() else { continue };
+        if crate::remote::is_disconnected(host) || !crate::remote::host(host).is_some_and(|h| crate::remote::connected(&h)) {
+            continue;
+        }
+        if let Err(e) = forward_here(&here) {
+            tracing::warn!("model server on {host}: {e}");
+        }
+    }
 }
 
 /// Writes the file whole (a temporary file renamed over it), keeping its
@@ -1129,5 +1497,71 @@ mod tests {
         let hermes = json!({ "local": { "api": "http://localhost:8080/v1" , "default_model": "m" }, "work": { "base_url": "https://gw/v1", "models": { "a": {}, "b": {} } }, "broken": { "models": {} } });
         let names: Vec<String> = listed(HarnessKind::Hermes, &hermes).into_iter().map(|s| format!("{} {:?}", s.name, s.models)).collect();
         assert_eq!(names, ["local [\"m\"]", "work [\"a\", \"b\"]"]);
+    }
+
+    /// A port here, reached from another machine (`HARLO_TEST_SSH`, e.g.
+    /// "ssh myhost") as its own `localhost:<port>`, then no more.
+    #[test]
+    #[ignore]
+    fn forwards_a_port_there() {
+        use std::io::{Read, Write};
+        let args = crate::remote::parse_ssh_command(&std::env::var("HARLO_TEST_SSH").expect("HARLO_TEST_SSH")).unwrap();
+        let host = crate::remote::Host { name: "t".into(), ssh: args };
+        crate::remote::set_hosts(vec![host.clone()]);
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for mut c in listener.incoming().flatten() {
+                let mut buf = [0u8; 512];
+                let _ = c.read(&mut buf);
+                let _ = c.write_all(b"HTTP/1.0 200 OK\r\nContent-Length: 5\r\n\r\nhello");
+            }
+        });
+        forward("t", port).unwrap();
+        // (Asked again: still fine.)
+        forward("t", port).unwrap();
+        let ask = format!("curl -s -m 5 http://localhost:{port}/ || wget -qO- -T 5 http://localhost:{port}/");
+        let out = crate::remote::run(&host, &ask, Duration::from_secs(30)).unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "hello");
+        assert!(forward_control("t", port, "cancel").unwrap().status.success());
+        let out = crate::remote::run(&host, &ask, Duration::from_secs(30)).unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "");
+        assert_eq!(local_port("http://127.0.0.1:8080/v1"), Some(8080));
+        assert_eq!(local_port("http://[::1]:11434/v1"), Some(11434));
+        assert_eq!(local_port("http://192.168.1.5:8080/v1"), None);
+    }
+
+    /// A server on another machine's localhost (`HARLO_TEST_SSH`), reached
+    /// here at an address of its own, then not once nothing uses it. Its
+    /// HOME a scratch folder (harlo's settings there).
+    #[test]
+    #[ignore]
+    fn reaches_a_server_there() {
+        let args = crate::remote::parse_ssh_command(&std::env::var("HARLO_TEST_SSH").expect("HARLO_TEST_SSH")).unwrap();
+        let host = crate::remote::Host { name: "t".into(), ssh: args };
+        crate::remote::set_hosts(vec![host.clone()]);
+        // A server there answering /v1/models, in a folder of its own.
+        let port = 20000 + (std::process::id() % 20000) as u16;
+        let dir = format!("harlo-reach-test-{port}");
+        let start = format!(
+            "mkdir -p ~/{dir}/v1 && echo '{{\"data\":[]}}' > ~/{dir}/v1/models && cd ~/{dir} && (setsid python3 -m http.server {port} --bind 127.0.0.1 > /dev/null 2>&1 < /dev/null & echo $! > pid) && for i in $(seq 50); do curl -s -m 1 -o /dev/null http://127.0.0.1:{port}/v1/models && break; sleep 0.1; done"
+        );
+        crate::remote::run(&host, &start, Duration::from_secs(30)).unwrap();
+        let url = format!("http://127.0.0.1:{port}/v1");
+        let outcome = std::panic::catch_unwind(|| {
+            let here = use_from("t", &url).unwrap();
+            assert_eq!(through(&here), Some(("t".to_owned(), url.clone())));
+            assert_eq!(used_here("t", &url).as_deref(), Some(here.as_str()));
+            // (The same again: the same address.)
+            assert_eq!(use_from("t", &url).unwrap(), here);
+            assert!(answers(&here), "{here}");
+            reach(&here).unwrap();
+            // No agent here has it: forgotten, its forward gone.
+            forget_unused_uses();
+            assert_eq!(through(&here), None);
+            assert!(!answers(&here));
+        });
+        let _ = crate::remote::run(&host, &format!("kill $(cat ~/{dir}/pid); rm -rf ~/{dir}"), Duration::from_secs(30));
+        outcome.unwrap();
     }
 }

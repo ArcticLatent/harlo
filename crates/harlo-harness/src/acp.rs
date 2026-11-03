@@ -376,6 +376,49 @@ impl Conn {
     }
 }
 
+fn init_params() -> Value {
+    json!({
+        "protocolVersion": 1,
+        // Its own tools read, write and run things; harlo shows them.
+        "clientCapabilities": { "fs": { "readTextFile": false, "writeTextFile": false }, "terminal": false },
+        "clientInfo": { "name": "harlo", "version": env!("CARGO_PKG_VERSION") },
+    })
+}
+
+/// Whether an `initialize` answer says the agent has a provider to run
+/// on: a way in besides its setup in a terminal (Hermes offers its runtime
+/// credentials only once they resolve; it lists models without any).
+/// An answer that names no ways in at all says nothing: taken as set up.
+pub fn set_up(info: &Value) -> bool {
+    info["authMethods"].as_array().is_none_or(|m| m.is_empty() || m.iter().any(|m| m["type"].as_str() != Some("terminal")))
+}
+
+impl Conn {
+    /// [`set_up`], asked again (a setup in the terminal may have run since
+    /// it started; it answers at once). As last known if it doesn't answer.
+    pub async fn set_up_now(&self) -> bool {
+        match self.request("initialize", init_params()).await {
+            Ok(info) => {
+                let ok = set_up(&info);
+                *self.info.lock().unwrap() = info;
+                ok
+            }
+            Err(_) => set_up(&self.info.lock().unwrap()),
+        }
+    }
+
+    fn set_up_now_blocking(&self) -> bool {
+        match self.request_blocking("initialize", init_params()) {
+            Ok(info) => {
+                let ok = set_up(&info);
+                *self.info.lock().unwrap() = info;
+                ok
+            }
+            Err(_) => set_up(&self.info.lock().unwrap()),
+        }
+    }
+}
+
 /// The agents' connections, by agent and host ("" here).
 static CONNS: OnceLock<Mutex<HashMap<(HarnessKind, String), Arc<Conn>>>> = OnceLock::new();
 
@@ -391,15 +434,7 @@ pub fn conn(kind: HarnessKind, program: &Path, remote: Option<&RemoteLaunch>) ->
         return Ok(Arc::clone(c));
     }
     let c = start(kind, program, remote)?;
-    let info = c.request_blocking(
-        "initialize",
-        json!({
-            "protocolVersion": 1,
-            // Its own tools read, write and run things; harlo shows them.
-            "clientCapabilities": { "fs": { "readTextFile": false, "writeTextFile": false }, "terminal": false },
-            "clientInfo": { "name": "harlo", "version": env!("CARGO_PKG_VERSION") },
-        }),
-    );
+    let info = c.request_blocking("initialize", init_params());
     let info = match info {
         Ok(i) => i,
         Err(e) => {
@@ -703,6 +738,8 @@ pub fn saved(path: &Path, program: &Path, remote: Option<&RemoteLaunch>) -> Save
 /// it's prompted).
 pub fn models(kind: HarnessKind, program: &Path) -> Result<Vec<(String, String)>> {
     let c = conn(kind, program, None)?;
+    // (Until it has a provider, only its own servers' models: see acp_run.)
+    let set_up = c.set_up_now_blocking();
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
     let r = c.request_blocking("session/new", json!({ "cwd": home, "mcpServers": [] }))?;
     Ok(r["models"]["availableModels"]
@@ -710,6 +747,7 @@ pub fn models(kind: HarnessKind, program: &Path) -> Result<Vec<(String, String)>
         .into_iter()
         .flatten()
         .filter_map(|m| Some((m["modelId"].as_str()?.to_owned(), model_name(m["name"].as_str().unwrap_or_default()))))
+        .filter(|(id, _)| set_up || split_model(id).0 == "custom")
         .collect())
 }
 
@@ -726,6 +764,14 @@ mod tests {
         assert_eq!(session_of(&r), Some(SessionRef { kind: HarnessKind::Hermes, id: "local-abc".into(), host: "box".into() }));
         assert!(!is_session_path(Path::new("/home/me/.claude/projects/x/1.jsonl")));
         assert!(!is_session_path(Path::new("ssh://box/home/me/.pi/agent/sessions/x/1.jsonl")));
+    }
+
+    #[test]
+    fn set_up_is_a_way_in_besides_the_terminal() {
+        let terminal = json!({ "id": "hermes-setup", "type": "terminal", "args": ["--setup"] });
+        assert!(!set_up(&json!({ "authMethods": [terminal] })), "only its setup: nothing to run on");
+        assert!(set_up(&json!({ "authMethods": [{ "id": "nous", "name": "nous runtime credentials" }, terminal] })));
+        assert!(set_up(&json!({ "protocolVersion": 1 })), "an agent that names none");
     }
 
     #[test]

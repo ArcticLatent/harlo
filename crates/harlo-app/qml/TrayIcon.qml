@@ -77,8 +77,11 @@ Item {
         model: tray.sessions
         delegate: Platform.MenuItem {
             required property var modelData
-            text: (modelData.status === "input" ? "● Needs input: " : modelData.status === "busy" ? "◐ " : "") + modelData.title
-            onTriggered: { root.showWindow(); Workspace.open(modelData.key) }
+            // A machine's name over its sessions (when there's more than one).
+            enabled: !modelData.header
+            text: modelData.header ? modelData.header
+                : (modelData.status === "input" ? "● Needs input: " : modelData.status === "busy" ? "◐ " : "") + modelData.title
+            onTriggered: { if (modelData.header) return; root.showWindow(); Workspace.open(modelData.key) }
         }
         onObjectAdded: (index, object) => menu.insertItem(6 + index, object)
         onObjectRemoved: (index, object) => menu.removeItem(object)

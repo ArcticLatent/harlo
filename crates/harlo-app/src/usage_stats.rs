@@ -55,17 +55,37 @@ impl UsageStats {
         self.as_mut().set_loading(true);
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
-            let files = harlo_core::stats::all_sessions();
-            let report = harlo_core::stats::report(&files, days.max(0) as u32, &roots).to_string();
-            let updated = chrono::Local::now().format("%-I:%M %p").to_string();
-            let _ = thread.queue(move |mut this| {
-                if this.generation != generation {
-                    return;
-                }
-                this.as_mut().set_json(QString::from(&report));
-                this.as_mut().set_updated(QString::from(&updated));
-                this.as_mut().set_loading(false);
+            let days = days.max(0) as u32;
+            let mut files = harlo_core::stats::all_sessions();
+            // This PC's at once; with other machines' once they're read.
+            let show = |files: &[std::sync::Arc<harlo_core::stats::FileStats>], done: bool| {
+                let report = harlo_core::stats::report(files, days, &roots).to_string();
+                let updated = chrono::Local::now().format("%-I:%M %p").to_string();
+                let _ = thread.queue(move |mut this| {
+                    if this.generation != generation {
+                        return;
+                    }
+                    this.as_mut().set_json(QString::from(&report));
+                    this.as_mut().set_updated(QString::from(&updated));
+                    if done {
+                        this.as_mut().set_loading(false);
+                    }
+                });
+            };
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(harlo_core::stats::remote_sessions(days));
             });
+            // (Read already: one report, not one that jumps a moment later.)
+            let remote = match rx.recv_timeout(std::time::Duration::from_millis(300)) {
+                Ok(r) => r,
+                Err(_) => {
+                    show(&files, false);
+                    rx.recv().unwrap_or_default()
+                }
+            };
+            files.extend(remote);
+            show(&files, true);
         });
     }
 }

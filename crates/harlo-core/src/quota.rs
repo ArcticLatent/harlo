@@ -74,6 +74,49 @@ pub fn fetch(omp: &Path) -> Result<Vec<Value>> {
     Ok(parse(&report))
 }
 
+/// pi's "openai" sign-in, as its auth.json names it: a ChatGPT login
+/// ("oauth") uses the same plan as OpenAI Codex; an API key ("api_key") is
+/// paid per token and has no plan limits.
+pub fn pi_openai_is_plan(sign_in_type: &str) -> bool {
+    sign_in_type == "oauth"
+}
+
+/// The same, of pi on this machine (`$PI_CODING_AGENT_DIR`, else
+/// `~/.pi/agent`). Only the sign-in's type is read.
+pub fn pi_openai_is_plan_here() -> bool {
+    let dir = std::env::var_os("PI_CODING_AGENT_DIR").map(PathBuf::from).unwrap_or_else(|| std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".pi/agent"));
+    std::fs::read_to_string(dir.join("auth.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .is_some_and(|v| v["openai"]["type"].as_str().is_some_and(pi_openai_is_plan))
+}
+
+/// The type of pi's "openai" sign-in there, printed on a line of its own
+/// before omp's report (pi runs on node, so node reads it; nothing else of
+/// the file leaves the machine).
+const PI_OPENAI_TYPE: &str = r#"a="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/auth.json"; t=$(node -e 'try{const a=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(String((a.openai||{}).type||""))}catch(e){}' "$a" 2>/dev/null); printf 'pi-openai:%s\n' "$t"; "#;
+
+/// Another machine's limits: its omp's (`omp usage --json`), and whether pi
+/// there uses its ChatGPT plan for "openai" (blocking).
+pub fn fetch_on(host: &crate::remote::Host) -> Result<(Vec<Value>, bool)> {
+    let out = crate::remote::run(host, &format!("{PI_OPENAI_TYPE}omp usage --json </dev/null"), Duration::from_secs(60))?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        bail!("omp usage on {} failed: {}", host.name, err.lines().last().unwrap_or("").trim());
+    }
+    let (pi_plan, report) = split_host_report(&out.stdout);
+    let report: Value = serde_json::from_slice(report).context("reading omp usage output")?;
+    Ok((parse(&report), pi_plan))
+}
+
+/// The `pi-openai:<type>` line, then omp's report.
+fn split_host_report(out: &[u8]) -> (bool, &[u8]) {
+    let Some(rest) = out.strip_prefix(b"pi-openai:") else { return (false, out) };
+    let end = rest.iter().position(|b| *b == b'\n').unwrap_or(rest.len());
+    let kind = String::from_utf8_lossy(&rest[..end]).trim().to_owned();
+    (pi_openai_is_plan(&kind), rest.get(end + 1..).unwrap_or_default())
+}
+
 /// Claude Code's plan limits, as Claude Code itself reports them: its
 /// `/usage` data, asked over its stream-json control channel (`get_usage`).
 /// No prompt is sent, so nothing is spent; its hooks stay off for the run.
@@ -81,16 +124,44 @@ pub fn fetch(omp: &Path) -> Result<Vec<Value>> {
 /// (Anthropic doesn't let other apps use a Claude subscription's tokens).
 /// None: no plan limits (an API key, Bedrock, Vertex).
 pub fn claude(program: &Path, config_dir: &Path) -> Result<Option<Value>> {
+    let mut cmd = Command::new(program);
+    cmd.args(CLAUDE_USAGE_ARGS).current_dir(std::env::temp_dir());
+    let Some(usage) = claude_usage(cmd, Duration::from_secs(45))? else { return Ok(None) };
+    let plan = claude_plan(usage["subscription_type"].as_str().unwrap_or_default());
+    Ok(Some(parse_claude(&usage["rate_limits"], &plan, &claude_account(config_dir))))
+}
+
+/// The same of Claude Code on another machine, over its SSH connection
+/// (blocking). Its address comes from `claude auth status` there.
+pub fn claude_on(host: &crate::remote::Host) -> Result<Option<Value>> {
+    let args: Vec<String> = CLAUDE_USAGE_ARGS.iter().map(|a| crate::remote::quote(a)).collect();
+    // (Its input ends with the connection, so it ends there too.)
+    let cmd = crate::remote::command(host, &format!("cd /tmp 2>/dev/null; exec claude {}", args.join(" ")));
+    let Some(usage) = claude_usage(cmd, Duration::from_secs(60))? else { return Ok(None) };
+    let plan = claude_plan(usage["subscription_type"].as_str().unwrap_or_default());
+    let account = crate::remote::run(host, "claude auth status --json </dev/null", Duration::from_secs(20))
+        .ok()
+        .and_then(|o| serde_json::from_slice::<Value>(&o.stdout).ok())
+        .and_then(|v| v["email"].as_str().map(str::to_owned))
+        .unwrap_or_default();
+    Ok(Some(parse_claude(&usage["rate_limits"], &plan, &account)))
+}
+
+/// Claude Code with no prompt: its control channel only, no hooks, no
+/// session saved, only the user's settings.
+const CLAUDE_USAGE_ARGS: [&str; 10] = ["--output-format", "stream-json", "--verbose", "--input-format", "stream-json", "--no-session-persistence", "--strict-mcp-config",
+    "--setting-sources=user", "--settings", r#"{"disableAllHooks":true}"#];
+
+/// Asks the Claude Code that `cmd` starts for its usage (`get_usage`);
+/// None when it has no plan limits.
+fn claude_usage(mut cmd: Command, wait: Duration) -> Result<Option<Value>> {
     use std::io::{BufRead, Write};
-    let mut child = Command::new(program)
-        .args(["--output-format", "stream-json", "--verbose", "--input-format", "stream-json", "--no-session-persistence", "--strict-mcp-config",
-               "--setting-sources=user", "--settings", r#"{"disableAllHooks":true}"#])
-        .current_dir(std::env::temp_dir())
+    let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .with_context(|| format!("running {}", program.display()))?;
+        .context("running Claude Code")?;
     let mut stdin = child.stdin.take().context("no input")?;
     for (id, request) in [("harlo-init", json!({ "subtype": "initialize" })), ("harlo-usage", json!({ "subtype": "get_usage", "skip_behaviors": true }))] {
         writeln!(stdin, "{}", json!({ "type": "control_request", "request_id": id, "request": request }))?;
@@ -107,7 +178,7 @@ pub fn claude(program: &Path, config_dir: &Path) -> Result<Option<Value>> {
             }
         }
     });
-    let answer = rx.recv_timeout(Duration::from_secs(45));
+    let answer = rx.recv_timeout(wait);
     drop(stdin);
     let _ = child.kill();
     let _ = child.wait();
@@ -119,8 +190,7 @@ pub fn claude(program: &Path, config_dir: &Path) -> Result<Option<Value>> {
     if usage["rate_limits_available"].as_bool() != Some(true) || !usage["rate_limits"].is_object() {
         return Ok(None);
     }
-    let plan = claude_plan(usage["subscription_type"].as_str().unwrap_or_default());
-    Ok(Some(parse_claude(&usage["rate_limits"], &plan, &claude_account(config_dir))))
+    Ok(Some(usage.clone()))
 }
 
 /// "pro" → "Pro", "max" → "Max".
@@ -157,7 +227,11 @@ pub fn parse_claude(body: &Value, plan: &str, account: &str) -> Value {
     for (key, label) in [("five_hour", "Session (5 h)"), ("seven_day", "Weekly")] {
         let w = &body[key];
         if w.is_object() {
-            windows.push(window(label.to_owned(), w["utilization"].as_f64(), resets(&w["resets_at"])));
+            // Whole percents, rounded: 100 can be 99.6, still allowed. Used up
+            // only when it says it's locked (a running session's own report
+            // says it as soon as a message is refused).
+            let used = w["utilization"].as_f64().map(|u| if u >= 100.0 && w["locked_reason"].is_null() { 99.5 } else { u });
+            windows.push(window(label.to_owned(), used, resets(&w["resets_at"])));
         }
     }
     // Per model: `limits[]` (weekly, scoped), or the older `seven_day_<model>` keys.
@@ -306,6 +380,17 @@ pub fn limit_name(provider: &str, label: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_machine_says_how_pi_signs_in_to_openai() {
+        let (plan, rest) = super::split_host_report(b"pi-openai:oauth\n{\"reports\":[]}");
+        assert!(plan);
+        assert_eq!(rest, b"{\"reports\":[]}");
+        assert!(!super::split_host_report(b"pi-openai:api_key\n{}").0);
+        assert!(!super::split_host_report(b"pi-openai:\n{}").0);
+        // (An older harlo's command: just omp's report.)
+        assert_eq!(super::split_host_report(b"{}"), (false, &b"{}"[..]));
+    }
+
     use super::*;
 
     #[test]
@@ -382,6 +467,11 @@ mod tests {
                 { "kind": "other" }
             ],
         });
+        // Rounded up to 100 but not locked: nearly, not used up.
+        let nearly = parse_claude(&json!({ "five_hour": { "utilization": 100, "locked_reason": null } }), "Pro", "");
+        assert_eq!((nearly["windows"][0]["status"].as_str(), nearly["limitReached"].as_bool()), (Some("ok"), Some(false)));
+        let locked = parse_claude(&json!({ "five_hour": { "utilization": 100, "locked_reason": "rate_limited" } }), "Pro", "");
+        assert_eq!(locked["windows"][0]["status"], "exhausted");
         let a = parse_claude(&body, "Pro", "me@example.com");
         assert_eq!((a["provider"].as_str(), a["plan"].as_str(), a["account"].as_str()), (Some("Claude"), Some("Pro"), Some("me@example.com")));
         let labels: Vec<&str> = a["windows"].as_array().unwrap().iter().map(|w| w["label"].as_str().unwrap()).collect();

@@ -1325,6 +1325,7 @@ dependencies = [
  "harlo-harness",
  "harlo-update-signing",
  "ignore",
+ "libc",
  "nucleo-matcher",
  "pulldown-cmark",
  "rusqlite",

@@ -50,6 +50,25 @@ Rectangle {
     onParallelChanged: {
         if (parallel && knownModels.length === 0) knownModels = JSON.parse(Workspace.knownModels())
         if (parallel) asGoal = false
+        if (parallel) fitLanes()
+    }
+    // A remote project's lanes: its host's agents, and the models they
+    // offer there (asked when a lane's menu opens; by harness).
+    property var laneModels: ({})
+    readonly property var laneHarnesses: (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.chatProvidersJson()) : [])
+        .map(p => p.id).filter(id => !runsOnHost || Theme.offeredOnHost(host, id))
+    /// Lanes keep to agents the machine has (another machine's may not).
+    function fitLanes() {
+        if (laneHarnesses.length === 0 || lanes.every(l => laneHarnesses.indexOf(l.harness) >= 0)) return
+        const fallback = laneHarnesses.indexOf(effectiveHarness) >= 0 ? effectiveHarness : laneHarnesses[0]
+        lanes = lanes.map(l => laneHarnesses.indexOf(l.harness) >= 0 ? l : { harness: fallback, model: "" })
+    }
+    onLaneHarnessesChanged: if (parallel) fitLanes()
+    onHostChanged: { hostModels = null; laneModels = ({}) }
+    function laneMenuModels(harness) {
+        if (!runsOnHost) return knownModels.filter(m => m.harness === harness).map(m => ({ id: m.model, name: Theme.modelLabel(m.model) }))
+        const got = laneModels[harness]
+        return got && got.models ? got.models.map(m => ({ id: m.id, name: m.name })) : []
     }
     function setLane(i, field, value) {
         const next = lanes.map(l => Object.assign({}, l))
@@ -58,6 +77,8 @@ Rectangle {
     }
     signal startedSession(string key, bool askFirst)
     signal addProjectRequested()
+    /// Sign this agent in on that host.
+    signal signInOnHost(string agent, string host)
 
     // Re-read when the page opens: projects and branches change elsewhere.
     property var projects: []
@@ -65,7 +86,7 @@ Rectangle {
     function refresh() {
         projects = JSON.parse(Workspace.projectsJson())
         defaultAgent = Workspace.defaultAgent()
-        if (model === "") model = defaultModel()
+        if (model === "") setModel(defaultModel())
         branches = []
         // (Read off the UI thread: a remote project's over SSH.)
         if (projects.some(p => p.id === projectId)) Workspace.requestBranches(projectId)
@@ -78,31 +99,77 @@ Rectangle {
             root.projects = JSON.parse(Workspace.projectsJson())
         }
         function onProvidersRevisionChanged() { root.defaultAgent = Workspace.defaultAgent() }
+        // Another machine: its projects, its home folder, its agents.
+        function onInstanceChanged() {
+            root.projects = JSON.parse(Workspace.projectsJson())
+            root.projectId = -1
+            root.harness = ""
+            root.useWorktree = false
+            root.hostModels = null
+            root.setModel(root.defaultModel())
+            root.refresh()
+        }
+        function onHostModelsReady(id, harness, json) {
+            if (id !== root.projectId) return
+            if (harness === root.effectiveHarness) root.hostModels = JSON.parse(json)
+            const next = Object.assign({}, root.laneModels)
+            next[harness] = JSON.parse(json)
+            root.laneModels = next
+        }
     }
     onVisibleChanged: if (visible) refresh()
     Component.onCompleted: refresh()
     readonly property var project: projects.find(p => p.id === projectId) || null
+    // The machine the session would run on ("": this one): the home folder
+    // is the home folder of the instance shown, so it can be a host too.
+    readonly property string host: project ? project.host : Workspace.instance
+    readonly property bool runsOnHost: host !== ""
+    readonly property string folder: (Remotes.revision, Workspace.instance, Workspace.draftFolder(projectId))
+    // What the host's agent offers: asked there when the menu opens (null
+    // until it answers; `error` if it couldn't).
+    property var hostModels: null
+    function loadHostModels() {
+        hostModels = null
+        Workspace.requestHostModels(projectId, effectiveHarness)
+    }
     readonly property string currentBranch: branches.length > 0 ? branches[0] : ""
-    readonly property bool onDefaultBranch: currentBranch === "main" || currentBranch === "master"
+    readonly property string homeLabel: Workspace.instance !== "" ? "Home folder on " + Workspace.instance : "Home folder"
+    readonly property bool atDefaultBranch: currentBranch === "main" || currentBranch === "master"
     // (What harlo starts when nothing is picked: Settings' choice, or the
     // first provider on and installed.)
     property string defaultAgent: Workspace.defaultAgent()
-    readonly property string effectiveHarness: harness !== "" ? harness : project ? project.harness : defaultAgent
+    readonly property string startAgent: project ? project.harness : defaultAgent
+    // (On a host: one that's there, if the usual one isn't.)
+    readonly property string effectiveHarness: {
+        if (harness !== "") return harness
+        if (!runsOnHost || Theme.offeredOnHost(host, startAgent)) return startAgent
+        const there = (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.chatProvidersJson()) : []).find(p => Theme.offeredOnHost(host, p.id))
+        return there ? there.id : startAgent
+    }
     /// The model to start with (`provider/model` as the agent takes it; ""
     /// the agent's own), from what the agent offers here (Settings →
     /// Providers reads it); the agent's default model from Settings (the
     /// setup guide) until one is picked. Not for a remote project (its host's
     /// agent).
     property string model: ""
+    // A picked model belongs to the agent and machine it was picked for: it
+    // goes no further (another machine's agent may not even have it).
+    property string modelFor: ""
+    readonly property string activeModel: modelFor === host + "\t" + effectiveHarness ? model : ""
+    function setModel(id) {
+        model = id
+        modelFor = host + "\t" + effectiveHarness
+    }
     function defaultModel() {
-        if (project && project.remote) return ""
         // The project's for this agent (Add a project, Settings → Projects).
         const own = project ? Workspace.setting("project_model_" + project.id + "_" + effectiveHarness) : ""
+        // (On another machine only its own: this computer's default may not be there.)
+        if (runsOnHost) return own
         return own !== "" ? own : Workspace.setting("default_model_" + effectiveHarness)
     }
-    onEffectiveHarnessChanged: model = defaultModel()
+    onEffectiveHarnessChanged: { hostModels = null; setModel(defaultModel()) }
     readonly property var modelChoices: {
-        if (project && project.remote) return []
+        if (runsOnHost) return hostModels && hostModels.models ? hostModels.models.filter(m => m.local).concat(hostModels.models.filter(m => !m.local)) : []
         const p = (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()) : []).find(x => x.id === effectiveHarness)
         if (!p) return []
         // Models served on this computer or the local network first, under
@@ -119,7 +186,7 @@ Rectangle {
         parallel = false
         starter = ""
         harness = t.harness
-        model = t.model !== "" ? t.model : defaultModel()
+        setModel(t.model !== "" ? t.model : defaultModel())
         approval = t.approval
         askFirst = t.askFirst
         asGoal = t.goal
@@ -141,11 +208,14 @@ Rectangle {
                 t.goal ? "goal" : "", t.worktree ? "new worktree" : "", t.askFirst ? "Ask first" : ""].filter(x => x !== "").join(" · ")
     }
     readonly property var starterInfo: starters.find(s => s.id === starter) || null
-    readonly property bool canSend: goalOn ? (input.text.trim() !== "" || starter !== "") && parseBudget(goalBudget) >= 0
-                                           : input.text.trim() !== "" || starter !== "" || attachments.length > 0
+    readonly property bool canSend: folder !== "" && (goalOn ? (input.text.trim() !== "" || starter !== "") && parseBudget(goalBudget) >= 0
+                                           : input.text.trim() !== "" || starter !== "" || attachments.length > 0)
 
     // Opens the page for a project (-1: home folder), keeping any draft text.
     function openFor(id) {
+        // (A project of the machine shown, or its home folder.)
+        projects = JSON.parse(Workspace.projectsJson())
+        if (!projects.some(p => p.id === id)) id = -1
         const other = id !== projectId
         if (other) {
             projectId = id
@@ -153,7 +223,7 @@ Rectangle {
             useWorktree = false
         }
         refresh()
-        if (other) model = defaultModel()
+        if (other) setModel(defaultModel())
         input.forceActiveFocus()
     }
     function reset() {
@@ -180,9 +250,9 @@ Rectangle {
         if (useWorktree && worktreeName.trim() === "")
             worktreeName = Workspace.suggestBranch()
         const key = Workspace.startDraft(JSON.stringify({
-            projectId: projectId, harness: effectiveHarness, worktreeBranch: useWorktree ? worktreeName.trim() : "",
+            projectId: project ? projectId : -1, harness: effectiveHarness, worktreeBranch: useWorktree ? worktreeName.trim() : "",
             base: currentBranch, starter: starter, text: input.text, attachments: attachments, askFirst: askFirst,
-            approval: startApproval === "" ? "" : approval, goal: goalOn, goalBudget: Math.max(0, parseBudget(goalBudget)), model: model
+            approval: startApproval === "" ? "" : approval, goal: goalOn, goalBudget: Math.max(0, parseBudget(goalBudget)), model: activeModel
         }))
         const ask = askFirst && !goalOn
         reset()
@@ -218,7 +288,7 @@ Rectangle {
                 onTriggered: root.openFor(modelData.id)
             }
         }
-        AppMenuItem { text: "Home folder"; marked: root.projectId === -1; onTriggered: root.openFor(-1) }
+        AppMenuItem { text: root.homeLabel; marked: root.projectId === -1; onTriggered: root.openFor(-1) }
         AppMenuSeparator { }
         AppMenuItem { text: "Add project…"; onTriggered: root.addProjectRequested() }
     }
@@ -235,7 +305,7 @@ Rectangle {
         id: harnessMenu
         Repeater {
             // (A remote project: the agents its host has.)
-            model: (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.chatProvidersJson()) : []).filter(p => !(root.project && root.project.remote) || Theme.offeredOnHost(root.project.host, p.id))
+            model: (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.chatProvidersJson()) : []).filter(p => !root.runsOnHost || Theme.offeredOnHost(root.host, p.id))
             AppMenuItem {
                 required property var modelData
                 text: modelData.label
@@ -367,16 +437,16 @@ Rectangle {
                     projectLook: root.project !== null
                     projectIcon: root.project ? root.project.icon : ""
                     projectColor: root.project ? root.project.color : ""
-                    text: root.project ? root.project.name : "Home folder"
+                    text: root.project ? root.project.name : root.folder === "" ? "Connecting to " + Workspace.instance + "…" : root.homeLabel
                     onClicked: projectMenu.popup(this, 0, height + 4)
                 }
                 Chip {
                     visible: root.currentBranch !== ""
-                    iconName: root.useWorktree ? "git-branch" : root.onDefaultBranch ? "alert" : "git-branch"
-                    iconColor: root.useWorktree ? Theme.success : root.onDefaultBranch ? Theme.warning : Theme.muted
+                    iconName: root.useWorktree ? "git-branch" : root.atDefaultBranch ? "alert" : "git-branch"
+                    iconColor: root.useWorktree ? Theme.success : root.atDefaultBranch ? Theme.warning : Theme.muted
                     text: root.useWorktree ? "New worktree" : root.currentBranch
                     onClicked: branchMenu.popup(this, 0, height + 4)
-                    ToolTip.visible: hovered && root.onDefaultBranch && !root.useWorktree
+                    ToolTip.visible: hovered && root.atDefaultBranch && !root.useWorktree
                     ToolTip.text: "Working directly on " + root.currentBranch + ". Pick “New worktree” to keep it untouched."
                     ToolTip.delay: 400
                 }
@@ -400,13 +470,16 @@ Rectangle {
                 Chip {
                     id: modelChip
                     objectName: "draftModel"
-                    visible: !root.parallel && !(root.project && root.project.remote)
+                    visible: !root.parallel
                     iconName: "sparkling"
-                    iconColor: root.model !== "" ? Theme.primary : Theme.muted
-                    text: root.model !== "" ? Theme.modelLabel(root.modelName) : "Default model"
+                    iconColor: root.activeModel !== "" ? Theme.primary : Theme.muted
+                    text: root.activeModel !== "" ? Theme.modelLabel(root.modelName) : "Default model"
                     // (The agents' models are read when first asked for.)
-                    onClicked: { Workspace.ensureProviders(); modelPopup.open() }
-                    ToolTip.visible: hovered && root.model === ""
+                    onClicked: {
+                        if (root.runsOnHost) root.loadHostModels(); else Workspace.ensureProviders()
+                        modelPopup.open()
+                    }
+                    ToolTip.visible: hovered && root.activeModel === ""
                     ToolTip.text: Theme.harnessLabel(root.effectiveHarness) + " starts with its own default model. Pick one to start with another."
                     ToolTip.delay: 400
                     // The models the agent offers here, filtered as you type.
@@ -414,7 +487,7 @@ Rectangle {
                         id: modelPopup
                         y: parent.height + 4
                         width: 400
-                        height: Math.min(380, 60 + Math.max(1, draftModels.count) * 30 + (root.modelChoices.some(m => m.local) ? 30 : 0))
+                        height: Math.min(380, 60 + Math.max(1, draftModels.count) * 30 + (root.modelChoices.some(m => m.local) ? 30 : 0) + (root.modelChoices.length === 0 ? 70 : 0))
                         padding: 8
                         background: GlassSurface { radius: 10 }
                         onOpened: { draftModelFilter.text = ""; draftModelFilter.forceActiveFocus() }
@@ -433,10 +506,28 @@ Rectangle {
                                 visible: root.modelChoices.length === 0
                                 Layout.fillWidth: true
                                 wrapMode: Text.Wrap
-                                text: Workspace.providersJson().indexOf('"checking"') >= 0 ? "Reading " + Theme.harnessLabel(root.effectiveHarness) + "'s models…"
+                                text: root.runsOnHost
+                                    ? (root.hostModels === null ? "Reading " + Theme.harnessLabel(root.effectiveHarness) + "'s models on " + root.host + "…"
+                                       : root.hostModels.error ? "Couldn't read " + Theme.harnessLabel(root.effectiveHarness) + "'s models on " + root.host + ": " + root.hostModels.error
+                                       : "No models. " + Theme.harnessLabel(root.effectiveHarness) + " needs its own login or API key on " + root.host + ".")
+                                    : Workspace.providersJson().indexOf('"checking"') >= 0 ? "Reading " + Theme.harnessLabel(root.effectiveHarness) + "'s models…"
                                     : Theme.harnessLabel(root.effectiveHarness) + " has no models to pick here. Sign it in to a provider in Settings → Providers."
                                 color: Theme.muted
                                 font.pixelSize: Theme.px(12)
+                            }
+                            RowLayout {
+                                visible: root.runsOnHost && root.hostModels !== null && root.modelChoices.length === 0
+                                spacing: 6
+                                FlatButton {
+                                    objectName: "draftModelsSignIn"
+                                    text: "Sign in on " + root.host
+                                    onClicked: { modelPopup.close(); root.signInOnHost(root.effectiveHarness, root.host) }
+                                }
+                                FlatButton {
+                                    objectName: "draftModelsCheckAgain"
+                                    text: "Check again"
+                                    onClicked: root.loadHostModels()
+                                }
                             }
                             ListView {
                                 id: draftModels
@@ -449,7 +540,10 @@ Rectangle {
                                     .filter(m => m.id === "" ? draftModelFilter.text === "" : (m.id + " " + m.name).toLowerCase().includes(draftModelFilter.text.toLowerCase()))
                                 function pick(i) {
                                     const m = model[i]
-                                    if (m) { root.model = m.id; modelPopup.close() }
+                                    if (m) {
+                                        root.setModel(m.id)
+                                        modelPopup.close()
+                                    }
                                 }
                                 delegate: ItemDelegate {
                                     id: dmRow
@@ -537,7 +631,7 @@ Rectangle {
                                 Label { anchors.centerIn: parent; text: String.fromCharCode(65 + laneRow.index); color: Theme.primary; font.pixelSize: Theme.px(12); font.bold: true }
                             }
                             Repeater {
-                                model: (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.chatProvidersJson()) : []).map(p => p.id)
+                                model: root.laneHarnesses
                                 Button {
                                     id: hb
                                     required property string modelData
@@ -569,19 +663,43 @@ Rectangle {
                                 text: "▾"
                                 padding: 4
                                 font.pixelSize: Theme.px(12)
-                                onClicked: modelMenu.popup(this, 0, height + 2)
+                                onClicked: {
+                                    // (Asked again each time: what the host's agent offers changes.)
+                                    if (root.runsOnHost) {
+                                        const next = Object.assign({}, root.laneModels)
+                                        delete next[laneRow.modelData.harness]
+                                        root.laneModels = next
+                                        Workspace.requestHostModels(root.projectId, laneRow.modelData.harness)
+                                    }
+                                    modelMenu.popup(this, 0, height + 2)
+                                }
                                 ToolTip.visible: hovered
-                                ToolTip.text: "Models you've used"
+                                ToolTip.text: root.runsOnHost ? "Models on " + root.host : "Models you've used"
                                 AppMenu {
                                     id: modelMenu
+                                    readonly property var asked: root.laneModels[laneRow.modelData.harness]
                                     AppMenuItem { text: "Harness default"; onTriggered: root.setLane(laneRow.index, "model", "") }
+                                    AppMenuItem {
+                                        visible: root.runsOnHost && !modelMenu.asked
+                                        height: visible ? implicitHeight : 0
+                                        enabled: false
+                                        text: "Reading " + Theme.harnessLabel(laneRow.modelData.harness) + "'s models on " + root.host + "…"
+                                    }
+                                    AppMenuItem {
+                                        visible: root.runsOnHost && !!modelMenu.asked && (!!modelMenu.asked.error || (modelMenu.asked.models || []).length === 0)
+                                        height: visible ? implicitHeight : 0
+                                        enabled: false
+                                        text: !modelMenu.asked ? ""
+                                            : modelMenu.asked.error ? "Couldn't read them: " + modelMenu.asked.error
+                                            : "No models. " + Theme.harnessLabel(laneRow.modelData.harness) + " needs its own login or API key on " + root.host + "."
+                                    }
                                     Repeater {
-                                        model: root.knownModels.filter(m => m.harness === laneRow.modelData.harness)
+                                        model: root.laneMenuModels(laneRow.modelData.harness)
                                         AppMenuItem {
                                             required property var modelData
-                                            text: Theme.modelLabel(modelData.model)
-                                            marked: laneRow.modelData.model === modelData.model
-                                            onTriggered: root.setLane(laneRow.index, "model", modelData.model)
+                                            text: modelData.name
+                                            marked: laneRow.modelData.model === modelData.id
+                                            onTriggered: root.setLane(laneRow.index, "model", modelData.id)
                                         }
                                     }
                                 }

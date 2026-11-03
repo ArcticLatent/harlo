@@ -20,6 +20,9 @@ pub mod ffi {
         /// deleted, then the application.
         #[namespace = "harlo"]
         fn shutdown_application();
+        /// Ends the event loop (any thread may ask).
+        #[namespace = "harlo"]
+        fn quit_application();
 
         #[namespace = "harlo"]
         fn set_window_icon(path: &QString);
@@ -41,4 +44,4 @@ pub mod ffi {
     }
 }
 
-pub use ffi::{clipboard_files, clipboard_image_to, create_application, exec_application, install_message_log, key_sequence_text, set_desktop_file_name, set_window_icon, shutdown_application};
+pub use ffi::{clipboard_files, clipboard_image_to, create_application, exec_application, quit_application, install_message_log, key_sequence_text, set_desktop_file_name, set_window_icon, shutdown_application};

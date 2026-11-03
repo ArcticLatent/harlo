@@ -4,8 +4,9 @@ import QtQuick.Layouts
 import harlo
 
 // Sets up a model server (Settings → Model servers): an engine that suits
-// this computer, a model, then harlo installs, starts and tests it, and adds
-// it to the agents chosen.
+// this computer, or another machine harlo is connected to, a model, then
+// harlo installs, starts and tests it there, and adds it to the agents chosen
+// (that machine's).
 AppDialog {
     id: dlg
     objectName: "setupServerDialog"
@@ -15,8 +16,25 @@ AppDialog {
     readonly property var job: ServerSetup.job !== "" ? JSON.parse(ServerSetup.job) : null
     readonly property var gg: ServerSetup.ggufs !== "" ? JSON.parse(ServerSetup.ggufs) : ({ state: "", files: [] })
     readonly property var hm: ServerSetup.hfModels !== "" ? JSON.parse(ServerSetup.hfModels) : ({ state: "", models: [] })
-    readonly property var agents: (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()) : [])
-        .filter(p => ["pi", "omp", "opencode", "hermes"].includes(p.id) && p.state !== "missing")
+    /// The machine it's for: "" for this computer, else one harlo is
+    /// connected to (its agents, engines and folders).
+    readonly property string host: ServerSetup.host
+    readonly property string machine: host === "" ? "this computer" : host
+    readonly property var hostAgents: Accounts.hostServers !== "" ? (JSON.parse(Accounts.hostServers)[host] || {}).agents || {} : ({})
+    readonly property var agents: host !== ""
+        ? ["pi", "omp", "opencode", "hermes"].filter(id => hostAgents[id] !== undefined).map(id => ({ id: id, label: ({ pi: "pi", omp: "Oh My Pi", opencode: "OpenCode", hermes: "Hermes" })[id] }))
+        : (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()) : [])
+            .filter(p => ["pi", "omp", "opencode", "hermes"].includes(p.id) && p.state !== "missing")
+    /// Opens it for `machine` ("" for this computer); while a setup runs,
+    /// that one shows, wherever it is.
+    function openOn(machine, row) {
+        if (!job || job.state !== "running") {
+            if (ServerSetup.host !== machine) ServerSetup.host = machine
+            addTo = row || null
+        }
+        if (machine !== "") Accounts.loadHostServers(machine)
+        open()
+    }
 
     // "engine" → "model" → "run".
     property string page: "engine"
@@ -67,7 +85,7 @@ AppDialog {
     /// Tokens, as models count them: 128k, 1M.
     function ctxText(n) { return n >= 1048576 ? +(n / 1048576).toFixed(1) + "M" : Math.round(n / 1024) + "k" }
     // ("runs": Basalt's and NInfer's, on the card and in RAM together by design.)
-    function fitText(fit) { return fit === "gpu" ? "Fits your graphics card" : fit === "ram" ? "Partly in RAM (slower)" : fit === "runs" ? "Runs here" : fit === "no" ? "Too big for this computer" : "" }
+    function fitText(fit) { return fit === "gpu" ? (host === "" ? "Fits your graphics card" : "Fits its graphics card") : fit === "ram" ? "Partly in RAM (slower)" : fit === "runs" ? (host === "" ? "Runs here" : "Runs there") : fit === "no" ? "Too big for " + machine : "" }
     function fitColor(fit) { return fit === "gpu" || fit === "runs" ? Theme.success : fit === "ram" ? Theme.warning : Theme.muted }
     function chooseRepo(m) {
         repo = m.repo
@@ -114,10 +132,7 @@ AppDialog {
     /// Adding a model to a server set up before (an Ollama row's "Add a
     /// model…"): its row; its engine, address and name as they are.
     property var addTo: null
-    function addModel(row) {
-        addTo = row
-        open()
-    }
+    function addModel(row) { openOn("", row) }
     function go() {
         error = ""
         ServerSetup.start(JSON.stringify({
@@ -134,14 +149,30 @@ AppDialog {
     /// it goes, without the setup's steps and agents.
     readonly property bool updating: job !== null && job.update === true
     readonly property bool updateEnded: updating && job.state !== "running"
-    onUpdateEndedChanged: if (updateEnded) { ServerSetup.refresh(); ServerSetup.checkUpdates(true); added() }
-    function updateEngine(id) {
+    onUpdateEndedChanged: if (updateEnded) {
+        if (host !== "") { Accounts.checkHostUpdates(host, true); Accounts.loadHostEngines(host) }
+        else { ServerSetup.refresh(); ServerSetup.checkUpdates(true) }
+        added()
+    }
+    function updateEngine(id, machine) {
+        if (job && job.state === "running") return
+        if (ServerSetup.host !== (machine || "")) ServerSetup.host = machine || ""
         ServerSetup.start(JSON.stringify({ update: id }))
         open()
     }
+    // Set up on another machine: in its list at once (Start, Stop, its agents).
+    readonly property bool jobDone: job !== null && job.state === "done"
+    onJobDoneChanged: if (jobDone && host !== "") Accounts.loadHostEngines(host)
     readonly property bool hermesFits: !job || !job.result || job.result.models.length === 0 || job.result.models.some(m => !m.context || m.context >= 64000)
     function addToAgents() {
         const r = job.result
+        if (host !== "") {
+            const ids = chosen.filter(x => agents.some(a => a.id === x) && (x !== "hermes" || hermesFits) && !(x === "omp" && ompFindsIt))
+            Accounts.addHostEngine(host, JSON.stringify({ name: r.name, baseUrl: r.baseUrl, models: r.models, agents: ids }))
+            close()
+            added()
+            return
+        }
         for (const id of chosen.filter(x => (x !== "hermes" || hermesFits) && !(x === "omp" && ompFindsIt))) {
             const a = agents.find(x => x.id === id)
             const taken = [...new Set((a.modelIds || []).map(m => m.split(/[\/:]/)[0]).filter(p => p !== ""))]
@@ -152,7 +183,7 @@ AppDialog {
         added()
     }
 
-    title: page === "run" && updating ? "Update the engine" : addTo !== null ? "Add a model to " + (engine ? engine.name : "the server") : page === "engine" ? "Set up a model server" : engine ? "Set up " + engine.name : ""
+    title: page === "run" && updating ? "Update the engine" : addTo !== null ? "Add a model to " + (engine ? engine.name : "the server") : page === "engine" ? "Set up a model server" + (host !== "" ? " on " + host : "") : engine ? "Set up " + engine.name + (host !== "" ? " on " + host : "") : ""
     standardButtons: Dialog.NoButton
     width: Math.min(640, (Overlay.overlay ? Overlay.overlay.width : 700) - 40)
     onAboutToShow: {
@@ -167,9 +198,15 @@ AppDialog {
             return
         }
         if (page === "engine") ServerSetup.refresh()
-        chosen = agents.map(a => a.id)
+        // (Another machine's agents may still be being read.)
+        chosen = host !== "" ? ["pi", "omp", "opencode", "hermes"] : agents.map(a => a.id)
     }
-    onClosed: if (!job || job.state !== "running") addTo = null
+    onClosed: {
+        if (job && job.state === "running") return
+        addTo = null
+        // (Settings shows this computer's engines again.)
+        if (ServerSetup.host !== "") { ServerSetup.host = ""; ServerSetup.refresh() }
+    }
     Connections {
         target: ServerSetup
         // The file that suits this computer, picked to start with.
@@ -190,7 +227,15 @@ AppDialog {
             visible: dlg.page === "engine"
             Layout.fillWidth: true
             spacing: 8
-            Note { text: dlg.cat.hardware ? "This computer: " + dlg.cat.hardware.summary : "Looking at this computer…" }
+            Note {
+                visible: dlg.cat.state !== "failed"
+                text: dlg.cat.hardware ? (dlg.host === "" ? "This computer: " : dlg.host + ": ") + dlg.cat.hardware.summary : "Looking at " + dlg.machine + "…"
+            }
+            Note {
+                visible: dlg.cat.state === "failed"
+                color: Theme.error
+                text: "Couldn't look at " + dlg.machine + ": " + (dlg.cat.error || "it didn't answer")
+            }
             Repeater {
                 model: dlg.cat.engines || []
                 ItemDelegate {
@@ -251,7 +296,7 @@ AppDialog {
                 text: dlg.engine && dlg.engine.id === "basalt" ? "Basalt has no ready-made builds: harlo downloads its latest release's source from GitHub and builds it here with CMake and your CUDA toolkit (several minutes), then gives its server a Python of its own, in harlo's folder."
                     : dlg.ninfer ? "NInfer has no ready-made builds or releases: harlo downloads its latest source from GitHub and builds it here with CMake and your CUDA toolkit (several minutes), in harlo's folder."
                     : dlg.wholeRepo ? "harlo installs uv (checked against its published checksum), then a Python of its own with vLLM and PyTorch for your card, in harlo's folder: several GB, a few minutes."
-                    : "harlo downloads the latest release for this computer's card, checks it against its published checksum and keeps it in its own folder." }
+                    : "harlo downloads the latest release for " + (dlg.host === "" ? "this computer's" : dlg.host + "'s") + " card, checks it against its published checksum and keeps it in its own folder." }
 
             // Ollama and llama.cpp: a model from Hugging Face, then its size.
             ColumnLayout {
@@ -262,7 +307,7 @@ AppDialog {
                 // (Basalt: one model, its sizes; the memory they count.)
                 Note {
                     visible: dlg.fixedRepo !== ""
-                    text: "Each size, graphics memory and RAM together: this computer has " + Math.round(dlg.memoryGb) + " GB (" + Math.round(dlg.vramGb) + " GB graphics + " + Math.round(dlg.memoryGb - dlg.vramGb) + " GB RAM). The download is the size shown, once."
+                    text: "Each size, graphics memory and RAM together: " + dlg.machine + " has " + Math.round(dlg.memoryGb) + " GB (" + Math.round(dlg.vramGb) + " GB graphics + " + Math.round(dlg.memoryGb - dlg.vramGb) + " GB RAM). The download is the size shown, once."
                 }
                 AppTextField {
                     id: modelSearch
@@ -419,7 +464,7 @@ AppDialog {
                 FieldName { Layout.topMargin: 4; text: dlg.deepseek ? "DeepSeek-V4.1-Flash, in the size that fits" : "Qwen3.8-Flash-Next, in the size that fits" }
                 // (Strata splits a model between the card and RAM: both count.)
                 Note {
-                    text: (dlg.deepseek ? "The least memory each needs: graphics memory and RAM together, the rest read from your SSD. This computer has " : "Memory each needs: graphics memory and RAM together. This computer has ") + Math.round(dlg.memoryGb) + " GB ("
+                    text: (dlg.deepseek ? "The least memory each needs: graphics memory and RAM together, the rest read from its SSD. " : "Memory each needs: graphics memory and RAM together. ") + (dlg.host === "" ? "This computer" : dlg.host) + " has " + Math.round(dlg.memoryGb) + " GB ("
                         + Math.round(dlg.vramGb) + " GB graphics + " + Math.round(dlg.memoryGb - dlg.vramGb) + " GB RAM)."
                 }
                 Repeater {
@@ -439,7 +484,7 @@ AppDialog {
                             spacing: 8
                             Label { text: sRow.modelData.name; color: Theme.foreground; font.family: Theme.mono; font.pixelSize: Theme.px(12); Layout.preferredWidth: 80 }
                             Label { Layout.fillWidth: true; text: sRow.modelData.what; color: Theme.muted; font.pixelSize: Theme.px(12) }
-                            Label { text: (sRow.fits ? "Runs here" : "Too big for this computer") + " · " + (sRow.modelData.diskGb ? sRow.modelData.diskGb + " GB on disk" : sRow.modelData.needGb + " GB"); color: sRow.fits ? Theme.success : Theme.muted; font.pixelSize: Theme.px(11.5) }
+                            Label { text: (sRow.fits ? (dlg.host === "" ? "Runs here" : "Runs there") : "Too big for " + dlg.machine) + " · " + (sRow.modelData.diskGb ? sRow.modelData.diskGb + " GB on disk" : sRow.modelData.needGb + " GB"); color: sRow.fits ? Theme.success : Theme.muted; font.pixelSize: Theme.px(11.5) }
                         }
                         onClicked: dlg.model = modelData.id
                     }
@@ -521,7 +566,7 @@ AppDialog {
                     onTextChanged: if (!dlg.nameEdited) nameField.text = dlg.defaultName()
                 }
             }
-            Note { visible: dlg.addTo === null; text: "On this computer only (127.0.0.1)." }
+            Note { visible: dlg.addTo === null; text: dlg.host === "" ? "On this computer only (127.0.0.1)." : "On " + dlg.host + ", for its own agents only (127.0.0.1 there). It keeps running when harlo quits; Stop it in Settings → Model servers." }
             RowLayout {
                 Layout.topMargin: 6
                 FlatButton { visible: dlg.addTo === null; text: "Back"; outlined: false; font.pixelSize: Theme.px(12); onClicked: dlg.page = "engine" }
@@ -653,6 +698,10 @@ AppDialog {
                             onToggled: dlg.chosen = checked ? dlg.chosen.concat([modelData.id]) : dlg.chosen.filter(x => x !== modelData.id)
                         }
                     }
+                }
+                Note {
+                    visible: dlg.host !== "" && dlg.agents.length === 0
+                    text: "No pi, Oh My Pi, OpenCode or Hermes on " + dlg.host + " yet: it runs there, to add to them later in Settings → Model servers."
                 }
                 Note {
                     visible: !dlg.hermesFits && dlg.agents.some(a => a.id === "hermes")

@@ -14,6 +14,8 @@ Rectangle {
     readonly property bool completionVisible: completion.visible
     readonly property bool inputFocused: input.activeFocus
     signal submitted(string text, string mode)
+    /// Sign this agent in on that host.
+    signal signInOnHost(string agent, string host)
 
     // Sent prompts, newest last; Up/Down in an empty composer walks them.
     property var history: []
@@ -293,9 +295,42 @@ Rectangle {
                 onAccepted: modelList.pick(modelList.currentIndex)
             }
             Label {
-                visible: root.session.models.length === 0
+                visible: root.session.models.length === 0 && !root.session.modelsAnswered
                 text: "Loading models…"
                 color: Theme.muted
+            }
+            // None: nothing to pick until the agent has a login, which is
+            // made where it runs.
+            ColumnLayout {
+                id: noModels
+                objectName: "noModels"
+                visible: root.session.models.length === 0 && root.session.modelsAnswered
+                Layout.fillWidth: true
+                spacing: 8
+                readonly property string host: (/^ssh:\/\/([^\/]+)/.exec(root.session.cwd) || [])[1] || ""
+                readonly property string agent: Theme.harnessLabel(root.session.harness)
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    color: Theme.muted
+                    text: noModels.host === ""
+                        ? "No models. " + noModels.agent + " needs a login or an API key: add one in Settings → Providers."
+                        : "No models. " + noModels.agent + " needs its own login or API key on " + noModels.host + "."
+                }
+                RowLayout {
+                    spacing: 6
+                    FlatButton {
+                        objectName: "modelsSignIn"
+                        visible: noModels.host !== ""
+                        text: "Sign in on " + noModels.host
+                        onClicked: { modelPicker.close(); root.signInOnHost(root.session.harness, noModels.host) }
+                    }
+                    FlatButton {
+                        objectName: "modelsCheckAgain"
+                        text: "Check again"
+                        onClicked: root.session.recheckModels()
+                    }
+                }
             }
             ListView {
                 id: modelList

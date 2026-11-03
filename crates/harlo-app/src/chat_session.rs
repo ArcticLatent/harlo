@@ -56,6 +56,13 @@ pub mod qobject {
         #[qproperty(QStringList, commands)]
         /// `provider\tid\tname\treasoning(0|1)` per model.
         #[qproperty(QStringList, models)]
+        /// The agent has answered for `models` (an empty list then means it
+        /// has none, not that they're coming).
+        #[qproperty(bool, models_answered, cxx_name = "modelsAnswered")]
+        /// The agent refused a message for want of a login or API key.
+        #[qproperty(bool, needs_login, cxx_name = "needsLogin")]
+        /// The last message was refused: its plan's limit is used up.
+        #[qproperty(bool, limit_refused, cxx_name = "limitRefused")]
         #[qproperty(QStringList, thinking_levels, cxx_name = "thinkingLevels")]
         #[qproperty(QStringList, file_matches, cxx_name = "fileMatches")]
         /// Image paths to send with the next prompt.
@@ -189,6 +196,10 @@ pub mod qobject {
         /// Fills `models` (starts the harness if needed).
         #[qinvokable]
         fn load_models(self: Pin<&mut ChatSession>);
+        /// `load_models` after starting an idle agent again, which reads its
+        /// logins only when it starts.
+        #[qinvokable]
+        fn recheck_models(self: Pin<&mut ChatSession>);
         #[qinvokable]
         fn set_model(self: Pin<&mut ChatSession>, provider: &QString, id: &QString);
         /// Fills `thinkingLevels`.
@@ -273,8 +284,8 @@ use std::collections::VecDeque;
 /// a remote host's is read over SSH.
 pub fn user_entry_id(file: Option<PathBuf>, harness: &str, ordinal: usize) -> Option<String> {
     file.and_then(|f| match harness {
-        // (A remote host's transcript, read over SSH.)
-        "claude" if harlo_core::remote::is_remote(&f) => harlo_core::remote::read(&f).ok().map(|b| harlo_harness::claude::user_entries_text(&String::from_utf8_lossy(&b))),
+        // (A remote host's transcript: its copy here, brought up to date.)
+        "claude" if harlo_core::remote::is_remote(&f) => harlo_core::remote::local_copy(&f).ok().map(|c| harlo_harness::claude::user_entries(&c)),
         "claude" => Some(harlo_harness::claude::user_entries(&f)),
         // (A remote host's, through its server.)
         "opencode" if harlo_core::remote::is_remote(&f) => harlo_core::remote::host_of(&f)
@@ -283,8 +294,8 @@ pub fn user_entry_id(file: Option<PathBuf>, harness: &str, ordinal: usize) -> Op
         "opencode" => Some(harlo_harness::opencode::user_entries(&f)),
         // An ACP agent's: harlo numbers its prompts (`u0`, `u1`, …).
         "hermes" => Some((0..=ordinal).map(|i| format!("u{i}")).collect()),
-        // (pi / omp: a remote host's file, read over SSH.)
-        _ if harlo_core::remote::is_remote(&f) => harlo_core::remote::read(&f).ok().map(|b| harlo_harness::branches::current_user_entries_text(&String::from_utf8_lossy(&b))),
+        // (pi / omp: a remote host's file, from its copy here.)
+        _ if harlo_core::remote::is_remote(&f) => harlo_core::remote::local_copy(&f).ok().and_then(|c| harlo_harness::branches::current_user_entries(&c).ok()),
         _ => harlo_harness::branches::current_user_entries(&f).ok(),
     })
     .and_then(|ids| ids.get(ordinal).cloned())
@@ -338,6 +349,9 @@ pub struct ChatSessionRust {
     compact_note: QString,
     commands: QStringList,
     models: QStringList,
+    models_answered: bool,
+    needs_login: bool,
+    limit_refused: bool,
     thinking_levels: QStringList,
     file_matches: QStringList,
     attachments: QStringList,
@@ -449,6 +463,9 @@ impl ChatSession {
         ] {
             setter(self.as_mut(), QStringList::default());
         }
+        self.as_mut().set_models_answered(false);
+        self.as_mut().set_needs_login(false);
+        self.as_mut().set_limit_refused(false);
         self.as_mut().set_context_fraction(0.0);
         self.as_mut().set_compact_fraction(0.0);
         self.as_mut().set_context_json(QString::default());
@@ -835,9 +852,14 @@ impl ChatSession {
             text
         };
         let paths: Vec<PathBuf> = self.attachments.iter().map(|p| PathBuf::from(p.to_string())).collect();
-        // Its model on a server harlo set up here: started first if stopped.
-        let server = crate::accounts::managed_server(&self.harness.to_string(), &self.model_id.to_string());
-        if paths.is_empty() && server.is_none() {
+        // (Another machine's session: what isn't inlined is copied there.)
+        let host = harlo_core::remote::host_of(&self.folder());
+        // Its model on a server harlo can start (set up here, or on the
+        // machine a session runs on): started first if stopped. (Another
+        // machine's agent's file is read in the background.)
+        let (agent, model) = (self.harness.to_string(), self.model_id.to_string());
+        let server = if host.is_none() { crate::accounts::managed_server(&agent, &model) } else { None };
+        if paths.is_empty() && server.is_none() && host.is_none() {
             h.prompt(&text, Vec::new(), mode);
             return;
         }
@@ -846,12 +868,14 @@ impl ChatSession {
         // Reading files and encoding images can take a moment; keep it off
         // the UI thread.
         crate::runtime().spawn_blocking(move || {
-            if let Some((name, url)) = server.filter(|(_, url)| crate::accounts::needs_start(url)) {
+            let server = server.or_else(|| host.as_deref().and_then(|h| crate::accounts::host_server(h, &agent, &model)));
+            if let Some(server) = server.filter(|s| s.needs_start()) {
+                let name = server.name().to_owned();
                 let starting = |name: String| {
                     let _ = thread.queue(move |mut this| this.as_mut().set_starting_server(QString::from(&name)));
                 };
                 starting(name.clone());
-                let started = crate::accounts::ensure_running(&url);
+                let started = server.start();
                 starting(String::new());
                 if let Err(e) = started {
                     let message = format!("{name} didn't start: {e}");
@@ -862,7 +886,7 @@ impl ChatSession {
                     return;
                 }
             }
-            let prepared = harlo_core::attach::prepare(&paths);
+            let prepared = harlo_core::attach::prepare_for(&paths, host.as_deref());
             h.prompt(&format!("{}{text}", prepared.prefix), prepared.images, mode);
         });
     }
@@ -1046,6 +1070,16 @@ impl ChatSession {
         command: Value,
         apply: impl FnOnce(Pin<&mut Self>, Value) + Send + 'static,
     ) {
+        self.request_or(command, apply, |_| {});
+    }
+
+    /// [`Self::request_then`], with what to do if it fails.
+    fn request_or(
+        self: Pin<&mut Self>,
+        command: Value,
+        apply: impl FnOnce(Pin<&mut Self>, Value) + Send + 'static,
+        failed: impl FnOnce(Pin<&mut Self>) + Send + 'static,
+    ) {
         let Some(handle) = self.handle().cloned() else { return };
         let thread = self.qt_thread();
         let generation = self.generation;
@@ -1058,7 +1092,14 @@ impl ChatSession {
                         }
                     });
                 }
-                Err(e) => tracing::warn!("request failed: {e}"),
+                Err(e) => {
+                    tracing::warn!("request failed: {e}");
+                    let _ = thread.queue(move |this| {
+                        if this.generation == generation {
+                            failed(this);
+                        }
+                    });
+                }
             }
         });
     }
@@ -1079,8 +1120,17 @@ impl ChatSession {
         });
     }
 
+    pub fn recheck_models(mut self: Pin<&mut Self>) {
+        if let Some(h) = self.handle() {
+            h.restart_if_idle();
+        }
+        self.as_mut().set_models(QStringList::default());
+        self.as_mut().set_models_answered(false);
+        self.load_models();
+    }
+
     pub fn load_models(self: Pin<&mut Self>) {
-        self.request_then(json!({ "type": "get_available_models" }), |mut this, data| {
+        let answer = |mut this: Pin<&mut Self>, data: Value| {
             let mut list = QStringList::default();
             // (Hermes doesn't say where its models are: its own servers' addresses.)
             let hermes = (this.harness.to_string() == "hermes").then(|| harlo_core::model_servers::servers(HarnessKind::Hermes));
@@ -1103,6 +1153,31 @@ impl ChatSession {
                 list.append(QString::from(&format!("{}\t{}\t{}\t{}\t{}", s("provider"), s("id"), s("name"), reasoning, local)));
             }
             this.as_mut().set_models(list);
+            this.as_mut().set_models_answered(true);
+        };
+        // Claude on another machine lists its models signed in or not, and
+        // refuses the first message: none to pick there until it's signed in.
+        let host = (self.harness.to_string() == "claude")
+            .then(|| harlo_core::remote::host_of(&PathBuf::from(self.cwd.to_string())).and_then(|h| harlo_core::remote::host(&h)))
+            .flatten();
+        let Some(host) = host else {
+            self.request_or(json!({ "type": "get_available_models" }), answer, |this| this.set_models_answered(true));
+            return;
+        };
+        let (thread, generation) = (self.qt_thread(), self.generation);
+        crate::runtime().spawn(async move {
+            let signed_in = tokio::task::spawn_blocking(move || harlo_core::providers::claude_signed_in_on(&host)).await.ok().flatten();
+            let _ = thread.queue(move |mut this| {
+                if this.generation != generation {
+                    return;
+                }
+                if signed_in == Some(false) {
+                    this.as_mut().set_models(QStringList::default());
+                    this.as_mut().set_models_answered(true);
+                } else {
+                    this.request_or(json!({ "type": "get_available_models" }), answer, |this| this.set_models_answered(true));
+                }
+            });
         });
     }
 
@@ -1167,6 +1242,8 @@ impl ChatSession {
                             self.as_mut().load_saved_subagents(file);
                         }
                     }
+                    self.as_mut().set_needs_login(m.needs_login);
+                    self.as_mut().set_limit_refused(m.limit_refused);
                     self.as_mut().set_model_name(QString::from(&m.model));
                     self.as_mut().set_model_id(QString::from(&m.model_id));
                     self.as_mut().set_thinking(QString::from(&m.thinking));

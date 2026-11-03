@@ -791,6 +791,14 @@ pub struct SubagentMeta {
 
 /// The dock's entries for `metas`, linked to the calls in the parent's
 /// transcript (`text`), in the order they were made.
+/// [`subagents_from`] with the parent's transcript in a file (read a line
+/// at a time).
+pub fn subagents_from_file(path: &Path, metas: Vec<SubagentMeta>) -> Vec<Value> {
+    subagents_read(metas, |each| {
+        let _ = crate::store::for_each_line(path, 0, each);
+    })
+}
+
 pub fn subagents_from(text: &str, metas: Vec<SubagentMeta>) -> Vec<Value> {
     subagents_read(metas, |each| crate::store::for_each_text_line(text, each))
 }

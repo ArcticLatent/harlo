@@ -14,6 +14,10 @@ AppDialog {
     title: page === "pick" ? "Sign in · " + agentLabel : (chosen ? chosen.name : "Sign in")
     standardButtons: Dialog.NoButton
 
+    signal signedInOnHost()
+    /// An agent's own setup, in harlo's terminal: in `folder` (a host's
+    /// home folder, for an agent there).
+    signal runInTerminal(string folder, string command)
     property string agent: ""
     property string agentLabel: ""
     /// "pick", "form" (OpenCode: a key and its fields first) or "flow".
@@ -41,6 +45,15 @@ AppDialog {
         open()
     }
     function begin(provider, m) {
+        if (m.type === "terminal") {
+            const at = agent.indexOf("@")
+            const host = at >= 0 ? agent.substring(at + 1) : ""
+            const h = host !== "" ? JSON.parse(Remotes.hostsJson()).find(x => x.name === host) : null
+            // (Its home unknown: the shell starts in it all the same.)
+            runInTerminal(host === "" ? Workspace.homeDir() : "ssh://" + host + (h && h.home ? h.home : "/~"), m.command)
+            close()
+            return
+        }
         chosen = provider
         method = m
         answers = ({})
@@ -72,7 +85,12 @@ AppDialog {
     }
     onClosed: {
         if (running) Accounts.cancel()
-        if (flow && flow.state === "done") Workspace.refreshProviders()
+        const onHost = agent.indexOf("@") >= 0
+        if (flow && flow.state === "done") {
+            Workspace.refreshProviders()
+            if (onHost) signedInOnHost()
+        }
+        if (onHost) Accounts.release()
     }
     onFlowChanged: {
         if (!flow || !visible) return
@@ -89,7 +107,7 @@ AppDialog {
 
         // Copies through a hidden TextEdit (QML has no clipboard API).
         TextEdit {
-            id: clip
+            id: copier
             visible: false
             function copyText(t) { text = t; selectAll(); copy(); deselect(); text = "" }
         }
@@ -160,7 +178,7 @@ AppDialog {
                             FlatButton {
                                 required property var modelData
                                 objectName: "signInMethod-" + row.modelData.id + "-" + modelData.id
-                                text: row.modelData.methods.length > 1 ? modelData.label : (modelData.type === "key" ? "Add key" : "Sign in")
+                                text: row.modelData.methods.length > 1 || modelData.type === "terminal" ? modelData.label : (modelData.type === "key" ? "Add key" : "Sign in")
                                 enabled: modelData.blocked !== true
                                 font.pixelSize: Theme.px(11.5)
                                 padding: 4
@@ -297,7 +315,7 @@ AppDialog {
                         FlatButton {
                             text: "Copy link"
                             font.pixelSize: Theme.px(12)
-                            onClicked: clip.copyText(step.modelData.url)
+                            onClicked: copier.copyText(step.modelData.url)
                         }
                         Label {
                             Layout.fillWidth: true
@@ -324,12 +342,21 @@ AppDialog {
                                 font.pixelSize: Theme.px(22)
                                 font.bold: true
                             }
-                            FlatButton { text: "Copy"; font.pixelSize: Theme.px(12); onClicked: clip.copyText(step.modelData.code) }
                             FlatButton {
+                                id: copyCode
+                                objectName: "signInCopyCode"
+                                property bool copied: false
+                                text: copied ? "Copied" : "Copy"
+                                font.pixelSize: Theme.px(12)
+                                onClicked: { copier.copyText(step.modelData.code); copied = true; copiedAgo.restart() }
+                                Timer { id: copiedAgo; interval: 1500; onTriggered: copyCode.copied = false }
+                            }
+                            FlatButton {
+                                visible: (step.modelData.url || "") !== ""
                                 text: "Open the page"
                                 accent: Theme.primary
                                 font.pixelSize: Theme.px(12)
-                                onClicked: { clip.copyText(step.modelData.code); Qt.openUrlExternally(step.modelData.url) }
+                                onClicked: { copier.copyText(step.modelData.code); Qt.openUrlExternally(step.modelData.url) }
                             }
                         }
                     }

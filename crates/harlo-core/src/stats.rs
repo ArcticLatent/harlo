@@ -148,8 +148,70 @@ pub fn all_sessions() -> Vec<Arc<FileStats>> {
             out.push(stats);
         }
     }
-    cache().lock().unwrap().retain(|p, _| seen.contains(p));
+    // (Other machines' are kept by [`remote_sessions`].)
+    cache().lock().unwrap().retain(|p, _| seen.contains(p) || crate::remote::split(p).is_some());
     out
+}
+
+/// Summaries of pi's and Oh My Pi's sessions on other machines, as the
+/// sidebar last listed them (blocking): each read from harlo's copy of it,
+/// brought up to date first when the file there changed. Only those changed
+/// in the last `days` days (0 = all time) are fetched; an older one counts
+/// when its copy is here and current. A machine that's offline gives what
+/// was read of it before. Paths and folders are `ssh://host/…`.
+pub fn remote_sessions(days: u32) -> Vec<Arc<FileStats>> {
+    let files = crate::remote_sessions::session_files();
+    let listed: HashSet<PathBuf> = files.iter().map(|f| f.0.clone()).collect();
+    let now = SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+    // (A day more: days are local, this is UTC.)
+    let since = if days == 0 { i64::MIN } else { now - (days as i64 + 1) * 86_400 };
+    let todo = Mutex::new(files.into_iter());
+    let out = Mutex::new(Vec::new());
+    // (A few at a time: one ssh command each.)
+    std::thread::scope(|s| {
+        for _ in 0..4 {
+            s.spawn(|| {
+                loop {
+                    let Some(file) = todo.lock().unwrap().next() else { break };
+                    if let Some(f) = remote_one(file, since) {
+                        out.lock().unwrap().push(f);
+                    }
+                }
+            });
+        }
+    });
+    cache().lock().unwrap().retain(|p, _| crate::remote::split(p).is_none() || listed.contains(p));
+    out.into_inner().unwrap()
+}
+
+fn remote_one((path, kind, mtime, size): (PathBuf, HarnessKind, i64, u64), since: i64) -> Option<Arc<FileStats>> {
+    let modified = std::time::UNIX_EPOCH + std::time::Duration::from_secs(mtime.max(0) as u64);
+    let cached = cache().lock().unwrap().get(&path).cloned();
+    if let Some((m, s, f)) = &cached
+        && *m == modified
+        && *s == size
+    {
+        return Some(f.clone());
+    }
+    let (host, _) = crate::remote::split(&path)?;
+    let len = |p: &Path| std::fs::metadata(p).map_or(0, |m| m.len());
+    let copy = match crate::remote::copy_of(&path).filter(|c| len(c) == size) {
+        Some(c) => c,
+        None if mtime >= since && !crate::remote::is_disconnected(&host) => match crate::remote::local_copy(&path) {
+            Ok(c) => c,
+            Err(_) => return cached.map(|c| c.2),
+        },
+        None => return cached.map(|c| c.2),
+    };
+    let mut f = summarize(kind, &copy)?;
+    f.path = path.clone();
+    f.cwd = crate::remote::join(&host, &f.cwd.to_string_lossy());
+    let f = Arc::new(f);
+    // (A copy that came over in part is read again next time.)
+    if len(&copy) == size {
+        cache().lock().unwrap().insert(path, (modified, size, f.clone()));
+    }
+    Some(f)
 }
 
 fn local_day(ts_ms: i64) -> Option<NaiveDate> {

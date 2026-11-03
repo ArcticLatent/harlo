@@ -33,6 +33,7 @@ mod registry;
 mod remotes;
 mod server_setup;
 mod setup;
+mod keep_above;
 mod workspace;
 mod orchestration;
 mod plans;
@@ -65,6 +66,11 @@ fn main() {
     // An agent's MCP server for harlo's tools (orchestration): relays to the
     // running harlo and exits with the agent.
     if std::env::args().nth(1).as_deref() == Some("--mcp-bridge") {
+        // (Named apart: in a process list it isn't a second harlo.)
+        // SAFETY: plain syscall with a NUL-terminated name of at most 16 bytes.
+        unsafe {
+            libc::prctl(libc::PR_SET_NAME, c"harlo-bridge".as_ptr());
+        }
         harlo_core::orchestration::run_bridge();
         return;
     }
@@ -102,6 +108,10 @@ fn main() {
             None
         }
     });
+    harlo_harness::set_remote_start(harlo_core::model_servers::forward_to);
+    // (Other machines' servers this computer's agents reach through SSH.)
+    std::thread::spawn(harlo_core::model_servers::forward_uses);
+    harlo_core::servers::set_after_start(accounts::sync_context);
     diagnostics::init_logging();
     diagnostics::install_panic_hook();
     for note in &migrated {
@@ -139,6 +149,14 @@ fn main() {
         args.append(QString::from(&a));
     }
     platform::create_application(&args);
+    // Asked to end (logging out, shutting down, Ctrl+C): quit as from the
+    // menu, so what harlo started (remote sessions too) ends with it.
+    runtime().spawn(async {
+        use tokio::signal::unix::{SignalKind, signal};
+        let (Ok(mut term), Ok(mut int), Ok(mut hup)) = (signal(SignalKind::terminate()), signal(SignalKind::interrupt()), signal(SignalKind::hangup())) else { return };
+        tokio::select! { _ = term.recv() => {}, _ = int.recv() => {}, _ = hup.recv() => {} }
+        platform::quit_application();
+    });
     // The interface font, bundled.
     fonts::load_bundled();
     fonts::set_application_font_family(&QString::from(fonts::DEFAULT_UI_FONT));
@@ -162,10 +180,16 @@ fn main() {
     // Quit normally, drawn or not (it started in the tray, say): the
     // graphics didn't stop it starting.
     graphics::inconclusive();
+    // Remote sessions end with harlo: what they're running there stops, and
+    // a session ending so isn't said as a failure.
+    for h in harlo_core::remote::hosts() {
+        harlo_core::remote::set_disconnected(&h.name, true);
+    }
     harlo_harness::stop_opencode();
     harlo_harness::stop_acp();
     // Model servers harlo started (Settings → Model servers).
-    accounts::stop_started_servers();
+    harlo_core::servers::stop_started_servers();
+    harlo_core::remote::disconnect_all();
     instance::cleanup();
     // Orchestration's socket.
     let _ = std::fs::remove_file(harlo_core::orchestration::socket_path());

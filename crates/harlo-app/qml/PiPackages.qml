@@ -7,7 +7,14 @@ import harlo
 // and costs, turning it on or off, and updating it.
 ColumnLayout {
     id: root
-    readonly property var st: Accounts.revision >= 0 ? JSON.parse(Accounts.packages()) : ({ state: "loading", list: [] })
+    // The machine whose pi it is ("" this one): the one shown.
+    property string host: Workspace.instance
+    // A file to open in harlo (another machine's rules).
+    signal openFile(string path)
+    readonly property var st: {
+        const v = Accounts.revision >= 0 ? JSON.parse(Accounts.packages()) : null
+        return v && (v.host || "") === host ? v : ({ state: "loading", list: [] })
+    }
     readonly property var list: st.list || []
     readonly property var job: st.job || null
     readonly property bool busy: job !== null && job.state === "running"
@@ -15,7 +22,8 @@ ColumnLayout {
     // (Those that are offered to everyone.)
     readonly property int allTokens: list.filter(p => !p.optional).reduce((sum, p) => sum + p.tokens, 0)
     spacing: 10
-    Component.onCompleted: Accounts.loadPackages()
+    Component.onCompleted: Accounts.loadPackages(host)
+    onHostChanged: Accounts.loadPackages(host)
 
     function thousands(n) {
         return String(n).replace(/\B(?=(\d{3})+$)/g, ",")
@@ -27,6 +35,7 @@ ColumnLayout {
         spacing: 8
         Repeater {
             model: [
+                root.host !== "" ? "These are for pi on " + root.host + ": its own copy of each, on or off there." : "",
                 "Bare pi is minimal: it doesn't ask before it runs anything, and it can't search the web, keep a task list or hand work to other agents.",
                 "These extensions add that, adapted to harlo. They're installed but off; turning them on is up to you.",
                 root.allTokens > 0 ? "The cost is context: bare pi sends about 1,500 tokens with every request, and all of these together add about " + root.thousands(root.allTokens) + " more before they're used. That matters most on small local models." : ""
@@ -103,14 +112,14 @@ ColumnLayout {
                 text: "Update to " + pkg.modelData.latest
                 padding: 3
                 font.pixelSize: Theme.px(11)
-                onClicked: Accounts.updatePackage(pkg.modelData.name)
+                onClicked: Accounts.updatePackage(root.host, pkg.modelData.name)
             }
             AppSwitch {
                 objectName: "piPackageSwitch-" + pkg.modelData.name
                 Layout.alignment: Qt.AlignTop
                 enabled: !root.busy
                 checked: pkg.modelData.enabled
-                onToggled: Accounts.setPackageEnabled(pkg.modelData.name, checked)
+                onToggled: Accounts.setPackageEnabled(root.host, pkg.modelData.name, checked)
             }
         }
     }
@@ -148,14 +157,20 @@ ColumnLayout {
             text: "Update all"
             accent: Theme.primary
             font.pixelSize: Theme.px(12)
-            onClicked: Accounts.updatePackage("all")
+            onClicked: Accounts.updatePackage(root.host, "all")
         }
         FlatButton {
             objectName: "piPackageRules"
             visible: root.list.some(p => p.name === "@gotgenes/pi-permission-system" && p.enabled)
             text: "Permission rules"
             font.pixelSize: Theme.px(12)
-            onClicked: Qt.openUrlExternally("file://" + Accounts.packageRulesFile())
+            onClicked: {
+                const file = Accounts.packageRulesFile(root.host)
+                if (file === "") return
+                // (Another machine's: in harlo's editor, over SSH.)
+                if (file.startsWith("ssh://")) root.openFile(file)
+                else Qt.openUrlExternally("file://" + file)
+            }
         }
         Item { Layout.fillWidth: true }
     }

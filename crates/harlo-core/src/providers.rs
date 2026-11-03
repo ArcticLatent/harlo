@@ -143,7 +143,27 @@ fn claude_signed_out(program: &Path) -> bool {
 
 /// pi / omp in RPC mode with no session: their model list.
 async fn rpc_models(kind: HarnessKind, program: PathBuf, cwd: PathBuf) -> Result<Vec<(String, String, bool)>, String> {
-    let cfg = HarnessConfig { kind, program: Some(program), cwd, session: SessionTarget::Ephemeral, extra_args: vec![], env: vec![], remote: None };
+    models_of(HarnessConfig { kind, program: Some(program), cwd, session: SessionTarget::Ephemeral, extra_args: vec![], env: vec![], remote: None }).await
+}
+
+/// What an agent offers on a remote host, asked there with no session (it
+/// has its own logins). Each entry: `provider/id`, name, served locally.
+pub async fn host_models(kind: HarnessKind, remote: harlo_harness::RemoteLaunch, cwd: PathBuf) -> Result<Vec<(String, String, bool)>, String> {
+    models_of(HarnessConfig { kind, program: None, cwd, session: SessionTarget::Ephemeral, extra_args: vec![], env: vec![], remote: Some(remote) }).await
+}
+
+/// Whether Claude Code is signed in on a host (blocking). Its list of models
+/// is the same either way, so that alone doesn't say. `None`: it didn't say.
+pub fn claude_signed_in_on(host: &crate::remote::Host) -> Option<bool> {
+    let out = crate::remote::run(host, "claude auth status", Duration::from_secs(20)).ok()?;
+    signed_in(&String::from_utf8_lossy(&out.stdout))
+}
+
+fn signed_in(status: &str) -> Option<bool> {
+    serde_json::from_str::<Value>(status.trim()).ok()?["loggedIn"].as_bool()
+}
+
+async fn models_of(cfg: HarnessConfig) -> Result<Vec<(String, String, bool)>, String> {
     let (harness, _events) = Harness::spawn(cfg).map_err(|e| format!("{e:#}"))?;
     let answer = tokio::time::timeout(Duration::from_secs(25), harness.request(json!({ "type": "get_available_models" }))).await;
     harness.kill();
@@ -171,6 +191,13 @@ async fn rpc_models(kind: HarnessKind, program: PathBuf, cwd: PathBuf) -> Result
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn claude_says_whether_it_is_signed_in() {
+        assert_eq!(super::signed_in(r#"{"loggedIn": false, "authMethod": "none"}"#), Some(false));
+        assert_eq!(super::signed_in("{\"loggedIn\": true}\n"), Some(true));
+        assert_eq!(super::signed_in("command not found"), None);
+    }
+
     #[test]
     fn version_numbers() {
         assert_eq!(super::version_number("2.1.296 (Claude Code)"), "2.1.296");

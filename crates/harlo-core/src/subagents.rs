@@ -84,7 +84,7 @@ pub fn from_session_file(path: &std::path::Path) -> Vec<Value> {
     // On a remote host: the file, which transcripts exist and which yielded,
     // each in one SSH command.
     let remote = crate::remote::is_remote(path);
-    let text = if remote { crate::remote::read(path).map(|b| String::from_utf8_lossy(&b).into_owned()).ok() } else { std::fs::read_to_string(path).ok() };
+    let text = if remote { crate::remote::local_copy(path).ok().and_then(|c| std::fs::read_to_string(c).ok()) } else { std::fs::read_to_string(path).ok() };
     let Some(text) = text else { return Vec::new() };
     let dir = path.with_extension("");
     let remote_files: std::collections::HashSet<String> = if remote {
@@ -175,8 +175,10 @@ done"#,
     if metas.is_empty() {
         return Vec::new();
     }
-    let text = crate::remote::read(path).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
-    harlo_harness::claude::subagents_from(&text, metas)
+    match crate::remote::local_copy(path) {
+        Ok(copy) => harlo_harness::claude::subagents_from_file(&copy, metas),
+        Err(_) => Vec::new(),
+    }
 }
 
 #[cfg(test)]

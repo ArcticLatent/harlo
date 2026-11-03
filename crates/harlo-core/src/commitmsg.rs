@@ -115,19 +115,50 @@ pub fn generate(kind: HarnessKind, program: Option<PathBuf>, model: &str, root: 
     if diff.trim().is_empty() {
         bail!("There are no changes to describe.");
     }
-    let program = match program {
+    let prompt = instructions(&recent_subjects(root));
+    let program = match program.or_else(|| harlo_harness::resolve_program(kind)) {
         Some(p) => p,
-        None => harlo_harness::resolve_program(kind).with_context(|| format!("could not find `{}`", kind.as_str()))?,
+        // Not here, but the repository's machine may have it.
+        None => match crate::remote::split(root) {
+            Some((host, _)) => return finish(run_on(&host, kind, &diff, &prompt)),
+            None => bail!("could not find `{}`", kind.as_str()),
+        },
     };
     let file = std::env::temp_dir().join(format!("harlo-commit-{}-{}.diff", std::process::id(), unique()));
     std::fs::write(&file, &diff).context("writing the diff")?;
-    let result = run(&program, model, root, &file, &instructions(&recent_subjects(root)));
+    let result = run(&program, model, root, &file, &prompt);
     let _ = std::fs::remove_file(&file);
-    let message = clean(&result?);
+    finish(result)
+}
+
+fn finish(answer: Result<String>) -> Result<String> {
+    let message = clean(&answer?);
     if message.is_empty() {
         bail!("The model returned an empty message.");
     }
     Ok(message)
+}
+
+/// The same on the repository's machine, with its agent and default model
+/// (this PC's choice of model may not be there): the diff goes over on
+/// stdin into a file of its own there, removed after.
+fn run_on(host: &str, kind: HarnessKind, diff: &str, prompt: &str) -> Result<String> {
+    let host = crate::remote::host(host).with_context(|| format!("unknown remote host {host}"))?;
+    let q = crate::remote::quote;
+    let script = format!(
+        r#"command -v {agent} >/dev/null 2>&1 || {{ echo "{agent} isn't on {name} either" >&2; exit 127; }}
+f=$(mktemp "${{TMPDIR:-/tmp}}/harlo-commit-XXXXXX") || exit 1; cat > "$f"; cd "${{TMPDIR:-/tmp}}"; {agent} -p --no-session --no-tools --thinking off "@$f" {prompt} </dev/null; rc=$?; rm -f "$f"; exit $rc"#,
+        agent = kind.as_str(),
+        name = host.name,
+        prompt = q(prompt),
+    );
+    let out = crate::remote::run_with_input(&host, &script, Some(diff.as_bytes()), TIMEOUT)?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        let tail = err.trim().lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("no error output").to_owned();
+        bail!("{} on {} failed: {tail}", kind.as_str(), host.name);
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 fn unique() -> u128 {

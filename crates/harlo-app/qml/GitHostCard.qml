@@ -36,7 +36,7 @@ Rectangle {
 
     // Copies through a hidden TextEdit (QML has no clipboard API).
     TextEdit {
-        id: clip
+        id: copier
         visible: false
         function copyText(t) { text = t; selectAll(); copy(); deselect(); text = "" }
     }
@@ -220,13 +220,13 @@ Rectangle {
                         font.pixelSize: Theme.px(22)
                         font.bold: true
                     }
-                    FlatButton { text: "Copy"; font.pixelSize: Theme.px(12); onClicked: clip.copyText(card.flow.code) }
+                    FlatButton { text: "Copy"; font.pixelSize: Theme.px(12); onClicked: copier.copyText(card.flow.code) }
                     FlatButton {
                         visible: card.flow !== null && (card.flow.url || "") !== ""
                         text: "Copy and open the page"
                         accent: Theme.primary
                         font.pixelSize: Theme.px(12)
-                        onClicked: { clip.copyText(card.flow.code); Qt.openUrlExternally(card.flow.url) }
+                        onClicked: { copier.copyText(card.flow.code); Qt.openUrlExternally(card.flow.url) }
                     }
                 }
             }

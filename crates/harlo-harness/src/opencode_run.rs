@@ -109,19 +109,35 @@ pub fn shutdown() {
     }
 }
 
-/// A remote host's OpenCode sessions in `roots` (its project folders, as
-/// it sees them), from its server's API (the database is there).
-pub fn remote_sessions(remote: &RemoteLaunch, roots: &[String]) -> Result<Vec<SessionInfo>> {
+/// Stops the server on a host (it starts again when next needed).
+pub fn shutdown_on(host: &str) {
+    if let Some(hub) = HUBS.get().and_then(|hubs| hubs.lock().unwrap().remove(host)) {
+        hub.server.stop();
+    }
+}
+
+/// A remote host's OpenCode sessions: every folder's latest 200, and all of
+/// those in `roots` (its project folders, as it sees them), from its
+/// server's API (the database is there).
+/// Each with when it last changed at all (a rename too), for telling what's new.
+pub fn remote_sessions(remote: &RemoteLaunch, roots: &[String]) -> Result<Vec<(SessionInfo, u64)>> {
     let hub = hub(Path::new("opencode"), Some(remote))?;
     let mut out = Vec::new();
-    for root in roots {
-        let dir = PathBuf::from(root);
-        let list = hub.server.get(&format!("/api/session?limit=200&directory={}", opencode::url_encode(root)), Some(&dir))?;
+    let mut ids = std::collections::HashSet::new();
+    // Every folder's (its latest), then each project's (all of its).
+    let mut asks: Vec<(String, Option<PathBuf>)> = vec![("/api/session?limit=200".to_owned(), None)];
+    asks.extend(roots.iter().map(|root| (format!("/api/session?limit=200&directory={}", opencode::url_encode(root)), Some(PathBuf::from(root)))));
+    for (ask, dir) in asks {
+        let list = hub.server.get(&ask, dir.as_deref())?;
         for s in list["data"].as_array().into_iter().flatten().filter(|s| s["parentID"].as_str().is_none_or(str::is_empty)) {
             let Some(id) = s["id"].as_str() else { continue };
+            if !ids.insert(id.to_owned()) {
+                continue;
+            }
             let Some(folder) = s["location"]["directory"].as_str() else { continue };
             let ms = |k: &str| s["time"][k].as_i64().unwrap_or(0).max(0) as u64;
-            out.push(SessionInfo {
+            let worked = crate::opencode::last_worked(ms("created"), ms("updated"), ms("busy"), ms("idle"));
+            out.push((SessionInfo {
                 harness: HarnessKind::OpenCode,
                 path: opencode::remote_session_path(&remote.host, id),
                 id: id.to_owned(),
@@ -129,10 +145,10 @@ pub fn remote_sessions(remote: &RemoteLaunch, roots: &[String]) -> Result<Vec<Se
                 name: s["title"].as_str().unwrap_or_default().to_owned(),
                 first_message: String::new(),
                 created: ms("created").to_string(),
-                modified: std::time::UNIX_EPOCH + Duration::from_millis(ms("updated")),
+                modified: std::time::UNIX_EPOCH + Duration::from_millis(worked),
                 size: 0,
                 parent_session: None,
-            });
+            }, ms("updated")));
         }
     }
     Ok(out)

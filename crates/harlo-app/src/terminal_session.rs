@@ -66,6 +66,9 @@ pub mod qobject {
         fn select_clear(self: Pin<&mut TerminalSession>);
         #[qinvokable]
         fn selected_text(self: &TerminalSession) -> QString;
+        /// The link at a screen cell ("" for none).
+        #[qinvokable]
+        fn link_at(self: &TerminalSession, row: i32, col: i32) -> QString;
         /// Ends the shell.
         #[qinvokable]
         fn stop(self: Pin<&mut TerminalSession>);
@@ -174,7 +177,9 @@ impl TerminalSession {
             Some((host, path)) => {
                 let mut args = vec!["-t".to_owned()];
                 args.extend(harlo_core::remote::ssh_args(&host));
-                args.push(format!("cd {} 2>/dev/null; exec \"$SHELL\" -l", harlo_core::remote::quote(&path)));
+                // (With the folders harlo starts its agents from on its PATH:
+                // a login shell there may not have them, ~/.local/bin say.)
+                args.push(format!("{} cd {} 2>/dev/null; exec \"$SHELL\" -l", harlo_core::remote::terminal_path(), harlo_core::remote::quote(&path)));
                 (home(), Some(("ssh".to_owned(), args)))
             }
             None => (if dir.is_dir() { dir.clone() } else { home() }, None),
@@ -242,6 +247,11 @@ impl TerminalSession {
     pub fn key(self: Pin<&mut Self>, key: i32, modifiers: i32, text: &QString) {
         let Some(t) = self.terminal.as_ref() else { return };
         let bytes = key_bytes(key, modifiers as u32, &text.to_string(), t.app_cursor());
+        // (Only a key that types something: Ctrl or Shift alone, on the way
+        // to Ctrl+Shift+C, keeps the selection to copy.)
+        if bytes.is_empty() {
+            return;
+        }
         t.select_clear();
         t.write(bytes);
     }
@@ -282,6 +292,10 @@ impl TerminalSession {
 
     pub fn selected_text(&self) -> QString {
         QString::from(&self.terminal.as_ref().map(|t| t.selected_text()).unwrap_or_default())
+    }
+
+    pub fn link_at(&self, row: i32, col: i32) -> QString {
+        QString::from(&self.terminal.as_ref().map(|t| t.link_at(row, col)).unwrap_or_default())
     }
 
     pub fn stop(mut self: Pin<&mut Self>) {

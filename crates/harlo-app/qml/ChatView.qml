@@ -73,6 +73,7 @@ Rectangle {
     signal openDiff(string path)
     signal fileSaved(string path)
     signal addProjectRequested()
+    signal signInOnHost(string agent, string host)
     /// A turn was undone: the folder's files changed.
     signal filesUndone()
 
@@ -310,6 +311,7 @@ Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
             visible: root.isDraft
+            onSignInOnHost: (agent, host) => root.signInOnHost(agent, host)
             onStartedSession: (key, askFirst) => {
                 if (key !== "" && askFirst)
                     session.setAskFirstForSession(true)
@@ -776,14 +778,17 @@ Rectangle {
             id: extraUsageBanner
             objectName: "extraUsageBanner"
             readonly property bool applies: root.hasSession && (root.session.harness === "pi" || root.session.harness === "omp")
-                && root.session.modelId.startsWith("anthropic/") && !root.session.cwd.startsWith("ssh://")
+                && root.session.modelId.startsWith("anthropic/")
                 && Workspace.setting("extra_usage_notice") !== "0"
+            // (Another machine's: its own sign-in, asked there.)
+            readonly property string agent: !root.hasSession ? "" : root.session.harness
+                + (root.session.cwd.startsWith("ssh://") ? "@" + root.session.cwd.substring(6).split("/")[0] : "")
             property bool dismissed: false
             Layout.fillWidth: true
             Layout.leftMargin: transcript.gutter
             Layout.rightMargin: transcript.gutter
             Layout.topMargin: 8
-            visible: applies && !dismissed && Accounts.revision >= 0 && Accounts.extraUsage(root.session.harness) && !root.covered
+            visible: applies && !dismissed && Accounts.revision >= 0 && Accounts.extraUsage(agent) && !root.covered
             implicitHeight: extraUsageRow.implicitHeight + 18
             radius: 10
             color: Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, 0.1)
@@ -855,11 +860,18 @@ Rectangle {
                 const p = (session.modelId || "").split("/")[0]
                 return session.harness === "opencode" && p === "openai" ? "openai-codex" : p
             }
+            // Its machine's limits (another's: what its Claude sessions said).
+            readonly property string host: (/^ssh:\/\/([^\/]+)/.exec(session.cwd) || [])[1] || ""
+            function accountsHere() {
+                try {
+                    if (host === "") return JSON.parse(Workspace.quotaJson || "{}").accounts || []
+                    return (JSON.parse(Workspace.hostLimitsJson || "{}")[host] || {}).accounts || []
+                } catch (e) { return [] }
+            }
             // Its fullest window of 90% or more.
             readonly property var worst: {
                 if (provider === "") return null
-                let accounts = []
-                try { accounts = JSON.parse(Workspace.quotaJson || "{}").accounts || [] } catch (e) {}
+                const accounts = accountsHere()
                 let w = null
                 for (const a of accounts.filter(a => a.provider === provider))
                     for (const x of a.windows || [])
@@ -867,32 +879,68 @@ Rectangle {
                 return w
             }
             readonly property bool out: !!worst && (worst.status === "exhausted" || worst.usedFraction >= 1)
+            // When work can go on: when the last used-up window resets.
+            readonly property real resetAt: {
+                if (!out) return 0
+                const accounts = accountsHere()
+                let at = 0
+                for (const a of accounts.filter(a => a.provider === provider))
+                    for (const x of a.windows || [])
+                        if ((x.status === "exhausted" || x.usedFraction >= 1) && x.resetsAt > at) at = x.resetsAt
+                return at
+            }
+            readonly property real resumesAt: (Workspace.limitResumes, Workspace.resumeAtFor(session.key))
+            readonly property bool working: session.status === "busy"
+            function at(ms) {
+                const d = new Date(ms)
+                const far = ms - Date.now() > 20 * 3600 * 1000
+                return (far ? d.toLocaleDateString(Qt.locale(), "ddd") + " " : "at ") + d.toLocaleTimeString(Qt.locale(), "HH:mm")
+            }
             function name(label) {
                 return label === "Session (5 h)" ? "5-hour limit" : label === "Weekly" ? "weekly limit"
                      : label.indexOf("Weekly · ") === 0 ? "weekly " + label.slice(9) + " limit" : label + " limit"
             }
             function when(ms) {
-                if (!ms) return ""
-                const d = new Date(ms)
-                const far = ms - Date.now() > 20 * 3600 * 1000
-                return " · resets " + (far ? d.toLocaleDateString(Qt.locale(), "ddd") + " " : "at ") + d.toLocaleTimeString(Qt.locale(), "HH:mm")
+                return ms ? " · resets " + at(ms) : ""
             }
             Layout.fillWidth: true
             Layout.leftMargin: transcript.gutter + 4
             Layout.rightMargin: transcript.gutter + 4
             Layout.topMargin: 6
-            visible: !!worst && !root.covered
+            visible: (!!worst || resumesAt > 0) && !root.covered
             spacing: 6
             Icon { name: "alert"; color: limitLine.out ? Theme.error : Theme.warning; implicitWidth: 14; implicitHeight: 14 }
             Label {
                 Layout.fillWidth: true
-                text: !limitLine.worst ? ""
+                text: limitLine.resumesAt > 0 ? (limitLine.out ? "You've used up your " + limitLine.name(limitLine.worst.label) + ". " : "") + "This session continues " + limitLine.at(limitLine.resumesAt)
+                    : !limitLine.worst ? ""
                     : (limitLine.out ? "You've used up your " + limitLine.name(limitLine.worst.label)
                                      : "You've used " + Math.floor(limitLine.worst.usedFraction * 100) + "% of your " + limitLine.name(limitLine.worst.label))
                       + limitLine.when(limitLine.worst.resetsAt)
                 color: limitLine.out ? Theme.error : Theme.warning
                 elide: Text.ElideRight
                 font.pixelSize: Theme.px(12)
+            }
+            // It would only be refused from here on: stop, and go on after.
+            FlatButton {
+                objectName: "limitResume"
+                visible: limitLine.resumesAt === 0 && limitLine.resetAt > Date.now() && (limitLine.working || session.limitRefused)
+                text: (limitLine.working ? "Stop and continue " : "Continue ") + limitLine.at(limitLine.resetAt)
+                font.pixelSize: Theme.px(12)
+                onClicked: {
+                    if (limitLine.working) session.abort()
+                    Workspace.resumeAtReset(session.key, limitLine.resetAt)
+                }
+                ToolTip.visible: hovered
+                ToolTip.text: "When the limit resets, harlo tells " + Theme.harnessLabel(session.harness) + " to continue where it left off. If harlo is closed then, it does so when you next open it, within a day."
+                ToolTip.delay: 500
+            }
+            FlatButton {
+                objectName: "limitResumeCancel"
+                visible: limitLine.resumesAt > 0
+                text: "Don't continue"
+                font.pixelSize: Theme.px(12)
+                onClicked: Workspace.cancelResume(session.key)
             }
         }
 
@@ -912,6 +960,45 @@ Rectangle {
                 color: Theme.muted
                 elide: Text.ElideRight
                 font.pixelSize: Theme.px(12)
+            }
+        }
+
+        // The agent has no login here: the sign-in window, for where it runs.
+        RowLayout {
+            id: loginLine
+            objectName: "loginLine"
+            readonly property string host: (/^ssh:\/\/([^\/]+)/.exec(session.cwd) || [])[1] || ""
+            Layout.fillWidth: true
+            Layout.leftMargin: transcript.gutter + 4
+            Layout.rightMargin: transcript.gutter + 4
+            Layout.topMargin: 6
+            visible: session.needsLogin && !root.covered
+            spacing: 8
+            Icon { name: "alert"; color: Theme.warning; implicitWidth: 14; implicitHeight: 14 }
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                text: loginLine.host === ""
+                    ? Theme.harnessLabel(session.harness) + " has no working login or API key for this model. Add one in Settings → Providers."
+                    : Theme.harnessLabel(session.harness) + " has no working login or API key for this model on " + loginLine.host + "."
+                color: Theme.muted
+                font.pixelSize: Theme.px(12)
+            }
+            FlatButton {
+                objectName: "loginLineSignIn"
+                visible: loginLine.host !== ""
+                text: "Sign in on " + loginLine.host
+                font.pixelSize: Theme.px(12)
+                onClicked: root.signInOnHost(session.harness, loginLine.host)
+            }
+            FlatButton {
+                objectName: "loginLineCheckAgain"
+                visible: loginLine.host !== ""
+                text: "Check again"
+                font.pixelSize: Theme.px(12)
+                ToolTip.visible: hovered
+                ToolTip.text: "Starts " + Theme.harnessLabel(session.harness) + " again, which reads its logins when it starts"
+                onClicked: session.recheckModels()
             }
         }
 
@@ -939,6 +1026,7 @@ Rectangle {
             visible: root.hasSession && !root.covered
             session: root.session
             onSubmitted: (text, mode) => root.submit(text, mode)
+            onSignInOnHost: (agent, host) => root.signInOnHost(agent, host)
         }
     }
 }

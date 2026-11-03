@@ -39,6 +39,21 @@ Item {
         Workspace.switchInstance(name)
         if (name !== "" && stateOf(name) !== "connected" && stateOf(name) !== "connecting") Remotes.connectHost(name)
     }
+    // Asked first if sessions are working there: closing the connection
+    // stops them. The window doesn't stay on a machine it isn't connected to.
+    property string stopAsked: ""
+    property int stopCount: 0
+    function disconnect(name) {
+        const working = Workspace.workingOnHost(name)
+        if (working > 0 && stopAsked !== name) {
+            stopAsked = name
+            stopCount = working
+            return
+        }
+        stopAsked = ""
+        if (name === current) Workspace.switchInstance("")
+        Remotes.disconnectHost(name)
+    }
     function refresh() {
         for (const h of hosts) {
             if (h.state === "connected") Remotes.pingHost(h.name)
@@ -51,11 +66,18 @@ Item {
     // On a host harlo started on (or switched to): connect it. If the
     // default host can't be reached at startup, Local instead.
     property bool startupCheck: Workspace.instance !== ""
+    property string connectedHosts: ""
     Component.onCompleted: if (current !== "" && stateOf(current) === "") Remotes.connectHost(current)
     onCurrentChanged: if (current !== "" && stateOf(current) === "") Remotes.connectHost(current)
     Connections {
         target: Remotes
         function onRevisionChanged() {
+            // Just connected: its sessions now, not at the next look.
+            const now = root.hosts.filter(h => h.state === "connected").map(h => h.name).join(",")
+            if (now !== root.connectedHosts) {
+                if (now.split(",").some(n => n !== "" && root.connectedHosts.split(",").indexOf(n) < 0)) Workspace.checkRemoteSessions()
+                root.connectedHosts = now
+            }
             if (!root.startupCheck) return
             const s = root.stateOf(root.current)
             if (s === "connected") root.startupCheck = false
@@ -107,6 +129,7 @@ Item {
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
         background: GlassSurface { radius: 12 }
         onOpened: root.refresh()
+        onClosed: root.stopAsked = ""
 
         contentItem: ColumnLayout {
             spacing: 0
@@ -204,6 +227,19 @@ Item {
                                 font.pixelSize: Theme.px(11)
                                 elide: Text.ElideRight
                             }
+                        }
+                        FlatButton {
+                            objectName: "instanceDisconnect-" + row.modelData
+                            readonly property bool asking: root.stopAsked === row.modelData
+                            visible: row.modelData !== "" && (root.stateOf(row.modelData) === "connected" || root.stateOf(row.modelData) === "connecting")
+                            text: asking ? "Stop " + root.stopCount + (root.stopCount === 1 ? " session" : " sessions") + " and disconnect" : "Disconnect"
+                            accent: asking ? Theme.error : Theme.muted
+                            font.pixelSize: Theme.px(11.5)
+                            padding: 4
+                            onClicked: root.disconnect(row.modelData)
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Closes the connection to " + row.modelData + ". Sessions running there stop; what they saved stays there. Click it here to connect again."
+                            ToolTip.delay: 500
                         }
                         // The one harlo starts on.
                         FlatButton {

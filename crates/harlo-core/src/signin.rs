@@ -60,6 +60,30 @@ pub fn url_in(line: &str) -> Option<String> {
     (url.len() > 10).then_some(url)
 }
 
+/// The port on `localhost` a sign-in page ends on, if it does: its own, or
+/// its `redirect_uri`'s. (On another machine, that port has to reach it.)
+pub fn callback_port(url: &str) -> Option<u16> {
+    let local = |u: &str| -> Option<u16> {
+        let rest = u.strip_prefix("http://")?;
+        let place = rest.split(['/', '?', '#']).next()?;
+        let (name, port) = place.rsplit_once(':')?;
+        ["localhost", "127.0.0.1", "[::1]"].contains(&name).then(|| port.parse().ok()).flatten()
+    };
+    local(url).or_else(|| {
+        let value = url.split_once("redirect_uri=")?.1.split('&').next()?;
+        let bytes = value.as_bytes();
+        let (mut out, mut i) = (Vec::new(), 0);
+        while i < bytes.len() {
+            let hex = (bytes[i] == b'%').then(|| value.get(i + 1..i + 3).and_then(|h| u8::from_str_radix(h, 16).ok())).flatten();
+            match hex {
+                Some(b) => { out.push(b); i += 3; }
+                None => { out.push(bytes[i]); i += 1; }
+            }
+        }
+        local(&String::from_utf8_lossy(&out))
+    })
+}
+
 /// What the command waits for, from the text it left without a newline
 /// ("Paste your DeepSeek API key (sk-...): ", "Paste code here if
 /// prompted > "): `{ kind: "secret" | "code" | "text", message }`.
@@ -127,6 +151,11 @@ mod tests {
         assert_eq!(url_in(&line).as_deref(), Some("https://claude.com/cai/oauth/authorize?code=true&state=x"));
         assert_eq!(plain("\x1b[1;32mDone\x1b[0m\r"), "Done");
         assert_eq!(url_in("Local shortcut (this machine only): http://localhost:1455/launch.").as_deref(), Some("http://localhost:1455/launch"));
+        assert_eq!(callback_port("http://localhost:1455/launch"), Some(1455));
+        assert_eq!(callback_port("https://auth.example/authorize?client_id=x&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&scope=y"), Some(1455));
+        assert_eq!(callback_port("https://auth.example/a?redirect_uri=http://127.0.0.1:53692/cb"), Some(53692));
+        assert_eq!(callback_port("https://platform.example/oauth?redirect_uri=https%3A%2F%2Fplatform.example%2Fcb"), None);
+        assert_eq!(callback_port("https://example.com/localhost:80"), None);
         assert_eq!(url_in("no address here"), None);
 
         assert_eq!(prompt("Paste your DeepSeek API key (sk-...): ").unwrap()["kind"], "secret");

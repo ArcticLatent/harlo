@@ -22,7 +22,6 @@ Popup {
     /// A file to open in harlo's editor (an agent's config, a log).
     signal openFileRequested(string path)
     /// A command in a terminal in `folder` (`ssh://host/…`: on that host).
-    signal runOnHostRequested(string folder, string command)
     /// Where a page's floating action bar goes.
     readonly property Item pageFooter: footerHost
     property string page: "general"
@@ -383,6 +382,7 @@ Popup {
     Component {
         id: usagePage
         ColumnLayout {
+            id: usageColumn
             spacing: 0
             SectionHeader {
                 Layout.leftMargin: 16
@@ -390,12 +390,31 @@ Popup {
                 Layout.bottomMargin: 4
                 subtitle: "Your plans' limits, and totals across all pi and omp sessions."
             }
+            // Other machines: those connected, or whose limits were seen.
+            readonly property var limitHosts: {
+                const seen = (() => { try { return JSON.parse(Workspace.hostLimitsJson || "{}") } catch (e) { return {} } })()
+                const hosts = Remotes.revision >= 0 ? JSON.parse(Remotes.hostsJson()) : []
+                return hosts.filter(h => h.state === "connected" || seen[h.name] !== undefined).map(h => h.name)
+            }
             PlanLimits {
                 Layout.fillWidth: true
                 Layout.leftMargin: 16
                 Layout.rightMargin: 16
                 Layout.topMargin: 8
                 Layout.bottomMargin: 8
+                title: usageColumn.limitHosts.length > 0 ? "Plan limits on this PC" : "Plan limits"
+            }
+            Repeater {
+                model: usageColumn.limitHosts
+                PlanLimits {
+                    required property string modelData
+                    host: modelData
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 16
+                    Layout.rightMargin: 16
+                    Layout.topMargin: 8
+                    Layout.bottomMargin: 8
+                }
             }
             // Spending limits: per session and per day, in dollars.
             ColumnLayout {
@@ -2229,15 +2248,29 @@ Popup {
                     SettingRow {
                         id: projModel
                         objectName: "projectModel"
-                        visible: proj.p !== null && !proj.p.remote
+                        visible: proj.p !== null
                         divider: true
                         title: "Model"
                         detail: "What " + (proj.p ? Theme.harnessLabel(proj.p.harness) : "the agent") + " starts with here."
+                            + (proj.p && proj.p.remote ? (projModel.hostModels && projModel.hostModels.error ? " Couldn't read its models: " + projModel.hostModels.error : "") : "")
                         icon: "sparkling"
                         property int revision: 0
                         readonly property string key: proj.p ? "project_model_" + proj.p.id + "_" + proj.p.harness : ""
                         readonly property string current: revision >= 0 && key !== "" ? Workspace.setting(key) : ""
+                        // Another machine's project: its agent's models there,
+                        // asked when the menu opens (null until it answers).
+                        property var hostModels: null
+                        Connections {
+                            target: Workspace
+                            function onHostModelsReady(id, harness, json) {
+                                if (proj.p && id === proj.p.id && harness === proj.p.harness) projModel.hostModels = JSON.parse(json)
+                            }
+                        }
                         readonly property var choices: {
+                            if (proj.p && proj.p.remote) {
+                                const list = hostModels && hostModels.models ? hostModels.models : []
+                                return list.filter(m => m.local).concat(list.filter(m => !m.local))
+                            }
                             const p = proj.p ? (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()) : []).find(x => x.id === proj.p.harness) : null
                             if (!p) return []
                             const all = (p.modelIds || []).map((id, i) => ({ id: id, name: (p.models || [])[i] || id, local: (p.localIds || []).indexOf(id) >= 0 }))
@@ -2249,10 +2282,19 @@ Popup {
                             readonly property var m: projModel.choices.find(x => x.id === projModel.current)
                             text: projModel.current === "" ? "Default model" : Theme.modelLabel(m ? m.name : projModel.current)
                             font.pixelSize: Theme.px(12)
-                            onClicked: { Workspace.ensureProviders(); projModelMenu.popup(projModelButton, 0, projModelButton.height + 4) }
+                            onClicked: {
+                                if (proj.p.remote) { projModel.hostModels = null; Workspace.requestHostModels(proj.p.id, proj.p.harness) }
+                                else Workspace.ensureProviders()
+                                projModelMenu.popup(projModelButton, 0, projModelButton.height + 4)
+                            }
                             AppMenu {
                                 id: projModelMenu
                                 AppMenuItem { text: "Default model"; marked: projModel.current === ""; onTriggered: projModel.choose("") }
+                                AppMenuItem {
+                                    visible: proj.p !== null && proj.p.remote && projModel.hostModels === null
+                                    enabled: false
+                                    text: "Reading its models on " + (proj.p ? proj.p.host : "") + "…"
+                                }
                                 AppMenuSeparator { visible: projModel.choices.length > 0 }
                                 Repeater {
                                     model: projModel.choices
@@ -2292,15 +2334,15 @@ Popup {
                     FlatButton { text: "Save"; variant: "primary"; font.pixelSize: Theme.px(12); onClicked: Workspace.setProjectSetup(proj.p.id, setupArea.text) }
                     FlatButton { text: "Cancel"; outlined: false; font.pixelSize: Theme.px(12); onClicked: setupArea.text = proj.p.setup }
                 }
-                // Specs and the shared plan (sessions on this computer).
+                // Specs and the shared plan.
                 SectionHeader {
-                    visible: proj.p !== null && !proj.p.remote
+                    visible: proj.p !== null
                     title: "Specs and plans"
                     subtitle: "harlo's tools for this project's agents (every agent, through harlo's tools: Settings → Orchestration). Sessions started afterwards get them."
                 }
                 Group {
                     id: featureGroup
-                    visible: proj.p !== null && !proj.p.remote
+                    visible: proj.p !== null
                     // (Re-read when another project is picked, or a switch moves.)
                     readonly property int pid: proj.p ? proj.p.id : -1
                     property int rev: 0
@@ -2703,8 +2745,8 @@ Popup {
                                         padding: 3
                                         font.pixelSize: Theme.px(11)
                                         ToolTip.visible: hovered
-                                        ToolTip.text: "Claude isn't signed in on " + agentChip.host.name + ". Opens Claude there in a terminal; sign in, then quit it (/exit)."
-                                        onClicked: root.runOnHostRequested(agentsFlow.folder, "claude")
+                                        ToolTip.text: "Claude isn't signed in on " + agentChip.host.name + "."
+                                        onClicked: root.signInRequested("claude@" + agentChip.host.name, "Claude on " + agentChip.host.name)
                                     }
                                 }
                             }
@@ -2760,6 +2802,15 @@ Popup {
             property int revision: 0
             readonly property var agents: (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()) : [])
                 .filter(p => ["pi", "omp", "opencode", "hermes"].includes(p.id) && p.state !== "missing")
+            // Other machines that are connected, and the servers their agents have.
+            readonly property var hostNames: (Remotes.revision >= 0 ? JSON.parse(Remotes.hostsJson()) : []).filter(h => h.state === "connected").map(h => h.name)
+            readonly property var onHosts: Accounts.hostServers !== "" ? JSON.parse(Accounts.hostServers) : ({})
+            // ...and the servers harlo set up on them, there.
+            readonly property var hostEngines: Accounts.hostEngines !== "" ? JSON.parse(Accounts.hostEngines) : ({})
+            function lookAtHosts() { for (const h of hostNames) { Accounts.loadHostServers(h); Accounts.loadHostEngines(h); Accounts.checkHostUpdates(h, false) } }
+            // (Another machine's server added to an agent here, or taken out.)
+            Connections { target: Accounts; function onLocalServersChanged() { Workspace.refreshProviders() } }
+            onHostNamesChanged: if (visible) lookAtHosts()
             // One row per server, with the agents that have it.
             readonly property var list: {
                 const rows = []
@@ -2795,6 +2846,7 @@ Popup {
                 })
                 if (lines.length === 0) lines.push("No models yet")
                 const where = row.baseUrl.replace(/^https?:\/\//, "").replace(/\/v1\/?$/, "")
+                if (row.via) return lines.join("\n") + "\nOn " + row.via + ", through the SSH connection (" + where + " here)"
                 return lines.join("\n") + "\n" + where + (row.engine ? " · in agents as “" + row.name + "”" : "")
             }
             ModelServerDialog { id: modelServerDialog; onAdded: { Accounts.loadServers(); Workspace.refreshProviders() } }
@@ -2920,16 +2972,22 @@ Popup {
                     }
                 }
             }
-            SetupServerDialog { id: setupServer; onAdded: { Accounts.loadServers(); Workspace.refreshProviders() } }
+            SetupServerDialog { id: setupServer; onAdded: { Accounts.loadServers(); Workspace.refreshProviders(); srv.lookAtHosts() } }
             // Which are up: now, and every few seconds while this is open.
             readonly property var states: Accounts.serverStates !== "" ? JSON.parse(Accounts.serverStates) : ({})
             function check() { Accounts.checkServers(JSON.stringify([...new Set(srv.list.filter(r => r.place !== "online").map(r => r.baseUrl))])) }
             // (What harlo read last shows at once; read again in the background.)
-            Component.onCompleted: { Accounts.loadServers(); check(); lookAtEngines() }
-            onVisibleChanged: if (visible) lookAtEngines()
+            Component.onCompleted: { Accounts.loadServers(); check(); lookAtEngines(); if (visible) lookAtHosts() }
+            onVisibleChanged: if (visible) { lookAtEngines(); lookAtHosts() }
             // The engines on this computer, and whether they have a newer version.
-            function lookAtEngines() { ServerSetup.refresh(); ServerSetup.checkUpdates(false) }
-            readonly property var engines: (setupServer.cat.engines || []).filter(e => e.installed !== null)
+            function lookAtEngines() {
+                // (This computer's, unless a setup is going on elsewhere.)
+                if (srv.jobRunning || setupServer.visible) return
+                if (ServerSetup.host !== "") ServerSetup.host = ""
+                ServerSetup.refresh()
+                ServerSetup.checkUpdates(false)
+            }
+            readonly property var engines: setupServer.cat.host ? [] : (setupServer.cat.engines || []).filter(e => e.installed !== null)
             readonly property var updates: ServerSetup.updates !== "" ? JSON.parse(ServerSetup.updates) : ({})
             readonly property bool jobRunning: setupServer.job !== null && setupServer.job.state === "running"
             Connections { target: Accounts; function onRevisionChanged() { srv.check() } }
@@ -2967,7 +3025,7 @@ Popup {
                             text: "Set up a local model…"
                             variant: "primary"
                             font.pixelSize: Theme.px(12.5)
-                            onClicked: { setupServer.addTo = null; setupServer.open() }
+                            onClicked: setupServer.openOn("")
                         }
                         FlatButton {
                             objectName: "addModelServer"
@@ -2988,7 +3046,7 @@ Popup {
                 Layout.topMargin: 12
                 spacing: 8
                 BusyIndicator { implicitWidth: 18; implicitHeight: 18; running: parent.visible }
-                Label { Layout.fillWidth: true; text: parent.job ? parent.job.step : ""; color: Theme.muted; font.pixelSize: Theme.px(12); elide: Text.ElideRight }
+                Label { Layout.fillWidth: true; text: parent.job ? (ServerSetup.host !== "" ? ServerSetup.host + ": " : "") + parent.job.step : ""; color: Theme.muted; font.pixelSize: Theme.px(12); elide: Text.ElideRight }
                 FlatButton { text: "Show"; font.pixelSize: Theme.px(12); onClicked: setupServer.open() }
             }
             Label {
@@ -3148,6 +3206,87 @@ Popup {
                                 }
                                 }
                             }
+                            // Other machines' agents: one on this computer is
+                            // reached there over the SSH connection.
+                            Repeater {
+                                model: serverItem.local && !serverItem.modelData.via ? srv.hostNames : []
+                                ColumnLayout {
+                                    id: hostRow
+                                    required property string modelData
+                                    readonly property var there: srv.onHosts[modelData] || ({ state: "loading", agents: {} })
+                                    readonly property var agentIds: Object.keys(there.agents || {})
+                                    Layout.fillWidth: true
+                                    Layout.topMargin: 4
+                                    spacing: 2
+                                    Flow {
+                                        Layout.fillWidth: true
+                                        spacing: 16
+                                        Label {
+                                            text: "On " + hostRow.modelData + ":"
+                                            color: Theme.muted
+                                            font.pixelSize: Theme.px(12)
+                                            height: implicitHeight + 6
+                                            verticalAlignment: Text.AlignVCenter
+                                        }
+                                        Label {
+                                            visible: hostRow.there.state !== "ready"
+                                            text: hostRow.there.state === "error" ? "couldn't read its agents' files" : "reading…"
+                                            color: hostRow.there.state === "error" ? Theme.error : Theme.textFaint
+                                            font.pixelSize: Theme.px(12)
+                                            height: implicitHeight + 6
+                                            verticalAlignment: Text.AlignVCenter
+                                        }
+                                        Label {
+                                            visible: hostRow.there.state === "ready" && hostRow.agentIds.length === 0
+                                            text: "no pi, Oh My Pi, OpenCode or Hermes there"
+                                            color: Theme.textFaint
+                                            font.pixelSize: Theme.px(12)
+                                            height: implicitHeight + 6
+                                            verticalAlignment: Text.AlignVCenter
+                                        }
+                                        Repeater {
+                                            model: hostRow.there.state === "ready" ? hostRow.agentIds : []
+                                            AppCheckBox {
+                                                required property string modelData
+                                                readonly property bool has: (hostRow.there.agents[modelData] || []).some(sv => sv.name === serverItem.modelData.name && sv.baseUrl === serverItem.modelData.baseUrl)
+                                                objectName: "serverHostAgent-" + serverItem.modelData.name + "-" + hostRow.modelData + "-" + modelData
+                                                text: ({ pi: "pi", omp: "Oh My Pi", opencode: "OpenCode", hermes: "Hermes" })[modelData] || modelData
+                                                font.pixelSize: Theme.px(12)
+                                                // Hermes refuses models with under 64k of context.
+                                                readonly property bool fits: modelData !== "hermes" || serverItem.modelData.hermesOk
+                                                checked: has
+                                                enabled: !hostRow.there.busy && (has || fits)
+                                                onToggled: {
+                                                    const want = checked
+                                                    checked = Qt.binding(() => has)
+                                                    if (want) Accounts.addServerOn(hostRow.modelData, modelData, serverItem.modelData.agentIds.length > 0 ? serverItem.modelData.agentIds[0] : serverItem.modelData.baseUrl, serverItem.modelData.name)
+                                                    else Accounts.removeServerOn(hostRow.modelData, modelData, serverItem.modelData.name)
+                                                }
+                                                ToolTip.visible: hovered
+                                                ToolTip.text: !fits && !has ? "Hermes needs at least 64k tokens of context, more than this serves."
+                                                    : serverItem.modelData.place === "here"
+                                                    ? "Its sessions on " + hostRow.modelData + " reach this computer's server through the SSH connection, while harlo is open."
+                                                    : "Its sessions on " + hostRow.modelData + " use the same address; it has to reach it from there."
+                                                ToolTip.delay: 400
+                                            }
+                                        }
+                                        BusyIndicator {
+                                            visible: !!hostRow.there.busy
+                                            running: visible
+                                            implicitWidth: 14
+                                            implicitHeight: 14
+                                        }
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        visible: text !== ""
+                                        text: hostRow.there.note || (hostRow.there.state === "error" ? hostRow.there.error || "" : "")
+                                        color: Theme.error
+                                        font.pixelSize: Theme.px(12)
+                                        wrapMode: Text.Wrap
+                                    }
+                                }
+                            }
                         }
                         // Its buttons, down the right, as wide as each other.
                         Column {
@@ -3201,9 +3340,19 @@ Popup {
                 }
             }
             Label {
+                visible: srv.agents.length > 0 && srv.list.length === 0
+                Layout.topMargin: 12
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                text: "No model servers yet."
+                color: Theme.muted
+                font.pixelSize: Theme.px(12.5)
+            }
+            Hint { Layout.topMargin: 6; visible: srv.list.length > 0; text: "harlo starts and stops the servers it set up; they stop when harlo quits. Tick an agent to add a server to its config, untick it to take it out." }
+            Label {
                 visible: srv.engines.length > 0
                 Layout.topMargin: 18
-                text: "ENGINES"
+                text: "ENGINES ON THIS COMPUTER"
                 color: Theme.blend(Theme.textMuted, Theme.accent, 0.7)
                 font.pixelSize: Theme.px(11.5)
                 font.weight: Font.DemiBold
@@ -3278,16 +3427,341 @@ Popup {
                     }
                 }
             }
-            Label {
-                visible: srv.agents.length > 0 && srv.list.length === 0
-                Layout.topMargin: 12
-                Layout.fillWidth: true
-                wrapMode: Text.Wrap
-                text: "No model servers yet."
-                color: Theme.muted
-                font.pixelSize: Theme.px(12.5)
+            // Each machine harlo is connected to: the servers harlo set up
+            // there (running there, for its agents there), and setting one up.
+            Repeater {
+                model: srv.hostNames
+                ColumnLayout {
+                    id: hostBlock
+                    required property string modelData
+                    readonly property string host: modelData
+                    readonly property var e: srv.hostEngines[host] || ({ state: "loading", list: [], busy: {} })
+                    readonly property var there: srv.onHosts[host] || ({ state: "loading", agents: {} })
+                    readonly property var agentIds: ["pi", "omp", "opencode", "hermes"].filter(id => (there.agents || {})[id] !== undefined)
+                    // Rows as this computer's: models by id, their contexts.
+                    readonly property var rows: (e.list || []).map(r => ({
+                        name: r.name, baseUrl: r.baseUrl, engine: r.engine, running: r.running, log: r.log, managed: true, here: r.here || "",
+                        models: (r.models || []).map(m => m.id), contexts: (r.models || []).map(m => m.context || 0), rawModels: r.models || [],
+                        hermesOk: (r.models || []).length === 0 || (r.models || []).some(m => !m.context || m.context >= 64000),
+                        agentIds: ["pi", "omp", "opencode", "hermes"].filter(id => ((there.agents || {})[id] || []).some(sv => sv.baseUrl === r.baseUrl)),
+                    }))
+                    Layout.fillWidth: true
+                    spacing: 0
+                    Label {
+                        Layout.topMargin: 18
+                        text: "ON " + hostBlock.host.toUpperCase()
+                        color: Theme.blend(Theme.textMuted, Theme.accent, 0.7)
+                        font.pixelSize: Theme.px(11.5)
+                        font.weight: Font.DemiBold
+                        font.letterSpacing: Theme.px(11.5) * 0.07
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 8
+                        spacing: 8
+                        Hint {
+                            Layout.fillWidth: true
+                            text: hostBlock.e.state === "error" ? "Couldn't read its servers: " + hostBlock.e.error
+                                : hostBlock.e.state === "loading" && hostBlock.rows.length === 0 ? "Reading its servers…"
+                                : hostBlock.rows.length === 0 ? "harlo can install an engine on " + hostBlock.host + ", download a model that fits it and run it there, for its agents."
+                                : "They run on " + hostBlock.host + " for its agents there, and keep running when harlo quits."
+                            color: hostBlock.e.state === "error" ? Theme.error : Theme.muted
+                        }
+                        FlatButton {
+                            objectName: "setupModelServerOn-" + hostBlock.host
+                            text: "Set up a model on " + hostBlock.host + "…"
+                            font.pixelSize: Theme.px(12)
+                            enabled: !srv.jobRunning || ServerSetup.host === hostBlock.host
+                            onClicked: setupServer.openOn(hostBlock.host)
+                            ToolTip.visible: hovered && !enabled
+                            ToolTip.text: "A setup is going on; this can start once it's done."
+                            ToolTip.delay: 300
+                        }
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 4
+                        visible: text !== ""
+                        text: hostBlock.e.note || ""
+                        color: Theme.error
+                        font.pixelSize: Theme.px(12)
+                        wrapMode: Text.Wrap
+                    }
+                    Group {
+                        visible: hostBlock.rows.length > 0
+                        Layout.topMargin: 8
+                        Repeater {
+                            model: hostBlock.rows
+                            Item {
+                                id: hostServer
+                                required property var modelData
+                                required property int index
+                                readonly property string busy: (hostBlock.e.busy || {})[modelData.baseUrl] || ""
+                                Layout.fillWidth: true
+                                implicitHeight: Math.max(hInfo.implicitHeight, hButtons.implicitHeight, 32) + 28
+                                Rectangle { visible: hostServer.index > 0; width: parent.width; height: 1; color: Theme.hairline }
+                                Column {
+                                    x: 16
+                                    y: 14
+                                    spacing: 8
+                                    Rectangle {
+                                        width: 32
+                                        height: 32
+                                        radius: 9
+                                        color: Theme.controlFill
+                                        ProviderLogo {
+                                            anchors.centerIn: parent
+                                            implicitWidth: 18
+                                            implicitHeight: 18
+                                            provider: hostServer.modelData.engine.toLowerCase()
+                                            color: Theme.textMuted
+                                        }
+                                    }
+                                    Rectangle {
+                                        objectName: "hostServerState-" + hostBlock.host + "-" + hostServer.modelData.name
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        width: 9
+                                        height: 9
+                                        radius: 4.5
+                                        color: hostServer.busy !== "" ? Theme.warning : hostServer.modelData.running ? Theme.success : Theme.muted
+                                        HoverHandler { id: hostStateHover }
+                                        ToolTip.visible: hostStateHover.hovered
+                                        ToolTip.text: hostServer.busy !== "" ? hostServer.busy.charAt(0).toUpperCase() + hostServer.busy.slice(1) + "…" : hostServer.modelData.running ? "Running" : "Stopped"
+                                        ToolTip.delay: 300
+                                    }
+                                }
+                                ColumnLayout {
+                                    id: hInfo
+                                    x: 60
+                                    y: 14
+                                    width: parent.width - x - hButtons.width - 32
+                                    spacing: 3
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: hostServer.modelData.engine + (hostBlock.rows.filter(r => r.engine === hostServer.modelData.engine).length > 1 ? " · " + hostServer.modelData.baseUrl.replace(/^https?:\/\/[^:\/]+:?/, "").replace(/\/.*$/, "") : "")
+                                        color: Theme.text
+                                        font.pixelSize: Theme.px(14)
+                                        font.weight: Font.DemiBold
+                                        elide: Text.ElideRight
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: srv.describe(hostServer.modelData)
+                                        color: Theme.muted
+                                        font.pixelSize: Theme.px(12)
+                                        wrapMode: Text.Wrap
+                                    }
+                                    // Its agents there: ticked ones have it.
+                                    Flow {
+                                        Layout.fillWidth: true
+                                        Layout.topMargin: 6
+                                        spacing: 16
+                                        Label {
+                                            visible: hostBlock.there.state === "ready" && hostBlock.agentIds.length === 0
+                                            text: "No pi, Oh My Pi, OpenCode or Hermes on " + hostBlock.host
+                                            color: Theme.textFaint
+                                            font.pixelSize: Theme.px(12)
+                                            height: implicitHeight + 6
+                                            verticalAlignment: Text.AlignVCenter
+                                        }
+                                        Repeater {
+                                            model: hostBlock.there.state === "ready" ? hostBlock.agentIds : []
+                                            AppCheckBox {
+                                                required property string modelData
+                                                readonly property bool has: hostServer.modelData.agentIds.includes(modelData)
+                                                readonly property bool fits: modelData !== "hermes" || hostServer.modelData.hermesOk
+                                                objectName: "hostServerAgent-" + hostBlock.host + "-" + hostServer.modelData.name + "-" + modelData
+                                                text: ({ pi: "pi", omp: "Oh My Pi", opencode: "OpenCode", hermes: "Hermes" })[modelData] || modelData
+                                                font.pixelSize: Theme.px(12)
+                                                checked: has
+                                                enabled: !hostBlock.there.busy && (has || fits)
+                                                onToggled: {
+                                                    const want = checked
+                                                    checked = Qt.binding(() => has)
+                                                    if (want) Accounts.addHostEngine(hostBlock.host, JSON.stringify({ name: hostServer.modelData.name, baseUrl: hostServer.modelData.baseUrl, models: hostServer.modelData.rawModels, agents: [modelData] }))
+                                                    else Accounts.removeServerOn(hostBlock.host, modelData, hostServer.modelData.name)
+                                                }
+                                                ToolTip.visible: hovered && !fits && !has
+                                                ToolTip.text: "Hermes needs at least 64k tokens of context, more than this serves."
+                                                ToolTip.delay: 400
+                                            }
+                                        }
+                                        BusyIndicator {
+                                            visible: !!hostBlock.there.busy
+                                            running: visible
+                                            implicitWidth: 14
+                                            implicitHeight: 14
+                                        }
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        visible: text !== ""
+                                        text: hostBlock.there.note || ""
+                                        color: Theme.error
+                                        font.pixelSize: Theme.px(12)
+                                        wrapMode: Text.Wrap
+                                    }
+                                    // This computer's agents: through the SSH connection.
+                                    Flow {
+                                        Layout.fillWidth: true
+                                        visible: srv.agents.length > 0
+                                        spacing: 16
+                                        Label {
+                                            text: "Here:"
+                                            color: Theme.muted
+                                            font.pixelSize: Theme.px(12)
+                                            height: implicitHeight + 6
+                                            verticalAlignment: Text.AlignVCenter
+                                        }
+                                        Repeater {
+                                            model: srv.agents
+                                            AppCheckBox {
+                                                required property var modelData
+                                                readonly property bool has: hostServer.modelData.here !== "" && srv.list.some(r => r.baseUrl === hostServer.modelData.here && r.agentIds.includes(modelData.id))
+                                                readonly property bool fits: modelData.id !== "hermes" || hostServer.modelData.hermesOk
+                                                objectName: "hostServerHere-" + hostBlock.host + "-" + hostServer.modelData.name + "-" + modelData.id
+                                                text: modelData.label
+                                                font.pixelSize: Theme.px(12)
+                                                checked: has
+                                                enabled: hostServer.busy === "" && (has || fits)
+                                                onToggled: {
+                                                    const want = checked
+                                                    checked = Qt.binding(() => has)
+                                                    Accounts.useHostEngine(hostBlock.host, JSON.stringify({ name: hostServer.modelData.name, baseUrl: hostServer.modelData.baseUrl, models: hostServer.modelData.rawModels }), modelData.id, want)
+                                                }
+                                                ToolTip.visible: hovered
+                                                ToolTip.text: !fits && !has ? "Hermes needs at least 64k tokens of context, more than this serves."
+                                                    : "Its sessions on this computer reach the server on " + hostBlock.host + " through the SSH connection; harlo starts it there first when it's stopped."
+                                                ToolTip.delay: 400
+                                            }
+                                        }
+                                        BusyIndicator {
+                                            visible: hostServer.busy === "here"
+                                            running: visible
+                                            implicitWidth: 14
+                                            implicitHeight: 14
+                                        }
+                                    }
+                                }
+                                Column {
+                                    id: hButtons
+                                    anchors.right: parent.right
+                                    anchors.rightMargin: 16
+                                    y: 14
+                                    width: 112
+                                    spacing: 4
+                                    FlatButton {
+                                        objectName: (hostServer.modelData.running ? "hostServerStop-" : "hostServerStart-") + hostBlock.host + "-" + hostServer.modelData.name
+                                        width: parent.width
+                                        enabled: hostServer.busy === ""
+                                        text: hostServer.busy === "starting" ? "Starting…" : hostServer.busy === "stopping" ? "Stopping…" : hostServer.modelData.running ? "Stop" : "Start"
+                                        variant: hostServer.modelData.running ? "danger" : "primary"
+                                        accent: hostServer.modelData.running ? Theme.error : Theme.foreground
+                                        font.pixelSize: Theme.px(12)
+                                        onClicked: hostServer.modelData.running ? Accounts.stopHostEngine(hostBlock.host, hostServer.modelData.baseUrl) : Accounts.startHostEngine(hostBlock.host, hostServer.modelData.baseUrl)
+                                    }
+                                    FlatButton {
+                                        visible: hostServer.modelData.log !== ""
+                                        width: parent.width
+                                        text: "Log"
+                                        font.pixelSize: Theme.px(12)
+                                        onClicked: root.openFileRequested("ssh://" + hostBlock.host + hostServer.modelData.log)
+                                    }
+                                    FlatButton {
+                                        visible: hostServer.modelData.engine === "Ollama" || hostServer.modelData.engine === "llama.cpp"
+                                        width: parent.width
+                                        enabled: !srv.jobRunning
+                                        text: "Add a model…"
+                                        font.pixelSize: Theme.px(12)
+                                        onClicked: setupServer.openOn(hostBlock.host, hostServer.modelData)
+                                    }
+                                    FlatButton {
+                                        objectName: "hostServerRemove-" + hostBlock.host + "-" + hostServer.modelData.name
+                                        width: parent.width
+                                        enabled: hostServer.busy === ""
+                                        text: hostServer.busy === "removing" ? "Removing…" : "Remove"
+                                        variant: "danger"
+                                        accent: Theme.error
+                                        font.pixelSize: Theme.px(12)
+                                        onClicked: removeHostServerDialog.ask(hostBlock.host, hostServer.modelData)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // The engines there: their version, and Update.
+                    Flow {
+                        visible: (hostBlock.e.engines || []).length > 0
+                        Layout.fillWidth: true
+                        Layout.topMargin: 8
+                        spacing: 14
+                        Label { text: "Engines there:"; color: Theme.muted; font.pixelSize: Theme.px(12); height: 26; verticalAlignment: Text.AlignVCenter; rightPadding: 4 }
+                        Repeater {
+                            model: hostBlock.e.engines || []
+                            RowLayout {
+                                id: hostEngine
+                                required property var modelData
+                                readonly property var latest: (hostBlock.e.updates || {})[modelData.id] || null
+                                readonly property bool newer: modelData.updatable && latest !== null && latest.available === true
+                                readonly property string version: (modelData.version || "").replace(/^v/, "")
+                                height: 26
+                                spacing: 4
+                                Label {
+                                    text: hostEngine.modelData.name + " " + hostEngine.version + (hostEngine.newer ? " → " + hostEngine.latest.latest : "")
+                                    color: hostEngine.newer ? Theme.accent : Theme.foreground
+                                    font.pixelSize: Theme.px(12)
+                                }
+                                FlatButton {
+                                    objectName: "hostEngineUpdate-" + hostBlock.host + "-" + hostEngine.modelData.id
+                                    visible: hostEngine.newer
+                                    enabled: !srv.jobRunning
+                                    text: "Update"
+                                    outlined: false
+                                    accent: Theme.accent
+                                    font.pixelSize: Theme.px(12)
+                                    onClicked: setupServer.updateEngine(hostEngine.modelData.id, hostBlock.host)
+                                    ToolTip.visible: hovered
+                                    ToolTip.delay: 400
+                                    ToolTip.text: "harlo updates it on " + hostBlock.host + ". Its servers there that are running stop and start again, so a message on them now would be cut off."
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            Hint { Layout.topMargin: 6; visible: srv.list.length > 0; text: "harlo starts and stops the servers it set up; they stop when harlo quits. Tick an agent to add a server to its config, untick it to take it out." }
+            // Removing a server from another machine: out of its agents
+            // there, stopped and forgotten, its model files deleted if you like.
+            AppDialog {
+                id: removeHostServerDialog
+                property string host: ""
+                property var row: null
+                function ask(h, r) {
+                    host = h
+                    row = r
+                    deleteHostFiles.checked = true
+                    open()
+                }
+                title: row ? "Remove " + row.name + " from " + host + "?" : ""
+                width: Math.min(460, (Overlay.overlay ? Overlay.overlay.width : 500) - 40)
+                footer: AppButtonBox {
+                    DialogButton { text: "Cancel"; DialogButtonBox.buttonRole: DialogButtonBox.RejectRole }
+                    DialogButton { text: "Remove"; DialogButtonBox.buttonRole: DialogButtonBox.DestructiveRole }
+                }
+                onDiscarded: {
+                    Accounts.removeHostEngine(host, row.baseUrl, row.name, deleteHostFiles.checked)
+                    close()
+                }
+                ColumnLayout {
+                    width: parent.width
+                    spacing: 8
+                    Hint {
+                        color: Theme.foreground
+                        text: !removeHostServerDialog.row ? "" : (removeHostServerDialog.row.agentIds.length > 0 ? "harlo takes it out of its agents there, stops it" : "harlo stops it") + " and forgets how to start it."
+                    }
+                    AppCheckBox { id: deleteHostFiles; text: "Also delete its model files on " + removeHostServerDialog.host }
+                    Hint { text: "The engine stays there, for its other servers." }
+                }
+            }
             // The agents' own files, to read.
             Flow {
                 visible: srv.agents.length > 0
@@ -3318,7 +3792,9 @@ Popup {
     // The extensions harlo offers for pi.
     Component {
         id: packagesPage
-        PiPackages {}
+        PiPackages {
+            onOpenFile: path => { Workspace.openFileTab(path); root.close() }
+        }
     }
 
     Component {
@@ -3340,6 +3816,8 @@ Popup {
                 readonly property var host: Remotes.revision >= 0 ? (JSON.parse(Remotes.hostsJson()).find(h => h.name === Workspace.instance) || null) : null
                 readonly property var updates: Updates.entriesJson !== "" ? JSON.parse(Updates.entriesJson) : []
                 readonly property var providers: Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()) : []
+                // The agent whose sign-ins there are shown below ("" none).
+                property string open: ""
                 Component.onCompleted: if (visible && host && host.state !== "connected" && host.state !== "connecting") Remotes.connectHost(Workspace.instance)
                 Label {
                     visible: !hostAgents.host || hostAgents.host.state !== "connected"
@@ -3391,18 +3869,94 @@ Popup {
                                     onClicked: Updates.update(hostAgent.update.key)
                                 }
                                 FlatButton {
+                                    objectName: "hostProviderAccounts-" + hostAgent.modelData
+                                    visible: hostAgent.found && hostAgent.modelData !== "omp"
+                                    text: hostAgents.open === hostAgent.modelData ? "Hide accounts" : "Accounts"
+                                    font.pixelSize: Theme.px(12)
+                                    onClicked: {
+                                        hostAgents.open = hostAgents.open === hostAgent.modelData ? "" : hostAgent.modelData
+                                        if (hostAgents.open !== "") Accounts.refresh(hostAgents.open + "@" + Workspace.instance)
+                                    }
+                                }
+                                FlatButton {
                                     visible: hostAgent.found && hostAgent.modelData === "claude" && hostAgent.h.claudeAuth === "no"
                                     text: "Sign in"
                                     font.pixelSize: Theme.px(12)
                                     ToolTip.visible: hovered
-                                    ToolTip.text: "Opens Claude on " + Workspace.instance + " in a terminal; sign in, then quit it (/exit)."
-                                    onClicked: root.runOnHostRequested("ssh://" + Workspace.instance + (hostAgent.h.home || ""), "claude")
+                                    ToolTip.text: "Claude isn't signed in on " + Workspace.instance + "."
+                                    onClicked: root.signInRequested("claude@" + Workspace.instance, "Claude on " + Workspace.instance)
                                 }
                                 AppSwitch {
                                     checked: hostAgent.local.enabled
                                     onToggled: Workspace.setProviderEnabled(hostAgent.modelData, checked)
                                 }
                             }
+                        }
+                    }
+                }
+                // One agent's sign-ins on that machine (its own logins there).
+                ColumnLayout {
+                    id: hostAccounts
+                    visible: hostAgents.open !== "" && hostAgents.host !== null && hostAgents.host.state === "connected"
+                    Layout.fillWidth: true
+                    Layout.topMargin: 10
+                    spacing: 6
+                    readonly property string agent: hostAgents.open + "@" + Workspace.instance
+                    readonly property var st: Accounts.revision >= 0 && hostAgents.open !== "" ? JSON.parse(Accounts.status(agent)) : ({ accounts: [] })
+                    property string signOutError: ""
+                    Label {
+                        text: Theme.harnessLabel(hostAgents.open) + "'s accounts on " + Workspace.instance
+                        color: Theme.foreground
+                        font.pixelSize: Theme.px(12.5)
+                        font.weight: Font.Medium
+                    }
+                    Repeater {
+                        model: hostAccounts.st.accounts || []
+                        RowLayout {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            spacing: 8
+                            Icon { name: "checkbox-circle"; color: Theme.success; implicitWidth: 13; implicitHeight: 13 }
+                            Label { text: modelData.label; color: Theme.foreground; font.pixelSize: Theme.px(12.5) }
+                            Label { Layout.fillWidth: true; text: modelData.detail || ""; elide: Text.ElideRight; color: Theme.muted; font.pixelSize: Theme.px(12) }
+                            FlatButton {
+                                visible: modelData.signOut === true
+                                text: "Sign out"
+                                padding: 3
+                                font.pixelSize: Theme.px(11)
+                                onClicked: hostAccounts.signOutError = Accounts.signOut(hostAccounts.agent, modelData.id)
+                            }
+                        }
+                    }
+                    Label {
+                        visible: hostAccounts.st.state === "ready" && (hostAccounts.st.error || "") === "" && (hostAccounts.st.accounts || []).length === 0
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        text: "Not signed in to anything there yet."
+                        color: Theme.warning
+                        font.pixelSize: Theme.px(12)
+                    }
+                    Label {
+                        visible: (hostAccounts.st.error || "") !== "" || hostAccounts.signOutError !== ""
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        text: hostAccounts.signOutError !== "" ? hostAccounts.signOutError : (hostAccounts.st.error || "")
+                        color: Theme.error
+                        font.pixelSize: Theme.px(12)
+                    }
+                    RowLayout {
+                        spacing: 8
+                        FlatButton {
+                            text: (hostAccounts.st.accounts || []).length > 0 ? "Sign in to another…" : "Sign in…"
+                            accent: Theme.primary
+                            font.pixelSize: Theme.px(12)
+                            onClicked: root.signInRequested(hostAccounts.agent, Theme.harnessLabel(hostAgents.open) + " on " + Workspace.instance)
+                        }
+                        Label {
+                            visible: hostAccounts.st.state === "loading"
+                            text: "Checking…"
+                            color: Theme.muted
+                            font.pixelSize: Theme.px(12)
                         }
                     }
                 }

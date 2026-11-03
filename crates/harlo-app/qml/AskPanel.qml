@@ -205,7 +205,7 @@ Rectangle {
                                         color: qBlock.q.multi && optRow.chosen ? Theme.primary : "transparent"
                                         border.color: optRow.chosen ? Theme.primary : Theme.muted
                                         border.width: !qBlock.q.multi && optRow.chosen ? 5 : 1.5
-                                        Icon { anchors.centerIn: parent; visible: !!qBlock.q.multi && optRow.chosen; name: "check"; color: Theme.onPrimary; implicitWidth: 13; implicitHeight: 13 }
+                                        Icon { anchors.centerIn: parent; visible: !!qBlock.q.multi && optRow.chosen; name: "check"; color: Theme.textOnPrimary; implicitWidth: 13; implicitHeight: 13 }
                                     }
                                     ColumnLayout {
                                         id: optCol

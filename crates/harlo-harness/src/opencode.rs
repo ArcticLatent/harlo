@@ -104,7 +104,9 @@ impl Server {
             remote.prelude
         );
         let mut cmd = Command::new("ssh");
-        cmd.args(["-o", "ExitOnForwardFailure=yes", "-L", &format!("{local}:127.0.0.1:{there}")]).args(&remote.ssh_args).arg(script).stdin(Stdio::piped());
+        // (A connection of its own: it stays up, and a host can allow few
+        // sessions on a shared one. ssh keeps the first value of an option.)
+        cmd.args(["-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "ExitOnForwardFailure=yes", "-L", &format!("{local}:127.0.0.1:{there}")]).args(&remote.ssh_args).arg(script).stdin(Stdio::piped());
         Self::launch(cmd, password.clone(), Some(format!("http://127.0.0.1:{local}")), Some(format!("{password}\n")), &format!("OpenCode on {}", remote.host))
     }
 
@@ -331,6 +333,16 @@ pub fn session_id(path: &Path) -> String {
     path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
+/// When a session was last worked in: its last turn's start or end. Not its
+/// `updated`, which OpenCode also moves when it starts up again (one whose
+/// turns predate those times: `updated`).
+pub fn last_worked(created: u64, updated: u64, busy: u64, idle: u64) -> u64 {
+    match busy.max(idle) {
+        0 => updated,
+        t => t.max(created).min(updated.max(created)),
+    }
+}
+
 /// Every session (not subagents' nor archived ones): `(path, updated, 0)`.
 pub fn list_sessions() -> Vec<(PathBuf, SystemTime, u64)> {
     let Some(db) = open_db() else { return Vec::new() };
@@ -351,6 +363,11 @@ pub fn read_session(path: &Path) -> Option<SessionInfo> {
     let (dir, title, created, updated): (String, Option<String>, i64, i64) = db
         .query_row("SELECT directory, title, time_created, time_updated FROM session_v2 WHERE id = ?1", [&id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
         .ok()?;
+    // (An older OpenCode has no turn times: its `updated` then.)
+    let (busy, idle): (Option<i64>, Option<i64>) =
+        db.query_row("SELECT time_busy, time_idle FROM session_v2 WHERE id = ?1", [&id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap_or((None, None));
+    let ms = |v: Option<i64>| v.unwrap_or(0).max(0) as u64;
+    let updated = last_worked(created.max(0) as u64, updated.max(0) as u64, ms(busy), ms(idle)) as i64;
     let first: Option<String> = db
         .query_row("SELECT data FROM session_message WHERE session_id = ?1 AND type = 'user' ORDER BY seq LIMIT 1", [&id], |r| r.get(0))
         .ok()
@@ -577,6 +594,17 @@ fn models_now(server: &Server, directory: &Path) -> Result<Vec<(String, String, 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_session_dates_from_its_last_turn() {
+        // OpenCode started again a day later: still the turn's time.
+        assert_eq!(super::last_worked(100, 90_000, 200, 300), 300);
+        // No turn times (an older OpenCode): `updated`.
+        assert_eq!(super::last_worked(100, 500, 0, 0), 500);
+        // Never later than `updated`, never before it was made.
+        assert_eq!(super::last_worked(100, 250, 200, 300), 250);
+        assert_eq!(super::last_worked(400, 500, 300, 0), 400);
+    }
+
     use super::*;
 
     #[test]

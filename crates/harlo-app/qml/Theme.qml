@@ -190,7 +190,7 @@ QtObject {
         return ({ claude: "Claude", opencode: "OpenCode", pi: "Pi", omp: "Oh My Pi", hermes: "Hermes", demo: "Demo" })[id] || id
     }
     // Text on a primary-coloured fill (buttons, check marks).
-    readonly property color onPrimary: luminance(primary) > 0.55 ? "#1a1a1a" : (isLight ? "#ffffff" : "#1a1310")
+    readonly property color textOnPrimary: luminance(primary) > 0.55 ? "#1a1a1a" : (isLight ? "#ffffff" : "#1a1310")
     // Fonts: Geist (bundled) for the interface, JetBrains Mono (bundled) for
     // code, unless others are chosen in Settings → Appearance.
     readonly property string defaultUiFont: "Geist"

@@ -17,7 +17,7 @@ Button {
     horizontalPadding: padding + 4
     contentItem: Label {
         text: fb.text
-        color: !fb.enabled ? Theme.muted : fb.outlined && fb.variant === "primary" ? Theme.onPrimary : fb.accent
+        color: !fb.enabled ? Theme.muted : fb.outlined && fb.variant === "primary" ? Theme.textOnPrimary : fb.accent
         font: fb.font
         // Only when a layout squeezes the button.
         elide: Text.ElideRight

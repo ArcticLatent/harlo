@@ -242,6 +242,40 @@ impl Terminal {
         self.term.lock().selection_to_string().unwrap_or_default()
     }
 
+    /// The link at a screen cell ("" for none): one the program marked
+    /// (OSC 8), or a web address in its text, also one wrapped onto the
+    /// next rows.
+    pub fn link_at(&self, row: i32, col: i32) -> String {
+        let term = self.term.lock();
+        let p = Self::point(&term, row, col);
+        let grid = term.grid();
+        if let Some(h) = grid[p].hyperlink() {
+            return h.uri().to_owned();
+        }
+        let cols = term.columns();
+        let wraps = |l: Line| grid[l][Column(cols - 1)].flags.contains(Flags::WRAPLINE);
+        let (mut first, mut last) = (p.line, p.line);
+        while first > grid.topmost_line() && wraps(first - 1) {
+            first -= 1;
+        }
+        while last < grid.bottommost_line() && wraps(last) {
+            last += 1;
+        }
+        let (mut chars, mut at) = (Vec::new(), 0);
+        for l in first.0..=last.0 {
+            for c in 0..cols {
+                let cell = &grid[Line(l)][Column(c)];
+                if Line(l) == p.line && c == p.column.0 {
+                    at = chars.len().saturating_sub(cell.flags.contains(Flags::WIDE_CHAR_SPACER) as usize);
+                }
+                if !cell.flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER) {
+                    chars.push(cell.c);
+                }
+            }
+        }
+        link_in(&chars, at).unwrap_or_default()
+    }
+
     /// The program asked for application cursor keys (vim, less…).
     pub fn app_cursor(&self) -> bool {
         self.term.lock().mode().contains(TermMode::APP_CURSOR)
@@ -310,6 +344,45 @@ impl Drop for Terminal {
     fn drop(&mut self) {
         self.kill();
     }
+}
+
+/// The web address in `text` that covers `at`, without the punctuation
+/// after it ("see https://x.org/a." → "https://x.org/a") or a bracket that
+/// closes around it.
+fn link_in(text: &[char], at: usize) -> Option<String> {
+    let edge = |c: char| c.is_whitespace() || c == '\0' || "\"'<>`|{}".contains(c);
+    if text.get(at).is_none_or(|c| edge(*c)) {
+        return None;
+    }
+    let start = text[..at].iter().rposition(|c| edge(*c)).map_or(0, |i| i + 1);
+    let end = text[at..].iter().position(|c| edge(*c)).map_or(text.len(), |i| at + i);
+    let word: String = text[start..end].iter().collect();
+    // (The last scheme that starts at or before `at`.)
+    let offset = at - start;
+    let mut from = None;
+    for scheme in ["https://", "http://"] {
+        for (i, _) in word.match_indices(scheme) {
+            let chars_before = word[..i].chars().count();
+            if chars_before <= offset && from.is_none_or(|(f, _)| chars_before > f) {
+                from = Some((chars_before, i));
+            }
+        }
+    }
+    let (from_chars, from_byte) = from?;
+    let mut url = &word[from_byte..];
+    loop {
+        let trimmed = url.trim_end_matches(['.', ',', ';', ':', '!', '?']);
+        let trimmed = match trimmed.chars().last() {
+            Some(c @ (')' | ']')) if trimmed.matches(if c == ')' { '(' } else { '[' }).count() < trimmed.matches(c).count() => &trimmed[..trimmed.len() - 1],
+            _ => trimmed,
+        };
+        if trimmed == url {
+            break;
+        }
+        url = trimmed;
+    }
+    let rest = url.split_once("://").map_or("", |(_, r)| r);
+    (!rest.is_empty() && offset < from_chars + url.chars().count()).then(|| url.to_owned())
 }
 
 #[derive(Clone, Copy, PartialEq, Default)]
@@ -509,11 +582,30 @@ mod tests {
         assert_eq!(key_bytes(0x0100_0014, CTRL, "", false), b"\x1b[1;5C");
         assert_eq!(key_bytes(0x43, CTRL, "\x03", false), b"\x03");
         assert_eq!(key_bytes(0x43, CTRL, "", false), b"\x03");
+        // Ctrl, Shift, Alt and Meta alone type nothing.
+        for modifier in [0x0100_0021, 0x0100_0020, 0x0100_0023, 0x0100_0022] {
+            assert!(key_bytes(modifier, CTRL | SHIFT, "", false).is_empty());
+        }
         assert_eq!(key_bytes(0x42, ALT, "b", false), b"\x1bb");
         assert_eq!(key_bytes(0x0100_0007, 0, "", false), b"\x1b[3~");
         assert_eq!(key_bytes(0x0100_0034, 0, "", false), b"\x1b[15~");
         assert_eq!(key_bytes(0x41, 0, "é", false), "é".as_bytes());
         assert_eq!(key_bytes(0x0100_0020, 0, "", false), b"", "a lone Shift sends nothing");
+    }
+
+    #[test]
+    fn finds_the_link_under_a_cell() {
+        let at = |line: &str, i: usize| super::link_in(&line.chars().collect::<Vec<_>>(), i);
+        let line = "    https://auth.openai.com/codex/device";
+        assert_eq!(at(line, 4).as_deref(), Some("https://auth.openai.com/codex/device"));
+        assert_eq!(at(line, line.len() - 1).as_deref(), Some("https://auth.openai.com/codex/device"));
+        assert_eq!(at(line, 1), None, "the space before it");
+        assert_eq!(at("(see https://x.org/a_(b)).", 10).as_deref(), Some("https://x.org/a_(b)"));
+        assert_eq!(at("open https://x.org/a.", 20), None, "its full stop");
+        assert_eq!(at("\"https://x.org\" ok", 3).as_deref(), Some("https://x.org"));
+        assert_eq!(at("plain words here", 3), None);
+        assert_eq!(at("x https:// y", 4), None, "no address after the scheme");
+        assert_eq!(at("é https://é.org/ü", 6).as_deref(), Some("https://é.org/ü"));
     }
 
     #[test]
@@ -549,5 +641,29 @@ mod tests {
             exited = matches!(rx.recv_timeout(Duration::from_millis(200)), Ok(TermEvent::Exited(_)));
         }
         assert!(exited, "the shell's exit is reported");
+    }
+
+    #[test]
+    fn a_link_wrapped_onto_the_next_rows_is_whole() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let term = Terminal::spawn(std::env::temp_dir(), Some(("/bin/sh".into(), Vec::new())), 20, 10, move |e| {
+            let _ = tx.send(e);
+        })
+        .unwrap();
+        // (Printed by a command the screen doesn't echo whole: its own row.)
+        term.write(b"clear; printf '%s%s\\n' https://example.org/ codex/device/abc\r".to_vec());
+        let url = "https://example.org/codex/device/abc";
+        let palette = Palette::from_hex(&[]);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut row = None;
+        while Instant::now() < deadline && row.is_none() {
+            let _ = rx.recv_timeout(Duration::from_millis(100));
+            row = term.render(&palette).lines.iter().position(|l| l.starts_with("https://example.org/"));
+        }
+        let row = row.expect("printed") as i32;
+        assert_eq!(term.link_at(row, 3), url, "on its first row");
+        assert_eq!(term.link_at(row + 1, 2), url, "on the row it wrapped onto");
+        assert_eq!(term.link_at(row + 1, 19), "", "past its end");
+        term.kill();
     }
 }

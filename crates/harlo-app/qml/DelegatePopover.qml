@@ -27,13 +27,34 @@ Popup {
     })
     readonly property var current: actions[action]
 
+    // The machine the session runs on ("": this one): the new sessions
+    // start there, so its agents and their models are offered.
+    readonly property string host: session && session.cwd.startsWith("ssh://") ? session.cwd.slice(6).split("/")[0] : ""
     // The agents sessions can start with (and their models, once checked).
     readonly property var providers: {
         Workspace.providersRevision
-        return JSON.parse(Workspace.providersJson()).filter(p => p.canChat && p.enabled && p.state !== "missing")
+        return JSON.parse(Workspace.providersJson()).filter(p => p.canChat && p.enabled && (host !== "" ? Theme.offeredOnHost(host, p.id) : p.state !== "missing"))
     }
     readonly property var agentIds: providers.map(p => p.id)
-    function provider(id) { return providers.find(p => p.id === id) || null }
+    // There: each agent's models as it lists them there (asked as the
+    // popover opens; absent while it's asked).
+    property var hostModels: ({})
+    Connections {
+        target: Workspace
+        function onModelsAtReady(folder, harness, json) {
+            if (!root.session || folder !== root.session.cwd) return
+            const next = Object.assign({}, root.hostModels)
+            next[harness] = JSON.parse(json)
+            root.hostModels = next
+        }
+    }
+    function provider(id) {
+        const p = providers.find(x => x.id === id) || null
+        if (!p || host === "") return p
+        const there = hostModels[id]
+        const models = there && there.models ? there.models : []
+        return Object.assign({}, p, { state: there ? "ready" : "checking", models: models.map(m => m.name || m.id), modelIds: models.map(m => m.id) })
+    }
     // The first agent that isn't `but` (a fresh view), else `but`.
     function other(but) { return agentIds.find(id => id !== but) || but }
 
@@ -54,6 +75,10 @@ Popup {
         worktree.checked = false
         bridgeNote = ""
         Workspace.ensureProviders()
+        if (host !== "") {
+            hostModels = ({})
+            for (const id of agentIds) Workspace.requestModelsAt(session.cwd, id)
+        }
         open()
     }
 

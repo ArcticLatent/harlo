@@ -25,6 +25,14 @@ const SCHEME: &str = "ssh://";
 /// non-interactive SSH command gets a minimal one).
 pub const PATH_PREFIX: &str = "$HOME/.local/bin:$HOME/.bun/bin:$HOME/.pi/agent/bin:$HOME/.opencode/bin:$HOME/.npm-global/bin:$HOME/.cargo/bin:/usr/local/bin";
 
+/// A shell's PATH with the folders of [`PATH_PREFIX`] that are there and
+/// not on it yet, in front (for a terminal: the agents harlo starts there
+/// are found there too, without folders that don't exist cluttering it).
+pub fn terminal_path() -> String {
+    let dirs: Vec<&str> = PATH_PREFIX.split(':').rev().collect();
+    format!(r#"for d in {}; do [ -d "$d" ] && case ":$PATH:" in *":$d:"*) ;; *) PATH="$d:$PATH" ;; esac; done; export PATH;"#, dirs.iter().map(|d| format!("\"{d}\"")).collect::<Vec<_>>().join(" "))
+}
+
 /// A remote machine.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Host {
@@ -430,6 +438,14 @@ pub fn run_with_input(host: &Host, script: &str, input: Option<&[u8]>, timeout: 
 }
 
 /// The script's stdout, or an error with its last stderr line.
+pub fn run_ok_with_input(host: &Host, script: &str, input: &[u8], timeout: Duration) -> Result<()> {
+    let out = run_with_input(host, script, Some(input), timeout)?;
+    if !out.status.success() {
+        bail!("{}", ssh_error(&host.name, &out));
+    }
+    Ok(())
+}
+
 pub fn run_ok(host: &Host, script: &str, timeout: Duration) -> Result<String> {
     let out = run(host, script, timeout)?;
     if !out.status.success() {
@@ -579,12 +595,42 @@ pub fn home(host: &Host) -> Result<String> {
     Ok(check(host)?.home)
 }
 
+/// Forwards (or stops forwarding) this computer's `localhost` port to the
+/// host's, over the shared connection, which has to be up.
+pub fn forward_port(host: &Host, port: u16, on: bool) -> Result<()> {
+    let out = Command::new("ssh")
+        .args(["-O", if on { "forward" } else { "cancel" }, "-L", &format!("{port}:localhost:{port}")])
+        .args(ssh_args(host))
+        .stdin(std::process::Stdio::null())
+        .output()?;
+    if !out.status.success() {
+        bail!("{}", ssh_error(&host.name, &out));
+    }
+    Ok(())
+}
+
 /// Whether the shared connection is up.
 pub fn connected(host: &Host) -> bool {
     let mut cmd = Command::new("ssh");
     cmd.args(ssh_options(host)).args(["-O", "check"]).args(host.ssh.last());
     cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     cmd.status().is_ok_and(|s| s.success())
+}
+
+/// Hosts disconnected by hand: harlo's background work leaves them alone (it
+/// would connect again) until they're connected again.
+static DISCONNECTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+pub fn set_disconnected(name: &str, on: bool) {
+    let mut list = DISCONNECTED.lock().unwrap_or_else(|e| e.into_inner());
+    list.retain(|n| n != name);
+    if on {
+        list.push(name.to_owned());
+    }
+}
+
+pub fn is_disconnected(name: &str) -> bool {
+    DISCONNECTED.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|n| n == name)
 }
 
 /// Closes the shared connection (sessions using it end).
@@ -600,6 +646,19 @@ pub fn disconnect(host: &Host) {
 type HomeFiles = HashMap<(String, String), (Instant, String)>;
 static HOME_FILES: Mutex<Option<HomeFiles>> = Mutex::new(None);
 
+/// Every host's connection closed (harlo quitting: they'd otherwise stay
+/// open a while for the next command), all at once.
+pub fn disconnect_all() {
+    let hosts = hosts();
+    for h in &hosts {
+        set_disconnected(&h.name, true);
+    }
+    let closing: Vec<_> = hosts.into_iter().map(|h| std::thread::spawn(move || disconnect(&h))).collect();
+    for c in closing {
+        let _ = c.join();
+    }
+}
+
 /// A file in the host's home (`rel`, like `.omp/agent/config.yml`), read
 /// again only when older than `max_age`; "" when missing or unreachable.
 /// Blocks while reading: call it off the UI thread.
@@ -609,12 +668,37 @@ pub fn home_file_cached(host_name: &str, rel: &str, max_age: Duration) -> String
         && at.elapsed() < max_age {
             return text;
         }
+    // (An absolute path is read as it is.)
+    let file = if rel.starts_with('/') { quote(rel) } else { format!("\"$HOME\"/{}", quote(rel)) };
     let text = host(host_name)
-        .and_then(|h| run(&h, &format!("cat \"$HOME\"/{} 2>/dev/null", quote(rel)), FILE_TIMEOUT).ok())
+        .and_then(|h| run(&h, &format!("cat {file} 2>/dev/null"), FILE_TIMEOUT).ok())
         .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
         .unwrap_or_default();
     HOME_FILES.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).insert(key, (Instant::now(), text.clone()));
     text
+}
+
+/// [`home_file_cached`] without waiting: the copy last read (None before
+/// the first), read again in the background when older than `max_age`
+/// (never while the host is disconnected).
+pub fn home_file_soon(host_name: &str, rel: &str, max_age: Duration) -> Option<String> {
+    static ASKED: Mutex<Option<HashMap<(String, String), Instant>>> = Mutex::new(None);
+    let key = (host_name.to_owned(), rel.to_owned());
+    let due = {
+        let mut asked = ASKED.lock().unwrap_or_else(|e| e.into_inner());
+        let map = asked.get_or_insert_with(HashMap::new);
+        let due = map.get(&key).is_none_or(|t| t.elapsed() > max_age);
+        if due {
+            map.insert(key.clone(), Instant::now());
+        }
+        due
+    };
+    if due && !is_disconnected(host_name) {
+        std::thread::spawn(move || {
+            home_file_cached(&key.0, &key.1, Duration::ZERO);
+        });
+    }
+    home_file_peek(host_name, rel)
 }
 
 /// The copy [`home_file_cached`] last read, without blocking.
@@ -630,6 +714,21 @@ fn host_and_path(path: &Path) -> Result<(Host, String)> {
 }
 
 const FILE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// A remote session file's copy here, brought up to date with what was added
+/// to it (see `harlo_harness::mirror`), to read as a local one; with the
+/// host unreachable, the copy as last made.
+pub fn local_copy(path: &Path) -> Result<PathBuf> {
+    let (host, remote) = host_and_path(path)?;
+    Ok(harlo_harness::mirror::refresh(&host.name, &remote, |script| command(&host, script))?)
+}
+
+/// The copy [`local_copy`] keeps of a remote session file, as it is (None
+/// before there is one).
+pub fn copy_of(path: &Path) -> Option<PathBuf> {
+    let (host, remote) = split(path)?;
+    harlo_harness::mirror::copy_path(&host, &remote).filter(|p| p.is_file())
+}
 
 /// A remote file's bytes.
 pub fn read(path: &Path) -> Result<Vec<u8>> {
@@ -659,6 +758,22 @@ pub struct Entry {
     pub size: u64,
     /// Seconds since the epoch.
     pub mtime: i64,
+}
+
+/// Makes the folder `name` inside a remote folder; its path.
+pub fn make_folder(parent: &Path, name: &str) -> Result<PathBuf> {
+    let name = name.trim();
+    if name.is_empty() || name == "." || name == ".." || name.contains('/') {
+        bail!("That can't be a folder's name.");
+    }
+    let path = parent.join(name);
+    let (host, remote) = host_and_path(&path)?;
+    let made = run_ok(&host, &format!("mkdir -- {}", quote_path(&remote)), FILE_TIMEOUT);
+    match made {
+        Ok(_) => Ok(path),
+        Err(e) if e.to_string().contains("File exists") => bail!("{name} is already there."),
+        Err(e) => Err(e),
+    }
 }
 
 /// A remote folder's entries (hidden ones too), unsorted.
@@ -712,6 +827,7 @@ pub fn trash(path: &Path) -> Result<()> {
     if !out.status.success() {
         bail!("{}", ssh_error(&host.name, &out));
     }
+    harlo_harness::mirror::forget(&host.name, &f);
     Ok(())
 }
 
@@ -725,6 +841,46 @@ pub fn exists(path: &Path, dir: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_terminal_finds_the_agents_folders_that_are_there() {
+        let home = std::env::temp_dir().join(format!("harlo-path-test-{}", std::process::id()));
+        std::fs::create_dir_all(home.join(".local/bin")).unwrap();
+        std::fs::create_dir_all(home.join(".cargo/bin")).unwrap();
+        let run = |path: &str| {
+            let out = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(format!("{} printf %s \"$PATH\"", terminal_path()))
+                .env("HOME", &home)
+                .env("PATH", path)
+                .output()
+                .unwrap();
+            String::from_utf8(out.stdout).unwrap()
+        };
+        let h = home.display();
+        assert_eq!(run("/usr/bin:/bin"), format!("{h}/.local/bin:{h}/.cargo/bin:/usr/local/bin:/usr/bin:/bin").replace("/usr/local/bin:", if std::path::Path::new("/usr/local/bin").is_dir() { "/usr/local/bin:" } else { "" }));
+        // (Already on it: left where it is.)
+        assert_eq!(run(&format!("/bin:{h}/.local/bin")), format!("{h}/.cargo/bin:/usr/local/bin:/bin:{h}/.local/bin").replace("/usr/local/bin:", if std::path::Path::new("/usr/local/bin").is_dir() { "/usr/local/bin:" } else { "" }));
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_disconnected_host_stays_so_until_connected() {
+        assert!(!is_disconnected("left-alone"));
+        set_disconnected("left-alone", true);
+        set_disconnected("left-alone", true);
+        assert!(is_disconnected("left-alone") && !is_disconnected("other"));
+        set_disconnected("left-alone", false);
+        assert!(!is_disconnected("left-alone"));
+    }
+
+    #[test]
+    fn a_folder_name_is_one_name() {
+        let parent = join("nowhere", "/home/me");
+        for name in ["", "  ", ".", "..", "a/b", "../up"] {
+            assert_eq!(make_folder(&parent, name).unwrap_err().to_string(), "That can't be a folder's name.", "{name:?}");
+        }
+    }
 
     #[test]
     fn remote_paths() {

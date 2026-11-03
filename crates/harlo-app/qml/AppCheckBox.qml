@@ -19,7 +19,7 @@ CheckBox {
             anchors.centerIn: parent
             visible: cb.checked
             text: "✓"
-            color: Theme.onPrimary
+            color: Theme.textOnPrimary
             font.pixelSize: Theme.px(11)
             font.bold: true
         }

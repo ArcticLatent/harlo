@@ -43,6 +43,8 @@ struct Waiting {
 
 #[derive(Default)]
 struct State {
+    /// What Claude refused this turn with, until the turn's result says it.
+    refusal: String,
     session_id: String,
     model: String,
     /// "" (Claude's default), "off", or an effort level.
@@ -165,11 +167,19 @@ impl Shared {
 
     /// A transcript's text (on its machine, over SSH).
     fn read_file(&self, path: &Path) -> Option<String> {
-        if self.cfg.remote.is_none() {
-            return std::fs::read_to_string(path).ok();
-        }
-        let q = crate::process::shell_quote(&crate::process::on_host(path));
-        self.on_host(&format!("cat -- {q}"), None).map(|b| String::from_utf8_lossy(&b).into_owned())
+        std::fs::read_to_string(self.local_file(path)?).ok()
+    }
+
+    /// The transcript to read here: itself, or a remote one's copy brought
+    /// up to date (see [`crate::mirror`]).
+    fn local_file(&self, path: &Path) -> Option<PathBuf> {
+        let Some(r) = self.cfg.remote.as_ref() else { return Some(path.to_path_buf()) };
+        let ssh = |script: &str| {
+            let mut c = std::process::Command::new("ssh");
+            c.args(&r.ssh_args).arg(script);
+            c
+        };
+        crate::mirror::refresh(&r.host, &crate::process::on_host(path), ssh).ok()
     }
 
     /// Writes a new transcript.
@@ -287,7 +297,8 @@ pub(crate) fn spawn(cfg: HarnessConfig, program: PathBuf) -> Result<(Harness, mp
     });
     // A resumed session: its conversation so far.
     if let SessionTarget::Resume(path) = &shared.cfg.session {
-        let saved = if shared.cfg.remote.is_none() { claude::saved_file_cached(path).ok() } else { shared.read_file(path).map(|text| claude::saved(&text)) };
+        let file = shared.local_file(path);
+        let saved = file.as_deref().and_then(|f| claude::saved_file_cached(f).ok());
         if let Some(saved) = saved {
             let mut st = shared.state.lock().unwrap();
             st.context_tokens = claude::context_used(&saved.messages);
@@ -298,7 +309,7 @@ pub(crate) fn spawn(cfg: HarnessConfig, program: PathBuf) -> Result<(Harness, mp
                 (st.context_window, st.compact_at, st.compact_model) = (window, Some(at), st.model.clone());
             }
         }
-        crate::store::after_reading(std::fs::metadata(path).map_or(0, |m| m.len()));
+        crate::store::after_reading(file.and_then(|f| std::fs::metadata(f).ok()).map_or(0, |m| m.len()));
     }
     {
         // (A new session: nothing else holds these yet.)
@@ -633,7 +644,7 @@ async fn command(shared: &Arc<Shared>, pending: &Pending, cmd: Value) {
         }
         "get_available_models" => {
             let version = shared.state.lock().unwrap().version.clone();
-            let list: Vec<Value> = claude::models((!version.is_empty()).then_some(version.as_str()), claude::config_dir().map(|d| d.join("settings.json")).as_deref())
+            let list: Vec<Value> = claude::models((!version.is_empty()).then_some(version.as_str()), claude::config_dir().filter(|_| shared.cfg.remote.is_none()).map(|d| d.join("settings.json")).as_deref())
                 .into_iter()
                 .map(|(id, name)| json!({ "provider": "anthropic", "id": id, "name": name, "reasoning": true }))
                 .collect();
@@ -840,8 +851,14 @@ async fn incoming(shared: &Arc<Shared>, frame: Value) {
         "stream_event" => stream(shared, &frame["event"]),
         "rate_limit_event" => shared.emit(HarnessEvent::Limits(frame["rate_limit_info"].clone())),
         "assistant" => {
-            assistant(shared, &frame["message"]);
-            subagents_started(shared, &frame["message"]);
+            // Claude's refusal (a failed login, say) comes as a reply and
+            // then as the turn's error: it's said once, as the error.
+            if !frame["error"].is_null() && frame["message"]["content"].as_array().is_some_and(|c| c.iter().all(|b| b["type"] == "text")) {
+                shared.state.lock().unwrap().refusal = result_text(&frame["message"]["content"]);
+            } else {
+                assistant(shared, &frame["message"]);
+                subagents_started(shared, &frame["message"]);
+            }
         }
         "user" => {
             // Tool results.
@@ -876,11 +893,15 @@ async fn incoming(shared: &Arc<Shared>, frame: Value) {
             }
             // A stop ends the turn "during execution": nothing went wrong.
             let stopped = shared.state.lock().unwrap().aborted && frame["subtype"] == "error_during_execution";
+            // Out of its plan's limit: what's waiting would only be refused too.
+            let mut out_of_limit = false;
             if !stopped && (frame["subtype"] != "success" || frame["is_error"] == true) {
                 // Claude's own diagnostics aren't for the reader.
                 let errors: Vec<&str> =
                     frame["errors"].as_array().into_iter().flatten().filter_map(Value::as_str).filter(|e| !e.starts_with("[ede_diagnostic]")).collect();
-                let text = if errors.is_empty() { text.to_owned() } else { errors.join("\n") };
+                let refusal = std::mem::take(&mut shared.state.lock().unwrap().refusal);
+                let text = if !errors.is_empty() { errors.join("\n") } else if text.is_empty() { refusal } else { text.to_owned() };
+                out_of_limit = text.contains("You've hit your");
                 if !text.is_empty() {
                     shared.emit(HarnessEvent::Notice { level: NoticeLevel::Error, text, system: false });
                 }
@@ -891,7 +912,7 @@ async fn incoming(shared: &Arc<Shared>, frame: Value) {
                 // What was waiting for this turn: the run goes on with it.
                 let next = {
                     let mut st = shared.state.lock().unwrap();
-                    let next = (!std::mem::take(&mut st.aborted) && !st.queued.is_empty()).then(|| st.queued.remove(0));
+                    let next = (!std::mem::take(&mut st.aborted) && !out_of_limit && !st.queued.is_empty()).then(|| st.queued.remove(0));
                     st.running = next.is_some();
                     next
                 };

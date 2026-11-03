@@ -32,6 +32,22 @@ pub fn pi(agent_dir: Option<&Path>, cwd: &Path, model: &str, window: u64) -> Opt
     pi_at(&[read_json(&dir.join("settings.json")), read_json(&cwd.join(".pi/settings.json"))], model, window)
 }
 
+/// The same on another machine, from its settings as last read there (pi's
+/// own `~/.pi/agent`, and the project's): None until they have been.
+pub fn pi_on(host: &str, cwd: &str, model: &str, window: u64) -> Option<u64> {
+    let own = crate::remote::home_file_soon(host, ".pi/agent/settings.json", REREAD)?;
+    let project = crate::remote::home_file_soon(host, &format!("{}/.pi/settings.json", cwd.trim_end_matches('/')), REREAD).unwrap_or_default();
+    let json = |t: &str| serde_json::from_str(t).unwrap_or(Value::Null);
+    pi_at(&[json(&own), json(&project)], model, window)
+}
+
+/// How often another machine's settings are read again for this.
+const REREAD: std::time::Duration = std::time::Duration::from_secs(60);
+
+fn yaml(text: &str) -> Yaml {
+    YamlLoader::load_from_str(text).ok().and_then(|d| d.into_iter().next()).unwrap_or(Yaml::Null)
+}
+
 fn pi_at(layers: &[Value], model: &str, window: u64) -> Option<u64> {
     let setting = |pick: &dyn Fn(&Value) -> &Value| layers.iter().rev().map(|l| pick(&l["compaction"])).find(|v| !v.is_null()).cloned();
     if window == 0 || setting(&|c| &c["enabled"]).and_then(|v| v.as_bool()) == Some(false) {
@@ -49,6 +65,11 @@ fn pi_at(layers: &[Value], model: &str, window: u64) -> Option<u64> {
 /// of 15% of it and `reserveTokens` (16,384), from `~/.omp/agent/config.yml`.
 pub fn omp(model: &str, window: u64) -> Option<u64> {
     omp_at(&read_yaml(&home().join(".omp/agent/config.yml")), model, window)
+}
+
+/// The same on another machine (its `~/.omp/agent/config.yml` as last read).
+pub fn omp_on(host: &str, model: &str, window: u64) -> Option<u64> {
+    omp_at(&yaml(&crate::remote::home_file_soon(host, ".omp/agent/config.yml", REREAD)?), model, window)
 }
 
 fn omp_at(config: &Yaml, model: &str, window: u64) -> Option<u64> {
@@ -115,6 +136,11 @@ fn omp_model_threshold<'a>(map: &'a Yaml, model: &str) -> Option<&'a Yaml> {
 pub fn hermes(model: &str, provider: &str, window: u64) -> Option<u64> {
     let dir = std::env::var_os("HERMES_HOME").map(PathBuf::from).unwrap_or_else(|| home().join(".hermes"));
     hermes_at(&read_yaml(&dir.join("config.yaml")), model, provider, window)
+}
+
+/// The same on another machine (its `~/.hermes/config.yaml` as last read).
+pub fn hermes_on(host: &str, model: &str, provider: &str, window: u64) -> Option<u64> {
+    hermes_at(&yaml(&crate::remote::home_file_soon(host, ".hermes/config.yaml", REREAD)?), model, provider, window)
 }
 
 fn hermes_at(config: &Yaml, model: &str, provider: &str, window: u64) -> Option<u64> {

@@ -11,8 +11,8 @@ Rectangle {
     signal openInWindowRequested()
     /// The mini-chat window: a keep-on-top toggle in the header.
     property bool pinnable: false
-    property bool onTop: false
-    signal onTopToggled(bool on)
+    property bool stayOnTop: false
+    signal stayOnTopToggled(bool on)
     color: Theme.background
     border.color: Theme.border
 
@@ -55,11 +55,11 @@ Rectangle {
                     text: "📌"
                     font.pixelSize: Theme.px(12)
                     padding: 4
-                    outlined: root.onTop
-                    accent: root.onTop ? Theme.primary : Theme.muted
-                    onClicked: root.onTopToggled(!root.onTop)
+                    outlined: root.stayOnTop
+                    accent: root.stayOnTop ? Theme.primary : Theme.muted
+                    onClicked: root.stayOnTopToggled(!root.stayOnTop)
                     ToolTip.visible: hovered
-                    ToolTip.text: root.onTop ? "Stays on top of other windows (click to stop)" : "Keep on top of other windows"
+                    ToolTip.text: root.stayOnTop ? "Stays on top of other windows (click to stop)" : "Keep on top of other windows"
                 }
                 FlatButton { text: "Open in window"; font.pixelSize: Theme.px(11); padding: 4; onClicked: root.openInWindowRequested() }
                 Button {

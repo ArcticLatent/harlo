@@ -4,6 +4,12 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = ["dictation"]
+# Dictation (whisper.cpp). harlo-engines, the helper harlo puts on other
+# machines, is built without it (--no-default-features).
+dictation = ["dep:whisper-rs"]
+
 [dependencies]
 harlo-harness.workspace = true
 anyhow.workspace = true
@@ -20,7 +26,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 alacritty_terminal = "0.26.0"
 yaml-rust = "0.4"
 # Dictation: whisper.cpp built in (CPU), and model downloads.
-whisper-rs = { version = "0.16", features = ["tracing_backend"] }
+whisper-rs = { version = "0.16", features = ["tracing_backend"], optional = true }
 ureq = { version = "3", features = ["platform-verifier"] }
 # harlo's own updates: the download's SHA-256, checked against the release's
 # signed manifest.
@@ -29,6 +35,7 @@ harlo-update-signing = { path = "../harlo-update-signing" }
 # Phone pairing: NaCl box (X25519 + XSalsa20-Poly1305), as the phone's tweetnacl.
 crypto_box = { version = "0.9", features = ["std"] }
 base64 = "0.22"
+libc = "0.2"
 
 [dev-dependencies]
 # Signs stand-in release manifests in the update tests.

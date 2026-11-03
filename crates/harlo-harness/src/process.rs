@@ -129,16 +129,19 @@ impl Harness {
             anyhow::bail!("harlo can't run {} sessions yet", cfg.kind.label());
         }
         if cfg.kind == HarnessKind::Claude {
-            let program = match &cfg.program {
-                Some(p) => p.clone(),
-                None => resolve_program(cfg.kind).context("could not find the `claude` binary")?,
+            let program = match (&cfg.program, &cfg.remote) {
+                (Some(p), _) => p.clone(),
+                // There: its PATH finds it. (It needn't be on this PC too.)
+                (None, Some(_)) => PathBuf::from(cfg.kind.as_str()),
+                (None, None) => resolve_program(cfg.kind).context("could not find the `claude` binary")?,
             };
             return crate::claude_run::spawn(cfg, program);
         }
         if cfg.kind == HarnessKind::OpenCode {
-            let program = match &cfg.program {
-                Some(p) => p.clone(),
-                None => resolve_program(cfg.kind).context("could not find the `opencode` binary")?,
+            let program = match (&cfg.program, &cfg.remote) {
+                (Some(p), _) => p.clone(),
+                (None, Some(_)) => PathBuf::from(cfg.kind.as_str()),
+                (None, None) => resolve_program(cfg.kind).context("could not find the `opencode` binary")?,
             };
             return crate::opencode_run::spawn(cfg, program);
         }

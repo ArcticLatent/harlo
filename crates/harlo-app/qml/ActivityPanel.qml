@@ -30,8 +30,14 @@ Rectangle {
     function icon(kind) {
         return ({ command: "terminal-box", edit: "code-box", write: "add-circle", read: "eye", search: "search", web: "global", agent: "robot-2" })[kind] || "sparkling"
     }
-    /// The file's full path (the agent may give it relative to the folder).
-    function fullPath(p) { return p.startsWith("/") || p.startsWith("ssh://") ? p : session.cwd + "/" + p }
+    /// The file's full path (the agent may give it relative to the folder;
+    /// on another machine, an absolute path is that machine's).
+    function fullPath(p) {
+        if (p.startsWith("ssh://")) return p
+        const cwd = session.cwd
+        const host = cwd.startsWith("ssh://") ? cwd.substring(0, cwd.indexOf("/", 6)) : ""
+        return p.startsWith("/") ? host + p : cwd + "/" + p
+    }
     /// The log as Markdown (Copy).
     function markdown() {
         const lines = ["# " + (session.title || "Session") + ": what the agent did", ""]
@@ -52,7 +58,7 @@ Rectangle {
     // While a run goes, keep up.
     Timer { interval: 2000; repeat: true; running: root.visible && root.session.status === "busy"; onTriggered: root.reload() }
     // Copies through a hidden TextEdit (QML has no clipboard API).
-    TextEdit { id: clip; visible: false; function copyText(t) { text = t; selectAll(); copy(); deselect(); text = "" } }
+    TextEdit { id: copier; visible: false; function copyText(t) { text = t; selectAll(); copy(); deselect(); text = "" } }
 
     ColumnLayout {
         anchors.fill: parent
@@ -67,7 +73,7 @@ Rectangle {
                 iconName: "survey"
                 tip: "Copy the log as Markdown"
                 enabled: !!root.log && root.log.actions.length > 0
-                onClicked: { clip.copyText(root.markdown()); copiedTip.show("Copied", 1200) }
+                onClicked: { copier.copyText(root.markdown()); copiedTip.show("Copied", 1200) }
                 ToolTip { id: copiedTip }
             }
             PanelButton { iconName: "refresh"; tip: "Refresh"; onClicked: root.reload() }
@@ -141,7 +147,7 @@ Rectangle {
                 bottomPadding: 7
                 onClicked: {
                     if (row.isFile) Workspace.openFileTab(root.fullPath(modelData.target))
-                    else if (modelData.kind === "command") { clip.copyText(modelData.target); copied.show("Command copied", 1200) }
+                    else if (modelData.kind === "command") { copier.copyText(modelData.target); copied.show("Command copied", 1200) }
                 }
                 ToolTip { id: copied }
                 ToolTip.visible: hovered && !copied.visible

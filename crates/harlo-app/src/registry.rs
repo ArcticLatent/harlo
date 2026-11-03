@@ -35,10 +35,10 @@ pub fn restart_idle(harness: &str) {
     }
 }
 
-/// The same for a change no session should go on without: a working one
-/// starts again once it has finished.
-pub fn restart_when_idle(harness: &str) {
-    for live in map().lock().unwrap().values().filter(|l| l.harness == harness) {
+/// Each of the harness's sessions on that machine ("" this one): restarted
+/// once it's idle, to pick up a change to its setup.
+pub fn restart_when_idle_on(harness: &str, host: &str) {
+    for live in map().lock().unwrap().values().filter(|l| l.harness == harness && harlo_core::remote::host_of(&l.cwd).unwrap_or_default() == host) {
         live.handle.restart_when_idle();
     }
 }

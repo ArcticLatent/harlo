@@ -40,11 +40,18 @@ Rectangle {
         spacing: 6
 
         // Plan use at a glance: the provider you used last (or the one
-        // pinned from its menu), its fullest limit window, as a ring.
+        // pinned from its menu), its fullest limit window, as a ring. Of the
+        // machine shown: another's are what its Claude sessions said.
         Item {
             id: planMeter
             objectName: "planMeter"
-            readonly property var accounts: { try { return JSON.parse(Workspace.quotaJson || "{}").accounts || [] } catch (e) { return [] } }
+            readonly property string host: Workspace.instance
+            readonly property var accounts: {
+                try {
+                    if (host === "") return JSON.parse(Workspace.quotaJson || "{}").accounts || []
+                    return (JSON.parse(Workspace.hostLimitsJson || "{}")[host] || {}).accounts || []
+                } catch (e) { return [] }
+            }
             // Each provider with limits, at its fullest window (of any of
             // its accounts).
             readonly property var providers: {
@@ -61,7 +68,8 @@ Rectangle {
             // Used last, with no limits to show (a model on your own server,
             // or a provider harlo reads no limits for): its logo, no ring.
             readonly property string lastOther: Workspace.meterPin === "" && Workspace.meterLast !== "" && !providers.some(p => p.provider === Workspace.meterLast) ? Workspace.meterLast : ""
-            readonly property bool lastLocal: lastOther !== "" && Accounts.revision >= 0
+            // (This computer's servers: another machine's aren't known here.)
+            readonly property bool lastLocal: lastOther !== "" && host === "" && Accounts.revision >= 0
                 && ["pi", "omp", "opencode", "hermes", ""].some(a => JSON.parse(Accounts.servers(a)).some(s => s.name === lastOther && s.place !== "online"))
                 || ["ollama", "llama.cpp", "lm-studio"].includes(lastOther)
             // Pinned, else the last used, else the fullest.
@@ -73,7 +81,10 @@ Rectangle {
             readonly property real f: shown ? Math.min(1, shown.f) : 0
             readonly property color tint: !shown ? Theme.accent : shown.reached || shown.f >= 0.95 ? Theme.error : shown.f >= 0.75 ? Theme.warning : Theme.accent
             function percent(p) { return Math.round(p.f * 100) + "%" }
-            visible: (shown !== null && shown !== undefined) || lastOther !== ""
+            // Another machine with nothing used there yet: an empty ring,
+            // so the meter doesn't look gone.
+            readonly property bool none: host !== "" && !shown && lastOther === ""
+            visible: (shown !== null && shown !== undefined) || lastOther !== "" || none
             width: 38
             height: meterCol.implicitHeight + 10
             Rectangle { anchors.fill: parent; radius: 10; color: meterHover.hovered || meterMenu.visible ? Theme.rowHover : "transparent"; Behavior on color { ColorAnimation { duration: Theme.hoverMotion } } }
@@ -130,7 +141,7 @@ Rectangle {
                 Label {
                     objectName: "planMeterPercent"
                     anchors.horizontalCenter: parent.horizontalCenter
-                    text: planMeter.lastOther !== "" ? (planMeter.lastLocal ? "local" : "—") : planMeter.shown ? planMeter.percent(planMeter.shown) : ""
+                    text: planMeter.lastOther !== "" ? (planMeter.lastLocal ? "local" : "—") : planMeter.shown ? planMeter.percent(planMeter.shown) : planMeter.none ? "—" : ""
                     color: Theme.textMuted
                     font.pixelSize: Theme.px(10)
                 }
@@ -138,8 +149,10 @@ Rectangle {
             HoverHandler { id: meterHover; cursorShape: Qt.PointingHandCursor }
             TapHandler { onTapped: meterMenu.popup(planMeter, planMeter.width + 8, 0) }
             ToolTip.visible: meterHover.hovered && !meterMenu.visible
-            ToolTip.text: planMeter.lastOther !== "" ? planMeter.lastOther + " (used last): " + (planMeter.lastLocal ? "runs on your own server, no usage limits" : "no usage limits harlo can read") + "\nClick to switch"
-                : planMeter.shown ? planMeter.shown.provider + ": " + planMeter.percent(planMeter.shown) + " of the " + planMeter.shown.label + " limit" + (planMeter.shown.reached ? " (limit reached)" : "")
+            readonly property string where: host !== "" ? " on " + host : ""
+            ToolTip.text: planMeter.none ? "Nothing used on " + planMeter.host + " yet: its limits show once a session there works (Claude's say how much is used)"
+                : planMeter.lastOther !== "" ? planMeter.lastOther + " (used last" + planMeter.where + "): " + (planMeter.lastLocal ? "runs on your own server, no usage limits" : "no usage limits harlo can read") + "\nClick to switch"
+                : planMeter.shown ? planMeter.shown.provider + planMeter.where + ": " + planMeter.percent(planMeter.shown) + " of the " + planMeter.shown.label + " limit" + (planMeter.shown.reached ? " (limit reached)" : "")
                 + (Workspace.meterPin === planMeter.shown.provider ? " (pinned)" : Workspace.meterLast === planMeter.shown.provider ? " (used last)" : "") + "\nClick to switch" : ""
             ToolTip.delay: 400
             // Whose limits to show.

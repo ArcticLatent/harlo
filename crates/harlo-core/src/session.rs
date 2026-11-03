@@ -87,6 +87,10 @@ pub struct SessionMetaInfo {
     /// The context size the agent compacts at on its own (0: it won't, or
     /// isn't known).
     pub compact_at: u64,
+    /// The agent refused a message for want of a login or API key.
+    pub needs_login: bool,
+    /// The agent's last message was refused: its plan's limit is used up.
+    pub limit_refused: bool,
     /// Session cost in USD so far.
     pub cost: f64,
 }
@@ -441,6 +445,10 @@ impl Driver {
             self.events = None;
             h.kill();
             set_status(st, SessionStatus::Offline, pending);
+            if st.meta.needs_login {
+                st.meta.needs_login = false;
+                pending.push(SessionUpdate::Meta(st.meta.clone()));
+            }
         }
     }
 
@@ -583,32 +591,37 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                     Some(r) => harlo_harness::opencode_remote_saved(r, &path),
                     None => harlo_harness::opencode::saved(&path),
                 };
-                let _ = tx.send(Aux::Loaded(saved));
+                let _ = tx.send(Aux::Loaded(saved, 0));
                 return;
             }
             // An ACP agent's: its replay (it has no file either).
             if harlo_harness::acp::is_acp(kind) {
                 let program = if remote.is_some() { Some(std::path::PathBuf::from(kind.as_str())) } else { program };
                 let saved = program.map(|p| harlo_harness::acp::saved(&path, &p, remote.as_ref())).unwrap_or_default();
-                let _ = tx.send(Aux::Loaded(saved));
+                let _ = tx.send(Aux::Loaded(saved, 0));
                 return;
             }
-            // A remote session's file comes over SSH.
-            let (saved, size) = if crate::remote::is_remote(&path) {
-                match crate::remote::read(&path) {
-                    Ok(b) => (Ok(harlo_harness::store::parse_saved_for(kind, &String::from_utf8_lossy(&b))), b.len() as u64),
-                    Err(e) => (Err(e), 0),
+            // A remote session: read from its copy here, brought up to date
+            // over SSH with what was added.
+            let (saved, size, missing) = if crate::remote::is_remote(&path) {
+                match crate::remote::local_copy(&path) {
+                    Ok(copy) => (
+                        harlo_harness::store::read_saved_for(kind, &copy).map_err(anyhow::Error::from),
+                        std::fs::metadata(&copy).map_or(0, |m| m.len()),
+                        harlo_harness::mirror::missing(&copy),
+                    ),
+                    Err(e) => (Err(e), 0, 0),
                 }
             } else {
                 let size = std::fs::metadata(&path).map_or(0, |m| m.len());
-                (harlo_harness::store::read_saved_for(kind, &path).map_err(anyhow::Error::from), size)
+                (harlo_harness::store::read_saved_for(kind, &path).map_err(anyhow::Error::from), size, 0)
             };
             let saved = saved.unwrap_or_else(|e| {
                 tracing::warn!("reading {}: {e:#}", path.display());
                 Default::default()
             });
             harlo_harness::store::after_reading(size);
-            let _ = tx.send(Aux::Loaded(saved));
+            let _ = tx.send(Aux::Loaded(saved, missing));
         });
     }
 
@@ -647,14 +660,50 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                     }
                     continue;
                 }
-                dirty |= st.transcript.apply(&ev);
+                // Its host disconnected by hand: said as that, not as a failure.
+                let by_hand = matches!(ev, HarnessEvent::Exited { .. }).then(|| driver.cfg.remote.as_ref().map(|r| r.host.clone()).filter(|h| crate::remote::is_disconnected(h))).flatten();
+                dirty |= match by_hand {
+                    Some(host) => st.transcript.apply(&HarnessEvent::Notice { level: harlo_harness::NoticeLevel::Info, text: format!("Disconnected from {host}."), system: false }),
+                    None => st.transcript.apply(&ev),
+                };
+                let login = match &ev {
+                    HarnessEvent::Response { success: false, error: Some(e), .. } | HarnessEvent::PromptResult { error: Some(e), .. } => Some(asks_for_login(e)),
+                    HarnessEvent::Exited { stderr_tail, .. } => Some(asks_for_login(stderr_tail)),
+                    // (How Claude says it.)
+                    HarnessEvent::Notice { level: harlo_harness::NoticeLevel::Error, text, .. } => asks_for_login(text).then_some(true),
+                    HarnessEvent::MessageStart { .. } => Some(false),
+                    _ => None,
+                };
+                let refused = match &ev {
+                    HarnessEvent::Notice { level: harlo_harness::NoticeLevel::Error, text, .. } => refused_by_limit(text).then_some(true),
+                    HarnessEvent::MessageStart { .. } => Some(false),
+                    _ => None,
+                };
+                if let Some(refused) = refused.filter(|r| *r != st.meta.limit_refused) {
+                    st.meta.limit_refused = refused;
+                    pending.push(SessionUpdate::Meta(st.meta.clone()));
+                }
+                if let Some(login) = login.filter(|l| *l != st.meta.needs_login) {
+                    st.meta.needs_login = login;
+                    pending.push(SessionUpdate::Meta(st.meta.clone()));
+                }
                 if driver.restart_settled && st.status == SessionStatus::Idle {
                     driver.stop_idle(&mut st, &mut pending);
                 }
             }
             Some(aux) = aux_rx.recv() => match aux {
-                Aux::Loaded(saved) => {
+                Aux::Loaded(saved, missing) => {
                     st.transcript.load_messages(&saved.messages);
+                    // (A copy is the start of the host's file: what didn't
+                    // come is the end, its latest messages.)
+                    if missing > 0 {
+                        let host = driver.cfg.remote.as_ref().map(|r| r.host.clone()).unwrap_or_default();
+                        let text = format!(
+                            "Not all of this session came over from {host}: its last {} (the latest messages) aren't shown. Close it and open it again to fetch the rest.",
+                            crate::attach::human_size(missing)
+                        );
+                        st.transcript.apply(&HarnessEvent::Notice { level: harlo_harness::NoticeLevel::Warning, text, system: false });
+                    }
                     st.meta.first_message = first_user_text(&saved.messages);
                     if !saved.name.is_empty() {
                         st.meta.name = saved.name;
@@ -703,7 +752,8 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                     // pi: its to-do list, from the last time it changed (none
                     // while the extension is off: it wouldn't be kept up).
                     if kind == HarnessKind::Pi {
-                        let todos = Some(&messages).filter(|_| crate::pi_packages::todos_enabled()).and_then(|m| crate::pi_packages::todos_in(m)).unwrap_or_else(|| json!([]));
+                        let host = driver.cfg.remote.as_ref().map(|r| r.host.clone()).unwrap_or_default();
+                        let todos = Some(&messages).filter(|_| crate::pi_packages::todos_enabled_on(&host)).and_then(|m| crate::pi_packages::todos_in(m)).unwrap_or_else(|| json!([]));
                         if todos != st.todos && !(st.todos.is_null() && todos == json!([])) {
                             st.todos = todos;
                             pending.push(SessionUpdate::Todos(st.todos.clone()));
@@ -984,8 +1034,10 @@ fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<Sessi
             }
             driver.fell_back = false;
             // Mid-run, or with a failure code: worth knowing. (What it said,
-            // not the end of a stack trace.)
-            if driver.model_gone.is_none() && (st.status == SessionStatus::Busy || code.is_some_and(|c| c != 0)) {
+            // not the end of a stack trace. Its host disconnected by hand:
+            // nothing went wrong, and that was asked first if it was working.)
+            let disconnected = driver.cfg.remote.as_ref().is_some_and(|r| crate::remote::is_disconnected(&r.host));
+            if !disconnected && driver.model_gone.is_none() && (st.status == SessionStatus::Busy || code.is_some_and(|c| c != 0)) {
                 let last = stderr_tail.lines().rev().map(str::trim).find(|l| !l.is_empty() && !l.starts_with("at ")).unwrap_or("");
                 let message = format!("{} stopped{}{}", driver.cfg.kind.as_str(), code.map_or(String::new(), |c| format!(" (exit {c})")), if last.is_empty() { String::new() } else { format!(": {last}") });
                 pending.push(SessionUpdate::Notable(Notable::Error { message }));
@@ -1056,8 +1108,9 @@ fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<Sessi
 }
 
 enum Aux {
-    /// The session file's branch, model and thinking level.
-    Loaded(harlo_harness::store::SavedSession),
+    /// The session file's branch, model and thinking level; with a remote
+    /// one's, how much of it didn't come over (its end).
+    Loaded(harlo_harness::store::SavedSession, u64),
     /// Messages from the harness (`get_messages`).
     History(Vec<Value>),
     State(Value),
@@ -1117,23 +1170,25 @@ fn apply_stats(meta: &mut SessionMetaInfo, stats: &Value) {
     meta.cost = stats["cost"].as_f64().unwrap_or(0.0);
 }
 
-/// Where the agent compacts, from its settings here (a remote host's aren't
-/// read for this).
+/// Where the agent compacts, from its settings (another machine's as last
+/// read there: until they have been, none).
 fn compact_at(cfg: &HarnessConfig, meta: &SessionMetaInfo) -> u64 {
-    if cfg.remote.is_some() || meta.context_window == 0 {
+    if meta.context_window == 0 {
         return 0;
     }
     let window = meta.context_window;
-    let at = match cfg.kind {
-        HarnessKind::Pi => {
+    let (provider, model) = meta.model_id.split_once('/').unwrap_or(("", &meta.model_id));
+    let at = match (&cfg.remote, cfg.kind) {
+        (Some(r), HarnessKind::Pi) => crate::compaction::pi_on(&r.host, &harlo_harness::on_host(&cfg.cwd), &meta.model_id, window),
+        (Some(r), HarnessKind::Omp) => crate::compaction::omp_on(&r.host, &meta.model_id, window),
+        (Some(r), HarnessKind::Hermes) => crate::compaction::hermes_on(&r.host, model, provider, window),
+        (Some(_), _) => None,
+        (None, HarnessKind::Pi) => {
             let dir = cfg.env.iter().find(|(k, _)| k == "PI_CODING_AGENT_DIR").map(|(_, v)| std::path::Path::new(v));
             crate::compaction::pi(dir, &cfg.cwd, &meta.model_id, window)
         }
-        HarnessKind::Omp => crate::compaction::omp(&meta.model_id, window),
-        HarnessKind::Hermes => {
-            let (provider, model) = meta.model_id.split_once('/').unwrap_or(("", &meta.model_id));
-            crate::compaction::hermes(model, provider, window)
-        }
+        (None, HarnessKind::Omp) => crate::compaction::omp(&meta.model_id, window),
+        (None, HarnessKind::Hermes) => crate::compaction::hermes(model, provider, window),
         _ => None,
     };
     at.unwrap_or(0)
@@ -1268,8 +1323,32 @@ fn ui_request(raw: &Value) -> UiRequest {
     }
 }
 
+/// An agent's error that says it has no login or key for the model.
+fn refused_by_limit(error: &str) -> bool {
+    error.contains("You've hit your")
+}
+
+fn asks_for_login(error: &str) -> bool {
+    ["/login", "No API key", "Failed to authenticate", "Not logged in", "Invalid API key"].iter().any(|said| error.contains(said))
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_refusal_for_a_used_up_limit_is_told_apart() {
+        assert!(super::refused_by_limit("You've hit your 5-hour limit · resets 4:10pm (America/Toronto)"));
+        assert!(super::refused_by_limit("You've hit your weekly limit · resets Oct 18, 1pm (America/Toronto)"));
+        assert!(!super::refused_by_limit("Rate limit reached"));
+    }
+
+    #[test]
+    fn a_refusal_for_want_of_a_login_is_told_apart() {
+        assert!(super::asks_for_login("No API key found for openai.\n\nUse /login to log into a provider via OAuth or API key."));
+        assert!(super::asks_for_login("No default model selected. Use /login, set an API key environment variable"));
+        assert!(super::asks_for_login("Failed to authenticate: OAuth session expired and could not be refreshed"));
+        assert!(!super::asks_for_login("Rate limit reached"));
+    }
+
     use super::*;
 
     #[test]

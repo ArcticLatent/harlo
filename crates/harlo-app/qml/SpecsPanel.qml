@@ -29,6 +29,11 @@ Rectangle {
     onSessionKeyChanged: if (visible) load()
     onVisibleChanged: if (visible) load()
     Component.onCompleted: if (visible) load()
+    // (Another machine's: read there, then shown.)
+    Connections {
+        target: Workspace
+        function onSpecsReady() { if (root.visible) root.load() }
+    }
 
     readonly property string writePrompt: "Write this project's specs: SPEC.md files that hold its intent between sessions. Start with the root SPEC.md (the product: its goal, who it's for, its main parts and the decisions behind them), then one SPEC.md in the folder of each main part (what it's for, how it behaves, its boundaries, and why it's built that way). Read the code to learn them, keep each short and about intent rather than a copy of the code, and tell me what you couldn't tell from the code."
 
@@ -48,7 +53,7 @@ Rectangle {
             Layout.fillWidth: true
             visible: root.st.project < 0
             wrapMode: Text.Wrap
-            text: root.sessionKey === "" ? "No session selected." : "Specs are for sessions in a project on this computer."
+            text: root.sessionKey === "" ? "No session selected." : "Specs are for sessions in a project."
             color: Theme.muted
         }
 
@@ -128,11 +133,21 @@ Rectangle {
             }
         }
 
+        Label {
+            Layout.margins: 18
+            Layout.fillWidth: true
+            visible: root.st.project >= 0 && !!root.st.loading
+            wrapMode: Text.Wrap
+            text: "Reading the specs on " + root.st.host + "…"
+            color: Theme.muted
+            font.pixelSize: Theme.px(12.5)
+        }
+
         // None yet.
         ColumnLayout {
             Layout.fillWidth: true
             Layout.margins: 18
-            visible: root.st.project >= 0 && root.st.specs.length === 0
+            visible: root.st.project >= 0 && root.st.specs.length === 0 && !root.st.loading
             spacing: 10
             Label {
                 Layout.fillWidth: true

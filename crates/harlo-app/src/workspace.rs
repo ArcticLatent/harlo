@@ -30,9 +30,12 @@ pub mod qobject {
         #[qproperty(i32, project_count, cxx_name = "projectCount")]
         /// Plan limits (omp's accounts, Claude's): `{ accounts, updatedAt, error, loading }`.
         #[qproperty(QString, quota_json, cxx_name = "quotaJson")]
+        /// Other machines' plan limits, as their Claude sessions say them:
+        /// `{ "<host>": { accounts, updatedAt } }` (this one's: `quotaJson`).
+        #[qproperty(QString, host_limits_json, cxx_name = "hostLimitsJson")]
         /// Whose limits the sidebar meter shows: the account the last busy
-        /// session used ("Claude", or a model provider such as
-        /// "openai-codex"), unless one is pinned.
+        /// session on the machine shown used ("Claude", or a model provider
+        /// such as "openai-codex"), unless one is pinned.
         #[qproperty(QString, meter_last, cxx_name = "meterLast")]
         #[qproperty(QString, meter_pin, cxx_name = "meterPin")]
         /// Bumped when a remote file's local copy (`localCopy`) is ready.
@@ -64,6 +67,8 @@ pub mod qobject {
         #[qproperty(QString, instance)]
         /// The instance harlo starts on ("" this computer).
         #[qproperty(QString, default_instance, cxx_name = "defaultInstance")]
+        /// Sessions to continue when a limit resets: `{ session: unix ms }`.
+        #[qproperty(QString, limit_resumes, cxx_name = "limitResumes")]
         /// Appearance settings (saved; change them with the `choose_*` calls).
         #[qproperty(QString, theme_family, cxx_name = "themeFamily")]
         /// system | dark | light
@@ -266,6 +271,9 @@ pub mod qobject {
         /// Re-reads plan limits (`omp usage --json`) in the background.
         #[qinvokable]
         fn refresh_quota(self: Pin<&mut Workspace>);
+        /// Another machine's limits, asked for now (Settings → Plan limits).
+        #[qinvokable]
+        fn refresh_host_quota(self: Pin<&mut Workspace>, host: &QString);
         /// Every half minute: a limit nearly or fully used that has reset
         /// is told of (a sound of its own), and its numbers asked for again.
         #[qinvokable]
@@ -429,6 +437,18 @@ pub mod qobject {
         /// answered by `branchesReady`.
         #[qinvokable]
         fn request_branches(self: &Workspace, project_id: i32);
+        /// The folder a new session in a project (-1: the home folder of the
+        /// instance shown) starts in; "" while a host's home isn't known yet.
+        #[qinvokable]
+        fn draft_folder(self: &Workspace, project_id: i32) -> QString;
+        /// What an agent offers on the host of a new session's folder,
+        /// answered by `hostModelsReady`.
+        #[qinvokable]
+        fn request_host_models(self: Pin<&mut Workspace>, project_id: i32, harness: &QString);
+        /// The same for a session's folder (`folder`, an `ssh://` path),
+        /// answered by `modelsAtReady`.
+        #[qinvokable]
+        fn request_models_at(self: Pin<&mut Workspace>, folder: &QString, harness: &QString);
         /// The sessions `key`'s agent started (orchestration), as its
         /// subagent dock lists them, JSON.
         #[qinvokable]
@@ -496,6 +516,9 @@ pub mod qobject {
         /// {path, branch, base, mainBranch, exists, dirty, ahead, behind}.
         #[qinvokable]
         fn worktree_info(self: &Workspace, key: &QString) -> QString;
+        /// Whether a session runs in a worktree harlo made (asks nothing).
+        #[qinvokable]
+        fn in_worktree(self: &Workspace, key: &QString) -> bool;
         /// Merges the session's worktree branch into the main checkout.
         #[qinvokable]
         fn merge_worktree(self: Pin<&mut Workspace>, key: &QString);
@@ -516,6 +539,26 @@ pub mod qobject {
         /// Shows a notice (the bar over the chat).
         #[qinvokable]
         fn show_notice(self: Pin<&mut Workspace>, text: &QString, error: bool);
+        /// Continues a session (its message goes then, even after a restart)
+        /// once a limit has reset, at `at` (unix ms).
+        #[qinvokable]
+        fn resume_at_reset(self: Pin<&mut Workspace>, key: &QString, at: f64);
+        #[qinvokable]
+        fn cancel_resume(self: Pin<&mut Workspace>, key: &QString);
+        /// When a session continues (unix ms), 0 if it isn't going to.
+        #[qinvokable]
+        fn resume_at_for(self: &Workspace, key: &QString) -> f64;
+        /// Sessions on a host that are working or waiting on you (closing the
+        /// connection stops them).
+        #[qinvokable]
+        fn working_on_host(self: &Workspace, name: &QString) -> i32;
+        /// Keeps one of harlo's windows (by its title) above the others, or
+        /// lets it go. (Wayland ignores Qt's hint: KDE's window manager does it.)
+        #[qinvokable]
+        fn keep_window_above(self: &Workspace, title: &QString, on: bool);
+        /// Looks at the hosts' sessions now (one has just connected).
+        #[qinvokable]
+        fn check_remote_sessions(self: Pin<&mut Workspace>);
         /// Shows another instance ("" this computer): its projects, sessions
         /// and tabs.
         #[qinvokable]
@@ -596,10 +639,29 @@ pub mod qobject {
         #[qsignal]
         #[cxx_name = "raiseRequested"]
         fn raise_requested(self: Pin<&mut Workspace>);
+        /// Another machine's worktree, asked there (`worktree_info` gave its
+        /// record first).
+        #[qsignal]
+        #[cxx_name = "worktreeInfoReady"]
+        fn worktree_info_ready(self: Pin<&mut Workspace>, key: &QString, json: &QString);
+        /// What specsJson says about another machine's project was read
+        /// again, and changed.
+        #[qsignal]
+        #[cxx_name = "specsReady"]
+        fn specs_ready(self: Pin<&mut Workspace>);
         /// A project's branches (`request_branches`), current first.
         #[qsignal]
         #[cxx_name = "branchesReady"]
         fn branches_ready(self: Pin<&mut Workspace>, project_id: i32, branches: &QStringList);
+        /// `request_host_models`: `{ models: [{ id, name, local }] }` or
+        /// `{ error }`, as JSON.
+        #[qsignal]
+        #[cxx_name = "hostModelsReady"]
+        fn host_models_ready(self: Pin<&mut Workspace>, project_id: i32, harness: &QString, json: &QString);
+        /// What `request_models_at` asked for.
+        #[qsignal]
+        #[cxx_name = "modelsAtReady"]
+        fn models_at_ready(self: Pin<&mut Workspace>, folder: &QString, harness: &QString, json: &QString);
         /// A session file's branches (`request_session_branches`), JSON.
         #[qsignal]
         #[cxx_name = "sessionBranchesReady"]
@@ -651,8 +713,8 @@ pub mod qobject {
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::{Arc, OnceLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::{QByteArray, QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QStringList, QVariant, QVector};
@@ -789,6 +851,7 @@ pub struct WorkspaceRust {
     schedules_revision: i32,
     modes_revision: i32,
     quota_json: QString,
+    host_limits_json: QString,
     meter_last: QString,
     meter_pin: QString,
     copies_revision: i32,
@@ -804,6 +867,11 @@ pub struct WorkspaceRust {
     /// When limits were last asked for (a turn on a provider with limits
     /// asks again, a minute apart at most).
     limits_asked: Option<std::time::Instant>,
+    /// When each other machine's limits were last asked for.
+    host_limits_asked: HashMap<String, std::time::Instant>,
+    /// Each other machine's pi: whether its "openai" sign-in is a ChatGPT
+    /// login (its turns then use the OpenAI Codex plan).
+    host_pi_openai_plan: HashMap<String, bool>,
     /// Resets told of ("provider|label|when"), and when harlo started (unix
     /// ms; resets before then aren't).
     limits_told: std::collections::HashSet<String>,
@@ -831,6 +899,7 @@ pub struct WorkspaceRust {
     tab_keys: Vec<String>,
     instance: QString,
     default_instance: QString,
+    limit_resumes: QString,
     /// The other instances' tabs (and active tab), kept while away.
     instance_tabs: HashMap<String, (Vec<String>, String)>,
     /// Orchestration on each host, as last looked at (Settings).
@@ -840,6 +909,9 @@ pub struct WorkspaceRust {
     restore_tabs: Option<(Vec<PathBuf>, Option<PathBuf>)>,
     /// Uncommitted changed files per session folder (inside a repository).
     change_counts: HashMap<PathBuf, usize>,
+    /// Another machine's folders: their repository, as the change count
+    /// found it (asked there without waiting).
+    remote_repo_roots: HashMap<PathBuf, PathBuf>,
     /// Folders included in the last count, repositories or not.
     change_checked: HashSet<PathBuf>,
     /// Wakes the change counter early.
@@ -873,9 +945,6 @@ pub struct WorkspaceRust {
     /// Remote files' stamps (`fileStamp`): the last known, and whether a
     /// fresh one is being asked for.
     remote_stamps: Arc<std::sync::Mutex<HashMap<String, (String, bool)>>>,
-    /// Remote session files as last read for their branches (the branch
-    /// dialog previews and continues from these).
-    branch_texts: Arc<std::sync::Mutex<HashMap<String, String>>>,
     branch_reads: Arc<std::sync::Mutex<BranchReads>>,
 }
 
@@ -892,12 +961,82 @@ struct BranchReads {
 /// Remote project folders, grouped by host name.
 type RemoteRoots = Vec<(String, Vec<PathBuf>)>;
 
+/// Remote projects, grouped by host, for the remote session scan.
+/// A worktree's state for the finish dialog: its main checkout's branch,
+/// and its commits and changes against its base (blocking: git there).
+fn worktree_details(w: &WorktreeRecord, project: Option<&Path>, exists: bool) -> serde_json::Value {
+    let main = project.and_then(git::repo_root);
+    let main_branch = main.as_ref().and_then(|m| git::status(m).ok()).map(|s| s.branch).unwrap_or_default();
+    let base = if w.base.is_empty() { main_branch.clone() } else { w.base.clone() };
+    let summary = if exists { git::worktree_summary(&w.path, &base).ok() } else { None }.unwrap_or_default();
+    json!({
+        "path": w.path.to_string_lossy(),
+        "branch": w.branch,
+        "base": base,
+        "mainBranch": main_branch,
+        "exists": exists,
+        "dirty": summary.dirty,
+        "ahead": summary.ahead,
+        "behind": summary.behind,
+    })
+}
+
+fn remote_roots_of<'a>(paths: impl Iterator<Item = &'a PathBuf>) -> RemoteRoots {
+    let mut roots = RemoteRoots::new();
+    for path in paths {
+        if let Some(host) = harlo_core::remote::host_of(path) {
+            match roots.iter_mut().find(|(h, _)| *h == host) {
+                Some((_, list)) => list.push(path.clone()),
+                None => roots.push((host, vec![path.clone()])),
+            }
+        }
+    }
+    roots
+}
+
+fn parse_resumes(text: &str) -> serde_json::Map<String, serde_json::Value> {
+    serde_json::from_str(text).unwrap_or_default()
+}
+
+/// Which sessions' limits have reset by `now` (a minute's grace: the limit
+/// must have lifted), and whether it's been so long there's no point any more.
+fn due_resumes(resumes: &serde_json::Map<String, serde_json::Value>, now: i64) -> Vec<(String, bool)> {
+    resumes
+        .iter()
+        .filter_map(|(id, at)| {
+            let at = at.as_i64()?;
+            (now >= at + 60_000).then(|| (id.clone(), now > at + 24 * 3600 * 1000))
+        })
+        .collect()
+}
+
+/// Oh My Pi, started in the home folder, moves to a temporary one unless told
+/// not to: its session wouldn't be where it was started.
+fn omp_home_arg(kind: HarnessKind, cwd: &Path) -> Option<String> {
+    if kind != HarnessKind::Omp {
+        return None;
+    }
+    let home = match harlo_core::remote::host_of(cwd) {
+        Some(host) => harlo_core::remote::info_of(&host)?.home,
+        None => std::env::var("HOME").ok()?,
+    };
+    is_home(&harlo_harness::on_host(cwd), &home).then(|| "--allow-home".to_owned())
+}
+
+fn is_home(folder: &str, home: &str) -> bool {
+    !home.is_empty() && folder.trim_end_matches('/') == home.trim_end_matches('/')
+}
+
 /// Whether the agent's sessions have a shield. pi's is its permission
-/// extension, when it's on (here: harlo doesn't look on other machines).
+/// extension, when it's on (another machine's: as its settings were last
+/// read, without waiting for them).
 fn has_shield(harness: &str, cwd: &Path) -> bool {
     match harness {
         "omp" | "demo" | "claude" | "opencode" | "hermes" => true,
-        "pi" => harlo_core::remote::host_of(cwd).is_none() && harlo_core::pi_packages::enabled(harlo_core::pi_packages::PERMISSIONS),
+        "pi" => match harlo_core::remote::host_of(cwd) {
+            None => harlo_core::pi_packages::enabled(harlo_core::pi_packages::PERMISSIONS),
+            Some(h) => harlo_core::pi_packages::enabled_on(&h, harlo_core::pi_packages::PERMISSIONS, false),
+        },
         _ => false,
     }
 }
@@ -994,6 +1133,7 @@ impl cxx_qt::Initialize for Workspace {
                 this.templates_json = QString::from(&harlo_core::templates::to_json(&harlo_core::templates::parse(&get("templates"))).to_string());
                 this.look = QString::from(&Some(get("look")).filter(|l| serde_json::from_str::<serde_json::Value>(l).is_ok_and(|v| v.is_object())).unwrap_or_else(|| "{}".to_owned()));
                 this.meter_last = QString::from(&get("meter_last"));
+                this.host_limits_json = QString::from(&db.get("cache.host_quota").ok().flatten().filter(|c| serde_json::from_str::<serde_json::Value>(c).is_ok_and(|v| v.is_object())).unwrap_or_else(|| "{}".to_owned()));
                 this.meter_pin = QString::from(&get("meter_pin"));
                 // The limits last seen, until fresh ones arrive.
                 if let Some(cached) = db.get("cache.quota").ok().flatten() {
@@ -1007,9 +1147,12 @@ impl cxx_qt::Initialize for Workspace {
                     }
                 // Settings → General → Reopen tabs.
                 this.restore_tabs = (get("restore_tabs") != "0").then_some((saved_tabs, active_tab));
+                this.limit_resumes = QString::from(&get("limit_resumes"));
                 this.worktrees = worktrees;
                 this.schedules = schedules;
                 this.window_active = true;
+                // (From the start: without them no host's sessions are looked for.)
+                *this.remote_roots.lock().unwrap() = remote_roots_of(projects.iter().map(|p| &p.path));
                 this.projects = projects;
                 this.meta = meta;
                 this.other_collapsed = other_collapsed;
@@ -1076,7 +1219,12 @@ impl cxx_qt::Initialize for Workspace {
                     .await
                     .expect("change counter");
                     counter = c;
-                    if ch_thread.queue(move |this| this.apply_change_counts(dirs, counts)).is_err() {
+                    // (Other machines' repositories, for asking without SSH.)
+                    let roots: HashMap<PathBuf, PathBuf> = counter.roots().iter().filter(|(d, _)| harlo_core::remote::is_remote(d)).map(|(d, r)| (d.clone(), r.clone())).collect();
+                    if ch_thread.queue(move |mut this| {
+                        this.as_mut().rust_mut().remote_repo_roots = roots;
+                        this.apply_change_counts(dirs, counts);
+                    }).is_err() {
                         break;
                     }
                 }
@@ -1141,6 +1289,7 @@ impl cxx_qt::Initialize for Workspace {
         let start = self.saved_default_instance();
         self.as_mut().set_default_instance(QString::from(&start));
         self.as_mut().set_instance(QString::from(&start));
+        self.as_mut().show_meter_of(&start);
         // A graphics choice that didn't start last time.
         let dropped = crate::graphics::take_dropped();
         if !dropped.is_empty() {
@@ -1200,13 +1349,52 @@ impl cxx_qt::Initialize for Workspace {
             // minute, doubling to half an hour), and logged once.
             let mut retry_at: HashMap<String, (std::time::Instant, u32)> = HashMap::new();
             let mut scanned: HashSet<String> = HashSet::new();
+            let mut looked_at: HashSet<String> = HashSet::new();
             loop {
-                let hosts = roots.lock().unwrap().clone();
+                // Hosts with projects, and those connected without any
+                // (their sessions go in Other sessions).
+                let mut hosts = roots.lock().unwrap().clone();
+                for h in harlo_core::remote::hosts() {
+                    if harlo_core::remote::info_of(&h.name).is_some() && !hosts.iter().any(|(n, _)| *n == h.name) {
+                        hosts.push((h.name, Vec::new()));
+                    }
+                }
+                // One no longer looked at (removed, say): its sessions leave.
+                let now: HashSet<String> = hosts.iter().map(|(n, _)| n.clone()).collect();
+                for name in looked_at.difference(&now).cloned().collect::<Vec<_>>() {
+                    let delta = scanner.forget_host(&name);
+                    scanned.remove(&name);
+                    if !delta.is_empty() && thread.queue(move |this| this.apply_scan(delta)).is_err() {
+                        return;
+                    }
+                }
+                looked_at = now;
                 for (name, host_roots) in hosts {
-                    if retry_at.get(&name).is_some_and(|(t, _)| std::time::Instant::now() < *t) {
+                    if harlo_core::remote::is_disconnected(&name) || retry_at.get(&name).is_some_and(|(t, _)| std::time::Instant::now() < *t) {
                         continue;
                     }
                     let host = harlo_core::remote::host(&name);
+                    // A host's first look: what's quick to read shows first,
+                    // OpenCode's (its server there starting) right after.
+                    if !scanned.contains(&name)
+                        && let Some(h) = host.clone()
+                    {
+                        let r = host_roots.clone();
+                        let (s, quick) = tokio::task::spawn_blocking(move || {
+                            let mut scanner = scanner;
+                            let delta = scanner.poll_quick(&h, &r);
+                            (scanner, delta)
+                        })
+                        .await
+                        .expect("remote scan task");
+                        scanner = s;
+                        if let Ok(delta) = quick
+                            && !delta.is_empty()
+                            && thread.queue(move |this| this.apply_scan(delta)).is_err()
+                        {
+                            return;
+                        }
+                    }
                     let (s, result) = tokio::task::spawn_blocking(move || {
                         let mut scanner = scanner;
                         let result = match &host {
@@ -1220,6 +1408,15 @@ impl cxx_qt::Initialize for Workspace {
                     .expect("remote scan task");
                     scanner = s;
                     let (name, result) = result;
+                    // Disconnected meanwhile: what this look opened goes too.
+                    if harlo_core::remote::is_disconnected(&name)
+                        && let Some(host) = harlo_core::remote::host(&name)
+                    {
+                        tokio::task::spawn_blocking(move || {
+                            harlo_harness::stop_opencode_on(&host.name);
+                            harlo_core::remote::disconnect(&host);
+                        });
+                    }
                     match result {
                         Ok(delta) => {
                             if retry_at.remove(&name).is_some() {
@@ -1277,16 +1474,7 @@ impl Workspace {
         }
         let n = self.projects_revision + 1;
         self.as_mut().set_projects_revision(n);
-        // Remote projects, grouped by host, for the remote session scan.
-        let mut roots: Vec<(String, Vec<PathBuf>)> = Vec::new();
-        for p in &self.projects {
-            if let Some(host) = harlo_core::remote::host_of(&p.path) {
-                match roots.iter_mut().find(|(h, _)| *h == host) {
-                    Some((_, list)) => list.push(p.path.clone()),
-                    None => roots.push((host, vec![p.path.clone()])),
-                }
-            }
-        }
+        let roots = remote_roots_of(self.projects.iter().map(|p| &p.path));
         // (Only when they changed: collapsing a project changes nothing there.)
         let changed = {
             let mut current = self.remote_roots.lock().unwrap();
@@ -1648,7 +1836,7 @@ impl Workspace {
                 program,
                 cwd: info.cwd.clone(),
                 session: SessionTarget::Resume(info.path.clone()),
-                extra_args: overlay.iter().map(|p| format!("--config={}", harlo_harness::on_host(p))).collect(),
+                extra_args: overlay.iter().map(|p| format!("--config={}", harlo_harness::on_host(p))).chain(omp_home_arg(info.harness, &info.cwd)).collect(),
                 // (Orchestration: the agent's harlo tools know who's calling.)
                 env: vec![("HARLO_SESSION".into(), token.clone())],
                 remote,
@@ -1701,7 +1889,7 @@ impl Workspace {
             // `--ephemeral` (testing): new sessions are not saved.
             session: if std::env::args().any(|a| a == "--ephemeral") { SessionTarget::Ephemeral } else { SessionTarget::New },
             extra_args: {
-                let mut args: Vec<String> = overlay.iter().map(|p| format!("--config={}", harlo_harness::on_host(p))).collect();
+                let mut args: Vec<String> = overlay.iter().map(|p| format!("--config={}", harlo_harness::on_host(p))).chain(omp_home_arg(kind, &cwd)).collect();
                 if !model.trim().is_empty() && kind != HarnessKind::Demo {
                     args.extend(["--model".into(), model.trim().to_owned()]);
                 }
@@ -1858,6 +2046,107 @@ impl Workspace {
         QString::from(&self.key_instance(&key.to_string()).unwrap_or_else(|| "*".into()))
     }
 
+    /// A session's name that lasts: its file, once it has one.
+    fn resume_id(&self, key: &str) -> String {
+        self.live.get(key).and_then(|e| e.info.session_file.as_ref()).map_or_else(|| key.to_owned(), |f| f.to_string_lossy().into_owned())
+    }
+
+    fn store_resumes(mut self: Pin<&mut Self>, resumes: &serde_json::Map<String, serde_json::Value>) {
+        let text = serde_json::Value::Object(resumes.clone()).to_string();
+        self.save_setting("limit_resumes", &text);
+        self.as_mut().set_limit_resumes(QString::from(&text));
+    }
+
+    pub fn resume_at_reset(self: Pin<&mut Self>, key: &QString, at: f64) {
+        let id = self.resume_id(&key.to_string());
+        let mut resumes = parse_resumes(&self.limit_resumes.to_string());
+        resumes.insert(id, json!(at as i64));
+        self.store_resumes(&resumes);
+    }
+
+    pub fn cancel_resume(self: Pin<&mut Self>, key: &QString) {
+        let (key, id) = (key.to_string(), self.resume_id(&key.to_string()));
+        let mut resumes = parse_resumes(&self.limit_resumes.to_string());
+        // (Asked before it had a file: under its key.)
+        if resumes.remove(&id).is_some() | resumes.remove(&key).is_some() {
+            self.store_resumes(&resumes);
+        }
+    }
+
+    pub fn resume_at_for(&self, key: &QString) -> f64 {
+        let (key, resumes) = (key.to_string(), parse_resumes(&self.limit_resumes.to_string()));
+        resumes.get(&self.resume_id(&key)).or_else(|| resumes.get(&key)).and_then(|v| v.as_i64()).unwrap_or(0) as f64
+    }
+
+    /// The sessions whose limit has reset get their message.
+    fn continue_after_limits(mut self: Pin<&mut Self>) {
+        let mut resumes = parse_resumes(&self.limit_resumes.to_string());
+        let due = due_resumes(&resumes, chrono::Local::now().timestamp_millis());
+        if due.is_empty() {
+            return;
+        }
+        for (id, give_up) in due {
+            if give_up {
+                resumes.remove(&id);
+                continue;
+            }
+            let path = Path::new(&id);
+            // (Disconnected by hand: not until it's connected again.)
+            if harlo_core::remote::host_of(path).is_some_and(|h| harlo_core::remote::is_disconnected(&h)) {
+                continue;
+            }
+            let key = if self.live.contains_key(&id) { Some(id.clone()) } else { self.live_key_for_file(path) };
+            // Not open: opened beside the tab you're on (its host's sessions
+            // may not have arrived yet: tried again next time).
+            let key = key.or_else(|| {
+                self.sessions.contains_key(path).then(|| {
+                    let active = self.active_key.to_string();
+                    let key = self.as_mut().open(&QString::from(&id)).to_string();
+                    if !active.is_empty() {
+                        self.as_mut().activate(&active);
+                    }
+                    key
+                })
+            });
+            let Some(key) = key else { continue };
+            resumes.remove(&id);
+            // (Already going again: left alone.)
+            if self.live.get(&key).is_some_and(|e| e.info.status == SessionStatus::Busy) {
+                continue;
+            }
+            if let Some(live) = registry::get(&key) {
+                live.handle.prompt("Your usage limit has reset. Please continue where you left off.", Vec::new(), harlo_harness::SendMode::Normal);
+                self.as_mut().notify_limit(&format!("resume-{id}"), "A session is working again", "Its limit has reset, so it continues where it left off.", true);
+            }
+        }
+        self.store_resumes(&resumes);
+    }
+
+    pub fn keep_window_above(&self, title: &QString, on: bool) {
+        let title = title.to_string();
+        std::thread::spawn(move || {
+            if let Err(e) = crate::keep_above::set(&title, on) {
+                tracing::debug!("keeping {title:?} on top: {e}");
+            }
+        });
+    }
+
+    pub fn check_remote_sessions(mut self: Pin<&mut Self>) {
+        self.remote_kick.notify_one();
+        // (Just connected, say: the limits of the machine shown too.)
+        let shown = self.instance.to_string();
+        self.as_mut().refresh_host_limits(&shown, true, false);
+    }
+
+    pub fn working_on_host(&self, name: &QString) -> i32 {
+        let name = name.to_string();
+        self.live
+            .values()
+            .filter(|e| harlo_core::remote::host_of(&e.info.cwd).as_deref() == Some(name.as_str()))
+            .filter(|e| e.info.needs_input || matches!(e.info.status, SessionStatus::Busy | SessionStatus::Starting))
+            .count() as i32
+    }
+
     pub fn switch_instance(mut self: Pin<&mut Self>, name: &QString) {
         let name = name.to_string();
         let current = self.instance.to_string();
@@ -1870,6 +2159,7 @@ impl Workspace {
         let (keys, active) = self.as_mut().rust_mut().instance_tabs.remove(&name).unwrap_or_default();
         self.as_mut().rust_mut().tab_keys = keys;
         self.as_mut().set_instance(QString::from(&name));
+        self.as_mut().show_meter_of(&name);
         // Its sessions now, even if it didn't answer a while ago.
         if !name.is_empty() {
             self.remote_kick.notify_one();
@@ -1886,13 +2176,70 @@ impl Workspace {
     /// The home folder of the instance shown: this computer's, or the
     /// host's (as its check found it).
     fn instance_home(&self) -> PathBuf {
-        let inst = self.instance.to_string();
+        self.home_on(&self.instance.to_string())
+    }
+
+    /// A machine's home folder ("" this one's).
+    fn home_on(&self, inst: &str) -> PathBuf {
+        let inst = inst.to_owned();
         if !inst.is_empty()
             && let Some(home) = harlo_core::remote::info_of(&inst).map(|i| i.home).filter(|h| !h.is_empty())
         {
             return harlo_core::remote::join(&inst, &home);
         }
+        // (Its home not known yet: still that machine, never this one.)
+        if !inst.is_empty() {
+            return harlo_core::remote::join(&inst, "/");
+        }
         PathBuf::from(std::env::var_os("HOME").unwrap_or_else(|| "/".into()))
+    }
+
+    pub fn draft_folder(&self, project_id: i32) -> QString {
+        let inst = self.instance.to_string();
+        let path = match self.projects.iter().find(|p| p.id == project_id as i64) {
+            Some(p) => p.path.clone(),
+            None if !inst.is_empty() && harlo_core::remote::info_of(&inst).is_none_or(|i| i.home.is_empty()) => return QString::default(),
+            None => self.instance_home(),
+        };
+        QString::from(&path.to_string_lossy().into_owned())
+    }
+
+    pub fn request_host_models(self: Pin<&mut Self>, project_id: i32, harness: &QString) {
+        let cwd = PathBuf::from(self.draft_folder(project_id).to_string());
+        self.models_there(harness, cwd, move |this, name, json| this.host_models_ready(project_id, name, json));
+    }
+
+    pub fn request_models_at(self: Pin<&mut Self>, folder: &QString, harness: &QString) {
+        let folder = folder.to_string();
+        self.models_there(harness, PathBuf::from(&folder), move |this, name, json| this.models_at_ready(&QString::from(&folder), name, json));
+    }
+
+    /// What an agent offers on `cwd`'s machine, asked there, given to
+    /// `reply` (`{ models: [{ id, name, local }] }` or `{ error }`).
+    fn models_there(self: Pin<&mut Self>, harness: &QString, cwd: PathBuf, reply: impl FnOnce(Pin<&mut Self>, &QString, &QString) + Send + 'static) {
+        let name = harness.to_string();
+        let Some(kind) = HarnessKind::parse(&name) else { return };
+        let (_, Some(remote)) = self.launch_for(kind, &cwd) else {
+            // (Its home not known yet, say: the menu mustn't wait for ever.)
+            reply(self, harness, &QString::from(&serde_json::json!({ "error": "harlo isn't connected to it yet." }).to_string()));
+            return;
+        };
+        let thread = self.qt_thread();
+        let claude_on = harlo_core::remote::host_of(&cwd).and_then(|h| harlo_core::remote::host(&h)).filter(|_| kind == HarnessKind::Claude);
+        crate::runtime().spawn(async move {
+            // (Signed out, it would list its models all the same, and refuse the first message.)
+            let signed_out = match claude_on {
+                Some(host) => tokio::task::spawn_blocking(move || harlo_core::providers::claude_signed_in_on(&host)).await.ok().flatten() == Some(false),
+                None => false,
+            };
+            let answer = match if signed_out { Ok(Vec::new()) } else { harlo_core::providers::host_models(kind, remote, cwd).await } {
+                Ok(list) => serde_json::json!({ "models": list.into_iter().map(|(id, name, local)| serde_json::json!({ "id": id, "name": name, "local": local })).collect::<Vec<_>>() }),
+                // (Oh My Pi quits at once with no model to start on.)
+                Err(e) if e == "harness exited before responding" => serde_json::json!({ "error": "it quit before answering, which usually means it has no login there yet." }),
+                Err(e) => serde_json::json!({ "error": e }),
+            };
+            let _ = thread.queue(move |this| reply(this, &QString::from(&name), &QString::from(&answer.to_string())));
+        });
     }
 
     /// A path is this instance's.
@@ -2205,12 +2552,9 @@ impl Workspace {
     }
 
     /// What a session's project has on: `(cwd, specs, plan, commits)`
-    /// (sessions on this computer in a harlo project only).
+    /// (sessions in a harlo project only).
     fn features_of(&self, key: &str) -> Option<(PathBuf, bool, bool, bool)> {
         let cwd = self.live.get(key).map(|e| e.info.cwd.clone()).or_else(|| self.sessions.get(Path::new(key)).map(|s| s.cwd.clone()))?;
-        if harlo_core::remote::is_remote(&cwd) {
-            return None;
-        }
         let project = self
             .worktrees
             .iter()
@@ -2239,7 +2583,7 @@ impl Workspace {
             Some(id) => self
                 .projects
                 .iter()
-                .find(|p| p.id == id && !harlo_core::remote::is_remote(&p.path))
+                .find(|p| p.id == id)
                 .map(|p| (p.path.clone(), self.setting_str(&format!("specs_{id}")) == "1")),
             None => self.features_of(&key).map(|(cwd, specs, ..)| (cwd, specs)),
         };
@@ -2252,9 +2596,43 @@ impl Workspace {
             .map(|w| w.project_id)
             .or_else(|| self.projects.iter().filter(|p| cwd.starts_with(&p.path)).max_by_key(|p| p.path.components().count()).map(|p| p.id))
             .unwrap_or(-1);
-        let root = harlo_core::specs::root_of(&cwd);
-        let specs: Vec<serde_json::Value> = harlo_core::specs::find(&root).into_iter().map(|s| json!({ "path": s.path, "title": s.title, "summary": s.summary })).collect();
-        QString::from(&json!({ "root": root.to_string_lossy(), "project": project, "enabled": enabled, "specs": specs }).to_string())
+        let read = |cwd: &Path| {
+            let root = harlo_core::specs::root_of(cwd);
+            let specs: Vec<serde_json::Value> = harlo_core::specs::find(&root).into_iter().map(|s| json!({ "path": s.path, "title": s.title, "summary": s.summary })).collect();
+            json!({ "root": root.to_string_lossy(), "specs": specs })
+        };
+        if !harlo_core::remote::is_remote(&cwd) {
+            let found = read(&cwd);
+            return QString::from(&json!({ "root": found["root"], "project": project, "enabled": enabled, "specs": found["specs"] }).to_string());
+        }
+        // Another machine's: what was read of them, read again in the
+        // background (specsReady says when).
+        static READ: OnceLock<Mutex<HashMap<PathBuf, (Instant, Option<serde_json::Value>)>>> = OnceLock::new();
+        let read_list = READ.get_or_init(Default::default);
+        let (fresh, cached) = read_list.lock().unwrap().get(&cwd).map_or((false, None), |(at, v)| (at.elapsed() < Duration::from_secs(5), v.clone()));
+        if !fresh && !harlo_core::remote::is_disconnected(&harlo_core::remote::host_of(&cwd).unwrap_or_default()) {
+            read_list.lock().unwrap().insert(cwd.clone(), (Instant::now(), cached.clone()));
+            let (thread, cwd) = (self.qt_thread(), cwd.clone());
+            crate::runtime().spawn_blocking(move || {
+                let found = read(&cwd);
+                let changed = read_list.lock().unwrap().insert(cwd, (Instant::now(), Some(found.clone()))).and_then(|(_, v)| v).as_ref() != Some(&found);
+                if changed {
+                    let _ = thread.queue(|mut this| this.as_mut().specs_ready());
+                }
+            });
+        }
+        let host = harlo_core::remote::host_of(&cwd).unwrap_or_default();
+        QString::from(
+            &json!({
+                "root": cached.as_ref().map_or_else(|| json!(cwd.to_string_lossy()), |c| c["root"].clone()),
+                "project": project,
+                "enabled": enabled,
+                "specs": cached.as_ref().map_or(json!([]), |c| c["specs"].clone()),
+                "loading": cached.is_none(),
+                "host": host,
+            })
+            .to_string(),
+        )
     }
 
     pub fn plan_edit(mut self: Pin<&mut Self>, key: &QString, op: &QString) {
@@ -2518,17 +2896,31 @@ impl Workspace {
 
     /// Finds worktrees of every project repository and records new ones.
     fn refresh_worktrees(self: Pin<&mut Self>) {
-        // (Remote projects have no worktrees in harlo yet.)
-        let projects: Vec<(i64, PathBuf)> = self.projects.iter().filter(|p| !harlo_core::remote::is_remote(&p.path)).map(|p| (p.id, p.path.clone())).collect();
+        // (Another machine's: while it's connected; never waits to connect.)
+        let projects: Vec<(i64, PathBuf)> = self
+            .projects
+            .iter()
+            .filter(|p| match harlo_core::remote::host_of(&p.path) {
+                None => true,
+                Some(h) => harlo_core::remote::host(&h).is_some_and(|h| harlo_core::remote::connected(&h)),
+            })
+            .map(|p| (p.id, p.path.clone()))
+            .collect();
         if projects.is_empty() {
             return;
         }
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
             let mut found = Vec::new();
+            // Projects on other machines whose worktrees were listed.
+            let mut listed: Vec<i64> = Vec::new();
             for (id, path) in projects {
                 let Some(root) = git::repo_root(&path) else { continue };
-                for wt in git::list_worktrees(&root).unwrap_or_default() {
+                let Ok(list) = git::list_worktrees(&root) else { continue };
+                if harlo_core::remote::is_remote(&root) {
+                    listed.push(id);
+                }
+                for wt in list {
                     if !wt.is_main && !wt.prunable {
                         found.push(WorktreeRecord { path: wt.path, project_id: id, branch: wt.branch, base: String::new(), removed: false });
                     }
@@ -2544,8 +2936,16 @@ impl Workspace {
                             changed = true;
                         }
                     }
-                    // Recorded worktrees whose folder disappeared.
-                    for w in this.worktrees.iter().filter(|w| !w.removed && !w.path.exists()) {
+                    // Recorded worktrees whose folder disappeared (another
+                    // machine's: not in its list, when it was listed).
+                    let gone = |w: &WorktreeRecord| {
+                        if harlo_core::remote::is_remote(&w.path) {
+                            listed.contains(&w.project_id) && !found.iter().any(|f| f.path == w.path)
+                        } else {
+                            !w.path.exists()
+                        }
+                    };
+                    for w in this.worktrees.iter().filter(|w| !w.removed && gone(w)) {
                         let _ = db.mark_worktree_removed(&w.path);
                         changed = true;
                     }
@@ -2620,7 +3020,14 @@ impl Workspace {
     pub fn start_draft(mut self: Pin<&mut Self>, form: &QString) -> QString {
         let form: serde_json::Value = serde_json::from_str(&form.to_string()).unwrap_or_default();
         let field = |k: &str| form[k].as_str().unwrap_or_default().to_owned();
-        let project_id = form["projectId"].as_i64().unwrap_or(-1) as i32;
+        let mut project_id = form["projectId"].as_i64().unwrap_or(-1) as i32;
+        // (The page says what it shows: never a project of another machine.)
+        if let Some(p) = self.projects.iter().find(|p| p.id == project_id as i64)
+            && !self.here(&p.path)
+        {
+            tracing::warn!("new session: project {} isn't on the machine shown ({:?})", p.path.display(), self.instance.to_string());
+            project_id = -1;
+        }
         let (harness, worktree_branch, base, starter, text) = (field("harness"), field("worktreeBranch"), field("base"), field("starter"), field("text"));
         // The model picked ("" the agent's own).
         let model = field("model");
@@ -2643,7 +3050,7 @@ impl Workspace {
         if let Some(s) = harlo_core::starters::find(&starter) {
             message = harlo_core::starters::wrap(s, &message);
         }
-        let server = crate::accounts::managed_server(&harness_name, &model);
+        let server = Some((harness_name.clone(), model.clone()));
         let first = FirstPrompt { text: message, attachments: attachments.iter().map(|p| PathBuf::from(url_to_path(p))).collect(), goal, server };
         if first.text.trim().is_empty() && first.attachments.is_empty() {
             return QString::default();
@@ -2705,6 +3112,12 @@ impl Workspace {
                         this.as_mut().adopt(&key, &parent, &title, kind.as_str(), notify);
                     }
                     if let Some(lane) = lane {
+                        if let Some(mut l) = this.find_run(&lane.0).and_then(|r| r.lanes.into_iter().find(|l| l.idx == lane.1)) {
+                            l.cwd = path.clone();
+                            if let Some(db) = this.db() {
+                                let _ = db.upsert_lane(&lane.0, &l);
+                            }
+                        }
                         this.as_mut().rust_mut().lane_keys.insert(key.clone(), lane);
                     }
                     if let Some(mode) = approval {
@@ -2767,35 +3180,43 @@ impl Workspace {
             .cloned()
     }
 
+    pub fn in_worktree(&self, key: &QString) -> bool {
+        self.worktree_for_key(&key.to_string()).is_some()
+    }
+
     pub fn worktree_info(&self, key: &QString) -> QString {
-        let Some(w) = self.worktree_for_key(&key.to_string()) else { return QString::default() };
-        let main = self.projects.iter().find(|p| p.id == w.project_id).and_then(|p| git::repo_root(&p.path));
-        let main_branch = main.as_ref().and_then(|m| git::status(m).ok()).map(|s| s.branch).unwrap_or_default();
-        let base = if w.base.is_empty() { main_branch.clone() } else { w.base.clone() };
-        let exists = w.path.exists() && !w.removed;
-        let summary = if exists { git::worktree_summary(&w.path, &base).ok() } else { None }.unwrap_or_default();
-        QString::from(
-            &json!({
-                "path": w.path.to_string_lossy(),
-                "branch": w.branch,
-                "base": base,
-                "mainBranch": main_branch,
-                "exists": exists,
-                "dirty": summary.dirty,
-                "ahead": summary.ahead,
-                "behind": summary.behind,
-            })
-            .to_string(),
-        )
+        let key = key.to_string();
+        let Some(w) = self.worktree_for_key(&key) else { return QString::default() };
+        let project = self.projects.iter().find(|p| p.id == w.project_id).map(|p| p.path.clone());
+        // Another machine's: its record now ("loading"), the rest asked
+        // there in the background (`worktreeInfoReady`).
+        if harlo_core::remote::is_remote(&w.path) {
+            let thread = self.qt_thread();
+            let (w2, k) = (w.clone(), key.clone());
+            crate::runtime().spawn_blocking(move || {
+                let info = worktree_details(&w2, project.as_deref(), !w2.removed);
+                let _ = thread.queue(move |mut this| this.as_mut().worktree_info_ready(&QString::from(&k), &QString::from(&info.to_string())));
+            });
+            return QString::from(
+                &json!({ "path": w.path.to_string_lossy(), "branch": w.branch, "base": w.base, "mainBranch": "", "exists": !w.removed,
+                         "dirty": 0, "ahead": 0, "behind": 0, "loading": true })
+                .to_string(),
+            );
+        }
+        QString::from(&worktree_details(&w, project.as_deref(), w.path.exists() && !w.removed).to_string())
     }
 
     pub fn merge_worktree(mut self: Pin<&mut Self>, key: &QString) {
         let Some(w) = self.worktree_for_key(&key.to_string()) else { return };
-        let Some(main) = self.projects.iter().find(|p| p.id == w.project_id).and_then(|p| git::repo_root(&p.path)) else { return };
+        // (Its repository found in the background: maybe another machine's.)
+        let Some(project) = self.projects.iter().find(|p| p.id == w.project_id).map(|p| p.path.clone()) else { return };
         self.as_mut().set_notice_text(&format!("Merging {}…", w.branch), false);
         let branch = w.branch.clone();
         self.background(
-            move || git::merge_branch(&main, &branch).map_err(|e| format!("{e:#}")),
+            move || {
+                let main = git::repo_root(&project).ok_or_else(|| "The project isn't a git repository.".to_owned())?;
+                git::merge_branch(&main, &branch).map_err(|e| format!("{e:#}"))
+            },
             |this, result| match result {
                 Ok(msg) => this.set_notice_text(&msg, false),
                 Err(e) => this.set_notice_text(&e, true),
@@ -2805,7 +3226,7 @@ impl Workspace {
 
     pub fn remove_worktree(mut self: Pin<&mut Self>, key: &QString, delete_branch: bool, force: bool) {
         let Some(w) = self.worktree_for_key(&key.to_string()) else { return };
-        let Some(main) = self.projects.iter().find(|p| p.id == w.project_id).and_then(|p| git::repo_root(&p.path)) else { return };
+        let Some(project) = self.projects.iter().find(|p| p.id == w.project_id).map(|p| p.path.clone()) else { return };
         // Stop every session running in that folder first.
         let inside: Vec<String> = self.live.values().filter(|e| e.info.cwd.starts_with(&w.path)).map(|e| e.info.key.clone()).collect();
         for k in inside {
@@ -2815,6 +3236,7 @@ impl Workspace {
         let rec = w.clone();
         self.background(
             move || -> Result<String, String> {
+                let main = git::repo_root(&project).ok_or_else(|| "The project isn't a git repository.".to_owned())?;
                 git::remove_worktree(&main, &rec.path, force).map_err(|e| format!("{e:#}"))?;
                 if delete_branch && !rec.branch.is_empty() {
                     // Unmerged work is only discarded when the user forced removal.
@@ -3165,7 +3587,8 @@ impl Workspace {
             .map(|s| {
                 let mut v = s.to_json();
                 v["describe"] = serde_json::json!(s.repeat.describe());
-                v["projectName"] = serde_json::json!(self.projects.iter().find(|p| p.id == s.project_id).map_or("Home folder".to_owned(), |p| p.name.clone()));
+                let home = if s.host.is_empty() { "Home folder".to_owned() } else { format!("Home folder on {}", s.host) };
+                v["projectName"] = serde_json::json!(self.projects.iter().find(|p| p.id == s.project_id).map_or(home, |p| p.name.clone()));
                 v
             })
             .collect();
@@ -3213,12 +3636,14 @@ impl Workspace {
             title: if title.is_empty() { prompt.lines().next().unwrap_or_default().chars().take(48).collect() } else { title },
             prompt,
             project_id: v["projectId"].as_i64().unwrap_or(-1),
+            // (Without a project: the machine it was made on, kept through edits.)
+            host: previous.as_ref().map_or_else(|| self.instance.to_string(), |p| p.host.clone()),
             harness: v["harness"].as_str().unwrap_or_default().to_owned(),
             model: v["model"].as_str().unwrap_or_default().trim().to_owned(),
             repeat,
             enabled: v["enabled"].as_bool().unwrap_or(true),
             catch_up: v["catchUp"].as_bool().unwrap_or(true),
-            last_run: previous.and_then(|p| p.last_run),
+            last_run: previous.as_ref().and_then(|p| p.last_run),
             next_run: None,
         };
         schedule.reschedule(chrono::Local::now());
@@ -3266,6 +3691,7 @@ impl Workspace {
         // (A new day lifts the daily spending limit.)
         self.as_mut().refresh_spending();
         self.as_mut().poll_requests();
+        self.as_mut().continue_after_limits();
         // `--clock-ahead=<seconds>` (testing): check as if it were later.
         let ahead = std::env::args().find_map(|a| a.strip_prefix("--clock-ahead=").and_then(|n| n.parse::<i64>().ok())).unwrap_or(0);
         let now = chrono::Local::now() + chrono::Duration::seconds(ahead);
@@ -3300,7 +3726,8 @@ impl Workspace {
             project.as_ref().map(|p| p.harness.clone()).unwrap_or_else(|| self.default_harness())
         };
         let Some(kind) = HarnessKind::parse(&harness) else { return };
-        let cwd = project.map(|p| p.path).unwrap_or_else(|| self.instance_home());
+        // (Without a project: the home folder of the machine it was made on.)
+        let cwd = project.map(|p| p.path).unwrap_or_else(|| self.home_on(&s.host));
         tracing::info!("scheduled prompt \"{}\" starts", s.title);
         let key = self.as_mut().start_session_with(kind, cwd, &s.model, false);
         let first = FirstPrompt { text: s.prompt.clone(), ..Default::default() };
@@ -3326,8 +3753,18 @@ impl Workspace {
     /// Plan limits: omp's accounts (`omp usage`) and Claude Code's (its own
     /// `/usage`).
     /// Each source keeps its last numbers when it can't be asked.
-    pub fn refresh_quota(self: Pin<&mut Self>) {
-        self.refresh_limits(true);
+    pub fn refresh_quota(mut self: Pin<&mut Self>) {
+        self.as_mut().refresh_limits(true);
+        // The other machines' too: those connected, or shown before.
+        let shown: Vec<String> = serde_json::from_str::<serde_json::Value>(&self.host_limits_json.to_string())
+            .ok()
+            .and_then(|v| v.as_object().map(|o| o.keys().cloned().collect()))
+            .unwrap_or_default();
+        for h in harlo_core::remote::hosts() {
+            if harlo_core::remote::info_of(&h.name).is_some() || shown.contains(&h.name) {
+                self.as_mut().refresh_host_limits(&h.name, true, false);
+            }
+        }
     }
 
     /// [`Self::refresh_quota`]; `claude` false keeps Claude's numbers as they
@@ -3415,6 +3852,138 @@ impl Workspace {
         self.as_mut().set_quota_json(QString::from(&json.to_string()));
     }
 
+    /// What a Claude session on `host` said of its limits: that machine's
+    /// (its own sign-in, maybe not this one's account).
+    fn apply_host_limits(mut self: Pin<&mut Self>, host: &str, info: &serde_json::Value) {
+        let mut all: serde_json::Value = serde_json::from_str(&self.host_limits_json.to_string()).ok().filter(|v: &serde_json::Value| v.is_object()).unwrap_or_else(|| json!({}));
+        let mut accounts: Vec<serde_json::Value> = all[host]["accounts"].as_array().cloned().unwrap_or_default();
+        let ran_out = harlo_core::quota::apply_claude_live(&mut accounts, info);
+        all[host] = json!({ "accounts": accounts, "updatedAt": chrono::Local::now().timestamp_millis() });
+        let text = all.to_string();
+        if let Some(db) = self.db.as_ref() {
+            let _ = db.set("cache.host_quota", &text);
+        }
+        self.as_mut().set_host_limits_json(QString::from(&text));
+        for label in ran_out {
+            let when = info["unifiedWindows"].as_object().into_iter().flat_map(|w| w.values()).filter(|w| w["status"] == "rejected").filter_map(|w| w["resetsAt"].as_i64()).max();
+            let body = when.map_or_else(|| "Claude stops there until it resets.".to_owned(), |s| format!("It resets at {}.", harlo_core::quota::reset_time(s * 1000)));
+            self.as_mut().notify_limit(&format!("limit-{host}-{label}"), &format!("{} on {host} is used up", harlo_core::quota::limit_name("Claude", &label)), &body, false);
+        }
+    }
+
+    /// The meter follows the machine shown: what was used last there (and
+    /// that machine's limits, asked for again).
+    fn show_meter_of(mut self: Pin<&mut Self>, host: &str) {
+        let last = self.setting_str(&meter_setting(host));
+        if last != self.meter_last.to_string() {
+            self.as_mut().set_meter_last(QString::from(&last));
+        }
+        self.refresh_host_limits(host, true, false);
+    }
+
+    /// Another machine's limits: from its omp (`omp usage`: the accounts
+    /// it's signed in to there) and, `ask_claude`, its Claude Code (its
+    /// `/usage`, as here). Each at most once a minute unless `now` (Refresh);
+    /// nothing when it isn't connected. What one can't say keeps its last
+    /// numbers.
+    fn refresh_host_limits(mut self: Pin<&mut Self>, host: &str, ask_claude: bool, now: bool) {
+        if host.is_empty() || harlo_core::remote::is_disconnected(host) {
+            return;
+        }
+        let Some(h) = harlo_core::remote::host(host) else { return };
+        let due = |this: &Self, key: &str| now || this.host_limits_asked.get(key).is_none_or(|t| t.elapsed() >= Duration::from_secs(60));
+        // (Not checked yet: tried; else only what's there, and Claude when signed in.)
+        let info = harlo_core::remote::info_of(host);
+        let omp = info.as_ref().is_none_or(|i| i.has("omp")) && due(&self, host);
+        let claude_key = format!("{host}#claude");
+        let claude = ask_claude && info.as_ref().is_none_or(|i| i.has("claude") && i.claude_auth != "no") && due(&self, &claude_key);
+        if !omp && !claude {
+            return;
+        }
+        let stamp = std::time::Instant::now();
+        if omp {
+            self.as_mut().rust_mut().host_limits_asked.insert(host.to_owned(), stamp);
+        }
+        if claude {
+            self.as_mut().rust_mut().host_limits_asked.insert(claude_key, stamp);
+        }
+        let host = host.to_owned();
+        self.as_mut().change_host_limits(&host, |entry| entry["loading"] = json!(true));
+        let thread = self.qt_thread();
+        crate::runtime().spawn_blocking(move || {
+            let (from_omp, from_claude) = std::thread::scope(|s| {
+                let c = claude.then(|| s.spawn(|| harlo_core::quota::claude_on(&h)));
+                let o = omp.then(|| harlo_core::quota::fetch_on(&h));
+                (o, c.map(|c| c.join().unwrap_or_else(|_| Err(anyhow::anyhow!("Claude Code's limits: failed")))))
+            });
+            let _ = thread.queue(move |mut this| {
+                let mut errors = Vec::new();
+                let omp_accounts = match from_omp {
+                    Some(Ok((a, pi_plan))) => {
+                        this.as_mut().rust_mut().host_pi_openai_plan.insert(host.clone(), pi_plan);
+                        Some(a)
+                    }
+                    Some(Err(e)) => {
+                        tracing::debug!("{host}'s limits from omp: {e:#}");
+                        // (No omp there: nothing to say.)
+                        if harlo_core::remote::found_on(&host, "omp") {
+                            errors.push(format!("{e:#}"));
+                        }
+                        None
+                    }
+                    None => None,
+                };
+                // Some(None): signed in without a plan (an API key): none.
+                let claude_account = match from_claude {
+                    Some(Ok(a)) => Some(a),
+                    Some(Err(e)) => {
+                        tracing::debug!("{host}'s Claude limits: {e:#}");
+                        errors.push(format!("{e:#}"));
+                        None
+                    }
+                    None => None,
+                };
+                this.as_mut().change_host_limits(&host, |entry| {
+                    let before: Vec<serde_json::Value> = entry["accounts"].as_array().cloned().unwrap_or_default();
+                    let mut merged: Vec<serde_json::Value> = match claude_account {
+                        Some(a) => a.into_iter().collect(),
+                        None => before.iter().filter(|a| a["provider"] == "Claude").cloned().collect(),
+                    };
+                    match omp_accounts {
+                        Some(a) => merged.extend(a.into_iter().filter(|a| a["provider"] != "Claude")),
+                        None => merged.extend(before.iter().filter(|a| a["provider"] != "Claude").cloned()),
+                    }
+                    *entry = json!({ "accounts": merged, "updatedAt": chrono::Local::now().timestamp_millis(), "error": errors.join("\n") });
+                });
+            });
+        });
+    }
+
+    /// Changes one machine's entry in `host_limits_json` (and its cache).
+    fn change_host_limits(mut self: Pin<&mut Self>, host: &str, change: impl FnOnce(&mut serde_json::Value)) {
+        let mut all: serde_json::Value = serde_json::from_str(&self.host_limits_json.to_string()).ok().filter(|v: &serde_json::Value| v.is_object()).unwrap_or_else(|| json!({}));
+        if !all[host].is_object() {
+            all[host] = json!({ "accounts": [] });
+        }
+        change(&mut all[host]);
+        let text = all.to_string();
+        if let Some(db) = self.db.as_ref() {
+            // (Kept without "checking…": a quit mid-way doesn't leave it.)
+            let mut kept = all.clone();
+            for entry in kept.as_object_mut().into_iter().flat_map(|o| o.values_mut()) {
+                if let Some(e) = entry.as_object_mut() {
+                    e.remove("loading");
+                }
+            }
+            let _ = db.set("cache.host_quota", &kept.to_string());
+        }
+        self.as_mut().set_host_limits_json(QString::from(&text));
+    }
+
+    pub fn refresh_host_quota(self: Pin<&mut Self>, host: &QString) {
+        self.refresh_host_limits(&host.to_string(), true, true);
+    }
+
     /// What a running Claude session said of its limits, shown at once.
     fn apply_live_limits(mut self: Pin<&mut Self>, info: &serde_json::Value) {
         let mut ran_out = Vec::new();
@@ -3423,6 +3992,16 @@ impl Workspace {
             let when = info["unifiedWindows"].as_object().into_iter().flat_map(|w| w.values()).filter(|w| w["status"] == "rejected").filter_map(|w| w["resetsAt"].as_i64()).max();
             let body = when.map_or_else(|| "Claude stops until it resets.".to_owned(), |s| format!("It resets at {}.", harlo_core::quota::reset_time(s * 1000)));
             self.as_mut().notify_limit(&format!("limit-{label}"), &format!("{} is used up", harlo_core::quota::limit_name("Claude", &label)), &body, false);
+        }
+    }
+
+    /// Whether pi's "openai" sign-in on that machine ("" this one) is a
+    /// ChatGPT login.
+    fn pi_openai_is_plan(&self, host: &str) -> bool {
+        if host.is_empty() {
+            harlo_core::quota::pi_openai_is_plan_here()
+        } else {
+            self.host_pi_openai_plan.get(host).copied().unwrap_or(false)
         }
     }
 
@@ -3439,6 +4018,7 @@ impl Workspace {
 
     pub fn check_limits(mut self: Pin<&mut Self>) {
         let now = chrono::Local::now().timestamp_millis();
+        self.as_mut().check_host_limits(now);
         let json: serde_json::Value = serde_json::from_str(&self.quota_json.to_string()).unwrap_or_default();
         let accounts: Vec<serde_json::Value> = json["accounts"].as_array().cloned().unwrap_or_default();
         let due: Vec<_> = harlo_core::quota::resets_due(&accounts, self.limits_since, now)
@@ -3458,6 +4038,38 @@ impl Workspace {
             self.as_mut().notify_limit(&format!("reset-{provider}-{label}-{at}"), &format!("{name} has reset"), "You can use it again.", true);
         }
         self.refresh_quota();
+    }
+
+    /// The same for the other machines' limits: each reset told once, "on
+    /// <machine>", and that machine's numbers asked for again.
+    fn check_host_limits(mut self: Pin<&mut Self>, now: i64) {
+        let all: serde_json::Value = serde_json::from_str(&self.host_limits_json.to_string()).unwrap_or_default();
+        let Some(hosts) = all.as_object() else { return };
+        let mut due: Vec<(String, String, String, i64)> = Vec::new();
+        for (host, entry) in hosts {
+            let accounts: Vec<serde_json::Value> = entry["accounts"].as_array().cloned().unwrap_or_default();
+            for (p, l, at) in harlo_core::quota::resets_due(&accounts, self.limits_since, now) {
+                if self.as_mut().rust_mut().limits_told.insert(format!("{host}|{p}|{l}|{at}")) {
+                    due.push((host.clone(), p, l, at));
+                }
+            }
+        }
+        let mut asked = Vec::new();
+        for (host, provider, label, at) in &due {
+            self.as_mut().change_host_limits(host, |entry| {
+                if let Some(accounts) = entry["accounts"].as_array_mut() {
+                    harlo_core::quota::mark_reset(accounts, provider, label);
+                }
+            });
+            let name = harlo_core::quota::limit_name(provider, label);
+            self.as_mut().notify_limit(&format!("reset-{host}-{provider}-{label}-{at}"), &format!("{name} on {host} has reset"), "You can use it again.", true);
+            if !asked.contains(host) {
+                asked.push(host.clone());
+            }
+        }
+        for host in asked {
+            self.as_mut().refresh_host_limits(&host, true, true);
+        }
     }
 
     /// A plan limit's notification (Settings → Notifications → Plan limits);
@@ -3879,7 +4491,8 @@ impl Workspace {
             let Some(kind) = HarnessKind::parse(harness) else { continue };
             let lane_ref = (id.clone(), idx as i64);
             // (Its model's server, started first if stopped.)
-            let first = FirstPrompt { server: crate::accounts::managed_server(harness, model), ..first.clone() };
+            let server = Some((harness.clone(), model.clone()));
+            let first = FirstPrompt { server, ..first.clone() };
             if use_worktrees {
                 let branch = format!("harlo/run-{}-{}-{letter}", if slug.is_empty() { "run" } else { &slug }, &id[id.len().saturating_sub(4)..]);
                 let project = project.as_ref().unwrap();
@@ -3937,8 +4550,9 @@ impl Workspace {
                 let answer = if l.session_file.as_os_str().is_empty() {
                     String::new()
                 } else {
-                    harlo_harness::store::read_saved(&l.session_file)
-                        .ok()
+                    // (Another machine's: its copy here, fetched as its turns end.)
+                    let file = if harlo_core::remote::is_remote(&l.session_file) { harlo_core::remote::copy_of(&l.session_file) } else { Some(l.session_file.clone()) };
+                    file.and_then(|f| harlo_harness::store::read_saved(&f).ok())
                         .and_then(|s| {
                             s.messages.iter().rev().find(|m| m["role"] == "assistant").map(|m| match &m["content"] {
                                 serde_json::Value::Array(b) => b.iter().filter(|x| x["type"] == "text").filter_map(|x| x["text"].as_str()).collect::<Vec<_>>().join("\n"),
@@ -3949,14 +4563,22 @@ impl Workspace {
                         .unwrap_or_default()
                 };
                 let answer: String = answer.chars().take(900).collect();
-                let changes = if !l.branch.is_empty() && l.cwd.is_dir() { git::status(&l.cwd).map(|s| s.files.len() as i64).unwrap_or(-1) } else { -1 };
+                // (A remote lane's worktree: its record says whether it's there; its
+                // changes are the sidebar's count, not asked over SSH while the page draws.)
+                let remote = harlo_core::remote::is_remote(&l.cwd);
+                let gone = !l.branch.is_empty() && if remote { !self.worktrees.iter().any(|w| w.path == l.cwd && !w.removed) } else { !l.cwd.is_dir() };
+                let changes = match (l.branch.is_empty() || gone, remote) {
+                    (true, _) => -1,
+                    (false, true) => self.change_counts.get(&l.cwd).map_or(-1, |n| *n as i64),
+                    (false, false) => git::status(&l.cwd).map(|s| s.files.len() as i64).unwrap_or(-1),
+                };
                 serde_json::json!({
                     "idx": l.idx,
                     "letter": ((b'A' + l.idx as u8) as char).to_string(),
                     "harness": l.harness,
                     "model": l.model,
                     "branch": l.branch,
-                    "worktreeGone": !l.branch.is_empty() && !l.cwd.is_dir(),
+                    "worktreeGone": gone,
                     "key": key,
                     "status": status,
                     "answer": answer,
@@ -3998,7 +4620,8 @@ impl Workspace {
                 for lane in cleanup {
                     let letter = (b'a' + lane.idx as u8) as char;
                     let result = (|| -> anyhow::Result<()> {
-                        if lane.cwd.is_dir() {
+                        let there = if harlo_core::remote::is_remote(&lane.cwd) { harlo_core::remote::exists(&lane.cwd, true) } else { lane.cwd.is_dir() };
+                        if there {
                             // Lanes rarely commit: keep their work reachable before removing it.
                             git::snapshot_worktree(&lane.cwd, &format!("refs/harlo/runs/{run_id}/{letter}"), &format!("harlo run {run_id}: lane {letter}"))?;
                             if let Some(root) = &root {
@@ -4037,19 +4660,39 @@ impl Workspace {
     }
 
     pub fn running_sessions(&self) -> QString {
-        let mut list: Vec<(u8, serde_json::Value)> = self
+        // Each machine's under its name (this computer's first) once there's
+        // more than one; the sidebar shows only one machine's titles.
+        let mut list: Vec<(String, u8, serde_json::Value)> = self
             .live
             .iter()
             .filter(|(_, e)| e.info.status != SessionStatus::Exited)
             .map(|(key, e)| {
-                let title = self.rows.iter().find(|r| &r.key == key).map(|r| r.title.clone()).unwrap_or_else(|| "New session".into());
+                let saved = PathBuf::from(key);
+                let title = self
+                    .rows
+                    .iter()
+                    .find(|r| &r.key == key)
+                    .map(|r| r.title.clone())
+                    .or_else(|| (!e.info.name.is_empty()).then(|| e.info.name.clone()))
+                    .or_else(|| e.info.session_file.as_ref().or(Some(&saved)).and_then(|f| self.sessions.get(f)).map(|s| s.display_title().to_owned()))
+                    .or_else(|| (!e.info.first_message.is_empty()).then(|| e.info.first_message.chars().take(60).collect()))
+                    .unwrap_or_else(|| "New session".into());
                 let status = sidebar::live_status(&e.info);
                 let rank = if e.info.needs_input { 0 } else if status == "busy" { 1 } else { 2 };
-                (rank, serde_json::json!({ "key": key, "title": title, "status": status }))
+                let machine = harlo_core::remote::host_of(&e.info.cwd).unwrap_or_default();
+                (machine, rank, serde_json::json!({ "key": key, "title": title, "status": status }))
             })
             .collect();
-        list.sort_by_key(|(rank, _)| *rank);
-        QString::from(&serde_json::Value::Array(list.into_iter().map(|(_, v)| v).collect()).to_string())
+        list.sort_by(|a, b| (&a.0, a.1).cmp(&(&b.0, b.1)));
+        let several = list.iter().any(|(m, ..)| *m != list[0].0);
+        let mut out = Vec::new();
+        for (i, (machine, _, v)) in list.iter().enumerate() {
+            if several && (i == 0 || list[i - 1].0 != *machine) {
+                out.push(serde_json::json!({ "header": if machine.is_empty() { "This computer" } else { machine.as_str() } }));
+            }
+            out.push(v.clone());
+        }
+        QString::from(&serde_json::Value::Array(out).to_string())
     }
 
     pub fn session_file(&self, key: &QString) -> QString {
@@ -4062,24 +4705,21 @@ impl Workspace {
     }
 
     pub fn session_branches(&self, path: &QString) -> QString {
-        // (A remote one: as last read by `request_session_branches`.)
-        let list = if harlo_core::remote::is_remote(Path::new(&path.to_string())) {
-            self.branch_texts.lock().unwrap().get(&path.to_string()).map(|t| harlo_harness::branches::branches_text(t)).unwrap_or_default()
-        } else {
-            harlo_harness::branches::branches(Path::new(&path.to_string())).unwrap_or_default()
-        };
+        // (A remote one: its copy here, as `request_session_branches` last
+        // brought it up to date.)
+        let p = PathBuf::from(path.to_string());
+        let file = if harlo_core::remote::is_remote(&p) { harlo_core::remote::copy_of(&p) } else { Some(p) };
+        let list = file.and_then(|f| harlo_harness::branches::branches(&f).ok()).unwrap_or_default();
         QString::from(&branches_json(list))
     }
 
     pub fn request_session_branches(&self, path: &QString) {
-        let (path, thread, texts, reads) = (path.to_string(), self.qt_thread(), Arc::clone(&self.branch_texts), Arc::clone(&self.branch_reads));
+        let (path, thread, reads) = (path.to_string(), self.qt_thread(), Arc::clone(&self.branch_reads));
         crate::runtime().spawn_blocking(move || {
             let p = Path::new(&path);
+            // (A remote one: from its copy here, brought up to date.)
             let json = if harlo_core::remote::is_remote(p) {
-                let text = harlo_core::remote::read(p).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
-                let list = harlo_harness::branches::branches_text(&text);
-                texts.lock().unwrap().insert(path.clone(), text);
-                branches_json(list)
+                branches_json(harlo_core::remote::local_copy(p).ok().and_then(|copy| harlo_harness::branches::branches(&copy).ok()).unwrap_or_default())
             } else {
                 if let Some(again) = reads.lock().unwrap().running.get_mut(&path) {
                     *again = true; // answered when that read ends
@@ -4111,9 +4751,9 @@ impl Workspace {
 
     pub fn branch_preview_file(&self, path: &QString, leaf: &QString) -> QString {
         let dir = std::env::temp_dir().join(format!("harlo-branch-preview-{}", std::process::id()));
-        // (A remote session: from its text as last read.)
+        // (A remote session: from its copy here.)
         if harlo_core::remote::is_remote(Path::new(&path.to_string())) {
-            let Some(text) = self.branch_texts.lock().unwrap().get(&path.to_string()).cloned() else { return QString::default() };
+            let Some(text) = harlo_core::remote::copy_of(Path::new(&path.to_string())).and_then(|c| std::fs::read_to_string(c).ok()) else { return QString::default() };
             let Ok((name, body)) = harlo_harness::branches::branch_file(&text, &leaf.to_string(), &path.to_string()) else { return QString::default() };
             let dest = dir.join(name);
             return if std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&dest, body)).is_ok() { QString::from(&dest.to_string_lossy().into_owned()) } else { QString::default() };
@@ -4130,10 +4770,11 @@ impl Workspace {
         // A remote session: the new file is written on its host (over SSH,
         // in the background), then opened.
         if harlo_core::remote::is_remote(&original) {
-            let Some(text) = self.branch_texts.lock().unwrap().get(&path.to_string()).cloned() else { return QString::default() };
             let leaf = leaf.to_string();
             self.as_mut().background(
                 move || -> Result<(PathBuf, String), String> {
+                    let copy = harlo_core::remote::local_copy(&original).map_err(|e| format!("{e:#}"))?;
+                    let text = std::fs::read_to_string(copy).map_err(|e| e.to_string())?;
                     let (name, body) = harlo_harness::branches::branch_file(&text, &leaf, &harlo_harness::on_host(&original)).map_err(|e| e.to_string())?;
                     let dest = original.with_file_name(name);
                     harlo_core::remote::write(&dest, body.as_bytes()).map_err(|e| format!("{e:#}"))?;
@@ -4321,12 +4962,14 @@ impl Workspace {
 
     pub fn session_repo(&self, key: &QString) -> QString {
         let key = key.to_string();
+        // (Another machine's: as the change count found it; no SSH while a
+        // menu opens.)
         let root = self
             .rows
             .iter()
             .find(|r| r.key == key)
             .filter(|r| !r.cwd.as_os_str().is_empty())
-            .and_then(|r| git::repo_root(&r.cwd));
+            .and_then(|r| if harlo_core::remote::is_remote(&r.cwd) { self.remote_repo_roots.get(&r.cwd).cloned() } else { git::repo_root(&r.cwd) });
         QString::from(&root.map(|r| r.to_string_lossy().into_owned()).unwrap_or_default())
     }
 
@@ -4582,7 +5225,7 @@ impl Workspace {
                     entry.requests.retain(|(q, _)| q.id != id);
                     answered |= entry.requests.len() != before;
                 }
-                SessionUpdate::Limits(info) if !harlo_core::remote::is_remote(&entry.info.cwd) => limits = Some(info),
+                SessionUpdate::Limits(info) => limits = Some(info),
                 _ => {}
             }
         }
@@ -4595,9 +5238,20 @@ impl Workspace {
         let limited_by = match entry.info.harness.as_str() {
             "claude" => Some("Claude".to_owned()),
             "omp" | "pi" | "opencode" => entry.model_id.split_once('/').map(|(p, _)| p.to_owned()).filter(|p| !p.is_empty()),
+            // Hermes: its provider; one of its own servers by its name
+            // ("custom/<server>:<model>"); none when it picks ("auto").
+            "hermes" => match entry.model_id.split_once('/') {
+                Some(("custom", rest)) => rest.split_once(':').map(|(server, _)| server.to_owned()),
+                Some((p, _)) if !p.is_empty() && p != "auto" => Some(p.to_owned()),
+                _ => None,
+            },
             _ => None,
         }
         .map(|p| if entry.info.harness == "opencode" && p == "openai" { "openai-codex".to_owned() } else { p });
+        // (The machine it runs on: its meter.)
+        let on_host = harlo_core::remote::host_of(&entry.info.cwd).unwrap_or_default();
+        let pi_openai = entry.info.harness == "pi" && limited_by.as_deref() == Some("openai");
+        let remote_file = entry.info.session_file.clone().filter(|f| harlo_core::remote::is_remote(f));
         let used = limited_by.clone().filter(|_| became_busy);
         // A turn on a provider whose limits are asked for (Claude says its own).
         let turn_on = limited_by.filter(|p| became_idle && p != "Claude");
@@ -4607,6 +5261,13 @@ impl Workspace {
         if became_idle {
             // The agent may have edited files.
             this.change_kick.notify_one();
+            // A lane on another machine: its file copied here for the run
+            // page's answer.
+            if let Some(file) = remote_file.filter(|_| this.lane_keys.contains_key(key)) {
+                crate::runtime().spawn_blocking(move || {
+                    let _ = harlo_core::remote::local_copy(&file);
+                });
+            }
         }
         if file_changed {
             self.as_mut().remember_modes(key);
@@ -4630,16 +5291,35 @@ impl Workspace {
             }
             self.as_mut().refresh_spending();
         }
-        if let Some(used) = used.filter(|u| *u != self.meter_last.to_string()) {
-            self.save_setting("meter_last", &used);
-            self.as_mut().set_meter_last(QString::from(&used));
+        // pi's "openai" signed in with ChatGPT: the OpenAI Codex plan's
+        // limits (an API key has none).
+        let (used, turn_on) = if pi_openai && (used.is_some() || turn_on.is_some()) && self.pi_openai_is_plan(&on_host) {
+            (used.map(|_| "openai-codex".to_owned()), turn_on.map(|_| "openai-codex".to_owned()))
+        } else {
+            (used, turn_on)
+        };
+        if let Some(used) = used.filter(|u| *u != self.setting_str(&meter_setting(&on_host))) {
+            self.save_setting(&meter_setting(&on_host), &used);
+            if on_host == self.instance.to_string() {
+                self.as_mut().set_meter_last(QString::from(&used));
+            }
         }
         self.as_mut().rebuild();
         if let Some(info) = limits {
-            self.as_mut().apply_live_limits(&info);
+            // (Another machine's Claude: its own sign-in, its own limits.)
+            if on_host.is_empty() {
+                self.as_mut().apply_live_limits(&info);
+            } else {
+                self.as_mut().apply_host_limits(&on_host, &info);
+            }
         }
         if let Some(provider) = turn_on {
-            self.as_mut().after_limited_turn(&provider);
+            // (Another machine's: asked of its own omp.)
+            if on_host.is_empty() {
+                self.as_mut().after_limited_turn(&provider);
+            } else {
+                self.as_mut().refresh_host_limits(&on_host, false, false);
+            }
         }
         // A session an agent started: its state, and its last reply back.
         if became_busy || became_idle {
@@ -5050,8 +5730,8 @@ struct FirstPrompt {
     /// omp: start a goal with the text as its objective instead of sending
     /// it (`Some(token budget)`, 0 for none).
     goal: Option<u64>,
-    /// Its model's server when harlo set it up here (name, address):
-    /// started first if it's stopped.
+    /// Its agent and model (`provider/id`): their server, when harlo can
+    /// start it, started first if it's stopped.
     server: Option<(String, String)>,
 }
 
@@ -5061,19 +5741,25 @@ struct FirstPrompt {
 fn send_first_prompt(key: &str, first: FirstPrompt, notify: Option<CxxQtThread<Workspace>>) {
     let Some(live) = registry::get(key) else { return };
     crate::runtime().spawn_blocking(move || {
-        if let Some((name, url)) = first.server.as_ref().filter(|(_, url)| crate::accounts::needs_start(url)) {
+        let host = harlo_core::remote::host_of(&live.cwd);
+        let server = first.server.as_ref().and_then(|(agent, model)| match &host {
+            Some(h) => crate::accounts::host_server(h, agent, model),
+            None => crate::accounts::managed_server(agent, model),
+        });
+        if let Some(server) = server.filter(|s| s.needs_start()) {
+            let name = server.name();
             let say = |text: String, error: bool| {
                 if let Some(thread) = &notify {
                     let _ = thread.queue(move |this| this.set_notice_text(&text, error));
                 }
             };
             say(format!("Starting {name}…"), false);
-            match crate::accounts::ensure_running(url) {
+            match server.start() {
                 Ok(()) => say(String::new(), false),
                 Err(e) => return say(format!("{name} didn't start, so your message wasn't sent: {e}"), true),
             }
         }
-        let prepared = harlo_core::attach::prepare(&first.attachments);
+        let prepared = harlo_core::attach::prepare_for(&first.attachments, host.as_deref());
         let text = format!("{}{}", prepared.prefix, first.text);
         let Some(budget) = first.goal else {
             live.handle.prompt(&text, prepared.images, harlo_harness::SendMode::Normal);
@@ -5230,10 +5916,7 @@ fn session_messages(path: &Path, kind: HarnessKind) -> Vec<serde_json::Value> {
         return harlo_harness::acp::cached(path).map(|s| s.messages).unwrap_or_default();
     }
     match remote {
-        Some(_) => {
-            let text = harlo_core::remote::read(path).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
-            harlo_harness::store::parse_saved_for(kind, &text).messages
-        }
+        Some(_) => harlo_core::remote::local_copy(path).ok().and_then(|copy| harlo_harness::store::read_saved_for(kind, &copy).ok()).map(|s| s.messages).unwrap_or_default(),
         None => harlo_harness::store::read_saved_for(kind, path).map(|s| s.messages).unwrap_or_default(),
     }
 }
@@ -5331,13 +6014,20 @@ impl Workspace {
             let key = text("session");
             this.live.contains_key(&key).then_some(key.clone()).ok_or_else(|| format!("There's no open session {key}."))
         };
+        // The caller's folder, and its machine (None: this one).
+        let caller_cwd = caller.as_ref().and_then(|c| self.live.get(c)).map(|e| e.info.cwd.clone());
+        let caller_host = caller_cwd.as_deref().and_then(harlo_core::remote::host_of);
         match tool {
             "list_agents" => {
                 let list: Vec<serde_json::Value> = HarnessKind::PROVIDERS
                     .iter()
                     .filter(|k| self.usable_harness(**k))
                     .map(|k| {
-                        let installed = harlo_harness::resolve_program(*k).is_some() || !self.setting_str(&format!("{}_path", k.as_str())).is_empty();
+                        // (A caller on another machine: what's installed there.)
+                        let installed = match &caller_host {
+                            Some(h) => harlo_core::remote::found_on(h, k.as_str()),
+                            None => harlo_harness::resolve_program(*k).is_some() || !self.setting_str(&format!("{}_path", k.as_str())).is_empty(),
+                        };
                         json!({ "id": k.as_str(), "name": k.label(), "installed": installed })
                     })
                     .collect();
@@ -5372,11 +6062,28 @@ impl Workspace {
                     return Err("Give it a prompt.".into());
                 }
                 let folder = text("folder");
-                let cwd = if !folder.is_empty() {
+                // A folder is the caller's machine's (relative: to its folder).
+                let cwd = if folder.is_empty() {
+                    caller_cwd.clone().unwrap_or_else(|| self.instance_home())
+                } else if harlo_core::remote::is_remote(Path::new(&folder)) {
                     PathBuf::from(&folder)
+                } else if Path::new(&folder).is_absolute() {
+                    match &caller_host {
+                        Some(h) => harlo_core::remote::join(h, &folder),
+                        None => PathBuf::from(&folder),
+                    }
                 } else {
-                    caller.as_ref().and_then(|c| self.live.get(c)).map(|e| e.info.cwd.clone()).unwrap_or_else(|| self.instance_home())
+                    match &caller_cwd {
+                        Some(c) => c.join(&folder),
+                        None => PathBuf::from(&folder),
+                    }
                 };
+                if let Some(h) = harlo_core::remote::host_of(&cwd)
+                    && !harlo_core::remote::found_on(&h, kind.as_str())
+                    && harlo_core::remote::info_of(&h).is_some()
+                {
+                    return Err(format!("{} isn't installed on {h}.", kind.label()));
+                }
                 if !harlo_core::remote::is_remote(&cwd) && !cwd.is_dir() {
                     return Err(format!("{} isn't a folder.", cwd.display()));
                 }
@@ -5688,8 +6395,37 @@ fn orch_token() -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
+/// The setting with what was used last on `host` ("" this computer).
+fn meter_setting(host: &str) -> String {
+    if host.is_empty() { "meter_last".to_owned() } else { format!("meter_last@{host}") }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_hosts_projects_are_looked_in_from_the_start() {
+        let paths = ["ssh://nas/a", "/local/b", "ssh://pi/c", "ssh://nas/d"].map(std::path::PathBuf::from);
+        let roots = super::remote_roots_of(paths.iter());
+        assert_eq!(roots.iter().map(|(h, l)| (h.as_str(), l.len())).collect::<Vec<_>>(), [("nas", 2), ("pi", 1)]);
+    }
+
+    #[test]
+    fn a_session_continues_a_minute_after_its_limit_resets() {
+        let resumes = super::parse_resumes(r#"{"/a.jsonl": 1000000, "/b.jsonl": 2000000}"#);
+        assert!(super::due_resumes(&resumes, 1_000_000).is_empty());
+        assert_eq!(super::due_resumes(&resumes, 1_060_000), [("/a.jsonl".to_owned(), false)]);
+        assert_eq!(super::due_resumes(&resumes, 90_000_000).iter().filter(|(_, give_up)| *give_up).count(), 2);
+        assert!(super::parse_resumes("").is_empty());
+    }
+
+    #[test]
+    fn only_the_home_folder_counts_as_home() {
+        assert!(super::is_home("/home/abra", "/home/abra"));
+        assert!(super::is_home("/home/abra/", "/home/abra"));
+        assert!(!super::is_home("/home/abra/project", "/home/abra"));
+        assert!(!super::is_home("/", ""));
+    }
+
     use super::url_to_path;
 
     #[test]
