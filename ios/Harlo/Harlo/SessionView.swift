@@ -78,9 +78,8 @@ struct SessionContent: View {
                                 AgentHead(session: session, time: Self.time(of: item))
                                     .padding(.top, 6)
                             }
-                            // Replies under the agent's name; a run's timeline hangs in the gap.
+                            // Replies full width under the agent's name.
                             ItemView(item: item, session: session)
-                                .padding(.leading, Self.isUser(item) || Self.isRun(item) ? 0 : Transcript.indent)
                                 .contextMenu { menu(for: item) }
                         }
                     }
@@ -127,7 +126,6 @@ struct SessionContent: View {
                             .accessibilityLabel("Undo these changes")
                         }
                         }
-                        .padding(.leading, Transcript.indent)
                     }
                     Color.clear.frame(height: 1).id("bottom")
                 }
@@ -344,11 +342,6 @@ extension SessionContent {
     /// Your last message's row key.
     static func lastUser(_ rows: [Row]) -> String {
         rows.last { $0.kind == "user" }?.key ?? ""
-    }
-
-    static func isRun(_ item: TranscriptItem) -> Bool {
-        if case .run = item { return true }
-        return false
     }
 
     /// When an item started (unix ms; 0: unknown).
@@ -611,10 +604,7 @@ struct Composer: View {
             }
             // Photos beside it; in it what to say, the session's settings and
             // send or stop.
-            HStack(alignment: .bottom, spacing: 8) {
-                PhotoButton(photos: $photos, size: 42)
-                    .padding(.bottom, 6)
-                VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 8) {
                     if !photos.isEmpty { PhotoStrip(photos: $photos) }
                     TextField(placeholder, text: $session.draft, axis: .vertical)
                         .lineLimit(1...6)
@@ -623,6 +613,7 @@ struct Composer: View {
                         .padding(.horizontal, 6)
                         .padding(.top, 6)
                     HStack(spacing: 8) {
+                        PhotoButton(photos: $photos, size: 34)
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 6) {
                                 if session.busy { steerOrQueue }
@@ -635,7 +626,6 @@ struct Composer: View {
                 }
                 .padding(10)
                 .card(p, radius: 22)
-            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)

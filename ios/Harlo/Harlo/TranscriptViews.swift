@@ -10,7 +10,7 @@ struct AgentHead: View {
     var time: Int64 = 0
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             AgentTile(harness: session.harness, size: Transcript.tile)
             Text(Style.harnessLabel(session.harness))
                 .font(.system(size: 16.5, weight: .semibold))
@@ -24,11 +24,13 @@ struct AgentHead: View {
     }
 }
 
-/// The transcript's measures: the agent's tile, and how far a reply is
-/// indented (under its name; tool calls hang their timeline in the gap).
+/// The transcript's measures: the agent's tile (on the reply's first
+/// line, the reply full width under it), and a run's timeline: the rail its
+/// marks sit on, and how far its steps are from the edge.
 enum Transcript {
-    static let tile: CGFloat = 36
-    static let indent: CGFloat = 46
+    static let tile: CGFloat = 28
+    static let rail: CGFloat = 24
+    static let step: CGFloat = 32
 }
 
 struct ItemView: View {
@@ -86,7 +88,7 @@ struct RunView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .padding(.leading, Transcript.indent)
+            .padding(.leading, (Transcript.rail - 12) / 2)
             if open {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(rows.enumerated()), id: \.element.id) { i, r in
@@ -116,7 +118,7 @@ struct TimelineStep: View {
                     .padding(.vertical, 8)
             }
         }
-        .padding(.leading, Transcript.indent)
+        .padding(.leading, Transcript.step)
         .padding(.bottom, last ? 0 : 10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .topLeading) {
@@ -125,7 +127,7 @@ struct TimelineStep: View {
                 StepMark(row: row)
                 line.frame(maxHeight: .infinity).opacity(last ? 0 : 1)
             }
-            .frame(width: Transcript.tile)
+            .frame(width: Transcript.rail)
         }
     }
 
