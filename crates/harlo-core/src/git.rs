@@ -632,6 +632,14 @@ fn locked(root: &Path, args: &[&str]) -> Result<String> {
     run_ok(cmd)
 }
 
+/// How many commits `base` has that the checkout at `dir` doesn't: how far
+/// the branch it started from moved on since (None: git couldn't say).
+pub fn commits_behind(dir: &Path, base: &str) -> Option<u32> {
+    let mut cmd = git(dir);
+    cmd.args(["rev-list", "--count", &format!("HEAD..{base}"), "--"]);
+    run_ok(cmd).ok()?.trim().parse().ok()
+}
+
 pub fn stage_file(root: &Path, path: &str) -> Result<()> {
     locked(root, &["add", "--", path]).map(drop)
 }

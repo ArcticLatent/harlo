@@ -69,9 +69,9 @@ pub fn tools(on_their_own: bool) -> Value {
         },
         {
             "name": "send_message",
-            "description": "Sends a follow-up message to a harlo session (queued if it's busy): more work for a helper, or the answer to its question.",
+            "description": "Sends a follow-up message to a harlo session (queued if it's busy): more work for a helper, or the answer to its question. To tell all your helpers the same thing (a change of plan, stop and report), send it to \"helpers\".",
             "inputSchema": s(json!({
-                "session": { "type": "string", "description": "The session's id (from start_session or list_sessions)." },
+                "session": { "type": "string", "description": "The session's id (from start_session or list_sessions), or \"helpers\": every helper you started that's still open." },
                 "message": { "type": "string" }
             }), &["session", "message"]),
         },
@@ -186,6 +186,18 @@ pub fn finished_message(agent: &str, title: &str, key: &str, report: Option<&Rep
     }
 }
 
+/// Added to a worktree helper's finished message when the branch it
+/// started from moved on meanwhile ("" when it didn't).
+pub fn drift_note(branch: &str, base: &str, behind: u32) -> String {
+    match behind {
+        0 => String::new(),
+        n => format!(
+            "\n\nIt worked on {branch}, in a worktree; {base} has moved on by {n} commit{} since it started, so merging it may conflict: merge {base} into it (or rebase) and check first.",
+            if n == 1 { "" } else { "s" }
+        ),
+    }
+}
+
 /// What a parent is told when its helper asks it something.
 pub fn question_message(agent: &str, title: &str, key: &str, question: &str) -> String {
     format!(
@@ -252,6 +264,9 @@ pub const BASE_INSTRUCTIONS: &str = "harlo's sessions: start other coding agents
 pub fn call_line(session: &str, opencode: bool, tool: &str, args: &Value) -> String {
     json!({ "session": session, "opencode": opencode, "tool": tool, "args": args }).to_string()
 }
+
+/// harlo draws Mermaid: told to every session with harlo's tools.
+pub const DIAGRAMS: &str = "harlo shows Mermaid diagrams in your replies (```mermaid blocks) as pictures, on the desktop and on the phone: draw one when a flow, a structure or a sequence of steps is clearer as a picture than in words.";
 
 /// The socket the bridge reaches harlo on: `--socket <path>` (agents start
 /// MCP servers with few environment variables), else `socket_path()`.
@@ -537,6 +552,13 @@ mod tests {
         // A committee needs two.
         assert!(delegate_prompt("committee", &[m("Claude", "claude", "")], "", false).is_none());
         assert!(delegate_prompt("nope", &[m("Claude", "claude", "")], "", false).is_none());
+    }
+
+    #[test]
+    fn a_moved_base_is_noted() {
+        assert_eq!(drift_note("helper/x", "main", 0), "");
+        assert!(drift_note("helper/x", "main", 1).contains("main has moved on by 1 commit since"));
+        assert!(drift_note("helper/x", "main", 3).contains("by 3 commits"));
     }
 
     #[test]

@@ -5743,7 +5743,7 @@ impl Workspace {
                         "status": r.status, "modified": r.modified, "branch": r.branch, "pinned": r.pinned,
                         "where": if r.cwd.as_os_str().is_empty() { String::new() } else { sidebar::tilde(&r.cwd) },
                         // Its machine ("" this one), and why it's settled ("" not).
-                        "host": harlo_core::remote::host_of(&r.cwd).unwrap_or_default(), "settled": r.settled,
+                        "host": harlo_core::remote::host_of(&r.cwd).unwrap_or_default(), "settled": match harlo_core::shelf::why_text(&r.settled) { "" => r.settled.as_str(), t => t },
                         "requests": requests,
                         // A helper: the session that started it (shown under it).
                         "parent": if r.nest > 0 { parents.get(&r.key).cloned() } else { None }, "helperOf": r.helper_of, "nest": r.nest,
@@ -5918,6 +5918,8 @@ struct PlanRun {
     paused: String,
     /// The session's file when it started (its plan's, should it close).
     file: Option<PathBuf>,
+    /// Steps tried again after a failure (once each, then the run pauses).
+    retried: HashSet<u32>,
 }
 
 /// A session an agent started (orchestration).
@@ -6206,7 +6208,7 @@ impl Workspace {
             return Ok(json!(tools));
         }
         if tool == harlo_core::orchestration::INSTRUCTIONS {
-            let mut text = format!("{} {}", harlo_core::orchestration::BASE_INSTRUCTIONS, harlo_core::orchestration::when_to_start(self.agents_start_on_their_own()));
+            let mut text = format!("{} {}\n\n{}", harlo_core::orchestration::BASE_INSTRUCTIONS, harlo_core::orchestration::when_to_start(self.agents_start_on_their_own()), harlo_core::orchestration::DIAGRAMS);
             if let Some((_, specs, plan, _)) = &features {
                 if *specs {
                     text = format!("{text}\n\n{}", harlo_core::specs::INSTRUCTIONS);
@@ -6297,6 +6299,9 @@ impl Workspace {
                 if !self.usable_harness(kind) {
                     return Err(format!("{} is turned off in harlo (Settings → Providers).", kind.label()));
                 }
+                if caller.as_deref().is_some_and(|c| self.helper_depth(c) >= MAX_HELPER_DEPTH) {
+                    return Err(format!("Helpers go {MAX_HELPER_DEPTH} deep at most, and you're that deep: do this yourself, or ask your parent (ask_parent)."));
+                }
                 let prompt = text("prompt");
                 if prompt.is_empty() {
                     return Err("Give it a prompt.".into());
@@ -6366,22 +6371,37 @@ impl Workspace {
                 Ok(json!({ "session": key, "title": title, "agent": kind.as_str(), "folder": cwd.to_string_lossy(), "notify": notify }))
             }
             "send_message" => {
-                let key = session(&self)?;
+                // One session, or all the caller's open helpers at once.
+                let keys: Vec<String> = if text("session") == "helpers" {
+                    let me = caller.clone().unwrap_or_default();
+                    let mut keys: Vec<String> = self.orch_children.iter().filter(|(k, c)| c.parent == me && self.live.contains_key(*k)).map(|(k, _)| k.clone()).collect();
+                    keys.sort();
+                    if keys.is_empty() {
+                        return Err("None of the helpers you started is open.".into());
+                    }
+                    keys
+                } else {
+                    vec![session(&self)?]
+                };
                 let message = text("message");
                 if message.is_empty() {
                     return Err("Give it a message.".into());
                 }
-                let busy = self.live.get(&key).is_some_and(|e| e.info.status == SessionStatus::Busy);
-                if let Some(live) = registry::get(&key) {
-                    live.handle.prompt(&message, Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });
-                }
-                // (A helper that asked: this is its answer.)
-                if let Some(c) = self.as_mut().rust_mut().orch_children.get_mut(&key) {
-                    c.status = "running".into();
-                    c.asking = false;
+                let mut sent = Vec::new();
+                for key in keys {
+                    let busy = self.live.get(&key).is_some_and(|e| e.info.status == SessionStatus::Busy);
+                    if let Some(live) = registry::get(&key) {
+                        live.handle.prompt(&message, Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });
+                    }
+                    // (A helper that asked: this is its answer.)
+                    if let Some(c) = self.as_mut().rust_mut().orch_children.get_mut(&key) {
+                        c.status = "running".into();
+                        c.asking = false;
+                    }
+                    sent.push(json!({ "session": key, "queued": busy }));
                 }
                 self.as_mut().bump_orchestration();
-                Ok(json!({ "session": key, "queued": busy }))
+                Ok(if sent.len() == 1 { sent.remove(0) } else { json!({ "sent": sent }) })
             }
             "read_session" => {
                 let key = session(&self)?;
@@ -6508,6 +6528,9 @@ impl Workspace {
                 Some(r) => Some((r.succeeded, r.summary.clone())),
                 None => reply.as_deref().and_then(|r| harlo_core::plan::outcome_in(r).map(|ok| (ok, harlo_core::notifications::summary(r, 300)))),
             };
+            if said.as_ref().is_some_and(|(ok, _)| *ok) {
+                self.as_mut().settle_helper(key);
+            }
             let result = match said {
                 Some((true, summary)) => Ok(summary),
                 Some((false, summary)) => Err(format!("it failed: {summary}")),
@@ -6518,13 +6541,30 @@ impl Workspace {
             };
             return self.as_mut().plan_step_ended(&child.parent, id, result);
         }
+        if child.report.as_ref().is_some_and(|r| r.succeeded) {
+            self.as_mut().settle_helper(key);
+        }
         if !child.notify {
             return;
         }
         let Some(parent) = registry::get(&child.parent) else { return };
         let message = harlo_core::orchestration::finished_message(agent_label(&child.agent), &child.title, key, child.report.as_ref(), reply.as_deref(), error.as_deref());
         let busy = self.live.get(&child.parent).is_some_and(|e| e.info.status == SessionStatus::Busy);
-        parent.handle.prompt(&message, Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });
+        let mode = if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal };
+        // In a worktree of this computer's: whether its base moved on (git,
+        // in the background), then the message.
+        let cwd = self.live.get(key).map(|e| e.info.cwd.clone());
+        let tree = cwd.as_ref().and_then(|cwd| {
+            self.worktrees.iter().filter(|w| !w.removed && !w.base.is_empty() && cwd.starts_with(&w.path) && !harlo_core::remote::is_remote(&w.path)).max_by_key(|w| w.path.components().count()).map(|w| (w.path.clone(), w.branch.clone(), w.base.clone()))
+        });
+        let Some((path, branch, base)) = tree else {
+            parent.handle.prompt(&message, Vec::new(), mode);
+            return;
+        };
+        crate::runtime().spawn_blocking(move || {
+            let behind = harlo_core::git::commits_behind(&path, &base).unwrap_or(0);
+            let _ = parent.handle.prompt(&format!("{message}{}", harlo_core::orchestration::drift_note(&branch, &base, behind)), Vec::new(), mode);
+        });
     }
 
     /// A started session waits for the user (an approval, its question):
@@ -6609,7 +6649,7 @@ impl Workspace {
             return QString::from("Every step of the plan has finished.");
         }
         let file = self.file_for_key(&key);
-        self.as_mut().rust_mut().plan_runs.insert(key.clone(), PlanRun { agent: kind, model: model.to_string().trim().to_owned(), paused: String::new(), file });
+        self.as_mut().rust_mut().plan_runs.insert(key.clone(), PlanRun { agent: kind, model: model.to_string().trim().to_owned(), paused: String::new(), file, retried: HashSet::new() });
         self.as_mut().plans_changed();
         self.as_mut().advance_plan(&key);
         QString::default()
@@ -6720,6 +6760,12 @@ impl Workspace {
             Err(why) => {
                 let _ = crate::plans::update(file.as_deref(), owner, |p| p.put_back(id, &format!("Not done: {why}")));
                 self.as_mut().plans_changed();
+                // Once more with a new helper (told what went wrong), then
+                // the run waits for you.
+                let again = self.as_mut().rust_mut().plan_runs.get_mut(owner).is_some_and(|r| r.paused.is_empty() && r.retried.insert(id));
+                if again {
+                    return self.as_mut().advance_plan(owner);
+                }
                 self.as_mut().pause_plan(owner, &format!("step {n} ({}) {why}", plan.step(id).map(|s| s.title.as_str()).unwrap_or_default()));
             }
         }
@@ -6956,12 +7002,47 @@ impl Workspace {
         QString::from(&serde_json::Value::Array(list).to_string())
     }
 
+    /// A helper that did its task goes on its project's Settled shelf
+    /// ("Done as a helper"), unless you're looking at it; it's back when
+    /// it works again.
+    fn settle_helper(mut self: Pin<&mut Self>, key: &str) {
+        if self.setting_str("settle_sessions") == "0" || self.active_key.to_string() == key {
+            return;
+        }
+        // (A little after now: its last writes may land a moment later.)
+        let at = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0) + 5;
+        self.as_mut().update_meta(key, |m| {
+            if !m.pinned && !m.archived {
+                m.settled_why = "helper".into();
+                m.settled_at = at;
+            }
+        });
+    }
+
+    /// How many sessions up a session's chain of parents goes (0: one
+    /// nobody started).
+    fn helper_depth(&self, key: &str) -> usize {
+        let mut at = key;
+        let mut depth = 0;
+        while let Some(c) = self.orch_children.get(at) {
+            depth += 1;
+            at = &c.parent;
+            if depth > 16 {
+                break;
+            }
+        }
+        depth
+    }
+
     pub fn stop_session(&self, key: &QString) {
         if let Some(live) = registry::get(&key.to_string()) {
             live.handle.abort();
         }
     }
 }
+
+/// How deep helpers go: a helper's helper's helper can't start another.
+const MAX_HELPER_DEPTH: usize = 3;
 
 /// The setting: agents may start sessions on their own ("1"), else only
 /// when the user asks.

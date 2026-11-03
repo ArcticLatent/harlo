@@ -185,6 +185,7 @@ impl Plan {
         step.status = Status::Active;
         step.helper = helper.to_owned();
         step.branch = branch.to_owned();
+        step.summary.clear();
         Ok(())
     }
 
@@ -387,6 +388,9 @@ pub fn step_prompt(plan: &Plan, id: u32, merge: &[(String, String)], commit: boo
     if !step.detail.is_empty() {
         text.push_str(&format!("\n\n{}", step.detail));
     }
+    if let Some(why) = step.summary.strip_prefix("Not done: ") {
+        text.push_str(&format!("\n\nAn earlier try didn't finish it: {why}. Start from what's in the folder now, and avoid what went wrong."));
+    }
     let done: Vec<String> = plan.steps.iter().filter(|s| s.status == Status::Done && s.id != id).map(|s| format!("- {}{}", s.title, if s.summary.is_empty() { String::new() } else { format!(": {}", s.summary) })).collect();
     if !done.is_empty() {
         text.push_str(&format!("\n\nDone already:\n{}", done.join("\n")));
@@ -523,9 +527,12 @@ mod tests {
         p.finish(2, "", false).unwrap();
         p.set_skipped(4, true).unwrap();
         // One failed: back to waiting, and run again.
-        p.put_back(3, "Failed: no tests").unwrap();
+        p.put_back(3, "Not done: it failed: no tests").unwrap();
         assert_eq!(p.ready(), [3]);
+        // Its next helper hears why the last one didn't finish it.
+        assert!(step_prompt(&p, 3, &[], true, true).contains("An earlier try didn't finish it: it failed: no tests."));
         p.hand_out(3, "live:y", "plan-ui2").unwrap();
+        assert!(p.step(3).unwrap().summary.is_empty(), "the old note goes as it starts again");
         p.finish(3, "", false).unwrap();
         assert_eq!(p.current_stage(), Some(vec![5]));
         // The last stage merges what the worktrees did (the skipped one: nothing).

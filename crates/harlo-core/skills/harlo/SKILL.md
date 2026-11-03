@@ -18,9 +18,9 @@ The tools exist only inside harlo. If they're missing, tell the user that harlo 
 - `worktree`: a new branch name. The session then works in a new git worktree on that branch, isolated from your checkout. The worktree is made in the background, so the session id comes later (`list_sessions`).
 - `notify`: defaults to true. Its report, its questions for you, and when it waits for the user come back to you. `false`: it's on its own (a handoff).
 
-It returns `{ session, title, agent, folder }`. The session is your helper: it starts in your permission mode, and the user sees it under your session and can open it. harlo tells it it's a helper, and how to report back.
+It returns `{ session, title, agent, folder }`. The session is your helper: it starts in your permission mode, and the user sees it under your session and can open it. harlo tells it it's a helper, and how to report back. Helpers can start helpers of their own, three deep at most. Once a helper has reported success, harlo moves it to its project's Settled shelf; it comes back if it works again.
 
-**`send_message`**: `{ session, message }`. A follow-up, queued if the session is busy.
+**`send_message`**: `{ session, message }`. A follow-up, queued if the session is busy. Send it to `"helpers"` to tell every helper you started that's still open the same thing (a change of plan, "stop and report").
 
 **`read_session`**: `{ session, messages? }`. The session's status (`busy`, `idle`, `waiting for input`) and its last reply, or its last `messages` messages.
 
@@ -53,11 +53,15 @@ Keep the user's intent exactly. If they asked only for an investigation, say "Do
 
 Agents take a while; 10–30 minutes is normal. Start every independent helper, then end your turn. harlo sends you a message by itself, which starts your next turn:
 
-- when a helper finishes: `[harlo] The <Agent> session "<title>" (<session>) finished and reported: succeeded.` and its summary (or, if it didn't report, its last reply);
+- when a helper finishes: `[harlo] The <Agent> session "<title>" (<session>) finished and reported: succeeded.` and its summary (or, if it didn't report, its last reply). If it worked in a worktree and the branch it started from has moved on since, harlo says by how many commits, so you know merging may conflict;
 - when it asks you something: `… asks you:` and the question. Answer with `send_message` when the answer follows from the task or the user's instructions; otherwise ask the user first;
 - when it waits for the user (an approval, or a question that's theirs): `… is waiting for the user`. Only the user can answer it. Tell them if they should know, or go on with other work.
 
 So don't poll `read_session` or `list_sessions` to check on it, and don't send it hurry-ups. A follow-up sent with `send_message` comes back the same way. When every helper has finished, tell the user each one's outcome, what it found, and what's still open. Never call a reported failure a success.
+
+## Diagrams
+
+harlo draws Mermaid diagrams (```` ```mermaid ```` blocks) in replies as pictures, on the desktop and on the phone. When you report a flow, a structure or how helpers' work fits together, a diagram is often clearer than a list.
 
 ## Choosing an agent
 

@@ -44,6 +44,7 @@ pub fn why_text(why: &str) -> &'static str {
         "merged" => "Pull request merged",
         "closed" => "Pull request closed",
         "quiet" => "No activity for a week",
+        "helper" => "Done as a helper",
         _ => "",
     }
 }
