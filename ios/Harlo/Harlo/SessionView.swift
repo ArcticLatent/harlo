@@ -784,14 +784,19 @@ struct Composer: View {
                 if i.compactAt > 0 { Text("Compacts at \(Style.tokens(i.compactAt))") }
                 if i.cost > 0 { Text(String(format: "$%.2f so far", i.cost)) }
             } label: {
+                // (The number in it: a gauge, not a spinner.)
                 ZStack {
-                    Circle().stroke(Color(p.border), lineWidth: 3)
-                    Circle().trim(from: 0, to: i.contextUsed)
-                        .stroke(Color(near ? p.warning : p.primary), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    Circle().stroke(Color(p.muted).opacity(0.3), lineWidth: 2.5)
+                    Circle().trim(from: 0, to: max(0.02, i.contextUsed))
+                        .stroke(Color(near ? p.warning : p.primary), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
                         .rotationEffect(.degrees(-90))
+                    Text("\(Int(i.contextUsed * 100))")
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(Color(near ? p.warning : p.muted))
                 }
-                .frame(width: 20, height: 20)
-                .frame(width: 30, height: 34)
+                .frame(width: 28, height: 28)
+                .frame(width: 32, height: 34)
                 .contentShape(Rectangle())
             }
             .accessibilityLabel("Context \(Int(i.contextUsed * 100))%, \(Style.tokens(i.contextTokens)) of \(Style.tokens(i.contextWindow))"
