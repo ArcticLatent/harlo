@@ -23,6 +23,11 @@ public struct SessionSummary: Equatable, Sendable, Identifiable {
     /// Why harlo put it on its project's Settled shelf ("Merged", …), "" when
     /// it isn't.
     public var settled: String
+    /// A helper: the session that started it (its key), and that one's
+    /// name; harlo lists it right after it, `nest` deep.
+    public var parent: String
+    public var helperOf: String
+    public var nest: Int
 
     public var id: String { key }
 
@@ -39,6 +44,9 @@ public struct SessionSummary: Equatable, Sendable, Identifiable {
         requests = (v["requests"].array ?? []).map(UIRequest.init)
         host = v["host"].text
         settled = v["settled"].text
+        parent = v["parent"].text
+        helperOf = v["helperOf"].text
+        nest = Int(v["nest"].int ?? 0)
     }
 
     public static func list(_ v: JSON) -> [SessionSummary] {

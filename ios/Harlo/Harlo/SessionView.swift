@@ -251,11 +251,11 @@ struct SessionContent: View {
                             Label("Plan and specs", systemImage: "list.bullet.clipboard")
                         }
                     }
-                    if !session.todos.isEmpty || !session.subagents.isEmpty {
+                    if !session.todos.isEmpty || !session.subagents.isEmpty || !session.helpers.isEmpty {
                         Button {
                             sheet = .activity
                         } label: {
-                            Label("Todos and subagents", systemImage: "checklist")
+                            Label(session.helpers.isEmpty ? "Todos and subagents" : "Todos and helpers", systemImage: "checklist")
                         }
                     }
                     Divider()

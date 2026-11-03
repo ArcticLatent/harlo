@@ -85,6 +85,8 @@ public final class OpenSession {
     public internal(set) var resumesAt: Int64 = 0
     /// Its shared plan (nil: harlo hasn't said, or doesn't have plans).
     public internal(set) var plan: Plan?
+    /// The helpers it started (sessions of their own in harlo).
+    public internal(set) var helpers: [Helper] = []
     /// Its repository's specs (nil: not asked yet).
     public internal(set) var specs: Specs?
     /// Your messages a turn can be undone to (row key → snapshot).
@@ -497,6 +499,8 @@ public final class HarloModel {
         switch ev {
         case .sessions(let s):
             sessions = s
+            // (A helper's state shows in the list as it changes.)
+            if let open = session { Task { await refreshHelpers(open) } }
         case .revoked:
             forgetHost()
             alert = "This phone was removed in harlo. Pair it again to use it."
@@ -692,6 +696,7 @@ public final class HarloModel {
             s.modes = try? await c.modes(r.key)
             await refreshLimit(s)
             await refreshPlan(s)
+            await refreshHelpers(s)
         } catch {
             s.error = Self.describe(error)
             s.loading = false
@@ -756,6 +761,42 @@ public final class HarloModel {
         guard let s = session else { return }
         if demo || samples != nil { s.plan = Self.demoEdit(s.plan ?? Plan(), edit); return }
         if let plan = await with({ c, k in try await c.editPlan(k, edit) }) { s.plan = plan }
+    }
+
+    /// harlo runs plans with helpers, and lists a session's helpers.
+    public var runsPlans: Bool { demo || samples != nil || features.contains("planRun") }
+
+    /// Runs the open session's plan with helpers of an agent, or goes on
+    /// with a paused run.
+    public func runPlan(agent: String) async {
+        guard let s = session else { return }
+        if demo || samples != nil {
+            if var plan = s.plan { plan.run = PlanRun(agent: agent, agentName: plan.reviewers.first { $0.id == agent }?.label ?? agent); s.plan = plan }
+            return
+        }
+        if let plan = await with({ c, k in try await c.runPlan(k, agent: agent) }) { s.plan = plan }
+    }
+
+    /// Stops the open session's plan's run.
+    public func stopPlanRun() async {
+        guard let s = session else { return }
+        if demo || samples != nil { s.plan?.run = nil; return }
+        if let plan = await with({ c, k in try await c.stopPlanRun(k) }) { s.plan = plan }
+    }
+
+    /// The open session's helpers, from harlo.
+    func refreshHelpers(_ s: OpenSession) async {
+        guard features.contains("helpers"), let c = client, !s.liveKey.isEmpty,
+              let list = try? await c.helpers(s.liveKey), session === s, list != s.helpers else { return }
+        s.helpers = list
+    }
+
+    /// Opens a helper's session (false: it isn't in the list).
+    @discardableResult
+    public func openHelper(_ key: String) -> Bool {
+        guard let row = sessions.first(where: { $0.key == key }) else { return false }
+        open(row)
+        return true
     }
 
     /// Has another agent review a finished step's commit: true when it

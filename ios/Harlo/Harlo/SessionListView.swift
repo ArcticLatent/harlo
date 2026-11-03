@@ -214,13 +214,21 @@ struct DashboardView: View {
         }
     }
 
+    /// It shows under the session that started it (grouped by project, as
+    /// harlo lists them).
+    func nested(_ s: SessionSummary) -> Bool {
+        all && groupBy != "day" && s.nest > 0 && search.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
     func card(_ s: SessionSummary) -> some View {
         Button {
             model.open(s)
         } label: {
-            SessionCard(session: s, unread: model.isUnread(s), showProject: !all || groupBy == "day")
+            SessionCard(session: s, unread: model.isUnread(s), showProject: !all || groupBy == "day", nested: nested(s))
         }
         .buttonStyle(.plain)
+        // A helper, right under the session that started it.
+        .padding(.leading, nested(s) ? CGFloat(min(s.nest, 3)) * 20 : 0)
         .plainRow(top: 5, bottom: 5)
         .swipeActions(edge: .trailing) {
             Button {
@@ -296,10 +304,13 @@ struct SessionCard: View {
     var unread = false
     /// Its project shows (the recent ones, or grouped by day).
     var showProject = false
+    /// A helper shown under the session that started it.
+    var nested = false
     @State private var now = Date()
 
     var detail: String {
         var parts = [Style.harnessLabel(session.harness)]
+        if !nested && !session.helperOf.isEmpty { parts.append("Helper of “\(session.helperOf)”") }
         if showProject && !session.project.isEmpty { parts.append(session.project) }
         // (Grouped by project, the group says its machine.)
         if showProject && !session.host.isEmpty { parts.append(session.host) }
@@ -313,6 +324,12 @@ struct SessionCard: View {
             AgentTile(harness: session.harness, size: 46)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    if nested {
+                        Image(systemName: "arrow.turn.down.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Color(p.muted))
+                            .accessibilityLabel("Helper of \(session.helperOf)")
+                    }
                     if session.pinned {
                         Image(systemName: "pin.fill")
                             .font(.system(size: 10))

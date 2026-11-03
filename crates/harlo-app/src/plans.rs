@@ -92,13 +92,13 @@ pub fn tool(tool: &str, args: &Value, ctx: &Value) -> Result<Value, String> {
     match tool {
         "plan_read" => Ok(get(file, key).json()),
         "plan_set" => {
-            let steps: Vec<(String, String)> = args["steps"]
+            let steps: Vec<(String, String, bool)> = args["steps"]
                 .as_array()
                 .into_iter()
                 .flatten()
                 .map(|s| match s {
-                    Value::String(t) => (t.clone(), String::new()),
-                    _ => (s["title"].as_str().unwrap_or_default().to_owned(), s["detail"].as_str().unwrap_or_default().to_owned()),
+                    Value::String(t) => (t.clone(), String::new(), false),
+                    _ => (s["title"].as_str().unwrap_or_default().to_owned(), s["detail"].as_str().unwrap_or_default().to_owned(), s["alongside"] == true),
                 })
                 .collect();
             update(file, key, |p| p.set(&steps).map(|()| p.json()))

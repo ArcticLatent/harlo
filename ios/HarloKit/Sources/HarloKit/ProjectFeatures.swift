@@ -15,6 +15,12 @@ public struct PlanStep: Equatable, Sendable, Identifiable {
     public var commitNote: String
     /// You changed or added it.
     public var editedByUser: Bool
+    /// It runs at the same time as the step before it (a run with helpers).
+    public var alongside: Bool
+    /// The helper session doing it, or that did (a run with helpers), "" none.
+    public var helper: String
+    /// The worktree branch it's done on (a step run alongside), "" none.
+    public var branch: String
 
     public init(_ v: JSON) {
         id = v["id"].int ?? -1
@@ -25,10 +31,35 @@ public struct PlanStep: Equatable, Sendable, Identifiable {
         commit = v["commit"].text
         commitNote = v["commitNote"].text
         editedByUser = v["editedByUser"].bool ?? false
+        alongside = v["alongside"].bool ?? false
+        helper = v["helper"].text
+        branch = v["branch"].text
     }
 
     /// It's still to do (it can be changed, or a step added after it).
     public var open: Bool { status == "pending" || status == "active" }
+}
+
+/// A plan running with helpers: harlo gives each step to a helper session,
+/// stage by stage.
+public struct PlanRun: Equatable, Sendable {
+    /// The helpers' agent ("claude", …), and its name.
+    public var agent: String
+    public var agentName: String
+    /// Why it stopped and waits for you ("" it's running).
+    public var paused: String
+
+    public init(_ v: JSON) {
+        agent = v["agent"].text
+        agentName = v["agentName"].text
+        paused = v["paused"].text
+    }
+
+    public init(agent: String, agentName: String, paused: String = "") {
+        self.agent = agent
+        self.agentName = agentName
+        self.paused = paused
+    }
 }
 
 /// A session's shared plan (a project with the plan on), as the dock above
@@ -39,14 +70,17 @@ public struct Plan: Equatable, Sendable {
     /// Each finished step is committed.
     public var commits: Bool
     public var steps: [PlanStep]
-    /// The agents that can review a step's commit.
+    /// The agents that can review a step's commit (and run it with helpers).
     public var reviewers: [Agent]
+    /// Its run with helpers (nil: none).
+    public var run: PlanRun?
 
     public init(_ v: JSON) {
         enabled = v["enabled"].bool ?? false
         commits = v["commits"].bool ?? false
         steps = (v["steps"].array ?? []).map(PlanStep.init)
         reviewers = (v["reviewers"].array ?? []).map { Agent(id: $0["id"].text, label: $0["label"].text) }
+        run = v["run"].object == nil ? nil : PlanRun(v["run"])
     }
 
     public init(steps: [PlanStep] = [], enabled: Bool = true) {
@@ -61,6 +95,15 @@ public struct Plan: Equatable, Sendable {
     public var finished: Int { steps.filter { $0.status == "done" || $0.status == "skipped" }.count }
     public var current: PlanStep? { steps.first { $0.status == "active" } }
 
+    /// It can run with helpers (again, when paused): steps are left, and it
+    /// isn't running.
+    public var canRun: Bool { finished < steps.count && (run == nil || run?.paused.isEmpty == false) }
+
+    /// The agents for its helpers, the session's own first.
+    public func helperAgents(for harness: String) -> [Agent] {
+        reviewers.filter { $0.id == harness } + reviewers.filter { $0.id != harness }
+    }
+
     /// Reviewers, the session's own agent last (another one first).
     public func reviewers(for harness: String) -> [Agent] {
         reviewers.filter { $0.id != harness } + reviewers.filter { $0.id == harness }
@@ -74,6 +117,8 @@ public enum PlanEdit: Sendable {
     case remove(id: Int64)
     case shift(id: Int64, by: Int)
     case skip(id: Int64, skipped: Bool)
+    /// Runs it at the same time as the step before (with helpers), or after.
+    case alongside(id: Int64, alongside: Bool)
 
     public var json: JSON {
         switch self {
@@ -85,6 +130,7 @@ public enum PlanEdit: Sendable {
         case .remove(let id): return ["op": "remove", "id": .int(id)]
         case .shift(let id, let by): return ["op": "shift", "id": .int(id), "by": .int(Int64(by))]
         case .skip(let id, let skipped): return ["op": "skip", "id": .int(id), "skipped": .bool(skipped)]
+        case .alongside(let id, let on): return ["op": "alongside", "id": .int(id), "alongside": .bool(on)]
         }
     }
 }

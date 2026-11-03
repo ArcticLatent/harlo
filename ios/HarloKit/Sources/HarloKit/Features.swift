@@ -469,6 +469,35 @@ public struct Subagent: Equatable, Sendable, Identifiable {
     }
 }
 
+/// A helper: a session the session's agent, or its plan's run, started in
+/// harlo.
+public struct Helper: Equatable, Sendable, Identifiable {
+    /// Its session's key (to open it).
+    public var id: String
+    public var name: String
+    /// Its agent ("claude", …).
+    public var agent: String
+    /// running | asking (its parent) | waiting (for you) | completed |
+    /// failed | ended
+    public var status: String
+    /// What it reported, "" nothing yet.
+    public var summary: String
+    /// The plan step it does (a run with helpers), nil none.
+    public var step: Int64?
+
+    public init(_ v: JSON) {
+        id = v["openKey"].string ?? v["id"].text
+        name = v["name"].text
+        agent = v["agent"].text
+        status = v["status"].text
+        summary = v["description"].text
+        step = v["step"].int
+    }
+
+    /// It waits on its parent or on you.
+    public var needsSomeone: Bool { status == "asking" || status == "waiting" }
+}
+
 /// The session's repository: its branch and changed files.
 public struct Changes: Equatable, Sendable {
     public struct File: Equatable, Sendable, Identifiable {

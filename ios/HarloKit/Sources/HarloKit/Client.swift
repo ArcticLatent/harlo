@@ -272,6 +272,22 @@ public actor HarloClient {
         Plan(try check(await call("planEdit", ["key": .string(key), "edit": edit.json])))
     }
 
+    /// Runs a session's plan with helpers of an agent ("" the session's
+    /// own), or goes on with a paused run: the plan after it.
+    public func runPlan(_ key: String, agent: String, model: String = "") async throws -> Plan {
+        Plan(try check(await call("planRun", ["key": .string(key), "agent": .string(agent), "model": .string(model)])))
+    }
+
+    /// Stops a plan's run (helpers at work finish their steps): the plan after.
+    public func stopPlanRun(_ key: String) async throws -> Plan {
+        Plan(try check(await call("planStop", ["key": .string(key)])))
+    }
+
+    /// The helpers a session started (its agent, or its plan's run).
+    public func helpers(_ key: String) async throws -> [Helper] {
+        (try check(await call("helpers", ["key": .string(key)]))["helpers"].array ?? []).map(Helper.init)
+    }
+
     /// Has another agent review a finished step's commit (its review comes
     /// back to the session).
     public func reviewStep(_ key: String, step: Int64, agent: String) async throws {

@@ -1,8 +1,10 @@
 import HarloKit
 import SwiftUI
 
-/// The session's todo list (by phase) and the subagents it started.
+/// The session's todo list (by phase), the subagents it started, and its
+/// helpers (sessions of their own in harlo).
 struct ActivityView: View {
+    @Environment(HarloModel.self) private var model
     @Environment(\.palette) private var p
     @Environment(\.dismiss) private var dismiss
     let session: OpenSession
@@ -55,13 +57,58 @@ struct ActivityView: View {
                         Text("Subagents").font(Style.mono(11.5, .semibold)).foregroundStyle(Color(p.muted)).textCase(nil)
                     }
                 }
+                if !session.helpers.isEmpty {
+                    Section {
+                        ForEach(session.helpers) { h in
+                            Button {
+                                dismiss()
+                                model.openHelper(h.id)
+                            } label: {
+                                HStack(alignment: .top, spacing: 10) {
+                                    StatusDot(status: h.needsSomeone ? "input" : h.status == "running" ? "busy" : h.status == "completed" ? "idle" : "exited")
+                                        .padding(.top, 6)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(h.name.isEmpty ? Style.harnessLabel(h.agent) : h.name).font(.system(size: 15, weight: .medium))
+                                        Text(h.summary.isEmpty ? Style.harnessLabel(h.agent) : h.summary)
+                                            .font(.system(size: 13.5))
+                                            .foregroundStyle(Color(p.muted))
+                                            .lineLimit(3)
+                                    }
+                                    Spacer(minLength: 0)
+                                    Text(helperState(h.status))
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(Color(h.needsSomeone ? p.warning : h.status == "failed" ? p.error : p.muted))
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(!model.sessions.contains { $0.key == h.id })
+                            .listRowBackground(Color(p.elevated))
+                        }
+                    } header: {
+                        Text("Helpers").font(Style.mono(11.5, .semibold)).foregroundStyle(Color(p.muted)).textCase(nil)
+                    } footer: {
+                        Text("Sessions this one started in harlo. Tap one to open it.")
+                    }
+                }
             }
             .screen()
-            .navigationTitle("Todos and subagents")
+            .navigationTitle(session.helpers.isEmpty ? "Todos and subagents" : "Todos and helpers")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
             }
+        }
+    }
+
+    func helperState(_ status: String) -> String {
+        switch status {
+        case "asking": return "Asks its parent"
+        case "waiting": return "Needs you"
+        case "completed": return "Done"
+        case "failed": return "Failed"
+        case "ended": return "Ended"
+        default: return "Working"
         }
     }
 

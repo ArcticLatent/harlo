@@ -54,6 +54,13 @@ pub struct Step {
     pub commit_note: String,
     /// Added or last changed by you (the agent sees that).
     pub yours: bool,
+    /// Runs at the same time as the step before it (in a run with helpers:
+    /// [`Plan::stages`]).
+    pub alongside: bool,
+    /// In a run with helpers: the session doing it, and the branch of the
+    /// worktree it did it in ("" for the session's own folder).
+    pub helper: String,
+    pub branch: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start: Option<Snapshot>,
 }
@@ -102,6 +109,14 @@ impl Plan {
                 if s.yours {
                     v["editedByUser"] = json!(true);
                 }
+                if s.alongside {
+                    v["alongside"] = json!(true);
+                }
+                for (k, val) in [("helper", &s.helper), ("branch", &s.branch)] {
+                    if !val.is_empty() {
+                        v[k] = json!(val);
+                    }
+                }
                 v
             })
             .collect();
@@ -110,16 +125,75 @@ impl Plan {
 
     /// The agent's steps from here on: the ones not started are replaced
     /// (the done, skipped and active ones stay).
-    pub fn set(&mut self, steps: &[(String, String)]) -> Result<(), String> {
-        let steps: Vec<&(String, String)> = steps.iter().filter(|(t, _)| !t.trim().is_empty()).collect();
+    /// (title, detail, alongside the one before.)
+    pub fn set(&mut self, steps: &[(String, String, bool)]) -> Result<(), String> {
+        let steps: Vec<&(String, String, bool)> = steps.iter().filter(|(t, ..)| !t.trim().is_empty()).collect();
         if steps.is_empty() {
             return Err("Give at least one step with a title.".into());
         }
         self.steps.retain(|s| s.status != Status::Pending);
-        for (title, detail) in steps {
+        for (title, detail, alongside) in steps {
             let id = self.new_id();
-            self.steps.push(Step { id, title: title.trim().to_owned(), detail: detail.trim().to_owned(), ..Default::default() });
+            self.steps.push(Step { id, title: title.trim().to_owned(), detail: detail.trim().to_owned(), alongside: *alongside, ..Default::default() });
         }
+        Ok(())
+    }
+
+    /// The steps in the order they run with helpers: each stage's steps at
+    /// the same time (a step `alongside` joins the stage of the one before),
+    /// a stage once the one before has finished.
+    pub fn stages(&self) -> Vec<Vec<u32>> {
+        let mut stages: Vec<Vec<u32>> = Vec::new();
+        for s in &self.steps {
+            match stages.last_mut() {
+                Some(last) if s.alongside => last.push(s.id),
+                _ => stages.push(vec![s.id]),
+            }
+        }
+        stages
+    }
+
+    fn finished(&self, id: u32) -> bool {
+        self.step(id).is_some_and(|s| matches!(s.status, Status::Done | Status::Skipped))
+    }
+
+    /// The stage that runs now (its steps), None when every step has
+    /// finished.
+    pub fn current_stage(&self) -> Option<Vec<u32>> {
+        self.stages().into_iter().find(|stage| !stage.iter().all(|id| self.finished(*id)))
+    }
+
+    /// What a run starts next: the current stage's steps not started yet.
+    pub fn ready(&self) -> Vec<u32> {
+        self.current_stage().unwrap_or_default().into_iter().filter(|id| self.step(*id).is_some_and(|s| s.status == Status::Pending)).collect()
+    }
+
+    /// The steps before the current stage that were done in worktrees:
+    /// (title, branch), for the next helper to merge.
+    pub fn branches_before(&self, stage: &[u32]) -> Vec<(String, String)> {
+        let first = stage.first().and_then(|id| self.steps.iter().position(|s| s.id == *id)).unwrap_or(0);
+        self.steps[..first].iter().filter(|s| s.status == Status::Done && !s.branch.is_empty()).map(|s| (s.title.clone(), s.branch.clone())).collect()
+    }
+
+    /// A run gives a step to a helper (`helper`: its session, `branch`: its
+    /// worktree's, "" for none). Steps of a stage run at once.
+    pub fn hand_out(&mut self, id: u32, helper: &str, branch: &str) -> Result<(), String> {
+        let step = self.step_mut(id)?;
+        if step.status != Status::Pending {
+            return Err(format!("Step {id} isn't waiting to start."));
+        }
+        step.status = Status::Active;
+        step.helper = helper.to_owned();
+        step.branch = branch.to_owned();
+        Ok(())
+    }
+
+    /// A helper didn't finish its step: it waits to be run again.
+    pub fn put_back(&mut self, id: u32, why: &str) -> Result<(), String> {
+        let step = self.step_mut(id)?;
+        step.status = Status::Pending;
+        step.helper.clear();
+        step.summary = why.trim().to_owned();
         Ok(())
     }
 
@@ -176,6 +250,14 @@ impl Plan {
         if j >= 0 && (j as usize) < self.steps.len() {
             self.steps.swap(i, j as usize);
         }
+    }
+
+    /// You make a step run at the same time as the one before, or after it.
+    pub fn set_alongside(&mut self, id: u32, alongside: bool) -> Result<(), String> {
+        let step = self.step_mut(id)?;
+        step.alongside = alongside;
+        step.yours = true;
+        Ok(())
     }
 
     /// You mark a step skipped, or not.
@@ -293,7 +375,53 @@ pub fn commit(folder: &Path, files: &[String], subject: &str, body: &str) -> Res
 }
 
 /// What harlo tells agents in a project with the plan on.
-pub const INSTRUCTIONS: &str = "This project uses a shared plan, which you work through and the user edits. For a task of three or more real steps, write the plan first with plan_set (each step one verifiable piece of work, outcome-named), then for each step: plan_read (the user may have added, changed, reordered or skipped steps; their edits win), plan_start, do the work, plan_done with a one-line summary. harlo commits each finished step on its own when its changes are provably the step's, so finish one step before starting the next, and don't commit yourself. For a small task, no plan is needed.";
+pub const INSTRUCTIONS: &str = "This project uses a shared plan, which you work through and the user edits. For a task of three or more real steps, write the plan first with plan_set (each step one verifiable piece of work, outcome-named), then for each step: plan_read (the user may have added, changed, reordered or skipped steps; their edits win), plan_start, do the work, plan_done with a one-line summary. harlo commits each finished step on its own when its changes are provably the step's, so finish one step before starting the next, and don't commit yourself. Mark a step alongside when it doesn't need the step before it: the user can run the plan with helpers (a session per step), and alongside steps then run at the same time. For a small task, no plan is needed.";
+
+/// What a helper is asked for a step of a run (before the helper brief):
+/// the step, where it stands in the plan, what to merge first, and whether
+/// to commit.
+pub fn step_prompt(plan: &Plan, id: u32, merge: &[(String, String)], commit: bool, worktree: bool) -> String {
+    let Some(step) = plan.step(id) else { return String::new() };
+    let n = plan.steps.iter().position(|s| s.id == id).map_or(0, |i| i + 1);
+    let mut text = format!("Do step {n} of {} of a plan: {}", plan.steps.len(), step.title);
+    if !step.detail.is_empty() {
+        text.push_str(&format!("\n\n{}", step.detail));
+    }
+    let done: Vec<String> = plan.steps.iter().filter(|s| s.status == Status::Done && s.id != id).map(|s| format!("- {}{}", s.title, if s.summary.is_empty() { String::new() } else { format!(": {}", s.summary) })).collect();
+    if !done.is_empty() {
+        text.push_str(&format!("\n\nDone already:\n{}", done.join("\n")));
+    }
+    let after: Vec<String> = plan.steps.iter().skip(n).filter(|s| s.status == Status::Pending).map(|s| format!("- {}", s.title)).collect();
+    if !after.is_empty() {
+        text.push_str(&format!("\n\nOther steps (not yours; leave them):\n{}", after.join("\n")));
+    }
+    if !merge.is_empty() {
+        let list: Vec<String> = merge.iter().map(|(title, branch)| format!("- {branch} ({title})")).collect();
+        text.push_str(&format!("\n\nEarlier steps were done on these branches: merge them into yours first (git merge), resolving any conflicts:\n{}", list.join("\n")));
+    }
+    text.push_str(if worktree {
+        "\n\nYou work in a worktree of your own, while other steps run at the same time. When the step works, commit it, with the step as the message."
+    } else if commit {
+        "\n\nWhen the step works, commit it, with the step as the message."
+    } else {
+        "\n\nDon't commit: the user does."
+    });
+    text
+}
+
+/// What a helper said its outcome was in words, when it had no harlo
+/// tools ("Outcome: succeeded" / "Outcome: failed"): Some(succeeded).
+pub fn outcome_in(reply: &str) -> Option<bool> {
+    let said = reply.lines().rev().find_map(|l| {
+        let l = l.trim().trim_start_matches(['*', '_', '-', ' ']).to_lowercase();
+        l.strip_prefix("outcome:").map(|o| o.split_whitespace().next().unwrap_or_default().trim_matches(['*', '_', '.', ',', ';']).to_owned())
+    })?;
+    match said.as_str() {
+        "succeeded" | "success" | "done" => Some(true),
+        "failed" | "failure" => Some(false),
+        _ => None,
+    }
+}
 
 /// The plan tools, as MCP lists them.
 pub fn tools(commits: bool) -> Value {
@@ -316,7 +444,8 @@ pub fn tools(commits: bool) -> Value {
             "inputSchema": s(json!({
                 "steps": { "type": "array", "items": { "type": "object", "properties": {
                     "title": { "type": "string", "description": "The step's outcome, short." },
-                    "detail": { "type": "string", "description": "How, or what to watch for (optional)." }
+                    "detail": { "type": "string", "description": "How, or what to watch for (optional)." },
+                    "alongside": { "type": "boolean", "description": "It can be done at the same time as the step before it (independent of it), when the plan runs with helpers (default false)." }
                 }, "required": ["title"] } }
             }), &["steps"]),
         },
@@ -348,8 +477,8 @@ mod tests {
     #[test]
     fn the_agent_and_you_edit_the_plan() {
         let mut p = Plan::default();
-        assert!(p.set(&[(" ".into(), String::new())]).is_err());
-        p.set(&[("Parse".into(), String::new()), ("Store".into(), "in sqlite".into()), ("Show".into(), String::new())]).unwrap();
+        assert!(p.set(&[(" ".into(), String::new(), false)]).is_err());
+        p.set(&[("Parse".into(), String::new(), false), ("Store".into(), "in sqlite".into(), false), ("Show".into(), String::new(), false)]).unwrap();
         p.start(1, None).unwrap();
         p.finish(1, "parses", false).unwrap();
         p.start(2, None).unwrap();
@@ -360,7 +489,7 @@ mod tests {
         p.shift(3, -1);
         assert_eq!(steps(&p), [(1, "Parse", Status::Done), (2, "Store", Status::Active), (3, "Show in the UI", Status::Pending), (4, "Test it", Status::Pending)]);
         // The agent rewrites what's left; the finished and active stay.
-        p.set(&[("Show".into(), String::new())]).unwrap();
+        p.set(&[("Show".into(), String::new(), false)]).unwrap();
         assert_eq!(steps(&p), [(1, "Parse", Status::Done), (2, "Store", Status::Active), (5, "Show", Status::Pending)]);
         // Starting another leaves one active.
         p.start(5, None).unwrap();
@@ -374,6 +503,50 @@ mod tests {
             { "id": 1, "title": "Parse", "status": "done", "summary": "parses" },
             { "id": 2, "title": "Store", "status": "skipped", "detail": "in sqlite", "editedByUser": true },
         ] }));
+    }
+
+    #[test]
+    fn a_run_goes_stage_by_stage() {
+        let mut p = Plan::default();
+        let t = |s: &str, along: bool| (s.to_owned(), String::new(), along);
+        p.set(&[t("Schema", false), t("API", false), t("UI", true), t("Docs", true), t("Ship", false)]).unwrap();
+        assert_eq!(p.stages(), [vec![1], vec![2, 3, 4], vec![5]]);
+        assert_eq!(p.ready(), [1]);
+        p.hand_out(1, "live:1", "").unwrap();
+        assert!(p.ready().is_empty() && p.hand_out(1, "live:9", "").is_err());
+        p.finish(1, "made it", false).unwrap();
+        // The next stage: all at once, in worktrees.
+        assert_eq!(p.ready(), [2, 3, 4]);
+        for (id, b) in [(2, "plan-api"), (3, "plan-ui"), (4, "plan-docs")] {
+            p.hand_out(id, "live:x", b).unwrap();
+        }
+        p.finish(2, "", false).unwrap();
+        p.set_skipped(4, true).unwrap();
+        // One failed: back to waiting, and run again.
+        p.put_back(3, "Failed: no tests").unwrap();
+        assert_eq!(p.ready(), [3]);
+        p.hand_out(3, "live:y", "plan-ui2").unwrap();
+        p.finish(3, "", false).unwrap();
+        assert_eq!(p.current_stage(), Some(vec![5]));
+        // The last stage merges what the worktrees did (the skipped one: nothing).
+        assert_eq!(p.branches_before(&[5]), [("API".to_owned(), "plan-api".to_owned()), ("UI".to_owned(), "plan-ui2".to_owned())]);
+        let prompt = step_prompt(&p, 5, &p.branches_before(&[5]), true, false);
+        assert!(prompt.starts_with("Do step 5 of 5 of a plan: Ship") && prompt.contains("- Schema: made it") && prompt.contains("- plan-api (API)") && prompt.ends_with("with the step as the message."), "{prompt}");
+        assert!(step_prompt(&p, 5, &[], false, false).ends_with("Don't commit: the user does."));
+        p.finish(5, "", false).unwrap();
+        assert!(p.current_stage().is_none() && p.ready().is_empty());
+        // You move a step to run with the one before.
+        p.set_alongside(5, true).unwrap();
+        assert_eq!(p.stages().last().unwrap(), &vec![2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn reads_an_outcome_said_in_words() {
+        assert_eq!(outcome_in("Did it.\n\n**Outcome: succeeded**"), Some(true));
+        assert_eq!(outcome_in("Outcome: failed. Tests don't build.\nmore"), Some(false));
+        assert_eq!(outcome_in("Outcome: maybe"), None);
+        assert_eq!(outcome_in("- Outcome: Failed"), Some(false));
+        assert_eq!(outcome_in("no outcome here"), None);
     }
 
     #[test]

@@ -167,6 +167,13 @@ pub mod qobject {
         /// `{ op: "clear" }`.
         #[qinvokable]
         fn plan_edit(self: Pin<&mut Workspace>, key: &QString, op: &QString);
+        /// Runs a session's plan with helpers (`agent` "": its own; `model`
+        /// "": the default), or goes on with a paused run; the problem, if any.
+        #[qinvokable]
+        fn run_plan(self: Pin<&mut Workspace>, key: &QString, agent: &QString, model: &QString) -> QString;
+        /// Stops a plan's run (helpers at work go on).
+        #[qinvokable]
+        fn stop_plan_run(self: Pin<&mut Workspace>, key: &QString);
         /// Has another agent review a finished step's commit; its review
         /// comes back to the session. The problem, if any.
         #[qinvokable]
@@ -867,6 +874,8 @@ pub struct WorkspaceRust {
     /// key, and the sessions agents started (by key).
     orch_tokens: HashMap<String, String>,
     orch_children: HashMap<String, OrchChild>,
+    /// Plans running with helpers, by the session whose plan it is.
+    plan_runs: HashMap<String, PlanRun>,
     /// Remote files being copied here (`localCopy`).
     copying: std::cell::RefCell<HashSet<PathBuf>>,
     quota_loading: bool,
@@ -2579,6 +2588,10 @@ impl Workspace {
         let mut v = crate::plans::get(self.file_for_key(&key).as_deref(), &key).json();
         v["enabled"] = json!(enabled);
         v["commits"] = json!(commits);
+        // Running with helpers: the agent, and why it paused.
+        if let Some(run) = self.plan_runs.get(&key) {
+            v["run"] = json!({ "agent": run.agent.as_str(), "agentName": run.agent.label(), "model": run.model, "paused": run.paused });
+        }
         QString::from(&v.to_string())
     }
 
@@ -2659,6 +2672,9 @@ impl Workspace {
             "skip" => {
                 let _ = p.set_skipped(id, op["skipped"].as_bool().unwrap_or(true));
             }
+            "alongside" => {
+                let _ = p.set_alongside(id, op["alongside"].as_bool().unwrap_or(true));
+            }
             "clear" => p.steps.clear(),
             _ => {}
         });
@@ -2694,7 +2710,7 @@ impl Workspace {
         if let Some(live) = registry::get(&child) {
             live.handle.send_raw(json!({ "type": "set_session_name", "name": title }));
         }
-        self.as_mut().adopt(&child, &key, &title, kind.as_str(), true);
+        self.as_mut().adopt(&child, &key, &title, kind.as_str(), true, None);
         // (Its progress shows in the session's Subagents box.)
         send_first_prompt(&child, FirstPrompt { text: prompt, ..Default::default() }, Some(self.qt_thread()));
         QString::default()
@@ -3076,7 +3092,8 @@ impl Workspace {
     }
 
     fn create_worktree_session(mut self: Pin<&mut Self>, project_id: i32, branch: &QString, base: &QString, harness: &QString, opts: WorktreeStart) {
-        let WorktreeStart { first, model, lane, parent, approval } = opts;
+        let WorktreeStart { first, model, lane, parent, approval, plan_step } = opts;
+        let step_of = parent.as_ref().map(|(p, ..)| p.clone()).zip(plan_step);
         let Some((project, root)) = self.project_root(project_id) else {
             self.set_notice_text("This project is not a git repository.", true);
             return;
@@ -3117,7 +3134,7 @@ impl Workspace {
                     let key = this.as_mut().start_session_with(kind, path.clone(), &model, lane.is_none() && parent.is_none());
                     // Started by an agent: its subagent.
                     if let Some((parent, title, notify)) = parent {
-                        this.as_mut().adopt(&key, &parent, &title, kind.as_str(), notify);
+                        this.as_mut().adopt(&key, &parent, &title, kind.as_str(), notify, plan_step);
                     }
                     if let Some(lane) = lane {
                         if let Some(mut l) = this.find_run(&lane.0).and_then(|r| r.lanes.into_iter().find(|l| l.idx == lane.1)) {
@@ -3137,7 +3154,13 @@ impl Workspace {
                     this.as_mut().set_notice_text(&format!("Worktree {branch} ready"), false);
                     this.run_setup(path, setup);
                 }
-                Err(e) => this.set_notice_text(&format!("Could not create the worktree: {e:#}"), true),
+                Err(e) => {
+                    this.as_mut().set_notice_text(&format!("Could not create the worktree: {e:#}"), true);
+                    // A plan's step: back to waiting, and the run paused.
+                    if let Some((owner, id)) = step_of {
+                        this.as_mut().plan_step_ended(&owner, id, Err(format!("its worktree couldn't be made: {e:#}")));
+                    }
+                }
             },
         );
     }
@@ -4522,7 +4545,7 @@ impl Workspace {
                     &QString::from(&branch),
                     &QString::from(&base),
                     &QString::from(harness),
-                    WorktreeStart { first: Some(first.clone()), model: model.clone(), lane: Some(lane_ref), parent: None, approval: None },
+                    WorktreeStart { first: Some(first.clone()), model: model.clone(), lane: Some(lane_ref), parent: None, approval: None, plan_step: None },
                 );
             } else {
                 record.lanes.push(RunLane { idx: idx as i64, harness: harness.clone(), model: model.clone(), cwd: cwd.clone(), branch: String::new(), session_file: PathBuf::new() });
@@ -5587,9 +5610,21 @@ impl Workspace {
             }
             // A session's shared plan (as the dock above the desktop's
             // composer), the agents that can review a step, and its edits.
-            "plan" | "planEdit" => {
+            // A session's helpers (the sessions its agent, or its plan's run,
+            // started), as its Subagents box shows them.
+            "helpers" => json!({ "helpers": serde_json::from_str::<serde_json::Value>(&self.orchestrated_json(&QString::from(&key)).to_string()).unwrap_or_default() }),
+            "plan" | "planEdit" | "planRun" | "planStop" => {
                 if msg["op"] == "planEdit" {
                     self.as_mut().plan_edit(&QString::from(&key), &QString::from(&msg["edit"].to_string()));
+                }
+                if msg["op"] == "planStop" {
+                    self.as_mut().stop_plan_run(&QString::from(&key));
+                }
+                if msg["op"] == "planRun" {
+                    let problem = self.as_mut().run_plan(&QString::from(&key), &QString::from(&text("agent")), &QString::from(&text("model"))).to_string();
+                    if !problem.is_empty() {
+                        return fail(&problem);
+                    }
                 }
                 let mut plan: serde_json::Value = serde_json::from_str(&self.plan_json(&QString::from(&key)).to_string()).unwrap_or_default();
                 plan["reviewers"] = HarnessKind::PROVIDERS.iter().filter(|&&k| self.usable_harness(k)).map(|k| json!({ "id": k.as_str(), "label": k.label() })).collect();
@@ -5687,6 +5722,10 @@ impl Workspace {
             // (Settled sessions too: a phone that shows them, as a shelf.)
             shelves_open: &expanded,
         });
+        // Helpers under the sessions that started them, as here.
+        let parents: HashMap<String, String> = self.orch_children.iter().map(|(k, c)| (k.clone(), c.parent.clone())).collect();
+        let mut rows = rows;
+        sidebar::nest_helpers(&mut rows, &parents);
         let mut group = String::new();
         let mut list = Vec::new();
         for r in rows {
@@ -5706,6 +5745,8 @@ impl Workspace {
                         // Its machine ("" this one), and why it's settled ("" not).
                         "host": harlo_core::remote::host_of(&r.cwd).unwrap_or_default(), "settled": r.settled,
                         "requests": requests,
+                        // A helper: the session that started it (shown under it).
+                        "parent": if r.nest > 0 { parents.get(&r.key).cloned() } else { None }, "helperOf": r.helper_of, "nest": r.nest,
                     }))
                 }
                 SidebarKind::More | SidebarKind::Shelf => {}
@@ -5863,6 +5904,20 @@ struct WorktreeStart {
     parent: Option<(String, String, bool)>,
     /// The shield's mode to start in.
     approval: Option<String>,
+    /// The step of its parent's plan it does (a run with helpers).
+    plan_step: Option<u32>,
+}
+
+/// A session's plan running with helpers: harlo hands each stage's steps
+/// to helper sessions (`harlo_core::plan::Plan::stages`).
+#[derive(Clone)]
+struct PlanRun {
+    agent: HarnessKind,
+    model: String,
+    /// Why it stopped handing out steps ("" while it runs).
+    paused: String,
+    /// The session's file when it started (its plan's, should it close).
+    file: Option<PathBuf>,
 }
 
 /// A session an agent started (orchestration).
@@ -5883,6 +5938,9 @@ struct OrchChild {
     asking: bool,
     /// Its parent was told it waits for the user (once a run).
     told_waiting: bool,
+    /// The step of its parent's plan it does (a run with helpers): its
+    /// result goes to the run, not to the parent's agent.
+    plan_step: Option<u32>,
 }
 
 /// The first message of a session started from the new-session page.
@@ -6171,6 +6229,10 @@ impl Workspace {
             if tool.starts_with("plan_") && !plan {
                 return Err("The shared plan is off for this project (its settings in harlo).".into());
             }
+            // A plan running with helpers is harlo's to hand out.
+            if matches!(tool, "plan_set" | "plan_start" | "plan_done") && self.plan_runs.get(caller).is_some_and(|r| r.paused.is_empty()) {
+                return Err("This plan is running with helpers: harlo hands its steps to them, so leave the steps alone until the run ends (the user can stop it).".into());
+            }
             // Other sessions' last work (now, while busy), for telling a
             // step's changes apart.
             let unix = |t: SystemTime| t.duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
@@ -6285,7 +6347,7 @@ impl Workspace {
                         &QString::from(&branch),
                         &QString::default(),
                         &QString::from(kind.as_str()),
-                        WorktreeStart { first: Some(first), model, lane: None, parent: caller.as_ref().map(|_| (parent, title.clone(), notify)), approval },
+                        WorktreeStart { first: Some(first), model, lane: None, parent: caller.as_ref().map(|_| (parent, title.clone(), notify)), approval, plan_step: None },
                     );
                     return Ok(json!({ "status": "creating the worktree; the session starts in it shortly (see list_sessions)", "branch": branch, "title": title }));
                 }
@@ -6295,7 +6357,7 @@ impl Workspace {
                     live.handle.send_raw(json!({ "type": "set_session_name", "name": title }));
                 }
                 if caller.is_some() {
-                    self.as_mut().adopt(&key, &parent, &title, kind.as_str(), notify);
+                    self.as_mut().adopt(&key, &parent, &title, kind.as_str(), notify, None);
                 }
                 if let Some(mode) = &approval {
                     self.as_mut().set_approval_mode(&QString::from(&key), &QString::from(mode));
@@ -6380,8 +6442,17 @@ impl Workspace {
     }
 
     /// `key` was started by `parent`'s agent: it's that session's subagent.
-    fn adopt(mut self: Pin<&mut Self>, key: &str, parent: &str, title: &str, agent: &str, notify: bool) {
-        self.as_mut().rust_mut().orch_children.insert(key.to_owned(), OrchChild { parent: parent.to_owned(), title: title.to_owned(), agent: agent.to_owned(), notify, status: "running".into(), report: None, asking: false, told_waiting: false });
+    fn adopt(mut self: Pin<&mut Self>, key: &str, parent: &str, title: &str, agent: &str, notify: bool, plan_step: Option<u32>) {
+        self.as_mut().rust_mut().orch_children.insert(key.to_owned(), OrchChild { parent: parent.to_owned(), title: title.to_owned(), agent: agent.to_owned(), notify, status: "running".into(), report: None, asking: false, told_waiting: false, plan_step });
+        // (A plan's step: who does it.)
+        if let Some(id) = plan_step {
+            crate::plans::update(self.plan_file(parent).as_deref(), parent, |p| {
+                if let Some(s) = p.steps.iter_mut().find(|s| s.id == id) {
+                    s.helper = key.to_owned();
+                }
+            });
+            self.as_mut().plans_changed();
+        }
         self.as_mut().bump_orchestration();
         // (Shown under its parent in the sidebar.)
         self.rebuild();
@@ -6431,6 +6502,22 @@ impl Workspace {
             c.told_waiting = false;
         }
         self.as_mut().bump_orchestration();
+        // A plan's step: its result goes to the run.
+        if let Some(id) = child.plan_step {
+            let said = match &child.report {
+                Some(r) => Some((r.succeeded, r.summary.clone())),
+                None => reply.as_deref().and_then(|r| harlo_core::plan::outcome_in(r).map(|ok| (ok, harlo_core::notifications::summary(r, 300)))),
+            };
+            let result = match said {
+                Some((true, summary)) => Ok(summary),
+                Some((false, summary)) => Err(format!("it failed: {summary}")),
+                None => Err(match error {
+                    Some(e) => format!("it stopped with an error: {e}"),
+                    None => "it ended without saying whether it worked (no report)".into(),
+                }),
+            };
+            return self.as_mut().plan_step_ended(&child.parent, id, result);
+        }
         if !child.notify {
             return;
         }
@@ -6449,7 +6536,8 @@ impl Workspace {
             c.told_waiting = true;
         }
         self.as_mut().bump_orchestration();
-        let Some(parent) = registry::get(&child.parent).filter(|_| child.notify && !child.told_waiting) else { return };
+        // (A plan's step: you're told, as for any session; the run waits.)
+        let Some(parent) = registry::get(&child.parent).filter(|_| child.notify && !child.told_waiting && child.plan_step.is_none()) else { return };
         let message = harlo_core::orchestration::waiting_message(agent_label(&child.agent), &child.title, key, what);
         let busy = self.live.get(&child.parent).is_some_and(|e| e.info.status == SessionStatus::Busy);
         parent.handle.prompt(&message, Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });
@@ -6498,6 +6586,178 @@ impl Workspace {
             None => harlo_core::orchestration::bridge_installed(kind),
             // A host's: what Settings last found there.
             Some(h) => self.orch_hosts.get(&h).is_some_and(|f| f["bridges"][kind.as_str()] == true),
+        }
+    }
+
+    /// Runs a session's plan with helpers (`agent`: "" for the session's
+    /// own, `model`: "" for its default), or goes on with a paused run. The
+    /// problem, if any.
+    pub fn run_plan(mut self: Pin<&mut Self>, key: &QString, agent: &QString, model: &QString) -> QString {
+        let key = key.to_string();
+        let Some(entry) = self.live.get(&key) else { return QString::from("Open the session first: its plan runs from it.") };
+        let own = HarnessKind::parse(&entry.info.harness);
+        let kind = match agent.to_string().trim() {
+            "" => own,
+            a => HarnessKind::parse(a),
+        };
+        let Some(kind) = kind.filter(|k| self.usable_harness(*k)) else { return QString::from("That agent isn't available.") };
+        if !self.features_of(&key).is_some_and(|(_, _, plan, _)| plan) {
+            return QString::from("The shared plan is off for this session's project (its settings).");
+        }
+        let plan = crate::plans::get(self.file_for_key(&key).as_deref(), &key);
+        if plan.current_stage().is_none() {
+            return QString::from("Every step of the plan has finished.");
+        }
+        let file = self.file_for_key(&key);
+        self.as_mut().rust_mut().plan_runs.insert(key.clone(), PlanRun { agent: kind, model: model.to_string().trim().to_owned(), paused: String::new(), file });
+        self.as_mut().plans_changed();
+        self.as_mut().advance_plan(&key);
+        QString::default()
+    }
+
+    /// Stops handing out a plan's steps (helpers at work go on; their steps
+    /// are marked as they finish).
+    pub fn stop_plan_run(mut self: Pin<&mut Self>, key: &QString) {
+        if self.as_mut().rust_mut().plan_runs.remove(&key.to_string()).is_some() {
+            self.as_mut().plans_changed();
+        }
+    }
+
+    /// A run's next steps: the current stage's that haven't started, each
+    /// to a helper (more than one: each in a worktree of its own); or, with
+    /// every step finished, the run's end.
+    fn advance_plan(mut self: Pin<&mut Self>, owner: &str) {
+        let Some(run) = self.plan_runs.get(owner).cloned().filter(|r| r.paused.is_empty()) else { return };
+        let file = self.plan_file(owner);
+        let plan = crate::plans::get(file.as_deref(), owner);
+        let Some(stage) = plan.current_stage() else {
+            self.as_mut().rust_mut().plan_runs.remove(owner);
+            self.as_mut().plans_changed();
+            let done = plan.steps.iter().filter(|s| s.status == harlo_core::plan::Status::Done).count();
+            let skipped = plan.steps.iter().filter(|s| s.status == harlo_core::plan::Status::Skipped).count();
+            let said = format!("{done} step{} done{}", if done == 1 { "" } else { "s" }, if skipped > 0 { format!(", {skipped} skipped") } else { String::new() });
+            self.as_mut().tell_about_run(owner, "Plan finished", &said, false);
+            // Its agent sums it up.
+            if let Some(live) = registry::get(owner) {
+                let busy = self.live.get(owner).is_some_and(|e| e.info.status == SessionStatus::Busy);
+                let text = format!("[harlo] Your plan ran with helpers and has finished: {said}. Read each step's summary with plan_read, check the work fits together, and tell the user what was done and what's still open.");
+                live.handle.prompt(&text, Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });
+            }
+            return;
+        };
+        let ready = plan.ready();
+        if ready.is_empty() {
+            return;
+        }
+        let Some((cwd, ..)) = self.features_of(owner) else {
+            return self.as_mut().pause_plan(owner, "the session isn't in a harlo project any more");
+        };
+        let commits = self.features_of(owner).is_some_and(|f| f.3);
+        // At the same time: each in a worktree of the project's (from the
+        // session's own branch, when it's in one).
+        let project = self.projects.iter().filter(|p| cwd.starts_with(&p.path)).max_by_key(|p| p.path.components().count()).cloned();
+        let tree = self.worktrees.iter().filter(|w| !w.removed && cwd.starts_with(&w.path)).max_by_key(|w| w.path.components().count()).cloned();
+        let project = project.or_else(|| tree.as_ref().and_then(|t| self.projects.iter().find(|p| p.id == t.project_id).cloned()));
+        let together = stage.len() > 1 && project.is_some();
+        // (Without a project's worktrees: one at a time.)
+        let ready: Vec<u32> = if together { ready } else { ready.into_iter().take(1).collect() };
+        if !together && plan.steps.iter().any(|s| stage.contains(&s.id) && s.status == harlo_core::plan::Status::Active) {
+            return;
+        }
+        let merge = plan.branches_before(&stage);
+        let owner_title = self.title_of(owner);
+        let tools = self.has_harlo_tools(run.agent, &cwd);
+        let approval = self.approval_of(owner).filter(|_| has_shield(run.agent.as_str(), &cwd));
+        let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() % 100_000);
+        for id in ready {
+            let Some(step) = plan.step(id).cloned() else { continue };
+            let n = plan.steps.iter().position(|s| s.id == id).map_or(0, |i| i + 1);
+            let title = format!("Step {n}: {}", step.title);
+            let branch = if together { format!("plan/{}-{id}-{stamp}", git::branch_slug(&step.title).chars().take(30).collect::<String>().trim_matches('-')) } else { String::new() };
+            let task = harlo_core::plan::step_prompt(&plan, id, &merge, commits, together);
+            let prompt = harlo_core::orchestration::helper_brief(&owner_title, &task, tools);
+            if let Err(e) = crate::plans::update(file.as_deref(), owner, |p| p.hand_out(id, "", &branch)) {
+                tracing::warn!("plan run: {e}");
+                continue;
+            }
+            if together && let Some(project) = &project {
+                let base = tree.as_ref().map(|t| t.branch.clone()).unwrap_or_default();
+                let first = FirstPrompt { text: prompt, ..Default::default() };
+                self.as_mut().create_worktree_session(
+                    project.id as i32,
+                    &QString::from(&branch),
+                    &QString::from(&base),
+                    &QString::from(run.agent.as_str()),
+                    WorktreeStart { first: Some(first), model: run.model.clone(), lane: None, parent: Some((owner.to_owned(), title.clone(), true)), approval: approval.clone(), plan_step: Some(id) },
+                );
+                continue;
+            }
+            let key = self.as_mut().start_session_with(run.agent, cwd.clone(), &run.model, false);
+            if let Some(live) = registry::get(&key) {
+                live.handle.send_raw(json!({ "type": "set_session_name", "name": title }));
+            }
+            self.as_mut().adopt(&key, owner, &title, run.agent.as_str(), true, Some(id));
+            if let Some(mode) = &approval {
+                self.as_mut().set_approval_mode(&QString::from(&key), &QString::from(mode));
+            }
+            send_first_prompt(&key, FirstPrompt { text: prompt, ..Default::default() }, Some(self.qt_thread()));
+        }
+        self.as_mut().plans_changed();
+    }
+
+    /// A plan's step ended: done with its summary (`Ok`), or (`Err`, why)
+    /// back to waiting with the run paused for you. Then the run goes on.
+    fn plan_step_ended(mut self: Pin<&mut Self>, owner: &str, id: u32, result: Result<String, String>) {
+        let file = self.plan_file(owner);
+        let plan = crate::plans::get(file.as_deref(), owner);
+        let n = plan.steps.iter().position(|s| s.id == id).map_or(0, |i| i + 1);
+        match result {
+            Ok(summary) => {
+                let _ = crate::plans::update(file.as_deref(), owner, |p| p.finish(id, &summary, false).map(|_| ()));
+                self.as_mut().plans_changed();
+                self.as_mut().advance_plan(owner);
+            }
+            Err(why) => {
+                let _ = crate::plans::update(file.as_deref(), owner, |p| p.put_back(id, &format!("Not done: {why}")));
+                self.as_mut().plans_changed();
+                self.as_mut().pause_plan(owner, &format!("step {n} ({}) {why}", plan.step(id).map(|s| s.title.as_str()).unwrap_or_default()));
+            }
+        }
+    }
+
+    /// The file a session's plan is kept by: its session file (the one its
+    /// run started with, when it's closed since).
+    fn plan_file(&self, owner: &str) -> Option<PathBuf> {
+        self.file_for_key(owner).or_else(|| self.plan_runs.get(owner).and_then(|r| r.file.clone()))
+    }
+
+    /// A run stops handing out steps until you run it again; you're told.
+    fn pause_plan(mut self: Pin<&mut Self>, owner: &str, why: &str) {
+        {
+            let mut this = self.as_mut().rust_mut();
+            let Some(run) = this.plan_runs.get_mut(owner) else { return };
+            run.paused = why.to_owned();
+        }
+        self.as_mut().plans_changed();
+        let text = format!("Paused: {why}. Run it again to retry the step, or skip or change it first.");
+        self.as_mut().tell_about_run(owner, "Plan run paused", &text, true);
+    }
+
+    /// A notification about a plan's run (desktop and phone).
+    fn tell_about_run(mut self: Pin<&mut Self>, owner: &str, title: &str, body: &str, failed: bool) {
+        let settings = harlo_core::notifications::Settings::load(&self.setting_str("notify"), &self.setting_str("notifications"));
+        let session = self.title_of(owner);
+        crate::phone_push::send(crate::phone_push::Alert {
+            what: if failed { crate::phone_push::What::Failed } else { crate::phone_push::What::Done },
+            key: owner.to_owned(),
+            title: session.clone(),
+            body: format!("{title}: {body}"),
+            badge: self.waiting_count(),
+            quiet: settings.quiet.hushes_now(false),
+        });
+        if settings.enabled && !settings.quiet.hushes_now(false) {
+            let tag = format!("plan-run-{owner}");
+            self.as_mut().deliver(&tag, if failed { "error" } else { "completion" }, owner, &format!("{title} · {session}"), body, settings.sound);
         }
     }
 
@@ -6687,6 +6947,7 @@ impl Workspace {
                 serde_json::json!({
                     "id": k, "name": c.title, "agent": c.agent, "status": status, "openKey": k,
                     "canCancel": live.is_some(), "canSteer": false, "startedAt": live.map(|e| e.info.started_at.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())),
+                    "description": c.report.as_ref().map_or("", |r| r.summary.as_str()), "step": c.plan_step,
                 })
             })
             .collect();

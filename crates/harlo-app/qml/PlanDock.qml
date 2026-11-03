@@ -6,7 +6,9 @@ import harlo
 // The session's shared plan (a project with the plan on): progress and
 // the step in hand on one line; expanded, every step to edit, reorder,
 // skip or remove, a step to add, and each finished step's commit, which
-// another agent can review.
+// another agent can review. The plan can also run with helpers: harlo
+// gives each step to a helper session, stage by stage (a step marked
+// "alongside" runs at the same time as the one before, in a worktree).
 Rectangle {
     id: root
     property ChatSession session
@@ -14,6 +16,8 @@ Rectangle {
     readonly property var steps: plan.steps || []
     readonly property int finished: steps.filter(s => s.status === "done" || s.status === "skipped").length
     readonly property var current: steps.find(s => s.status === "active") || null
+    readonly property var run: plan.run || null
+    readonly property bool paused: !!run && (run.paused || "") !== ""
     property bool expanded: false
     /// The step being edited (its id; -1 none, 0 a new one).
     property int editing: -1
@@ -61,6 +65,17 @@ Rectangle {
                 radius: 2
                 color: Theme.subtle
                 Rectangle { width: parent.width * (root.steps.length ? root.finished / root.steps.length : 0); height: parent.height; radius: 2; color: Theme.success }
+            }
+            // Running with helpers (or paused, waiting for you).
+            Rectangle {
+                objectName: "planRunChip"
+                visible: !!root.run
+                implicitWidth: runChip.implicitWidth + 12
+                implicitHeight: 18
+                radius: 9
+                readonly property color tint: root.paused ? Theme.warning : Theme.primary
+                color: Qt.rgba(tint.r, tint.g, tint.b, 0.15)
+                Label { id: runChip; anchors.centerIn: parent; text: root.paused ? "Paused" : "Running with helpers"; color: parent.tint; font.pixelSize: Theme.px(10.5); font.bold: true }
             }
             Label {
                 Layout.fillWidth: true
@@ -110,6 +125,13 @@ Rectangle {
                     ColumnLayout {
                         Layout.fillWidth: true
                         spacing: 1
+                        // Runs at the same time as the step before (with helpers).
+                        RowLayout {
+                            visible: !!stepRow.modelData.alongside
+                            spacing: 4
+                            Icon { name: "layout-column"; color: Theme.info; implicitWidth: 11; implicitHeight: 11 }
+                            Label { text: "With the step before"; color: Theme.info; font.pixelSize: Theme.px(10.5) }
+                        }
                         Label {
                             Layout.fillWidth: true
                             text: stepRow.modelData.title + (stepRow.modelData.editedByUser ? "  ·  yours" : "")
@@ -125,6 +147,28 @@ Rectangle {
                             color: Theme.textFaint
                             font.pixelSize: Theme.px(11.5)
                             wrapMode: Text.Wrap
+                        }
+                        // Its helper (a run), and the worktree it works in.
+                        RowLayout {
+                            visible: (stepRow.modelData.helper || "") !== "" || (stepRow.modelData.branch || "") !== ""
+                            Layout.fillWidth: true
+                            spacing: 6
+                            Icon { name: "node-tree"; color: Theme.muted; implicitWidth: 12; implicitHeight: 12 }
+                            Label {
+                                Layout.fillWidth: true
+                                text: (stepRow.modelData.status === "active" ? "A helper is on it" : "Done by a helper") + ((stepRow.modelData.branch || "") !== "" ? " · ⎇ " + stepRow.modelData.branch : "")
+                                color: Theme.muted
+                                font.pixelSize: Theme.px(11)
+                                elide: Text.ElideRight
+                            }
+                            FlatButton {
+                                objectName: "planOpenHelper-" + stepRow.modelData.id
+                                visible: (stepRow.modelData.helper || "") !== "" && stepRow.modelData.status === "active"
+                                text: "Open"
+                                padding: 2
+                                font.pixelSize: Theme.px(11)
+                                onClicked: Workspace.open(stepRow.modelData.helper)
+                            }
                         }
                         // Its commit, or why there isn't one.
                         RowLayout {
@@ -173,6 +217,12 @@ Rectangle {
                         spacing: 0
                         StepButton { iconName: "arrow-up-s"; tip: "Move up"; enabled: stepRow.index > 0; onClicked: root.edit({ op: "shift", id: stepRow.modelData.id, by: -1 }) }
                         StepButton { iconName: "arrow-down-s"; tip: "Move down"; enabled: stepRow.index < root.steps.length - 1; onClicked: root.edit({ op: "shift", id: stepRow.modelData.id, by: 1 }) }
+                        StepButton {
+                            visible: stepRow.index > 0 && stepRow.modelData.status === "pending"
+                            iconName: "layout-column"
+                            tip: stepRow.modelData.alongside ? "Run it after the step before" : "Run it at the same time as the step before (with helpers)"
+                            onClicked: root.edit({ op: "alongside", id: stepRow.modelData.id, alongside: !stepRow.modelData.alongside })
+                        }
                         StepButton { visible: stepRow.open; iconName: "edit"; tip: "Change it"; onClicked: { root.editing = stepRow.modelData.id; editTitle.text = stepRow.modelData.title; editDetail.text = stepRow.modelData.detail || "" } }
                         StepButton {
                             visible: stepRow.modelData.status !== "done"
@@ -229,10 +279,60 @@ Rectangle {
                 }
             }
         }
+        // Why the run paused.
+        Label {
+            Layout.fillWidth: true
+            Layout.topMargin: 2
+            visible: root.expanded && root.paused
+            text: root.run ? root.run.paused : ""
+            color: Theme.warning
+            font.pixelSize: Theme.px(11.5)
+            wrapMode: Text.Wrap
+        }
         RowLayout {
             Layout.fillWidth: true
             visible: root.expanded && root.editing < 0
             spacing: 8
+            // Each step to a helper session, stage by stage.
+            FlatButton {
+                objectName: "planRun"
+                visible: (!root.run || root.paused) && root.finished < root.steps.length
+                text: root.paused ? "Run again" : "Run with helpers"
+                accent: Theme.primary
+                padding: 3
+                font.pixelSize: Theme.px(11.5)
+                onClicked: runMenu.popup()
+                ToolTip.visible: hovered
+                ToolTip.text: "harlo gives each step to a helper session: in order, and steps marked to run with the one before at the same time, each in a worktree."
+                ToolTip.delay: 500
+                AppMenu {
+                    id: runMenu
+                    Repeater {
+                        model: root.reviewers.slice().sort((a, b) => (b.id === root.session.harness) - (a.id === root.session.harness))
+                        AppMenuItem {
+                            required property var modelData
+                            text: "Helpers: " + modelData.label + (modelData.id === root.session.harness ? " (this session's)" : "")
+                            onTriggered: {
+                                const err = Workspace.runPlan(root.session.key, modelData.id, "")
+                                if (err !== "") Workspace.showNotice(err, true)
+                            }
+                        }
+                    }
+                }
+            }
+            FlatButton {
+                objectName: "planStopRun"
+                visible: !!root.run
+                text: "Stop the run"
+                outlined: false
+                accent: Theme.muted
+                padding: 3
+                font.pixelSize: Theme.px(11.5)
+                onClicked: Workspace.stopPlanRun(root.session.key)
+                ToolTip.visible: hovered
+                ToolTip.text: "No more steps start; helpers at work finish theirs."
+                ToolTip.delay: 500
+            }
             FlatButton {
                 objectName: "planAddStep"
                 text: "Add a step"
@@ -242,7 +342,7 @@ Rectangle {
             }
             Label {
                 Layout.fillWidth: true
-                text: "The agent reads your changes before each step."
+                text: root.run ? "" : "The agent reads your changes before each step."
                 color: Theme.textFaint
                 font.pixelSize: Theme.px(11)
                 elide: Text.ElideRight

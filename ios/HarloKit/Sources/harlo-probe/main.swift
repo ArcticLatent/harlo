@@ -69,6 +69,7 @@ func run(_ link: String) async {
     // The plan and specs (a session outside a project has neither), and a
     // diagram harlo draws for the phone.
     check(model.hasPlans && s.plan?.enabled == false && s.plan?.steps.isEmpty == true, "a session outside a project: its plan is off (\(String(describing: s.plan)))")
+    check(model.runsPlans && model.features.contains("helpers") && s.helpers.isEmpty, "harlo runs plans with helpers, and this session started none (\(s.helpers.count))")
     await model.loadSpecs()
     check(s.specs != nil, "its specs can be asked for (\(s.specs?.specs.count ?? -1))")
     let drawn = await model.diagram("flowchart LR\n  A[phone] --> B[harlo]", light: true, colors: ["background": "#ffffff", "text": "#111111"])

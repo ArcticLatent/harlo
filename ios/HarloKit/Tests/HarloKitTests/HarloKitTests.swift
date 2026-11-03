@@ -747,6 +747,44 @@ final class PlanTests: XCTestCase {
         XCTAssertEqual(PlanEdit.add(title: "T", detail: "d", after: nil).json, ["op": "add", "title": "T", "detail": "d"])
         XCTAssertEqual(PlanEdit.skip(id: 2, skipped: true).json, ["op": "skip", "id": 2, "skipped": true])
         XCTAssertEqual(PlanEdit.shift(id: 2, by: -1).json, ["op": "shift", "id": 2, "by": -1])
+        XCTAssertEqual(PlanEdit.alongside(id: 3, alongside: true).json, ["op": "alongside", "id": 3, "alongside": true])
+    }
+
+    func testPlanRunWithHelpers() {
+        let v = try! JSON.parse(#"""
+        { "enabled": true, "reviewers": [{ "id": "omp", "label": "Oh My Pi" }, { "id": "claude", "label": "Claude" }],
+          "run": { "agent": "claude", "agentName": "Claude", "model": "", "paused": "" },
+          "steps": [{ "id": 1, "title": "One", "status": "active", "helper": "live:4" },
+                    { "id": 2, "title": "Two", "status": "active", "alongside": true, "helper": "live:5", "branch": "plan/two-2" },
+                    { "id": 3, "title": "Three" }] }
+        """#)
+        var plan = Plan(v)
+        XCTAssertEqual(plan.run?.agentName, "Claude")
+        XCTAssertFalse(plan.canRun, "it's running")
+        XCTAssertEqual(plan.steps[0].helper, "live:4")
+        XCTAssertTrue(plan.steps[1].alongside)
+        XCTAssertEqual(plan.steps[1].branch, "plan/two-2")
+        XCTAssertFalse(plan.steps[2].alongside)
+        XCTAssertEqual(plan.helperAgents(for: "claude").map(\.id), ["claude", "omp"], "the session's own first")
+        plan.run?.paused = "Step 2 (Two) failed: tests"
+        XCTAssertTrue(plan.canRun, "a paused run goes on")
+        plan.run = nil
+        XCTAssertTrue(plan.canRun)
+        XCTAssertNil(Plan(["enabled": true, "steps": []]).run)
+    }
+
+    func testHelpers() {
+        let h = Helper(["id": "live:4", "name": "Step 1: One", "agent": "claude", "status": "waiting", "openKey": "live:4", "description": "Did it", "step": 1])
+        XCTAssertEqual(h.id, "live:4")
+        XCTAssertEqual(h.summary, "Did it")
+        XCTAssertEqual(h.step, 1)
+        XCTAssertTrue(h.needsSomeone)
+        XCTAssertNil(Helper(["id": "live:6", "status": "running"]).step)
+        let row = SessionSummary(["key": "live:4", "title": "Step 1: One", "parent": "live:1", "helperOf": "Fix it", "nest": 1])
+        XCTAssertEqual(row.parent, "live:1")
+        XCTAssertEqual(row.helperOf, "Fix it")
+        XCTAssertEqual(row.nest, 1)
+        XCTAssertEqual(SessionSummary(["key": "live:1"]).nest, 0)
     }
 
     func testDemoEdits() {
@@ -756,6 +794,10 @@ final class PlanTests: XCTestCase {
         XCTAssertTrue(plan.steps[1].editedByUser)
         plan = HarloModel.demoEdit(plan, .skip(id: 3, skipped: true))
         XCTAssertEqual(plan.steps.first { $0.id == 3 }?.status, "skipped")
+        plan = HarloModel.demoEdit(plan, .alongside(id: 3, alongside: false))
+        XCTAssertEqual(plan.steps.first { $0.id == 3 }?.alongside, false)
+        plan = HarloModel.demoEdit(plan, .alongside(id: 1, alongside: true))
+        XCTAssertEqual(plan.steps.first?.alongside, false, "the first step has none before it")
         plan = HarloModel.demoEdit(plan, .remove(id: 3))
         XCTAssertNil(plan.steps.first { $0.id == 3 })
     }

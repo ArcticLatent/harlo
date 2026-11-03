@@ -36,7 +36,7 @@ struct PlanLine: View {
 
 /// The session's shared plan (every step, to change, skip, reorder or
 /// remove, a step to add, each finished step's commit for another agent to
-/// review) and its repository's specs, to read.
+/// review, and a run with helpers) and its repository's specs, to read.
 struct PlanSheet: View {
     @Environment(HarloModel.self) private var model
     @Environment(\.palette) private var p
@@ -70,7 +70,10 @@ struct PlanSheet: View {
                         } header: {
                             Text("\(plan.finished) of \(plan.steps.count) done")
                         } footer: {
-                            Text(plan.commits ? "The agent works through the steps and commits each one. Long-press a step to change it." : "The agent works through the steps. Long-press a step to change it.")
+                            Text(plan.run != nil ? "harlo gives each step to a helper session. Long-press a step to change it." : plan.commits ? "The agent works through the steps and commits each one. Long-press a step to change it." : "The agent works through the steps. Long-press a step to change it.")
+                        }
+                        if model.runsPlans && (plan.canRun || plan.run != nil) {
+                            runSection(plan)
                         }
                     } else {
                         Section {
@@ -106,6 +109,46 @@ struct PlanSheet: View {
             .task { await model.loadSpecs() }
         }
         .modifier(Themed())
+    }
+
+    /// Running it with helpers: a helper session per step, stage by stage.
+    func runSection(_ plan: Plan) -> some View {
+        Section {
+            if let run = plan.run, !run.paused.isEmpty {
+                Label(run.paused, systemImage: "pause.circle")
+                    .font(.system(size: 14))
+                    .foregroundStyle(Color(p.warning))
+            } else if let run = plan.run {
+                Label("Running with \(run.agentName) helpers", systemImage: "person.2")
+                    .font(.system(size: 14))
+                    .foregroundStyle(Color(p.primary))
+            }
+            if plan.canRun && !plan.reviewers.isEmpty {
+                Menu {
+                    ForEach(plan.helperAgents(for: session.harness)) { a in
+                        Button(a.id == session.harness ? "\(a.label) (this session's)" : a.label) {
+                            UISelectionFeedbackGenerator().selectionChanged()
+                            Task { await model.runPlan(agent: a.id) }
+                        }
+                    }
+                } label: {
+                    Label(plan.run == nil ? "Run with helpers" : "Run again", systemImage: "play.circle")
+                }
+            }
+            if plan.run != nil {
+                Button(role: .destructive) {
+                    Task { await model.stopPlanRun() }
+                } label: {
+                    Label("Stop the run", systemImage: "stop.circle")
+                }
+            }
+        } header: {
+            Text("Helpers")
+        } footer: {
+            Text(plan.run == nil
+                 ? "harlo gives each step to a helper session, in order. Steps marked to run with the one before run at the same time, each in a worktree."
+                 : "No more steps start once you stop; helpers at work finish theirs.")
+        }
     }
 
     @ViewBuilder
@@ -168,6 +211,17 @@ struct PlanSheet: View {
                 if !note.isEmpty {
                     Text(note).font(.system(size: 13.5)).foregroundStyle(Color(p.muted))
                 }
+                if step.alongside {
+                    Label("With the step before", systemImage: "rectangle.split.2x1")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color(p.info))
+                }
+                if !step.helper.isEmpty {
+                    Label((step.status == "active" ? "A helper is on it" : "Done by a helper") + (step.branch.isEmpty ? "" : " · \(step.branch)"), systemImage: "person.2")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color(p.muted))
+                        .lineLimit(1)
+                }
                 if !step.commit.isEmpty {
                     Label("Committed \(step.commit.prefix(8))", systemImage: "point.3.filled.connected.trianglepath.dotted")
                         .font(Style.mono(11.5))
@@ -197,6 +251,14 @@ struct PlanSheet: View {
             if step.open {
                 Button { editing = StepDraft(step: step.id, title: step.title, detail: step.detail) } label: { Label("Change it", systemImage: "pencil") }
                 Button { editing = StepDraft(after: step.id) } label: { Label("Add a step after it", systemImage: "plus") }
+            }
+            if !step.helper.isEmpty, step.status == "active", model.sessions.contains(where: { $0.key == step.helper }) {
+                Button { dismiss(); model.openHelper(step.helper) } label: { Label("Open its helper", systemImage: "arrow.up.forward.app") }
+            }
+            if index > 0 && step.status == "pending" && model.runsPlans {
+                Button { edit(.alongside(id: step.id, alongside: !step.alongside)) } label: {
+                    Label(step.alongside ? "Run it after the step before" : "Run it with the step before", systemImage: "rectangle.split.2x1")
+                }
             }
             if index > 0 {
                 Button { edit(.shift(id: step.id, by: -1)) } label: { Label("Move up", systemImage: "arrow.up") }

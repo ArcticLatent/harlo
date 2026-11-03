@@ -142,6 +142,8 @@ extension HarloModel {
             }
         case .skip(let id, let skipped):
             if let i = at(id) { p.steps[i].status = skipped ? "skipped" : "pending" }
+        case .alongside(let id, let on):
+            if let i = at(id), i > 0 { p.steps[i].alongside = on }
         }
         return p
     }
@@ -155,7 +157,7 @@ extension HarloModel {
         var plan = Plan(steps: [
             PlanStep(["id": 1, "title": "Keep the list's rows on a status change", "status": "done", "summary": "Rows are merged by key instead of rebuilt.", "commit": "3f9a2c41d0"]),
             PlanStep(["id": 2, "title": "Keep the scroll position", "status": "active", "detail": "Anchor to the first visible row."]),
-            PlanStep(["id": 3, "title": "A test for reordering", "status": "pending"]),
+            PlanStep(["id": 3, "title": "A test for reordering", "status": "pending", "alongside": true]),
         ])
         plan.commits = true
         plan.reviewers = [Agent(id: "claude", label: "Claude"), Agent(id: "opencode", label: "OpenCode")]
