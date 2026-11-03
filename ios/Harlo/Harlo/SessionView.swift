@@ -29,6 +29,9 @@ struct SessionContent: View {
     @State private var branch: String?
     /// Undo a turn (Settings → Undo a turn).
     @AppStorage("undoTurns") private var undoOn = true
+    /// The transcript is scrolled to its end (new rows follow then; read
+    /// further up and they wait).
+    @State private var atBottom = true
 
     /// The agent and the session's project.
     var subtitle: String {
@@ -137,9 +140,13 @@ struct SessionContent: View {
             .overlay {
                 if session.loading && session.rows.isEmpty && session.error == nil { ProgressView() }
             }
+            // New rows: follow them while at the end. (Not animated: an
+            // animated scroll through rows not drawn yet lands on their
+            // guessed heights, past the end, showing nothing.)
             .onChange(of: session.rows.count) { _, _ in
-                withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) }
+                if atBottom { proxy.scrollTo("bottom", anchor: .bottom) }
             }
+            .modifier(FollowsTheEnd(atBottom: $atBottom) { proxy.scrollTo("bottom", anchor: .bottom) })
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
                     ActivityLine(session: session)
@@ -151,6 +158,7 @@ struct SessionContent: View {
                             .id(req.id)
                     }
                     Composer(session: session, openSheet: { sheet = $0 }) {
+                        atBottom = true
                         proxy.scrollTo("bottom", anchor: .bottom)
                     }
                 }
@@ -930,6 +938,42 @@ struct ActivityLine: View {
             }
             .padding(.horizontal, 18)
             .padding(.top, 8)
+        }
+    }
+}
+
+/// Whether the transcript is at its end, and back to the end when it's
+/// scrolled past it: rows folding, a card or the keyboard resizing can
+/// leave it showing only empty space below the last row (iOS 18 and later,
+/// which say where it's scrolled).
+struct FollowsTheEnd: ViewModifier {
+    @Binding var atBottom: Bool
+    var toEnd: () -> Void
+    @State private var healed = Date.distantPast
+
+    struct Where: Equatable {
+        var nearEnd: Bool
+        /// Nothing of the content in sight: past its end.
+        var pastEnd: Bool
+    }
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.onScrollGeometryChange(for: Where.self) { g in
+                let end = g.contentSize.height
+                return Where(nearEnd: g.visibleRect.maxY >= end - 120,
+                             pastEnd: end > 0 && g.visibleRect.minY > end - 40)
+            } action: { _, now in
+                atBottom = now.nearEnd
+                // (Once a moment: the scroll there says where it is again.)
+                if now.pastEnd && Date().timeIntervalSince(healed) > 0.4 {
+                    healed = Date()
+                    atBottom = true
+                    toEnd()
+                }
+            }
+        } else {
+            content
         }
     }
 }
