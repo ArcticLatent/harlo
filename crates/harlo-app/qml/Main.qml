@@ -3224,7 +3224,7 @@ ApplicationWindow {
         PauseAnimation { duration: 6000 }
         ScriptAction { script: {
             const t = win.chatText(), kids = JSON.parse(Workspace.orchestratedJson(win.remoteClaudeKey))
-            win.check(t.indexOf("Started a helper with harlo (6 tools): live:") >= 0, "on the host, the agent finds harlo's tools (" + t.slice(-110) + ")")
+            win.check(t.indexOf("Started a helper with harlo (7 tools): live:") >= 0, "on the host, the agent finds harlo's tools (" + t.slice(-110) + ")")
             win.check(kids.length === 1 && Workspace.instanceOf(kids[0].id) === "box", "and its helper runs on box (" + JSON.stringify(kids) + ")")
             win.check(t.indexOf("[harlo] The Claude session") >= 0, "whose reply comes back to it")
             win.check(Workspace.sessionFile(win.remoteClaudeKey) !== "", "(still the host's session)")
@@ -3435,7 +3435,7 @@ ApplicationWindow {
         PauseAnimation { duration: 3000 }
         ScriptAction { script: {
             const t = win.chatText()
-            win.check(t.indexOf("Started a helper with harlo (6 tools): live:") >= 0, "the agent finds harlo's tools and starts a session (" + t.slice(-90) + ")")
+            win.check(t.indexOf("Started a helper with harlo (7 tools): live:") >= 0, "the agent finds harlo's tools and starts a session (" + t.slice(-90) + ")")
             const kids = JSON.parse(Workspace.orchestratedJson(win.orchestrator))
             win.check(kids.length === 1 && kids[0].name === "Helper" && kids[0].agent === "claude", "it's the agent's subagent (" + JSON.stringify(kids) + ")")
             win.check(win.findText("Helper", chat.subagentDock) !== null, "and shows in its dock") } }

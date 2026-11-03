@@ -115,6 +115,10 @@ pub enum SessionUpdate {
     Commands(Vec<SlashCommand>),
     UiRequest(UiRequest),
     UiCleared(String),
+    /// The user answered an approval request the session's agent made with
+    /// harlo's tools (see [`SessionHandle::open_gate`]): what it asked,
+    /// and the answer (`{ value }`, or `{ cancelled: true }`).
+    GateAnswered { question: String, answer: Value },
     /// A status-bar entry from an extension (ANSI stripped); `None` clears it.
     StatusEntry { key: String, text: Option<String> },
     /// omp subagent event (`subagent_lifecycle` / `subagent_progress` frame).
@@ -131,6 +135,11 @@ pub enum SessionUpdate {
     /// Claude's plan limits, as it last said (see `HarnessEvent::Limits`).
     Limits(Value),
 }
+
+/// The ids of harlo's own requests (approvals its tools asked for).
+pub const GATE_PREFIX: &str = "harlo-gate-";
+/// Their title.
+pub const GATE_TITLE: &str = "Approval requested";
 
 /// Events the app may notify about.
 #[derive(Debug, Clone, PartialEq)]
@@ -155,6 +164,9 @@ enum Control {
     Prompt(String, Vec<Value>, SendMode),
     Abort,
     Answer(String, Value),
+    /// A request of harlo's (an approval its tools asked for): shown and
+    /// answered as the agent's are, but the answer is harlo's.
+    Gate(UiRequest),
     /// A raw command for the harness (starts it if needed).
     Raw(Value),
     /// A command whose response data the caller awaits.
@@ -251,6 +263,17 @@ impl SessionHandle {
 
     pub fn answer_ui(&self, request_id: &str, answer: Value) {
         let _ = self.control.send(Control::Answer(request_id.to_owned(), answer));
+    }
+
+    /// Asks the user to decide `question` (one of `options`), as the
+    /// agent's own questions are asked; the answer comes as
+    /// [`SessionUpdate::GateAnswered`]. Its id.
+    pub fn open_gate(&self, question: &str, options: Vec<String>) -> String {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let id = format!("{GATE_PREFIX}{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+        let raw = json!({ "id": id, "method": "select", "title": GATE_TITLE, "message": question, "options": options, "gate": true });
+        let _ = self.control.send(Control::Gate(ui_request(&raw)));
+        id
     }
 
     /// Re-reads the messages and state from the harness, e.g. after it
@@ -839,11 +862,20 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                     }
                 }
                 Some(Control::Answer(id, answer)) => {
-                    if let Some(h) = &driver.harness {
+                    if id.starts_with(GATE_PREFIX) {
+                        // harlo's: what was asked, for the agent's answer.
+                        if let Some(gate) = st.requests.iter().find(|r| r.id == id) {
+                            pending.push(SessionUpdate::GateAnswered { question: gate.message.clone(), answer });
+                        }
+                    } else if let Some(h) = &driver.harness {
                         h.answer_ui(&id, answer);
                     }
                     st.requests.retain(|r| r.id != id);
                     pending.push(SessionUpdate::UiCleared(id));
+                }
+                Some(Control::Gate(request)) => {
+                    st.requests.push(request.clone());
+                    pending.push(SessionUpdate::UiRequest(request));
                 }
                 Some(Control::Raw(cmd)) => {
                     let modes = cmd["type"] == "harlo_set_modes";
@@ -1043,7 +1075,10 @@ fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<Sessi
                 pending.push(SessionUpdate::Notable(Notable::Error { message }));
             }
             set_status(st, SessionStatus::Exited, pending);
-            for r in st.requests.drain(..) {
+            // (harlo's own requests outlive the agent's process.)
+            let (gates, gone): (Vec<UiRequest>, Vec<UiRequest>) = st.requests.drain(..).partition(|r| r.id.starts_with(GATE_PREFIX));
+            st.requests = gates;
+            for r in gone {
                 pending.push(SessionUpdate::UiCleared(r.id));
             }
         }
@@ -1512,6 +1547,32 @@ mod tests {
         // Working: not stopped.
         handle.restart_if_idle();
         assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::Status(SessionStatus::Idle))).await);
+    }
+
+    /// An approval harlo asks for: shown as the agent's questions are,
+    /// kept when its process stops, and its answer harlo's (not the agent's).
+    #[tokio::test]
+    async fn approval_gates_are_harlos() {
+        let handle = SessionHandle::spawn(cfg(HarnessKind::Demo, SessionTarget::New));
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        handle.subscribe(ChannelSink(tx));
+        let mut rows = Vec::new();
+        assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::Status(SessionStatus::Idle))).await);
+        let id = handle.open_gate("Merge it?", vec!["Approve".into(), "Reject".into()]);
+        assert!(id.starts_with(GATE_PREFIX));
+        assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::UiRequest(r) if r.id == id && r.method == "select" && r.message == "Merge it?" && r.options.len() == 2)).await);
+        // The agent's process stops: the request stays.
+        handle.restart_if_idle();
+        assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::Status(SessionStatus::Offline))).await);
+        let (tx2, mut rx2) = mpsc::unbounded_channel();
+        handle.subscribe(ChannelSink(tx2));
+        assert!(collect_until(&mut rx2, &mut Vec::new(), |u| matches!(u, SessionUpdate::UiRequest(r) if r.id == id)).await);
+        // Answered: to harlo, with what was asked; the agent isn't started for it.
+        handle.answer_ui(&id, json!({ "value": "Approve" }));
+        assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::GateAnswered { question, answer } if question == "Merge it?" && answer["value"] == "Approve")).await);
+        assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::UiCleared(c) if *c == id)).await);
+        let started = tokio::time::timeout(Duration::from_secs(1), collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::Status(SessionStatus::Starting)))).await;
+        assert!(!matches!(started, Ok(true)));
     }
 
     #[tokio::test]

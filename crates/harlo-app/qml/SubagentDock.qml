@@ -15,6 +15,8 @@ Rectangle {
     readonly property var agents: (session && session.subagentsJson !== "" ? JSON.parse(session.subagentsJson) : [])
         .concat(session && session.key !== "" && Workspace.orchestrationRevision >= 0 ? JSON.parse(Workspace.orchestratedJson(session.key)) : [])
     readonly property int running: agents.filter(a => a.status === "running" || a.status === "pending").length
+    // harlo sessions waiting: on their parent's answer, or on you.
+    readonly property int stalled: agents.filter(a => a.status === "asking" || a.status === "waiting").length
     // Collapsed to its summary line: the details sit under the task tool
     // row in the transcript; open it to manage them from here.
     property bool expanded: false
@@ -39,8 +41,10 @@ Rectangle {
             Icon { name: "node-tree"; color: root.running > 0 ? Theme.primary : Theme.muted; implicitWidth: 15; implicitHeight: 15 }
             Label {
                 Layout.fillWidth: true
-                text: "Subagents · " + (root.running > 0 ? root.running + " running" : "all done")
-                    + (root.agents.length - root.running > 0 && root.running > 0 ? " · " + (root.agents.length - root.running) + " finished" : "")
+                readonly property int finished: root.agents.length - root.running - root.stalled
+                text: "Subagents · " + (root.running > 0 ? root.running + " running" : root.stalled > 0 ? "" : "all done")
+                    + (root.stalled > 0 ? (root.running > 0 ? " · " : "") + root.stalled + " waiting" : "")
+                    + (finished > 0 && root.running + root.stalled > 0 ? " · " + finished + " finished" : "")
                 color: Theme.foreground
                 font.pixelSize: Theme.px(12)
                 font.bold: true

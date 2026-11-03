@@ -46,7 +46,7 @@ pub fn tools() -> Value {
         },
         {
             "name": "start_session",
-            "description": "Starts a new harlo session with a coding agent and sends it a first prompt. It becomes your subagent: the user sees it, and when it finishes its last reply is sent back to you (unless notify is false). The new agent has none of your context: make the prompt a self-contained briefing.",
+            "description": "Starts a new harlo session with a coding agent and sends it a first prompt. It becomes your helper: the user sees it, and harlo sends you its report when it finishes (unless notify is false), its questions for you, and when it waits for the user. Start every independent helper, then end your turn: harlo wakes you with what comes back; don't poll. The new agent has none of your context: make the prompt a self-contained briefing.",
             "inputSchema": s(json!({
                 "agent": { "type": "string", "description": "claude, opencode, pi or omp (see list_agents)." },
                 "prompt": { "type": "string", "description": "The first message: the task, its context, the relevant files, what's done and what's left." },
@@ -54,12 +54,12 @@ pub fn tools() -> Value {
                 "model": { "type": "string", "description": "provider/model, if not the agent's default." },
                 "folder": { "type": "string", "description": "Where it works (default: your folder)." },
                 "worktree": { "type": "string", "description": "A new git worktree on this branch name to work in (isolated from your checkout)." },
-                "notify": { "type": "boolean", "description": "Send its last reply back to you when it finishes (default true)." }
+                "notify": { "type": "boolean", "description": "Send its report back to you when it finishes, and its questions (default true). False: it's on its own (a handoff)." }
             }), &["agent", "prompt"]),
         },
         {
             "name": "send_message",
-            "description": "Sends a follow-up message to a harlo session (queued if it's busy).",
+            "description": "Sends a follow-up message to a harlo session (queued if it's busy): more work for a helper, or the answer to its question.",
             "inputSchema": s(json!({
                 "session": { "type": "string", "description": "The session's id (from start_session or list_sessions)." },
                 "message": { "type": "string" }
@@ -77,8 +77,133 @@ pub fn tools() -> Value {
             "name": "stop_session",
             "description": "Stops what a harlo session is doing (it stays open; send_message continues it).",
             "inputSchema": s(json!({ "session": { "type": "string" } }), &["session"]),
+        },
+        {
+            "name": "request_approval",
+            "description": "Asks the user to decide something only they may decide (to go ahead with a risky or irreversible step, or a choice that's theirs). harlo shows it in your session and on their phone, and notifies them; no agent can answer it. Then end your turn: their answer comes to you as a message.",
+            "inputSchema": s(json!({
+                "question": { "type": "string", "description": "What they decide, with what they need to know to decide it." },
+                "options": { "type": "array", "items": { "type": "string" }, "description": "Their choices (default: Approve, Reject)." }
+            }), &["question"]),
         }
     ])
+}
+
+/// The tools of a session another session started (its helper), besides
+/// [`tools`].
+pub fn helper_tools() -> Value {
+    let s = |props: Value, required: &[&str]| json!({ "type": "object", "properties": props, "required": required });
+    json!([
+        {
+            "name": "report_done",
+            "description": "Reports your task's result to the session that started you: once, when you're done (or can't go on), then end your turn.",
+            "inputSchema": s(json!({
+                "outcome": { "type": "string", "enum": ["succeeded", "failed"], "description": "failed if the task isn't done: never hide a failure in the summary." },
+                "summary": { "type": "string", "description": "Three sentences: what you did, what you found, what's left." },
+                "files": { "type": "array", "items": { "type": "string" }, "description": "The files you changed (paths), if any." }
+            }), &["outcome", "summary"]),
+        },
+        {
+            "name": "ask_parent",
+            "description": "Asks the session that started you a question the task doesn't settle. Then end your turn: harlo wakes you with its answer. (For what only the user may decide, use request_approval.)",
+            "inputSchema": s(json!({ "question": { "type": "string" } }), &["question"]),
+        }
+    ])
+}
+
+/// A helper's report (`report_done`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Report {
+    pub succeeded: bool,
+    pub summary: String,
+    pub files: Vec<String>,
+}
+
+impl Report {
+    /// From `report_done`'s arguments.
+    pub fn parse(args: &Value) -> Result<Report, String> {
+        let succeeded = match args["outcome"].as_str().map(str::trim) {
+            Some("succeeded") => true,
+            Some("failed") => false,
+            _ => return Err("Give an outcome: succeeded or failed.".into()),
+        };
+        let summary = args["summary"].as_str().map(str::trim).unwrap_or_default().to_owned();
+        if summary.is_empty() {
+            return Err("Give a summary: what you did, what you found, what's left.".into());
+        }
+        let files = args["files"].as_array().into_iter().flatten().filter_map(|f| f.as_str().map(str::trim)).filter(|f| !f.is_empty()).map(str::to_owned).collect();
+        Ok(Report { succeeded, summary, files })
+    }
+}
+
+/// What a helper's first message starts with: what it is, and how its
+/// result goes back (`tools`: it has harlo's tools; else it says it in
+/// its last reply).
+pub fn helper_brief(parent: &str, task: &str, tools: bool) -> String {
+    let parent = if parent.trim().is_empty() { String::new() } else { format!(" (\"{}\")", parent.trim()) };
+    let how = if tools {
+        "- When the task leaves a decision open, call harlo's ask_parent tool with your question, then end your turn: the answer comes to you as a message.\n\
+         - For what only the user may decide (going ahead with a risky or irreversible step, a choice that's theirs), call request_approval, then end your turn.\n\
+         - When you're done, or can't go on, call report_done once: outcome succeeded or failed (never hide a failure in the summary), a three-sentence summary (what you did, what you found, what's left), and the files you changed. Then end your turn."
+    } else {
+        "- When you're done, or can't go on, end your last reply with a report: \"Outcome: succeeded\" or \"Outcome: failed\" (never hide a failure), what you did, what you found, what's left, and the files you changed."
+    };
+    format!(
+        "[harlo] You're a helper: another agent's session{parent} started you with the task below, and harlo sends it your result.\n\
+         - Do only this task, yourself: start no helper sessions unless it asks.\n\
+         {how}\n\n\
+         The task:\n\n{task}"
+    )
+}
+
+/// What a parent is told when its helper `title` (`agent`, `key`) finished:
+/// its report, else its last reply (`reply`), or its error.
+pub fn finished_message(agent: &str, title: &str, key: &str, report: Option<&Report>, reply: Option<&str>, error: Option<&str>) -> String {
+    let head = format!("[harlo] The {agent} session \"{title}\" ({key})");
+    match report {
+        Some(r) => {
+            let mut text = format!("{head} finished and reported: {}.\n\n{}", if r.succeeded { "succeeded" } else { "FAILED" }, r.summary);
+            if !r.files.is_empty() {
+                text.push_str(&format!("\n\nFiles changed: {}", r.files.join(", ")));
+            }
+            text
+        }
+        None => match (reply.map(str::trim).filter(|r| !r.is_empty()), error) {
+            (Some(reply), _) => format!("{head} finished without reporting (report_done). Its last reply:\n\n{reply}"),
+            (None, Some(e)) => format!("{head} stopped with an error, without reporting: {e}"),
+            (None, None) => format!("{head} finished without a reply or a report."),
+        },
+    }
+}
+
+/// What a parent is told when its helper asks it something.
+pub fn question_message(agent: &str, title: &str, key: &str, question: &str) -> String {
+    format!(
+        "[harlo] The {agent} session \"{title}\" ({key}) asks you:\n\n{}\n\n\
+         Answer it with send_message (session \"{key}\") when the answer follows from its task or the user's instructions; otherwise ask the user first.",
+        question.trim()
+    )
+}
+
+/// What a parent is told when its helper waits for the user (an approval,
+/// its question, or one it asked with request_approval).
+pub fn waiting_message(agent: &str, title: &str, key: &str, what: &str) -> String {
+    let what = what.trim();
+    let what = if what.is_empty() { String::new() } else { format!(": {what}") };
+    format!(
+        "[harlo] The {agent} session \"{title}\" ({key}) is waiting for the user{what}\n\n\
+         It can't go on until they answer it in harlo (no agent can). Tell the user if they should know, or go on with other work; harlo tells you when it finishes."
+    )
+}
+
+/// What a session is told when the user answered its approval request.
+pub fn approval_answer(question: &str, answer: &Value) -> String {
+    let said = answer["value"].as_str().map(str::trim).filter(|v| !v.is_empty());
+    let question = question.trim();
+    match said {
+        Some(choice) => format!("[harlo] The user answered your approval request (\"{question}\"): {choice}"),
+        None => format!("[harlo] The user dismissed your approval request (\"{question}\") without choosing. Don't go ahead with it; ask them, or carry on without it."),
+    }
 }
 
 /// What the bridge asks to learn whether orchestration is on.
@@ -341,7 +466,7 @@ pub fn delegate_prompt(action: &str, members: &[Member], note: &str, worktree: b
         ("advisor", [m, ..]) => format!(
             "Get a second opinion from {}: start it with harlo's start_session tool, titled \"[Advisor] <the topic>\".\n\
              It has none of our context, so make its prompt a self-contained briefing: the question, what you've considered and ruled out, the relevant files (by path, for it to read), and the ask: \"Give me a recommendation, with your reasoning.\" End the prompt with: {NO_EDITS}\n\
-             Then end your turn. Its reply comes back to you as a [harlo] message; don't poll for it. Then give me its verdict and your own recommendation.\n\n\
+             Then end your turn. Its report comes back to you as a [harlo] message; don't poll for it. Then give me its verdict and your own recommendation.\n\n\
              The question: {}",
             m.describe(),
             if note.is_empty() { "the approach we're taking on the current task." } else { note }
@@ -351,7 +476,7 @@ pub fn delegate_prompt(action: &str, members: &[Member], note: &str, worktree: b
              - {}\n\
              - {}\n\
              The prompt is about the problem, not your theory: the goal, the symptoms, what's been tried, the relevant files (by path), and the question \"What's the root cause, and what's the plan?\" End it, and every later message to them, with: {NO_EDITS}\n\
-             Then end your turn. Their replies come back to you as [harlo] messages; don't poll or hurry them. Where they disagree, send each the other's arguments with send_message, until they agree. Then give me the agreed plan, where they disagreed, and how that was settled.\n\n\
+             Then end your turn. Their reports come back to you as [harlo] messages; don't poll or hurry them. Where they disagree, send each the other's arguments with send_message, until they agree. Then give me the agreed plan, where they disagreed, and how that was settled.\n\n\
              The problem: {}",
             a.describe(),
             b.describe(),
@@ -381,6 +506,26 @@ mod tests {
         // A committee needs two.
         assert!(delegate_prompt("committee", &[m("Claude", "claude", "")], "", false).is_none());
         assert!(delegate_prompt("nope", &[m("Claude", "claude", "")], "", false).is_none());
+    }
+
+    #[test]
+    fn helpers_report_back() {
+        // A report: its outcome, summary and files.
+        let r = Report::parse(&json!({ "outcome": "failed", "summary": " Tried. ", "files": ["a.rs", " ", "b.rs"] })).unwrap();
+        assert_eq!(r, Report { succeeded: false, summary: "Tried.".into(), files: vec!["a.rs".into(), "b.rs".into()] });
+        assert!(Report::parse(&json!({ "outcome": "done", "summary": "x" })).is_err());
+        assert!(Report::parse(&json!({ "outcome": "succeeded", "summary": "  " })).is_err());
+        let m = finished_message("Claude", "Fix", "k1", Some(&r), Some("ignored"), None);
+        assert!(m.starts_with("[harlo] The Claude session \"Fix\" (k1) finished and reported: FAILED.") && m.ends_with("Files changed: a.rs, b.rs"));
+        // None: its last reply, else its error.
+        assert!(finished_message("pi", "T", "k", None, Some("hi"), None).contains("without reporting (report_done). Its last reply:\n\nhi"));
+        assert!(finished_message("pi", "T", "k", None, Some(" "), Some("boom")).ends_with("without reporting: boom"));
+        // The brief: with the tools, or a report in words.
+        let b = helper_brief("Lead", "Do X", true);
+        assert!(b.contains("session (\"Lead\") started you") && b.contains("report_done") && b.ends_with("The task:\n\nDo X"));
+        assert!(!helper_brief("", "Do X", false).contains("report_done"));
+        assert!(approval_answer("Merge?", &json!({ "value": "Approve" })).ends_with("(\"Merge?\"): Approve"));
+        assert!(approval_answer("Merge?", &json!({ "cancelled": true })).contains("dismissed"));
     }
 }
 

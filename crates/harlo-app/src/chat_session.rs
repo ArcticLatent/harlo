@@ -1289,7 +1289,7 @@ impl ChatSession {
                 SessionUpdate::Goal(goal) => self.as_mut().apply_goal(&goal),
                 // (The workspace notifies.)
                 // (The workspace has these.)
-                SessionUpdate::Notable(_) | SessionUpdate::Limits(_) => {}
+                SessionUpdate::Notable(_) | SessionUpdate::Limits(_) | SessionUpdate::GateAnswered { .. } => {}
                 SessionUpdate::Btw(frame) => self.as_mut().apply_btw(frame),
                 SessionUpdate::UiRequest(req) => {
                     self.as_mut().rust_mut().requests.push_back(req);

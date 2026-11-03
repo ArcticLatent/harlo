@@ -13,7 +13,7 @@ Rectangle {
     signal viewRequested(var agent, bool steer)
     function statusColor(s) {
         return s === "running" || s === "pending" ? Theme.primary : s === "completed" ? Theme.success
-             : s === "failed" ? Theme.error : Theme.muted
+             : s === "failed" ? Theme.error : s === "asking" || s === "waiting" ? Theme.warning : Theme.muted
     }
     function toolLine(a) {
         const p = a.progress || {}
@@ -88,7 +88,8 @@ Rectangle {
                 }
                 Label {
                     visible: !agentRow.live
-                    text: agentRow.a.status
+                    // (A harlo session waiting: on its parent, or on you.)
+                    text: agentRow.a.status === "waiting" ? qsTr("needs you") : agentRow.a.status
                     color: agentRow.statusColor(agentRow.a.status)
                     font.pixelSize: Theme.px(11)
                 }

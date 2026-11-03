@@ -5201,6 +5201,8 @@ impl Workspace {
         let mut cost: Option<f64> = None;
         let mut notes: Vec<Note> = Vec::new();
         let mut answered = false;
+        // Approvals the agent asked for with harlo's tools, answered.
+        let mut gates: Vec<(String, serde_json::Value)> = Vec::new();
         // Claude's limits as it just said (a host's may be another account's).
         let mut limits: Option<serde_json::Value> = None;
         let needed_input = entry.info.needs_input;
@@ -5243,6 +5245,7 @@ impl Workspace {
                     answered |= entry.requests.len() != before;
                 }
                 SessionUpdate::Limits(info) => limits = Some(info),
+                SessionUpdate::GateAnswered { question, answer } => gates.push((question, answer)),
                 _ => {}
             }
         }
@@ -5338,9 +5341,25 @@ impl Workspace {
                 self.as_mut().refresh_host_limits(&on_host, false, false);
             }
         }
-        // A session an agent started: its state, and its last reply back.
+        // A session an agent started: its state, and its report back; its
+        // parent told when it waits for the user.
         if became_busy || became_idle {
             self.as_mut().child_progress(key, became_idle, &notes);
+        }
+        for note in &notes {
+            if let Note::Question(what, _) = note {
+                self.as_mut().child_waiting(key, what);
+            }
+        }
+        if answered {
+            self.as_mut().child_answered(key);
+        }
+        // The user's answers to its approval requests: to the agent.
+        if let Some(live) = registry::get(key) {
+            for (question, answer) in gates {
+                let busy = self.live.get(key).is_some_and(|e| e.info.status == SessionStatus::Busy);
+                live.handle.prompt(&harlo_core::orchestration::approval_answer(&question, &answer), Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });
+            }
         }
         for note in notes {
             self.as_mut().notify(key, note);
@@ -5842,10 +5861,18 @@ struct OrchChild {
     parent: String,
     title: String,
     agent: String,
-    /// Its last reply goes back to the parent when it finishes.
+    /// Its report (or last reply) goes back to the parent when it
+    /// finishes, and its questions.
     notify: bool,
-    /// running | completed | failed | aborted
+    /// running | asking (its parent) | waiting (for the user) | completed |
+    /// failed
     status: String,
+    /// What it reported this turn (`report_done`).
+    report: Option<harlo_core::orchestration::Report>,
+    /// It asked its parent and waits for the answer (until it works again).
+    asking: bool,
+    /// Its parent was told it waits for the user (once a run).
+    told_waiting: bool,
 }
 
 /// The first message of a session started from the new-session page.
@@ -6096,6 +6123,10 @@ impl Workspace {
         let features = caller.as_deref().and_then(|c| self.features_of(c));
         if tool == harlo_core::orchestration::TOOLS {
             let mut tools = harlo_core::orchestration::tools().as_array().cloned().unwrap_or_default();
+            // A helper: its report and its questions for its parent.
+            if caller.as_ref().and_then(|c| self.orch_children.get(c)).is_some_and(|c| c.notify) {
+                tools.extend(harlo_core::orchestration::helper_tools().as_array().cloned().unwrap_or_default());
+            }
             if let Some((_, specs, plan, commits)) = &features {
                 if *specs {
                     tools.extend(harlo_core::specs::tools().as_array().cloned().unwrap_or_default());
@@ -6228,6 +6259,8 @@ impl Workspace {
                 let notify = args["notify"].as_bool().unwrap_or(true) && caller.is_some();
                 let model = text("model");
                 let parent = caller.clone().unwrap_or_default();
+                // A helper: told what it is and how its result goes back.
+                let prompt = if notify { harlo_core::orchestration::helper_brief(&self.title_of(&parent), &prompt, self.has_harlo_tools(kind, &cwd)) } else { prompt };
                 // In a new worktree: made in the background; it shows when ready.
                 let branch = text("worktree");
                 if !branch.is_empty() {
@@ -6265,8 +6298,10 @@ impl Workspace {
                 if let Some(live) = registry::get(&key) {
                     live.handle.prompt(&message, Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });
                 }
+                // (A helper that asked: this is its answer.)
                 if let Some(c) = self.as_mut().rust_mut().orch_children.get_mut(&key) {
                     c.status = "running".into();
+                    c.asking = false;
                 }
                 self.as_mut().bump_orchestration();
                 Ok(json!({ "session": key, "queued": busy }))
@@ -6282,13 +6317,56 @@ impl Workspace {
                 self.stop_session(&QString::from(&key));
                 Ok(json!({ "session": key, "stopped": true }))
             }
+            "request_approval" => {
+                let Some(live) = caller.as_deref().and_then(registry::get) else {
+                    return Err("Only a session harlo started can ask the user here.".into());
+                };
+                let question = text("question");
+                if question.is_empty() {
+                    return Err("Give the question.".into());
+                }
+                let mut options: Vec<String> = args["options"].as_array().into_iter().flatten().filter_map(|o| o.as_str().map(str::trim)).filter(|o| !o.is_empty()).map(str::to_owned).collect();
+                if options.is_empty() {
+                    options = vec!["Approve".into(), "Reject".into()];
+                }
+                live.handle.open_gate(&question, options);
+                Ok(json!({ "asked": true, "next": "End your turn now: harlo sends you the user's answer as a message." }))
+            }
+            "report_done" | "ask_parent" => {
+                let Some((key, child)) = caller.as_ref().and_then(|c| self.orch_children.get(c).map(|ch| (c.clone(), ch.clone()))).filter(|(_, c)| c.notify) else {
+                    return Err("You weren't started by another session, so there's no one to report to or ask.".into());
+                };
+                if tool == "report_done" {
+                    let report = harlo_core::orchestration::Report::parse(args)?;
+                    if let Some(c) = self.as_mut().rust_mut().orch_children.get_mut(&key) {
+                        c.report = Some(report);
+                    }
+                    return Ok(json!({ "reported": true, "next": "End your turn now: harlo sends your report when it ends." }));
+                }
+                let question = text("question");
+                if question.is_empty() {
+                    return Err("Give the question.".into());
+                }
+                let Some(parent) = registry::get(&child.parent) else {
+                    return Err("The session that started you is closed. Ask the user instead (end your turn with the question).".into());
+                };
+                let message = harlo_core::orchestration::question_message(agent_label(&child.agent), &child.title, &key, &question);
+                let busy = self.live.get(&child.parent).is_some_and(|e| e.info.status == SessionStatus::Busy);
+                parent.handle.prompt(&message, Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });
+                if let Some(c) = self.as_mut().rust_mut().orch_children.get_mut(&key) {
+                    c.asking = true;
+                    c.status = "asking".into();
+                }
+                self.as_mut().bump_orchestration();
+                Ok(json!({ "asked": true, "next": "End your turn now: harlo sends you the answer as a message." }))
+            }
             _ => Err(format!("harlo has no tool {tool}.")),
         }
     }
 
     /// `key` was started by `parent`'s agent: it's that session's subagent.
     fn adopt(mut self: Pin<&mut Self>, key: &str, parent: &str, title: &str, agent: &str, notify: bool) {
-        self.as_mut().rust_mut().orch_children.insert(key.to_owned(), OrchChild { parent: parent.to_owned(), title: title.to_owned(), agent: agent.to_owned(), notify, status: "running".into() });
+        self.as_mut().rust_mut().orch_children.insert(key.to_owned(), OrchChild { parent: parent.to_owned(), title: title.to_owned(), agent: agent.to_owned(), notify, status: "running".into(), report: None, asking: false, told_waiting: false });
         self.bump_orchestration();
     }
 
@@ -6298,27 +6376,96 @@ impl Workspace {
     }
 
     /// A started session got busy or finished: its state, and (finished)
-    /// its last reply to the session that started it.
+    /// its report, or last reply, to the session that started it. (Not
+    /// while it waits: on its parent's answer, or the user's.)
     fn child_progress(mut self: Pin<&mut Self>, key: &str, finished: bool, notes: &[Note]) {
         let Some(child) = self.orch_children.get(key).cloned() else { return };
+        if !finished {
+            if let Some(c) = self.as_mut().rust_mut().orch_children.get_mut(key) {
+                c.status = "running".into();
+                c.asking = false;
+                c.told_waiting = false;
+            }
+            return self.as_mut().bump_orchestration();
+        }
+        let waiting = self.live.get(key).is_some_and(|e| !e.requests.is_empty());
+        if child.asking || waiting {
+            if let Some(c) = self.as_mut().rust_mut().orch_children.get_mut(key) {
+                c.status = if child.asking { "asking" } else { "waiting" }.into();
+            }
+            return self.as_mut().bump_orchestration();
+        }
         let reply = notes.iter().find_map(|n| match n {
             Note::Event(harlo_core::Notable::Completed { last_message }) => Some(last_message.clone()),
             _ => None,
         });
-        let failed = notes.iter().any(|n| matches!(n, Note::Event(harlo_core::Notable::Error { .. })));
-        let status = if !finished { "running" } else if failed && reply.is_none() { "failed" } else { "completed" };
+        let error = notes.iter().find_map(|n| match n {
+            Note::Event(harlo_core::Notable::Error { message }) => Some(message.clone()),
+            _ => None,
+        });
+        let status = match &child.report {
+            Some(r) => if r.succeeded { "completed" } else { "failed" },
+            None if error.is_some() && reply.as_deref().is_none_or(|r| r.trim().is_empty()) => "failed",
+            None => "completed",
+        };
         if let Some(c) = self.as_mut().rust_mut().orch_children.get_mut(key) {
             c.status = status.into();
+            c.report = None;
+            c.told_waiting = false;
         }
         self.as_mut().bump_orchestration();
-        if !finished || !child.notify {
+        if !child.notify {
             return;
         }
         let Some(parent) = registry::get(&child.parent) else { return };
-        let body = reply.unwrap_or_else(|| "(It finished without a reply.)".into());
-        let message = format!("[harlo] The {} session \"{}\" ({key}) finished. Its last reply:\n\n{body}", HarnessKind::parse(&child.agent).map_or(child.agent.as_str(), |k| k.label()), child.title);
+        let message = harlo_core::orchestration::finished_message(agent_label(&child.agent), &child.title, key, child.report.as_ref(), reply.as_deref(), error.as_deref());
         let busy = self.live.get(&child.parent).is_some_and(|e| e.info.status == SessionStatus::Busy);
         parent.handle.prompt(&message, Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });
+    }
+
+    /// A started session waits for the user (an approval, its question):
+    /// its parent is told (once a run: approvals come one after another).
+    fn child_waiting(mut self: Pin<&mut Self>, key: &str, what: &str) {
+        let Some(child) = self.orch_children.get(key).cloned() else { return };
+        if let Some(c) = self.as_mut().rust_mut().orch_children.get_mut(key) {
+            c.status = "waiting".into();
+            c.told_waiting = true;
+        }
+        self.as_mut().bump_orchestration();
+        let Some(parent) = registry::get(&child.parent).filter(|_| child.notify && !child.told_waiting) else { return };
+        let message = harlo_core::orchestration::waiting_message(agent_label(&child.agent), &child.title, key, what);
+        let busy = self.live.get(&child.parent).is_some_and(|e| e.info.status == SessionStatus::Busy);
+        parent.handle.prompt(&message, Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });
+    }
+
+    /// Its answers: a started session that waited, working again.
+    fn child_answered(mut self: Pin<&mut Self>, key: &str) {
+        let working = self.live.get(key).is_some_and(|e| e.requests.is_empty() && e.info.status == SessionStatus::Busy);
+        if let Some(c) = self.as_mut().rust_mut().orch_children.get_mut(key).filter(|c| working && c.status == "waiting") {
+            c.status = "running".into();
+            self.as_mut().bump_orchestration();
+        }
+    }
+
+    /// A session's title, as the sidebar shows it.
+    fn title_of(&self, key: &str) -> String {
+        if let Some(row) = self.rows.iter().find(|r| r.key == key) {
+            return row.title.clone();
+        }
+        self.live.get(key).map(|e| if !e.info.name.is_empty() { e.info.name.clone() } else { e.info.first_message.chars().take(80).collect() }).unwrap_or_default()
+    }
+
+    /// A session of `kind` in `cwd` gets harlo's tools: Claude, OpenCode and
+    /// Hermes with each start; pi and omp with the bridge in their config.
+    fn has_harlo_tools(&self, kind: HarnessKind, cwd: &Path) -> bool {
+        if !harlo_core::orchestration::BRIDGE_AGENTS.contains(&kind) {
+            return true;
+        }
+        match harlo_core::remote::host_of(cwd) {
+            None => harlo_core::orchestration::bridge_installed(kind),
+            // A host's: what Settings last found there.
+            Some(h) => self.orch_hosts.get(&h).is_some_and(|f| f["bridges"][kind.as_str()] == true),
+        }
     }
 
     pub fn delegate_prompt(&self, request: &QString) -> QString {
@@ -6520,6 +6667,11 @@ impl Workspace {
             live.handle.abort();
         }
     }
+}
+
+/// An agent's name ("claude" → "Claude").
+fn agent_label(agent: &str) -> &str {
+    HarnessKind::parse(agent).map_or(agent, |k| k.label())
 }
 
 /// A session's `HARLO_SESSION` token (its agent's harlo tools say it).
