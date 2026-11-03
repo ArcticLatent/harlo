@@ -206,6 +206,27 @@ pub fn waiting_message(agent: &str, title: &str, key: &str, what: &str) -> Strin
     )
 }
 
+/// What a waiting request asks, in short (for the parent): an approval as
+/// "approval to use <tool>: <its first line>", else its question's first line.
+pub fn waiting_what(title: &str, question: &str, approval: bool) -> String {
+    let short = |t: &str| {
+        let line = t.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default();
+        match line.char_indices().nth(100) {
+            Some((i, _)) => format!("{}…", line[..i].trim_end()),
+            None => line.to_owned(),
+        }
+    };
+    if !approval {
+        return short(question);
+    }
+    let tool = title.lines().next().unwrap_or_default().trim().trim_start_matches("Allow tool:").trim();
+    match (tool, short(question)) {
+        ("", what) => format!("an approval: {what}"),
+        (tool, what) if what.is_empty() => format!("approval to use {tool}"),
+        (tool, what) => format!("approval to use {tool} ({what})"),
+    }
+}
+
 /// What a session is told when the user answered its approval request.
 pub fn approval_answer(question: &str, answer: &Value) -> String {
     let said = answer["value"].as_str().map(str::trim).filter(|v| !v.is_empty());
@@ -536,6 +557,11 @@ mod tests {
         assert!(!helper_brief("", "Do X", false).contains("report_done"));
         assert!(approval_answer("Merge?", &json!({ "value": "Approve" })).ends_with("(\"Merge?\"): Approve"));
         assert!(approval_answer("Merge?", &json!({ "cancelled": true })).contains("dismissed"));
+        // What it waits for, in short.
+        let long = format!("echo {} && find . -type f | wc -l\nsecond line", "x".repeat(150));
+        let w = waiting_what("Allow tool: Bash", &long, true);
+        assert!(w.starts_with("approval to use Bash (echo xxx") && w.ends_with("…)") && !w.contains("second line"), "{w}");
+        assert_eq!(waiting_what("Question", "Which one?\nmore", false), "Which one?");
         // When to start sessions: as the setting says.
         let start = |own: bool| tools(own).as_array().unwrap().iter().find(|t| t["name"] == "start_session").unwrap()["description"].as_str().unwrap().to_owned();
         assert!(start(false).contains("only when the user asks") && !start(true).contains("only when"));

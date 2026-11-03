@@ -5347,8 +5347,9 @@ impl Workspace {
             self.as_mut().child_progress(key, became_idle, &notes);
         }
         for note in &notes {
-            if let Note::Question(what, _) = note {
-                self.as_mut().child_waiting(key, what);
+            if let Note::Question(what, request) = note {
+                let what = harlo_core::orchestration::waiting_what(request["title"].as_str().unwrap_or_default(), what, request["approval"] == true);
+                self.as_mut().child_waiting(key, &what);
             }
         }
         if answered {
