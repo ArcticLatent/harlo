@@ -128,7 +128,9 @@ Rectangle {
             ScrollBar.vertical: ScrollBar { }
             ColumnLayout {
                 id: questionsCol
-                width: flick.width - (flick.contentHeight > flick.height ? 12 : 0)
+                // (Room for the scroll bar, always: making room only when it
+                // shows rewraps the text, which can change whether it shows.)
+                width: flick.width - 12
                 spacing: 14
                 Repeater {
                     model: root.questions
@@ -211,19 +213,32 @@ Rectangle {
                                         id: optCol
                                         Layout.fillWidth: true
                                         spacing: 2
-                                        RowLayout {
+                                        // The label, cut short where there's no room, and the
+                                        // Recommended mark after it. (Placed by hand: as a layout,
+                                        // its width came from the row's, which came from it, a loop.)
+                                        Item {
                                             Layout.fillWidth: true
-                                            spacing: 8
-                                            Label { text: optRow.modelData.label; color: Theme.foreground; font.pixelSize: Theme.px(13); Layout.maximumWidth: optCol.width - 100; elide: Text.ElideRight }
+                                            implicitHeight: Math.max(optLabel.implicitHeight, 16)
+                                            Label {
+                                                id: optLabel
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                width: Math.min(implicitWidth, parent.width - (recMark.visible ? recMark.width + 8 : 0))
+                                                text: optRow.modelData.label
+                                                color: Theme.foreground
+                                                font.pixelSize: Theme.px(13)
+                                                elide: Text.ElideRight
+                                            }
                                             Rectangle {
+                                                id: recMark
                                                 visible: optRow.recommended
-                                                implicitWidth: recLabel.implicitWidth + 10
-                                                implicitHeight: 16
+                                                x: optLabel.width + 8
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                width: recLabel.implicitWidth + 10
+                                                height: 16
                                                 radius: 8
                                                 color: Qt.rgba(Theme.success.r, Theme.success.g, Theme.success.b, 0.15)
                                                 Label { id: recLabel; anchors.centerIn: parent; text: "Recommended"; color: Theme.success; font.pixelSize: Theme.px(10); font.bold: true }
                                             }
-                                            Item { Layout.fillWidth: true }
                                         }
                                         Label {
                                             Layout.fillWidth: true
