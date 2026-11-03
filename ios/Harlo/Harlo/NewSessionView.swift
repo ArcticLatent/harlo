@@ -51,8 +51,9 @@ struct NewSessionView: View {
     /// Where it starts, under the composer.
     var placePath: String {
         if let pr = project { return pr.location }
-        guard !host.isEmpty, let home = choices?.machine(host)?.home, !home.isEmpty else { return "" }
-        return "\(host): \(home)"
+        guard !host.isEmpty else { return "~" }
+        guard let home = choices?.machine(host)?.home, !home.isEmpty else { return "" }
+        return home
     }
 
     /// Connects to the machine picked, then its agents are the choices
@@ -138,106 +139,34 @@ struct NewSessionView: View {
     func composer(_ c: NewSessionChoices) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             if !c.templates.isEmpty { templates(c) }
-            // Where, which agent and model, what runs without asking (onto a
-            // second line when they don't fit, all in sight).
-            Flow(spacing: 8) {
-                    Menu {
-                        // By machine: this computer's, then each other one's
-                        // (its home folder too, from a harlo that starts there).
-                        Picker("Where", selection: $place) {
-                            ForEach(c.machines, id: \.host) { m in
-                                Section(machineTitle(m.host, c)) {
-                                    if m.host.isEmpty || (c.machine(m.host) != nil && model.canConnect) {
-                                        Label("Home folder", systemImage: "house").tag(SessionPlace.home(m.host))
-                                    }
-                                    ForEach(m.projects) { pr in
-                                        Label(pr.name, systemImage: "folder").tag(SessionPlace.project(pr.id))
-                                    }
-                                }
-                            }
-                        }
-                    } label: {
-                        PickerChip(text: placeText) {
-                            if connecting != nil {
-                                ProgressView().controlSize(.mini)
-                            } else {
-                                Image(systemName: !host.isEmpty ? "server.rack" : project == nil ? "house" : "folder").font(.system(size: 13))
-                            }
-                        }
-                    }
-                    .disabled(connecting != nil)
-                    .onChange(of: place) { _, now in
-                        agent = c.agent(for: now)
-                        modelId = ""
-                        approval = ""
-                        if c.needsConnecting(now) && model.canConnect { connect(c.host(now)) }
-                    }
-                    Menu {
-                        Picker("Agent", selection: $agent) {
-                            ForEach(c.agents(for: place)) { a in
-                                Text(a.label).tag(a.id)
-                            }
-                        }
-                    } label: {
-                        PickerChip(text: c.agents.first { $0.id == agent }?.label ?? "Agent") {
-                            AgentTile(harness: agent, size: 22)
-                        }
-                    }
-                    .onChange(of: agent) { _, _ in
-                        if keepPicks { keepPicks = false; return }
-                        modelId = ""
-                        approval = ""
-                    }
-                    // Used before first, then every model the agent offers.
-                    Menu {
-                        Picker("Model", selection: $modelId) {
-                            Text(defaultModel(c)).tag("")
-                            ForEach(!host.isEmpty ? [] : c.modelChoices(for: agent), id: \.id) { m in
-                                Text(stopped[m.id].map { "\(m.name) (\($0) stopped)" } ?? m.name).tag(m.id)
-                            }
-                        }
-                    } label: {
-                        PickerChip(text: c.modelChoices(for: agent).first { $0.id == modelId }?.name ?? defaultModel(c)) {
-                            Image(systemName: "cpu").font(.system(size: 13))
-                        }
-                    }
-                    let starts = c.approval(for: agent, in: project)
-                    if !starts.isEmpty {
-                        Menu {
-                            Picker("Permissions", selection: Binding(get: { approval.isEmpty ? starts : approval }, set: { approval = $0 })) {
-                                ForEach(["always-ask", "write", "yolo"], id: \.self) { m in
-                                    Text(Modes.label(m)).tag(m)
-                                }
-                            }
-                        } label: {
-                            PickerChip(text: Modes.short(approval.isEmpty ? starts : approval)) {
-                                Image(systemName: (approval.isEmpty ? starts : approval) == "yolo" ? "bolt.shield" : "shield").font(.system(size: 13))
-                            }
-                        }
-                    }
-            }
-            .padding(.horizontal, 2)
-            VStack(alignment: .leading, spacing: 10) {
+            // As the session's composer: where it starts on top (a "To:"
+            // line), the message, then photos, the agent and its model, what
+            // runs without asking, dictation and start, all on one line.
+            VStack(alignment: .leading, spacing: 8) {
+                placeRow(c)
+                Rectangle().fill(Color(p.hairline)).frame(height: 1)
                 if !photos.isEmpty { PhotoStrip(photos: $photos) }
                 TextField("What should the agent do?", text: $text, axis: .vertical)
                     .lineLimit(1...8)
                     .font(.system(size: 17))
                     .focused($focused)
-                    .padding(.top, 4)
-                HStack {
-                    PhotoButton(photos: $photos, size: 40)
-                    Spacer()
-                    MicButton(text: $text, size: 40)
+                    .padding(.top, 2)
+                HStack(spacing: 6) {
+                    PhotoButton(photos: $photos, size: 34)
+                    agentAndModel(c)
+                    permissions(c)
+                    Spacer(minLength: 0)
+                    MicButton(text: $text, size: 34)
                     Button(action: start) {
                         Group {
                             if starting {
                                 ProgressView().tint(Color(p.onPrimary))
                             } else {
-                                Image(systemName: "arrow.right").font(.system(size: 18, weight: .bold))
+                                Image(systemName: "arrow.up").font(.system(size: 16, weight: .bold))
                             }
                         }
-                        .frame(width: 48, height: 44)
-                        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(canStart || starting ? p.primary : p.subtle)))
+                        .frame(width: 36, height: 36)
+                        .background(Circle().fill(Color(canStart || starting ? p.primary : p.subtle)))
                         .foregroundStyle(Color(canStart ? p.onPrimary : p.muted))
                     }
                     .buttonStyle(.plain)
@@ -245,30 +174,157 @@ struct NewSessionView: View {
                     .accessibilityLabel("Start the session")
                 }
             }
-            .padding(12)
-            .card(p, radius: 18, fill: p.background)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .card(p, radius: 22, fill: p.background)
             if let server = stopped[modelId] {
                 HStack(spacing: 4) {
                     Image(systemName: "pause.circle")
                     Text("\(server) is stopped: harlo starts it before your message")
                 }
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(Color(p.warning))
-                    .padding(.horizontal, 4)
-            }
-            if !placePath.isEmpty {
-                Text(placePath)
-                    .font(Style.mono(11))
-                    .foregroundStyle(Color(p.faint))
-                    .lineLimit(1)
-                    .truncationMode(.head)
-                    .padding(.horizontal, 4)
+                .font(.system(size: 12.5))
+                .foregroundStyle(Color(p.warning))
+                .padding(.horizontal, 6)
             }
         }
         .padding(10)
-        .card(p, radius: 24)
+        .card(p, radius: 26)
         .padding(.horizontal, 10)
         .padding(.bottom, 8)
+        .onChange(of: place) { _, now in
+            agent = c.agent(for: now)
+            modelId = ""
+            approval = ""
+            if c.needsConnecting(now) && model.canConnect { connect(c.host(now)) }
+        }
+        .onChange(of: agent) { _, _ in
+            if keepPicks { keepPicks = false; return }
+            modelId = ""
+            approval = ""
+        }
+    }
+
+    /// Where it starts: a project, or a machine's home folder (by machine:
+    /// this computer's, then each other one's), with its folder.
+    func placeRow(_ c: NewSessionChoices) -> some View {
+        Menu {
+            Picker("Where", selection: $place) {
+                ForEach(c.machines, id: \.host) { m in
+                    Section(machineTitle(m.host, c)) {
+                        if m.host.isEmpty || (c.machine(m.host) != nil && model.canConnect) {
+                            Label("Home folder", systemImage: "house").tag(SessionPlace.home(m.host))
+                        }
+                        ForEach(m.projects) { pr in
+                            Label(pr.name, systemImage: "folder").tag(SessionPlace.project(pr.id))
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Group {
+                    if connecting != nil {
+                        ProgressView().controlSize(.mini)
+                    } else {
+                        Image(systemName: !host.isEmpty ? "server.rack" : project == nil ? "house" : "folder")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(Color(p.primary))
+                    }
+                }
+                .frame(width: 20)
+                Text(placeText)
+                    .font(.system(size: 15, weight: .semibold))
+                    .lineLimit(1)
+                    .layoutPriority(1)
+                Text(placePath)
+                    .font(Style.mono(12))
+                    .foregroundStyle(Color(p.faint))
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color(p.muted))
+            }
+            .foregroundStyle(Color(p.foreground))
+            .padding(.horizontal, 4)
+            .frame(height: 32)
+            .contentShape(Rectangle())
+        }
+        .disabled(connecting != nil)
+        .accessibilityLabel("Where: \(placeText)")
+    }
+
+    /// The agent's tile and the model's name; its menu picks either.
+    /// (Used before first, then every model the agent offers; another
+    /// machine's agent picks its own.)
+    func agentAndModel(_ c: NewSessionChoices) -> some View {
+        let agentName = c.agents.first { $0.id == agent }?.label ?? "Agent"
+        let modelName = c.modelChoices(for: agent).first { $0.id == modelId }?.name ?? defaultModel(c)
+        return Menu {
+            Picker(selection: $agent) {
+                ForEach(c.agents(for: place)) { a in
+                    Text(a.label).tag(a.id)
+                }
+            } label: {
+                Label("Agent: \(agentName)", systemImage: "person.crop.circle")
+            }
+            .pickerStyle(.menu)
+            Picker(selection: $modelId) {
+                Text(defaultModel(c)).tag("")
+                ForEach(!host.isEmpty ? [] : c.modelChoices(for: agent), id: \.id) { m in
+                    Text(stopped[m.id].map { "\(m.name) (\($0) stopped)" } ?? m.name).tag(m.id)
+                }
+            } label: {
+                Label("Model: \(modelName)", systemImage: "cpu")
+            }
+            .pickerStyle(.menu)
+        } label: {
+            HStack(spacing: 6) {
+                AgentTile(harness: agent, size: 20)
+                Text(modelName)
+                    .font(.system(size: 13.5, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: 130, alignment: .leading)
+                    .fixedSize(horizontal: true, vertical: false)
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).foregroundStyle(Color(p.muted))
+            }
+            .padding(.leading, 6)
+            .padding(.trailing, 10)
+            .frame(height: 34)
+            .background(Capsule().fill(Color(p.raised.mix(p.foreground, 0.04))))
+            .overlay(Capsule().strokeBorder(Color(p.hairline), lineWidth: 1))
+            .foregroundStyle(Color(p.foreground))
+            .contentShape(Capsule())
+        }
+        .accessibilityLabel("\(agentName), \(modelName)")
+    }
+
+    /// What runs without asking (agents that ask): a shield, lit when
+    /// nothing asks first.
+    @ViewBuilder
+    func permissions(_ c: NewSessionChoices) -> some View {
+        let starts = c.approval(for: agent, in: project)
+        if !starts.isEmpty {
+            let mode = approval.isEmpty ? starts : approval
+            let yolo = mode == "yolo"
+            Menu {
+                Picker("Permissions", selection: Binding(get: { mode }, set: { approval = $0 })) {
+                    ForEach(["always-ask", "write", "yolo"], id: \.self) { m in
+                        Text(Modes.label(m)).tag(m)
+                    }
+                }
+            } label: {
+                Image(systemName: yolo ? "bolt.shield" : "shield")
+                    .font(.system(size: 15, weight: .medium))
+                    .frame(width: 34, height: 34)
+                    .background(Circle().fill(Color(yolo ? p.accentSoft.over(p.raised) : p.raised.mix(p.foreground, 0.04))))
+                    .overlay(Circle().strokeBorder(Color(yolo ? p.primary.mix(p.raised, 0.4) : p.hairline), lineWidth: 1))
+                    .foregroundStyle(Color(yolo ? p.primary : p.muted))
+            }
+            .accessibilityLabel("Permissions: \(Modes.label(mode))")
+        }
     }
 
     /// A machine's section in the place picker.
@@ -326,39 +382,5 @@ struct NewSessionView: View {
                 if let s = model.session { LiveActivities.start(for: s, model: model) }
             }
         }
-    }
-}
-
-/// A picker's chip: an icon (or a tile), what's chosen, and a chevron.
-struct PickerChip<Lead: View>: View {
-    @Environment(\.palette) private var p
-    let text: String
-    let lead: Lead
-
-    init(text: String, @ViewBuilder lead: () -> Lead) {
-        self.text = text
-        self.lead = lead()
-    }
-
-    var body: some View {
-        HStack(spacing: 7) {
-            lead
-            Text(text)
-                .font(.system(size: 15, weight: .medium))
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(maxWidth: 170, alignment: .leading)
-                .fixedSize(horizontal: true, vertical: false)
-            Image(systemName: "chevron.down")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Color(p.muted))
-        }
-        .padding(.leading, 8)
-        .padding(.trailing, 11)
-        .frame(height: 38)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(p.raised)))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color(p.hairline), lineWidth: 1))
-        .foregroundStyle(Color(p.foreground))
-        .contentShape(RoundedRectangle(cornerRadius: 12))
     }
 }
