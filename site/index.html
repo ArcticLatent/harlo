@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>harlo · A native desktop app for coding agents</title>
-<meta name="description" content="A native Rust and Qt app, not Electron. harlo runs Claude Code, OpenCode, pi, Oh My Pi and Hermes on your Linux computer and your other machines, with a native chat, changes and diffs, pull requests and CI, and an iPhone app to follow and answer them.">
+<meta name="description" content="A native Rust and Qt app, not Electron. harlo runs Claude Code, OpenCode, pi, Oh My Pi and Hermes on your Linux computer and your other machines, with a native chat, changes and diffs, pull requests and CI, your own local models, and an iPhone app to follow and answer them.">
 <meta name="theme-color" content="#1b1c21">
 <link rel="canonical" href="https://harlo.run/">
 <link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
@@ -39,7 +39,7 @@
     <div class="logo-wrap"><img class="logo only-dark" src="/assets/logo.svg" alt="Harlo" width="678" height="220"><img class="logo only-light" src="/assets/logo-light.svg" alt="Harlo" width="678" height="220"></div>
     <p class="stack"><span>Rust</span><span>Qt 6</span><span class="no" aria-label="not Electron">Electron</span></p>
     <h1>Your coding agents, <span class="grad">in a truly native app</span></h1>
-    <p class="lead">harlo is written in Rust and Qt, not Electron: no browser bundled in a window, just a fast, light desktop app. It runs Claude Code, OpenCode, pi, Oh My Pi and Hermes on your Linux computer and your other machines, and its iPhone app follows them wherever you are.</p>
+    <p class="lead">harlo is written in Rust and Qt, not Electron: no browser bundled in a window, just a fast, light desktop app. It runs Claude Code, OpenCode, pi, Oh My Pi and Hermes on your Linux computer and your other machines, sets up local models for them, and its iPhone app follows them wherever you are.</p>
     <div class="cta">
       <a class="btn primary" href="/download">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16"/></svg>
@@ -112,7 +112,7 @@
       <div class="card">
         <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></div>
         <h3>Your other machines</h3>
-        <p>Add a machine you reach over SSH and run sessions there, with its terminal, files and changes, as if it were this one.</p>
+        <p>Add a machine you reach over SSH and work there as you would here: its terminal, files, changes, worktrees, sign-ins and models. Switch machines from the sidebar.</p>
       </div>
       <div class="card">
         <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12M18 9v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M6 15a6 6 0 0 0 6-6h3"/></svg></div>
@@ -138,6 +138,21 @@
         <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6-6-6M12 19h8"/></svg></div>
         <h3>A terminal, files, templates</h3>
         <p>A terminal in the session's folder, a file browser and editor, and session templates for the prompts you start with every day.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/></svg></div>
+        <h3>Your own models</h3>
+        <p>llama.cpp, Ollama, vLLM, Strata, Basalt or NInfer, set up for your graphics card with a model that fits, on this computer or a GPU box over SSH, and added to your agents. Stopped servers start before your message.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11M9 12h11M9 18h11"/><path d="m3.5 6 1 1 2-2M3.5 12l1 1 2-2"/><circle cx="5" cy="18" r="1"/></svg></div>
+        <h3>Specs and a shared plan</h3>
+        <p>Every agent can read and write the project's SPEC.md files and work through one plan, each finished step committed on its own and reviewed by another agent. Diagrams are drawn in the chat.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 3v9l6.4 6.4"/></svg></div>
+        <h3>Plan limits as they change</h3>
+        <p>Your Claude and ChatGPT plans' limits on every machine, a heads-up from 90%, a notification when they reset, and Stop and continue at the reset.</p>
       </div>
     </div>
   </div>

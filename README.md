@@ -9,7 +9,7 @@
 
 <p align="center"><b>Your coding agents, in a truly native app.</b><br>
 Claude Code, OpenCode, pi, Oh My Pi and Hermes on your Linux computer and your other machines,<br>
-with an iPhone app to follow and answer them. Written in Rust and Qt, not Electron.</p>
+with your own local models and an iPhone app to follow and answer them. Written in Rust and Qt, not Electron.</p>
 
 <p align="center">
   <a href="https://harlo.run/download"><b>Download</b></a> ·
@@ -45,11 +45,14 @@ Many agent apps are a web page in an Electron window. harlo is a desktop app:
 | **Five agents, one chat** | Claude Code, OpenCode, pi, Oh My Pi and Hermes. Your existing Claude Code, OpenCode, pi and Oh My Pi sessions show up in the sidebar; click one to carry on. Each agent uses your own login and settings. |
 | **Changes and diffs** | Every file an agent touched, side-by-side diffs, review comments sent back to the agent, and undo for any turn. A folder of repositories shows each one's changes. |
 | **Pull requests and CI** | Commit, push, open a pull request and follow its checks on GitHub, GitLab or Forgejo (your own server too). Failed checks go back to the agent in one click. |
-| **Your other machines** | Add a machine over SSH and run sessions there, with its files, terminal and changes. |
+| **Your other machines** | Add a machine over SSH and run sessions there as you would here: its files, terminal, changes, worktrees, sign-ins, models, stats, specs and plans. |
+| **Your own models** | Settings → Model servers sets up llama.cpp, Ollama, vLLM, Strata, Basalt or NInfer for your graphics card, downloads a model that fits and adds it to your agents. On this computer or on another machine (a GPU box, a NAS; x86-64 or ARM), each machine's agents can use the other's servers through SSH, and a stopped server starts before your message. |
+| **Specs and a shared plan** | Per project, every agent can find, read and write its SPEC.md files, and work through a plan whose finished steps are committed one by one and reviewed by another agent. |
+| **Plan limits** | Your Claude and ChatGPT plan's limits as they change, on each machine, a notification when one is used up and when it resets, and Stop and continue at the reset. The context bar marks where each agent compacts. |
 | **Worktrees** | Sessions in worktrees of their own, side by side, or one task run by several agents in parallel; merge the one you keep. |
 | **Dictation** | Speak your prompt. Recognised on your computer (whisper.cpp); nothing leaves it. |
-| **Guard rails** | Approvals, plan mode, spending limits per session and per day, an action log of every command and edit, quiet hours. |
-| **And** | A terminal, a file browser and editor, templates, scheduled prompts, MCP servers, export as Markdown, 31 themes. |
+| **Guard rails** | Approvals, plan mode, spending limits per session and per day, an action log of every command and edit, quiet hours. Bare pi gets permissions, questions, a to-do list, subagents and web access from harlo's extensions (Settings → Extensions), off until you turn them on. |
+| **And** | A terminal, a file browser and editor, Mermaid diagrams in the chat, templates, scheduled prompts, MCP servers, hand off and second opinions between agents, export as Markdown, 31 themes. |
 
 <p align="center">
   <img src="site/assets/desktop-diff.webp" alt="A side-by-side diff in harlo" width="49%">
@@ -89,6 +92,7 @@ Needs Rust 1.85 or newer, Qt 6.9 or newer (`qt6-base`, `qt6-declarative`, `qt6-m
 
 ```sh
 cargo run -p harlo-app --release
+cargo build -p harlo-core --release --bin harlo-engines --no-default-features   # model servers on other machines
 cargo test --workspace
 ```
 
@@ -101,7 +105,8 @@ On Arch, `cd packaging/aur/harlo-git && makepkg -si` builds the latest commit ag
 - **The composer.** Enter sends, Shift+Enter adds a line, `/` completes the agent's commands, `@` completes files, Up/Down recalls earlier prompts. While the agent works, Enter queues a follow-up, Ctrl+Enter steers, Esc stops. Drop files on the chat to attach them. Below it: Build / Plan (Tab), the permissions shield, the model, the microphone and expand (Ctrl+Shift+X).
 - **Panels.** Changes (Ctrl+Shift+G), Files (Ctrl+Shift+E), Activity (Ctrl+Shift+A), Context (Ctrl+Shift+I), Notes (Ctrl+Shift+N) and the terminal (Ctrl+`). Ctrl+K opens the command palette, Ctrl+P finds a session, Ctrl+Shift+F searches every conversation, Ctrl+/ lists the shortcuts.
 - **Projects.** Settings → Projects gives a project a name, a colour, an icon, its default agent and the commands to run in each new worktree.
-- **Remote machines.** Settings → Remote Instances adds SSH connections (`user@host` or a `~/.ssh/config` name). **+ Project** then offers each machine's folders, and its sessions run there, with its terminal, files and changes.
+- **Remote machines.** Settings → Remote Instances adds SSH connections (`user@host` or a `~/.ssh/config` name). The instance menu at the top of the sidebar switches between this computer and each machine, and connects or disconnects one. **+ Project** then offers each machine's folders (with New folder), and its sessions run there, with its terminal, files and changes. An agent there signs in from the model menu (**Sign in on <machine>**).
+- **Model servers.** Settings → Model servers: **Set up a local model…** for this computer, **Set up a model on <machine>…** for each connected machine. harlo shows what fits the machine's card and memory, installs the engine, downloads the model, starts it and tests it. Tick the agents that should use it, on that machine or (through SSH) here. On another machine, harlo runs a small helper of its own (`harlo-engines`, in `~/.cache/harlo` there) for the setup.
 - **Your phone.** Settings → Devices → Pair a device shows a QR code. On the same network the phone connects directly (port 7676; if a firewall blocks it, harlo offers to open it for that network only). Away from home it goes through a harlo relay or Tailscale Funnel.
 - **Your data.** harlo keeps its own state in `~/.local/share/harlo/` and `~/.config/harlo/`. Conversations stay where each agent keeps them.
 
@@ -124,7 +129,7 @@ It speaks plain HTTP: put it behind something that adds HTTPS (Caddy, a Cloudfla
 | Crate | Role |
 |---|---|
 | `crates/harlo-harness` | Runs the agents (pi and omp over RPC, Claude Code's stream-json, OpenCode's server, Hermes over the Agent Client Protocol) and turns what they say into one stream of events |
-| `crates/harlo-core` | Sessions, transcripts, markdown, git, worktrees, search, remote machines, phone protocol, state. No Qt |
+| `crates/harlo-core` | Sessions, transcripts, markdown, git, worktrees, search, remote machines, model servers, phone protocol, state. No Qt. Its `harlo-engines` program sets up and runs model servers on other machines |
 | `crates/harlo-app` | The desktop app: cxx-qt bridges and the QML interface |
 | `crates/harlo-relay` | The relay |
 | `crates/harlo-apns` | Apple's push service, for the relay |
