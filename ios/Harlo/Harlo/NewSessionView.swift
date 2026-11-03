@@ -93,9 +93,9 @@ struct NewSessionView: View {
     func composer(_ c: NewSessionChoices) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             if !c.templates.isEmpty { templates(c) }
-            // Where, which agent and model, what runs without asking.
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
+            // Where, which agent and model, what runs without asking (onto a
+            // second line when they don't fit, all in sight).
+            Flow(spacing: 8) {
                     Menu {
                         // By machine: this computer's, then each remote host's.
                         Picker("Project", selection: $projectId) {
@@ -161,9 +161,8 @@ struct NewSessionView: View {
                             }
                         }
                     }
-                }
-                .padding(.horizontal, 2)
             }
+            .padding(.horizontal, 2)
             VStack(alignment: .leading, spacing: 10) {
                 if !photos.isEmpty { PhotoStrip(photos: $photos) }
                 TextField("What should the agent do?", text: $text, axis: .vertical)
@@ -278,6 +277,9 @@ struct PickerChip<Lead: View>: View {
             Text(text)
                 .font(.system(size: 15, weight: .medium))
                 .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: 170, alignment: .leading)
+                .fixedSize(horizontal: true, vertical: false)
             Image(systemName: "chevron.down")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Color(p.muted))
