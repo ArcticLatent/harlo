@@ -30,8 +30,18 @@ pub fn socket_path() -> PathBuf {
     }
 }
 
-/// The tools, as MCP lists them.
-pub fn tools() -> Value {
+/// When agents may start sessions (Settings → Orchestration): only when the
+/// user asks (the default), or on their own when it helps.
+pub fn when_to_start(on_their_own: bool) -> &'static str {
+    if on_their_own {
+        "Start one when another agent's work would help: a second opinion, work in parallel, a different model or agent."
+    } else {
+        "Start one only when the user asks for another agent or session (a handoff, a second opinion, a helper, a committee), or their message is a harlo Delegate request. Otherwise do the work yourself (with your own subagents, if you have them)."
+    }
+}
+
+/// The tools, as MCP lists them (`on_their_own`: see [`when_to_start`]).
+pub fn tools(on_their_own: bool) -> Value {
     let s = |props: Value, required: &[&str]| json!({ "type": "object", "properties": props, "required": required });
     json!([
         {
@@ -46,7 +56,7 @@ pub fn tools() -> Value {
         },
         {
             "name": "start_session",
-            "description": "Starts a new harlo session with a coding agent and sends it a first prompt. It becomes your helper: the user sees it, and harlo sends you its report when it finishes (unless notify is false), its questions for you, and when it waits for the user. Start every independent helper, then end your turn: harlo wakes you with what comes back; don't poll. The new agent has none of your context: make the prompt a self-contained briefing.",
+            "description": format!("Starts a new harlo session with a coding agent and sends it a first prompt. {} It becomes your helper: the user sees it, and harlo sends you its report when it finishes (unless notify is false), its questions for you, and when it waits for the user. Start every independent helper, then end your turn: harlo wakes you with what comes back; don't poll. The new agent has none of your context: make the prompt a self-contained briefing.", when_to_start(on_their_own)),
             "inputSchema": s(json!({
                 "agent": { "type": "string", "description": "claude, opencode, pi or omp (see list_agents)." },
                 "prompt": { "type": "string", "description": "The first message: the task, its context, the relevant files, what's done and what's left." },
@@ -526,6 +536,9 @@ mod tests {
         assert!(!helper_brief("", "Do X", false).contains("report_done"));
         assert!(approval_answer("Merge?", &json!({ "value": "Approve" })).ends_with("(\"Merge?\"): Approve"));
         assert!(approval_answer("Merge?", &json!({ "cancelled": true })).contains("dismissed"));
+        // When to start sessions: as the setting says.
+        let start = |own: bool| tools(own).as_array().unwrap().iter().find(|t| t["name"] == "start_session").unwrap()["description"].as_str().unwrap().to_owned();
+        assert!(start(false).contains("only when the user asks") && !start(true).contains("only when"));
     }
 }
 

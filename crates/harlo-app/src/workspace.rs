@@ -6122,7 +6122,7 @@ impl Workspace {
         // project's specs and plan when they're on.
         let features = caller.as_deref().and_then(|c| self.features_of(c));
         if tool == harlo_core::orchestration::TOOLS {
-            let mut tools = harlo_core::orchestration::tools().as_array().cloned().unwrap_or_default();
+            let mut tools = harlo_core::orchestration::tools(self.agents_start_on_their_own()).as_array().cloned().unwrap_or_default();
             // A helper: its report and its questions for its parent.
             if caller.as_ref().and_then(|c| self.orch_children.get(c)).is_some_and(|c| c.notify) {
                 tools.extend(harlo_core::orchestration::helper_tools().as_array().cloned().unwrap_or_default());
@@ -6138,7 +6138,7 @@ impl Workspace {
             return Ok(json!(tools));
         }
         if tool == harlo_core::orchestration::INSTRUCTIONS {
-            let mut text = harlo_core::orchestration::BASE_INSTRUCTIONS.to_owned();
+            let mut text = format!("{} {}", harlo_core::orchestration::BASE_INSTRUCTIONS, harlo_core::orchestration::when_to_start(self.agents_start_on_their_own()));
             if let Some((_, specs, plan, _)) = &features {
                 if *specs {
                     text = format!("{text}\n\n{}", harlo_core::specs::INSTRUCTIONS);
@@ -6447,6 +6447,12 @@ impl Workspace {
         }
     }
 
+    /// Settings → Orchestration: agents may start sessions on their own
+    /// (else only when the user asks).
+    fn agents_start_on_their_own(&self) -> bool {
+        self.setting_str(ORCH_ON_THEIR_OWN) == "1"
+    }
+
     /// A session's title, as the sidebar shows it.
     fn title_of(&self, key: &str) -> String {
         if let Some(row) = self.rows.iter().find(|r| r.key == key) {
@@ -6668,6 +6674,10 @@ impl Workspace {
         }
     }
 }
+
+/// The setting: agents may start sessions on their own ("1"), else only
+/// when the user asks.
+const ORCH_ON_THEIR_OWN: &str = "orchestration_on_their_own";
 
 /// An agent's name ("claude" → "Claude").
 fn agent_label(agent: &str) -> &str {

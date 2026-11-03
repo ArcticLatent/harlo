@@ -2435,7 +2435,7 @@ Popup {
 
             SectionHeader {
                 title: "Agents drive harlo"
-                subtitle: "Agents in harlo can start sessions with other agents, send them messages, read their replies and stop them. The sessions an agent starts show under its own, and each one's last reply goes back to it when it finishes."
+                subtitle: "Agents in harlo can start sessions with other agents, send them messages, read their replies and stop them. The sessions an agent starts show under its own as its helpers: each one reports back to it when it finishes, can ask it questions, and it's told when one waits for you. Any agent can also ask you to approve a step; only you can answer."
             }
             Group {
                 SettingRow {
@@ -2447,6 +2447,27 @@ Popup {
                         objectName: "orchEnabled"
                         checked: Workspace.orchestrationOn
                         onToggled: { orch.problem = Workspace.setOrchestrationEnabled(checked); orch.reload(); checked = Qt.binding(() => Workspace.orchestrationOn) }
+                    }
+                }
+                SettingRow {
+                    id: selfStart
+                    visible: Workspace.orchestrationOn
+                    divider: true
+                    readonly property bool own: (Workspace.orchestrationRevision, Workspace.setting("orchestration_on_their_own") === "1")
+                    title: "Agents start helpers"
+                    detail: (own ? "On their own: when another agent's work would help (a second opinion, parallel work, another model)."
+                                 : "Only when you ask: for another agent or session, or with the Delegate button. Otherwise they do the work themselves.")
+                        + " For sessions started from now on."
+                    icon: "node-tree"
+                    ComboField {
+                        objectName: "orchSelfStart"
+                        width: 190
+                        model: ["Only when I ask", "On their own"]
+                        currentIndex: selfStart.own ? 1 : 0
+                        onActivated: i => {
+                            Workspace.setSetting("orchestration_on_their_own", i === 1 ? "1" : "")
+                            Workspace.loadOrchestration()
+                        }
                     }
                 }
             }
