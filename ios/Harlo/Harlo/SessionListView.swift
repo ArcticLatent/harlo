@@ -25,6 +25,13 @@ struct DashboardView: View {
 
     /// The projects whose Settled shelf is open.
     @State private var openShelves: Set<String> = []
+    /// The sessions whose helpers show (folded under them otherwise).
+    @State private var openHelpers: Set<String> = []
+
+    /// Helpers fold under the sessions that started them (not while
+    /// searching: then every match lists).
+    var folding: Bool { search.trimmingCharacters(in: .whitespaces).isEmpty }
+    var helpers: SessionSummary.Helpers { SessionSummary.helpers(model.sessions) }
 
     struct SessionGroup: Identifiable {
         let id: String
@@ -36,15 +43,21 @@ struct DashboardView: View {
 
     var groups: [SessionGroup] {
         let working = ["busy", "starting", "input"]
+        let h = helpers
+        // (A session works while one of its helpers does.)
+        let works = { (s: SessionSummary) in working.contains(h.status(s)) }
         if !all {
-            // (Settled ones are done with, unless they work again.)
-            let shown = model.sessions.filter { $0.settled.isEmpty || working.contains($0.status) }
-            let busy = shown.filter { working.contains($0.status) }
-            let rest = shown.filter { !working.contains($0.status) }.sorted { $0.modified > $1.modified }
+            // (Settled ones are done with, unless they work again; helpers
+            // show under their sessions.)
+            let shown = model.sessions.filter { ($0.settled.isEmpty || works($0)) && !h.folded($0) }
+            let busy = shown.filter(works)
+            let rest = shown.filter { !works($0) }.sorted { $0.modified > $1.modified }
             return [SessionGroup(id: "", name: "", sessions: Array((busy + rest).prefix(max(Self.recentCount, busy.count))))]
         }
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
-        let found = model.sessions.filter { s in q.isEmpty || "\(s.title) \(s.project) \(s.branch) \(s.location) \(s.host)".lowercased().contains(q) }
+        let found = model.sessions.filter { s in
+            q.isEmpty ? !h.folded(s) : "\(s.title) \(s.project) \(s.branch) \(s.location) \(s.host)".lowercased().contains(q)
+        }
         if groupBy == "day" {
             return SessionSummary.byDay(found).map { SessionGroup(id: $0.name, name: $0.name, sessions: $0.sessions) }
         }
@@ -58,7 +71,7 @@ struct DashboardView: View {
                 out.append(SessionGroup(id: id, name: s.host.isEmpty ? name : "\(name) · \(s.host)", sessions: []))
             }
             let i = out.firstIndex { $0.id == id }!
-            if s.settled.isEmpty || working.contains(s.status) { out[i].sessions.append(s) } else { out[i].settled.append(s) }
+            if s.settled.isEmpty || works(s) { out[i].sessions.append(s) } else { out[i].settled.append(s) }
         }
         return out
     }
@@ -96,8 +109,61 @@ struct DashboardView: View {
         .accessibilityValue(open ? "Shown" : "Hidden")
         .plainRow(top: 2, bottom: 2)
         if open {
-            ForEach(g.settled) { s in card(s) }
+            ForEach(g.settled) { s in entry(s) }
         }
+    }
+
+    /// A session's card, then its helpers (folded, behind a line to open).
+    @ViewBuilder
+    func entry(_ s: SessionSummary) -> some View {
+        card(s)
+        if folding, let kids = helpers.helpers[s.key] {
+            helperLine(s, kids.map(\.session))
+            if openHelpers.contains(s.key) {
+                ForEach(kids) { k in card(k.session, depth: k.depth) }
+            }
+        }
+    }
+
+    /// "Helpers · 3", and whether one works or waits for you: opens them.
+    func helperLine(_ s: SessionSummary, _ kids: [SessionSummary]) -> some View {
+        let open = openHelpers.contains(s.key)
+        let waiting = kids.contains { $0.status == "input" }
+        let working = kids.contains { ["busy", "starting"].contains($0.status) }
+        return Button {
+            withAnimation(.easeOut(duration: 0.2)) {
+                if open { openHelpers.remove(s.key) } else { openHelpers.insert(s.key) }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.system(size: 12))
+                Text("Helpers · \(kids.count)")
+                    .font(.system(size: 14.5, weight: .medium))
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .rotationEffect(.degrees(open ? 90 : 0))
+                Spacer()
+                if waiting {
+                    Text("Waiting for you")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Color(p.warning))
+                } else if working {
+                    Text("Working")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Color(p.primary))
+                }
+            }
+            .foregroundStyle(Color(p.muted))
+            .padding(.leading, 26)
+            .padding(.trailing, 6)
+            .frame(height: 30)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Helpers of \(s.title), \(kids.count)")
+        .accessibilityValue(open ? "Shown" : "Hidden")
+        .plainRow(top: 0, bottom: 2)
     }
 
     var body: some View {
@@ -179,7 +245,7 @@ struct DashboardView: View {
                         .plainRow(top: 12, bottom: 2)
                 }
                 ForEach(g.sessions) { s in
-                    card(s)
+                    entry(s)
                 }
                 if !g.settled.isEmpty { shelf(g) }
             }
@@ -214,21 +280,16 @@ struct DashboardView: View {
         }
     }
 
-    /// It shows under the session that started it (grouped by project, as
-    /// harlo lists them).
-    func nested(_ s: SessionSummary) -> Bool {
-        all && groupBy != "day" && s.nest > 0 && search.trimmingCharacters(in: .whitespaces).isEmpty
-    }
-
-    func card(_ s: SessionSummary) -> some View {
+    /// A session's card; a helper's (`depth` > 0) under the session that
+    /// started it, set in.
+    func card(_ s: SessionSummary, depth: Int = 0) -> some View {
         Button {
             model.open(s)
         } label: {
-            SessionCard(session: s, unread: model.isUnread(s), showProject: !all || groupBy == "day", nested: nested(s))
+            SessionCard(session: s, unread: model.isUnread(s), showProject: !all || groupBy == "day", nested: depth > 0)
         }
         .buttonStyle(.plain)
-        // A helper, right under the session that started it.
-        .padding(.leading, nested(s) ? CGFloat(min(s.nest, 3)) * 20 : 0)
+        .padding(.leading, CGFloat(min(depth, 3)) * 20)
         .plainRow(top: 5, bottom: 5)
         .swipeActions(edge: .trailing) {
             Button {

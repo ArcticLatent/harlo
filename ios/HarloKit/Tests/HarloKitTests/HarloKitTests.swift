@@ -791,6 +791,25 @@ final class PlanTests: XCTestCase {
         XCTAssertEqual(SessionSummary(["key": "live:1"]).nest, 0)
     }
 
+    func testHelpersFoldUnderTheirSession() {
+        let list = SessionSummary.list([
+            ["key": "a", "status": "idle"],
+            ["key": "a1", "parent": "a", "nest": 1, "status": "idle"],
+            ["key": "a1x", "parent": "a1", "nest": 2, "status": "input"],
+            ["key": "a2", "parent": "a", "nest": 1, "status": "idle"],
+            ["key": "b", "status": "idle"],
+            // (Its parent isn't listed: it lists on its own.)
+            ["key": "c1", "parent": "gone", "nest": 1, "status": "busy"],
+        ])
+        let h = SessionSummary.helpers(list)
+        XCTAssertEqual(list.filter { !h.folded($0) }.map(\.key), ["a", "b", "c1"])
+        XCTAssertEqual(h.helpers["a"]?.map(\.session.key), ["a1", "a1x", "a2"])
+        XCTAssertEqual(h.helpers["a"]?.map(\.depth), [1, 2, 1])
+        XCTAssertNil(h.helpers["b"])
+        XCTAssertEqual(h.status(list[0]), "input", "a helper waiting for you shows on its session")
+        XCTAssertEqual(h.status(list[4]), "idle")
+    }
+
     func testDemoEdits() {
         var plan = HarloModel.samplePlan()
         plan = HarloModel.demoEdit(plan, .add(title: "New", detail: "", after: 1))

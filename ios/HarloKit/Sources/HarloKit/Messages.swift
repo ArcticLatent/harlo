@@ -303,4 +303,53 @@ extension SessionSummary {
         }
         return order.compactMap { name in groups[name].map { (name, $0) } }
     }
+
+    /// Helpers folded under the sessions that started them: each helper of
+    /// one in `list` (and theirs, `depth` deep from 1), by the top session's
+    /// key, in harlo's order. The rest are the ones that list on their own.
+    public struct Nested: Sendable, Identifiable {
+        public var session: SessionSummary
+        /// 1: started by the top session; 2: by one of its helpers; …
+        public var depth: Int
+        public var id: String { session.key }
+    }
+
+    public struct Helpers: Sendable {
+        public var helpers: [String: [Nested]] = [:]
+        /// Whether `s` is folded under another session.
+        public func folded(_ s: SessionSummary) -> Bool { foldedKeys.contains(s.key) }
+        var foldedKeys: Set<String> = []
+
+        /// A session's own state with its helpers': working if one is, else
+        /// waiting for you if one is.
+        public func status(_ s: SessionSummary) -> String {
+            let all = [s.status] + (helpers[s.key] ?? []).map(\.session.status)
+            if all.contains("input") { return "input" }
+            if all.contains(where: { ["busy", "starting"].contains($0) }) { return "busy" }
+            return s.status
+        }
+    }
+
+    public static func helpers(_ list: [SessionSummary]) -> Helpers {
+        let keys = Set(list.map(\.key))
+        var kids: [String: [SessionSummary]] = [:]
+        for s in list where !s.parent.isEmpty && s.parent != s.key && keys.contains(s.parent) {
+            kids[s.parent, default: []].append(s)
+        }
+        var out = Helpers()
+        out.foldedKeys = Set(kids.values.flatMap { $0.map(\.key) })
+        for top in list where !out.foldedKeys.contains(top.key) {
+            var found: [Nested] = []
+            var seen: Set<String> = [top.key]
+            func walk(_ key: String, _ depth: Int) {
+                for k in kids[key] ?? [] where seen.insert(k.key).inserted {
+                    found.append(Nested(session: k, depth: depth))
+                    walk(k.key, depth + 1)
+                }
+            }
+            walk(top.key, 1)
+            if !found.isEmpty { out.helpers[top.key] = found }
+        }
+        return out
+    }
 }
