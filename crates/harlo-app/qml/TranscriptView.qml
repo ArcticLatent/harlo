@@ -62,20 +62,18 @@ Item {
         x: (view.width - view.contentWidthLimit) / 2
         width: view.contentWidthLimit
         height: root.headHeight
-        AgentAvatar {
-            visible: !view.compact
-            implicitWidth: Theme.px(32)
-            implicitHeight: Theme.px(32)
-            anchors.verticalCenter: parent.verticalCenter
-            provider: root.session.harness
-            ring: Theme.canvas
-        }
         Row {
-            x: view.indent
             anchors.verticalCenter: parent.verticalCenter
             spacing: 8
+            AgentAvatar {
+                implicitWidth: Theme.px(24)
+                implicitHeight: Theme.px(24)
+                anchors.verticalCenter: parent.verticalCenter
+                provider: root.session.harness
+                ring: Theme.canvas
+            }
             Label { text: Theme.harnessLabel(root.session.harness); color: Theme.text; font.pixelSize: Theme.px(14.5); font.weight: Font.DemiBold }
-            Label { visible: root.session.modelName !== ""; text: "· " + Theme.modelLabel(root.session.modelName); color: Theme.textFaint; font.pixelSize: Theme.px(13); anchors.baseline: parent.children[0].baseline }
+            Label { visible: root.session.modelName !== ""; text: "· " + Theme.modelLabel(root.session.modelName); color: Theme.textFaint; font.pixelSize: Theme.px(13); anchors.baseline: parent.children[1].baseline }
         }
     }
     /// A run of tool calls and thoughts: folded or open as set by hand,
@@ -284,12 +282,10 @@ Item {
         // that wide, centred.
         readonly property real gutter: Math.max(16, Math.min(64, width * 0.04), (width - Theme.px(Theme.chatMaxWidth)) / 2)
         readonly property real contentWidthLimit: Math.max(120, width - 2 * gutter)
-        // A turn's text sits right of the avatars (narrow: no avatars, the
-        // whole width for the text).
-        readonly property bool compact: contentWidthLimit < Theme.px(480)
-        readonly property real indent: compact ? 0 : Theme.px(46)
-        readonly property real columnX: (width - contentWidthLimit) / 2 + indent
-        readonly property real columnWidth: Math.max(80, contentWidthLimit - indent)
+        // A turn's rows use the whole column (the avatars sit beside the
+        // names), so they line up with the composer under them.
+        readonly property real columnX: (width - contentWidthLimit) / 2
+        readonly property real columnWidth: Math.max(80, contentWidthLimit)
         function scrollToEnd() {
             autoScrolling = true
             positionViewAtEnd()
@@ -451,7 +447,7 @@ Item {
                         readonly property string turn: root.undoBefore(userRow.rowKey)
                         objectName: "undoTurn-" + userRow.index
                         visible: turn !== ""
-                        x: view.columnX - 6
+                        x: view.columnX - 2
                         y: Math.round(userRow.gap / 2) - 6 - height / 2
                         text: "↶ Undo from here"
                         outlined: false
@@ -463,15 +459,6 @@ Item {
                         ToolTip.delay: 400
                         ToolTip.text: "Put the folder's files back as they were before this turn (this turn and the ones after it)"
                         onClicked: root.undoRequested(turn)
-                    }
-                    // Your avatar (picked from the left rail).
-                    UserAvatar {
-                        objectName: "turnAvatar"
-                        visible: !view.compact
-                        x: (view.width - view.contentWidthLimit) / 2
-                        y: userRow.gap
-                        width: Theme.px(32)
-                        height: width
                     }
                     Item {
                         id: bubble
@@ -485,13 +472,21 @@ Item {
                             y: 0
                             width: parent.width
                             spacing: 6
-                            Label {
-                                height: root.headHeight * 0.55
-                                verticalAlignment: Text.AlignVCenter
-                                text: "You"
-                                color: Theme.text
-                                font.pixelSize: Theme.px(14.5)
-                                font.weight: Font.DemiBold
+                            Row {
+                                spacing: 8
+                                // Your avatar (picked from the left rail).
+                                UserAvatar {
+                                    objectName: "turnAvatar"
+                                    width: Theme.px(24)
+                                    height: width
+                                }
+                                Label {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "You"
+                                    color: Theme.text
+                                    font.pixelSize: Theme.px(14.5)
+                                    font.weight: Font.DemiBold
+                                }
                             }
                             Flow {
                                 width: parent.width
@@ -741,8 +736,8 @@ Item {
                         readonly property bool last: !root.isActivity(thinkRow.ListView.nextSection) || (thinkRow.folded && first)
                         visible: thinkRow.implicitHeight > 0 && !(thinkRow.folded && !first)
                         z: -1
-                        x: view.columnX - 8
-                        width: view.columnWidth + 16
+                        x: view.columnX
+                        width: view.columnWidth
                         y: first ? thinkRow.gap - 4 : 0
                         height: thinkRow.implicitHeight - y + (last ? 4 : 0)
                         color: Theme.raised
@@ -759,9 +754,9 @@ Item {
                     visible: implicitHeight > 0
                     RunHeader {
                         visible: thinkRow.head > 0
-                        x: view.columnX
+                        x: view.columnX + 8
                         y: thinkRow.gap
-                        width: view.columnWidth
+                        width: view.columnWidth - 16
                         group: thinkRow.group
                         summary: thinkRow.summary
                         dflt: thinkRow.groupOpen
@@ -778,9 +773,9 @@ Item {
                     ColumnLayout {
                         id: thinkCol
                         visible: !thinkRow.folded
-                        x: view.columnX
+                        x: view.columnX + 8
                         y: thinkRow.gap + thinkRow.head + 5
-                        width: view.columnWidth
+                        width: view.columnWidth - 16
                         spacing: 4
                         RowLayout {
                             id: thinkHead
@@ -839,8 +834,8 @@ Item {
                         readonly property bool last: !root.isActivity(toolRow.ListView.nextSection) || (toolRow.folded && first)
                         visible: toolRow.implicitHeight > 0 && !(toolRow.folded && !first)
                         z: -1
-                        x: view.columnX - 8
-                        width: view.columnWidth + 16
+                        x: view.columnX
+                        width: view.columnWidth
                         y: first ? toolRow.gap - 4 : 0
                         height: toolRow.implicitHeight - y + (last ? 4 : 0)
                         color: Theme.raised
@@ -858,9 +853,9 @@ Item {
                     visible: implicitHeight > 0
                     RunHeader {
                         visible: toolRow.head > 0
-                        x: view.columnX
+                        x: view.columnX + 8
                         y: toolRow.gap
-                        width: view.columnWidth
+                        width: view.columnWidth - 16
                         group: toolRow.group
                         summary: toolRow.summary
                         dflt: toolRow.groupOpen
@@ -878,9 +873,9 @@ Item {
                     Rectangle {
                         id: toolBox
                         visible: !toolRow.folded
-                        x: view.columnX
+                        x: view.columnX + 8
                         y: toolRow.gap + toolRow.head
-                        width: view.columnWidth
+                        width: view.columnWidth - 16
                         height: toolCol.implicitHeight + (toolRow.asking ? 20 : 10)
                         radius: 8
                         color: toolRow.asking ? Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, 0.06)
