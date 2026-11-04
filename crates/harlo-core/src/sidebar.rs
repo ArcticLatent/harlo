@@ -489,7 +489,17 @@ pub fn nest_helpers(rows: &mut Vec<SidebarRow>, parent_of: &HashMap<String, Stri
             nested[i] = true;
         }
     }
+    // Whose helper each is (named even when it isn't under it: on the
+    // Settled shelf while its parent isn't, say).
+    let title_at: HashMap<&str, &str> = rows.iter().filter(|r| r.kind == SidebarKind::Session).map(|r| (r.key.as_str(), r.title.as_str())).collect();
+    let named: Vec<String> = rows
+        .iter()
+        .map(|r| parent_of.get(&r.key).filter(|p| **p != r.key).and_then(|p| title_at.get(p.as_str())).map(|t| (*t).to_owned()).unwrap_or_default())
+        .collect();
     if under.is_empty() {
+        for (row, name) in rows.iter_mut().zip(named) {
+            row.helper_of = name;
+        }
         return;
     }
     fn place(i: usize, depth: u32, rows: &[SidebarRow], under: &HashMap<usize, Vec<usize>>, done: &mut [bool], order: &mut Vec<(usize, u32)>) {
@@ -514,13 +524,11 @@ pub fn nest_helpers(rows: &mut Vec<SidebarRow>, parent_of: &HashMap<String, Stri
             place(i, 0, rows, &under, &mut done, &mut order);
         }
     }
-    let titles: HashMap<usize, String> = under.keys().map(|&p| (p, rows[p].title.clone())).collect();
-    let parent_at: HashMap<usize, usize> = under.iter().flat_map(|(&p, cs)| cs.iter().map(move |&c| (c, p))).collect();
     let mut old: Vec<Option<SidebarRow>> = std::mem::take(rows).into_iter().map(Some).collect();
     for (i, depth) in order {
         let mut row = old[i].take().expect("each row placed once");
         row.nest = depth;
-        row.helper_of = parent_at.get(&i).and_then(|p| titles.get(p)).cloned().unwrap_or_default();
+        row.helper_of = named[i].clone();
         rows.push(row);
     }
 }
@@ -548,8 +556,8 @@ mod tests {
         let shown: Vec<(&str, u32, &str)> = rows.iter().map(|r| (r.key.as_str(), r.nest, r.helper_of.as_str())).collect();
         assert_eq!(shown, [
             ("p", 0, ""), ("other", 0, ""), ("lead", 0, ""), ("child", 1, "T lead"), ("grandchild", 2, "T child"),
-            // On the shelf, its parent isn't: it stays.
-            ("s", 0, ""), ("settled-child", 0, ""),
+            // On the shelf, its parent isn't: it stays, and says whose it is.
+            ("s", 0, ""), ("settled-child", 0, "T lead"),
         ]);
     }
 
