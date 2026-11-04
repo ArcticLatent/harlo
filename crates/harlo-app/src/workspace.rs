@@ -5326,6 +5326,12 @@ impl Workspace {
         }
         if file_changed {
             self.as_mut().remember_modes(key);
+            self.as_mut().remember_parent(key);
+            // (Its helpers started before its file was known.)
+            let kids: Vec<String> = self.orch_children.iter().filter(|(_, c)| c.parent == key).map(|(k, _)| k.clone()).collect();
+            for k in kids {
+                self.as_mut().remember_parent(&k);
+            }
             // (A helper that finished before its file was known.)
             if self.settle_later.contains(key) && self.active_key.to_string() != key {
                 self.as_mut().settle_helper(key);
@@ -5737,7 +5743,7 @@ impl Workspace {
             shelves_open: &expanded,
         });
         // Helpers under the sessions that started them, as here.
-        let parents: HashMap<String, String> = self.orch_children.iter().map(|(k, c)| (k.clone(), c.parent.clone())).collect();
+        let parents = self.helper_parents();
         let mut rows = rows;
         sidebar::nest_helpers(&mut rows, &parents);
         let mut group = String::new();
@@ -5791,7 +5797,7 @@ impl Workspace {
         });
         let mut new_rows = new_rows;
         // Sessions agents started: under the session that started them.
-        let parents: HashMap<String, String> = self.orch_children.iter().map(|(k, c)| (k.clone(), c.parent.clone())).collect();
+        let parents = self.helper_parents();
         sidebar::nest_helpers(&mut new_rows, &parents);
         let mut unchecked = false;
         for r in new_rows.iter_mut().filter(|r| r.kind == SidebarKind::Session) {
@@ -6502,6 +6508,7 @@ impl Workspace {
     /// while it waits: on its parent's answer, or the user's.)
     fn child_progress(mut self: Pin<&mut Self>, key: &str, finished: bool, notes: &[Note]) {
         let Some(child) = self.orch_children.get(key).cloned() else { return };
+        self.as_mut().remember_parent(key);
         if !finished {
             self.as_mut().rust_mut().settle_later.remove(key);
             if let Some(c) = self.as_mut().rust_mut().orch_children.get_mut(key) {
@@ -7037,6 +7044,27 @@ impl Workspace {
                 m.settled_at = at;
             }
         });
+    }
+
+    /// Each helper's parent, by their rows' keys: this run's, and those
+    /// saved with the sessions (helpers from before harlo restarted).
+    fn helper_parents(&self) -> HashMap<String, String> {
+        let live_by_file: HashMap<&Path, &str> = self.live.values().filter_map(|e| e.info.session_file.as_deref().map(|f| (f, e.info.key.as_str()))).collect();
+        let key_of = |file: &Path| live_by_file.get(file).map_or_else(|| file.to_string_lossy().into_owned(), |k| (*k).to_owned());
+        let mut parents: HashMap<String, String> = self.meta.iter().filter(|(_, m)| !m.parent.is_empty()).map(|(f, m)| (key_of(f), key_of(Path::new(&m.parent)))).collect();
+        parents.extend(self.orch_children.iter().map(|(k, c)| (k.clone(), c.parent.clone())));
+        parents
+    }
+
+    /// Saves a helper's parent with it, once both their files are known.
+    fn remember_parent(mut self: Pin<&mut Self>, key: &str) {
+        let Some(parent) = self.orch_children.get(key).map(|c| c.parent.clone()) else { return };
+        let (Some(file), Some(parent_file)) = (self.file_for_key(key), self.file_for_key(&parent)) else { return };
+        let parent_file = parent_file.to_string_lossy().into_owned();
+        if self.meta.get(&file).is_some_and(|m| m.parent == parent_file) {
+            return;
+        }
+        self.as_mut().update_meta(key, |m| m.parent = parent_file);
     }
 
     /// How many sessions up a session's chain of parents goes (0: one

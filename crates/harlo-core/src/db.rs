@@ -54,6 +54,9 @@ pub struct SessionMeta {
     /// The thinking level you set on it, for agents that don't record one in
     /// the session ("" none).
     pub thinking: String,
+    /// A helper: the session file of the session that started it ("" none),
+    /// so it's still shown under it after harlo restarts.
+    pub parent: String,
 }
 
 pub struct Db {
@@ -186,6 +189,10 @@ impl Db {
         if !has_modes {
             conn.execute_batch("ALTER TABLE session_meta ADD COLUMN approval TEXT NOT NULL DEFAULT ''; ALTER TABLE session_meta ADD COLUMN thinking TEXT NOT NULL DEFAULT '';")?;
         }
+        let has_parent: bool = conn.prepare("SELECT 1 FROM pragma_table_info('session_meta') WHERE name = 'parent'")?.exists([])?;
+        if !has_parent {
+            conn.execute_batch("ALTER TABLE session_meta ADD COLUMN parent TEXT NOT NULL DEFAULT '';")?;
+        }
         Ok(Self { conn })
     }
 
@@ -292,20 +299,20 @@ impl Db {
         Ok(self
             .conn
             .query_row(
-                "SELECT archived, pinned, last_viewed_at, settled_why, settled_at, approval, thinking FROM session_meta WHERE path = ?1",
+                "SELECT archived, pinned, last_viewed_at, settled_why, settled_at, approval, thinking, parent FROM session_meta WHERE path = ?1",
                 [path.to_string_lossy()],
-                |r| Ok(SessionMeta { archived: r.get(0)?, pinned: r.get(1)?, last_viewed_at: r.get(2)?, settled_why: r.get(3)?, settled_at: r.get(4)?, approval: r.get(5)?, thinking: r.get(6)? }),
+                |r| Ok(SessionMeta { archived: r.get(0)?, pinned: r.get(1)?, last_viewed_at: r.get(2)?, settled_why: r.get(3)?, settled_at: r.get(4)?, approval: r.get(5)?, thinking: r.get(6)?, parent: r.get(7)? }),
             )
             .optional()?
             .unwrap_or_default())
     }
 
     pub fn all_session_meta(&self) -> Result<Vec<(PathBuf, SessionMeta)>> {
-        let mut stmt = self.conn.prepare("SELECT path, archived, pinned, last_viewed_at, settled_why, settled_at, approval, thinking FROM session_meta")?;
+        let mut stmt = self.conn.prepare("SELECT path, archived, pinned, last_viewed_at, settled_why, settled_at, approval, thinking, parent FROM session_meta")?;
         let rows = stmt.query_map([], |r| {
             Ok((
                 PathBuf::from(r.get::<_, String>(0)?),
-                SessionMeta { archived: r.get(1)?, pinned: r.get(2)?, last_viewed_at: r.get(3)?, settled_why: r.get(4)?, settled_at: r.get(5)?, approval: r.get(6)?, thinking: r.get(7)? },
+                SessionMeta { archived: r.get(1)?, pinned: r.get(2)?, last_viewed_at: r.get(3)?, settled_why: r.get(4)?, settled_at: r.get(5)?, approval: r.get(6)?, thinking: r.get(7)?, parent: r.get(8)? },
             ))
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
@@ -313,9 +320,9 @@ impl Db {
 
     pub fn set_session_meta(&self, path: &Path, meta: &SessionMeta) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO session_meta (path, archived, pinned, last_viewed_at, settled_why, settled_at, approval, thinking) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-             ON CONFLICT(path) DO UPDATE SET archived = ?2, pinned = ?3, last_viewed_at = ?4, settled_why = ?5, settled_at = ?6, approval = ?7, thinking = ?8",
-            params![path.to_string_lossy(), meta.archived, meta.pinned, meta.last_viewed_at, meta.settled_why, meta.settled_at, meta.approval, meta.thinking],
+            "INSERT INTO session_meta (path, archived, pinned, last_viewed_at, settled_why, settled_at, approval, thinking, parent) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT(path) DO UPDATE SET archived = ?2, pinned = ?3, last_viewed_at = ?4, settled_why = ?5, settled_at = ?6, approval = ?7, thinking = ?8, parent = ?9",
+            params![path.to_string_lossy(), meta.archived, meta.pinned, meta.last_viewed_at, meta.settled_why, meta.settled_at, meta.approval, meta.thinking, meta.parent],
         )?;
         Ok(())
     }
@@ -535,7 +542,7 @@ mod tests {
         conn.execute_batch("CREATE TABLE session_meta (path TEXT PRIMARY KEY, archived INTEGER NOT NULL DEFAULT 0, pinned INTEGER NOT NULL DEFAULT 0, last_viewed_at INTEGER NOT NULL DEFAULT 0); INSERT INTO session_meta (path, pinned) VALUES ('/s/a', 1);").unwrap();
         let db = Db::init(conn).unwrap();
         assert_eq!(db.session_meta(Path::new("/s/a")).unwrap(), SessionMeta { pinned: true, ..Default::default() });
-        let modes = SessionMeta { approval: "yolo".into(), thinking: "max".into(), ..Default::default() };
+        let modes = SessionMeta { approval: "yolo".into(), thinking: "max".into(), parent: "/s/lead".into(), ..Default::default() };
         db.set_session_meta(Path::new("/s/a"), &modes).unwrap();
         assert_eq!(db.session_meta(Path::new("/s/a")).unwrap(), modes, "a session's modes come back");
     }
