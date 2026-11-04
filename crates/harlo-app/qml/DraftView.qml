@@ -710,8 +710,9 @@ Rectangle {
                                 flat: true
                                 implicitWidth: 24
                                 implicitHeight: 24
+                                padding: 0
                                 onClicked: root.lanes = root.lanes.filter((_, i) => i !== laneRow.index)
-                                contentItem: Icon { name: "close"; color: removeLane.hovered ? Theme.foreground : Theme.muted }
+                                contentItem: Item { Icon { anchors.centerIn: parent; name: "close"; color: removeLane.hovered ? Theme.foreground : Theme.muted } }
                                 background: Rectangle { radius: 5; color: removeLane.hovered ? Theme.hover : "transparent" }
                             }
                         }

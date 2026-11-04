@@ -94,8 +94,9 @@ Rectangle {
                 flat: true
                 implicitWidth: 24
                 implicitHeight: 24
+                padding: 0
                 onClicked: { root.expanded = !root.expanded; root.editing = -1 }
-                contentItem: Icon { name: "arrow-down-s"; rotation: root.expanded ? 180 : 0; color: toggle.hovered ? Theme.foreground : Theme.muted }
+                contentItem: Item { Icon { anchors.centerIn: parent; name: "arrow-down-s"; rotation: root.expanded ? 180 : 0; color: toggle.hovered ? Theme.foreground : Theme.muted; implicitWidth: 18; implicitHeight: 18 } }
                 background: Rectangle { radius: 5; color: toggle.hovered ? Theme.hover : "transparent" }
                 ToolTip.visible: hovered
                 ToolTip.text: root.expanded ? "Hide the plan" : "Show and edit the plan"
@@ -382,9 +383,11 @@ Rectangle {
         property string iconName
         property string tip
         flat: true
-        implicitWidth: 22
-        implicitHeight: 22
-        contentItem: Icon { name: sb.iconName; color: !sb.enabled ? Theme.textFaint : sb.hovered ? Theme.foreground : Theme.muted; implicitWidth: 13; implicitHeight: 13 }
+        implicitWidth: 24
+        implicitHeight: 24
+        // (The style's padding would leave the icon a few pixels.)
+        padding: 0
+        contentItem: Item { Icon { anchors.centerIn: parent; name: sb.iconName; color: !sb.enabled ? Theme.textFaint : sb.hovered ? Theme.foreground : Theme.muted; implicitWidth: 15; implicitHeight: 15 } }
         background: Rectangle { radius: 5; color: sb.hovered ? Theme.hover : "transparent" }
         ToolTip.visible: hovered
         ToolTip.text: tip
