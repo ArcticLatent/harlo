@@ -928,6 +928,17 @@ pub fn valid_branch_name(root: &Path, name: &str) -> bool {
     run(cmd).is_ok_and(|o| o.status.success())
 }
 
+/// The branch checked out at `root` (a detached checkout: its commit; ""
+/// when git can't say). What a worktree starts from when no base is named.
+pub fn head_branch(root: &Path) -> String {
+    let name = output_in(root, &["symbolic-ref", "--short", "-q", "HEAD"]);
+    let name = name.trim();
+    if !name.is_empty() {
+        return name.to_owned();
+    }
+    output_in(root, &["rev-parse", "--verify", "-q", "HEAD"]).trim().to_owned()
+}
+
 /// Adds a worktree at `path` on `branch`. A missing branch is created from
 /// `base`; an existing one is checked out.
 pub fn create_worktree(root: &Path, path: &Path, branch: &str, base: &str) -> Result<()> {
@@ -1678,7 +1689,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(wt_path.parent().unwrap());
 
         assert!(!valid_branch_name(&dir, "bad..name"));
-        create_worktree(&dir, &wt_path, "feature/x", "main").unwrap();
+        // (No base named: what a worktree starts from is the branch checked out.)
+        assert_eq!(head_branch(&dir), "main");
+        create_worktree(&dir, &wt_path, "feature/x", &head_branch(&dir)).unwrap();
         let wts = list_worktrees(&dir).unwrap();
         assert_eq!(wts.len(), 2);
         assert!(wts[0].is_main && wts[0].branch == "main");

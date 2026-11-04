@@ -879,6 +879,9 @@ pub struct WorkspaceRust {
     /// Helpers that did their task while you were looking at them (or
     /// before their file was known): settled once you're not.
     settle_later: HashSet<String>,
+    /// Helpers that failed (or ended without saying): settled once you've
+    /// opened them and gone on, so you see what went wrong first.
+    settle_once_seen: HashSet<String>,
     /// Remote files being copied here (`localCopy`).
     copying: std::cell::RefCell<HashSet<PathBuf>>,
     quota_loading: bool,
@@ -1981,6 +1984,10 @@ impl Workspace {
         let previous = self.active_key.to_string();
         if let Some(entry) = self.as_mut().rust_mut().live.get_mut(key) {
             entry.info.unread = false;
+        }
+        // A failed helper you open: settled as you go on from it.
+        if self.as_mut().rust_mut().settle_once_seen.remove(key) {
+            self.as_mut().rust_mut().settle_later.insert(key.to_owned());
         }
         // A helper that finished while you looked at it: settled as you go.
         let leaving = previous != key && self.settle_later.contains(&previous);
@@ -3118,7 +3125,7 @@ impl Workspace {
         let local = self.worktree_base().join(&folder).join(git::branch_slug(&branch));
         let setup = project.setup.clone();
         self.as_mut().set_notice_text(&format!("Creating worktree {branch}…"), false);
-        let (b, bs, slug) = (branch.clone(), base.clone(), git::branch_slug(&branch));
+        let (b, bs, slug) = (branch.clone(), base, git::branch_slug(&branch));
         self.background(
             move || {
                 let path = match &host {
@@ -3129,12 +3136,15 @@ impl Workspace {
                     }
                     None => local,
                 };
+                // No base named (a helper's, a plan step's from a session
+                // that isn't in a worktree): the branch checked out now.
+                let bs = if bs.trim().is_empty() { git::head_branch(&root) } else { bs };
                 git::create_worktree(&root, &path, &b, &bs)?;
                 // git reports canonical paths; match them.
-                Ok::<_, anyhow::Error>(if host.is_some() { path } else { path.canonicalize().unwrap_or(path) })
+                Ok::<_, anyhow::Error>((if host.is_some() { path } else { path.canonicalize().unwrap_or(path) }, bs))
             },
             move |mut this, result| match result {
-                Ok(path) => {
+                Ok((path, base)) => {
                     let rec = WorktreeRecord { path: path.clone(), project_id: project.id, branch: branch.clone(), base, removed: false };
                     if let Some(db) = this.db() {
                         let _ = db.upsert_worktree(&rec);
@@ -5092,6 +5102,13 @@ impl Workspace {
         use harlo_core::Notable;
         let settings = harlo_core::notifications::Settings::load(&self.setting_str("notify"), &self.setting_str("notifications"));
         let entry = self.live.get(key);
+        // A helper's end goes to the session that started it, not to you:
+        // it only notifies when it waits for you (an approval, a question).
+        let helper = self.orch_children.contains_key(key)
+            || entry.and_then(|e| e.info.session_file.as_ref()).and_then(|f| self.meta.get(f)).is_some_and(|m| !m.parent.is_empty());
+        if helper && !matches!(note, Note::Question(..)) {
+            return;
+        }
         let goal_active = entry.is_some_and(|e| e.goal_status == "active");
         self.push_to_phones(key, &note, goal_active, &settings.quiet);
         let model = entry.map(|e| e.model.clone()).unwrap_or_default();
@@ -6511,6 +6528,7 @@ impl Workspace {
         self.as_mut().remember_parent(key);
         if !finished {
             self.as_mut().rust_mut().settle_later.remove(key);
+            self.as_mut().rust_mut().settle_once_seen.remove(key);
             if let Some(c) = self.as_mut().rust_mut().orch_children.get_mut(key) {
                 c.status = "running".into();
                 c.asking = false;
@@ -6552,6 +6570,8 @@ impl Workspace {
             };
             if said.as_ref().is_some_and(|(ok, _)| *ok) {
                 self.as_mut().settle_helper(key);
+            } else {
+                self.as_mut().settle_after_look(key);
             }
             let result = match said {
                 Some((true, summary)) => Ok(summary),
@@ -6565,6 +6585,8 @@ impl Workspace {
         }
         if child.report.as_ref().is_some_and(|r| r.succeeded) {
             self.as_mut().settle_helper(key);
+        } else {
+            self.as_mut().settle_after_look(key);
         }
         if !child.notify {
             return;
@@ -7027,6 +7049,16 @@ impl Workspace {
     /// A helper that did its task goes on its project's Settled shelf
     /// ("Done as a helper"), unless you're looking at it; it's back when
     /// it works again.
+    /// A helper that failed, or ended without saying: settled once you've
+    /// looked at it (now, if you are).
+    fn settle_after_look(mut self: Pin<&mut Self>, key: &str) {
+        if self.active_key.to_string() == key {
+            self.as_mut().rust_mut().settle_later.insert(key.to_owned());
+        } else {
+            self.as_mut().rust_mut().settle_once_seen.insert(key.to_owned());
+        }
+    }
+
     fn settle_helper(mut self: Pin<&mut Self>, key: &str) {
         if self.setting_str("settle_sessions") == "0" {
             return;
