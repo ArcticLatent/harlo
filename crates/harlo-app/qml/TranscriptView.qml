@@ -552,6 +552,9 @@ Item {
                     required property string rowKey
                     required property int index
                     readonly property real gap: root.gapAbove("markdown", ListView.previousSection)
+                    // The code block (in a list) just copied: its link says "Copied" a moment.
+                    property int copiedBlock: -1
+                    Timer { id: blockCopiedTimer; interval: 1200; onTriggered: mdRow.copiedBlock = -1 }
                     AgentHead { visible: mdRow.ListView.previousSection === "user"; y: mdRow.gap - height - 10 }
                     width: view.width
                     implicitHeight: md.implicitHeight + gap
@@ -562,7 +565,7 @@ Item {
                         y: mdRow.gap
                         width: view.columnWidth
                         textFormat: TextEdit.RichText
-                        text: Theme.htmlStyle + Theme.proseHtml(parent.html)
+                        text: Theme.htmlStyle + Theme.proseHtml(parent.html, mdRow.copiedBlock)
                         color: Theme.foreground
                         selectionColor: Theme.selection
                         selectedTextColor: Theme.foreground
@@ -572,8 +575,12 @@ Item {
                         font.pixelSize: Theme.px(15)
                         // (A code block in a list: its Copy link.)
                         onLinkActivated: link => {
-                            if (link.startsWith("harlo-copy:")) clipboardHelper.copyText(Theme.proseCode(mdRow.html, parseInt(link.substring(11))))
-                            else Qt.openUrlExternally(link)
+                            if (link.startsWith("harlo-copy:")) {
+                                const n = parseInt(link.substring(11))
+                                clipboardHelper.copyText(Theme.proseCode(mdRow.html, n))
+                                mdRow.copiedBlock = n
+                                blockCopiedTimer.restart()
+                            } else Qt.openUrlExternally(link)
                         }
                         HoverHandler { cursorShape: md.hoveredLink ? Qt.PointingHandCursor : Qt.IBeamCursor }
                     }
@@ -629,11 +636,15 @@ Item {
                                 onClicked: Diagrams.openInBrowser(codeRow.text, Theme.isLight)
                             }
                             FlatButton {
+                                id: copyCode
                                 Layout.rightMargin: 4
                                 Layout.preferredHeight: 22
-                                text: "Copy"
+                                // "Copied" for a moment after a click.
+                                property bool copied: false
+                                text: copied ? "Copied" : "Copy"
                                 font.pixelSize: Theme.px(11)
-                                onClicked: clipboardHelper.copyText(codeRow.text)
+                                onClicked: { clipboardHelper.copyText(codeRow.text); copied = true; copiedTimer.restart() }
+                                Timer { id: copiedTimer; interval: 1200; onTriggered: copyCode.copied = false }
                             }
                         }
                         // Drawing it, or why it isn't drawn.

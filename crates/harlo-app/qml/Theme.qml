@@ -254,12 +254,13 @@ QtObject {
     /// shaded box that wraps.
     /// Each box has a Copy link (`harlo-copy:<n>`, the n-th block: see
     /// `proseCode`).
-    function proseHtml(html) {
+    /// (`copied`: the block whose link says "Copied", -1 none.)
+    function proseHtml(html, copied) {
         if (html.indexOf("<pre>") < 0)
             return html
         let n = 0
         return html.replace(/<pre><code([^>]*)>/g, (_, attrs) => '<table class="code" width="100%" cellspacing="0" cellpadding="8"><tr><td class="code">'
-                + '<p align="right" style="margin:0px;font-size:small;"><a class="copy" href="harlo-copy:' + (n++) + '">Copy</a></p><pre><code' + attrs + '>')
+                + '<p align="right" style="margin:0px;font-size:small;"><a class="copy" href="harlo-copy:' + n + '">' + (n++ === copied ? "Copied" : "Copy") + '</a></p><pre><code' + attrs + '>')
             .replace(/\n?<\/code><\/pre>/g, "</code></pre></td></tr></table>")
     }
     /// The n-th code block of a reply's prose HTML, as plain text.
