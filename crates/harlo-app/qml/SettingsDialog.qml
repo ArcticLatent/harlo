@@ -2372,9 +2372,10 @@ Popup {
                         id: planRow
                         divider: true
                         title: "Shared plan"
-                        detail: "For a bigger task the agent writes a plan of steps and works through it; you add, change, reorder or skip steps at any time (above the message box), and it reads them before each step."
+                        detail: "For a bigger task the agent writes a plan of steps and works through it; you add, change, reorder or skip steps at any time (above the message box), and it reads them before each step. On by default in a git repository."
                         icon: "list-check-2"
-                        readonly property bool on: featureGroup.on("plan")
+                        // (Unset: on in a git repository.)
+                        readonly property bool on: featureGroup.rev >= 0 && featureGroup.pid >= 0 && Workspace.planOn(featureGroup.pid)
                         AppSwitch {
                             objectName: "projectPlan"
                             checked: planRow.on
@@ -2463,19 +2464,22 @@ Popup {
                     id: selfStart
                     visible: Workspace.orchestrationOn
                     divider: true
-                    readonly property bool own: (Workspace.orchestrationRevision, Workspace.setting("orchestration_on_their_own") === "1")
+                    // "1" on their own, "asked" only when asked, else they offer.
+                    readonly property string mode: (Workspace.orchestrationRevision, Workspace.setting("orchestration_on_their_own"))
+                    readonly property int choice: mode === "asked" ? 0 : mode === "1" ? 2 : 1
                     title: "Agents start helpers"
-                    detail: (own ? "On their own: when another agent's work would help (a second opinion, parallel work, another model)."
-                                 : "Only when you ask: for another agent or session, or with the Delegate button. Otherwise they do the work themselves.")
+                    detail: ["Only when you ask: for another agent or session, or with the Delegate button. Otherwise they do the work themselves.",
+                             "When you ask, and they offer a split when a task has parts that could be done at the same time: you decide, and harlo starts the helpers if you agree.",
+                             "On their own: when another agent's work would help (a second opinion, parallel work, another model)."][choice]
                         + " For sessions started from now on."
                     icon: "node-tree"
                     ComboField {
                         objectName: "orchSelfStart"
                         width: 190
-                        model: ["Only when I ask", "On their own"]
-                        currentIndex: selfStart.own ? 1 : 0
+                        model: ["Only when I ask", "Ask me first", "On their own"]
+                        currentIndex: selfStart.choice
                         onActivated: i => {
-                            Workspace.setSetting("orchestration_on_their_own", i === 1 ? "1" : "")
+                            Workspace.setSetting("orchestration_on_their_own", ["asked", "", "1"][i])
                             Workspace.loadOrchestration()
                         }
                     }

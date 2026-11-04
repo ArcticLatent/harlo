@@ -384,6 +384,12 @@ fn walk_for_repos(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// Whether `dir` (on this computer) looks like it's in a git repository:
+/// a `.git` in it or a folder above. Cheap (no git run), for defaults.
+pub fn looks_like_repo(dir: &Path) -> bool {
+    !crate::remote::is_remote(dir) && dir.ancestors().any(|d| d.join(".git").exists())
+}
+
 /// The repository containing `dir`, or `None` if it is not in one.
 pub fn repo_root(dir: &Path) -> Option<PathBuf> {
     let mut cmd = git(dir);

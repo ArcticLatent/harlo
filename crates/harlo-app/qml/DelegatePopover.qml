@@ -4,7 +4,7 @@ import QtQuick.Layouts
 import harlo
 
 // The composer's Delegate menu: hand the task off, get a second opinion,
-// or form a committee, by picking agents rather than typing a skill's
+// form a committee, or split the task into helpers, by picking agents rather than typing a skill's
 // name. harlo writes the instruction (Workspace.delegatePrompt) and sends
 // it to this session's agent, which writes the briefing: only it knows
 // the conversation.
@@ -24,6 +24,8 @@ Popup {
                    about: "Another agent looks at the problem and advises; it doesn't edit anything. Its answer comes back here." },
         committee: { title: "Committee", icon: "scales-3", button: "Start committee",
                      about: "Two agents (best from different families) each find the root cause, then argue until they agree on a plan. It doesn't edit anything." },
+        split: { title: "Split into helpers", icon: "node-tree", button: "Split",
+                 about: "This session splits the task into parts that can be done at the same time, starts a helper for each, then checks and combines their work." },
     })
     readonly property var current: actions[action]
 
@@ -72,7 +74,8 @@ Popup {
         memberA.pick(which === "advisor" ? other(mine) : mine)
         memberB.pick(other(memberA.agent))
         note.text = draft
-        worktree.checked = false
+        // (Helpers editing at once: apart, each on its own branch.)
+        worktree.checked = which === "split"
         bridgeNote = ""
         Workspace.ensureProviders()
         if (host !== "") {
@@ -156,7 +159,7 @@ Popup {
             font.pixelSize: Theme.px(12)
             wrapMode: Text.Wrap
         }
-        MemberRow { id: memberA; label: root.action === "committee" ? "Member 1" : root.action === "handoff" ? "To" : "Ask" }
+        MemberRow { id: memberA; label: root.action === "committee" ? "Member 1" : root.action === "handoff" ? "To" : root.action === "split" ? "Helpers" : "Ask" }
         MemberRow { id: memberB; label: "Member 2"; visible: root.action === "committee" }
         Label {
             visible: root.action === "committee" && memberA.agent === memberB.agent && root.agentIds.length > 1
@@ -171,6 +174,7 @@ Popup {
             Layout.preferredHeight: Math.min(Math.max(implicitHeight, 60), 140)
             placeholderText: root.action === "handoff" ? "Anything to add for the new agent (optional)"
                            : root.action === "advisor" ? "The question (optional: the current approach)"
+                           : root.action === "split" ? "How to split it, or what to leave out (optional)"
                            : "The problem (optional: what we're stuck on)"
             placeholderTextColor: Theme.muted
             color: Theme.foreground
@@ -187,8 +191,9 @@ Popup {
         AppCheckBox {
             id: worktree
             objectName: "delegateWorktree"
-            visible: root.action === "handoff"
-            text: "In a new git worktree (its own branch, apart from this checkout)"
+            visible: root.action === "handoff" || root.action === "split"
+            text: root.action === "split" ? "Each in a new git worktree (its own branch, apart from this checkout)"
+                                          : "In a new git worktree (its own branch, apart from this checkout)"
         }
         // pi / omp without harlo's tools.
         RowLayout {

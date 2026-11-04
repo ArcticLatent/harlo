@@ -30,6 +30,8 @@ It returns `{ session, title, agent, folder }`. The session is your helper: it s
 
 **`request_approval`**: `{ question, options? }`. Asks the user to decide something only they may decide: going ahead with a risky or irreversible step, or a choice that's theirs. harlo shows it in your session and on their phone, and notifies them. No agent can answer it. End your turn after asking; their answer comes back as a `[harlo]` message.
 
+**`propose_helpers`**: `{ why, helpers: [{ title, prompt, agent?, model?, worktree? }] }`. Offered only when harlo is set to have agents offer splits (the default). When a big task splits into parts that could be done at the same time (each substantial, not editing the same files), or a part is better done by another agent or model, offer the split instead of starting helpers yourself. harlo shows the user why and what each helper would do. If they agree, harlo starts the helpers as `start_session` would (`agent` defaults to yours) and tells you their ids; if they don't, do the work yourself. Either way, end your turn after offering.
+
 ### When you're a helper
 
 A session another one started gets two more tools:

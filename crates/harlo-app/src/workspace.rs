@@ -470,6 +470,10 @@ pub mod qobject {
         /// `{ action, members: [{ agent, model }], note, worktree }`.
         #[qinvokable]
         fn delegate_prompt(self: &Workspace, request: &QString) -> QString;
+        /// A project's shared plan is on (as set; by default in a git
+        /// repository).
+        #[qinvokable]
+        fn plan_on(self: &Workspace, project_id: i32) -> bool;
         /// Checks the providers (their models) unless that's been done.
         #[qinvokable]
         fn ensure_providers(self: Pin<&mut Workspace>);
@@ -885,6 +889,10 @@ pub struct WorkspaceRust {
     /// Helpers that failed (or ended without saying): settled once you've
     /// opened them and gone on, so you see what went wrong first.
     settle_once_seen: HashSet<String>,
+    /// Agents' offers to split into helpers (`propose_helpers`), by the id
+    /// of the card asking the user: who offered, and the helpers'
+    /// start_session arguments.
+    proposals: HashMap<String, (String, Vec<serde_json::Value>)>,
     /// Remote files being copied here (`localCopy`).
     copying: std::cell::RefCell<HashSet<PathBuf>>,
     quota_loading: bool,
@@ -2635,7 +2643,17 @@ impl Workspace {
             .map(|w| w.project_id)
             .or_else(|| self.projects.iter().filter(|p| cwd.starts_with(&p.path)).max_by_key(|p| p.path.components().count()).map(|p| p.id))?;
         let on = |k: &str| self.setting_str(&format!("{k}_{project}")) == "1";
-        Some((cwd, on("specs"), on("plan"), self.setting_str(&format!("plan_commits_{project}")) != "0"))
+        Some((cwd, on("specs"), self.plan_on(project as i32), self.setting_str(&format!("plan_commits_{project}")) != "0"))
+    }
+
+    /// A project's shared plan is on: as set, else (by default) in a git
+    /// repository.
+    pub fn plan_on(&self, project_id: i32) -> bool {
+        match self.setting_str(&format!("plan_{project_id}")).as_str() {
+            "1" => true,
+            "0" => false,
+            _ => self.projects.iter().find(|p| p.id == project_id as i64).is_some_and(|p| harlo_core::git::looks_like_repo(&p.path)),
+        }
     }
 
     pub fn plan_json(&self, key: &QString) -> QString {
@@ -5314,7 +5332,7 @@ impl Workspace {
         let mut notes: Vec<Note> = Vec::new();
         let mut answered = false;
         // Approvals the agent asked for with harlo's tools, answered.
-        let mut gates: Vec<(String, serde_json::Value)> = Vec::new();
+        let mut gates: Vec<(String, String, serde_json::Value)> = Vec::new();
         // Claude's limits as it just said (a host's may be another account's).
         let mut limits: Option<serde_json::Value> = None;
         let needed_input = entry.info.needs_input;
@@ -5357,7 +5375,7 @@ impl Workspace {
                     answered |= entry.requests.len() != before;
                 }
                 SessionUpdate::Limits(info) => limits = Some(info),
-                SessionUpdate::GateAnswered { question, answer } => gates.push((question, answer)),
+                SessionUpdate::GateAnswered { id, question, answer } => gates.push((id, question, answer)),
                 _ => {}
             }
         }
@@ -5477,11 +5495,16 @@ impl Workspace {
         if answered {
             self.as_mut().child_answered(key);
         }
-        // The user's answers to its approval requests: to the agent.
-        if let Some(live) = registry::get(key) {
-            for (question, answer) in gates {
+        // The user's answers to its approval requests (and split offers):
+        // to the agent.
+        for (id, question, answer) in gates {
+            let message = match self.as_mut().rust_mut().proposals.remove(&id) {
+                Some((_, helpers)) => self.as_mut().answer_proposal(key, helpers, &answer),
+                None => harlo_core::orchestration::approval_answer(&question, &answer),
+            };
+            if let Some(live) = registry::get(key) {
                 let busy = self.live.get(key).is_some_and(|e| e.info.status == SessionStatus::Busy);
-                live.handle.prompt(&harlo_core::orchestration::approval_answer(&question, &answer), Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });
+                live.handle.prompt(&message, Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });
             }
         }
         for note in notes {
@@ -6266,8 +6289,7 @@ impl Workspace {
     /// An agent's tool call (orchestration): `token` is its session's
     /// `HARLO_SESSION`; `opencode`: it came through OpenCode's server (whose
     /// running session is the caller).
-    pub(crate) fn orchestrate(mut self: Pin<&mut Self>, token: &str, opencode: bool, tool: &str, args: &serde_json::Value) -> Result<serde_json::Value, String> {
-        use serde_json::json;
+    pub(crate) fn orchestrate(self: Pin<&mut Self>, token: &str, opencode: bool, tool: &str, args: &serde_json::Value) -> Result<serde_json::Value, String> {
         let caller = self.orch_tokens.get(token).cloned().or_else(|| {
             opencode
                 .then(|| {
@@ -6279,6 +6301,12 @@ impl Workspace {
                 })
                 .flatten()
         });
+        self.orchestrate_as(caller, tool, args)
+    }
+
+    /// A tool call from `caller` (None: not a session harlo knows).
+    fn orchestrate_as(mut self: Pin<&mut Self>, caller: Option<String>, tool: &str, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+        use serde_json::json;
         if !self.orchestration_on {
             return Err("Orchestration is turned off in harlo (Settings → Orchestration).".into());
         }
@@ -6289,7 +6317,7 @@ impl Workspace {
         // project's specs and plan when they're on.
         let features = caller.as_deref().and_then(|c| self.features_of(c));
         if tool == harlo_core::orchestration::TOOLS {
-            let mut tools = harlo_core::orchestration::tools(self.agents_start_on_their_own()).as_array().cloned().unwrap_or_default();
+            let mut tools = harlo_core::orchestration::tools(self.agents_starting()).as_array().cloned().unwrap_or_default();
             // A helper: its report and its questions for its parent.
             if caller.as_ref().and_then(|c| self.orch_children.get(c)).is_some_and(|c| c.notify) {
                 tools.extend(harlo_core::orchestration::helper_tools().as_array().cloned().unwrap_or_default());
@@ -6305,7 +6333,7 @@ impl Workspace {
             return Ok(json!(tools));
         }
         if tool == harlo_core::orchestration::INSTRUCTIONS {
-            let mut text = format!("{} {}\n\n{}", harlo_core::orchestration::BASE_INSTRUCTIONS, harlo_core::orchestration::when_to_start(self.agents_start_on_their_own()), harlo_core::orchestration::DIAGRAMS);
+            let mut text = format!("{} {}\n\n{}", harlo_core::orchestration::BASE_INSTRUCTIONS, harlo_core::orchestration::when_to_start(self.agents_starting()), harlo_core::orchestration::DIAGRAMS);
             if let Some((_, specs, plan, _)) = &features {
                 if *specs {
                     text = format!("{text}\n\n{}", harlo_core::specs::INSTRUCTIONS);
@@ -6524,8 +6552,38 @@ impl Workspace {
                 if options.is_empty() {
                     options = vec!["Approve".into(), "Reject".into()];
                 }
-                live.handle.open_gate(&question, options);
+                live.handle.open_gate("", &question, options);
                 Ok(json!({ "asked": true, "next": "End your turn now: harlo sends you the user's answer as a message." }))
+            }
+            "propose_helpers" => {
+                let Some((caller, live)) = caller.as_ref().and_then(|c| registry::get(c).map(|l| (c.clone(), l))) else {
+                    return Err("Only a session harlo started can offer a split.".into());
+                };
+                if self.agents_starting() != harlo_core::orchestration::Starting::Offer {
+                    return Err("harlo isn't set to have agents offer splits now (Settings → Orchestration): start helpers only when the user asks.".into());
+                }
+                if self.helper_depth(&caller) >= MAX_HELPER_DEPTH {
+                    return Err(format!("Helpers go {MAX_HELPER_DEPTH} deep at most, and you're that deep: do this yourself."));
+                }
+                let (why, helpers) = harlo_core::orchestration::parse_proposal(args)?;
+                let own = self.live.get(&caller).map(|e| e.info.harness.clone()).unwrap_or_default();
+                let mut lines = Vec::new();
+                let mut starts = Vec::new();
+                for h in helpers {
+                    let agent = if h.agent.is_empty() { own.clone() } else { h.agent.clone() };
+                    let Some(kind) = HarnessKind::parse(&agent).filter(|k| *k != HarnessKind::Demo || agent == "demo") else {
+                        return Err(format!("Unknown agent \"{agent}\" for \"{}\": use claude, opencode, pi or omp (list_agents).", h.title));
+                    };
+                    if !self.usable_harness(kind) {
+                        return Err(format!("{} is turned off in harlo (Settings → Providers): pick another agent for \"{}\".", kind.label(), h.title));
+                    }
+                    lines.push((h.title.clone(), kind.label().to_owned(), h.model.clone(), h.worktree.clone()));
+                    starts.push(json!({ "agent": kind.as_str(), "prompt": h.prompt, "title": h.title, "model": h.model, "worktree": h.worktree }));
+                }
+                let options = harlo_core::orchestration::PROPOSAL_OPTIONS.iter().map(|o| o.to_string()).collect();
+                let id = live.handle.open_gate(harlo_core::orchestration::PROPOSAL_TITLE, &harlo_core::orchestration::proposal_question(&why, &lines), options);
+                self.as_mut().rust_mut().proposals.insert(id, (caller, starts));
+                Ok(json!({ "asked": true, "next": "End your turn now: harlo tells you the user's answer as a message (and starts the helpers if they agree)." }))
             }
             "report_done" | "ask_parent" => {
                 let Some((key, child)) = caller.as_ref().and_then(|c| self.orch_children.get(c).map(|ch| (c.clone(), ch.clone()))).filter(|(_, c)| c.notify) else {
@@ -6716,10 +6774,29 @@ impl Workspace {
         harlo_core::omp_overlay::APPROVAL_MODES.contains(&mode.as_str()).then_some(mode)
     }
 
-    /// Settings → Orchestration: agents may start sessions on their own
-    /// (else only when the user asks).
-    fn agents_start_on_their_own(&self) -> bool {
-        self.setting_str(ORCH_ON_THEIR_OWN) == "1"
+    /// The user answered `key`'s split offer: its helpers started (if they
+    /// agreed); what to tell it.
+    fn answer_proposal(mut self: Pin<&mut Self>, key: &str, helpers: Vec<serde_json::Value>, answer: &serde_json::Value) -> String {
+        if answer["value"].as_str() != Some(harlo_core::orchestration::PROPOSAL_OPTIONS[0]) {
+            return harlo_core::orchestration::proposal_answer(None);
+        }
+        let started: Vec<(String, Result<String, String>)> = helpers
+            .iter()
+            .map(|args| {
+                let title = args["title"].as_str().unwrap_or_default().to_owned();
+                let result = self.as_mut().orchestrate_as(Some(key.to_owned()), "start_session", args).map(|r| match r["session"].as_str() {
+                    Some(session) => session.to_owned(),
+                    None => format!("starting in a new worktree on {}; see list_sessions", r["branch"].as_str().unwrap_or_default()),
+                });
+                (title, result)
+            })
+            .collect();
+        harlo_core::orchestration::proposal_answer(Some(&started))
+    }
+
+    /// Settings → Orchestration: when agents start helpers.
+    fn agents_starting(&self) -> harlo_core::orchestration::Starting {
+        harlo_core::orchestration::Starting::from_setting(&self.setting_str(ORCH_ON_THEIR_OWN))
     }
 
     /// A session's title, as the sidebar shows it.
@@ -7239,7 +7316,7 @@ mod tests {
     #[test]
     fn answered_approvals_reach_the_workspace() {
         // (It sends the answer to the agent; filtered out, the agent never heard it.)
-        let answered = harlo_core::session::SessionUpdate::GateAnswered { question: "Delete it?".into(), answer: serde_json::json!({ "value": "Reject" }) };
+        let answered = harlo_core::session::SessionUpdate::GateAnswered { id: "harlo-gate-1".into(), question: "Delete it?".into(), answer: serde_json::json!({ "value": "Reject" }) };
         assert!(super::workspace_wants(&answered));
     }
 

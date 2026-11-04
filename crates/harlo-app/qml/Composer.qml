@@ -421,6 +421,7 @@ Rectangle {
         AppMenuItem { objectName: "delegateHandoff"; text: "Hand off…"; hint: "to a new session"; onTriggered: delegate.show("handoff") }
         AppMenuItem { objectName: "delegateAdvisor"; text: "Second opinion…"; hint: "from another agent"; onTriggered: delegate.show("advisor") }
         AppMenuItem { objectName: "delegateCommittee"; text: "Committee…"; hint: "two agents plan"; onTriggered: delegate.show("committee") }
+        AppMenuItem { objectName: "delegateSplit"; text: "Split into helpers…"; hint: "parts at once"; onTriggered: delegate.show("split") }
     }
     BtwPopover {
         id: btw

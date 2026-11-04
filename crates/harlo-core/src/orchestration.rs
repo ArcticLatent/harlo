@@ -30,20 +30,42 @@ pub fn socket_path() -> PathBuf {
     }
 }
 
-/// When agents may start sessions (Settings → Orchestration): only when the
-/// user asks (the default), or on their own when it helps.
-pub fn when_to_start(on_their_own: bool) -> &'static str {
-    if on_their_own {
-        "Start one when another agent's work would help: a second opinion, work in parallel, a different model or agent."
-    } else {
-        "Start one only when the user asks for another agent or session (a handoff, a second opinion, a helper, a committee), or their message is a harlo Delegate request. Otherwise do the work yourself (with your own subagents, if you have them)."
+/// When agents start helpers (Settings → Orchestration).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Starting {
+    /// Only when the user asks (or with the Delegate button).
+    WhenAsked,
+    /// They offer a split ([`propose_helpers`](tools)); the user decides.
+    Offer,
+    /// On their own, when it helps.
+    OnTheirOwn,
+}
+
+impl Starting {
+    /// From the setting: "1" on their own, "asked" only when asked, else
+    /// (the default) they offer.
+    pub fn from_setting(value: &str) -> Starting {
+        match value {
+            "1" => Starting::OnTheirOwn,
+            "asked" => Starting::WhenAsked,
+            _ => Starting::Offer,
+        }
     }
 }
 
-/// The tools, as MCP lists them (`on_their_own`: see [`when_to_start`]).
-pub fn tools(on_their_own: bool) -> Value {
+/// When agents may start sessions (see [`Starting`]).
+pub fn when_to_start(starting: Starting) -> &'static str {
+    match starting {
+        Starting::OnTheirOwn => "Start one when another agent's work would help: a second opinion, work in parallel, a different model or agent.",
+        Starting::WhenAsked => "Start one only when the user asks for another agent or session (a handoff, a second opinion, a helper, a committee), or their message is a harlo Delegate request. Otherwise do the work yourself (with your own subagents, if you have them).",
+        Starting::Offer => "Start one when the user asks for another agent or session (a handoff, a second opinion, a helper, a committee), or their message is a harlo Delegate request. When a big task splits into parts that could be done at the same time (each one substantial, and not editing the same files), or a part is better done by another agent or model, don't start them yourself: offer the split with propose_helpers, and the user decides. Otherwise do the work yourself (with your own subagents, if you have them).",
+    }
+}
+
+/// The tools, as MCP lists them (`starting`: see [`when_to_start`]).
+pub fn tools(starting: Starting) -> Value {
     let s = |props: Value, required: &[&str]| json!({ "type": "object", "properties": props, "required": required });
-    json!([
+    let mut tools = json!([
         {
             "name": "list_agents",
             "description": "The coding agents harlo can start sessions with (claude, opencode, pi, omp): their ids and whether they're installed.",
@@ -56,7 +78,7 @@ pub fn tools(on_their_own: bool) -> Value {
         },
         {
             "name": "start_session",
-            "description": format!("Starts a new harlo session with a coding agent and sends it a first prompt. {} It becomes your helper, in your permission mode: the user sees it under your session, and harlo sends you its report when it finishes (unless notify is false), its questions for you, and when it waits for the user. Start every independent helper, then end your turn: harlo wakes you with what comes back; don't poll. The new agent has none of your context: make the prompt a self-contained briefing.", when_to_start(on_their_own)),
+            "description": format!("Starts a new harlo session with a coding agent and sends it a first prompt. {} It becomes your helper, in your permission mode: the user sees it under your session, and harlo sends you its report when it finishes (unless notify is false), its questions for you, and when it waits for the user. Start every independent helper, then end your turn: harlo wakes you with what comes back; don't poll. The new agent has none of your context: make the prompt a self-contained briefing.", when_to_start(starting)),
             "inputSchema": s(json!({
                 "agent": { "type": "string", "description": "claude, opencode, pi or omp (see list_agents)." },
                 "prompt": { "type": "string", "description": "The first message: the task, its context, the relevant files, what's done and what's left." },
@@ -96,7 +118,109 @@ pub fn tools(on_their_own: bool) -> Value {
                 "options": { "type": "array", "items": { "type": "string" }, "description": "Their choices (default: Approve, Reject)." }
             }), &["question"]),
         }
-    ])
+    ]);
+    if starting == Starting::Offer
+        && let Some(list) = tools.as_array_mut()
+    {
+        list.push(json!({
+            "name": "propose_helpers",
+            "description": format!("Offers the user a split of your task into helpers that work at the same time. harlo shows them why and what each helper would do; if they agree, harlo starts the helpers (as start_session does: your helpers, in your permission mode, reporting back to you). Then end your turn: harlo tells you their answer, with the helpers' ids if it started them, and their reports come to you as they finish; don't poll. If they say no, do the work yourself. At most {MAX_PROPOSED} helpers."),
+            "inputSchema": s(json!({
+                "why": { "type": "string", "description": "Why splitting helps, in a sentence or two (for the user)." },
+                "helpers": {
+                    "type": "array",
+                    "description": "The helpers, one per part.",
+                    "items": s(json!({
+                        "title": { "type": "string", "description": "A short name for the part." },
+                        "prompt": { "type": "string", "description": "Its first message, a self-contained briefing (it has none of your context): the part, the relevant files, what \"done\" looks like, what not to touch." },
+                        "agent": { "type": "string", "description": "claude, opencode, pi or omp (default: yours)." },
+                        "model": { "type": "string", "description": "provider/model, if not the agent's default." },
+                        "worktree": { "type": "string", "description": "A new git worktree on this branch name to work in (for parts that edit files)." }
+                    }), &["title", "prompt"])
+                }
+            }), &["why", "helpers"]),
+        }));
+    }
+    tools
+}
+
+/// The most helpers one proposal may start.
+pub const MAX_PROPOSED: usize = 6;
+
+/// A helper an agent proposes (`propose_helpers`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Proposed {
+    pub title: String,
+    pub prompt: String,
+    /// "" for the proposer's own.
+    pub agent: String,
+    pub model: String,
+    pub worktree: String,
+}
+
+/// `propose_helpers`' arguments: why, and its helpers.
+pub fn parse_proposal(args: &Value) -> Result<(String, Vec<Proposed>), String> {
+    let text = |v: &Value, k: &str| v[k].as_str().map(str::trim).unwrap_or_default().to_owned();
+    let why = text(args, "why");
+    if why.is_empty() {
+        return Err("Say why splitting helps (why).".into());
+    }
+    let helpers: Vec<Proposed> = args["helpers"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|h| Proposed { title: text(h, "title"), prompt: text(h, "prompt"), agent: text(h, "agent").to_lowercase(), model: text(h, "model"), worktree: text(h, "worktree") })
+        .collect();
+    if helpers.is_empty() {
+        return Err("Give the helpers.".into());
+    }
+    if helpers.len() > MAX_PROPOSED {
+        return Err(format!("At most {MAX_PROPOSED} helpers: combine some parts."));
+    }
+    if let Some(h) = helpers.iter().find(|h| h.title.is_empty() || h.prompt.is_empty()) {
+        return Err(format!("Each helper needs a title and a prompt{}.", if h.title.is_empty() { String::new() } else { format!(" (\"{}\" has no prompt)", h.title) }));
+    }
+    Ok((why, helpers))
+}
+
+/// The title of the user's card for a proposal.
+pub const PROPOSAL_TITLE: &str = "Split into helpers?";
+/// Its choices: the first starts them.
+pub const PROPOSAL_OPTIONS: [&str; 2] = ["Start helpers", "Do it yourself"];
+
+/// What the user's card says: why, and each helper (`agent`: its label).
+pub fn proposal_question(why: &str, helpers: &[(String, String, String, String)]) -> String {
+    let mut text = format!("{}\n", why.trim());
+    for (title, agent, model, worktree) in helpers {
+        let mut how = vec![agent.clone()];
+        if !model.is_empty() {
+            how.push(model.rsplit('/').next().unwrap_or(model).to_owned());
+        }
+        if !worktree.is_empty() {
+            how.push(format!("worktree {worktree}"));
+        }
+        text.push_str(&format!("\n• {title} ({})", how.join(", ")));
+    }
+    text
+}
+
+/// What the proposer is told of the user's answer: `started`, each helper's
+/// title and what became of it (Ok: where it is; Err: why it didn't start),
+/// or None when they said no.
+pub fn proposal_answer(started: Option<&[(String, Result<String, String>)]>) -> String {
+    let Some(started) = started else {
+        return "[harlo] The user turned down your split (propose_helpers): do the work yourself, in this session, without helpers.".into();
+    };
+    let ok: Vec<String> = started.iter().filter_map(|(t, r)| r.as_ref().ok().map(|w| format!("\"{t}\" ({w})"))).collect();
+    let failed: Vec<String> = started.iter().filter_map(|(t, r)| r.as_ref().err().map(|e| format!("\"{t}\": {e}"))).collect();
+    let mut text = String::from("[harlo] The user agreed to your split.");
+    if !ok.is_empty() {
+        text.push_str(&format!(" harlo started your helpers: {}. Their reports come to you as they finish: end your turn now (don't poll), then check their work and combine it.", ok.join(", ")));
+    }
+    if !failed.is_empty() {
+        text.push_str(&format!(" These didn't start: {}. Do those parts yourself, or start them with start_session once the problem is fixed.", failed.join("; ")));
+    }
+    text
 }
 
 /// The tools of a session another session started (its helper), besides
@@ -536,6 +660,20 @@ pub fn delegate_prompt(action: &str, members: &[Member], note: &str, worktree: b
             b.describe(),
             if note.is_empty() { "what we're stuck on in the current task." } else { note }
         ),
+        ("split", [m, ..]) => {
+            let place = if worktree { ", each in its own new git worktree (pass a short branch name taken from its part as `worktree`)" } else { "" };
+            let mut t = format!(
+                "Split this task into helpers that work at the same time. Find the parts that can be done independently (each one substantial, and not editing the same files; two to four is usually right), and start a helper for each with harlo's start_session tool: {}{place}, titled \"[Split] <the part>\". Keep for yourself what depends on the other parts, and do it once they've reported.\n\
+                 Each helper has none of our context, so make its prompt a self-contained briefing: its part, why it exists, the relevant files (by path), what \"done\" looks like, and what not to touch (the other parts).\n\
+                 If the task doesn't split well, tell me why and do it yourself.\n\
+                 Then end your turn. Their reports come back to you as [harlo] messages; don't poll. When they've all reported, check their work, combine it, and tell me what each did and what's left.",
+                m.describe()
+            );
+            if !note.is_empty() {
+                t.push_str(&format!("\n\nAlso: {note}"));
+            }
+            t
+        }
         _ => return None,
     };
     Some(text)
@@ -557,6 +695,8 @@ mod tests {
         assert!(a.contains("model \"openai/gpt-5\"") && a.contains("Do NOT write code.") && a.ends_with("the current task."));
         let c = delegate_prompt("committee", &[m("Claude", "claude", ""), m("pi", "pi", "google/gemini")], "flaky tests", false).unwrap();
         assert!(c.contains("- Claude (agent") && c.contains("- pi (agent \"pi\", model \"google/gemini\")") && c.ends_with("The problem: flaky tests"));
+        let s = delegate_prompt("split", &[m("Claude", "claude", "")], "", true).unwrap();
+        assert!(s.contains("start a helper for each") && s.contains("each in its own new git worktree") && s.contains("[Split] <the part>"));
         // A committee needs two.
         assert!(delegate_prompt("committee", &[m("Claude", "claude", "")], "", false).is_none());
         assert!(delegate_prompt("nope", &[m("Claude", "claude", "")], "", false).is_none());
@@ -594,8 +734,36 @@ mod tests {
         assert!(w.starts_with("approval to use Bash (echo xxx") && w.ends_with("…)") && !w.contains("second line"), "{w}");
         assert_eq!(waiting_what("Question", "Which one?\nmore", false), "Which one?");
         // When to start sessions: as the setting says.
-        let start = |own: bool| tools(own).as_array().unwrap().iter().find(|t| t["name"] == "start_session").unwrap()["description"].as_str().unwrap().to_owned();
-        assert!(start(false).contains("only when the user asks") && !start(true).contains("only when"));
+        let start = |st: Starting| tools(st).as_array().unwrap().iter().find(|t| t["name"] == "start_session").unwrap()["description"].as_str().unwrap().to_owned();
+        assert!(start(Starting::WhenAsked).contains("only when the user asks") && !start(Starting::OnTheirOwn).contains("only when"));
+        assert!(start(Starting::Offer).contains("offer the split with propose_helpers"));
+        // The split offer: only when they offer.
+        let proposes = |st: Starting| tools(st).as_array().unwrap().iter().any(|t| t["name"] == "propose_helpers");
+        assert!(proposes(Starting::Offer) && !proposes(Starting::WhenAsked) && !proposes(Starting::OnTheirOwn));
+        assert_eq!(Starting::from_setting(""), Starting::Offer);
+        assert_eq!(Starting::from_setting("1"), Starting::OnTheirOwn);
+        assert_eq!(Starting::from_setting("asked"), Starting::WhenAsked);
+    }
+
+    #[test]
+    fn agents_offer_splits() {
+        let args = json!({ "why": " Two parts. ", "helpers": [
+            { "title": "API", "prompt": "Do the API", "agent": "Claude", "worktree": "split/api" },
+            { "title": "UI", "prompt": "Do the UI", "model": "openai/gpt-5" }
+        ] });
+        let (why, helpers) = parse_proposal(&args).unwrap();
+        assert_eq!(why, "Two parts.");
+        assert_eq!(helpers[0], Proposed { title: "API".into(), prompt: "Do the API".into(), agent: "claude".into(), model: String::new(), worktree: "split/api".into() });
+        assert!(parse_proposal(&json!({ "why": "x", "helpers": [] })).is_err());
+        assert!(parse_proposal(&json!({ "why": "", "helpers": [{ "title": "a", "prompt": "b" }] })).is_err());
+        assert!(parse_proposal(&json!({ "why": "x", "helpers": [{ "title": "a", "prompt": " " }] })).unwrap_err().contains("\"a\" has no prompt"));
+        let many: Vec<Value> = (0..=MAX_PROPOSED).map(|i| json!({ "title": i.to_string(), "prompt": "p" })).collect();
+        assert!(parse_proposal(&json!({ "why": "x", "helpers": many })).is_err());
+        let q = proposal_question("Two parts.", &[("API".into(), "Claude".into(), String::new(), "split/api".into()), ("UI".into(), "OpenCode".into(), "openai/gpt-5".into(), String::new())]);
+        assert_eq!(q, "Two parts.\n\n• API (Claude, worktree split/api)\n• UI (OpenCode, gpt-5)");
+        assert!(proposal_answer(None).contains("do the work yourself"));
+        let a = proposal_answer(Some(&[("API".into(), Ok("k1".into())), ("UI".into(), Err("OpenCode is turned off".into()))]));
+        assert!(a.contains("started your helpers: \"API\" (k1).") && a.contains("These didn't start: \"UI\": OpenCode is turned off."), "{a}");
     }
 }
 

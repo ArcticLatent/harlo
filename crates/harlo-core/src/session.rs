@@ -118,7 +118,7 @@ pub enum SessionUpdate {
     /// The user answered an approval request the session's agent made with
     /// harlo's tools (see [`SessionHandle::open_gate`]): what it asked,
     /// and the answer (`{ value }`, or `{ cancelled: true }`).
-    GateAnswered { question: String, answer: Value },
+    GateAnswered { id: String, question: String, answer: Value },
     /// A status-bar entry from an extension (ANSI stripped); `None` clears it.
     StatusEntry { key: String, text: Option<String> },
     /// omp subagent event (`subagent_lifecycle` / `subagent_progress` frame).
@@ -269,11 +269,11 @@ impl SessionHandle {
 
     /// Asks the user to decide `question` (one of `options`), as the
     /// agent's own questions are asked; the answer comes as
-    /// [`SessionUpdate::GateAnswered`]. Its id.
-    pub fn open_gate(&self, question: &str, options: Vec<String>) -> String {
+    /// [`SessionUpdate::GateAnswered`]. `title`: "" for [`GATE_TITLE`]. Its id.
+    pub fn open_gate(&self, title: &str, question: &str, options: Vec<String>) -> String {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let id = format!("{GATE_PREFIX}{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
-        let raw = json!({ "id": id, "method": "select", "title": GATE_TITLE, "message": question, "options": options, "gate": true });
+        let raw = json!({ "id": id, "method": "select", "title": if title.is_empty() { GATE_TITLE } else { title }, "message": question, "options": options, "gate": true });
         let _ = self.control.send(Control::Gate(ui_request(&raw)));
         id
     }
@@ -870,7 +870,7 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                     if id.starts_with(GATE_PREFIX) {
                         // harlo's: what was asked, for the agent's answer.
                         if let Some(gate) = st.requests.iter().find(|r| r.id == id) {
-                            pending.push(SessionUpdate::GateAnswered { question: gate.message.clone(), answer });
+                            pending.push(SessionUpdate::GateAnswered { id: id.clone(), question: gate.message.clone(), answer });
                         }
                     } else if let Some(h) = &driver.harness {
                         h.answer_ui(&id, answer);
@@ -1564,7 +1564,7 @@ mod tests {
         handle.subscribe(ChannelSink(tx));
         let mut rows = Vec::new();
         assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::Status(SessionStatus::Idle))).await);
-        let id = handle.open_gate("Merge it?", vec!["Approve".into(), "Reject".into()]);
+        let id = handle.open_gate("", "Merge it?", vec!["Approve".into(), "Reject".into()]);
         assert!(id.starts_with(GATE_PREFIX));
         assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::UiRequest(r) if r.id == id && r.method == "select" && r.message == "Merge it?" && r.options.len() == 2)).await);
         // The agent's process stops: the request stays.
@@ -1575,7 +1575,7 @@ mod tests {
         assert!(collect_until(&mut rx2, &mut Vec::new(), |u| matches!(u, SessionUpdate::UiRequest(r) if r.id == id)).await);
         // Answered: to harlo, with what was asked; the agent isn't started for it.
         handle.answer_ui(&id, json!({ "value": "Approve" }));
-        assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::GateAnswered { question, answer } if question == "Merge it?" && answer["value"] == "Approve")).await);
+        assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::GateAnswered { question, answer, .. } if question == "Merge it?" && answer["value"] == "Approve")).await);
         assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::UiCleared(c) if *c == id)).await);
         let started = tokio::time::timeout(Duration::from_secs(1), collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::Status(SessionStatus::Starting)))).await;
         assert!(!matches!(started, Ok(true)));
