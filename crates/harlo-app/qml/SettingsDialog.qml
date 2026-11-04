@@ -2386,11 +2386,11 @@ Popup {
                         divider: true
                         visible: planRow.on
                         title: "Commit each finished step"
-                        detail: "When a step is done, harlo commits its changes on their own, with the step as the message, if they're provably the step's: not when a file it touched already had changes, the branch moved, or another session worked there meanwhile (then it says why and leaves them to you). A finished step can be reviewed by another agent."
+                        detail: "When a step is done, harlo commits its changes on their own, with the step as the message, if they're provably the step's: not when a file it touched already had changes, the branch moved, or another session worked there meanwhile (then it says why and leaves them to you). A finished step can be reviewed by another agent. Off unless you turn it on (or the shared plan) here."
                         icon: "git-commit"
                         AppSwitch {
                             objectName: "projectPlanCommits"
-                            checked: featureGroup.rev >= 0 && featureGroup.pid >= 0 && Workspace.setting("plan_commits_" + featureGroup.pid) !== "0"
+                            checked: featureGroup.rev >= 0 && featureGroup.pid >= 0 && Workspace.planCommitsOn(featureGroup.pid)
                             onToggled: featureGroup.set("plan_commits", checked)
                         }
                     }

@@ -376,7 +376,16 @@ pub fn commit(folder: &Path, files: &[String], subject: &str, body: &str) -> Res
 }
 
 /// What harlo tells agents in a project with the plan on.
-pub const INSTRUCTIONS: &str = "This project uses a shared plan, which you work through and the user edits. For a task of three or more real steps, write the plan first with plan_set (each step one verifiable piece of work, outcome-named), then for each step: plan_read (the user may have added, changed, reordered or skipped steps; their edits win), plan_start, do the work, plan_done with a one-line summary. harlo commits each finished step on its own when its changes are provably the step's, so finish one step before starting the next, and don't commit yourself. Mark a step alongside when it doesn't need the step before it: the user can run the plan with helpers (a session per step), and alongside steps then run at the same time. For a small task, no plan is needed.";
+/// What the plan's tools are for (`commits`: harlo commits each finished
+/// step).
+pub fn instructions(commits: bool) -> String {
+    let committing = if commits {
+        "harlo commits each finished step on its own when its changes are provably the step's, so finish one step before starting the next, and don't commit yourself."
+    } else {
+        "Finish one step before starting the next. Don't commit unless the user asks."
+    };
+    format!("This project uses a shared plan, which you work through and the user edits. For a task of three or more real steps, write the plan first with plan_set (each step one verifiable piece of work, outcome-named), then for each step: plan_read (the user may have added, changed, reordered or skipped steps; their edits win), plan_start, do the work, plan_done with a one-line summary. {committing} Mark a step alongside when it doesn't need the step before it: the user can run the plan with helpers (a session per step), and alongside steps then run at the same time. For a small task, no plan is needed.")
+}
 
 /// What a helper is asked for a step of a run (before the helper brief):
 /// the step, where it stands in the plan, what to merge first, and whether
@@ -438,7 +447,7 @@ pub fn tools(commits: bool) -> Value {
     json!([
         {
             "name": "plan_read",
-            "description": format!("The shared plan of this session: its steps, with their ids and statuses (pending, active, done, skipped), and which ones the user edited. Read it before each step. {INSTRUCTIONS}"),
+            "description": format!("The shared plan of this session: its steps, with their ids and statuses (pending, active, done, skipped), and which ones the user edited. Read it before each step. {}", instructions(commits)),
             "inputSchema": s(json!({}), &[]),
             "annotations": { "readOnlyHint": true },
         },

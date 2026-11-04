@@ -474,6 +474,10 @@ pub mod qobject {
         /// repository).
         #[qinvokable]
         fn plan_on(self: &Workspace, project_id: i32) -> bool;
+        /// harlo commits a project's finished plan steps (as set; by
+        /// default when its plan was turned on, not only on by default).
+        #[qinvokable]
+        fn plan_commits_on(self: &Workspace, project_id: i32) -> bool;
         /// Checks the providers (their models) unless that's been done.
         #[qinvokable]
         fn ensure_providers(self: Pin<&mut Workspace>);
@@ -2643,7 +2647,18 @@ impl Workspace {
             .map(|w| w.project_id)
             .or_else(|| self.projects.iter().filter(|p| cwd.starts_with(&p.path)).max_by_key(|p| p.path.components().count()).map(|p| p.id))?;
         let on = |k: &str| self.setting_str(&format!("{k}_{project}")) == "1";
-        Some((cwd, on("specs"), self.plan_on(project as i32), self.setting_str(&format!("plan_commits_{project}")) != "0"))
+        Some((cwd, on("specs"), self.plan_on(project as i32), self.plan_commits_on(project as i32)))
+    }
+
+    /// harlo commits a project's finished plan steps: as set, else (by
+    /// default) when you turned its plan on yourself (not when it's only on
+    /// by default: nothing's committed you didn't ask for).
+    pub fn plan_commits_on(&self, project_id: i32) -> bool {
+        match self.setting_str(&format!("plan_commits_{project_id}")).as_str() {
+            "1" => true,
+            "0" => false,
+            _ => self.setting_str(&format!("plan_{project_id}")) == "1",
+        }
     }
 
     /// A project's shared plan is on: as set, else (by default) in a git
@@ -6334,12 +6349,12 @@ impl Workspace {
         }
         if tool == harlo_core::orchestration::INSTRUCTIONS {
             let mut text = format!("{} {}\n\n{}", harlo_core::orchestration::BASE_INSTRUCTIONS, harlo_core::orchestration::when_to_start(self.agents_starting()), harlo_core::orchestration::DIAGRAMS);
-            if let Some((_, specs, plan, _)) = &features {
+            if let Some((_, specs, plan, commits)) = &features {
                 if *specs {
                     text = format!("{text}\n\n{}", harlo_core::specs::INSTRUCTIONS);
                 }
                 if *plan {
-                    text = format!("{text}\n\n{}", harlo_core::plan::INSTRUCTIONS);
+                    text = format!("{text}\n\n{}", harlo_core::plan::instructions(*commits));
                 }
             }
             return Ok(json!(text));
