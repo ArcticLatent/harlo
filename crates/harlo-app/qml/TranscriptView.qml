@@ -562,7 +562,7 @@ Item {
                         y: mdRow.gap
                         width: view.columnWidth
                         textFormat: TextEdit.RichText
-                        text: Theme.htmlStyle + parent.html
+                        text: Theme.htmlStyle + Theme.proseHtml(parent.html)
                         color: Theme.foreground
                         selectionColor: Theme.selection
                         selectedTextColor: Theme.foreground

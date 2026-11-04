@@ -236,11 +236,26 @@ QtObject {
             + "table{border-color:" + rgb(hairline) + ";border-style:solid;}"
             + "td,th{border-color:" + rgb(hairline) + ";border-style:solid;padding:6px 10px;}"
             + "th{color:" + rgb(text) + ";}"
+            // A code block inside a list or a quote (see `proseHtml`): a
+            // shaded box, its lines wrapped to the column.
+            + "td.code pre{white-space:pre-wrap;font-family:'" + mono + "';margin-top:0px;margin-bottom:0px;line-height:125%;}"
+            + "table.code{border-style:none;}td.code{background-color:" + rgb(codeBg) + ";border-style:none;}"
+            + "td.code code{color:" + rgb(foreground) + ";}"
             + css("a", m.link) + css("code", m.inlineCode) + css("blockquote", m.blockquote)
             + css(".s1", s.comment) + css(".s2", s.keyword) + css(".s3", s.string) + css(".s4", s.number)
             + css(".s5", s.function) + css(".s6", s.variable) + css(".s7", s.type) + css(".s8", s.operator)
             + css(".s9", h.diffAdded) + css(".s10", h.diffRemoved) + css(".s11", h.diffModified)
             + "</style>"
+    }
+
+    /// A reply's prose HTML for its text box: code blocks inside lists and
+    /// quotes (Qt draws them as one unwrapped line, past the column) in a
+    /// shaded box that wraps.
+    function proseHtml(html) {
+        if (html.indexOf("<pre>") < 0)
+            return html
+        return html.replace(/<pre><code([^>]*)>/g, '<table class="code" width="100%" cellspacing="0" cellpadding="8"><tr><td class="code"><pre><code$1>')
+            .replace(/\n?<\/code><\/pre>/g, "</code></pre></td></tr></table>")
     }
 
     function statusColor(status) {
