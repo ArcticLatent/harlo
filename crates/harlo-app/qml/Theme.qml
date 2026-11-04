@@ -241,6 +241,7 @@ QtObject {
             + "td.code pre{white-space:pre-wrap;font-family:'" + mono + "';margin-top:0px;margin-bottom:0px;line-height:125%;}"
             + "table.code{border-style:none;}td.code{background-color:" + rgb(codeBg) + ";border-style:none;}"
             + "td.code code{color:" + rgb(foreground) + ";}"
+            + "a.copy{color:" + rgb(muted) + ";text-decoration:none;}"
             + css("a", m.link) + css("code", m.inlineCode) + css("blockquote", m.blockquote)
             + css(".s1", s.comment) + css(".s2", s.keyword) + css(".s3", s.string) + css(".s4", s.number)
             + css(".s5", s.function) + css(".s6", s.variable) + css(".s7", s.type) + css(".s8", s.operator)
@@ -251,11 +252,23 @@ QtObject {
     /// A reply's prose HTML for its text box: code blocks inside lists and
     /// quotes (Qt draws them as one unwrapped line, past the column) in a
     /// shaded box that wraps.
+    /// Each box has a Copy link (`harlo-copy:<n>`, the n-th block: see
+    /// `proseCode`).
     function proseHtml(html) {
         if (html.indexOf("<pre>") < 0)
             return html
-        return html.replace(/<pre><code([^>]*)>/g, '<table class="code" width="100%" cellspacing="0" cellpadding="8"><tr><td class="code"><pre><code$1>')
+        let n = 0
+        return html.replace(/<pre><code([^>]*)>/g, (_, attrs) => '<table class="code" width="100%" cellspacing="0" cellpadding="8"><tr><td class="code">'
+                + '<p align="right" style="margin:0px;font-size:small;"><a class="copy" href="harlo-copy:' + (n++) + '">Copy</a></p><pre><code' + attrs + '>')
             .replace(/\n?<\/code><\/pre>/g, "</code></pre></td></tr></table>")
+    }
+    /// The n-th code block of a reply's prose HTML, as plain text.
+    function proseCode(html, n) {
+        const blocks = html.match(/<pre><code[^>]*>[\s\S]*?<\/code><\/pre>/g) || []
+        if (n < 0 || n >= blocks.length)
+            return ""
+        return blocks[n].replace(/<[^>]+>/g, "").replace(/\n$/, "")
+            .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&")
     }
 
     function statusColor(status) {

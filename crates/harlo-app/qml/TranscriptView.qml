@@ -570,7 +570,11 @@ Item {
                         selectByMouse: true
                         wrapMode: TextEdit.Wrap
                         font.pixelSize: Theme.px(15)
-                        onLinkActivated: link => Qt.openUrlExternally(link)
+                        // (A code block in a list: its Copy link.)
+                        onLinkActivated: link => {
+                            if (link.startsWith("harlo-copy:")) clipboardHelper.copyText(Theme.proseCode(mdRow.html, parseInt(link.substring(11))))
+                            else Qt.openUrlExternally(link)
+                        }
                         HoverHandler { cursorShape: md.hoveredLink ? Qt.PointingHandCursor : Qt.IBeamCursor }
                     }
                 }
