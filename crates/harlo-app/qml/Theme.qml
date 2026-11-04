@@ -261,9 +261,14 @@ QtObject {
         let n = 0
         return html.replace(/<pre><code[^>]*>([\s\S]*?)\n?<\/code><\/pre>/g, (_, code) => {
             const link = '<a class="copy" href="harlo-copy:' + n + '"><span style="font-family:\'' + uiFont + '\';font-size:small;">' + (n++ === copied ? "Copied" : "Copy") + "</span></a>"
-            return '<table class="code" width="100%" cellspacing="0" cellpadding="0"><tr><td class="code" bgcolor="' + rgb(codeBg) + '">'
-                + '<p style="margin:6px 10px 10px 10px;white-space:pre-wrap;font-family:\'' + mono + '\';line-height:125%;">'
-                + link + "<br/><code>" + code.replace(/\n/g, "<br/>") + "</code></p></td></tr></table>"
+            // A shaded table inside a plain one: Qt shades a table's whole frame
+            // without gaps, but ignores the list or quote indent for a table
+            // placed straight in one; inside a cell it sits where the text does.
+            return '<table class="code" width="100%" cellspacing="0" cellpadding="0"><tr><td class="code" style="padding:0px;">'
+                + '<table class="code" width="100%" bgcolor="' + rgb(codeBg) + '" cellspacing="0" cellpadding="10"><tr><td class="code">'
+                + '<p align="right" style="margin:0px;line-height:100%;">' + link + "</p>"
+                + '<p style="margin:0px;white-space:pre-wrap;font-family:\'' + mono + '\';line-height:125%;">'
+                + "<code>" + code.replace(/\n/g, "<br/>") + "</code></p></td></tr></table></td></tr></table>"
         })
     }
     /// The n-th code block of a reply's prose HTML, as plain text.
