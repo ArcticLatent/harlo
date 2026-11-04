@@ -4728,6 +4728,8 @@ impl Workspace {
             .live
             .iter()
             .filter(|(_, e)| e.info.status != SessionStatus::Exited)
+            // Helpers are their sessions' business: only one waiting for you.
+            .filter(|(key, e)| e.info.needs_input || !self.is_helper(key))
             .map(|(key, e)| {
                 let saved = PathBuf::from(key);
                 let title = self
@@ -5104,9 +5106,7 @@ impl Workspace {
         let entry = self.live.get(key);
         // A helper's end goes to the session that started it, not to you:
         // it only notifies when it waits for you (an approval, a question).
-        let helper = self.orch_children.contains_key(key)
-            || entry.and_then(|e| e.info.session_file.as_ref()).and_then(|f| self.meta.get(f)).is_some_and(|m| !m.parent.is_empty());
-        if helper && !matches!(note, Note::Question(..)) {
+        if self.is_helper(key) && !matches!(note, Note::Question(..)) {
             return;
         }
         let goal_active = entry.is_some_and(|e| e.goal_status == "active");
@@ -7049,6 +7049,13 @@ impl Workspace {
     /// A helper that did its task goes on its project's Settled shelf
     /// ("Done as a helper"), unless you're looking at it; it's back when
     /// it works again.
+    /// Whether a session is a helper (another session started it): this
+    /// run's, or one saved with its parent.
+    fn is_helper(&self, key: &str) -> bool {
+        self.orch_children.contains_key(key)
+            || self.live.get(key).and_then(|e| e.info.session_file.as_ref()).and_then(|f| self.meta.get(f)).is_some_and(|m| !m.parent.is_empty())
+    }
+
     /// A helper that failed, or ended without saying: settled once you've
     /// looked at it (now, if you are).
     fn settle_after_look(mut self: Pin<&mut Self>, key: &str) {
