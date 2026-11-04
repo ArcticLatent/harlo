@@ -139,8 +139,8 @@ Rectangle {
     AppMenu {
         id: shelfMenu
         property int projectId: -1
-        property int count: 0
-        AppMenuItem { objectName: "shelfArchiveAll"; text: "Archive all " + shelfMenu.count; onTriggered: Workspace.archiveShelf(shelfMenu.projectId) }
+        property int sessions: 0
+        AppMenuItem { objectName: "shelfArchiveAll"; text: "Archive all " + shelfMenu.sessions; onTriggered: Workspace.archiveShelf(shelfMenu.projectId) }
     }
 
     AppMenu {
@@ -337,7 +337,7 @@ Rectangle {
                             acceptedButtons: Qt.RightButton
                             onTapped: {
                                 shelfMenu.projectId = shelfRow.projectId
-                                shelfMenu.count = shelfRow.count
+                                shelfMenu.sessions = shelfRow.count
                                 shelfMenu.popup()
                             }
                         }
