@@ -18,7 +18,10 @@ Rectangle {
     readonly property var current: steps.find(s => s.status === "active") || null
     readonly property var run: plan.run || null
     readonly property bool paused: !!run && (run.paused || "") !== ""
-    property bool expanded: false
+    // Open to begin with: the plan is what you'd look at (fold it by hand).
+    property bool expanded: true
+    /// The most its steps take before they scroll.
+    property real maxStepsHeight: 320
     /// The step being edited (its id; -1 none, 0 a new one).
     property int editing: -1
 
@@ -99,139 +102,155 @@ Rectangle {
             }
         }
 
-        Repeater {
-            model: root.expanded ? root.steps : []
+        // Its steps (a long plan scrolls, so the chat keeps its room).
+        Flickable {
+            id: stepsView
+            Layout.fillWidth: true
+            Layout.preferredHeight: Math.min(stepsCol.implicitHeight, root.maxStepsHeight)
+            visible: root.expanded
+            contentHeight: stepsCol.implicitHeight
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: ScrollBar { policy: stepsView.contentHeight > stepsView.height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff }
             ColumnLayout {
-                id: stepRow
-                required property var modelData
-                required property int index
-                readonly property var m: root.mark(modelData.status)
-                readonly property bool open: modelData.status === "pending" || modelData.status === "active"
-                Layout.fillWidth: true
-                spacing: 2
-                HoverHandler { id: stepHover }
-                RowLayout {
-                    Layout.fillWidth: true
-                    visible: root.editing !== stepRow.modelData.id
-                    spacing: 8
-                    Item {
-                        implicitWidth: 14
-                        implicitHeight: 14
-                        Layout.alignment: Qt.AlignTop
-                        Layout.topMargin: 2
-                        Icon { anchors.fill: parent; visible: stepRow.m.icon !== ""; name: stepRow.m.icon; color: stepRow.m.color }
-                        Rectangle { visible: stepRow.m.icon === ""; anchors.centerIn: parent; width: 10; height: 10; radius: 5; color: "transparent"; border.color: Theme.muted }
-                    }
+                id: stepsCol
+                width: stepsView.width
+                spacing: col.spacing
+                Repeater {
+                    model: root.expanded ? root.steps : []
                     ColumnLayout {
+                        id: stepRow
+                        required property var modelData
+                        required property int index
+                        readonly property var m: root.mark(modelData.status)
+                        readonly property bool open: modelData.status === "pending" || modelData.status === "active"
                         Layout.fillWidth: true
-                        spacing: 1
-                        // Runs at the same time as the step before (with helpers).
+                        spacing: 2
+                        HoverHandler { id: stepHover }
                         RowLayout {
-                            visible: !!stepRow.modelData.alongside
-                            spacing: 4
-                            Icon { name: "layout-column"; color: Theme.info; implicitWidth: 11; implicitHeight: 11 }
-                            Label { text: "With the step before"; color: Theme.info; font.pixelSize: Theme.px(10.5) }
-                        }
-                        Label {
                             Layout.fillWidth: true
-                            text: stepRow.modelData.title + (stepRow.modelData.editedByUser ? "  ·  yours" : "")
-                            color: stepRow.modelData.status === "active" ? Theme.foreground : Theme.muted
-                            font.pixelSize: Theme.px(12)
-                            font.strikeout: stepRow.modelData.status === "skipped"
-                            wrapMode: Text.Wrap
-                        }
-                        Label {
-                            Layout.fillWidth: true
-                            visible: text !== ""
-                            text: stepRow.modelData.summary || stepRow.modelData.detail || ""
-                            color: Theme.textFaint
-                            font.pixelSize: Theme.px(11.5)
-                            wrapMode: Text.Wrap
-                        }
-                        // Its helper (a run), and the worktree it works in.
-                        RowLayout {
-                            visible: (stepRow.modelData.helper || "") !== "" || (stepRow.modelData.branch || "") !== ""
-                            Layout.fillWidth: true
-                            spacing: 6
-                            Icon { name: "node-tree"; color: Theme.muted; implicitWidth: 12; implicitHeight: 12 }
-                            Label {
+                            visible: root.editing !== stepRow.modelData.id
+                            spacing: 8
+                            Item {
+                                implicitWidth: 14
+                                implicitHeight: 14
+                                Layout.alignment: Qt.AlignTop
+                                Layout.topMargin: 2
+                                Icon { anchors.fill: parent; visible: stepRow.m.icon !== ""; name: stepRow.m.icon; color: stepRow.m.color }
+                                Rectangle { visible: stepRow.m.icon === ""; anchors.centerIn: parent; width: 10; height: 10; radius: 5; color: "transparent"; border.color: Theme.muted }
+                            }
+                            ColumnLayout {
                                 Layout.fillWidth: true
-                                text: (stepRow.modelData.status === "active" ? "A helper is on it" : "Done by a helper") + ((stepRow.modelData.branch || "") !== "" ? " · ⎇ " + stepRow.modelData.branch : "")
-                                color: Theme.muted
-                                font.pixelSize: Theme.px(11)
-                                elide: Text.ElideRight
-                            }
-                            FlatButton {
-                                objectName: "planOpenHelper-" + stepRow.modelData.id
-                                visible: (stepRow.modelData.helper || "") !== "" && stepRow.modelData.status === "active"
-                                text: "Open"
-                                padding: 2
-                                font.pixelSize: Theme.px(11)
-                                onClicked: Workspace.open(stepRow.modelData.helper)
-                            }
-                        }
-                        // Its commit, or why there isn't one.
-                        RowLayout {
-                            visible: (stepRow.modelData.commit || "") !== "" || (stepRow.modelData.commitNote || "") !== ""
-                            Layout.fillWidth: true
-                            spacing: 6
-                            Icon { visible: (stepRow.modelData.commit || "") !== ""; name: "git-commit"; color: Theme.success; implicitWidth: 12; implicitHeight: 12 }
-                            Label {
-                                Layout.fillWidth: true
-                                text: (stepRow.modelData.commit || "") !== "" ? "Committed " + stepRow.modelData.commit.substring(0, 8) : (stepRow.modelData.commitNote || "")
-                                color: (stepRow.modelData.commit || "") !== "" ? Theme.success : (stepRow.modelData.commitNote || "").startsWith("Not committed") ? Theme.warning : Theme.muted
-                                font.family: (stepRow.modelData.commit || "") !== "" ? Theme.mono : Theme.uiFont
-                                font.pixelSize: Theme.px(11)
-                                wrapMode: Text.Wrap
-                            }
-                            FlatButton {
-                                objectName: "planReview-" + stepRow.modelData.id
-                                visible: (stepRow.modelData.commit || "") !== ""
-                                text: "Review…"
-                                padding: 2
-                                font.pixelSize: Theme.px(11)
-                                onClicked: reviewMenu.popup()
-                                AppMenu {
-                                    id: reviewMenu
-                                    Repeater {
-                                        model: root.reviewers
-                                        AppMenuItem {
-                                            required property var modelData
-                                            text: "Review with " + modelData.label
-                                            onTriggered: {
-                                                const err = Workspace.reviewStep(root.session.key, stepRow.modelData.id, modelData.id)
-                                                if (err !== "") Workspace.showNotice(err, true)
+                                spacing: 1
+                                // Runs at the same time as the step before (with helpers).
+                                RowLayout {
+                                    visible: !!stepRow.modelData.alongside
+                                    spacing: 4
+                                    Icon { name: "layout-column"; color: Theme.info; implicitWidth: 11; implicitHeight: 11 }
+                                    Label { text: "With the step before"; color: Theme.info; font.pixelSize: Theme.px(10.5) }
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: stepRow.modelData.title + (stepRow.modelData.editedByUser ? "  ·  yours" : "")
+                                    color: stepRow.modelData.status === "active" ? Theme.foreground : Theme.muted
+                                    font.pixelSize: Theme.px(12)
+                                    font.strikeout: stepRow.modelData.status === "skipped"
+                                    wrapMode: Text.Wrap
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    visible: text !== ""
+                                    text: stepRow.modelData.summary || stepRow.modelData.detail || ""
+                                    color: Theme.textFaint
+                                    font.pixelSize: Theme.px(11.5)
+                                    wrapMode: Text.Wrap
+                                }
+                                // Its helper (a run), and the worktree it works in.
+                                RowLayout {
+                                    visible: (stepRow.modelData.helper || "") !== "" || (stepRow.modelData.branch || "") !== ""
+                                    Layout.fillWidth: true
+                                    spacing: 6
+                                    Icon { name: "node-tree"; color: Theme.muted; implicitWidth: 12; implicitHeight: 12 }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: (stepRow.modelData.status === "active" ? "A helper is on it" : "Done by a helper") + ((stepRow.modelData.branch || "") !== "" ? " · ⎇ " + stepRow.modelData.branch : "")
+                                        color: Theme.muted
+                                        font.pixelSize: Theme.px(11)
+                                        elide: Text.ElideRight
+                                    }
+                                    FlatButton {
+                                        objectName: "planOpenHelper-" + stepRow.modelData.id
+                                        visible: (stepRow.modelData.helper || "") !== "" && stepRow.modelData.status === "active"
+                                        text: "Open"
+                                        padding: 2
+                                        font.pixelSize: Theme.px(11)
+                                        onClicked: Workspace.open(stepRow.modelData.helper)
+                                    }
+                                }
+                                // Its commit, or why there isn't one.
+                                RowLayout {
+                                    visible: (stepRow.modelData.commit || "") !== "" || (stepRow.modelData.commitNote || "") !== ""
+                                    Layout.fillWidth: true
+                                    spacing: 6
+                                    Icon { visible: (stepRow.modelData.commit || "") !== ""; name: "git-commit"; color: Theme.success; implicitWidth: 12; implicitHeight: 12 }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: (stepRow.modelData.commit || "") !== "" ? "Committed " + stepRow.modelData.commit.substring(0, 8) : (stepRow.modelData.commitNote || "")
+                                        color: (stepRow.modelData.commit || "") !== "" ? Theme.success : (stepRow.modelData.commitNote || "").startsWith("Not committed") ? Theme.warning : Theme.muted
+                                        font.family: (stepRow.modelData.commit || "") !== "" ? Theme.mono : Theme.uiFont
+                                        font.pixelSize: Theme.px(11)
+                                        wrapMode: Text.Wrap
+                                    }
+                                    FlatButton {
+                                        objectName: "planReview-" + stepRow.modelData.id
+                                        visible: (stepRow.modelData.commit || "") !== ""
+                                        text: "Review…"
+                                        padding: 2
+                                        font.pixelSize: Theme.px(11)
+                                        onClicked: reviewMenu.popup()
+                                        AppMenu {
+                                            id: reviewMenu
+                                            Repeater {
+                                                model: root.reviewers
+                                                AppMenuItem {
+                                                    required property var modelData
+                                                    text: "Review with " + modelData.label
+                                                    onTriggered: {
+                                                        const err = Workspace.reviewStep(root.session.key, stepRow.modelData.id, modelData.id)
+                                                        if (err !== "") Workspace.showNotice(err, true)
+                                                    }
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
+                            // Your edits (on hover; their room is kept, so the text
+                            // doesn't rewrap when they show).
+                            Row {
+                                Layout.alignment: Qt.AlignTop
+                                opacity: stepHover.hovered ? 1 : 0
+                                enabled: stepHover.hovered
+                                spacing: 0
+                                StepButton { iconName: "arrow-up-s"; tip: "Move up"; enabled: stepRow.index > 0; onClicked: root.edit({ op: "shift", id: stepRow.modelData.id, by: -1 }) }
+                                StepButton { iconName: "arrow-down-s"; tip: "Move down"; enabled: stepRow.index < root.steps.length - 1; onClicked: root.edit({ op: "shift", id: stepRow.modelData.id, by: 1 }) }
+                                StepButton {
+                                    visible: stepRow.index > 0 && stepRow.modelData.status === "pending"
+                                    iconName: "layout-column"
+                                    tip: stepRow.modelData.alongside ? "Run it after the step before" : "Run it at the same time as the step before (with helpers)"
+                                    onClicked: root.edit({ op: "alongside", id: stepRow.modelData.id, alongside: !stepRow.modelData.alongside })
+                                }
+                                StepButton { visible: stepRow.open; iconName: "edit"; tip: "Change it"; onClicked: { root.editing = stepRow.modelData.id; editTitle.text = stepRow.modelData.title; editDetail.text = stepRow.modelData.detail || "" } }
+                                StepButton {
+                                    visible: stepRow.modelData.status !== "done"
+                                    iconName: stepRow.modelData.status === "skipped" ? "arrow-go-back" : "close"
+                                    tip: stepRow.modelData.status === "skipped" ? "Don't skip it" : "Skip it"
+                                    onClicked: root.edit({ op: "skip", id: stepRow.modelData.id, skipped: stepRow.modelData.status !== "skipped" })
+                                }
+                                StepButton { visible: stepRow.modelData.status === "pending"; iconName: "delete-bin"; tip: "Remove it"; onClicked: root.edit({ op: "remove", id: stepRow.modelData.id }) }
+                                StepButton { visible: stepRow.modelData.status === "pending" || stepRow.modelData.status === "active"; iconName: "add"; tip: "Add a step after it"; onClicked: { root.editing = 0; addAfter.value = stepRow.modelData.id; editTitle.text = ""; editDetail.text = "" } }
+                            }
                         }
-                    }
-                    // Your edits (on hover; their room is kept, so the text
-                    // doesn't rewrap when they show).
-                    Row {
-                        Layout.alignment: Qt.AlignTop
-                        opacity: stepHover.hovered ? 1 : 0
-                        enabled: stepHover.hovered
-                        spacing: 0
-                        StepButton { iconName: "arrow-up-s"; tip: "Move up"; enabled: stepRow.index > 0; onClicked: root.edit({ op: "shift", id: stepRow.modelData.id, by: -1 }) }
-                        StepButton { iconName: "arrow-down-s"; tip: "Move down"; enabled: stepRow.index < root.steps.length - 1; onClicked: root.edit({ op: "shift", id: stepRow.modelData.id, by: 1 }) }
-                        StepButton {
-                            visible: stepRow.index > 0 && stepRow.modelData.status === "pending"
-                            iconName: "layout-column"
-                            tip: stepRow.modelData.alongside ? "Run it after the step before" : "Run it at the same time as the step before (with helpers)"
-                            onClicked: root.edit({ op: "alongside", id: stepRow.modelData.id, alongside: !stepRow.modelData.alongside })
-                        }
-                        StepButton { visible: stepRow.open; iconName: "edit"; tip: "Change it"; onClicked: { root.editing = stepRow.modelData.id; editTitle.text = stepRow.modelData.title; editDetail.text = stepRow.modelData.detail || "" } }
-                        StepButton {
-                            visible: stepRow.modelData.status !== "done"
-                            iconName: stepRow.modelData.status === "skipped" ? "arrow-go-back" : "close"
-                            tip: stepRow.modelData.status === "skipped" ? "Don't skip it" : "Skip it"
-                            onClicked: root.edit({ op: "skip", id: stepRow.modelData.id, skipped: stepRow.modelData.status !== "skipped" })
-                        }
-                        StepButton { visible: stepRow.modelData.status === "pending"; iconName: "delete-bin"; tip: "Remove it"; onClicked: root.edit({ op: "remove", id: stepRow.modelData.id }) }
-                        StepButton { visible: stepRow.modelData.status === "pending" || stepRow.modelData.status === "active"; iconName: "add"; tip: "Add a step after it"; onClicked: { root.editing = 0; addAfter.value = stepRow.modelData.id; editTitle.text = ""; editDetail.text = "" } }
                     }
                 }
             }

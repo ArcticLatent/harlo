@@ -626,6 +626,7 @@ Rectangle {
             Layout.rightMargin: transcript.gutter
             Layout.topMargin: 8
             session: root.session
+            maxStepsHeight: Math.max(160, root.height * 0.4)
             visible: plan.enabled && steps.length > 0 && !root.covered
         }
 
