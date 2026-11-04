@@ -876,6 +876,9 @@ pub struct WorkspaceRust {
     orch_children: HashMap<String, OrchChild>,
     /// Plans running with helpers, by the session whose plan it is.
     plan_runs: HashMap<String, PlanRun>,
+    /// Helpers that did their task while you were looking at them (or
+    /// before their file was known): settled once you're not.
+    settle_later: HashSet<String>,
     /// Remote files being copied here (`localCopy`).
     copying: std::cell::RefCell<HashSet<PathBuf>>,
     quota_loading: bool,
@@ -1979,6 +1982,8 @@ impl Workspace {
         if let Some(entry) = self.as_mut().rust_mut().live.get_mut(key) {
             entry.info.unread = false;
         }
+        // A helper that finished while you looked at it: settled as you go.
+        let leaving = previous != key && self.settle_later.contains(&previous);
         if let Some(file) = self.live.get(key).and_then(|e| e.info.session_file.clone()) {
             self.as_mut().mark_viewed(&file);
         }
@@ -1988,6 +1993,9 @@ impl Workspace {
             self.as_mut().rust_mut().tab_keys.insert(at, key.to_owned());
         }
         self.as_mut().set_active_key(QString::from(key));
+        if leaving {
+            self.as_mut().settle_helper(&previous);
+        }
         if previous != key {
             self.as_mut().release_if_idle(&previous);
         }
@@ -5318,6 +5326,10 @@ impl Workspace {
         }
         if file_changed {
             self.as_mut().remember_modes(key);
+            // (A helper that finished before its file was known.)
+            if self.settle_later.contains(key) && self.active_key.to_string() != key {
+                self.as_mut().settle_helper(key);
+            }
         }
         // A run lane's session file: remember it for the run.
         if let Some(file) = lane_file
@@ -6491,6 +6503,7 @@ impl Workspace {
     fn child_progress(mut self: Pin<&mut Self>, key: &str, finished: bool, notes: &[Note]) {
         let Some(child) = self.orch_children.get(key).cloned() else { return };
         if !finished {
+            self.as_mut().rust_mut().settle_later.remove(key);
             if let Some(c) = self.as_mut().rust_mut().orch_children.get_mut(key) {
                 c.status = "running".into();
                 c.asking = false;
@@ -7008,9 +7021,14 @@ impl Workspace {
     /// ("Done as a helper"), unless you're looking at it; it's back when
     /// it works again.
     fn settle_helper(mut self: Pin<&mut Self>, key: &str) {
-        if self.setting_str("settle_sessions") == "0" || self.active_key.to_string() == key {
+        if self.setting_str("settle_sessions") == "0" {
             return;
         }
+        if self.active_key.to_string() == key || self.file_for_key(key).is_none() {
+            self.as_mut().rust_mut().settle_later.insert(key.to_owned());
+            return;
+        }
+        self.as_mut().rust_mut().settle_later.remove(key);
         // (A little after now: its last writes may land a moment later.)
         let at = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0) + 5;
         self.as_mut().update_meta(key, |m| {
