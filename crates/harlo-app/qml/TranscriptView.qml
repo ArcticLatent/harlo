@@ -134,6 +134,16 @@ Item {
         return "Allow " + tool + " to run?"
     }
     /// Brings row `i` to the middle and flashes it (search results).
+    /// Row `i`'s end is on screen (an approval's buttons are there), its
+    /// run open. (Re-read as the view scrolls: it reads `contentY`.)
+    function rowEndInView(i) {
+        if (i < 0) return false
+        const item = view.itemAtIndex(i)
+        if (!item || item.folded || !item.visible || item.height <= 0) return false
+        const bottom = item.y + item.height - view.contentY
+        return bottom > 24 && bottom <= view.height + 1
+    }
+
     function revealIndex(i) {
         view.follow = false
         view.positionViewAtIndex(i, ListView.Center)

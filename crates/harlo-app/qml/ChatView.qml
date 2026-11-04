@@ -493,7 +493,9 @@ Rectangle {
             Layout.leftMargin: transcript.gutter
             Layout.rightMargin: transcript.gutter
             Layout.topMargin: 8
-            visible: session.hasRequest && session.requestMethod !== "ask" && !root.covered
+            // (An approval whose tool row is on screen: asked there alone.)
+            visible: session.hasRequest && session.requestMethod !== "ask" && !root.covered && !inlineShown
+            readonly property bool inlineShown: inlineApproval && (transcript.count, transcript.height, transcript.rowEndInView(session.indexOfKey(session.approvalRow)))
             // `select` options may carry descriptions (`optionDetails`).
             readonly property var details: {
                 if (!visible || session.requestJson === "") return []
