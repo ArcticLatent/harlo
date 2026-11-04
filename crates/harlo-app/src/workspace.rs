@@ -3230,6 +3230,14 @@ impl Workspace {
                     // A plan's step: back to waiting, and the run paused.
                     if let Some((owner, id)) = step_of {
                         this.as_mut().plan_step_ended(&owner, id, Err(format!("its worktree couldn't be made: {e:#}")));
+                    } else if let Some((parent, title, _)) = parent
+                        && let Some(live) = registry::get(&parent)
+                    {
+                        // An agent's helper: it was told the helper starts
+                        // shortly, so it hears that it didn't.
+                        let busy = this.live.get(&parent).is_some_and(|e| e.info.status == SessionStatus::Busy);
+                        let message = harlo_core::orchestration::worktree_failed(&title, &branch, &format!("{e:#}"));
+                        live.handle.prompt(&message, Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });
                     }
                 }
             },

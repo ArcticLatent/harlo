@@ -186,6 +186,14 @@ pub fn finished_message(agent: &str, title: &str, key: &str, report: Option<&Rep
     }
 }
 
+/// To an agent whose helper (`title`) couldn't start: its worktree on
+/// `branch` couldn't be made.
+pub fn worktree_failed(title: &str, branch: &str, error: &str) -> String {
+    format!(
+        "[harlo] Your helper \"{title}\" didn't start: its worktree on {branch} couldn't be made ({error}). A branch can be checked out in one worktree only (yours, if you're in one, counts): start it again on a new branch name, or without a worktree."
+    )
+}
+
 /// Added to a worktree helper's finished message when the branch it
 /// started from moved on meanwhile ("" when it didn't).
 pub fn drift_note(branch: &str, base: &str, behind: u32) -> String {
@@ -556,6 +564,7 @@ mod tests {
 
     #[test]
     fn a_moved_base_is_noted() {
+        assert!(worktree_failed("Drift", "helper/x", "already exists").contains("\"Drift\" didn't start: its worktree on helper/x couldn't be made (already exists)"));
         assert_eq!(drift_note("helper/x", "main", 0), "");
         assert!(drift_note("helper/x", "main", 1).contains("main has moved on by 1 commit since"));
         assert!(drift_note("helper/x", "main", 3).contains("by 3 commits"));
