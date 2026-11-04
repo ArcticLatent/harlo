@@ -323,7 +323,7 @@ Rectangle {
                         rightInset: 6
                         hoverEnabled: true
                         ToolTip.visible: hovered
-                        ToolTip.text: "Finished helpers, and worktree sessions whose pull request was merged or closed or with no activity for a week. Working in one brings it back; after 30 days here they're archived (Settings → Worktrees). Right-click to archive them all now."
+                        ToolTip.text: "Finished helpers, and worktree sessions that are merged,\nclosed or quiet for a week. Working in one brings it back.\nArchived after 30 days here; right-click to archive all now."
                         ToolTip.delay: 700
                         contentItem: RowLayout {
                             spacing: 6
