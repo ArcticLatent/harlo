@@ -16,6 +16,8 @@ Rectangle {
     readonly property var steps: plan.steps || []
     readonly property int finished: steps.filter(s => s.status === "done" || s.status === "skipped").length
     readonly property var current: steps.find(s => s.status === "active") || null
+    // The session's agent is working (through the plan, or anything else).
+    readonly property bool agentBusy: !!session && (session.status === "busy" || session.status === "starting")
     readonly property var run: plan.run || null
     readonly property bool paused: !!run && (run.paused || "") !== ""
     // Open to begin with: the plan is what you'd look at (fold it by hand).
@@ -318,6 +320,8 @@ Rectangle {
                 objectName: "planRun"
                 visible: (!root.run || root.paused) && root.finished < root.steps.length
                 text: root.paused ? "Run again" : "Run with helpers"
+                // (Not while the agent works through it itself: two at once.)
+                enabled: !root.agentBusy
                 accent: Theme.primary
                 padding: 3
                 font.pixelSize: Theme.px(11.5)
@@ -362,7 +366,8 @@ Rectangle {
             }
             Label {
                 Layout.fillWidth: true
-                text: root.run ? "" : "The agent reads your changes before each step."
+                text: root.run ? "" : root.agentBusy && root.finished < root.steps.length ? "Run with helpers once the agent stops (or when you stop it)."
+                    : "The agent reads your changes before each step."
                 color: Theme.textFaint
                 font.pixelSize: Theme.px(11)
                 elide: Text.ElideRight

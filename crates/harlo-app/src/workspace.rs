@@ -6850,11 +6850,21 @@ impl Workspace {
         if !self.features_of(&key).is_some_and(|(_, _, plan, _)| plan) {
             return QString::from("The shared plan is off for this session's project (its settings).");
         }
-        let plan = crate::plans::get(self.file_for_key(&key).as_deref(), &key);
+        // Not with the agent at work on it too.
+        if matches!(entry.info.status, SessionStatus::Busy | SessionStatus::Starting) {
+            return QString::from("The agent is working: run the plan with helpers once it stops (or stop it first).");
+        }
+        let file = self.file_for_key(&key);
+        // A step the agent left started (stopped midway): a helper's now.
+        crate::plans::update(file.as_deref(), &key, |p| {
+            for step in p.steps.iter_mut().filter(|s| s.status == harlo_core::plan::Status::Active && s.helper.is_empty()) {
+                step.status = harlo_core::plan::Status::Pending;
+            }
+        });
+        let plan = crate::plans::get(file.as_deref(), &key);
         if plan.current_stage().is_none() {
             return QString::from("Every step of the plan has finished.");
         }
-        let file = self.file_for_key(&key);
         self.as_mut().rust_mut().plan_runs.insert(key.clone(), PlanRun { agent: kind, model: model.to_string().trim().to_owned(), paused: String::new(), file, retried: HashSet::new() });
         self.as_mut().plans_changed();
         self.as_mut().advance_plan(&key);
