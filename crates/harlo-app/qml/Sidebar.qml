@@ -346,6 +346,8 @@ Rectangle {
                         readonly property bool active: rowKey === Workspace.activeKey
                         // On hover: whose helper it is, the cwd (other sessions)
                         // and/or the worktree branch, and why it's settled.
+                        // On the Settled shelf: faded, until you point at it.
+                        readonly property bool dim: settled !== "" && !active && !hovered
                         readonly property string detail: [helperOf !== "" ? "Helper of “" + helperOf + "”" : "", branch !== "" ? "⎇ " + branch : "", subtitle, settled].filter(t => t !== "").join("  ·  ")
                         width: ListView.view.width
                         height: 42
@@ -384,11 +386,13 @@ Rectangle {
                                 provider: sessionRow.harness
                                 badge: sessionRow.status
                                 ring: sessionRow.rowColor
+                                opacity: sessionRow.dim ? 0.4 : 1
+                                Behavior on opacity { NumberAnimation { duration: Theme.hoverMotion } }
                             }
                             Label {
                                 Layout.fillWidth: true
                                 text: (sessionRow.pinned ? "★ " : "") + sessionRow.title
-                                color: sessionRow.active || sessionRow.status === "unread" ? Theme.text : Theme.textMuted
+                                color: sessionRow.active || sessionRow.status === "unread" ? Theme.text : sessionRow.dim ? Theme.textFaint : Theme.textMuted
                                 elide: Text.ElideRight
                                 font.pixelSize: Theme.px(14)
                                 font.weight: sessionRow.status === "unread" ? Font.DemiBold : sessionRow.active ? Font.Medium : Font.Normal
