@@ -3163,7 +3163,14 @@ impl Workspace {
         let WorktreeStart { first, model, lane, parent, approval, plan_step } = opts;
         let step_of = parent.as_ref().map(|(p, ..)| p.clone()).zip(plan_step);
         let Some((project, root)) = self.project_root(project_id) else {
-            self.set_notice_text("This project is not a git repository.", true);
+            self.as_mut().set_notice_text("This project is not a git repository.", true);
+            // An agent's helper, or a plan's step: told, not left waiting.
+            let why = "the project isn't a git repository";
+            match (step_of, parent) {
+                (Some((owner, id)), _) => self.plan_step_ended(&owner, id, Err(format!("its worktree couldn't be made: {why}"))),
+                (None, Some((parent, title, _))) => self.tell_worktree_failed(&parent, &title, &branch.to_string(), why),
+                _ => {}
+            }
             return;
         };
         let branch = branch.to_string().trim().to_owned();
@@ -3230,14 +3237,8 @@ impl Workspace {
                     // A plan's step: back to waiting, and the run paused.
                     if let Some((owner, id)) = step_of {
                         this.as_mut().plan_step_ended(&owner, id, Err(format!("its worktree couldn't be made: {e:#}")));
-                    } else if let Some((parent, title, _)) = parent
-                        && let Some(live) = registry::get(&parent)
-                    {
-                        // An agent's helper: it was told the helper starts
-                        // shortly, so it hears that it didn't.
-                        let busy = this.live.get(&parent).is_some_and(|e| e.info.status == SessionStatus::Busy);
-                        let message = harlo_core::orchestration::worktree_failed(&title, &branch, &format!("{e:#}"));
-                        live.handle.prompt(&message, Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });
+                    } else if let Some((parent, title, _)) = parent {
+                        this.tell_worktree_failed(&parent, &title, &branch, &format!("{e:#}"));
                     }
                 }
             },
@@ -6439,7 +6440,8 @@ impl Workspace {
                 // In a new worktree: made in the background; it shows when ready.
                 let branch = text("worktree");
                 if !branch.is_empty() {
-                    let Some(project) = self.projects.iter().find(|p| cwd.starts_with(&p.path)).cloned() else {
+                    // (The closest: a project can be inside another's folder.)
+                    let Some(project) = self.projects.iter().filter(|p| cwd.starts_with(&p.path)).max_by_key(|p| p.path.components().count()).cloned() else {
                         return Err("Worktrees are for a project's folder (that one isn't a harlo project).".into());
                     };
                     let first = FirstPrompt { text: prompt, ..Default::default() };
@@ -7108,6 +7110,15 @@ impl Workspace {
     /// A helper that did its task goes on its project's Settled shelf
     /// ("Done as a helper"), unless you're looking at it; it's back when
     /// it works again.
+    /// An agent was told its helper starts shortly (in a worktree): it
+    /// hears that it didn't, and why.
+    fn tell_worktree_failed(&self, parent: &str, title: &str, branch: &str, why: &str) {
+        let Some(live) = registry::get(parent) else { return };
+        let busy = self.live.get(parent).is_some_and(|e| e.info.status == SessionStatus::Busy);
+        let message = harlo_core::orchestration::worktree_failed(title, branch, why);
+        live.handle.prompt(&message, Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });
+    }
+
     /// Whether a session is a helper (another session started it): this
     /// run's, or one saved with its parent.
     fn is_helper(&self, key: &str) -> bool {
