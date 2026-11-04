@@ -1071,23 +1071,25 @@ struct WorkspaceSink {
     key: String,
 }
 
+/// The session updates the workspace acts on (the rest are the chat's).
+fn workspace_wants(u: &SessionUpdate) -> bool {
+    matches!(
+        u,
+        SessionUpdate::Status(_)
+            | SessionUpdate::Meta(_)
+            | SessionUpdate::UiRequest(_)
+            | SessionUpdate::UiCleared(_)
+            | SessionUpdate::Notable(_)
+            | SessionUpdate::Goal(_)
+            | SessionUpdate::Limits(_)
+            // (The user's answer to an approval request: to the agent.)
+            | SessionUpdate::GateAnswered { .. }
+    )
+}
+
 impl SessionSink for WorkspaceSink {
     fn deliver(&self, updates: Vec<SessionUpdate>) {
-        let relevant: Vec<SessionUpdate> = updates
-            .into_iter()
-            .filter(|u| {
-                matches!(
-                    u,
-                    SessionUpdate::Status(_)
-                        | SessionUpdate::Meta(_)
-                        | SessionUpdate::UiRequest(_)
-                        | SessionUpdate::UiCleared(_)
-                        | SessionUpdate::Notable(_)
-                        | SessionUpdate::Goal(_)
-                        | SessionUpdate::Limits(_)
-                )
-            })
-            .collect();
+        let relevant: Vec<SessionUpdate> = updates.into_iter().filter(workspace_wants).collect();
         if relevant.is_empty() {
             return;
         }
@@ -7070,6 +7072,13 @@ fn meter_setting(host: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn answered_approvals_reach_the_workspace() {
+        // (It sends the answer to the agent; filtered out, the agent never heard it.)
+        let answered = harlo_core::session::SessionUpdate::GateAnswered { question: "Delete it?".into(), answer: serde_json::json!({ "value": "Reject" }) };
+        assert!(super::workspace_wants(&answered));
+    }
+
     #[test]
     fn a_hosts_projects_are_looked_in_from_the_start() {
         let paths = ["ssh://nas/a", "/local/b", "ssh://pi/c", "ssh://nas/d"].map(std::path::PathBuf::from);
