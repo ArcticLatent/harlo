@@ -97,6 +97,9 @@ pub enum HarnessEvent {
     RunEnded,
     /// No automatic work remains (pi `agent_settled`, omp `session_settled`).
     Settled,
+    /// How many commands the agent left running in the background (Claude
+    /// Code's): it picks the work up again when one finishes.
+    BackgroundTasks(usize),
 
     /// `message` is the harness `AgentMessage` as sent on the wire.
     MessageStart { id: String, message: Value },

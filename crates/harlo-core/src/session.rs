@@ -144,8 +144,10 @@ pub const GATE_TITLE: &str = "Approval requested";
 /// Events the app may notify about.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Notable {
-    /// A run finished; the agent's last reply (plain text).
-    Completed { last_message: String },
+    /// A run finished; the agent's last reply (plain text), and how many
+    /// commands it left running in the background (it goes on when one
+    /// finishes).
+    Completed { last_message: String, background: usize },
     /// A run failed, or the harness reported an error.
     Error { message: String },
     /// An omp subagent finished (`status`: completed, failed, aborted).
@@ -336,6 +338,8 @@ struct DriverState {
     goal: Value,
     /// Calls of the agent's `todo` tool still running.
     todo_calls: std::collections::HashSet<String>,
+    /// Commands the agent left running in the background.
+    background: usize,
     /// Asked for the session file during this run (a new session gets
     /// one only once its first message is under way).
     file_asked: bool,
@@ -576,6 +580,7 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
         todos: Value::Null,
         goal: Value::Null,
         todo_calls: Default::default(),
+        background: 0,
         file_asked: false,
         sinks: Vec::new(),
         messages: KeptMessages::default(),
@@ -1025,6 +1030,7 @@ fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<Sessi
                 pending.push(SessionUpdate::Todos(st.todos.clone()));
             }
         }
+        HarnessEvent::BackgroundTasks(n) => st.background = *n,
         HarnessEvent::RunStarted => {
             st.run_error = None;
             st.aborted = false;
@@ -1037,7 +1043,7 @@ fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<Sessi
                 let notable = match st.run_error.take() {
                     Some(message) => Some(Notable::Error { message }),
                     None if aborted => None,
-                    None => Some(Notable::Completed { last_message: st.messages.last_reply() }),
+                    None => Some(Notable::Completed { last_message: st.messages.last_reply(), background: st.background }),
                 };
                 pending.extend(notable.map(SessionUpdate::Notable));
             }

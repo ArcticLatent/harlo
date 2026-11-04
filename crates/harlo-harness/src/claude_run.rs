@@ -1006,6 +1006,7 @@ fn system(shared: &Arc<Shared>, frame: &Value) {
             shared.emit(HarnessEvent::Compaction { started: false, reason: None, error: None });
         }
         "task_started" | "task_updated" | "task_progress" | "task_notification" => task_frame(shared, frame),
+        "background_tasks_changed" => shared.emit(HarnessEvent::BackgroundTasks(frame["tasks"].as_array().map_or(0, Vec::len))),
         _ => {}
     }
 }
@@ -1499,6 +1500,21 @@ mod tests {
         assert_eq!((starts, settled), (2, 2), "one run per turn");
         let st = s.state.lock().unwrap();
         assert!(!st.session_id.is_empty() && st.context_tokens > 0 && st.cost > 0.0);
+    }
+
+    #[tokio::test]
+    async fn says_how_many_commands_run_in_the_background() {
+        let (s, mut rx) = shared();
+        for tasks in [json!([{ "task_id": "b1", "task_type": "local_bash" }]), json!([])] {
+            incoming(&s, json!({ "type": "system", "subtype": "background_tasks_changed", "tasks": tasks })).await;
+        }
+        let mut counts = Vec::new();
+        while let Ok(e) = rx.try_recv() {
+            if let HarnessEvent::BackgroundTasks(n) = e {
+                counts.push(n);
+            }
+        }
+        assert_eq!(counts, [1, 0]);
     }
 
     #[test]

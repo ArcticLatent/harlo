@@ -5147,7 +5147,7 @@ impl Workspace {
         let (what, body) = match note {
             // Between a goal's turns omp goes on by itself: its end notifies.
             Note::Event(Notable::Completed { .. }) if goal_active => return,
-            Note::Event(Notable::Completed { last_message }) => (What::Done, last_message.clone()),
+            Note::Event(Notable::Completed { last_message, .. }) => (What::Done, last_message.clone()),
             Note::Event(Notable::Error { message }) => (What::Failed, message.clone()),
             Note::Event(Notable::SubagentDone { .. }) => return,
             Note::Question(text, request) => (What::Ask(request.clone()), text.clone()),
@@ -5179,7 +5179,7 @@ impl Workspace {
         let (event, last, fallback) = match note {
             // Between a goal's turns omp goes on by itself: its end notifies.
             Note::Event(Notable::Completed { .. }) if goal_active => return,
-            Note::Event(Notable::Completed { last_message }) => ("completion", last_message, (format!("{agent} agent is ready"), format!("{} completed the task", if model.is_empty() { "The agent".to_owned() } else { model.clone() }))),
+            Note::Event(Notable::Completed { last_message, .. }) => ("completion", last_message, (format!("{agent} agent is ready"), format!("{} completed the task", if model.is_empty() { "The agent".to_owned() } else { model.clone() }))),
             Note::Event(Notable::Error { message }) => ("error", message, ("Tool error".to_owned(), "An error occurred".to_owned())),
             Note::Event(Notable::SubagentDone { agent: sub, status, task, .. }) => {
                 agent = title_case(&sub);
@@ -6604,8 +6604,17 @@ impl Workspace {
             }
             return self.as_mut().bump_orchestration();
         }
+        // Its turn ended with commands still running in the background:
+        // it goes on when they finish (Claude Code), unless it reported.
+        let background = notes.iter().any(|n| matches!(n, Note::Event(harlo_core::Notable::Completed { background, .. }) if *background > 0));
+        if background && child.report.is_none() {
+            if let Some(c) = self.as_mut().rust_mut().orch_children.get_mut(key) {
+                c.status = "running".into();
+            }
+            return self.as_mut().bump_orchestration();
+        }
         let reply = notes.iter().find_map(|n| match n {
-            Note::Event(harlo_core::Notable::Completed { last_message }) => Some(last_message.clone()),
+            Note::Event(harlo_core::Notable::Completed { last_message, .. }) => Some(last_message.clone()),
             _ => None,
         });
         let error = notes.iter().find_map(|n| match n {
