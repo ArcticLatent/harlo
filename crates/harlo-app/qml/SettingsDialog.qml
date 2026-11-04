@@ -1831,12 +1831,22 @@ Popup {
             Group {
                 SettingRow {
                     title: "Put them on a Settled shelf"
-                    detail: "A worktree session goes on its project's Settled shelf (under its sessions in the sidebar) when its branch's pull request is merged or closed (GitHub, GitLab), or after a week without activity. Working in one brings it back; right-click → Put back does too. Pinned sessions stay. Off: every session comes back."
+                    detail: "A helper goes on its project's Settled shelf (under its sessions in the sidebar) once it's done, and a worktree session when its branch's pull request is merged or closed (GitHub, GitLab), or after a week without activity. Working in one brings it back; right-click → Put back does too. Pinned sessions stay. Off: every session comes back."
                     icon: "archive-stack"
                     AppSwitch {
                         objectName: "settleSessions"
                         checked: Workspace.setting("settle_sessions") !== "0"
                         onToggled: Workspace.setSettling(checked)
+                    }
+                }
+                SettingRow {
+                    title: "Archive them after 30 days"
+                    detail: "A session that's been on the Settled shelf for 30 days with no activity is archived (still searchable, and shown again with Show archived). Right-click the shelf to archive it all now."
+                    icon: "time"
+                    AppSwitch {
+                        objectName: "archiveSettled"
+                        checked: Workspace.setting("archive_settled") !== "0"
+                        onToggled: Workspace.setSetting("archive_settled", checked ? "1" : "0")
                     }
                 }
             }

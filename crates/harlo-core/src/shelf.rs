@@ -10,6 +10,15 @@ use serde_json::Value;
 
 /// A week of quiet, in seconds.
 pub const QUIET: i64 = 7 * 24 * 3600;
+/// How long a session stays on the shelf, untouched, before it's archived
+/// (when that's on): 30 days.
+pub const ARCHIVE_AFTER: i64 = 30 * 24 * 3600;
+
+/// Whether a settled session goes to the archive now: 30 days since it went
+/// on the shelf and since its last activity (unix seconds).
+pub fn archive_now(modified: i64, settled_at: i64, now: i64) -> bool {
+    now - modified.max(settled_at) >= ARCHIVE_AFTER
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReviewState {
@@ -89,6 +98,16 @@ pub fn glab_review(json: &str) -> Option<Review> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn settled_sessions_are_archived_after_30_days() {
+        let day = 24 * 3600;
+        let now = 100 * day;
+        assert!(!archive_now(now - 29 * day, now - 29 * day, now));
+        assert!(archive_now(now - 30 * day, now - 31 * day, now));
+        // (Settled later than its last activity: from when it settled.)
+        assert!(!archive_now(now - 40 * day, now - 10 * day, now));
+    }
     use super::*;
 
     const DAY: i64 = 24 * 3600;

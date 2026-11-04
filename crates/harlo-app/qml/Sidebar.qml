@@ -135,6 +135,14 @@ Rectangle {
         AppMenuItem { text: "Remove project…"; danger: true; onTriggered: removeProjectDialog.ask(projectMenu.projectId, projectMenu.name) }
     }
 
+    // A Settled shelf's.
+    AppMenu {
+        id: shelfMenu
+        property int projectId: -1
+        property int count: 0
+        AppMenuItem { objectName: "shelfArchiveAll"; text: "Archive all " + shelfMenu.count; onTriggered: Workspace.archiveShelf(shelfMenu.projectId) }
+    }
+
     AppMenu {
         id: sessionMenu
         property string key: ""
@@ -306,6 +314,7 @@ Rectangle {
                         required property string rowKey
                         required property bool collapsed
                         required property int count
+                        required property int projectId
                         objectName: "shelfRow-" + rowKey
                         width: ListView.view.width
                         height: 30
@@ -314,7 +323,7 @@ Rectangle {
                         rightInset: 6
                         hoverEnabled: true
                         ToolTip.visible: hovered
-                        ToolTip.text: "Worktree sessions whose pull request was merged or closed, or with no activity for a week. Working in one brings it back."
+                        ToolTip.text: "Finished helpers, and worktree sessions whose pull request was merged or closed or with no activity for a week. Working in one brings it back; after 30 days here they're archived (Settings → Worktrees). Right-click to archive them all now."
                         ToolTip.delay: 700
                         contentItem: RowLayout {
                             spacing: 6
@@ -324,6 +333,14 @@ Rectangle {
                         }
                         background: Rectangle { radius: 8; color: shelfRow.hovered ? Theme.hover : "transparent" }
                         onClicked: Workspace.toggleCollapsed(rowKey)
+                        TapHandler {
+                            acceptedButtons: Qt.RightButton
+                            onTapped: {
+                                shelfMenu.projectId = shelfRow.projectId
+                                shelfMenu.count = shelfRow.count
+                                shelfMenu.popup()
+                            }
+                        }
                     }
                 }
                 DelegateChoice {

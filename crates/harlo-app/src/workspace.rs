@@ -151,6 +151,9 @@ pub mod qobject {
         /// until there's newer work in it and a reason again).
         #[qinvokable]
         fn put_back(self: Pin<&mut Workspace>, key: &QString);
+        /// Archives everything on a project's Settled shelf.
+        #[qinvokable]
+        fn archive_shelf(self: Pin<&mut Workspace>, project_id: i32);
         /// A session's shared plan: `{ enabled, commits, steps: [{ id,
         /// title, detail, status, summary, commit, commitNote,
         /// editedByUser }] }` (`enabled`: the plan is on for its project).
@@ -2584,6 +2587,42 @@ impl Workspace {
         self.update_meta(&key.to_string(), |m| m.settled_why.clear());
     }
 
+    pub fn archive_shelf(mut self: Pin<&mut Self>, project_id: i32) {
+        let id = i64::from(project_id);
+        let Some(project) = self.projects.iter().find(|p| p.id == id).cloned().map(|mut p| { p.collapsed = false; p }) else { return };
+        let sessions: Vec<SessionInfo> = self.sessions.values().filter(|s| self.here(&s.path)).cloned().collect();
+        let live: Vec<LiveInfo> = self.live.values().map(|e| e.info.clone()).collect();
+        let rows = sidebar::build(&SidebarInput {
+            projects: std::slice::from_ref(&project),
+            worktrees: &self.worktrees,
+            sessions: &sessions,
+            live: &live,
+            meta: &self.meta,
+            filter: "",
+            show_archived: false,
+            other_collapsed: true,
+            expanded: &[id],
+            shelves_open: &[id],
+        });
+        // The rows after its shelf's.
+        let files: Vec<PathBuf> = rows
+            .iter()
+            .skip_while(|r| r.kind != SidebarKind::Shelf)
+            .skip(1)
+            .take_while(|r| r.kind == SidebarKind::Session)
+            .filter(|r| !r.settled.is_empty())
+            .filter_map(|r| self.file_for_key(&r.key))
+            .collect();
+        for file in files {
+            let mut meta = self.meta.get(&file).cloned().unwrap_or_default();
+            meta.archived = true;
+            let r = self.db().map(|db| db.set_session_meta(&file, &meta)).transpose();
+            self.as_mut().report(r);
+            self.as_mut().rust_mut().meta.insert(file, meta);
+        }
+        self.rebuild();
+    }
+
     /// What a session's project has on: `(cwd, specs, plan, commits)`
     /// (sessions in a harlo project only).
     fn features_of(&self, key: &str) -> Option<(PathBuf, bool, bool, bool)> {
@@ -2769,12 +2808,17 @@ impl Workspace {
         }
         let mut by_tree: Vec<Tree> = Vec::new();
         let mut back: Vec<PathBuf> = Vec::new();
+        // Settled for 30 days, untouched: archived (unless that's off).
+        let archive_old = self.setting_str("archive_settled") != "0";
+        let mut old: Vec<PathBuf> = Vec::new();
         for s in self.sessions.values() {
             let meta = self.meta.get(&s.path).cloned().unwrap_or_default();
             let modified = unix(s.modified);
             if !meta.settled_why.is_empty() {
                 if modified > meta.settled_at {
                     back.push(s.path.clone());
+                } else if archive_old && !meta.archived && !meta.pinned && !live.contains(&s.path) && harlo_core::shelf::archive_now(modified, meta.settled_at, now) {
+                    old.push(s.path.clone());
                 }
                 continue;
             }
@@ -2789,6 +2833,13 @@ impl Workspace {
                 Some(t) => t.sessions.push((s.path.clone(), modified)),
                 None => by_tree.push(Tree { path: w.path.clone(), branch: w.branch.clone(), sessions: vec![(s.path.clone(), modified)] }),
             }
+        }
+        for file in old {
+            let mut meta = self.meta.get(&file).cloned().unwrap_or_default();
+            meta.archived = true;
+            let r = self.db().map(|db| db.set_session_meta(&file, &meta)).transpose();
+            self.as_mut().report(r);
+            self.as_mut().rust_mut().meta.insert(file, meta);
         }
         for file in back {
             let mut meta = self.meta.get(&file).cloned().unwrap_or_default();
