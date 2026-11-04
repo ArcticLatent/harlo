@@ -134,7 +134,9 @@ Rectangle {
     // For `--selftest`: popups live outside the page item.
     function grabCompletion(path) { list.grabToImage(r => r.saveToFile(path)) }
 
-    implicitHeight: Math.min(Math.max(input.implicitHeight, 44), 240) + 48
+    // The text's height plus what's around it (the input's margins, the bar
+    // and its bottom margin): any less and the input scrolls, clipping a line.
+    implicitHeight: Math.min(Math.max(input.implicitHeight, 44), 240) + 16 + bar.height + bar.anchors.bottomMargin
     radius: 14
     color: Theme.raised
     border.color: input.activeFocus ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.6) : Theme.controlBorder
