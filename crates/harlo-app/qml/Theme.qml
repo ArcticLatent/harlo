@@ -238,8 +238,7 @@ QtObject {
             + "th{color:" + rgb(text) + ";}"
             // A code block inside a list or a quote (see `proseHtml`): a
             // shaded box, its lines wrapped to the column.
-            + "td.code pre{white-space:pre-wrap;font-family:'" + mono + "';margin-top:0px;margin-bottom:0px;line-height:125%;}"
-            + "table.code{border-style:none;}td.code{background-color:" + rgb(codeBg) + ";border-style:none;}"
+            + "table.code{border-style:none;}td.code{border-style:none;}"
             + "td.code code{color:" + rgb(foreground) + ";}"
             + "a.copy{color:" + rgb(muted) + ";text-decoration:none;}"
             + css("a", m.link) + css("code", m.inlineCode) + css("blockquote", m.blockquote)
@@ -251,17 +250,21 @@ QtObject {
 
     /// A reply's prose HTML for its text box: code blocks inside lists and
     /// quotes (Qt draws them as one unwrapped line, past the column) in a
-    /// shaded box that wraps.
-    /// Each box has a Copy link (`harlo-copy:<n>`, the n-th block: see
-    /// `proseCode`).
-    /// (`copied`: the block whose link says "Copied", -1 none.)
+    /// shaded box that wraps, with a Copy link (`harlo-copy:<n>`, the n-th
+    /// block: see `proseCode`; `copied`: the one that says "Copied", -1
+    /// none). (One paragraph, its lines joined with breaks: Qt shades a
+    /// table cell behind each paragraph alone, so a <pre>'s lines, or a
+    /// paragraph above it, leave gaps.)
     function proseHtml(html, copied) {
         if (html.indexOf("<pre>") < 0)
             return html
         let n = 0
-        return html.replace(/<pre><code([^>]*)>/g, (_, attrs) => '<table class="code" width="100%" cellspacing="0" cellpadding="8"><tr><td class="code">'
-                + '<p align="right" style="margin:0px;font-size:small;"><a class="copy" href="harlo-copy:' + n + '">' + (n++ === copied ? "Copied" : "Copy") + '</a></p><pre><code' + attrs + '>')
-            .replace(/\n?<\/code><\/pre>/g, "</code></pre></td></tr></table>")
+        return html.replace(/<pre><code[^>]*>([\s\S]*?)\n?<\/code><\/pre>/g, (_, code) => {
+            const link = '<a class="copy" href="harlo-copy:' + n + '"><span style="font-family:\'' + uiFont + '\';font-size:small;">' + (n++ === copied ? "Copied" : "Copy") + "</span></a>"
+            return '<table class="code" width="100%" cellspacing="0" cellpadding="0"><tr><td class="code" bgcolor="' + rgb(codeBg) + '">'
+                + '<p style="margin:6px 10px 10px 10px;white-space:pre-wrap;font-family:\'' + mono + '\';line-height:125%;">'
+                + link + "<br/><code>" + code.replace(/\n/g, "<br/>") + "</code></p></td></tr></table>"
+        })
     }
     /// The n-th code block of a reply's prose HTML, as plain text.
     function proseCode(html, n) {
