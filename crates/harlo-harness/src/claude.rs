@@ -304,9 +304,22 @@ pub fn session_from_text(path: &Path, size: u64, modified: SystemTime, head: &st
         name,
         first_message: first,
         created,
-        modified,
+        // (Not before the file's time: a clock that ran ahead.)
+        modified: last_activity(if tail.is_empty() { head } else { tail }).map_or(modified, |t| t.min(modified)),
         size,
         parent_session: None,
+    })
+}
+
+/// When the conversation last changed: its newest entry's time. Claude Code
+/// also writes lines with no time that aren't the conversation (its costs,
+/// as it quits; titles), which change the file's time.
+fn last_activity(text: &str) -> Option<SystemTime> {
+    text.lines().rev().filter(|l| l.contains(r#""timestamp":""#)).find_map(|l| {
+        let e = serde_json::from_str::<Value>(l).ok()?;
+        let t = chrono::DateTime::parse_from_rfc3339(e["timestamp"].as_str()?).ok()?;
+        let ms = u64::try_from(t.timestamp_millis()).ok()?;
+        Some(SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(ms))
     })
 }
 
@@ -873,6 +886,23 @@ mod tests {
         assert_eq!(reply["usage"]["output"], 40, "the reply's last say");
         assert_eq!(context_used(&saved.messages), 20_103);
         assert_eq!(context_used(&saved.messages[..1]), 0);
+    }
+
+    #[test]
+    fn quitting_isnt_activity() {
+        let head = [
+            r#"{"type":"user","cwd":"/p","timestamp":"2026-11-04T03:20:00.000Z","message":{"role":"user","content":"hi"}}"#,
+            r#"{"type":"assistant","timestamp":"2026-11-04T03:21:40.500Z","message":{"content":[{"type":"text","text":"hello"}]}}"#,
+            // (What Claude Code writes as it quits: no time.)
+            r#"{"type":"cost-state","sessionId":"s","totalCostUSD":0.1}"#,
+        ]
+        .join("\n");
+        let file_time = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_793_800_000);
+        let info = session_from_text(Path::new("/p/s.jsonl"), 0, file_time, &head, "").unwrap();
+        assert_eq!(info.modified, SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(1_793_762_500_500), "the reply's time, not the file's");
+        // No times at all: the file's.
+        let bare = r#"{"type":"user","cwd":"/p","message":{"role":"user","content":"hi"}}"#;
+        assert_eq!(session_from_text(Path::new("/p/s.jsonl"), 0, file_time, bare, "").unwrap().modified, file_time);
     }
 
     #[test]
