@@ -384,7 +384,7 @@ pub fn instructions(commits: bool) -> String {
     } else {
         "Finish one step before starting the next. Don't commit unless the user asks."
     };
-    format!("This project uses a shared plan, which you work through and the user edits. For a task of three or more real steps, write the plan first with plan_set (each step one verifiable piece of work, outcome-named), then for each step: plan_read (the user may have added, changed, reordered or skipped steps; their edits win), plan_start, do the work, plan_done with a one-line summary. {committing} Mark a step alongside when it doesn't need the step before it: the user can run the plan with helpers (a session per step), and alongside steps then run at the same time. For a small task, no plan is needed.")
+    format!("This project uses a shared plan, which you work through and the user edits. For a task of three or more real steps, write the plan first with plan_set (each step one verifiable piece of work, outcome-named), then for each step: plan_read (the user may have added, changed, reordered or skipped steps; their edits win), plan_start, do the work, plan_done with a one-line summary. {committing} Mark a step alongside when it can be done at the same time as the step before it: the user can run the plan with helpers (a session per step), and alongside steps then run at once, each without the others' work. A step marked alongside joins the whole group the step before it runs in, so mark it only when it needs none of that group's work (tests of code a step in the group writes, or a step using its files, can't be alongside). For a small task, no plan is needed.")
 }
 
 /// What a helper is asked for a step of a run (before the helper brief):
@@ -458,7 +458,7 @@ pub fn tools(commits: bool) -> Value {
                 "steps": { "type": "array", "items": { "type": "object", "properties": {
                     "title": { "type": "string", "description": "The step's outcome, short." },
                     "detail": { "type": "string", "description": "How, or what to watch for (optional)." },
-                    "alongside": { "type": "boolean", "description": "It can be done at the same time as the step before it (independent of it), when the plan runs with helpers (default false)." }
+                    "alongside": { "type": "boolean", "description": "It can be done at the same time as the step before it, when the plan runs with helpers: it joins the group that step runs in (steps marked alongside one after another run together), so only when it needs none of their work (default false)." }
                 }, "required": ["title"] } }
             }), &["steps"]),
         },
