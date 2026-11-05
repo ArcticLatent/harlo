@@ -161,12 +161,19 @@ Rectangle {
                                     wrapMode: Text.Wrap
                                 }
                                 Label {
+                                    id: stepText
                                     Layout.fillWidth: true
                                     visible: text !== ""
+                                    // (A helper's report can run long: two lines, a click for all.)
+                                    property bool full: false
                                     text: stepRow.modelData.summary || stepRow.modelData.detail || ""
                                     color: Theme.textFaint
                                     font.pixelSize: Theme.px(11.5)
                                     wrapMode: Text.Wrap
+                                    maximumLineCount: full ? 1000 : 2
+                                    elide: Text.ElideRight
+                                    HoverHandler { enabled: stepText.truncated || stepText.full; cursorShape: Qt.PointingHandCursor }
+                                    TapHandler { enabled: stepText.truncated || stepText.full; onTapped: stepText.full = !stepText.full }
                                 }
                                 // Its helper (a run), and the worktree it works in.
                                 RowLayout {

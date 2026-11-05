@@ -413,7 +413,7 @@ pub fn step_prompt(plan: &Plan, id: u32, merge: &[(String, String)], commit: boo
         text.push_str(&format!("\n\nEarlier steps were done on these branches: merge them into yours first (git merge), resolving any conflicts:\n{}", list.join("\n")));
     }
     text.push_str(if worktree {
-        "\n\nYou work in a worktree of your own, while other steps run at the same time. When the step works, commit it, with the step as the message."
+        "\n\nYou work in a worktree of your own (its own branch, apart from the user's checkout; other steps may run at the same time). When the step works, commit it there, with the step as the message: the steps after yours merge your branch."
     } else if commit {
         "\n\nWhen the step works, commit it, with the step as the message."
     } else {

@@ -6893,10 +6893,13 @@ impl Workspace {
             let skipped = plan.steps.iter().filter(|s| s.status == harlo_core::plan::Status::Skipped).count();
             let said = format!("{done} step{} done{}", if done == 1 { "" } else { "s" }, if skipped > 0 { format!(", {skipped} skipped") } else { String::new() });
             self.as_mut().tell_about_run(owner, "Plan finished", &said, false);
-            // Its agent sums it up.
+            // Its agent sums it up (the work on the last step's branch,
+            // when the steps ran in worktrees).
             if let Some(live) = registry::get(owner) {
                 let busy = self.live.get(owner).is_some_and(|e| e.info.status == SessionStatus::Busy);
-                let text = format!("[harlo] Your plan ran with helpers and has finished: {said}. Read each step's summary with plan_read, check the work fits together, and tell the user what was done and what's still open.");
+                let last = plan.steps.iter().rev().find(|s| s.status == harlo_core::plan::Status::Done).map(|s| s.branch.clone()).unwrap_or_default();
+                let branch = if last.is_empty() { String::new() } else { format!(" The steps' work is together on branch {last} (each step merged the ones before), not in your checkout yet: tell the user, and merge it only when they say so.") };
+                let text = format!("[harlo] Your plan ran with helpers and has finished: {said}.{branch} Read each step's summary with plan_read, check the work fits together, and tell the user what was done and what's still open.");
                 live.handle.prompt(&text, Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });
             }
             return;
@@ -6914,13 +6917,15 @@ impl Workspace {
         let project = self.projects.iter().filter(|p| cwd.starts_with(&p.path)).max_by_key(|p| p.path.components().count()).cloned();
         let tree = self.worktrees.iter().filter(|w| !w.removed && cwd.starts_with(&w.path)).max_by_key(|w| w.path.components().count()).cloned();
         let project = project.or_else(|| tree.as_ref().and_then(|t| self.projects.iter().find(|p| p.id == t.project_id).cloned()));
-        let together = stage.len() > 1 && project.is_some();
+        let merge = plan.branches_before(&stage);
+        // In worktrees: steps at the same time, and every step after one
+        // (it merges theirs: never into your checkout).
+        let together = (stage.len() > 1 || !merge.is_empty()) && project.is_some();
         // (Without a project's worktrees: one at a time.)
         let ready: Vec<u32> = if together { ready } else { ready.into_iter().take(1).collect() };
         if !together && plan.steps.iter().any(|s| stage.contains(&s.id) && s.status == harlo_core::plan::Status::Active) {
             return;
         }
-        let merge = plan.branches_before(&stage);
         let owner_title = self.title_of(owner);
         let tools = self.has_harlo_tools(run.agent, &cwd);
         let approval = self.approval_of(owner).filter(|_| has_shield(run.agent.as_str(), &cwd));
