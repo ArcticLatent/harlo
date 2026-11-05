@@ -26,6 +26,8 @@ Popup {
                      about: "Two agents (best from different families) each find the root cause, then argue until they agree on a plan. It doesn't edit anything." },
         split: { title: "Split into helpers", icon: "node-tree", button: "Split",
                  about: "This session splits the task into parts that can be done at the same time, starts a helper for each, then checks and combines their work." },
+        run: { title: "Run the plan with helpers", icon: "node-tree", button: "Run",
+               about: "Each step goes to a helper session with this agent and model, for this run only (the project's Team settings choose the usual ones)." },
     })
     readonly property var current: actions[action]
 
@@ -72,6 +74,15 @@ Popup {
         action = which
         const mine = agentIds.indexOf(session.harness) >= 0 ? session.harness : (agentIds[0] || "")
         memberA.pick(which === "advisor" ? other(mine) : mine)
+        // Helpers: the team's (or as this session) to start from.
+        if (which === "split" || which === "run") {
+            const h = JSON.parse(Workspace.helpersJson(session.key))
+            if (h.agent && agentIds.indexOf(h.agent) >= 0) {
+                memberA.pick(h.agent)
+                memberA.model = h.model || ""
+                memberA.sync()
+            }
+        }
         memberB.pick(other(memberA.agent))
         note.text = draft
         // (Helpers editing at once: apart, each on its own branch.)
@@ -86,6 +97,12 @@ Popup {
     }
 
     function start() {
+        if (action === "run") {
+            const err = Workspace.runPlan(session.key, memberA.agent, memberA.model)
+            if (err !== "") Workspace.showNotice(err, true)
+            close()
+            return
+        }
         const members = [memberA.chosen()]
         if (action === "committee") members.push(memberB.chosen())
         const text = Workspace.delegatePrompt(JSON.stringify({ action: action, members: members, note: note.text, worktree: worktree.checked }))
@@ -159,7 +176,7 @@ Popup {
             font.pixelSize: Theme.px(12)
             wrapMode: Text.Wrap
         }
-        MemberRow { id: memberA; label: root.action === "committee" ? "Member 1" : root.action === "handoff" ? "To" : root.action === "split" ? "Helpers" : "Ask" }
+        MemberRow { id: memberA; label: root.action === "committee" ? "Member 1" : root.action === "handoff" ? "To" : root.action === "split" || root.action === "run" ? "Helpers" : "Ask" }
         MemberRow { id: memberB; label: "Member 2"; visible: root.action === "committee" }
         Label {
             visible: root.action === "committee" && memberA.agent === memberB.agent && root.agentIds.length > 1
@@ -170,6 +187,7 @@ Popup {
         TextArea {
             id: note
             objectName: "delegateNote"
+            visible: root.action !== "run"
             Layout.fillWidth: true
             Layout.preferredHeight: Math.min(Math.max(implicitHeight, 60), 140)
             placeholderText: root.action === "handoff" ? "Anything to add for the new agent (optional)"
@@ -223,7 +241,7 @@ Popup {
             spacing: 8
             Label {
                 Layout.fillWidth: true
-                text: "Ctrl+Enter"
+                text: root.action === "run" ? "" : "Ctrl+Enter"
                 color: Theme.muted
                 font.pixelSize: Theme.px(11)
             }

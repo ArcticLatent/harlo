@@ -2395,6 +2395,88 @@ Popup {
                         }
                     }
                 }
+                // Who the agents' helpers are (a plan's run, a split).
+                SectionHeader {
+                    visible: proj.p !== null && Workspace.orchestrationOn
+                    Layout.topMargin: 22
+                    title: "Team"
+                    subtitle: "Who does the work when a plan runs with helpers or an agent splits a task, so you can plan with one model and have another do the steps. You can still choose others for one run."
+                }
+                Group {
+                    id: team
+                    visible: proj.p !== null && Workspace.orchestrationOn
+                    readonly property int pid: proj.p ? proj.p.id : -1
+                    property int rev: 0
+                    // { agent, model, thinking } ({}: the same as the session).
+                    readonly property var value: {
+                        if (rev < 0 || pid < 0) return ({})
+                        try { return JSON.parse(Workspace.setting("team_helpers_" + pid) || "{}") } catch (e) { return ({}) }
+                    }
+                    readonly property var providers: Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()).filter(p => p.canChat && p.enabled && p.state !== "missing") : []
+                    readonly property var provider: providers.find(p => p.id === value.agent) || null
+                    readonly property var levels: ["", "low", "medium", "high"]
+                    function save(v) { Workspace.setSetting("team_helpers_" + pid, v.agent ? JSON.stringify(v) : ""); rev++ }
+                    function change(k, x) { const v = Object.assign({}, value); v[k] = x; save(v) }
+                    onVisibleChanged: if (visible) Workspace.ensureProviders()
+                    SettingRow {
+                        title: "Helpers"
+                        detail: team.provider ? "Helpers are " + team.provider.label + " sessions, with the model and thinking below."
+                                              : "The same as the session that starts them: its agent, model and thinking."
+                        icon: "node-tree"
+                        ComboField {
+                            id: teamAgent
+                            objectName: "teamAgent"
+                            width: 190
+                            model: ["Same as the session"].concat(team.providers.map(p => p.label))
+                            function at() { return team.provider ? team.providers.indexOf(team.provider) + 1 : 0 }
+                            currentIndex: at()
+                            onModelChanged: currentIndex = Qt.binding(() => at())
+                            onActivated: i => {
+                                team.save(i === 0 ? {} : { agent: team.providers[i - 1].id, model: "", thinking: "" })
+                                currentIndex = Qt.binding(() => at())
+                            }
+                        }
+                    }
+                    SettingRow {
+                        visible: team.provider !== null
+                        divider: true
+                        title: "Their model"
+                        detail: team.provider && team.provider.state === "checking" ? "Finding " + team.provider.label + "'s models…" : ""
+                        icon: "sparkling"
+                        ComboField {
+                            id: teamModel
+                            objectName: "teamModel"
+                            width: 190
+                            readonly property var ids: team.provider ? team.provider.modelIds || [] : []
+                            model: ["Default model"].concat(team.provider ? (team.provider.models || []).map(m => Theme.modelLabel(m)) : [])
+                            function at() { return !team.value.model ? 0 : ids.indexOf(team.value.model) + 1 }
+                            currentIndex: at()
+                            onModelChanged: currentIndex = Qt.binding(() => at())
+                            onActivated: i => {
+                                team.change("model", i > 0 ? ids[i - 1] || "" : "")
+                                currentIndex = Qt.binding(() => at())
+                            }
+                        }
+                    }
+                    SettingRow {
+                        visible: team.provider !== null
+                        divider: true
+                        title: "Their thinking"
+                        detail: "How hard they think: more is slower and costs more."
+                        icon: "speed"
+                        ComboField {
+                            objectName: "teamThinking"
+                            width: 190
+                            model: ["Default", "Low", "Medium", "High"]
+                            function at() { return Math.max(0, team.levels.indexOf(team.value.thinking || "")) }
+                            currentIndex: at()
+                            onActivated: i => {
+                                team.change("thinking", team.levels[i])
+                                currentIndex = Qt.binding(() => at())
+                            }
+                        }
+                    }
+                }
                 Rule { }
 
                 RowLayout {

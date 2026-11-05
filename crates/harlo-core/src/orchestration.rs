@@ -84,6 +84,7 @@ pub fn tools(starting: Starting) -> Value {
                 "prompt": { "type": "string", "description": "The first message: the task, its context, the relevant files, what's done and what's left." },
                 "title": { "type": "string", "description": "A short name for the session." },
                 "model": { "type": "string", "description": "provider/model, if not the agent's default." },
+                "thinking": { "type": "string", "description": "Its thinking level (low, medium, high), if not the agent's default." },
                 "folder": { "type": "string", "description": "Where it works (default: your folder)." },
                 "worktree": { "type": "string", "description": "A new git worktree on this branch name to work in (isolated from your checkout)." },
                 "notify": { "type": "boolean", "description": "Send its report back to you when it finishes, and its questions (default true). False: it's on its own (a handoff)." }
@@ -133,7 +134,7 @@ pub fn tools(starting: Starting) -> Value {
                     "items": s(json!({
                         "title": { "type": "string", "description": "A short name for the part." },
                         "prompt": { "type": "string", "description": "Its first message, a self-contained briefing (it has none of your context): the part, the relevant files, what \"done\" looks like, what not to touch." },
-                        "agent": { "type": "string", "description": "claude, opencode, pi or omp (default: yours)." },
+                        "agent": { "type": "string", "description": "claude, opencode, pi or omp. Leave it (and model) out for the project's usual helpers (the user's choice), unless a part needs another agent or model." },
                         "model": { "type": "string", "description": "provider/model, if not the agent's default." },
                         "worktree": { "type": "string", "description": "A new git worktree on this branch name to work in (for parts that edit files)." }
                     }), &["title", "prompt"])

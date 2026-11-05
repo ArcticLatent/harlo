@@ -12,6 +12,14 @@ import harlo
 Rectangle {
     id: root
     property ChatSession session
+    /// Run with helpers, but other ones than the team's (this run only).
+    signal chooseHelpers()
+    // Who the helpers are (read as the menu opens): the team's, else as
+    // the session.
+    property var helpers: ({})
+    readonly property string helpersLabel: !helpers.agent ? "" : helpers.agentName
+        + (helpers.model ? " · " + Theme.modelLabel(helpers.model.split("/").pop()) : "")
+        + (helpers.thinking ? " · " + helpers.thinking + " thinking" : "")
     readonly property var plan: session && session.key !== "" && Workspace.plansRevision >= 0 ? JSON.parse(Workspace.planJson(session.key)) : ({ enabled: false, steps: [] })
     readonly property var steps: plan.steps || []
     readonly property int finished: steps.filter(s => s.status === "done" || s.status === "skipped").length
@@ -332,22 +340,30 @@ Rectangle {
                 accent: Theme.primary
                 padding: 3
                 font.pixelSize: Theme.px(11.5)
-                onClicked: runMenu.popup()
+                onClicked: {
+                    root.helpers = JSON.parse(Workspace.helpersJson(root.session.key))
+                    runMenu.popup()
+                }
                 ToolTip.visible: hovered
                 ToolTip.text: "harlo gives each step to a helper session: in order, and steps marked to run with the one before at the same time, each in a worktree."
                 ToolTip.delay: 500
                 AppMenu {
                     id: runMenu
-                    Repeater {
-                        model: root.reviewers.slice().sort((a, b) => (b.id === root.session.harness) - (a.id === root.session.harness))
-                        AppMenuItem {
-                            required property var modelData
-                            text: "Helpers: " + modelData.label + (modelData.id === root.session.harness ? " (this session's)" : "")
-                            onTriggered: {
-                                const err = Workspace.runPlan(root.session.key, modelData.id, "")
-                                if (err !== "") Workspace.showNotice(err, true)
-                            }
+                    AppMenuItem {
+                        objectName: "planRunTeam"
+                        text: "Helpers: " + root.helpersLabel
+                        hint: root.helpers.team ? "the team" : "as this session"
+                        onTriggered: {
+                            const err = Workspace.runPlan(root.session.key, "", "")
+                            if (err !== "") Workspace.showNotice(err, true)
                         }
+                    }
+                    AppMenuSeparator { }
+                    AppMenuItem {
+                        objectName: "planRunOther"
+                        text: "Other agent or model…"
+                        hint: "this run"
+                        onTriggered: root.chooseHelpers()
                     }
                 }
             }

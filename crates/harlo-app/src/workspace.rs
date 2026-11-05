@@ -170,10 +170,15 @@ pub mod qobject {
         /// `{ op: "clear" }`.
         #[qinvokable]
         fn plan_edit(self: Pin<&mut Workspace>, key: &QString, op: &QString);
-        /// Runs a session's plan with helpers (`agent` "": its own; `model`
-        /// "": the default), or goes on with a paused run; the problem, if any.
+        /// Runs a session's plan with helpers (`agent` "": its team's, else as
+        /// the session; `model` "": the agent's default), or goes on with a
+        /// paused run; the problem, if any.
         #[qinvokable]
         fn run_plan(self: Pin<&mut Workspace>, key: &QString, agent: &QString, model: &QString) -> QString;
+        /// Who a session's helpers are (its project's team, else the same as
+        /// it): `{ agent, agentName, model, thinking, team }`, or {}.
+        #[qinvokable]
+        fn helpers_json(self: &Workspace, key: &QString) -> QString;
         /// Stops a plan's run (helpers at work go on).
         #[qinvokable]
         fn stop_plan_run(self: Pin<&mut Workspace>, key: &QString);
@@ -812,6 +817,8 @@ struct LiveEntry {
     /// The session's model (for notifications) and its `provider/id`.
     model: String,
     model_id: String,
+    /// Its thinking level ("" its default, or not known).
+    thinking: String,
     /// omp goal status ("" when there is no goal).
     goal_status: String,
 }
@@ -1978,7 +1985,7 @@ impl Workspace {
             unread: false,
             started_at: SystemTime::now(),
         };
-        self.as_mut().rust_mut().live.insert(key.clone(), LiveEntry { info, sub, requests: Vec::new(), model: String::new(), model_id: String::new(), goal_status: String::new() });
+        self.as_mut().rust_mut().live.insert(key.clone(), LiveEntry { info, sub, requests: Vec::new(), model: String::new(), model_id: String::new(), thinking: String::new(), goal_status: String::new() });
         key
     }
 
@@ -2638,14 +2645,7 @@ impl Workspace {
     /// What a session's project has on: `(cwd, specs, plan, commits)`
     /// (sessions in a harlo project only).
     fn features_of(&self, key: &str) -> Option<(PathBuf, bool, bool, bool)> {
-        let cwd = self.live.get(key).map(|e| e.info.cwd.clone()).or_else(|| self.sessions.get(Path::new(key)).map(|s| s.cwd.clone()))?;
-        let project = self
-            .worktrees
-            .iter()
-            .filter(|w| cwd.starts_with(&w.path))
-            .max_by_key(|w| w.path.components().count())
-            .map(|w| w.project_id)
-            .or_else(|| self.projects.iter().filter(|p| cwd.starts_with(&p.path)).max_by_key(|p| p.path.components().count()).map(|p| p.id))?;
+        let (cwd, project) = self.project_of(key)?;
         let on = |k: &str| self.setting_str(&format!("{k}_{project}")) == "1";
         Some((cwd, on("specs"), self.plan_on(project as i32), self.plan_commits_on(project as i32)))
     }
@@ -2658,6 +2658,62 @@ impl Workspace {
             "1" => true,
             "0" => false,
             _ => self.setting_str(&format!("plan_{project_id}")) == "1",
+        }
+    }
+
+    /// A session's folder, and the project it's in (its worktree's).
+    fn project_of(&self, key: &str) -> Option<(PathBuf, i64)> {
+        let cwd = self.live.get(key).map(|e| e.info.cwd.clone()).or_else(|| self.sessions.get(Path::new(key)).map(|s| s.cwd.clone()))?;
+        let project = self
+            .worktrees
+            .iter()
+            .filter(|w| cwd.starts_with(&w.path))
+            .max_by_key(|w| w.path.components().count())
+            .map(|w| w.project_id)
+            .or_else(|| self.projects.iter().filter(|p| cwd.starts_with(&p.path)).max_by_key(|p| p.path.components().count()).map(|p| p.id))?;
+        Some((cwd, project))
+    }
+
+    /// Who a session's helpers are: its project's team (Settings →
+    /// Projects), else the same as the session (its agent, model and
+    /// thinking).
+    fn helpers_for(&self, key: &str) -> Option<HelperSetup> {
+        let team = self.project_of(key).and_then(|(_, p)| {
+            let v: serde_json::Value = serde_json::from_str(&self.setting_str(&format!("team_helpers_{p}"))).ok()?;
+            let agent = HarnessKind::parse(v["agent"].as_str()?).filter(|k| self.usable_harness(*k))?;
+            let s = |k: &str| v[k].as_str().unwrap_or_default().trim().to_owned();
+            Some(HelperSetup { agent, model: s("model"), thinking: s("thinking"), team: true })
+        });
+        team.or_else(|| {
+            let e = self.live.get(key)?;
+            let agent = HarnessKind::parse(&e.info.harness)?;
+            let thinking = self.modes.get(key).and_then(|m| m.thinking.clone()).unwrap_or_else(|| e.thinking.clone());
+            Some(HelperSetup { agent, model: e.model_id.clone(), thinking, team: false })
+        })
+    }
+
+    /// A session's helpers (`helpers_for`), for the plan's run menu and the
+    /// Delegate menu: `{ agent, agentName, model, thinking, team }`, or {}.
+    pub fn helpers_json(&self, key: &QString) -> QString {
+        let v = self.helpers_for(&key.to_string()).map_or(json!({}), |h| {
+            json!({ "agent": h.agent.as_str(), "agentName": h.agent.label(), "model": h.model, "thinking": h.thinking, "team": h.team })
+        });
+        QString::from(&v.to_string())
+    }
+
+    /// Sets a session's thinking level ("": leaves it).
+    fn apply_thinking(mut self: Pin<&mut Self>, key: &str, level: &str) {
+        let level = level.trim();
+        if level.is_empty() {
+            return;
+        }
+        if let Some(live) = registry::get(key) {
+            live.handle.send_raw(json!({ "type": "set_thinking_level", "level": level }));
+        }
+        // (Claude's session file doesn't say: as if set by hand.)
+        if self.live.get(key).is_some_and(|e| e.info.harness == "claude") {
+            self.as_mut().rust_mut().modes.entry(key.to_owned()).or_default().thinking = Some(level.to_owned());
+            self.as_mut().modes_changed(key);
         }
     }
 
@@ -3193,7 +3249,7 @@ impl Workspace {
     }
 
     fn create_worktree_session(mut self: Pin<&mut Self>, project_id: i32, branch: &QString, base: &QString, harness: &QString, opts: WorktreeStart) {
-        let WorktreeStart { first, model, lane, parent, approval, plan_step } = opts;
+        let WorktreeStart { first, model, thinking, lane, parent, approval, plan_step } = opts;
         let step_of = parent.as_ref().map(|(p, ..)| p.clone()).zip(plan_step);
         let Some((project, root)) = self.project_root(project_id) else {
             self.as_mut().set_notice_text("This project is not a git repository.", true);
@@ -3259,6 +3315,7 @@ impl Workspace {
                     if let Some(mode) = approval {
                         this.as_mut().set_approval_mode(&QString::from(&key), &QString::from(&mode));
                     }
+                    this.as_mut().apply_thinking(&key, &thinking);
                     if let Some(first) = first {
                         send_first_prompt(&key, first, Some(this.qt_thread()));
                     }
@@ -4658,7 +4715,7 @@ impl Workspace {
                     &QString::from(&branch),
                     &QString::from(&base),
                     &QString::from(harness),
-                    WorktreeStart { first: Some(first.clone()), model: model.clone(), lane: Some(lane_ref), parent: None, approval: None, plan_step: None },
+                    WorktreeStart { first: Some(first.clone()), model: model.clone(), lane: Some(lane_ref), ..Default::default() },
                 );
             } else {
                 record.lanes.push(RunLane { idx: idx as i64, harness: harness.clone(), model: model.clone(), cwd: cwd.clone(), branch: String::new(), session_file: PathBuf::new() });
@@ -5367,6 +5424,7 @@ impl Workspace {
                     entry.info.first_message = m.first_message;
                     entry.model = m.model;
                     entry.model_id = m.model_id.clone();
+                    entry.thinking = m.thinking;
                     model_id = Some(m.model_id);
                 }
                 SessionUpdate::UiRequest(r) => {
@@ -6034,6 +6092,8 @@ impl Workspace {
 struct WorktreeStart {
     first: Option<FirstPrompt>,
     model: String,
+    /// Its thinking level ("" the agent's default).
+    thinking: String,
     lane: Option<(String, i64)>,
     /// Started by an agent (orchestration): its session, the title, notify.
     parent: Option<(String, String, bool)>,
@@ -6043,12 +6103,25 @@ struct WorktreeStart {
     plan_step: Option<u32>,
 }
 
+/// Who helpers are (an agent's, or a plan's run): Settings → Projects → Team.
+#[derive(Clone, Debug)]
+struct HelperSetup {
+    agent: HarnessKind,
+    /// "" the agent's default.
+    model: String,
+    thinking: String,
+    /// The project's team (else the same as the session).
+    team: bool,
+}
+
 /// A session's plan running with helpers: harlo hands each stage's steps
 /// to helper sessions (`harlo_core::plan::Plan::stages`).
 #[derive(Clone)]
 struct PlanRun {
     agent: HarnessKind,
     model: String,
+    /// The helpers' thinking level ("" their default).
+    thinking: String,
     /// Why it stopped handing out steps ("" while it runs).
     paused: String,
     /// The session's file when it started (its plan's, should it close).
@@ -6475,6 +6548,7 @@ impl Workspace {
                 let title = { let t = text("title"); if t.is_empty() { prompt.lines().next().unwrap_or_default().chars().take(60).collect() } else { t } };
                 let notify = args["notify"].as_bool().unwrap_or(true) && caller.is_some();
                 let model = text("model");
+                let thinking = text("thinking");
                 let parent = caller.clone().unwrap_or_default();
                 // A helper works as its parent may: the same permission mode.
                 let approval = caller.as_deref().and_then(|c| self.approval_of(c)).filter(|_| has_shield(kind.as_str(), &cwd));
@@ -6493,7 +6567,7 @@ impl Workspace {
                         &QString::from(&branch),
                         &QString::default(),
                         &QString::from(kind.as_str()),
-                        WorktreeStart { first: Some(first), model, lane: None, parent: caller.as_ref().map(|_| (parent, title.clone(), notify)), approval, plan_step: None },
+                        WorktreeStart { first: Some(first), model, thinking: thinking.clone(), lane: None, parent: caller.as_ref().map(|_| (parent, title.clone(), notify)), approval, plan_step: None },
                     );
                     return Ok(json!({ "status": "creating the worktree; the session starts in it shortly (see list_sessions)", "branch": branch, "title": title }));
                 }
@@ -6508,6 +6582,7 @@ impl Workspace {
                 if let Some(mode) = &approval {
                     self.as_mut().set_approval_mode(&QString::from(&key), &QString::from(mode));
                 }
+                self.as_mut().apply_thinking(&key, &thinking);
                 send_first_prompt(&key, FirstPrompt { text: prompt, ..Default::default() }, Some(self.qt_thread()));
                 Ok(json!({ "session": key, "title": title, "agent": kind.as_str(), "folder": cwd.to_string_lossy(), "notify": notify }))
             }
@@ -6581,11 +6656,22 @@ impl Workspace {
                     return Err(format!("Helpers go {MAX_HELPER_DEPTH} deep at most, and you're that deep: do this yourself."));
                 }
                 let (why, helpers) = harlo_core::orchestration::parse_proposal(args)?;
-                let own = self.live.get(&caller).map(|e| e.info.harness.clone()).unwrap_or_default();
+                // (Unnamed: the team's helpers, else as the caller.)
+                let team = self.helpers_for(&caller);
                 let mut lines = Vec::new();
                 let mut starts = Vec::new();
-                for h in helpers {
-                    let agent = if h.agent.is_empty() { own.clone() } else { h.agent.clone() };
+                for mut h in helpers {
+                    let mut thinking = String::new();
+                    if h.agent.is_empty()
+                        && let Some(t) = &team
+                    {
+                        h.agent = t.agent.as_str().to_owned();
+                        if h.model.is_empty() {
+                            h.model = t.model.clone();
+                        }
+                        thinking = t.thinking.clone();
+                    }
+                    let agent = h.agent.clone();
                     let Some(kind) = HarnessKind::parse(&agent).filter(|k| *k != HarnessKind::Demo || agent == "demo") else {
                         return Err(format!("Unknown agent \"{agent}\" for \"{}\": use claude, opencode, pi or omp (list_agents).", h.title));
                     };
@@ -6593,7 +6679,7 @@ impl Workspace {
                         return Err(format!("{} is turned off in harlo (Settings → Providers): pick another agent for \"{}\".", kind.label(), h.title));
                     }
                     lines.push((h.title.clone(), kind.label().to_owned(), h.model.clone(), h.worktree.clone()));
-                    starts.push(json!({ "agent": kind.as_str(), "prompt": h.prompt, "title": h.title, "model": h.model, "worktree": h.worktree }));
+                    starts.push(json!({ "agent": kind.as_str(), "prompt": h.prompt, "title": h.title, "model": h.model, "thinking": thinking, "worktree": h.worktree }));
                 }
                 let options = harlo_core::orchestration::PROPOSAL_OPTIONS.iter().map(|o| o.to_string()).collect();
                 let id = live.handle.open_gate(harlo_core::orchestration::PROPOSAL_TITLE, &harlo_core::orchestration::proposal_question(&why, &lines), options);
@@ -6841,17 +6927,21 @@ impl Workspace {
     pub fn run_plan(mut self: Pin<&mut Self>, key: &QString, agent: &QString, model: &QString) -> QString {
         let key = key.to_string();
         let Some(entry) = self.live.get(&key) else { return QString::from("Open the session first: its plan runs from it.") };
-        let own = HarnessKind::parse(&entry.info.harness);
-        let kind = match agent.to_string().trim() {
-            "" => own,
-            a => HarnessKind::parse(a),
+        let status = entry.info.status;
+        // The team's helpers, or (this run) another agent and model.
+        let (kind, model, thinking) = match agent.to_string().trim() {
+            "" => match self.helpers_for(&key) {
+                Some(h) => (Some(h.agent), h.model, h.thinking),
+                None => (None, String::new(), String::new()),
+            },
+            a => (HarnessKind::parse(a), model.to_string().trim().to_owned(), String::new()),
         };
         let Some(kind) = kind.filter(|k| self.usable_harness(*k)) else { return QString::from("That agent isn't available.") };
         if !self.features_of(&key).is_some_and(|(_, _, plan, _)| plan) {
             return QString::from("The shared plan is off for this session's project (its settings).");
         }
         // Not with the agent at work on it too.
-        if matches!(entry.info.status, SessionStatus::Busy | SessionStatus::Starting) {
+        if matches!(status, SessionStatus::Busy | SessionStatus::Starting) {
             return QString::from("The agent is working: run the plan with helpers once it stops (or stop it first).");
         }
         let file = self.file_for_key(&key);
@@ -6865,7 +6955,7 @@ impl Workspace {
         if plan.current_stage().is_none() {
             return QString::from("Every step of the plan has finished.");
         }
-        self.as_mut().rust_mut().plan_runs.insert(key.clone(), PlanRun { agent: kind, model: model.to_string().trim().to_owned(), paused: String::new(), file, retried: HashSet::new() });
+        self.as_mut().rust_mut().plan_runs.insert(key.clone(), PlanRun { agent: kind, model, thinking, paused: String::new(), file, retried: HashSet::new() });
         self.as_mut().plans_changed();
         self.as_mut().advance_plan(&key);
         QString::default()
@@ -6949,7 +7039,7 @@ impl Workspace {
                     &QString::from(&branch),
                     &QString::from(&base),
                     &QString::from(run.agent.as_str()),
-                    WorktreeStart { first: Some(first), model: run.model.clone(), lane: None, parent: Some((owner.to_owned(), title.clone(), true)), approval: approval.clone(), plan_step: Some(id) },
+                    WorktreeStart { first: Some(first), model: run.model.clone(), thinking: run.thinking.clone(), lane: None, parent: Some((owner.to_owned(), title.clone(), true)), approval: approval.clone(), plan_step: Some(id) },
                 );
                 continue;
             }
@@ -6961,6 +7051,7 @@ impl Workspace {
             if let Some(mode) = &approval {
                 self.as_mut().set_approval_mode(&QString::from(&key), &QString::from(mode));
             }
+            self.as_mut().apply_thinking(&key, &run.thinking);
             send_first_prompt(&key, FirstPrompt { text: prompt, ..Default::default() }, Some(self.qt_thread()));
         }
         self.as_mut().plans_changed();
