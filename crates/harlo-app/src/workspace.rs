@@ -7047,6 +7047,9 @@ impl Workspace {
     /// problem, if any.
     pub fn run_plan(mut self: Pin<&mut Self>, key: &QString, agent: &QString, model: &QString) -> QString {
         let key = key.to_string();
+        if !self.orchestration_on {
+            return QString::from("Running a plan with helpers needs orchestration (Settings → Orchestration).");
+        }
         let Some(entry) = self.live.get(&key) else { return QString::from("Open the session first: its plan runs from it.") };
         let status = entry.info.status;
         // The team's helpers, or (this run) another agent and model.

@@ -333,7 +333,8 @@ Rectangle {
             // Each step to a helper session, stage by stage.
             FlatButton {
                 objectName: "planRun"
-                visible: (!root.run || root.paused) && root.finished < root.steps.length
+                // (Helpers are sessions harlo starts: orchestration's.)
+                visible: Workspace.orchestrationOn && (!root.run || root.paused) && root.finished < root.steps.length
                 text: root.paused ? "Run again" : "Run with helpers"
                 // (Not while the agent works through it itself: two at once.)
                 enabled: !root.agentBusy
