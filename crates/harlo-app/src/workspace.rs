@@ -5572,8 +5572,9 @@ impl Workspace {
         }
         for note in &notes {
             if let Note::Question(what, request) = note {
-                let what = harlo_core::orchestration::waiting_what(request["title"].as_str().unwrap_or_default(), what, request["approval"] == true);
-                self.as_mut().child_waiting(key, &what);
+                let approval = request["approval"] == true;
+                let what = harlo_core::orchestration::waiting_what(request["title"].as_str().unwrap_or_default(), what, approval);
+                self.as_mut().child_waiting(key, &what, approval);
             }
         }
         if answered {
@@ -6575,12 +6576,19 @@ impl Workspace {
                 let approval = caller.as_deref().and_then(|c| self.approval_of(c)).filter(|_| has_shield(kind.as_str(), &cwd));
                 // A helper: told what it is and how its result goes back.
                 let code = helper_code(kind);
+                let branch = text("worktree");
+                // (The closest: a project can be inside another's folder.)
+                let project = self.projects.iter().filter(|p| cwd.starts_with(&p.path)).max_by_key(|p| p.path.components().count()).cloned();
+                // In a worktree: told where it works (its task names the
+                // checkout's paths).
+                let prompt = match (&project, branch.is_empty()) {
+                    (Some(p), false) => format!("{prompt}{}", harlo_core::orchestration::worktree_note(&branch, &p.path.to_string_lossy())),
+                    _ => prompt,
+                };
                 let prompt = if notify { harlo_core::orchestration::helper_brief(&self.title_of(&parent), &prompt, self.has_harlo_tools(kind, &cwd), &code) } else { prompt };
                 // In a new worktree: made in the background; it shows when ready.
-                let branch = text("worktree");
                 if !branch.is_empty() {
-                    // (The closest: a project can be inside another's folder.)
-                    let Some(project) = self.projects.iter().filter(|p| cwd.starts_with(&p.path)).max_by_key(|p| p.path.components().count()).cloned() else {
+                    let Some(project) = project else {
                         return Err("Worktrees are for a project's folder (that one isn't a harlo project).".into());
                     };
                     let first = FirstPrompt { text: prompt, ..Default::default() };
@@ -6864,7 +6872,7 @@ impl Workspace {
 
     /// A started session waits for the user (an approval, its question):
     /// its parent is told (once a run: approvals come one after another).
-    fn child_waiting(mut self: Pin<&mut Self>, key: &str, what: &str) {
+    fn child_waiting(mut self: Pin<&mut Self>, key: &str, what: &str, approval: bool) {
         let Some(child) = self.orch_children.get(key).cloned() else { return };
         if let Some(c) = self.as_mut().rust_mut().orch_children.get_mut(key) {
             c.status = "waiting".into();
@@ -6872,7 +6880,9 @@ impl Workspace {
         }
         self.as_mut().bump_orchestration();
         // (A plan's step: you're told, as for any session; the run waits.)
-        let Some(parent) = registry::get(&child.parent).filter(|_| child.notify && !child.told_waiting && child.plan_step.is_none()) else { return };
+        // (A tool's approval: yours alone, and you're notified; the parent
+        // isn't woken just to say so.)
+        let Some(parent) = registry::get(&child.parent).filter(|_| child.notify && !child.told_waiting && child.plan_step.is_none() && !approval) else { return };
         let message = harlo_core::orchestration::waiting_message(agent_label(&child.agent), &child.title, key, what);
         let busy = self.live.get(&child.parent).is_some_and(|e| e.info.status == SessionStatus::Busy);
         parent.handle.prompt(&message, Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });

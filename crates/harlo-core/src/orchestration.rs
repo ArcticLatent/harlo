@@ -295,6 +295,14 @@ pub fn helper_brief(parent: &str, task: &str, tools: bool, code: &str) -> String
     )
 }
 
+/// What a helper in a new worktree on `branch` is told of where it works
+/// (`root`: the project's main checkout, which its task may name).
+pub fn worktree_note(branch: &str, root: &str) -> String {
+    format!(
+        "\n\nWhere you work: a new git worktree on branch {branch}, your own copy of the project apart from its main checkout ({root}). Make your changes in your working folder: where this task names files under {root}, use the same paths in yours. Leave the main checkout alone; the session that started you combines the work."
+    )
+}
+
 /// What a parent is told when its helper `title` (`agent`, `key`) finished:
 /// its report, else its last reply (`reply`), or its error.
 pub fn finished_message(agent: &str, title: &str, key: &str, report: Option<&Report>, reply: Option<&str>, error: Option<&str>) -> String {
@@ -732,6 +740,7 @@ mod tests {
         assert!(b.contains("session (\"Lead\") started you") && b.contains("report_done") && b.ends_with("The task:\n\nDo X") && !b.contains("helper id"));
         assert!(!helper_brief("", "Do X", false, "h-1").contains("report_done"));
         assert!(helper_brief("", "Do X", true, "h-1").contains("Your helper id is h-1: pass it as `helper`"));
+        assert!(worktree_note("helper/x", "/p").contains("a new git worktree on branch helper/x, your own copy of the project apart from its main checkout (/p)"));
         assert!(approval_answer("Merge?", &json!({ "value": "Approve" })).ends_with("(\"Merge?\"): Approve"));
         assert!(approval_answer("Merge?", &json!({ "cancelled": true })).contains("dismissed"));
         // What it waits for, in short.
