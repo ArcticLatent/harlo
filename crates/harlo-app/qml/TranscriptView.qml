@@ -8,6 +8,8 @@ import harlo
 Item {
     id: root
     required property ChatSession session
+    // A row added to the transcript fades in.
+    component AddFade: NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.paneMotion; easing.type: Easing.OutCubic }
     property alias follow: view.follow
     property alias count: view.count
     /// Side margin of the rows; the composer below uses it too so edges align.
@@ -268,11 +270,10 @@ Item {
         // Grabbing the scrollbar always means "stop following".
         ScrollBar.vertical: ScrollBar { id: vbar; onPressedChanged: if (pressed) view.follow = false }
         // A new message, card or reply fades in (not a whole session as it
-        // opens: that's a reset).
-        add: Transition {
-            enabled: Theme.motion > 0
-            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.paneMotion; easing.type: Easing.OutCubic }
-        }
+        // opens: that's a reset): each row itself (AddFade), not the list's
+        // add transition, which kept a row added as the one before it grew
+        // (a call turning into an approval card) at that one's old height,
+        // over its buttons.
 
         // Expanded state of thinking/tool rows, keyed by row key, so it
         // survives delegate destruction while scrolling.
@@ -401,6 +402,8 @@ Item {
                 roleValue: "user"
                 Item {
                     id: userRow
+                    ListView.onAdd: if (Theme.motion > 0) userRowFade.start()
+                    AddFade { id: userRowFade; target: userRow }
                     required property int index
                     required property string rowKey
                     required property string text
@@ -553,6 +556,8 @@ Item {
                 roleValue: "markdown"
                 Item {
                     id: mdRow
+                    ListView.onAdd: if (Theme.motion > 0) mdRowFade.start()
+                    AddFade { id: mdRowFade; target: mdRow }
                     required property string html
                     required property string rowKey
                     required property int index
@@ -596,6 +601,8 @@ Item {
                 roleValue: "code"
                 Item {
                     id: codeRow
+                    ListView.onAdd: if (Theme.motion > 0) codeRowFade.start()
+                    AddFade { id: codeRowFade; target: codeRow }
                     required property string html
                     required property string text
                     required property string title
@@ -731,6 +738,8 @@ Item {
                 roleValue: "thinking"
                 Item {
                     id: thinkRow
+                    ListView.onAdd: if (Theme.motion > 0) thinkRowFade.start()
+                    AddFade { id: thinkRowFade; target: thinkRow }
                     required property string rowKey
                     required property string text
                     required property string rowState
@@ -822,6 +831,8 @@ Item {
                 roleValue: "tool"
                 Item {
                     id: toolRow
+                    ListView.onAdd: if (Theme.motion > 0) toolRowFade.start()
+                    AddFade { id: toolRowFade; target: toolRow }
                     required property string rowKey
                     required property string text
                     required property string title
@@ -835,10 +846,8 @@ Item {
                     readonly property var agents: callId !== "" ? root.subagents.filter(a => a.parentToolCallId === callId) : []
                     // omp waits for your approval to run this call.
                     readonly property bool asking: root.session.hasRequest && root.session.requestIsApproval && root.session.approvalRow === rowKey
-                    // (Grown into an approval card as the next row came: the
-                    // list moves the rows after it, else that row covers the
-                    // card's buttons.)
-                    onAskingChanged: Qt.callLater(view.forceLayout)
+                    // (Over the rows after it: its buttons are never covered.)
+                    z: asking ? 2 : 0
                     readonly property var askLines: asking ? root.session.requestTitle.split("\n").slice(1) : []
                     readonly property real gap: root.gapAbove("tool", ListView.previousSection)
                     AgentHead { visible: toolRow.ListView.previousSection === "user"; y: toolRow.gap - height - 10 }
@@ -891,9 +900,9 @@ Item {
                         y: toolRow.gap + toolRow.head
                         width: view.columnWidth - 16
                         height: toolCol.implicitHeight + (toolRow.asking ? 20 : 10)
-                        onHeightChanged: if (toolRow.asking) Qt.callLater(view.forceLayout)
                         radius: 8
-                        color: toolRow.asking ? Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, 0.06)
+                        // (Solid when it asks: a row under it doesn't show through.)
+                        color: toolRow.asking ? Qt.tint(Theme.raised, Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, 0.06))
                              : toolHover.hovered && toolRow.text !== "" ? Theme.hover : "transparent"
                         border.color: toolRow.asking ? Theme.warning : "transparent"
                         HoverHandler { id: toolHover }
@@ -1047,6 +1056,8 @@ Item {
                 roleValue: "notice"
                 Item {
                     id: noticeRow
+                    ListView.onAdd: if (Theme.motion > 0) noticeRowFade.start()
+                    AddFade { id: noticeRowFade; target: noticeRow }
                     required property string rowKey
                     required property string text
                     required property string title
