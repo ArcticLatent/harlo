@@ -117,11 +117,13 @@ Popup {
         }
         const members = [memberA.chosen()]
         if (action === "committee") members.push(memberB.chosen())
-        const text = Workspace.delegatePrompt(JSON.stringify({ action: action, members: members, note: note.text, worktree: worktree.checked }))
+        // (A new session's task is what's typed in its message box.)
+        const task = session ? note.text : draft
+        const text = Workspace.delegatePrompt(JSON.stringify({ action: action, members: members, note: task, worktree: worktree.checked }))
         if (text === "") return
         if (session) session.send(text, session.status === "busy" ? "followUp" : "normal")
         else delegated(text)
-        if (draft !== "" && note.text.indexOf(draft.trim()) >= 0) draftUsed()
+        if (session && draft !== "" && note.text.indexOf(draft.trim()) >= 0) draftUsed()
         close()
         sent()
     }
@@ -131,7 +133,7 @@ Popup {
     focus: true
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
     background: GlassSurface { radius: 10 }
-    onOpened: note.forceActiveFocus()
+    onOpened: note.visible ? note.forceActiveFocus() : contentItem.forceActiveFocus()
 
     // An agent and its model.
     component MemberRow: RowLayout {
@@ -200,7 +202,8 @@ Popup {
         TextArea {
             id: note
             objectName: "delegateNote"
-            visible: root.action !== "run"
+            // (A new session's task is in its message box already.)
+            visible: root.action !== "run" && !!root.session
             Layout.fillWidth: true
             Layout.preferredHeight: Math.min(Math.max(implicitHeight, 60), 140)
             placeholderText: root.action === "handoff" ? "Anything to add for the new agent (optional)"
@@ -254,7 +257,7 @@ Popup {
             spacing: 8
             Label {
                 Layout.fillWidth: true
-                text: root.action === "run" ? "" : "Ctrl+Enter"
+                text: root.action === "run" || !root.session ? "" : "Ctrl+Enter"
                 color: Theme.muted
                 font.pixelSize: Theme.px(11)
             }
