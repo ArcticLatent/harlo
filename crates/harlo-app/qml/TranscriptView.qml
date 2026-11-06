@@ -835,6 +835,10 @@ Item {
                     readonly property var agents: callId !== "" ? root.subagents.filter(a => a.parentToolCallId === callId) : []
                     // omp waits for your approval to run this call.
                     readonly property bool asking: root.session.hasRequest && root.session.requestIsApproval && root.session.approvalRow === rowKey
+                    // (Grown into an approval card as the next row came: the
+                    // list moves the rows after it, else that row covers the
+                    // card's buttons.)
+                    onAskingChanged: Qt.callLater(view.forceLayout)
                     readonly property var askLines: asking ? root.session.requestTitle.split("\n").slice(1) : []
                     readonly property real gap: root.gapAbove("tool", ListView.previousSection)
                     AgentHead { visible: toolRow.ListView.previousSection === "user"; y: toolRow.gap - height - 10 }
@@ -887,6 +891,7 @@ Item {
                         y: toolRow.gap + toolRow.head
                         width: view.columnWidth - 16
                         height: toolCol.implicitHeight + (toolRow.asking ? 20 : 10)
+                        onHeightChanged: if (toolRow.asking) Qt.callLater(view.forceLayout)
                         radius: 8
                         color: toolRow.asking ? Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, 0.06)
                              : toolHover.hovered && toolRow.text !== "" ? Theme.hover : "transparent"
