@@ -1,6 +1,6 @@
 ---
 name: harlo
-description: harlo's tools for running other coding agents (Claude, OpenCode, pi, omp) as sessions you start, prompt, read and stop. Read this before using harlo-handoff, harlo-advisor or harlo-committee, or whenever the user asks you to start, delegate to, or check on another agent in harlo.
+description: harlo's tools for running other coding agents (Claude, OpenCode, pi, omp, Hermes) as sessions you start, prompt, read and stop. Read this before using harlo-handoff, harlo-advisor or harlo-committee, or whenever the user asks you to start, delegate to, or check on another agent in harlo.
 ---
 
 harlo is the desktop app you're running in. It shows each coding-agent session as a tab, and its MCP server `harlo` lets you run other sessions yourself. The tools reach you as `mcp__harlo__<tool>` (or `harlo_<tool>`, depending on your agent).
@@ -9,11 +9,12 @@ The tools exist only inside harlo. If they're missing, tell the user that harlo 
 
 ## Tools
 
-**`list_agents`**: the agents harlo can start (`claude`, `opencode`, `pi`, `omp`) and whether each is installed.
+**`list_agents`**: the agents harlo can start (`claude`, `opencode`, `pi`, `omp`, `hermes`) and whether each is installed.
 
-**`start_session`**: `{ agent, prompt, title?, model?, folder?, worktree?, notify? }`. Starts a session and sends it `prompt`.
+**`start_session`**: `{ agent, prompt, title?, model?, thinking?, folder?, worktree?, notify? }`. Starts a session and sends it `prompt`.
 - `agent`: an id from `list_agents`.
 - `model`: `provider/model` (e.g. `anthropic/claude-sonnet-4-5`). Leave it out for the agent's default.
+- `thinking`: its thinking level (`low`, `medium`, `high`), if not the agent's default.
 - `folder`: defaults to your own folder.
 - `worktree`: a new branch name. The session then works in a new git worktree on that branch, isolated from your checkout. The worktree is made in the background, so the session id comes later (`list_sessions`).
 - `notify`: defaults to true. Its report, its questions for you, and when it waits for the user come back to you. `false`: it's on its own (a handoff).
@@ -39,6 +40,8 @@ A session another one started gets two more tools:
 **`report_done`**: `{ outcome, summary, files? }`. Once, when the task is done or can't go on, then end your turn. `outcome` is `succeeded` or `failed`; never hide a failure in the summary. `summary` is three sentences: what you did, what you found, what's left.
 
 **`ask_parent`**: `{ question }`. A question the task doesn't settle. End your turn after asking; the answer comes as a message.
+
+If your briefing gives you a helper id, pass it as `helper` with each of these tools (and `request_approval`).
 
 ## Briefing
 

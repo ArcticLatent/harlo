@@ -739,6 +739,14 @@ async fn command(s: &Arc<Session>, pending: &Pending, cmd: Value) {
         }
         "set_thinking_level" => {
             let level = cmd["level"].as_str().unwrap_or_default().to_owned();
+            // (One its model has.)
+            let level = {
+                let st = s.state.lock().unwrap();
+                match st.variants.get(&format!("{}/{}", st.model.provider, st.model.id)) {
+                    Some(known) if level != "default" && !level.is_empty() => crate::nearest_level(&level, known),
+                    _ => level,
+                }
+            };
             s.state.lock().unwrap().model.variant = level.clone();
             let sid = s.state.lock().unwrap().session_id.clone();
             if !sid.is_empty() {

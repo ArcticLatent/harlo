@@ -37,6 +37,20 @@ pub use store::SessionInfo;
 /// network, a model you run yourself, rather than a provider's service:
 /// loopback, private and link-local addresses, Tailscale's, and `.local`,
 /// `.lan`, `.home.arpa` and `.ts.net` names.
+/// The thinking level of `available` nearest `want` (helpers are given one
+/// level for every agent; a model names its own): `want` itself when it's
+/// there or nothing's known.
+pub fn nearest_level(want: &str, available: &[String]) -> String {
+    const ORDER: [&str; 8] = ["off", "minimal", "low", "medium", "high", "xhigh", "max", "maximum"];
+    let rank = |l: &str| ORDER.iter().position(|o| o.eq_ignore_ascii_case(l));
+    let known: Vec<&String> = available.iter().filter(|l| rank(l).is_some()).collect();
+    let Some(w) = rank(want) else { return want.to_owned() };
+    if known.is_empty() || available.iter().any(|l| l.eq_ignore_ascii_case(want)) {
+        return want.to_owned();
+    }
+    known.into_iter().min_by_key(|l| (rank(l).unwrap() as i32 - w as i32).abs() * 2 + i32::from(rank(l).unwrap() < w)).map_or_else(|| want.to_owned(), |l| l.to_string())
+}
+
 pub fn is_local_url(url: &str) -> bool {
     use std::net::IpAddr;
     let rest = url.split_once("://").map_or(url, |(_, r)| r);
@@ -120,6 +134,18 @@ pub(crate) fn mcp_bridge() -> Option<Vec<String>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_thinking_level_maps_to_the_nearest_a_model_has() {
+        use super::nearest_level;
+        let v = |l: &[&str]| l.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(nearest_level("high", &v(&["low", "medium", "high"])), "high");
+        assert_eq!(nearest_level("high", &v(&["low", "max"])), "max");
+        assert_eq!(nearest_level("medium", &v(&["low", "high"])), "high");
+        assert_eq!(nearest_level("low", &v(&["minimal", "high"])), "minimal");
+        assert_eq!(nearest_level("high", &v(&[])), "high");
+        assert_eq!(nearest_level("high", &v(&["fast", "smart"])), "high");
+    }
+
     #[test]
     fn local_servers() {
         use super::is_local_url;

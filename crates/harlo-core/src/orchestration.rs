@@ -68,7 +68,7 @@ pub fn tools(starting: Starting) -> Value {
     let mut tools = json!([
         {
             "name": "list_agents",
-            "description": "The coding agents harlo can start sessions with (claude, opencode, pi, omp): their ids and whether they're installed.",
+            "description": "The coding agents harlo can start sessions with (claude, opencode, pi, omp, hermes): their ids and whether they're installed.",
             "inputSchema": s(json!({}), &[]),
         },
         {
@@ -80,7 +80,7 @@ pub fn tools(starting: Starting) -> Value {
             "name": "start_session",
             "description": format!("Starts a new harlo session with a coding agent and sends it a first prompt. {} It becomes your helper, in your permission mode: the user sees it under your session, and harlo sends you its report when it finishes (unless notify is false), its questions for you, and when it waits for the user. Start every independent helper, then end your turn: harlo wakes you with what comes back; don't poll. The new agent has none of your context: make the prompt a self-contained briefing.", when_to_start(starting)),
             "inputSchema": s(json!({
-                "agent": { "type": "string", "description": "claude, opencode, pi or omp (see list_agents)." },
+                "agent": { "type": "string", "description": "claude, opencode, pi, omp or hermes (see list_agents)." },
                 "prompt": { "type": "string", "description": "The first message: the task, its context, the relevant files, what's done and what's left." },
                 "title": { "type": "string", "description": "A short name for the session." },
                 "model": { "type": "string", "description": "provider/model, if not the agent's default." },
@@ -135,7 +135,7 @@ pub fn tools(starting: Starting) -> Value {
                     "items": s(json!({
                         "title": { "type": "string", "description": "A short name for the part." },
                         "prompt": { "type": "string", "description": "Its first message, a self-contained briefing (it has none of your context): the part, the relevant files, what \"done\" looks like, what not to touch." },
-                        "agent": { "type": "string", "description": "claude, opencode, pi or omp. Leave it (and model) out for the project's usual helpers (the user's choice), unless a part needs another agent or model." },
+                        "agent": { "type": "string", "description": "claude, opencode, pi, omp or hermes. Leave it (and model) out for the project's usual helpers (the user's choice), unless a part needs another agent or model." },
                         "model": { "type": "string", "description": "provider/model, if not the agent's default." },
                         "worktree": { "type": "string", "description": "A new git worktree on this branch name to work in (for parts that edit files)." }
                     }), &["title", "prompt"])

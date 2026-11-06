@@ -1924,7 +1924,13 @@ impl Workspace {
 
     /// Spawns a session; `model` (`provider/model`) overrides the harness's
     /// default; `activate` makes it the active tab.
-    fn start_session_with(mut self: Pin<&mut Self>, kind: HarnessKind, cwd: PathBuf, model: &str, activate: bool) -> String {
+    fn start_session_with(self: Pin<&mut Self>, kind: HarnessKind, cwd: PathBuf, model: &str, activate: bool) -> String {
+        self.start_session_thinking(kind, cwd, model, "", activate)
+    }
+
+    /// The same, at a thinking level ("" the agent's default): Claude's
+    /// from its start (it restarts to change it), others' set as it opens.
+    fn start_session_thinking(mut self: Pin<&mut Self>, kind: HarnessKind, cwd: PathBuf, model: &str, thinking: &str, activate: bool) -> String {
         let (program, mut remote) = self.launch_for(kind, &cwd);
         let overlay = self.as_mut().new_overlay(kind, model.trim(), remote.as_mut());
         let token = orch_token();
@@ -1938,6 +1944,9 @@ impl Workspace {
                 let mut args: Vec<String> = overlay.iter().map(|p| format!("--config={}", harlo_harness::on_host(p))).chain(omp_home_arg(kind, &cwd)).collect();
                 if !model.trim().is_empty() && kind != HarnessKind::Demo {
                     args.extend(["--model".into(), model.trim().to_owned()]);
+                }
+                if kind == HarnessKind::Claude && !thinking.trim().is_empty() {
+                    args.push(format!("{}{}", harlo_harness::claude::THINKING_ARG, thinking.trim()));
                 }
                 args
             },
@@ -2701,17 +2710,19 @@ impl Workspace {
         QString::from(&v.to_string())
     }
 
-    /// Sets a session's thinking level ("": leaves it).
+    /// Sets a new session's thinking level ("": leaves it). (Claude's
+    /// started at it: `start_session_thinking`.)
     fn apply_thinking(mut self: Pin<&mut Self>, key: &str, level: &str) {
         let level = level.trim();
         if level.is_empty() {
             return;
         }
-        if let Some(live) = registry::get(key) {
+        let claude = self.live.get(key).is_some_and(|e| e.info.harness == "claude");
+        if !claude && let Some(live) = registry::get(key) {
             live.handle.send_raw(json!({ "type": "set_thinking_level", "level": level }));
         }
         // (Claude's session file doesn't say: as if set by hand.)
-        if self.live.get(key).is_some_and(|e| e.info.harness == "claude") {
+        if claude {
             self.as_mut().rust_mut().modes.entry(key.to_owned()).or_default().thinking = Some(level.to_owned());
             self.as_mut().modes_changed(key);
         }
@@ -3298,7 +3309,7 @@ impl Workspace {
                     }
                     this.as_mut().reload_worktrees();
                     // Run lanes start in the background; the run's overview is the tab.
-                    let key = this.as_mut().start_session_with(kind, path.clone(), &model, lane.is_none() && parent.is_none());
+                    let key = this.as_mut().start_session_thinking(kind, path.clone(), &model, &thinking, lane.is_none() && parent.is_none());
                     // Started by an agent: its subagent.
                     if let Some((parent, title, notify, code)) = parent {
                         this.as_mut().adopt(&key, &parent, &title, kind.as_str(), notify, plan_step, &code);
@@ -6387,15 +6398,15 @@ impl Workspace {
             self.orch_children.iter().find(|(k, ch)| ch.code == c && self.live.contains_key(*k)).map(|(k, _)| k.clone())
         });
         let caller = self.orch_tokens.get(token).cloned().or(named).or_else(|| {
-            opencode
-                .then(|| {
-                    self.live
-                        .values()
-                        .filter(|e| e.info.harness == "opencode" && e.info.status == SessionStatus::Busy)
-                        .max_by_key(|e| e.info.started_at)
-                        .map(|e| e.info.key.clone())
-                })
-                .flatten()
+            if !opencode {
+                return None;
+            }
+            // (Without an id: not a helper that has one, if any is at work;
+            // its parent starting another, say.)
+            let busy = |e: &&LiveEntry| e.info.harness == "opencode" && e.info.status == SessionStatus::Busy;
+            let has_id = |k: &str| self.orch_children.get(k).is_some_and(|c| !c.code.is_empty());
+            let latest = |only_unnamed: bool| self.live.values().filter(busy).filter(|e| !only_unnamed || !has_id(&e.info.key)).max_by_key(|e| e.info.started_at).map(|e| e.info.key.clone());
+            latest(true).or_else(|| latest(false))
         });
         self.orchestrate_as(caller, opencode, tool, args)
     }
@@ -6517,7 +6528,7 @@ impl Workspace {
             "start_session" => {
                 let agent = text("agent").to_lowercase();
                 let Some(kind) = HarnessKind::parse(&agent).filter(|k| *k != HarnessKind::Demo || agent == "demo") else {
-                    return Err(format!("Unknown agent \"{agent}\": use claude, opencode, pi or omp (list_agents)."));
+                    return Err(format!("Unknown agent \"{agent}\": use claude, opencode, pi, omp or hermes (list_agents)."));
                 };
                 if !self.usable_harness(kind) {
                     return Err(format!("{} is turned off in harlo (Settings → Providers).", kind.label()));
@@ -6582,7 +6593,7 @@ impl Workspace {
                     );
                     return Ok(json!({ "status": "creating the worktree; the session starts in it shortly (see list_sessions)", "branch": branch, "title": title }));
                 }
-                let key = self.as_mut().start_session_with(kind, cwd.clone(), &model, false);
+                let key = self.as_mut().start_session_thinking(kind, cwd.clone(), &model, &thinking, false);
                 // (Named in the background: renaming would open it.)
                 if let Some(live) = registry::get(&key) {
                     live.handle.send_raw(json!({ "type": "set_session_name", "name": title }));
@@ -6684,7 +6695,7 @@ impl Workspace {
                     }
                     let agent = h.agent.clone();
                     let Some(kind) = HarnessKind::parse(&agent).filter(|k| *k != HarnessKind::Demo || agent == "demo") else {
-                        return Err(format!("Unknown agent \"{agent}\" for \"{}\": use claude, opencode, pi or omp (list_agents).", h.title));
+                        return Err(format!("Unknown agent \"{agent}\" for \"{}\": use claude, opencode, pi, omp or hermes (list_agents).", h.title));
                     };
                     if !self.usable_harness(kind) {
                         return Err(format!("{} is turned off in harlo (Settings → Providers): pick another agent for \"{}\".", kind.label(), h.title));
@@ -7055,7 +7066,7 @@ impl Workspace {
                 );
                 continue;
             }
-            let key = self.as_mut().start_session_with(run.agent, cwd.clone(), &run.model, false);
+            let key = self.as_mut().start_session_thinking(run.agent, cwd.clone(), &run.model, &run.thinking, false);
             if let Some(live) = registry::get(&key) {
                 live.handle.send_raw(json!({ "type": "set_session_name", "name": title }));
             }

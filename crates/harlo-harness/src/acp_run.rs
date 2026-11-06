@@ -129,6 +129,9 @@ struct Session {
     inbox: mpsc::UnboundedSender<Incoming>,
     /// Set once the session is open (or failed to open).
     opened: watch::Sender<Option<Result<(), String>>>,
+    /// Its `HARLO_SESSION` (harlo's tools: who's calling). The agent's
+    /// process serves every session, so its tools are told it themselves.
+    token: String,
 }
 
 impl Session {
@@ -145,7 +148,10 @@ impl Session {
     /// `mcpServers`.
     fn tools(&self) -> Value {
         match crate::mcp_bridge_for(self.remote.as_ref()) {
-            Some(cmd) if !cmd.is_empty() => json!([{ "name": "harlo", "command": cmd[0], "args": cmd[1..], "env": [] }]),
+            Some(cmd) if !cmd.is_empty() => {
+                let env = if self.token.is_empty() { json!([]) } else { json!([{ "name": "HARLO_SESSION", "value": self.token }]) };
+                json!([{ "name": "harlo", "command": cmd[0], "args": cmd[1..], "env": env }])
+            }
             _ => json!([]),
         }
     }
@@ -283,7 +289,8 @@ pub(crate) fn spawn(cfg: HarnessConfig, program: PathBuf) -> Result<(Harness, mp
     };
     let (opened, _) = watch::channel(None);
     let cwd = if cfg.remote.is_some() { crate::process::on_host(&cfg.cwd) } else { cfg.cwd.to_string_lossy().into_owned() };
-    let session = Arc::new(Session { kind: cfg.kind, state: Mutex::new(state), events, conn: Mutex::new(None), program, cwd, remote: cfg.remote.clone(), inbox, opened });
+    let token = cfg.env.iter().find(|(k, _)| k == "HARLO_SESSION").map(|(_, v)| v.clone()).unwrap_or_default();
+    let session = Arc::new(Session { kind: cfg.kind, state: Mutex::new(state), events, conn: Mutex::new(None), program, cwd, remote: cfg.remote.clone(), inbox, opened, token });
 
     let s = Arc::clone(&session);
     tokio::spawn(async move {
@@ -443,6 +450,7 @@ async fn command(s: &Arc<Session>, pending: &Pending, cmd: Value) {
         }
         "set_thinking_level" => {
             let level = cmd["level"].as_str().unwrap_or_default().to_owned();
+            let level = crate::nearest_level(&level, &s.state.lock().unwrap().efforts.clone());
             match conn.request("session/set_config_option", json!({ "sessionId": sid, "configId": "reasoning_effort", "value": level })).await {
                 Ok(r) => {
                     options(&mut s.state.lock().unwrap(), &r["configOptions"]);
@@ -858,7 +866,7 @@ mod tests {
         let (events, rx) = mpsc::unbounded_channel();
         let (inbox, _) = mpsc::unbounded_channel();
         let (opened, _) = watch::channel(None);
-        (Arc::new(Session { kind: HarnessKind::Hermes, state: Mutex::new(State::default()), events, conn: Mutex::new(None), program: "hermes".into(), cwd: "/work".into(), remote: None, inbox, opened }), rx)
+        (Arc::new(Session { kind: HarnessKind::Hermes, state: Mutex::new(State::default()), events, conn: Mutex::new(None), program: "hermes".into(), cwd: "/work".into(), remote: None, inbox, opened, token: String::new() }), rx)
     }
 
     /// A real Hermes 0.22.5 turn (a file written after an edit approval,
