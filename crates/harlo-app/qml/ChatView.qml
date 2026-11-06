@@ -495,7 +495,9 @@ Rectangle {
             Layout.topMargin: 8
             // (An approval whose tool row is on screen: asked there alone.)
             visible: session.hasRequest && session.requestMethod !== "ask" && !root.covered && !inlineShown
-            readonly property bool inlineShown: inlineApproval && (transcript.count, transcript.height, transcript.rowEndInView(session.indexOfKey(session.approvalRow)))
+            // (At the end, where a new approval's row is; else when its row's
+            // end is on screen.)
+            readonly property bool inlineShown: inlineApproval && (transcript.follow || (transcript.count, transcript.height, transcript.rowEndInView(session.indexOfKey(session.approvalRow))))
             // `select` options may carry descriptions (`optionDetails`).
             readonly property var details: {
                 if (!visible || session.requestJson === "") return []

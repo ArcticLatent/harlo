@@ -183,9 +183,24 @@ QtObject {
         return sv ? sv.engine : ""
     }
     function toolLabel(name) {
+        // harlo's own (Claude's "mcp__harlo__x", OpenCode's "harlo_x"): what it does.
+        const h = /^(?:mcp__harlo__|harlo_)(.+)$/.exec(name || "")
+        if (h && harloTools[h[1]]) return harloTools[h[1]]
         const m = /^mcp__([^_]+(?:_[^_]+)*?)__(.+)$/.exec(name || "")
         return m ? m[1] + " " + m[2].replace(/_/g, " ") : name
     }
+    readonly property var harloTools: ({
+        propose_helpers: "harlo: offer a split (writing each helper's briefing)",
+        start_session: "harlo: start a session",
+        send_message: "harlo: message a session",
+        read_session: "harlo: read a session",
+        list_sessions: "harlo: list sessions",
+        list_agents: "harlo: list agents",
+        stop_session: "harlo: stop a session",
+        request_approval: "harlo: ask you to approve",
+        report_done: "harlo: report back",
+        ask_parent: "harlo: ask the session that started it",
+    })
     function harnessLabel(id) {
         return ({ claude: "Claude", opencode: "OpenCode", pi: "Pi", omp: "Oh My Pi", hermes: "Hermes", demo: "Demo" })[id] || id
     }

@@ -22,6 +22,10 @@ Rectangle {
         return p.currentTool + (args ? ": " + String(args).replace(/\s+/g, " ").slice(0, 80) : "")
     }
     readonly property bool live: a.status === "running" || a.status === "pending"
+    // A harlo helper waiting for you: what it asks (a tool's approval is
+    // answered here).
+    readonly property var asks: a.asks || null
+    readonly property bool approvable: !!asks && asks.approval && asks.options.indexOf("Approve") >= 0
     implicitHeight: rowCol.implicitHeight + 12
     radius: 7
     color: rowHover.hovered ? Theme.hover : "transparent"
@@ -99,7 +103,11 @@ Rectangle {
                 Layout.preferredWidth: 0
                 visible: text !== ""
                 maximumLineCount: 1
-                text: { const t = agentRow.toolLine(agentRow.a); return t !== "" ? "↳ " + t : "" }
+                text: {
+                    if (agentRow.asks) return "↳ wants " + String(agentRow.asks.text).replace(/\s+/g, " ")
+                    const t = agentRow.toolLine(agentRow.a)
+                    return t !== "" ? "↳ " + t : ""
+                }
                 color: Theme.muted
                 font.family: Theme.mono
                 font.pixelSize: Theme.px(11)
@@ -116,6 +124,24 @@ Rectangle {
             font.pixelSize: Theme.px(11)
             padding: 4
             onClicked: agentRow.a.openKey ? Workspace.open(agentRow.a.openKey) : agentRow.viewRequested(agentRow.a, false)
+        }
+        FlatButton {
+            objectName: "subagentDeny"
+            visible: agentRow.approvable
+            text: "Deny"
+            accent: Theme.error
+            font.pixelSize: Theme.px(11)
+            padding: 4
+            onClicked: Workspace.answerHelper(agentRow.a.openKey, agentRow.asks.id, "Deny")
+        }
+        FlatButton {
+            objectName: "subagentApprove"
+            visible: agentRow.approvable
+            text: "Approve"
+            accent: Theme.success
+            font.pixelSize: Theme.px(11)
+            padding: 4
+            onClicked: Workspace.answerHelper(agentRow.a.openKey, agentRow.asks.id, "Approve")
         }
         FlatButton {
             visible: agentRow.live && agentRow.a.canSteer !== false

@@ -468,6 +468,10 @@ pub mod qobject {
         /// subagent dock lists them, JSON.
         #[qinvokable]
         fn orchestrated_json(self: &Workspace, key: &QString) -> QString;
+        /// Answers a helper's request (`value`: Approve, Deny, …) from
+        /// its parent's Subagents box.
+        #[qinvokable]
+        fn answer_helper(self: Pin<&mut Workspace>, key: &QString, request_id: &QString, value: &QString);
         /// Stops what a session is doing (it stays open).
         #[qinvokable]
         fn stop_session(self: &Workspace, key: &QString);
@@ -6891,8 +6895,11 @@ impl Workspace {
     /// Its answers: a started session that waited, working again.
     fn child_answered(mut self: Pin<&mut Self>, key: &str) {
         let working = self.live.get(key).is_some_and(|e| e.requests.is_empty() && e.info.status == SessionStatus::Busy);
-        if let Some(c) = self.as_mut().rust_mut().orch_children.get_mut(key).filter(|c| working && c.status == "waiting") {
-            c.status = "running".into();
+        if let Some(c) = self.as_mut().rust_mut().orch_children.get_mut(key) {
+            if working && c.status == "waiting" {
+                c.status = "running".into();
+            }
+            // (Its parent's Subagents box shows what it asks.)
             self.as_mut().bump_orchestration();
         }
     }
@@ -7326,6 +7333,15 @@ impl Workspace {
         }
     }
 
+    /// Answers a helper's request (a tool's approval: `value` Approve,
+    /// Deny or Always allow) from its parent's Subagents box.
+    pub fn answer_helper(mut self: Pin<&mut Self>, key: &QString, request_id: &QString, value: &QString) {
+        if let Some(live) = registry::get(&key.to_string()) {
+            live.handle.answer_ui(&request_id.to_string(), json!({ "value": value.to_string() }));
+        }
+        self.as_mut().bump_orchestration();
+    }
+
     pub fn orchestrated_json(&self, key: &QString) -> QString {
         let key = key.to_string();
         let list: Vec<serde_json::Value> = self
@@ -7335,7 +7351,16 @@ impl Workspace {
             .map(|(k, c)| {
                 let live = self.live.get(k);
                 let status = if live.is_none() { "ended".to_owned() } else { c.status.clone() };
+                // What it waits for you to answer (the oldest): answered here
+                // when it's a tool's approval.
+                let asks = live.and_then(|e| e.requests.first()).map_or(serde_json::Value::Null, |(r, _)| {
+                    serde_json::json!({
+                        "id": r.id, "approval": r.is_approval, "options": r.options,
+                        "text": harlo_core::orchestration::waiting_what(&r.title, &question_text(r), r.is_approval),
+                    })
+                });
                 serde_json::json!({
+                    "asks": asks,
                     "id": k, "name": c.title, "agent": c.agent, "status": status, "openKey": k,
                     "canCancel": live.is_some(), "canSteer": false, "startedAt": live.map(|e| e.info.started_at.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())),
                     "description": c.report.as_ref().map_or("", |r| r.summary.as_str()), "step": c.plan_step,
