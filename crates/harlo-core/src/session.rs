@@ -873,6 +873,13 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                             pending.push(SessionUpdate::GateAnswered { id: id.clone(), question: gate.message.clone(), answer });
                         }
                     } else if let Some(h) = &driver.harness {
+                        // (In the agent's words, where they differ.)
+                        let mut answer = answer;
+                        if answer["value"] == "Always allow" {
+                            if let Some(said) = st.requests.iter().find(|r| r.id == id).and_then(|r| r.raw["alwaysValue"].as_str()) {
+                                answer["value"] = json!(said);
+                            }
+                        }
                         h.answer_ui(&id, answer);
                     }
                     st.requests.retain(|r| r.id != id);
@@ -1348,6 +1355,19 @@ fn ui_request(raw: &Value) -> UiRequest {
         })
         .unwrap_or_default();
     let title = s("title");
+    let mut options = options;
+    let mut raw = raw.clone();
+    // omp's session-long answer ("Approve write for this session") is
+    // harlo's "Always allow"; the answer goes back in its words.
+    if title.starts_with("Allow tool:") {
+        if let Some(i) = options.iter().position(|o| o.starts_with("Approve ") && o.ends_with(" for this session")) {
+            let said = options.remove(i);
+            raw["alwaysHint"] = json!(said.trim_start_matches("Approve "));
+            raw["alwaysValue"] = json!(said);
+            options.push("Always allow".to_owned());
+            raw["options"] = json!(options);
+        }
+    }
     // An approval: Approve / Deny, and "Always allow" where the agent can
     // remember it (`alwaysHint` says what it would remember).
     let is_approval = title.starts_with("Allow tool:") && options.len() >= 2 && options[..2] == ["Approve", "Deny"] && options[2..].iter().all(|o| o == "Always allow");
@@ -1360,7 +1380,7 @@ fn ui_request(raw: &Value) -> UiRequest {
         title,
         options,
         is_approval,
-        raw: raw.clone(),
+        raw,
     }
 }
 
@@ -1600,6 +1620,18 @@ mod tests {
         assert_eq!(rows[0].text, "saved prompt");
         assert!(rows[1].html.contains("saved answer"));
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn omps_session_long_approval_is_always_allow() {
+        let r = ui_request(&json!({ "id": "1", "method": "select", "title": "Allow tool: write\nPath: a.py",
+            "options": ["Approve", "Approve write for this session", "Deny"] }));
+        assert!(r.is_approval);
+        assert_eq!(r.options, ["Approve", "Deny", "Always allow"]);
+        assert_eq!((r.raw["alwaysHint"].as_str(), r.raw["alwaysValue"].as_str()), (Some("write for this session"), Some("Approve write for this session")));
+        // The older Approve / Deny is as it was.
+        let r = ui_request(&json!({ "id": "2", "method": "select", "title": "Allow tool: bash", "options": ["Approve", "Deny"] }));
+        assert!(r.is_approval && r.raw["alwaysValue"].is_null());
     }
 
     #[test]

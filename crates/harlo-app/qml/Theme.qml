@@ -190,7 +190,7 @@ QtObject {
         return m ? m[1] + " " + m[2].replace(/_/g, " ") : name
     }
     readonly property var harloTools: ({
-        propose_helpers: "harlo: offer a split (writing each helper's briefing)",
+        propose_helpers: "harlo: offer a split",
         start_session: "harlo: start a session",
         send_message: "harlo: message a session",
         read_session: "harlo: read a session",
@@ -201,6 +201,13 @@ QtObject {
         report_done: "harlo: report back",
         ask_parent: "harlo: ask the session that started it",
     })
+    // What a harlo tool's call is busy with before its arguments are in: the
+    // agent writing them (a briefing can take a minute).
+    function toolWriting(name) {
+        const h = /^(?:mcp__harlo__|harlo_)(.+)$/.exec(name || "")
+        return h ? ({ propose_helpers: "writing each helper's briefing…", start_session: "writing its briefing…", send_message: "writing the message…",
+                      request_approval: "writing the question…", report_done: "writing the report…", ask_parent: "writing the question…" })[h[1]] || "" : ""
+    }
     function harnessLabel(id) {
         return ({ claude: "Claude", opencode: "OpenCode", pi: "Pi", omp: "Oh My Pi", hermes: "Hermes", demo: "Demo" })[id] || id
     }

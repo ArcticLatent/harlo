@@ -927,7 +927,7 @@ Item {
                                 Label { text: Theme.toolLabel(toolRow.title); color: Theme.foreground; font.bold: true; font.pixelSize: Theme.px(13) }
                                 Label {
                                     Layout.fillWidth: true
-                                    text: toolRow.subtitle
+                                    text: toolRow.subtitle !== "" || toolRow.rowState !== "pending" ? toolRow.subtitle : Theme.toolWriting(toolRow.title)
                                     color: Theme.muted
                                     elide: Text.ElideRight
                                     font.family: Theme.mono

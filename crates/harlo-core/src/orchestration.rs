@@ -376,6 +376,11 @@ pub fn waiting_what(title: &str, question: &str, approval: bool) -> String {
     if !approval {
         return short(question);
     }
+    // (omp's details are under the title: the question is the title.)
+    let question = match question.strip_prefix(title.lines().next().unwrap_or_default()) {
+        Some(rest) if question.starts_with("Allow tool:") => rest,
+        _ => question,
+    };
     let tool = title.lines().next().unwrap_or_default().trim().trim_start_matches("Allow tool:").trim();
     match (tool, short(question)) {
         ("", what) => format!("an approval: {what}"),
@@ -746,6 +751,8 @@ mod tests {
         let w = waiting_what("Allow tool: Bash", &long, true);
         assert!(w.starts_with("approval to use Bash (echo xxx") && w.ends_with("…)") && !w.contains("second line"), "{w}");
         assert_eq!(waiting_what("Question", "Which one?\nmore", false), "Which one?");
+        let t = "Allow tool: write\nPath: a.py\nContent: x";
+        assert_eq!(waiting_what(t, t, true), "approval to use write (Path: a.py)");
         // When to start sessions: as the setting says.
         let start = |st: Starting| tools(st).as_array().unwrap().iter().find(|t| t["name"] == "start_session").unwrap()["description"].as_str().unwrap().to_owned();
         assert!(start(Starting::WhenAsked).contains("only when the user asks") && !start(Starting::OnTheirOwn).contains("only when"));
