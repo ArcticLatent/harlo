@@ -675,17 +675,15 @@ pub fn delegate_prompt(action: &str, members: &[Member], note: &str, worktree: b
         ),
         ("split", [m, ..]) => {
             let place = if worktree { ", each in its own new git worktree (pass a short branch name taken from its part as `worktree`)" } else { "" };
-            let mut t = format!(
+            format!(
                 "Split this task into helpers that work at the same time. Find the parts that can be done independently (each one substantial, and not editing the same files; two to four is usually right), and start a helper for each with harlo's start_session tool: {}{place}, titled \"[Split] <the part>\". Keep for yourself what depends on the other parts, and do it once they've reported.\n\
                  Each helper has none of our context, so make its prompt a self-contained briefing: its part, why it exists, the relevant files (by path), what \"done\" looks like, and what not to touch (the other parts).\n\
                  If the task doesn't split well, tell me why and do it yourself.\n\
-                 Then end your turn. Their reports come back to you as [harlo] messages; don't poll. When they've all reported, check their work, combine it, and tell me what each did and what's left.",
-                m.describe()
-            );
-            if !note.is_empty() {
-                t.push_str(&format!("\n\nAlso: {note}"));
-            }
-            t
+                 Then end your turn. Their reports come back to you as [harlo] messages; don't poll. When they've all reported, check their work, combine it, and tell me what each did and what's left.\n\n\
+                 The task: {}",
+                m.describe(),
+                if note.is_empty() { "the current task." } else { note }
+            )
         }
         _ => return None,
     };
@@ -709,7 +707,7 @@ mod tests {
         let c = delegate_prompt("committee", &[m("Claude", "claude", ""), m("pi", "pi", "google/gemini")], "flaky tests", false).unwrap();
         assert!(c.contains("- Claude (agent") && c.contains("- pi (agent \"pi\", model \"google/gemini\")") && c.ends_with("The problem: flaky tests"));
         let s = delegate_prompt("split", &[m("Claude", "claude", "")], "", true).unwrap();
-        assert!(s.contains("start a helper for each") && s.contains("each in its own new git worktree") && s.contains("[Split] <the part>"));
+        assert!(s.contains("start a helper for each") && s.contains("each in its own new git worktree") && s.contains("[Split] <the part>") && s.ends_with("The task: the current task."));
         // A committee needs two.
         assert!(delegate_prompt("committee", &[m("Claude", "claude", "")], "", false).is_none());
         assert!(delegate_prompt("nope", &[m("Claude", "claude", "")], "", false).is_none());

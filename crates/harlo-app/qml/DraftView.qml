@@ -232,7 +232,9 @@ Rectangle {
         attachments = []
         useWorktree = false
     }
-    function send() {
+    // `instead`: the first message to send in place of the typed one (the
+    // Delegate menu's instruction).
+    function send(instead) {
         if (!canSend)
             return
         if (parallel) {
@@ -251,7 +253,7 @@ Rectangle {
             worktreeName = Workspace.suggestBranch()
         const key = Workspace.startDraft(JSON.stringify({
             projectId: project ? projectId : -1, harness: effectiveHarness, worktreeBranch: useWorktree ? worktreeName.trim() : "",
-            base: currentBranch, starter: starter, text: input.text, attachments: attachments, askFirst: askFirst,
+            base: currentBranch, starter: starter, text: typeof instead === "string" ? instead : input.text, attachments: attachments, askFirst: askFirst,
             approval: startApproval === "" ? "" : approval, goal: goalOn, goalBudget: Math.max(0, parseBudget(goalBudget)), model: activeModel
         }))
         const ask = askFirst && !goalOn
@@ -877,6 +879,37 @@ Rectangle {
                                   : "Permissions: auto — the agent edits and runs commands without asking")
                                  + "\nClick to switch"
                             onClicked: root.cycleApproval()
+                        }
+                        // Delegate: the new session's agent splits the task, or asks
+                        // another agent (its first message says how).
+                        ComposerIconButton {
+                            id: draftDelegateButton
+                            objectName: "draftDelegateButton"
+                            visible: Workspace.orchestrationOn && !root.parallel && root.effectiveHarness !== "demo" && root.effectiveHarness !== ""
+                            enabled: root.canSend && root.input.text.trim() !== ""
+                            iconName: "robot-2"
+                            tip: "Delegate: split the task into helpers, get a second opinion, or form a committee (type the task first)"
+                            onClicked: draftDelegateMenu.popup(this, 0, -draftDelegateMenu.implicitHeight - 6)
+                            AppMenu {
+                                id: draftDelegateMenu
+                                AppMenuItem { objectName: "draftDelegateSplit"; text: "Split into helpers…"; hint: "parts at once"; onTriggered: draftDelegate.show("split") }
+                                AppMenuItem { text: "Second opinion…"; hint: "from another agent"; onTriggered: draftDelegate.show("advisor") }
+                                AppMenuItem { text: "Committee…"; hint: "two agents plan"; onTriggered: draftDelegate.show("committee") }
+                            }
+                            DelegatePopover {
+                                id: draftDelegate
+                                // (Over the whole message box, as in a chat.)
+                                parent: box
+                                draft: root.input.text
+                                draftAgent: root.effectiveHarness
+                                draftModel: root.activeModel
+                                draftFolder: root.folder
+                                draftProject: root.projectId
+                                x: 8
+                                y: -height - 6
+                                // (Its instruction, with the task, is the first message.)
+                                onDelegated: text => root.send(text)
+                            }
                         }
                         ComposerIconButton {
                             objectName: "draftParallelButton"

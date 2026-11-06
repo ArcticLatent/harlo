@@ -11,6 +11,16 @@ import harlo
 Popup {
     id: root
     property ChatSession session
+    // Without a session (the new-session page): its agent, model, folder
+    // and project; the instruction then starts the session (`delegated`).
+    property string draftAgent: ""
+    property string draftModel: ""
+    property string draftFolder: ""
+    property int draftProject: -1
+    readonly property string agentId: session ? session.harness : draftAgent
+    readonly property string folder: session ? session.cwd : draftFolder
+    /// The instruction, for the new-session page to start the session with.
+    signal delegated(string text)
     /// The composer's text: the note, unless one's typed here.
     property string draft: ""
     signal draftUsed()
@@ -25,7 +35,7 @@ Popup {
         committee: { title: "Committee", icon: "scales-3", button: "Start committee",
                      about: "Two agents (best from different families) each find the root cause, then argue until they agree on a plan. It doesn't edit anything." },
         split: { title: "Split into helpers", icon: "node-tree", button: "Split",
-                 about: "This session splits the task into parts that can be done at the same time, starts a helper for each, then checks and combines their work." },
+                 about: "The agent splits the task into parts that can be done at the same time, starts a helper for each, then checks and combines their work." },
         run: { title: "Run the plan with helpers", icon: "node-tree", button: "Run",
                about: "Each step goes to a helper session with this agent and model, for this run only (the project's Team settings choose the usual ones)." },
     })
@@ -33,7 +43,7 @@ Popup {
 
     // The machine the session runs on ("": this one): the new sessions
     // start there, so its agents and their models are offered.
-    readonly property string host: session && session.cwd.startsWith("ssh://") ? session.cwd.slice(6).split("/")[0] : ""
+    readonly property string host: folder.startsWith("ssh://") ? folder.slice(6).split("/")[0] : ""
     // The agents sessions can start with (and their models, once checked).
     readonly property var providers: {
         Workspace.providersRevision
@@ -46,7 +56,7 @@ Popup {
     Connections {
         target: Workspace
         function onModelsAtReady(folder, harness, json) {
-            if (!root.session || folder !== root.session.cwd) return
+            if (folder !== root.folder) return
             const next = Object.assign({}, root.hostModels)
             next[harness] = JSON.parse(json)
             root.hostModels = next
@@ -65,18 +75,20 @@ Popup {
     readonly property var orch: { Workspace.providersRevision; return visible ? JSON.parse(Workspace.orchestrationJson()) : null }
     // pi and omp take the tools from their MCP config.
     readonly property var bridge: {
-        const a = orch ? orch.agents.find(x => x.id === session.harness) : null
+        const a = orch ? orch.agents.find(x => x.id === root.agentId) : null
         return a && a.bridge === false ? a : null
     }
     property string bridgeNote: ""
 
     function show(which) {
         action = which
-        const mine = agentIds.indexOf(session.harness) >= 0 ? session.harness : (agentIds[0] || "")
+        const mine = agentIds.indexOf(agentId) >= 0 ? agentId : (agentIds[0] || "")
         memberA.pick(which === "advisor" ? other(mine) : mine)
         // Helpers: the team's (or as this session) to start from.
         if (which === "split" || which === "run") {
-            const h = JSON.parse(Workspace.helpersJson(session.key))
+            // (A new session's: its project's team, else as it'll be.)
+            const team = session ? null : JSON.parse(Workspace.projectHelpersJson(draftProject))
+            const h = session ? JSON.parse(Workspace.helpersJson(session.key)) : (team.agent ? team : { agent: draftAgent, model: draftModel })
             if (h.agent && agentIds.indexOf(h.agent) >= 0) {
                 memberA.pick(h.agent)
                 memberA.model = h.model || ""
@@ -91,7 +103,7 @@ Popup {
         Workspace.ensureProviders()
         if (host !== "") {
             hostModels = ({})
-            for (const id of agentIds) Workspace.requestModelsAt(session.cwd, id)
+            for (const id of agentIds) Workspace.requestModelsAt(folder, id)
         }
         open()
     }
@@ -107,7 +119,8 @@ Popup {
         if (action === "committee") members.push(memberB.chosen())
         const text = Workspace.delegatePrompt(JSON.stringify({ action: action, members: members, note: note.text, worktree: worktree.checked }))
         if (text === "") return
-        session.send(text, session.status === "busy" ? "followUp" : "normal")
+        if (session) session.send(text, session.status === "busy" ? "followUp" : "normal")
+        else delegated(text)
         if (draft !== "" && note.text.indexOf(draft.trim()) >= 0) draftUsed()
         close()
         sent()
@@ -192,7 +205,7 @@ Popup {
             Layout.preferredHeight: Math.min(Math.max(implicitHeight, 60), 140)
             placeholderText: root.action === "handoff" ? "Anything to add for the new agent (optional)"
                            : root.action === "advisor" ? "The question (optional: the current approach)"
-                           : root.action === "split" ? "How to split it, or what to leave out (optional)"
+                           : root.action === "split" ? (root.session ? "The task, or how to split the current one (optional)" : "The task")
                            : "The problem (optional: what we're stuck on)"
             placeholderTextColor: Theme.muted
             color: Theme.foreground

@@ -179,6 +179,9 @@ pub mod qobject {
         /// it): `{ agent, agentName, model, thinking, team }`, or {}.
         #[qinvokable]
         fn helpers_json(self: &Workspace, key: &QString) -> QString;
+        /// A project's team helpers, or {} (the same as the session).
+        #[qinvokable]
+        fn project_helpers_json(self: &Workspace, project_id: i32) -> QString;
         /// Stops a plan's run (helpers at work go on).
         #[qinvokable]
         fn stop_plan_run(self: Pin<&mut Workspace>, key: &QString);
@@ -2691,12 +2694,7 @@ impl Workspace {
     /// Projects), else the same as the session (its agent, model and
     /// thinking).
     fn helpers_for(&self, key: &str) -> Option<HelperSetup> {
-        let team = self.project_of(key).and_then(|(_, p)| {
-            let v: serde_json::Value = serde_json::from_str(&self.setting_str(&format!("team_helpers_{p}"))).ok()?;
-            let agent = HarnessKind::parse(v["agent"].as_str()?).filter(|k| self.usable_harness(*k))?;
-            let s = |k: &str| v[k].as_str().unwrap_or_default().trim().to_owned();
-            Some(HelperSetup { agent, model: s("model"), thinking: s("thinking"), team: true })
-        });
+        let team = self.project_of(key).and_then(|(_, p)| self.team_of(p));
         team.or_else(|| {
             let e = self.live.get(key)?;
             let agent = HarnessKind::parse(&e.info.harness)?;
@@ -2705,11 +2703,29 @@ impl Workspace {
         })
     }
 
+    /// A project's team helpers, if it has them.
+    fn team_of(&self, project: i64) -> Option<HelperSetup> {
+        let v: serde_json::Value = serde_json::from_str(&self.setting_str(&format!("team_helpers_{project}"))).ok()?;
+        let agent = HarnessKind::parse(v["agent"].as_str()?).filter(|k| self.usable_harness(*k))?;
+        let s = |k: &str| v[k].as_str().unwrap_or_default().trim().to_owned();
+        Some(HelperSetup { agent, model: s("model"), thinking: s("thinking"), team: true })
+    }
+
     /// A session's helpers (`helpers_for`), for the plan's run menu and the
     /// Delegate menu: `{ agent, agentName, model, thinking, team }`, or {}.
     pub fn helpers_json(&self, key: &QString) -> QString {
         let v = self.helpers_for(&key.to_string()).map_or(json!({}), |h| {
             json!({ "agent": h.agent.as_str(), "agentName": h.agent.label(), "model": h.model, "thinking": h.thinking, "team": h.team })
+        });
+        QString::from(&v.to_string())
+    }
+
+    /// A project's team helpers (Settings → Projects → Team), as
+    /// `helpers_json` gives them, or {} when it has none (the same as the
+    /// session).
+    pub fn project_helpers_json(&self, project_id: i32) -> QString {
+        let v = self.team_of(project_id as i64).map_or(json!({}), |h| {
+            json!({ "agent": h.agent.as_str(), "agentName": h.agent.label(), "model": h.model, "thinking": h.thinking, "team": true })
         });
         QString::from(&v.to_string())
     }
