@@ -3169,6 +3169,19 @@ impl Workspace {
         });
     }
 
+    /// `branch`, or `branch-2`, `-3`… when a branch or worktree folder by
+    /// that name is there already (a helper's from an earlier run). A
+    /// remote project's is left as asked (asking its host would wait here).
+    fn free_branch(&self, project: &Project, branch: &str) -> String {
+        let Some(root) = git::repo_root(&project.path).filter(|r| harlo_core::remote::host_of(r).is_none()) else { return branch.to_owned() };
+        let branches = git::local_branches(&root).map(|(b, _)| b).unwrap_or_default();
+        let folder = self.worktree_base().join(format!("{}-{}", git::branch_slug(&project.name), project.id));
+        (1..100)
+            .map(|n| if n == 1 { branch.to_owned() } else { format!("{branch}-{n}") })
+            .find(|b| !branches.contains(b) && !folder.join(git::branch_slug(b)).exists())
+            .unwrap_or_else(|| branch.to_owned())
+    }
+
     fn project_root(&self, project_id: i32) -> Option<(Project, PathBuf)> {
         let project = self.projects.iter().find(|p| p.id == project_id as i64)?.clone();
         let root = git::repo_root(&project.path)?;
@@ -6599,6 +6612,11 @@ impl Workspace {
                 let branch = text("worktree");
                 // (The closest: a project can be inside another's folder.)
                 let project = self.projects.iter().filter(|p| cwd.starts_with(&p.path)).max_by_key(|p| p.path.components().count()).cloned();
+                // A name that's taken (an earlier helper's): the next free one.
+                let branch = match &project {
+                    Some(p) if !branch.is_empty() => self.free_branch(p, &branch),
+                    _ => branch,
+                };
                 // In a worktree: told where it works (its task names the
                 // checkout's paths).
                 let prompt = match (&project, branch.is_empty()) {
