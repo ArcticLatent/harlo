@@ -684,8 +684,11 @@ Rectangle {
                         spacing: 6
                         Label {
                             Layout.fillWidth: true
-                            text: "⏳ " + queuedRow.modelData
+                            // (One line: a message's line breaks would spill out.)
+                            text: "⏳ " + queuedRow.modelData.replace(/\s+/g, " ")
                             color: Theme.muted
+                            maximumLineCount: 1
+                            clip: true
                             elide: Text.ElideRight
                             font.pixelSize: Theme.px(12)
                         }

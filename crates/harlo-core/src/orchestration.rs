@@ -116,7 +116,8 @@ pub fn tools(starting: Starting) -> Value {
             "description": "Asks the user to decide something only they may decide (to go ahead with a risky or irreversible step, or a choice that's theirs). harlo shows it in your session and on their phone, and notifies them; no agent can answer it. Then end your turn: their answer comes to you as a message.",
             "inputSchema": s(json!({
                 "question": { "type": "string", "description": "What they decide, with what they need to know to decide it." },
-                "options": { "type": "array", "items": { "type": "string" }, "description": "Their choices (default: Approve, Reject)." }
+                "options": { "type": "array", "items": { "type": "string" }, "description": "Their choices (default: Approve, Reject)." },
+                "helper": { "type": "string", "description": "Your helper id, if your briefing gave you one." }
             }), &["question"]),
         }
     ]);
@@ -235,13 +236,14 @@ pub fn helper_tools() -> Value {
             "inputSchema": s(json!({
                 "outcome": { "type": "string", "enum": ["succeeded", "failed"], "description": "failed if the task isn't done: never hide a failure in the summary." },
                 "summary": { "type": "string", "description": "Three sentences: what you did, what you found, what's left." },
-                "files": { "type": "array", "items": { "type": "string" }, "description": "The files you changed (paths), if any." }
+                "files": { "type": "array", "items": { "type": "string" }, "description": "The files you changed (paths), if any." },
+                "helper": { "type": "string", "description": "Your helper id, if your briefing gave you one." }
             }), &["outcome", "summary"]),
         },
         {
             "name": "ask_parent",
             "description": "Asks the session that started you a question the task doesn't settle. Then end your turn: harlo wakes you with its answer. (For what only the user may decide, use request_approval.)",
-            "inputSchema": s(json!({ "question": { "type": "string" } }), &["question"]),
+            "inputSchema": s(json!({ "question": { "type": "string" }, "helper": { "type": "string", "description": "Your helper id, if your briefing gave you one." } }), &["question"]),
         }
     ])
 }
@@ -274,8 +276,10 @@ impl Report {
 /// What a helper's first message starts with: what it is, and how its
 /// result goes back (`tools`: it has harlo's tools; else it says it in
 /// its last reply).
-pub fn helper_brief(parent: &str, task: &str, tools: bool) -> String {
+pub fn helper_brief(parent: &str, task: &str, tools: bool, code: &str) -> String {
     let parent = if parent.trim().is_empty() { String::new() } else { format!(" (\"{}\")", parent.trim()) };
+    // (OpenCode's sessions share harlo's tools: who's calling.)
+    let id = if tools && !code.is_empty() { format!("\n- Your helper id is {code}: pass it as `helper` with each of harlo's tools you call (report_done, ask_parent, request_approval).") } else { String::new() };
     let how = if tools {
         "- When the task leaves a decision open, call harlo's ask_parent tool with your question, then end your turn: the answer comes to you as a message.\n\
          - For what only the user may decide (going ahead with a risky or irreversible step, a choice that's theirs), call request_approval, then end your turn.\n\
@@ -286,7 +290,7 @@ pub fn helper_brief(parent: &str, task: &str, tools: bool) -> String {
     format!(
         "[harlo] You're a helper: another agent's session{parent} started you with the task below, and harlo sends it your result.\n\
          - Do only this task, yourself: start no helper sessions unless it asks.\n\
-         {how}\n\n\
+         {how}{id}\n\n\
          The task:\n\n{task}"
     )
 }
@@ -724,9 +728,10 @@ mod tests {
         assert!(finished_message("pi", "T", "k", None, Some("hi"), None).contains("without reporting (report_done). Its last reply:\n\nhi"));
         assert!(finished_message("pi", "T", "k", None, Some(" "), Some("boom")).ends_with("without reporting: boom"));
         // The brief: with the tools, or a report in words.
-        let b = helper_brief("Lead", "Do X", true);
-        assert!(b.contains("session (\"Lead\") started you") && b.contains("report_done") && b.ends_with("The task:\n\nDo X"));
-        assert!(!helper_brief("", "Do X", false).contains("report_done"));
+        let b = helper_brief("Lead", "Do X", true, "");
+        assert!(b.contains("session (\"Lead\") started you") && b.contains("report_done") && b.ends_with("The task:\n\nDo X") && !b.contains("helper id"));
+        assert!(!helper_brief("", "Do X", false, "h-1").contains("report_done"));
+        assert!(helper_brief("", "Do X", true, "h-1").contains("Your helper id is h-1: pass it as `helper`"));
         assert!(approval_answer("Merge?", &json!({ "value": "Approve" })).ends_with("(\"Merge?\"): Approve"));
         assert!(approval_answer("Merge?", &json!({ "cancelled": true })).contains("dismissed"));
         // What it waits for, in short.

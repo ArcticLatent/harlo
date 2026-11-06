@@ -2855,7 +2855,7 @@ impl Workspace {
         if let Some(live) = registry::get(&child) {
             live.handle.send_raw(json!({ "type": "set_session_name", "name": title }));
         }
-        self.as_mut().adopt(&child, &key, &title, kind.as_str(), true, None);
+        self.as_mut().adopt(&child, &key, &title, kind.as_str(), true, None, "");
         // (Its progress shows in the session's Subagents box.)
         send_first_prompt(&child, FirstPrompt { text: prompt, ..Default::default() }, Some(self.qt_thread()));
         QString::default()
@@ -3257,7 +3257,7 @@ impl Workspace {
             let why = "the project isn't a git repository";
             match (step_of, parent) {
                 (Some((owner, id)), _) => self.plan_step_ended(&owner, id, Err(format!("its worktree couldn't be made: {why}"))),
-                (None, Some((parent, title, _))) => self.tell_worktree_failed(&parent, &title, &branch.to_string(), why),
+                (None, Some((parent, title, ..))) => self.tell_worktree_failed(&parent, &title, &branch.to_string(), why),
                 _ => {}
             }
             return;
@@ -3300,8 +3300,8 @@ impl Workspace {
                     // Run lanes start in the background; the run's overview is the tab.
                     let key = this.as_mut().start_session_with(kind, path.clone(), &model, lane.is_none() && parent.is_none());
                     // Started by an agent: its subagent.
-                    if let Some((parent, title, notify)) = parent {
-                        this.as_mut().adopt(&key, &parent, &title, kind.as_str(), notify, plan_step);
+                    if let Some((parent, title, notify, code)) = parent {
+                        this.as_mut().adopt(&key, &parent, &title, kind.as_str(), notify, plan_step, &code);
                     }
                     if let Some(lane) = lane {
                         if let Some(mut l) = this.find_run(&lane.0).and_then(|r| r.lanes.into_iter().find(|l| l.idx == lane.1)) {
@@ -3327,7 +3327,7 @@ impl Workspace {
                     // A plan's step: back to waiting, and the run paused.
                     if let Some((owner, id)) = step_of {
                         this.as_mut().plan_step_ended(&owner, id, Err(format!("its worktree couldn't be made: {e:#}")));
-                    } else if let Some((parent, title, _)) = parent {
+                    } else if let Some((parent, title, ..)) = parent {
                         this.tell_worktree_failed(&parent, &title, &branch, &format!("{e:#}"));
                     }
                 }
@@ -6096,7 +6096,8 @@ struct WorktreeStart {
     thinking: String,
     lane: Option<(String, i64)>,
     /// Started by an agent (orchestration): its session, the title, notify.
-    parent: Option<(String, String, bool)>,
+    /// (Its helper id: see `OrchChild::code`.)
+    parent: Option<(String, String, bool, String)>,
     /// The shield's mode to start in.
     approval: Option<String>,
     /// The step of its parent's plan it does (a run with helpers).
@@ -6136,6 +6137,9 @@ struct OrchChild {
     parent: String,
     title: String,
     agent: String,
+    /// Its helper id, from its briefing ("" none): OpenCode's sessions
+    /// share a server, so they say who they are with it.
+    code: String,
     /// Its report (or last reply) goes back to the parent when it
     /// finishes, and its questions.
     notify: bool,
@@ -6378,7 +6382,11 @@ impl Workspace {
     /// `HARLO_SESSION`; `opencode`: it came through OpenCode's server (whose
     /// running session is the caller).
     pub(crate) fn orchestrate(self: Pin<&mut Self>, token: &str, opencode: bool, tool: &str, args: &serde_json::Value) -> Result<serde_json::Value, String> {
-        let caller = self.orch_tokens.get(token).cloned().or_else(|| {
+        // (OpenCode's: a helper says its id; else the one at work.)
+        let named = args["helper"].as_str().map(str::trim).filter(|c| opencode && !c.is_empty()).and_then(|c| {
+            self.orch_children.iter().find(|(k, ch)| ch.code == c && self.live.contains_key(*k)).map(|(k, _)| k.clone())
+        });
+        let caller = self.orch_tokens.get(token).cloned().or(named).or_else(|| {
             opencode
                 .then(|| {
                     self.live
@@ -6389,11 +6397,12 @@ impl Workspace {
                 })
                 .flatten()
         });
-        self.orchestrate_as(caller, tool, args)
+        self.orchestrate_as(caller, opencode, tool, args)
     }
 
-    /// A tool call from `caller` (None: not a session harlo knows).
-    fn orchestrate_as(mut self: Pin<&mut Self>, caller: Option<String>, tool: &str, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    /// A tool call from `caller` (None: not a session harlo knows;
+    /// `opencode`: through OpenCode's shared server).
+    fn orchestrate_as(mut self: Pin<&mut Self>, caller: Option<String>, opencode: bool, tool: &str, args: &serde_json::Value) -> Result<serde_json::Value, String> {
         use serde_json::json;
         if !self.orchestration_on {
             return Err("Orchestration is turned off in harlo (Settings → Orchestration).".into());
@@ -6407,7 +6416,8 @@ impl Workspace {
         if tool == harlo_core::orchestration::TOOLS {
             let mut tools = harlo_core::orchestration::tools(self.agents_starting()).as_array().cloned().unwrap_or_default();
             // A helper: its report and its questions for its parent.
-            if caller.as_ref().and_then(|c| self.orch_children.get(c)).is_some_and(|c| c.notify) {
+            // (OpenCode lists its tools once for all its sessions: always.)
+            if opencode || caller.as_ref().and_then(|c| self.orch_children.get(c)).is_some_and(|c| c.notify) {
                 tools.extend(harlo_core::orchestration::helper_tools().as_array().cloned().unwrap_or_default());
             }
             if let Some((_, specs, plan, commits)) = &features {
@@ -6553,7 +6563,8 @@ impl Workspace {
                 // A helper works as its parent may: the same permission mode.
                 let approval = caller.as_deref().and_then(|c| self.approval_of(c)).filter(|_| has_shield(kind.as_str(), &cwd));
                 // A helper: told what it is and how its result goes back.
-                let prompt = if notify { harlo_core::orchestration::helper_brief(&self.title_of(&parent), &prompt, self.has_harlo_tools(kind, &cwd)) } else { prompt };
+                let code = helper_code(kind);
+                let prompt = if notify { harlo_core::orchestration::helper_brief(&self.title_of(&parent), &prompt, self.has_harlo_tools(kind, &cwd), &code) } else { prompt };
                 // In a new worktree: made in the background; it shows when ready.
                 let branch = text("worktree");
                 if !branch.is_empty() {
@@ -6567,7 +6578,7 @@ impl Workspace {
                         &QString::from(&branch),
                         &QString::default(),
                         &QString::from(kind.as_str()),
-                        WorktreeStart { first: Some(first), model, thinking: thinking.clone(), lane: None, parent: caller.as_ref().map(|_| (parent, title.clone(), notify)), approval, plan_step: None },
+                        WorktreeStart { first: Some(first), model, thinking: thinking.clone(), lane: None, parent: caller.as_ref().map(|_| (parent, title.clone(), notify, code)), approval, plan_step: None },
                     );
                     return Ok(json!({ "status": "creating the worktree; the session starts in it shortly (see list_sessions)", "branch": branch, "title": title }));
                 }
@@ -6577,7 +6588,7 @@ impl Workspace {
                     live.handle.send_raw(json!({ "type": "set_session_name", "name": title }));
                 }
                 if caller.is_some() {
-                    self.as_mut().adopt(&key, &parent, &title, kind.as_str(), notify, None);
+                    self.as_mut().adopt(&key, &parent, &title, kind.as_str(), notify, None, &code);
                 }
                 if let Some(mode) = &approval {
                     self.as_mut().set_approval_mode(&QString::from(&key), &QString::from(mode));
@@ -6719,8 +6730,8 @@ impl Workspace {
     }
 
     /// `key` was started by `parent`'s agent: it's that session's subagent.
-    fn adopt(mut self: Pin<&mut Self>, key: &str, parent: &str, title: &str, agent: &str, notify: bool, plan_step: Option<u32>) {
-        self.as_mut().rust_mut().orch_children.insert(key.to_owned(), OrchChild { parent: parent.to_owned(), title: title.to_owned(), agent: agent.to_owned(), notify, status: "running".into(), report: None, asking: false, told_waiting: false, plan_step });
+    fn adopt(mut self: Pin<&mut Self>, key: &str, parent: &str, title: &str, agent: &str, notify: bool, plan_step: Option<u32>, code: &str) {
+        self.as_mut().rust_mut().orch_children.insert(key.to_owned(), OrchChild { parent: parent.to_owned(), title: title.to_owned(), agent: agent.to_owned(), code: code.to_owned(), notify, status: "running".into(), report: None, asking: false, told_waiting: false, plan_step });
         // (A plan's step: who does it.)
         if let Some(id) = plan_step {
             crate::plans::update(self.plan_file(parent).as_deref(), parent, |p| {
@@ -6885,7 +6896,7 @@ impl Workspace {
             .iter()
             .map(|args| {
                 let title = args["title"].as_str().unwrap_or_default().to_owned();
-                let result = self.as_mut().orchestrate_as(Some(key.to_owned()), "start_session", args).map(|r| match r["session"].as_str() {
+                let result = self.as_mut().orchestrate_as(Some(key.to_owned()), false, "start_session", args).map(|r| match r["session"].as_str() {
                     Some(session) => session.to_owned(),
                     None => format!("starting in a new worktree on {}; see list_sessions", r["branch"].as_str().unwrap_or_default()),
                 });
@@ -7026,7 +7037,8 @@ impl Workspace {
             let title = format!("Step {n}: {}", step.title);
             let branch = if together { format!("plan/{}-{id}-{stamp}", git::branch_slug(&step.title).chars().take(30).collect::<String>().trim_matches('-')) } else { String::new() };
             let task = harlo_core::plan::step_prompt(&plan, id, &merge, commits, together);
-            let prompt = harlo_core::orchestration::helper_brief(&owner_title, &task, tools);
+            let code = helper_code(run.agent);
+            let prompt = harlo_core::orchestration::helper_brief(&owner_title, &task, tools, &code);
             if let Err(e) = crate::plans::update(file.as_deref(), owner, |p| p.hand_out(id, "", &branch)) {
                 tracing::warn!("plan run: {e}");
                 continue;
@@ -7039,7 +7051,7 @@ impl Workspace {
                     &QString::from(&branch),
                     &QString::from(&base),
                     &QString::from(run.agent.as_str()),
-                    WorktreeStart { first: Some(first), model: run.model.clone(), thinking: run.thinking.clone(), lane: None, parent: Some((owner.to_owned(), title.clone(), true)), approval: approval.clone(), plan_step: Some(id) },
+                    WorktreeStart { first: Some(first), model: run.model.clone(), thinking: run.thinking.clone(), lane: None, parent: Some((owner.to_owned(), title.clone(), true, code)), approval: approval.clone(), plan_step: Some(id) },
                 );
                 continue;
             }
@@ -7047,7 +7059,7 @@ impl Workspace {
             if let Some(live) = registry::get(&key) {
                 live.handle.send_raw(json!({ "type": "set_session_name", "name": title }));
             }
-            self.as_mut().adopt(&key, owner, &title, run.agent.as_str(), true, Some(id));
+            self.as_mut().adopt(&key, owner, &title, run.agent.as_str(), true, Some(id), &code);
             if let Some(mode) = &approval {
                 self.as_mut().set_approval_mode(&QString::from(&key), &QString::from(mode));
             }
@@ -7418,6 +7430,12 @@ fn agent_label(agent: &str) -> &str {
 }
 
 /// A session's `HARLO_SESSION` token (its agent's harlo tools say it).
+/// A helper's id for its briefing: OpenCode's (its sessions share one
+/// server, so harlo can't tell them apart otherwise), else "".
+fn helper_code(kind: HarnessKind) -> String {
+    if kind == HarnessKind::OpenCode { format!("h-{}", &orch_token()[..8]) } else { String::new() }
+}
+
 fn orch_token() -> String {
     let mut b = [0u8; 16];
     if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
