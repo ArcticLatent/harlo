@@ -478,6 +478,12 @@ pub mod qobject {
         /// Stops what a session is doing (it stays open).
         #[qinvokable]
         fn stop_session(self: &Workspace, key: &QString);
+        /// The Stop button: the helpers a session started stop with it.
+        #[qinvokable]
+        fn stop_helpers_of(self: Pin<&mut Workspace>, key: &QString);
+        /// Whether helpers a session started are still at work.
+        #[qinvokable]
+        fn helpers_working(self: &Workspace, key: &QString) -> bool;
         /// The composer's Delegate menu: what to send the agent, for
         /// `{ action, members: [{ agent, model }], note, worktree }`.
         #[qinvokable]
@@ -911,6 +917,9 @@ pub struct WorkspaceRust {
     /// of the card asking the user: who offered, and the helpers'
     /// start_session arguments.
     proposals: HashMap<String, (String, Vec<serde_json::Value>)>,
+    /// Sessions you stopped, with their helpers: a helper whose worktree
+    /// is still being made doesn't start (until the session works again).
+    halted: HashSet<String>,
     /// Remote files being copied here (`localCopy`).
     copying: std::cell::RefCell<HashSet<PathBuf>>,
     quota_loading: bool,
@@ -1119,6 +1128,8 @@ fn workspace_wants(u: &SessionUpdate) -> bool {
             | SessionUpdate::Limits(_)
             // (The user's answer to an approval request: to the agent.)
             | SessionUpdate::GateAnswered { .. }
+            // (Its helpers stop with it.)
+            | SessionUpdate::Stopped
     )
 }
 
@@ -3341,6 +3352,11 @@ impl Workspace {
                         let _ = db.upsert_worktree(&rec);
                     }
                     this.as_mut().reload_worktrees();
+                    // Its parent was stopped meanwhile: not started (the
+                    // worktree stays, in the list).
+                    if parent.as_ref().is_some_and(|(p, ..)| this.halted.contains(p)) {
+                        return this.as_mut().set_notice_text(&format!("The helper on {branch} wasn't started: you stopped the session that asked for it."), false);
+                    }
                     // Run lanes start in the background; the run's overview is the tab.
                     let key = this.as_mut().start_session_thinking(kind, path.clone(), &model, &thinking, lane.is_none() && parent.is_none());
                     // Started by an agent: its subagent.
@@ -5449,6 +5465,7 @@ impl Workspace {
         let mut answered = false;
         // Approvals the agent asked for with harlo's tools, answered.
         let mut gates: Vec<(String, String, serde_json::Value)> = Vec::new();
+        let mut stopped = false;
         // Claude's limits as it just said (a host's may be another account's).
         let mut limits: Option<serde_json::Value> = None;
         let needed_input = entry.info.needs_input;
@@ -5493,6 +5510,7 @@ impl Workspace {
                 }
                 SessionUpdate::Limits(info) => limits = Some(info),
                 SessionUpdate::GateAnswered { id, question, answer } => gates.push((id, question, answer)),
+                SessionUpdate::Stopped => stopped = true,
                 _ => {}
             }
         }
@@ -5612,6 +5630,9 @@ impl Workspace {
         }
         if answered {
             self.as_mut().child_answered(key);
+        }
+        if stopped {
+            self.as_mut().stop_helpers(key);
         }
         // The user's answers to its approval requests (and split offers):
         // to the agent.
@@ -6200,6 +6221,9 @@ struct OrchChild {
     /// The step of its parent's plan it does (a run with helpers): its
     /// result goes to the run, not to the parent's agent.
     plan_step: Option<u32>,
+    /// You stopped it (with its parent): it ends without reporting, and is
+    /// settled.
+    stopped: bool,
 }
 
 /// The first message of a session started from the new-session page.
@@ -6451,6 +6475,10 @@ impl Workspace {
         use serde_json::json;
         if !self.orchestration_on {
             return Err("Orchestration is turned off in harlo (Settings → Orchestration).".into());
+        }
+        // (A session working again: its helpers start again.)
+        if let Some(c) = &caller {
+            self.as_mut().rust_mut().halted.remove(c);
         }
         if tool == harlo_core::orchestration::ENABLED {
             return Ok(json!(true));
@@ -6788,7 +6816,7 @@ impl Workspace {
 
     /// `key` was started by `parent`'s agent: it's that session's subagent.
     fn adopt(mut self: Pin<&mut Self>, key: &str, parent: &str, title: &str, agent: &str, notify: bool, plan_step: Option<u32>, code: &str) {
-        self.as_mut().rust_mut().orch_children.insert(key.to_owned(), OrchChild { parent: parent.to_owned(), title: title.to_owned(), agent: agent.to_owned(), code: code.to_owned(), notify, status: "running".into(), report: None, asking: false, told_waiting: false, plan_step });
+        self.as_mut().rust_mut().orch_children.insert(key.to_owned(), OrchChild { parent: parent.to_owned(), title: title.to_owned(), agent: agent.to_owned(), code: code.to_owned(), notify, status: "running".into(), report: None, asking: false, told_waiting: false, plan_step, stopped: false });
         // (A plan's step: who does it.)
         if let Some(id) = plan_step {
             crate::plans::update(self.plan_file(parent).as_deref(), parent, |p| {
@@ -6821,7 +6849,17 @@ impl Workspace {
                 c.status = "running".into();
                 c.asking = false;
                 c.told_waiting = false;
+                c.stopped = false;
             }
+            return self.as_mut().bump_orchestration();
+        }
+        // Stopped with its parent: settled, and nobody's told.
+        if child.stopped {
+            if let Some(c) = self.as_mut().rust_mut().orch_children.get_mut(key) {
+                c.status = "stopped".into();
+                c.report = None;
+            }
+            self.as_mut().settle_helper(key);
             return self.as_mut().bump_orchestration();
         }
         let waiting = self.live.get(key).is_some_and(|e| !e.requests.is_empty());
@@ -7494,6 +7532,68 @@ impl Workspace {
         if let Some(live) = registry::get(&key.to_string()) {
             live.handle.abort();
         }
+    }
+
+    /// The Stop button (with the session's own stop): the helpers it
+    /// started (theirs too), working or waiting.
+    pub fn stop_helpers_of(self: Pin<&mut Self>, key: &QString) {
+        self.stop_helpers(&key.to_string());
+    }
+
+    /// Whether helpers `key` started (or theirs) are still at work.
+    pub fn helpers_working(&self, key: &QString) -> bool {
+        !self.working_helpers(&key.to_string()).is_empty()
+    }
+
+    /// The helpers under `key`, at any depth, still at work.
+    fn working_helpers(&self, key: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut parents = vec![key.to_owned()];
+        while let Some(p) = parents.pop() {
+            for (k, c) in self.orch_children.iter().filter(|(_, c)| c.parent == p) {
+                parents.push(k.clone());
+                let busy = self.live.get(k).is_some_and(|e| matches!(e.info.status, SessionStatus::Busy | SessionStatus::Starting));
+                if busy || matches!(c.status.as_str(), "running" | "asking" | "waiting") && self.live.contains_key(k) {
+                    out.push(k.clone());
+                }
+            }
+        }
+        out
+    }
+
+    /// A session was stopped: so are its helpers (whatever their agent),
+    /// and its plan's run. They don't report back; they're settled.
+    fn stop_helpers(mut self: Pin<&mut Self>, key: &str) {
+        if self.as_mut().rust_mut().plan_runs.remove(key).is_some() {
+            self.as_mut().plans_changed();
+        }
+        self.as_mut().rust_mut().halted.insert(key.to_owned());
+        let helpers = self.working_helpers(key);
+        if helpers.is_empty() {
+            return;
+        }
+        for k in &helpers {
+            self.as_mut().rust_mut().halted.insert(k.clone());
+            let busy = self.live.get(k).is_some_and(|e| matches!(e.info.status, SessionStatus::Busy | SessionStatus::Starting));
+            let asked: Vec<String> = self.live.get(k).map(|e| e.requests.iter().map(|(r, _)| r.id.clone()).collect()).unwrap_or_default();
+            if let Some(c) = self.as_mut().rust_mut().orch_children.get_mut(k) {
+                c.stopped = true;
+                c.status = "stopped".into();
+                c.asking = false;
+            }
+            if let Some(live) = registry::get(k) {
+                // (What it asked you: dismissed, so it isn't left waiting.)
+                for id in asked {
+                    live.handle.answer_ui(&id, serde_json::json!({ "cancelled": true }));
+                }
+                live.handle.abort();
+            }
+            // Idle (it waited on its parent): settled now; else as it ends.
+            if !busy {
+                self.as_mut().settle_helper(k);
+            }
+        }
+        self.as_mut().bump_orchestration();
     }
 }
 

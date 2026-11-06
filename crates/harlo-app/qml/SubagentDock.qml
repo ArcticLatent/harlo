@@ -42,7 +42,7 @@ Rectangle {
             Label {
                 Layout.fillWidth: true
                 readonly property int finished: root.agents.length - root.running - root.stalled
-                text: "Subagents · " + (root.running > 0 ? root.running + " running" : root.stalled > 0 ? "" : "all done")
+                text: "Subagents · " + (root.running > 0 ? root.running + " running" : root.stalled > 0 ? "" : root.agents.every(a => a.status === "stopped") ? "stopped" : "all done")
                     + (root.stalled > 0 ? (root.running > 0 ? " · " : "") + root.stalled + " waiting" : "")
                     + (finished > 0 && root.running + root.stalled > 0 ? " · " + finished + " finished" : "")
                 color: Theme.foreground

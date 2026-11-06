@@ -37,6 +37,12 @@ Rectangle {
     // (Hermes has no plan mode.)
     readonly property bool canPlan: session.harness !== "hermes"
     function togglePlan() { if (canPlan) Workspace.setPlanMode(session.key, !planOn) }
+    // Helpers it started are at work (Stop stops them too, as it waits).
+    readonly property bool helpersWorking: Workspace.orchestrationRevision >= 0 && session.key !== "" && Workspace.helpersWorking(session.key)
+    function stop() {
+        if (session.status === "busy") session.abort()
+        Workspace.stopHelpersOf(session.key)
+    }
     readonly property var approvalModes: ["always-ask", "write", "yolo"]
     function cycleApproval() {
         const i = approvalModes.indexOf(approvalMode)
@@ -561,7 +567,7 @@ Rectangle {
                     return
                 }
                 if (event.key === Qt.Key_Escape && root.session.status === "busy") {
-                    root.session.abort()
+                    root.stop()
                     event.accepted = true
                     return
                 }
@@ -863,9 +869,9 @@ Rectangle {
         // Stop while the agent runs; Send (or queue, while it runs).
         ComposerIconButton {
             objectName: "stopButton"
-            visible: root.session.status === "busy"
-            tip: "Stop the run (Esc)"
-            onClicked: root.session.abort()
+            visible: root.session.status === "busy" || root.helpersWorking
+            tip: root.session.status === "busy" ? "Stop the run, and its helpers (Esc)" : "Stop its helpers"
+            onClicked: root.stop()
             contentItem: Item {
                 Rectangle { anchors.centerIn: parent; width: 14; height: 14; radius: 3; color: Qt.rgba(Theme.error.r, Theme.error.g, Theme.error.b, 0.22); border.color: Theme.error; border.width: 1.5 }
             }

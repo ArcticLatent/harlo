@@ -119,6 +119,9 @@ pub enum SessionUpdate {
     /// harlo's tools (see [`SessionHandle::open_gate`]): what it asked,
     /// and the answer (`{ value }`, or `{ cancelled: true }`).
     GateAnswered { id: String, question: String, answer: Value },
+    /// The run was stopped (the user's Stop, or another session's
+    /// `stop_session`), not finished.
+    Stopped,
     /// A status-bar entry from an extension (ANSI stripped); `None` clears it.
     StatusEntry { key: String, text: Option<String> },
     /// omp subagent event (`subagent_lifecycle` / `subagent_progress` frame).
@@ -1053,6 +1056,9 @@ fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<Sessi
                     None => Some(Notable::Completed { last_message: st.messages.last_reply(), background: st.background }),
                 };
                 pending.extend(notable.map(SessionUpdate::Notable));
+                if aborted {
+                    pending.push(SessionUpdate::Stopped);
+                }
             }
             set_status(st, SessionStatus::Idle, pending);
             // The session file and title may have appeared during the run.
@@ -1599,6 +1605,27 @@ mod tests {
         assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::UiCleared(c) if *c == id)).await);
         let started = tokio::time::timeout(Duration::from_secs(1), collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::Status(SessionStatus::Starting)))).await;
         assert!(!matches!(started, Ok(true)));
+    }
+
+    /// A run you stop says so (its helpers stop with it); one that finishes doesn't.
+    #[tokio::test]
+    async fn a_stopped_run_says_so() {
+        let handle = SessionHandle::spawn(cfg(HarnessKind::Demo, SessionTarget::New));
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        handle.subscribe(ChannelSink(tx));
+        let mut rows = Vec::new();
+        assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::Status(SessionStatus::Idle))).await);
+        handle.prompt("hello", Vec::new(), harlo_harness::SendMode::Normal);
+        assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::Status(SessionStatus::Busy))).await);
+        handle.abort();
+        let mut stopped = false;
+        assert!(collect_until(&mut rx, &mut rows, |u| { stopped |= matches!(u, SessionUpdate::Stopped); matches!(u, SessionUpdate::Status(SessionStatus::Idle)) }).await);
+        assert!(stopped);
+        handle.prompt("fast", Vec::new(), harlo_harness::SendMode::Normal);
+        let mut stopped = false;
+        assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::Status(SessionStatus::Busy))).await);
+        assert!(collect_until(&mut rx, &mut rows, |u| { stopped |= matches!(u, SessionUpdate::Stopped); matches!(u, SessionUpdate::Status(SessionStatus::Idle)) }).await);
+        assert!(!stopped);
     }
 
     #[tokio::test]
