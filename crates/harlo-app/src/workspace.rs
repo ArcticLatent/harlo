@@ -4452,9 +4452,19 @@ impl Workspace {
         if !harlo_core::omp_overlay::APPROVAL_MODES.contains(&mode.as_str()) {
             return;
         }
-        self.as_mut().rust_mut().modes.entry(key.clone()).or_default().approval = Some(mode);
+        self.as_mut().rust_mut().modes.entry(key.clone()).or_default().approval = Some(mode.clone());
         self.as_mut().modes_changed(&key);
-        self.remember_modes(&key);
+        self.as_mut().remember_modes(&key);
+        // Its helpers at work (theirs too) follow it, whatever their agent
+        // (one without a permission shield has none to follow).
+        for helper in self.working_helpers(&key) {
+            let shielded = self.live.get(&helper).is_some_and(|e| has_shield(&e.info.harness, &e.info.cwd));
+            if shielded && self.modes.get(&helper).and_then(|m| m.approval.as_deref()) != Some(mode.as_str()) {
+                self.as_mut().rust_mut().modes.entry(helper.clone()).or_default().approval = Some(mode.clone());
+                self.as_mut().modes_changed(&helper);
+                self.as_mut().remember_modes(&helper);
+            }
+        }
     }
 
     pub fn remember_thinking(mut self: Pin<&mut Self>, key: &QString, level: &QString) {
