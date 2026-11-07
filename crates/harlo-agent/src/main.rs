@@ -19,6 +19,8 @@
 
 mod agent;
 mod auth;
+mod chat;
+mod providers;
 mod responses;
 mod rpc;
 mod session;
@@ -65,13 +67,20 @@ async fn run(args: Vec<String>) -> Result<()> {
             Ok(())
         }
         Some("models") => {
-            let token = auth::access_token(false).await?;
+            let (models, errors) = providers::every_model().await;
+            for e in &errors {
+                eprintln!("{e}");
+            }
             if args.get(1).is_some_and(|a| a == "--json") {
-                println!("{:#}", responses::models_raw(&token).await?);
+                let list: Vec<_> = models.iter().map(|m| serde_json::json!({ "provider": m.provider, "id": m.id, "name": m.name, "contextWindow": m.context_window, "levels": m.levels })).collect();
+                println!("{:#}", serde_json::Value::from(list));
                 return Ok(());
             }
-            for (id, name) in responses::models(&token).await? {
-                println!("{id}\t{name}");
+            for m in &models {
+                println!("{}\t{}", m.key(), m.name);
+            }
+            if models.is_empty() {
+                bail!("No models: sign in (`harlo-agent login`) or set up a provider in {}", auth::config_dir().join("providers.json").display());
             }
             Ok(())
         }
@@ -157,10 +166,10 @@ async fn ask(prompt: &str, model: Option<String>, effort: Option<String>, from: 
     // The model asked for, else the session's, else the plan's first.
     let effort = effort.or_else(|| logged.1.clone());
     let model = match model.or_else(|| logged.0.clone()) {
-        Some(m) => m,
+        Some(m) => providers::full(&m),
         None => {
-            let token = auth::access_token(false).await?;
-            responses::models(&token).await?.into_iter().next().map(|(id, _)| id).ok_or_else(|| anyhow::anyhow!("Your plan lists no models"))?
+            let (models, errors) = providers::every_model().await;
+            models.first().map(|m| m.key()).ok_or_else(|| anyhow::anyhow!("No models: {}", if errors.is_empty() { "set up a provider".to_owned() } else { errors.join("; ") }))?
         }
     };
     let mut agent = agent::Agent::new(cwd, log, history, logged, model, effort);

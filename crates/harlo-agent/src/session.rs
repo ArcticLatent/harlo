@@ -113,7 +113,13 @@ impl Log {
             match e["type"].as_str() {
                 Some("message") => messages.push(e["message"].clone()),
                 Some("custom_message") => messages.push(json!({ "role": "custom", "customType": e["customType"], "content": e["content"], "display": e["display"] })),
-                Some("model_change") => model = e["modelId"].as_str().map(str::to_owned),
+                // (`provider/model`; a bare one is the plan's.)
+                Some("model_change") => {
+                    model = e["modelId"].as_str().map(|m| match e["provider"].as_str().filter(|p| !p.is_empty()) {
+                        Some(p) => format!("{p}/{m}"),
+                        None => m.to_owned(),
+                    })
+                }
                 Some("thinking_level_change") => effort = e["thinkingLevel"].as_str().filter(|l| *l != "off").map(str::to_owned),
                 Some("session_info") => name = e["name"].as_str().filter(|n| !n.is_empty()).map(str::to_owned),
                 _ => {}
@@ -335,7 +341,7 @@ mod tests {
 
         let mut loaded = Log::open(&path).unwrap();
         assert_eq!(loaded.log.id, log.id);
-        assert_eq!(loaded.model.as_deref(), Some("m1"));
+        assert_eq!(loaded.model.as_deref(), Some("openai/m1"));
         assert_eq!(loaded.messages, vec![user.clone(), stop.clone()]);
         let reply = json!({ "role": "assistant", "content": [{ "type": "text", "text": "hello" }] });
         loaded.log.message(&reply).unwrap();
@@ -368,7 +374,7 @@ mod tests {
         assert_ne!(f.log.path, log.path);
         assert_eq!(f.log.path.parent(), log.path.parent());
         assert_eq!(f.messages, vec![msg("user", "first"), msg("assistant", "one")]);
-        assert_eq!((f.model.as_deref(), f.name.as_deref()), (Some("m1"), Some("Named")));
+        assert_eq!((f.model.as_deref(), f.name.as_deref()), (Some("openai/m1"), Some("Named")));
         f.log.message(&msg("user", "second, edited")).unwrap();
         let again = Log::open(&f.log.path).unwrap();
         assert_eq!(again.messages.len(), 3, "it continues where it was forked");
@@ -379,7 +385,7 @@ mod tests {
 
         // From the first: no messages, the model kept.
         let (mut f, said) = Log::fork(&log.path, &users[0]).unwrap();
-        assert_eq!((said.as_str(), f.messages.len(), f.model.as_deref()), ("first", 0, Some("m1")));
+        assert_eq!((said.as_str(), f.messages.len(), f.model.as_deref()), ("first", 0, Some("openai/m1")));
         f.log.message(&msg("user", "anew")).unwrap();
         let header: Value = serde_json::from_str(std::fs::read_to_string(&f.log.path).unwrap().lines().next().unwrap()).unwrap();
         assert_eq!(header["parentSession"].as_str(), Some(log.path.to_str().unwrap()));

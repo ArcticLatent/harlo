@@ -1606,7 +1606,7 @@ mod tests {
         assert!(kinds.contains(&crate::RowKind::Tool), "{rows:?}");
         let file = meta.session_file.clone().expect("its file");
         assert!(file.starts_with(home.join("data/harlo-agent/sessions")), "{file:?}");
-        assert!(!meta.model.is_empty() && meta.model_id.starts_with("openai/"), "{meta:?}");
+        assert!(!meta.model.is_empty() && meta.model_id.starts_with("chatgpt/"), "{meta:?}");
         assert_eq!(meta.thinking, "low");
         assert!(meta.context_window > 0, "{meta:?}");
 

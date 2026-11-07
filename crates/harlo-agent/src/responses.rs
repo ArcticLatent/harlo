@@ -1,12 +1,11 @@
-//! OpenAI's Responses API, streamed (server-sent events). With a ChatGPT
-//! plan's token: `store: false`, `stream: true`, the whole history in
-//! `input` each time, the system prompt as `instructions`.
+//! OpenAI's Responses API, streamed (server-sent events): a ChatGPT plan's,
+//! an API key's, or a server's that speaks it. `store: false`,
+//! `stream: true`, the whole history in `input` each time, the system
+//! prompt as `instructions`.
 
 use anyhow::{Result, anyhow, bail};
 use futures_util::StreamExt as _;
 use serde_json::{Value, json};
-
-use crate::auth::RESOURCE;
 
 /// What a stream says, as it comes. `index`: the item's place in the
 /// response's output.
@@ -29,67 +28,24 @@ pub enum Event {
 
 /// One client for every request, so a session's requests reuse their
 /// connection.
-fn client() -> &'static reqwest::Client {
+pub(crate) fn client() -> &'static reqwest::Client {
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
     CLIENT.get_or_init(reqwest::Client::new)
 }
 
-/// The models list as the server sends it.
-pub async fn models_raw(token: &str) -> Result<Value> {
-    let resp = client().get(format!("{RESOURCE}/models")).bearer_auth(token).send().await?;
+/// A server's models list as it sends it.
+pub async fn models_raw(base: &str, token: Option<&str>) -> Result<Value> {
+    let mut req = client().get(format!("{base}/models"));
+    if let Some(t) = token {
+        req = req.bearer_auth(t);
+    }
+    let resp = req.send().await.map_err(|e| anyhow!("Couldn't reach {base}: {e}"))?;
     let status = resp.status();
     let body: Value = resp.json().await.unwrap_or(Value::Null);
     if !status.is_success() {
         bail!("{}", refusal(status.as_u16(), &body));
     }
     Ok(body)
-}
-
-/// A model the signed-in account may use.
-#[derive(Clone, Debug)]
-pub struct ModelInfo {
-    pub id: String,
-    /// Its name for people.
-    pub name: String,
-    /// Tokens, or 0 when not said.
-    pub context_window: u64,
-    /// Reasoning efforts it takes (none said: empty).
-    pub levels: Vec<String>,
-}
-
-/// The models: (id, name to show), in the server's order.
-pub async fn models(token: &str) -> Result<Vec<(String, String)>> {
-    Ok(models_info(token).await?.into_iter().map(|m| (m.id, m.name)).collect())
-}
-
-pub async fn models_info(token: &str) -> Result<Vec<ModelInfo>> {
-    Ok(parse_models(&models_raw(token).await?))
-}
-
-fn parse_models(body: &Value) -> Vec<ModelInfo> {
-    let window = |m: &Value| ["context_window", "contextWindow", "context_length"].iter().find_map(|k| m[*k].as_u64()).unwrap_or(0);
-    let levels = |m: &Value| -> Vec<String> {
-        m["supported_reasoning_levels"].as_array().into_iter().flatten().filter_map(|l| l["effort"].as_str().or_else(|| l.as_str()).map(str::to_owned)).collect()
-    };
-    // A plan's list (`models`, in the server's order, only those to list);
-    // an API key's (`data`).
-    if let Some(list) = body["models"].as_array() {
-        return list
-            .iter()
-            .filter(|m| m["visibility"].as_str().is_none_or(|v| v == "list"))
-            .filter_map(|m| {
-                let id = m["slug"].as_str().or_else(|| m["id"].as_str())?.to_owned();
-                let name = m["display_name"].as_str().unwrap_or(&id).to_owned();
-                Some(ModelInfo { id, name, context_window: window(m), levels: levels(m) })
-            })
-            .collect();
-    }
-    body["data"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|m| m["id"].as_str().map(|id| ModelInfo { id: id.to_owned(), name: id.to_owned(), context_window: window(m), levels: levels(m) }))
-        .collect()
 }
 
 /// A request's body: the model, its instructions, the history, tools.
@@ -115,7 +71,7 @@ pub fn request(model: &str, instructions: &str, input: &[Value], tools: Value, e
 /// `thinking` (the whole item in `thinkingSignature`), text with its item's
 /// id (and phase) in `textSignature`, calls as `toolCall` with
 /// `call_id|item_id`.
-pub fn assistant_message(items: &[Value], model: &str, usage: &Value) -> Value {
+pub fn assistant_message(items: &[Value], provider: &str, model: &str, usage: &Value) -> Value {
     let mut content = Vec::new();
     for item in items {
         match item["type"].as_str() {
@@ -158,7 +114,7 @@ pub fn assistant_message(items: &[Value], model: &str, usage: &Value) -> Value {
         "role": "assistant",
         "content": content,
         "api": "openai-responses",
-        "provider": "openai",
+        "provider": provider,
         "model": model,
         "usage": {
             "input": input.saturating_sub(cached), "output": output, "cacheRead": cached, "cacheWrite": 0,
@@ -172,8 +128,8 @@ pub fn assistant_message(items: &[Value], model: &str, usage: &Value) -> Value {
 }
 
 /// pi's messages as the Responses API's `input`. Reasoning and call item
-/// ids go back only to the model that made them.
-pub fn input(messages: &[Value], model: &str) -> Vec<Value> {
+/// ids go back only to the model (and provider) that made them.
+pub fn input(messages: &[Value], provider: &str, model: &str) -> Vec<Value> {
     let text_of = |content: &Value| -> String {
         match content {
             Value::String(s) => s.clone(),
@@ -196,7 +152,7 @@ pub fn input(messages: &[Value], model: &str) -> Vec<Value> {
             }
             Some("custom") => out.push(json!({ "role": "user", "content": [{ "type": "input_text", "text": text_of(&m["content"]) }] })),
             Some("assistant") => {
-                let same = m["provider"] == "openai" && m["model"] == model;
+                let same = m["provider"] == provider && m["model"] == model && m["api"] == "openai-responses";
                 let mut texts = 0;
                 for b in m["content"].as_array().into_iter().flatten() {
                     match b["type"].as_str() {
@@ -240,17 +196,17 @@ pub fn input(messages: &[Value], model: &str) -> Vec<Value> {
 }
 
 /// Sends one request and calls `on` with each event until it completes.
-/// `session`: the session's id, sent as its affinity headers too, so its
-/// requests go where their shared start is cached.
-pub async fn stream(token: &str, session: &str, body: &Value, mut on: impl FnMut(Event)) -> Result<()> {
-    let resp = client()
-        .post(format!("{RESOURCE}/responses"))
-        .bearer_auth(token)
-        .header("session-id", session)
-        .header("x-client-request-id", session)
-        .json(body)
-        .send()
-        .await?;
+/// `affinity`: the session's id, sent as the plan's affinity headers, so
+/// its requests go where their shared start is cached.
+pub async fn stream(base: &str, token: Option<&str>, affinity: Option<&str>, body: &Value, mut on: impl FnMut(Event)) -> Result<()> {
+    let mut req = client().post(format!("{base}/responses")).json(body);
+    if let Some(t) = token {
+        req = req.bearer_auth(t);
+    }
+    if let Some(session) = affinity {
+        req = req.header("session-id", session).header("x-client-request-id", session);
+    }
+    let resp = req.send().await.map_err(|e| anyhow!("Couldn't reach {base}: {e}"))?;
     let status = resp.status();
     if !status.is_success() {
         let body: Value = resp.json().await.unwrap_or(Value::Null);
@@ -306,7 +262,7 @@ fn delta(ev: &Value) -> String {
 }
 
 /// (end of the event's text, end including the blank line).
-fn find_event_end(buf: &[u8]) -> Option<(usize, usize)> {
+pub(crate) fn find_event_end(buf: &[u8]) -> Option<(usize, usize)> {
     let lf = buf.windows(2).position(|w| w == b"\n\n").map(|i| (i, i + 2));
     let crlf = buf.windows(4).position(|w| w == b"\r\n\r\n").map(|i| (i, i + 4));
     match (lf, crlf) {
@@ -370,7 +326,7 @@ mod tests {
             json!({ "type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "read", "arguments": "{\"path\":\"a.rs\",\"limit\":5}", "status": "completed" }),
         ];
         let usage = json!({ "input_tokens": 3000, "input_tokens_details": { "cached_tokens": 2048 }, "output_tokens": 40 });
-        let reply = assistant_message(&items, "m1", &usage);
+        let reply = assistant_message(&items, "chatgpt", "m1", &usage);
         assert_eq!(reply["stopReason"], "toolUse");
         assert_eq!((reply["usage"]["input"].as_u64(), reply["usage"]["cacheRead"].as_u64()), (Some(952), Some(2048)));
         assert_eq!(reply["content"][0]["thinking"], "Look first.");
@@ -378,20 +334,21 @@ mod tests {
         let result = json!({ "role": "toolResult", "toolCallId": "call_1|fc_1", "toolName": "read", "content": [{ "type": "text", "text": "fn a() {}" }], "isError": false });
         let msgs = vec![json!({ "role": "user", "content": [{ "type": "text", "text": "hi" }] }), reply, result];
 
-        let same = input(&msgs, "m1");
+        let same = input(&msgs, "chatgpt", "m1");
         assert_eq!(same[1], items[0], "reasoning goes back whole");
         assert_eq!(same[2], json!({ "type": "message", "role": "assistant", "content": [{ "type": "output_text", "text": "Reading.", "annotations": [] }], "status": "completed", "id": "msg_1", "phase": "commentary" }));
         assert_eq!(same[3], json!({ "type": "function_call", "call_id": "call_1", "name": "read", "arguments": "{\"path\":\"a.rs\",\"limit\":5}", "id": "fc_1" }));
         assert_eq!(same[4], json!({ "type": "function_call_output", "call_id": "call_1", "output": "fn a() {}" }));
 
-        let other = input(&msgs, "m2");
+        let other = input(&msgs, "chatgpt", "m2");
         assert_eq!(other.len(), 4, "another model gets no reasoning");
         assert!(other[2].get("id").is_none(), "nor the call's item id");
+        assert_eq!(input(&msgs, "openai", "m1").len(), 4, "nor the same model through another provider");
     }
 
     #[test]
     fn arguments_that_arent_json_are_marked() {
-        let reply = assistant_message(&[json!({ "type": "function_call", "id": "fc_1", "call_id": "c", "name": "bash", "arguments": "{oops" })], "m", &Value::Null);
+        let reply = assistant_message(&[json!({ "type": "function_call", "id": "fc_1", "call_id": "c", "name": "bash", "arguments": "{oops" })], "chatgpt", "m", &Value::Null);
         assert!(reply["content"][0]["argumentsError"].as_str().unwrap().contains("{oops"));
         assert_eq!(reply["content"][0]["arguments"], json!({}));
     }

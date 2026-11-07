@@ -16,7 +16,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::session::{Log, now_ms};
 use crate::tools::{self, Tools};
-use crate::{auth, responses};
+use crate::providers::{self, Api};
+use crate::{chat, responses};
 
 /// Rounds of tool calls in one run, at most.
 const MAX_ROUNDS: usize = 200;
@@ -186,7 +187,8 @@ impl Agent {
     /// they started), and the history says what was cut off.
     pub async fn run(&mut self, prompt: &str, stop: &CancellationToken, show: &mut (dyn FnMut(Shown) + Send)) -> Result<Ended> {
         if self.logged.0.as_deref() != Some(&self.model) {
-            self.log.append(json!({ "type": "model_change", "provider": "openai", "modelId": self.model }))?;
+            let (provider, id) = self.model.split_once('/').unwrap_or((providers::CHATGPT, &self.model));
+            self.log.append(json!({ "type": "model_change", "provider": provider, "modelId": id }))?;
             self.logged.0 = Some(self.model.clone());
         }
         if self.logged.1 != self.effort {
@@ -252,7 +254,8 @@ impl Agent {
     /// Records a failed request as pi does: an assistant message with the
     /// error (it adds nothing to what the model sees next).
     pub fn failed(&mut self, error: &str, show: &mut (dyn FnMut(Shown) + Send)) -> Result<()> {
-        let mut m = responses::assistant_message(&[], &self.model, &Value::Null);
+        let (provider, id) = self.model.split_once('/').unwrap_or((providers::CHATGPT, &self.model));
+        let mut m = responses::assistant_message(&[], provider, id, &Value::Null);
         m["stopReason"] = json!("error");
         m["errorMessage"] = json!(error);
         show(Shown::MessageStart(&m));
@@ -262,32 +265,47 @@ impl Agent {
     /// One request: the reply, as pi's assistant message. A token the API
     /// refuses is refreshed once and the request sent again.
     async fn ask(&mut self, show: &mut (dyn FnMut(Shown) + Send)) -> Result<Value> {
-        let input = responses::input(&self.history, &self.model);
-        let body = responses::request(&self.model, &self.instructions, &input, tools::specs(), self.effort.as_deref(), &self.log.id);
-        let model = self.model.clone();
-        show(Shown::MessageStart(&json!({ "role": "assistant", "content": [], "api": "openai-responses", "provider": "openai", "model": model, "timestamp": now_ms() })));
+        let (provider, model) = providers::resolve(&self.model)?;
+        let pid = provider.id.clone();
+        let api = if provider.api == Api::Chat { "openai-completions" } else { "openai-responses" };
+        show(Shown::MessageStart(&json!({ "role": "assistant", "content": [], "api": api, "provider": pid, "model": model, "timestamp": now_ms() })));
+        let effort = self.effort.as_deref().filter(|_| provider.reasons(&model));
+        let totals = &mut self.totals;
+        let last_usage = &mut self.last_usage;
+        let mut counted = |usage: &Value, show: &mut (dyn FnMut(Shown) + Send)| {
+            totals.requests += 1;
+            totals.input += usage["input_tokens"].as_u64().unwrap_or(0);
+            totals.cached += usage["input_tokens_details"]["cached_tokens"].as_u64().unwrap_or(0);
+            totals.output += usage["output_tokens"].as_u64().unwrap_or(0);
+            show(Shown::Usage { model: &model, usage });
+            *last_usage = usage.clone();
+        };
+        if provider.api == Api::Chat {
+            let body = chat::request(&model, &self.instructions, &chat::messages(&self.history), &tools::specs(), effort);
+            let token = provider.token(false).await?;
+            let (message, usage) = chat::stream(&provider.base_url, token.as_deref(), &body, &pid, &model, |e| show(Shown::Stream(e))).await?;
+            counted(&usage, show);
+            return Ok(message);
+        }
+        let input = responses::input(&self.history, &pid, &model);
+        let body = responses::request(&model, &self.instructions, &input, tools::specs(), effort, &self.log.id);
+        // (The plan's affinity headers keep a session's requests where its cache is.)
+        let affinity = provider.is_plan().then_some(self.log.id.as_str());
         let mut force = false;
         loop {
-            let token = auth::access_token(force).await?;
+            let token = provider.token(force).await?;
             let mut items = Vec::new();
             let mut done: Option<(Value, Vec<Value>)> = None;
             let mut blocks = Blocks::default();
-            let totals = &mut self.totals;
-            let last_usage = &mut self.last_usage;
-            let result = responses::stream(&token, &self.log.id, &body, |ev| match ev {
+            let result = responses::stream(&provider.base_url, token.as_deref(), affinity, &body, |ev| match ev {
                 responses::Event::Item { index, item } => {
-                    if let Some(end) = blocks.end(index, &item, &model) {
+                    if let Some(end) = blocks.end(index, &item, &pid, &model) {
                         show(Shown::Stream(&end));
                     }
                     items.push(item);
                 }
                 responses::Event::Completed { usage, output } => {
-                    totals.requests += 1;
-                    totals.input += usage["input_tokens"].as_u64().unwrap_or(0);
-                    totals.cached += usage["input_tokens_details"]["cached_tokens"].as_u64().unwrap_or(0);
-                    totals.output += usage["output_tokens"].as_u64().unwrap_or(0);
-                    show(Shown::Usage { model: &model, usage: &usage });
-                    *last_usage = usage.clone();
+                    counted(&usage, show);
                     done = Some((usage, output));
                 }
                 other => {
@@ -302,9 +320,10 @@ impl Agent {
                     let (usage, output) = done.unwrap_or_default();
                     // The completed response's own list when it has one.
                     let items = if output.is_empty() { items } else { output };
-                    return Ok(responses::assistant_message(&items, &model, &usage));
+                    return Ok(responses::assistant_message(&items, &pid, &model, &usage));
                 }
-                Err(e) if !force && e.downcast_ref::<responses::ApiError>().is_some_and(|a| a.status == 401) => force = true,
+                // The plan's token, refused: refreshed once.
+                Err(e) if provider.is_plan() && !force && e.downcast_ref::<responses::ApiError>().is_some_and(|a| a.status == 401) => force = true,
                 Err(e) => return Err(e),
             }
         }
@@ -357,9 +376,9 @@ impl Blocks {
     }
 
     /// An item done: its block's end, with the block as it will be kept.
-    fn end(&mut self, index: usize, item: &Value, model: &str) -> Option<Value> {
+    fn end(&mut self, index: usize, item: &Value, provider: &str, model: &str) -> Option<Value> {
         let (ci, _) = *self.at.get(&index)?;
-        let block = responses::assistant_message(std::slice::from_ref(item), model, &Value::Null)["content"][0].clone();
+        let block = responses::assistant_message(std::slice::from_ref(item), provider, model, &Value::Null)["content"][0].clone();
         Some(match block["type"].as_str()? {
             "thinking" => json!({ "type": "thinking_end", "contentIndex": ci, "content": block["thinking"] }),
             "text" => json!({ "type": "text_end", "contentIndex": ci, "content": block["text"] }),

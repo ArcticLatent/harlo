@@ -22,7 +22,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::{Agent, Gate, Inbox, Shown};
-use crate::{auth, responses, session};
+use crate::{providers, session};
 
 /// The thinking levels offered when the model doesn't list its own (the
 /// reasoning effort sent).
@@ -54,7 +54,7 @@ struct Shared {
     /// Settings changed while a run had the agent: applied when it ends.
     pending: Mutex<Pending>,
     /// The plan's models.
-    models: Mutex<Vec<responses::ModelInfo>>,
+    models: Mutex<Vec<providers::ModelInfo>>,
 }
 
 struct Modes {
@@ -116,24 +116,31 @@ impl Shared {
         }
     }
 
-    fn model_json(&self, id: &str) -> Value {
-        let models = self.models.lock().unwrap();
-        let m = models.iter().find(|m| m.id == id);
+    /// A model (`provider/id`) as pi describes one.
+    fn model_json(&self, key: &str) -> Value {
+        let reasoning = self.levels(key) != ["off"];
+        let m = self.models.lock().unwrap().iter().find(|m| m.key() == key).cloned();
+        let (provider, id) = key.split_once('/').unwrap_or((providers::CHATGPT, key));
+        let base = providers::resolve(key).map(|(p, _)| p.base_url).unwrap_or_default();
         json!({
-            "provider": "openai", "id": id, "name": m.map_or(id, |m| m.name.as_str()), "reasoning": true,
-            "baseUrl": auth::RESOURCE, "contextWindow": m.map_or(0, |m| m.context_window),
+            "provider": provider, "id": id, "name": m.as_ref().map_or(id, |m| m.name.as_str()),
+            "reasoning": reasoning, "baseUrl": base, "contextWindow": m.map_or(0, |m| m.context_window),
         })
     }
 
-    fn context_window(&self, id: &str) -> u64 {
-        self.models.lock().unwrap().iter().find(|m| m.id == id).map_or(0, |m| m.context_window)
+    fn context_window(&self, key: &str) -> u64 {
+        self.models.lock().unwrap().iter().find(|m| m.key() == key).map_or(0, |m| m.context_window)
     }
 
-    /// The model's thinking levels.
-    fn levels(&self, id: &str) -> Vec<String> {
-        let models = self.models.lock().unwrap();
-        match models.iter().find(|m| m.id == id) {
-            Some(m) if !m.levels.is_empty() => m.levels.clone(),
+    /// The model's thinking levels: its own, else the usual ones for a
+    /// model that reasons, else just "off".
+    fn levels(&self, key: &str) -> Vec<String> {
+        let own = self.models.lock().unwrap().iter().find(|m| m.key() == key && !m.levels.is_empty()).map(|m| m.levels.clone());
+        if let Some(levels) = own {
+            return levels;
+        }
+        match providers::resolve(key) {
+            Ok((p, id)) if !p.reasons(&id) => vec!["off".to_owned()],
             _ => LEVELS.iter().map(|l| l.to_string()).collect(),
         }
     }
@@ -203,7 +210,7 @@ pub async fn serve(keep: Keep, model: Option<String>, effort: Option<String>) ->
         }
     };
     let effort = effort.or_else(|| logged.1.clone()).unwrap_or_else(|| DEFAULT_LEVEL.to_owned());
-    let model = model.or_else(|| logged.0.clone()).unwrap_or_default();
+    let model = model.or_else(|| logged.0.clone()).map(|m| providers::full(&m)).unwrap_or_default();
     let mut agent = Agent::new(cwd.clone(), log, history, logged, model, Some(effort));
 
     let (out, mut out_rx) = mpsc::unbounded_channel::<Value>();
@@ -374,7 +381,7 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
         }
         "get_available_models" => match load_models(sh).await {
             Ok(()) => {
-                let ids: Vec<String> = sh.models.lock().unwrap().iter().map(|m| m.id.clone()).collect();
+                let ids: Vec<String> = sh.models.lock().unwrap().iter().map(|m| m.key()).collect();
                 reply(Ok(json!({ "models": ids.iter().map(|id| sh.model_json(id)).collect::<Vec<_>>() })))
             }
             Err(e) => reply(Err(e)),
@@ -385,11 +392,30 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
             reply(Ok(json!({ "levels": sh.levels(&model) })))
         }
         "set_model" => {
-            let model = cmd["modelId"].as_str().or_else(|| cmd["model"].as_str()).unwrap_or_default().to_owned();
-            if model.is_empty() {
+            let id = cmd["modelId"].as_str().or_else(|| cmd["model"].as_str()).unwrap_or_default();
+            if id.is_empty() {
                 return reply(Err("set_model needs modelId".into()));
             }
+            let model = providers::full(&match cmd["provider"].as_str().filter(|p| !p.is_empty()) {
+                Some(p) => format!("{p}/{id}"),
+                None => id.to_owned(),
+            });
+            if let Err(e) = providers::resolve(&model) {
+                return reply(Err(format!("{e:#}")));
+            }
             let _ = load_models(sh).await;
+            // A level this model doesn't take: the nearest it does.
+            let levels = sh.levels(&model);
+            let effort = sh.view.lock().unwrap().effort.clone();
+            if !levels.contains(&effort) {
+                let level = if levels.iter().any(|l| l == DEFAULT_LEVEL) { DEFAULT_LEVEL.to_owned() } else { levels[0].clone() };
+                match agent.try_lock() {
+                    Ok(mut a) => a.effort = (level != "off").then(|| level.clone()),
+                    Err(_) => sh.pending.lock().unwrap().effort = Some(level.clone()),
+                }
+                sh.view.lock().unwrap().effort = level.clone();
+                sh.emit(json!({ "type": "thinking_level_changed", "level": level }));
+            }
             match agent.try_lock() {
                 Ok(mut a) => a.model = model.clone(),
                 Err(_) => sh.pending.lock().unwrap().model = Some(model.clone()),
@@ -407,7 +433,7 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
                 return reply(Err(format!("This model's levels are {}", levels.join(", "))));
             }
             match agent.try_lock() {
-                Ok(mut a) => a.effort = Some(level.clone()),
+                Ok(mut a) => a.effort = (level != "off").then(|| level.clone()),
                 Err(_) => sh.pending.lock().unwrap().effort = Some(level.clone()),
             }
             sh.view.lock().unwrap().effort = level.clone();
@@ -513,9 +539,11 @@ async fn load_models(sh: &Shared) -> Result<(), String> {
     if !sh.models.lock().unwrap().is_empty() {
         return Ok(());
     }
-    let token = auth::access_token(false).await.map_err(|e| format!("{e:#}"))?;
-    let list = responses::models_info(&token).await.map_err(|e| format!("{e:#}"))?;
-    let first = list.first().map(|m| m.id.clone());
+    let (list, errors) = providers::every_model().await;
+    if list.is_empty() {
+        return Err(if errors.is_empty() { "No models: sign in with ChatGPT or set up a provider".to_owned() } else { errors.join("; ") });
+    }
+    let first = list.first().map(|m| m.key());
     *sh.models.lock().unwrap() = list;
     let mut v = sh.view.lock().unwrap();
     if v.model.is_empty()
@@ -553,8 +581,9 @@ async fn start(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, prompt:
         if let Some(m) = p.model {
             a.model = m;
         }
+        // ("off": none.)
         if let Some(e) = p.effort {
-            a.effort = Some(e);
+            a.effort = (e != "off").then_some(e);
         }
         if let Some(n) = p.name {
             let _ = a.rename(&n);
