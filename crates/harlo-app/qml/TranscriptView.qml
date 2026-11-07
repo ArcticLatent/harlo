@@ -76,12 +76,22 @@ Item {
     /// A reply's model as the head shows it (its name when the agent
     /// listed it; "" unknown: the session's).
     function replyModelName(id) {
-        const current = session.modelId
-        if (id === "" || current === id || current.endsWith("/" + id))
-            return session.modelName
-        const known = session.models.map(m => m.split("\t")).find(p => p[1] === id || p[0] + "/" + p[1] === id)
-        return known && known[2] ? known[2] : id
+        for (const s of [session, namesFrom]) {
+            if (!s || s.modelId === "")
+                continue
+            if (id === "" || s.modelId === id || s.modelId.endsWith("/" + id))
+                return s.modelName
+        }
+        for (const s of [session, namesFrom]) {
+            const known = s ? s.models.map(m => m.split("\t")).find(p => p[1] === id || p[0] + "/" + p[1] === id) : null
+            if (known && known[2])
+                return known[2]
+        }
+        return id === "" ? session.modelName : id
     }
+    /// Another session whose model names it may use (a branch's preview:
+    /// the session open in the chat).
+    property ChatSession namesFrom: null
     // The agent at the top of its reply: avatar, name and model (the
     // reply's own: the session may have switched since).
     component AgentHead: Item {

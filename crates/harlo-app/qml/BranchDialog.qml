@@ -10,6 +10,8 @@ Popup {
     property string file: ""          // the session file
     property string harness: ""
     property string cwd: ""
+    /// The session open in the chat: its model names label the preview.
+    property ChatSession liveSession: null
     property var branches: []
     property int selected: 0
     readonly property var current: branches[selected] || null
@@ -189,6 +191,7 @@ Popup {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 session: previewSession
+                namesFrom: root.liveSession
             }
         }
     }

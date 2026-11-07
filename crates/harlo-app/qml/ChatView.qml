@@ -203,6 +203,7 @@ Rectangle {
     }
     BranchDialog {
         id: branchDialog
+        liveSession: root.session
         onContinued: key => {}
     }
 
