@@ -42,7 +42,7 @@ Rectangle {
             spacing: 8
             Icon { name: "list-check-2"; color: Theme.primary; implicitWidth: 15; implicitHeight: 15 }
             Label {
-                text: "Plan · " + root.done + "/" + root.tasks.length
+                text: "To-do · " + root.done + "/" + root.tasks.length
                 color: Theme.foreground
                 font.pixelSize: Theme.px(12)
                 font.bold: true
