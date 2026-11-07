@@ -384,10 +384,9 @@ pub fn resolve_program(kind: HarnessKind) -> Option<PathBuf> {
     let name = kind.program_name();
     // harlo's own agent: the one built and shipped with this harlo first.
     if kind == HarnessKind::Harlo
-        && let Some(beside) = std::env::current_exe().ok().and_then(|exe| Some(exe.parent()?.join(name)))
-        && is_executable(&beside)
+        && let Some(shipped) = std::env::current_exe().ok().and_then(|exe| shipped_with(&exe, name))
     {
-        return Some(beside);
+        return Some(shipped);
     }
     if let Some(path) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&path) {
@@ -414,6 +413,14 @@ pub fn resolve_program(kind: HarnessKind) -> Option<PathBuf> {
         HarnessKind::Demo => vec![],
     };
     known.into_iter().find(|p| is_executable(p))
+}
+
+/// A program shipped with harlo (`exe`): beside it (a build), else in
+/// `lib/harlo` next to its folder (the packages: `usr/bin` and
+/// `usr/lib/harlo`, `/opt/harlo/bin` and `/opt/harlo/lib/harlo`).
+fn shipped_with(exe: &Path, name: &str) -> Option<PathBuf> {
+    let dir = exe.parent()?;
+    [dir.join(name), dir.join("../lib/harlo").join(name)].into_iter().find(|p| is_executable(p))
 }
 
 fn is_executable(path: &Path) -> bool {
@@ -740,5 +747,29 @@ mod tests {
         let state = tokio::time::timeout(Duration::from_secs(30), harness.request(json!({ "type": "get_state" }))).await.unwrap().unwrap();
         println!("model over ssh: {}", state["model"]["id"]);
         assert!(state.get("model").is_some(), "{state}");
+    }
+
+    #[test]
+    fn finds_what_ships_with_harlo() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("harlo-shipped-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let exe = root.join("opt/harlo/bin/harlo");
+        std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(root.join("opt/harlo/lib/harlo")).unwrap();
+        let make = |p: &Path| {
+            std::fs::write(p, "#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        assert_eq!(shipped_with(&exe, "harlo-agent"), None);
+        // The packages': in lib/harlo.
+        let lib = root.join("opt/harlo/lib/harlo/harlo-agent");
+        make(&lib);
+        assert_eq!(shipped_with(&exe, "harlo-agent").map(|p| p.canonicalize().unwrap()), Some(lib.canonicalize().unwrap()));
+        // A build's, beside it, comes first.
+        let beside = root.join("opt/harlo/bin/harlo-agent");
+        make(&beside);
+        assert_eq!(shipped_with(&exe, "harlo-agent"), Some(beside));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

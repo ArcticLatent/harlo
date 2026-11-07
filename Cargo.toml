@@ -26,3 +26,9 @@ cxx-qt-build = { version = "0.10", features = ["link_qt_object_files"] }
 # Checksums of engine downloads (gigabytes) in a dev build: seconds, not minutes.
 [profile.dev.package.sha2]
 opt-level = 3
+
+# harlo-agent as shipped: one optimized unit (smaller, less memory per session).
+[profile.agent]
+inherits = "release"
+lto = "fat"
+codegen-units = 1

@@ -25,6 +25,8 @@ cargo build --release --locked -p harlo-app
 # (The helper harlo puts on another machine to run model servers there:
 # without dictation, so it needs no C++ library there.)
 cargo build --release --locked -p harlo-core --bin harlo-engines --no-default-features
+# Harlo, harlo's own agent (one optimized unit: smaller, less memory).
+cargo build --profile agent --locked -p harlo-agent
 
 fetch() {
     [ -x "$TOOLS/$1" ] || { curl -fsSL -o "$TOOLS/$1" "$2"; chmod +x "$TOOLS/$1"; }
@@ -72,6 +74,8 @@ export PATH="$QTDIR/bin:$PATH"
 # The helper harlo puts on another machine to run model servers there: as
 # built (after linuxdeploy, which changes the programs it finds), stripped.
 install -Dm755 -s "${CARGO_TARGET_DIR:-target}/release/harlo-engines" "$APPDIR/usr/lib/harlo/harlo-engines"
+# Harlo's agent, which harlo looks for in lib/harlo beside its own bin.
+install -Dm755 -s "${CARGO_TARGET_DIR:-target}/agent/harlo-agent" "$APPDIR/usr/lib/harlo/harlo-agent"
 # ARM machines' (built on one: the release's arm64 job puts it in dist/helpers).
 if [ -f "$OUT/helpers/harlo-engines-aarch64" ]; then
     install -Dm755 "$OUT/helpers/harlo-engines-aarch64" "$APPDIR/usr/lib/harlo/harlo-engines-aarch64"

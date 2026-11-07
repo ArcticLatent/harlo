@@ -36,6 +36,7 @@ build() {
     export RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR=target QMAKE=qmake6
     cargo build --frozen --release -p harlo-app
     cargo build --frozen --release -p harlo-core --bin harlo-engines --no-default-features
+    cargo build --frozen --profile agent -p harlo-agent
 }
 
 check() {
@@ -49,6 +50,8 @@ package() {
     install -Dm755 target/release/harlo "$pkgdir/usr/bin/harlo"
     # (What harlo puts on another machine to run model servers there.)
     install -Dm755 target/release/harlo-engines "$pkgdir/usr/lib/harlo/harlo-engines"
+    # (Harlo, harlo's own agent.)
+    install -Dm755 target/agent/harlo-agent "$pkgdir/usr/lib/harlo/harlo-agent"
     install -Dm644 packaging/harlo.desktop "$pkgdir/usr/share/applications/harlo.desktop"
     install -Dm644 crates/harlo-app/icons/app/harlo.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/harlo.svg"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"

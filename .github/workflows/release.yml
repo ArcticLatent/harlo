@@ -111,6 +111,9 @@ jobs:
           test -x dist/opt/harlo/lib/harlo/harlo-engines
           test -x dist/opt/harlo/lib/harlo/harlo-engines-aarch64
           dist/opt/harlo/lib/harlo/harlo-engines version
+          # Harlo's agent, where harlo looks for it.
+          test -x dist/opt/harlo/lib/harlo/harlo-agent
+          dist/opt/harlo/lib/harlo/harlo-agent --version
           # It runs and its QML loads: --version prints and quits; a short
           # offscreen start must not report missing modules or libraries.
           QT_QPA_PLATFORM=offscreen dist/opt/harlo/bin/harlo --version
