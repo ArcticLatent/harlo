@@ -339,8 +339,20 @@ fn read_callback(url: &reqwest::Url, state: &str) -> Callback {
 /// `paste`: or the address the page ended on, pasted on the input (when
 /// the browser is on another computer and its redirect can't reach here).
 async fn wait_for_callback(listener: &tokio::net::TcpListener, state: &str, done: &str, paste: bool) -> Result<(String, Option<String>)> {
-    use tokio::io::AsyncBufReadExt;
-    let mut lines = paste.then(|| tokio::io::BufReader::new(tokio::io::stdin()).lines());
+    // (Read on a thread of its own: a read waiting on tokio's blocking pool
+    // would keep the program from ending once the sign-in is done.)
+    let mut lines = paste.then(|| {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        std::thread::spawn(move || {
+            for line in std::io::stdin().lines() {
+                let Ok(line) = line else { break };
+                if tx.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        rx
+    });
     if paste {
         print!("If the page doesn't say you're signed in, paste the address it ended on: ");
         let _ = std::io::Write::flush(&mut std::io::stdout());
@@ -348,14 +360,14 @@ async fn wait_for_callback(listener: &tokio::net::TcpListener, state: &str, done
     loop {
         let pasted = async {
             match lines.as_mut() {
-                Some(l) => l.next_line().await,
+                Some(l) => l.recv().await,
                 None => std::future::pending().await,
             }
         };
         let mut sock = tokio::select! {
             got = listener.accept() => got?.0,
             line = pasted => {
-                let Some(line) = line? else {
+                let Some(line) = line else {
                     lines = None;
                     continue;
                 };
