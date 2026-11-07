@@ -109,6 +109,8 @@ fn main() {
         }
     });
     harlo_harness::set_remote_start(harlo_core::model_servers::forward_to);
+    // (Harlo's agent on other machines: the copy harlo puts there.)
+    harlo_harness::set_remote_program(harlo_core::agent_host::remote_program);
     // (Other machines' servers this computer's agents reach through SSH.)
     std::thread::spawn(harlo_core::model_servers::forward_uses);
     harlo_core::servers::set_after_start(accounts::sync_context);

@@ -109,6 +109,25 @@ pub fn set_remote_start(f: RemoteStart) {
     let _ = REMOTE_START.set(f);
 }
 
+/// The program a session of a kind runs on a remote host when harlo puts
+/// it there itself (Harlo's agent): its path there, or None (that machine's
+/// PATH finds it).
+pub type RemoteProgram = fn(&str, HarnessKind) -> anyhow::Result<Option<String>>;
+static REMOTE_PROGRAM: std::sync::OnceLock<RemoteProgram> = std::sync::OnceLock::new();
+
+pub fn set_remote_program(f: RemoteProgram) {
+    let _ = REMOTE_PROGRAM.set(f);
+}
+
+/// The program to run on `host` for `kind` (see [`set_remote_program`]).
+pub(crate) fn remote_program(host: &str, kind: HarnessKind) -> anyhow::Result<std::path::PathBuf> {
+    let there = match REMOTE_PROGRAM.get() {
+        Some(f) => f(host, kind)?,
+        None => None,
+    };
+    Ok(there.map(std::path::PathBuf::from).unwrap_or_else(|| std::path::PathBuf::from(kind.program_name())))
+}
+
 /// The bridge an agent runs for harlo's tools, here or on its host, while
 /// orchestration is on. (Called as each session starts: on a host, what
 /// [`set_remote_start`] set runs first.)

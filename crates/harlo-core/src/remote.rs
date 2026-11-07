@@ -474,6 +474,8 @@ pub fn ssh_error(host: &str, out: &Output) -> String {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HostInfo {
     pub os: String,
+    /// `uname -m`, as harlo names machines (x86_64, aarch64…).
+    pub arch: String,
     pub home: String,
     /// The agents' paths on the host ("" when missing).
     pub pi: String,
@@ -518,7 +520,7 @@ pub fn install_command(agent: &str) -> &'static str {
 /// at most each) and Claude's sign-in. (Run by the user's login shell, zsh
 /// included: no word splitting of variables.)
 // (HARLO_TEST_HOME: the click tests' scratch home on the test host.)
-const CHECK_SCRIPT: &str = r#"printf 'os=%s\nhome=%s\n' "$(uname -s)" "${HARLO_TEST_HOME:-$HOME}"
+const CHECK_SCRIPT: &str = r#"printf 'os=%s\narch=%s\nhome=%s\n' "$(uname -s)" "$(uname -m)" "${HARLO_TEST_HOME:-$HOME}"
 ver() { if command -v timeout >/dev/null 2>&1; then timeout 10 "$@"; else "$@"; fi; }
 for p in pi omp claude opencode hermes; do
   w=$(command -v "$p" 2>/dev/null || true)
@@ -537,6 +539,7 @@ pub fn check(host: &Host) -> Result<HostInfo> {
         if let Some((k, v)) = line.split_once('=') {
             match k {
                 "os" => info.os = v.to_owned(),
+                "arch" => info.arch = crate::remote_helper::normal_arch(v),
                 "home" => info.home = v.to_owned(),
                 "pi" => info.pi = v.to_owned(),
                 "omp" => info.omp = v.to_owned(),
@@ -582,6 +585,8 @@ impl HostInfo {
             "claude" => !self.claude.is_empty(),
             "opencode" => !self.opencode.is_empty(),
             "hermes" => !self.hermes.is_empty(),
+            // (harlo brings it.)
+            "harlo" => crate::agent_host::not_there(self).is_none(),
             _ => false,
         }
     }

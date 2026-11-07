@@ -158,7 +158,10 @@ impl Harness {
         let (program, mut cmd) = match &cfg.remote {
             // On the remote machine: its PATH finds the program.
             Some(remote) => {
-                let program = cfg.program.clone().unwrap_or_else(|| PathBuf::from(cfg.kind.program_name()));
+                let program = match cfg.program.clone() {
+                    Some(p) => p,
+                    None => crate::remote_program(&remote.host, cfg.kind)?,
+                };
                 // harlo's tools there (pi and omp take the bridge from their
                 // config on the host): the bridge and the forward in place.
                 if matches!(cfg.kind, HarnessKind::Pi | HarnessKind::Omp) {
@@ -705,6 +708,17 @@ mod tests {
         assert_eq!(script, r#"PATH="$HOME/.local/bin:$PATH"; cd '/home/me/my proj' && exec env 'A=1 2' omp --mode rpc-ui --resume '/s/it'\''s.jsonl'"#);
         remote.cleanup = "rm -f /tmp/x".into();
         assert_eq!(remote_script(&remote, "pi", &[], Path::new("/w"), &[]), r#"PATH="$HOME/.local/bin:$PATH"; cd /w && pi; status=$?; rm -f /tmp/x; exit $status"#);
+    }
+
+    #[test]
+    fn a_program_harlo_puts_there() {
+        fn put(_: &str, kind: HarnessKind) -> anyhow::Result<Option<String>> {
+            Ok((kind == HarnessKind::Harlo).then(|| "/home/me/.cache/harlo/harlo-agent-00ff".to_owned()))
+        }
+        crate::set_remote_program(put);
+        assert_eq!(crate::remote_program("nas", HarnessKind::Harlo).unwrap(), Path::new("/home/me/.cache/harlo/harlo-agent-00ff"));
+        // The others: that machine's PATH finds them.
+        assert_eq!(crate::remote_program("nas", HarnessKind::Omp).unwrap(), Path::new("omp"));
     }
 
     /// A pi that reads and never answers: harlo's own replies don't wait on

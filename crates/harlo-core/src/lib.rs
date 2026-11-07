@@ -12,6 +12,8 @@ pub mod db;
 #[cfg(feature = "dictation")]
 pub mod dictation;
 pub mod engine_host;
+pub mod agent_host;
+pub mod remote_helper;
 pub mod engine_setup;
 pub mod engines;
 pub mod export;

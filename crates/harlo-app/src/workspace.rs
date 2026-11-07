@@ -1783,8 +1783,8 @@ impl Workspace {
         let mut out: Vec<&'static str> = HarnessKind::PROVIDERS
             .iter()
             .filter(|&&k| self.usable_harness(k))
-            // (harlo-agent runs only on this computer, so far.)
-            .filter(|&&k| host.is_none() || (k != HarnessKind::Harlo && info.as_ref().is_none_or(|i| i.has(k.as_str()))))
+            // (Harlo: where harlo can put its agent.)
+            .filter(|&&k| host.is_none() || info.as_ref().is_none_or(|i| i.has(k.as_str())))
             .map(|k| k.as_str())
             .collect();
         // (Tests start demo sessions.)
