@@ -39,11 +39,10 @@ pub fn limits(headers: &reqwest::header::HeaderMap) -> Vec<Value> {
         .into_iter()
         .filter_map(|w| {
             let used = num(format!("x-codex-{w}-used-percent"))?;
-            Some(json!({
-                "windowMinutes": num(format!("x-codex-{w}-window-minutes")).map(|m| m.round() as i64),
-                "usedPercent": used,
-                "resetsAt": num(format!("x-codex-{w}-reset-at")).map(|r| r.round() as i64),
-            }))
+            let minutes = num(format!("x-codex-{w}-window-minutes")).map(|m| m.round() as i64).filter(|m| *m > 0);
+            let reset = num(format!("x-codex-{w}-reset-at")).map(|r| r.round() as i64).filter(|r| *r > 0);
+            // (A window with nothing in it: a plan without that window.)
+            (used != 0.0 || minutes.is_some() || reset.is_some()).then(|| json!({ "windowMinutes": minutes, "usedPercent": used, "resetsAt": reset }))
         })
         .collect()
 }
@@ -398,6 +397,13 @@ mod tests {
             ]
         );
         assert!(limits(&reqwest::header::HeaderMap::new()).is_empty());
+        // A plan with one window: the other comes empty, and is left out.
+        let mut one = reqwest::header::HeaderMap::new();
+        for (k, v) in [("x-codex-primary-used-percent", "1"), ("x-codex-primary-window-minutes", "10080"), ("x-codex-primary-reset-at", "1794537064"),
+                       ("x-codex-secondary-used-percent", "0"), ("x-codex-secondary-window-minutes", "0")] {
+            one.insert(k, v.parse().unwrap());
+        }
+        assert_eq!(limits(&one), vec![json!({ "windowMinutes": 10080, "usedPercent": 1.0, "resetsAt": 1794537064 })]);
     }
 
     #[test]

@@ -40,9 +40,10 @@ pub fn parse(body: &Value, email: &str, now: i64) -> Value {
         .filter_map(|k| {
             let w = &body["rate_limit"][*k];
             let used = w["used_percent"].as_f64()?;
-            let minutes = w["limit_window_seconds"].as_i64().map(|s| (s + 30) / 60);
-            let reset = w["reset_at"].as_i64().filter(|r| *r > 0).or_else(|| w["reset_after_seconds"].as_i64().map(|s| now + s));
-            Some(json!({ "windowMinutes": minutes, "usedPercent": used, "resetsAt": reset }))
+            let minutes = w["limit_window_seconds"].as_i64().map(|s| (s + 30) / 60).filter(|m| *m > 0);
+            let reset = w["reset_at"].as_i64().filter(|r| *r > 0).or_else(|| w["reset_after_seconds"].as_i64().filter(|s| *s > 0).map(|s| now + s));
+            // (A window with nothing in it: a plan without that window.)
+            (used != 0.0 || minutes.is_some() || reset.is_some()).then(|| json!({ "windowMinutes": minutes, "usedPercent": used, "resetsAt": reset }))
         })
         .collect();
     json!({ "provider": "openai-codex", "account": email, "plan": body["plan_type"].as_str().unwrap_or_default(), "windows": windows })
@@ -62,5 +63,8 @@ mod tests {
             { "windowMinutes": 300, "usedPercent": 12.0, "resetsAt": 1792300303 },
             { "windowMinutes": 10080, "usedPercent": 40.0, "resetsAt": 4600 }] }));
         assert_eq!(parse(&json!({}), "", 0)["windows"], json!([]));
+        let one = json!({ "rate_limit": { "primary_window": { "used_percent": 1, "limit_window_seconds": 604800, "reset_at": 1794537064 },
+                                           "secondary_window": { "used_percent": 0, "limit_window_seconds": 0, "reset_after_seconds": 0, "reset_at": 0 } } });
+        assert_eq!(parse(&one, "", 0)["windows"], json!([{ "windowMinutes": 10080, "usedPercent": 1.0, "resetsAt": 1794537064 }]));
     }
 }

@@ -1549,6 +1549,7 @@ mod tests {
         assert!(home.starts_with("/tmp/"), "not a scratch folder: {home:?}");
         let work = home.join("work");
         std::fs::create_dir_all(&work).unwrap();
+        harlo_harness::protocol_log::set_dir(Some(home.join("protocol")));
         let agent = std::env::var("HARLO_TEST_HARLO_AGENT").expect("HARLO_TEST_HARLO_AGENT");
         let out = std::process::Command::new(&agent).args(["models", "--json"]).output().unwrap();
         let models: Value = serde_json::from_slice(&out.stdout).unwrap();
@@ -1567,14 +1568,26 @@ mod tests {
         let mut rows = Vec::new();
         assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::Status(SessionStatus::Idle))).await);
         handle.prompt("Reply with just the word ok.", Vec::new(), SendMode::Normal);
-        let (mut limits, mut meta) = (Vec::new(), SessionMetaInfo::default());
+        let (mut limits, mut meta, mut busy) = (Vec::new(), SessionMetaInfo::default(), false);
         let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
         while let Ok(Some(u)) = tokio::time::timeout_at(deadline, rx.recv()).await {
             match u {
                 SessionUpdate::Rows(changes) => apply(&mut rows, changes),
                 SessionUpdate::Meta(m) => meta = m,
                 SessionUpdate::Limits(l) => limits.push(l),
-                SessionUpdate::Status(SessionStatus::Idle) => break,
+                // (The turn's end, not an Idle from before it began.)
+                SessionUpdate::Status(SessionStatus::Idle) if busy => break,
+                SessionUpdate::Status(SessionStatus::Idle) => {}
+                SessionUpdate::Status(_) => busy = true,
+                _ => {}
+            }
+        }
+        // (What comes just after.)
+        while let Ok(Some(u)) = tokio::time::timeout(Duration::from_millis(1500), rx.recv()).await {
+            match u {
+                SessionUpdate::Rows(changes) => apply(&mut rows, changes),
+                SessionUpdate::Meta(m) => meta = m,
+                SessionUpdate::Limits(l) => limits.push(l),
                 _ => {}
             }
         }
@@ -1584,13 +1597,13 @@ mod tests {
         let l = limits.first().expect("the plan's limits with the reply");
         assert_eq!(l["provider"], "openai-codex");
         let w = l["windows"].as_array().expect("windows");
-        assert!(!w.is_empty() && w.iter().all(|w| w["usedPercent"].is_number() && w["windowMinutes"].as_i64().is_some_and(|m| m > 0)), "{l}");
+        assert!(!w.is_empty() && w.iter().all(|w| w["usedPercent"].is_number() && w["windowMinutes"].as_i64().is_some_and(|m| m > 0)), "{w:?}");
         let mut accounts = Vec::new();
         crate::quota::apply_live(&mut accounts, l);
         println!("{model}: {}", accounts[0]["windows"].as_array().unwrap().iter().map(|w| format!("{} {:.0}%", w["label"], w["usedFraction"].as_f64().unwrap() * 100.0)).collect::<Vec<_>>().join(", "));
         // And the meter's own ask, between turns.
         let usage = crate::quota::fetch_harlo(std::path::Path::new(&std::env::var("HARLO_TEST_HARLO_AGENT").unwrap())).unwrap().expect("signed in");
-        assert!(!usage["windows"].as_array().unwrap().is_empty(), "{usage}");
+        assert!(!usage["windows"].as_array().unwrap().is_empty(), "{:?}", usage["windows"]);
     }
 
     /// A real harlo-agent (`HARLO_TEST_HARLO_AGENT`, signed in), its
