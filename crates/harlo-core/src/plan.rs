@@ -377,14 +377,20 @@ pub fn commit(folder: &Path, files: &[String], subject: &str, body: &str) -> Res
 
 /// What harlo tells agents in a project with the plan on.
 /// What the plan's tools are for (`commits`: harlo commits each finished
-/// step).
-pub fn instructions(commits: bool) -> String {
+/// step; `plan_mode`: a plan asked for in Plan mode goes in the card too,
+/// for agents without a plan flow of their own; Claude Code shows its own).
+pub fn instructions(commits: bool, plan_mode: bool) -> String {
     let committing = if commits {
         "harlo commits each finished step on its own when its changes are provably the step's, so finish one step before starting the next, and don't commit yourself."
     } else {
         "Finish one step before starting the next. Don't commit unless the user asks."
     };
-    format!("This project uses a shared plan, which you work through and the user edits. For a task of three or more real steps, write the plan first with plan_set (each step one verifiable piece of work, outcome-named), then for each step: plan_read (the user may have added, changed, reordered or skipped steps; their edits win), plan_start, do the work, plan_done with a one-line summary. {committing} Mark a step alongside when it can be done at the same time as the step before it: the user can run the plan with helpers (a session per step), and alongside steps then run at once, each without the others' work. A step marked alongside joins the whole group the step before it runs in, so mark it only when it needs none of that group's work (tests of code a step in the group writes, or a step using its files, can't be alongside). For a small task, no plan is needed, except in Plan mode (the user's message ends with a [Plan mode] note): then always write your plan with plan_set, whatever its size (it changes no files: the user reviews and edits it in harlo's plan card, then switches to Build for you to work through it), and reply with a short summary of it.")
+    let in_plan_mode = if plan_mode {
+        " In Plan mode (the user's message ends with a [Plan mode] note), though, always write your plan with plan_set, whatever its size (it changes no files: the user reviews and edits it in harlo's plan card, then switches to Build for you to work through it), and reply with a short summary of it."
+    } else {
+        ""
+    };
+    format!("This project uses a shared plan, which you work through and the user edits. For a task of three or more real steps, write the plan first with plan_set (each step one verifiable piece of work, outcome-named), then for each step: plan_read (the user may have added, changed, reordered or skipped steps; their edits win), plan_start, do the work, plan_done with a one-line summary. {committing} Mark a step alongside when it can be done at the same time as the step before it: the user can run the plan with helpers (a session per step), and alongside steps then run at once, each without the others' work. A step marked alongside joins the whole group the step before it runs in, so mark it only when it needs none of that group's work (tests of code a step in the group writes, or a step using its files, can't be alongside). For a small task, no plan is needed.{in_plan_mode}")
 }
 
 /// What a helper is asked for a step of a run (before the helper brief):
@@ -447,7 +453,7 @@ pub fn tools(commits: bool) -> Value {
     json!([
         {
             "name": "plan_read",
-            "description": format!("The shared plan of this session: its steps, with their ids and statuses (pending, active, done, skipped), and which ones the user edited. Read it before each step. {}", instructions(commits)),
+            "description": format!("The shared plan of this session: its steps, with their ids and statuses (pending, active, done, skipped), and which ones the user edited. Read it before each step. {}", instructions(commits, false)),
             "inputSchema": s(json!({}), &[]),
             "annotations": { "readOnlyHint": true },
         },

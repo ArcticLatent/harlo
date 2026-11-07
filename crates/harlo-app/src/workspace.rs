@@ -6128,7 +6128,9 @@ impl Workspace {
                     text = format!("{text}\n\n{}", harlo_core::specs::INSTRUCTIONS);
                 }
                 if *plan {
-                    text = format!("{text}\n\n{}", harlo_core::plan::instructions(*commits));
+                    // (Claude Code plans in its own flow: its plan question.)
+                    let own_flow = caller.as_ref().and_then(|c| self.live.get(c)).is_some_and(|e| e.info.harness == "claude");
+                    text = format!("{text}\n\n{}", harlo_core::plan::instructions(*commits, !own_flow));
                 }
             }
             return Ok(json!(text));
