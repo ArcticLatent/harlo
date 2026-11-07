@@ -1,5 +1,5 @@
-//! harlo-agent: harlo's own coding agent. This first step signs in with
-//! ChatGPT and streams one reply.
+//! harlo-agent: harlo's own coding agent. Signs in with ChatGPT, and works
+//! on a task in the current folder with its tools (`-p`).
 //!
 //! ```text
 //! harlo-agent login            sign in with ChatGPT (in the browser)
@@ -9,16 +9,15 @@
 //! harlo-agent -p "…" [-m model] [--thinking low|medium|high]
 //! ```
 
+mod agent;
 mod auth;
 mod responses;
+mod tools;
 
 use std::io::Write as _;
 use std::process::ExitCode;
 
 use anyhow::{Result, bail};
-use serde_json::json;
-
-const INSTRUCTIONS: &str = "You are harlo-agent, a coding assistant. Be concise.";
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -92,42 +91,69 @@ async fn login() -> Result<()> {
 }
 
 async fn ask(prompt: &str, model: Option<String>, effort: Option<String>) -> Result<()> {
-    let mut token = auth::access_token(false).await?;
     let model = match model {
         Some(m) => m,
-        None => responses::models(&token).await?.into_iter().next().map(|(id, _)| id).ok_or_else(|| anyhow::anyhow!("Your plan lists no models"))?,
+        None => {
+            let token = auth::access_token(false).await?;
+            responses::models(&token).await?.into_iter().next().map(|(id, _)| id).ok_or_else(|| anyhow::anyhow!("Your plan lists no models"))?
+        }
     };
-    let input = json!([{ "role": "user", "content": [{ "type": "input_text", "text": prompt }] }]);
+    let cwd = std::env::current_dir()?;
+    let mut agent = agent::Agent::new(cwd, model, effort);
     let mut out = std::io::stdout();
     let mut thinking = false;
-    let mut on = |ev: responses::Event| match ev {
-        responses::Event::Reasoning(t) => {
-            if !thinking {
-                eprint!("\x1b[2m");
-                thinking = true;
-            }
-            eprint!("{t}");
-        }
-        responses::Event::Text(t) => {
-            if thinking {
+    let mut show = |s: agent::Shown| {
+        let end_thinking = |thinking: &mut bool| {
+            if *thinking {
                 eprintln!("\x1b[0m");
-                thinking = false;
+                *thinking = false;
             }
-            print!("{t}");
-            let _ = out.flush();
-        }
-        responses::Event::Completed { usage } => {
-            println!();
-            eprintln!("\x1b[2m[{model} · {} in, {} out]\x1b[0m", usage["input_tokens"], usage["output_tokens"]);
+        };
+        match s {
+            agent::Shown::Reasoning(t) => {
+                if !thinking {
+                    eprint!("\x1b[2m");
+                    thinking = true;
+                }
+                eprint!("{t}");
+            }
+            agent::Shown::Text(t) => {
+                end_thinking(&mut thinking);
+                print!("{t}");
+                let _ = out.flush();
+            }
+            agent::Shown::ToolStart { name, args } => {
+                end_thinking(&mut thinking);
+                eprintln!("\x1b[36m→ {name}\x1b[0m \x1b[2m{}\x1b[0m", summary(name, args));
+            }
+            agent::Shown::ToolEnd { text, failed, .. } => {
+                let first = text.lines().next().unwrap_or_default();
+                let more = text.lines().count().saturating_sub(1);
+                let first: String = first.chars().take(120).collect();
+                eprintln!("  \x1b[{}m{first}{}\x1b[0m", if failed { "31" } else { "2" }, if more > 0 { format!(" (+{more} lines)") } else { String::new() });
+            }
+            agent::Shown::Usage { model, usage } => {
+                end_thinking(&mut thinking);
+                eprintln!("\x1b[2m[{model} · {} in ({} cached), {} out]\x1b[0m", usage["input_tokens"], usage["input_tokens_details"]["cached_tokens"], usage["output_tokens"]);
+            }
         }
     };
-    // A token the API refuses: refreshed once, then tried again.
-    let first = responses::stream(&token, &model, INSTRUCTIONS, input.clone(), effort.as_deref(), &mut on).await;
-    match first {
-        Err(e) if e.downcast_ref::<responses::ApiError>().is_some_and(|a| a.status == 401) => {
-            token = auth::access_token(true).await?;
-            responses::stream(&token, &model, INSTRUCTIONS, input, effort.as_deref(), &mut on).await
-        }
-        other => other,
-    }
+    agent.run(prompt, &mut show).await?;
+    println!();
+    Ok(())
+}
+
+/// A call's arguments in one line.
+fn summary(name: &str, args: &serde_json::Value) -> String {
+    let s = |k: &str| args[k].as_str().unwrap_or_default().to_owned();
+    let text = match name {
+        "bash" => s("command"),
+        "read" | "write" | "ls" => s("path"),
+        "edit" => format!("{} ({} edit{})", s("path"), args["edits"].as_array().map_or(0, Vec::len), if args["edits"].as_array().map_or(0, Vec::len) == 1 { "" } else { "s" }),
+        "grep" => format!("{} {}", s("pattern"), s("path")),
+        "find" => format!("{} {}", s("pattern"), s("path")),
+        _ => args.to_string(),
+    };
+    let one: String = text.replace('\n', " ⏎ ").chars().take(160).collect();
+    one
 }

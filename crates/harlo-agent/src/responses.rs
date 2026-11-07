@@ -13,6 +13,9 @@ use crate::auth::RESOURCE;
 pub enum Event {
     Text(String),
     Reasoning(String),
+    /// An output item, complete (a message, reasoning, a function call):
+    /// what goes back in `input` next time.
+    Item(Value),
     /// Finished: its usage (`input_tokens`, `output_tokens`, …).
     Completed { usage: Value },
 }
@@ -41,13 +44,26 @@ pub async fn models(token: &str) -> Result<Vec<(String, String)>> {
     Ok(body["data"].as_array().into_iter().flatten().filter_map(|m| m["id"].as_str().map(|id| (id.to_owned(), id.to_owned()))).collect())
 }
 
-/// Sends one request and calls `on` with each event until it completes.
-pub async fn stream(token: &str, model: &str, instructions: &str, input: Value, effort: Option<&str>, mut on: impl FnMut(Event)) -> Result<()> {
-    let mut body = json!({ "model": model, "instructions": instructions, "input": input, "store": false, "stream": true });
+/// A request's body: the model, its instructions, the history, tools.
+pub fn request(model: &str, instructions: &str, input: &[Value], tools: Value, effort: Option<&str>) -> Value {
+    let mut body = json!({
+        "model": model, "instructions": instructions, "input": input, "store": false, "stream": true,
+        "include": ["reasoning.encrypted_content"],
+    });
+    if tools.as_array().is_some_and(|t| !t.is_empty()) {
+        body["tools"] = tools;
+        body["tool_choice"] = json!("auto");
+        body["parallel_tool_calls"] = json!(true);
+    }
     if let Some(e) = effort {
         body["reasoning"] = json!({ "effort": e, "summary": "auto" });
     }
-    let resp = reqwest::Client::new().post(format!("{RESOURCE}/responses")).bearer_auth(token).json(&body).send().await?;
+    body
+}
+
+/// Sends one request and calls `on` with each event until it completes.
+pub async fn stream(token: &str, body: &Value, mut on: impl FnMut(Event)) -> Result<()> {
+    let resp = reqwest::Client::new().post(format!("{RESOURCE}/responses")).bearer_auth(token).json(body).send().await?;
     let status = resp.status();
     if !status.is_success() {
         let body: Value = resp.json().await.unwrap_or(Value::Null);
@@ -69,6 +85,7 @@ pub async fn stream(token: &str, model: &str, instructions: &str, input: Value, 
             match ev["type"].as_str().unwrap_or_default() {
                 "response.output_text.delta" => on(Event::Text(ev["delta"].as_str().unwrap_or_default().to_owned())),
                 "response.reasoning_summary_text.delta" => on(Event::Reasoning(ev["delta"].as_str().unwrap_or_default().to_owned())),
+                "response.output_item.done" => on(Event::Item(ev["item"].clone())),
                 "response.completed" => {
                     on(Event::Completed { usage: ev["response"]["usage"].clone() });
                     return Ok(());
