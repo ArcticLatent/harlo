@@ -17,6 +17,10 @@ use serde_json::{Value, json};
 /// Lines `read` shows at most, and bytes.
 const READ_LINES: usize = 2000;
 const READ_BYTES: usize = 50 * 1024;
+/// A file longer than one read, read without a range: its start only (what
+/// a read shows stays in every later request).
+const PREVIEW_LINES: usize = 250;
+const PREVIEW_BYTES: usize = 12 * 1024;
 /// Entries `ls` and `find` list at most; matches `grep` shows.
 const LIST_MAX: usize = 500;
 const GREP_MAX: usize = 300;
@@ -55,7 +59,7 @@ pub fn specs() -> Value {
                 "parameters": { "type": "object", "properties": properties, "required": required, "additionalProperties": false } })
     };
     json!([
-        f("read", "Read a text file. Shows up to 2000 lines (50 KB) from `offset` (1-based line); says how to read on when there's more.",
+        f("read", "Read a text file. Shows up to 2000 lines (50 KB) from `offset` (1-based line); says how to read on when there's more. A file longer than that, read without offset or limit, shows its first 250 lines and its size: grep it for what you need, or read a range.",
           json!({ "path": { "type": "string", "description": "Relative to the working directory, or absolute" }, "offset": { "type": "integer" }, "limit": { "type": "integer" } }), &["path"]),
         f("write", "Create a file, or replace a whole file you've read in this session. Makes missing folders. To change part of a file, use edit.",
           json!({ "path": { "type": "string" }, "content": { "type": "string" } }), &["path", "content"]),
@@ -148,11 +152,12 @@ impl Tools {
         if start >= lines.len() {
             return fail(format!("The file has {} lines; offset {} is past its end.", lines.len(), start + 1));
         }
-        let max = limit.map_or(READ_LINES, |l| (l as usize).clamp(1, READ_LINES));
+        let preview = offset.is_none() && limit.is_none() && (lines.len() > READ_LINES || text.len() > READ_BYTES);
+        let (max, max_bytes) = if preview { (PREVIEW_LINES, PREVIEW_BYTES) } else { (limit.map_or(READ_LINES, |l| (l as usize).clamp(1, READ_LINES)), READ_BYTES) };
         let mut out = String::new();
         let mut n = 0;
         for l in &lines[start..] {
-            if n >= max || out.len() + l.len() + 1 > READ_BYTES {
+            if n >= max || out.len() + l.len() + 1 > max_bytes {
                 break;
             }
             out.push_str(l);
@@ -165,6 +170,15 @@ impl Tools {
             n = 1;
         }
         let end = start + n;
+        if preview {
+            return ok(format!(
+                "[{} is {} lines ({} KB), more than one read shows. These are lines 1-{end}: grep it for what you need, or read a range with offset and limit (up to {READ_LINES} lines).]\n{}",
+                path.display(),
+                lines.len(),
+                text.len().div_ceil(1024),
+                out.trim_end_matches('\n')
+            ));
+        }
         if end < lines.len() {
             out.push_str(&format!("\n[Lines {}-{} of {}. Read on with offset={}.]", start + 1, end, lines.len(), end + 1));
         }
@@ -320,6 +334,24 @@ impl Tools {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_huge_file_read_whole_shows_its_start_and_size() {
+        let dir = std::env::temp_dir().join(format!("harlo-agent-preview-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let text: String = (1..=5000).map(|i| format!("line {i}\n")).collect();
+        std::fs::write(dir.join("big.log"), &text).unwrap();
+        std::fs::write(dir.join("small.rs"), (1..=1500).map(|i| format!("// {i}\n")).collect::<String>()).unwrap();
+        let t = Tools::new(dir.clone(), dir.join(".out"));
+        let out = t.call("read", &json!({ "path": "big.log" })).await.text;
+        assert!(out.starts_with(&format!("[{} is 5000 lines (", dir.join("big.log").display())), "{}", &out[..120]);
+        assert!(out.ends_with("\nline 250") && !out.contains("line 251"));
+        let ranged = t.call("read", &json!({ "path": "big.log", "offset": 4000, "limit": 3 })).await.text;
+        assert_eq!(ranged, "line 4000\nline 4001\nline 4002\n\n[Lines 4000-4002 of 5000. Read on with offset=4003.]");
+        let small = t.call("read", &json!({ "path": "small.rs" })).await.text;
+        assert!(small.ends_with("// 1500"), "a file that fits is read whole");
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[tokio::test]
     async fn refuses_to_overwrite_what_changed_since_read() {

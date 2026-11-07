@@ -12,8 +12,10 @@ use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
 /// Shown to the model at most: lines and bytes (start and end together).
-pub const MAX_LINES: usize = 2000;
-pub const MAX_BYTES: usize = 50 * 1024;
+/// Small, because what's shown stays in every later request; the whole
+/// output is in a file to grep or read.
+pub const MAX_LINES: usize = 600;
+pub const MAX_BYTES: usize = 16 * 1024;
 const DEFAULT_TIMEOUT: u64 = 120;
 /// Kept in memory at most (the rest still goes to the file).
 const KEEP_BYTES: usize = 16 * 1024 * 1024;
