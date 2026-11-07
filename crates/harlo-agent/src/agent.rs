@@ -73,6 +73,13 @@ pub trait Gate: Send + Sync {
     fn check(&self, name: &str, args: &Value) -> BoxFuture<'static, Result<(), String>>;
 }
 
+/// harlo, when it started this agent (`--harlo-tools`): its tools (start
+/// other sessions, report to a parent, the project's plan and specs)
+/// called through it. `_tools` and `_instructions` say what they are.
+pub trait Harlo: Send + Sync {
+    fn call(&self, tool: &str, args: &Value) -> BoxFuture<'static, Result<Value, String>>;
+}
+
 /// Messages sent while a run works: steering goes in at the next step,
 /// follow-ups when it would stop (one at a time).
 #[derive(Default)]
@@ -102,6 +109,11 @@ pub struct Agent {
     /// The last request's usage (the context's size).
     pub last_usage: Value,
     pub gate: Option<Arc<dyn Gate>>,
+    pub harlo: Option<Arc<dyn Harlo>>,
+    /// harlo's tools as the model gets them, and what they're for (asked
+    /// at each run's start).
+    harlo_tools: Vec<Value>,
+    harlo_text: String,
     pub inbox: Arc<Mutex<Inbox>>,
 }
 
@@ -132,6 +144,9 @@ impl Agent {
             totals: Totals::default(),
             last_usage: Value::Null,
             gate: None,
+            harlo: None,
+            harlo_tools: Vec::new(),
+            harlo_text: String::new(),
             inbox: Arc::default(),
         }
     }
@@ -233,6 +248,7 @@ impl Agent {
             self.log.append(json!({ "type": "thinking_level_change", "thinkingLevel": self.effort.as_deref().unwrap_or("off") }))?;
             self.logged.1 = self.effort.clone();
         }
+        self.ask_harlo().await;
         self.push_user(prompt, show)?;
         // (A request too long for the model: compacted and sent again, once.)
         let mut retried = false;
@@ -290,7 +306,8 @@ impl Agent {
                 show(Shown::ToolStart { call_id: id, name, args });
             }
             let pairs: Vec<(&str, &Value)> = names.iter().copied().zip(&args).collect();
-            let outcomes = run_calls(&self.tools, &pairs, self.gate.as_deref(), stop).await;
+            let harlo = self.harlo.as_deref().map(|h| (h, self.harlo_tools.as_slice()));
+            let outcomes = run_calls(&self.tools, &pairs, self.gate.as_deref(), harlo, stop).await;
             for ((c, name), o) in calls.iter().zip(&names).zip(outcomes) {
                 show(Shown::ToolEnd { call_id: c["id"].as_str().unwrap_or_default(), name, text: &o.text, failed: o.failed });
                 self.push(
@@ -327,12 +344,44 @@ impl Agent {
 
     /// One request with the history: the reply, as pi's assistant message.
     async fn ask(&mut self, show: &mut (dyn FnMut(Shown) + Send)) -> Result<Value> {
-        let asked = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &self.instructions, history: &self.history, session: &self.log.id, tools: true };
+        let (system, specs) = (self.system(), self.specs());
+        let asked = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &self.history, session: &self.log.id, specs: &specs, tools: true };
         let (message, usage) = send(asked, show).await?;
         self.count(&usage);
         show(Shown::Usage { model: message["model"].as_str().unwrap_or_default(), usage: &usage });
         self.last_usage = usage;
         Ok(message)
+    }
+
+    /// The system prompt: the project's, then what harlo's tools are for.
+    fn system(&self) -> String {
+        if self.harlo_text.is_empty() {
+            return self.instructions.clone();
+        }
+        format!("{}\n<harlo>\n{}\n</harlo>\n", self.instructions, self.harlo_text.trim())
+    }
+
+    /// The tools the model gets: its own, then harlo's.
+    fn specs(&self) -> Value {
+        let mut all = tools::specs();
+        if let Some(list) = all.as_array_mut() {
+            list.extend(self.harlo_tools.iter().cloned());
+        }
+        all
+    }
+
+    /// harlo's tools and what they're for, as harlo says now (none when it
+    /// doesn't answer, or orchestration is off in it). Unchanged, the
+    /// requests start as before, so their cache still serves.
+    async fn ask_harlo(&mut self) {
+        let Some(h) = self.harlo.clone() else { return };
+        let listed = h.call(HARLO_TOOLS, &json!({})).await;
+        self.harlo_tools = listed.map(|l| harlo_specs(&l)).unwrap_or_default();
+        self.harlo_text = if self.harlo_tools.is_empty() {
+            String::new()
+        } else {
+            h.call(HARLO_INSTRUCTIONS, &json!({})).await.ok().and_then(|t| t.as_str().map(str::to_owned)).unwrap_or_default()
+        };
     }
 
     fn count(&mut self, usage: &Value) {
@@ -391,7 +440,8 @@ impl Agent {
         };
         let mut asked: Vec<Value> = self.history[..cut].to_vec();
         asked.push(json!({ "role": "user", "content": [{ "type": "text", "text": compact::request(focus) }], "timestamp": now_ms() }));
-        let request = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &self.instructions, history: &asked, session: &self.log.id, tools: false };
+        let (system, specs) = (self.system(), self.specs());
+        let request = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &asked, session: &self.log.id, specs: &specs, tools: false };
         // (The summary isn't shown as it's written.)
         let mut quiet = |_: Shown| {};
         let sent = tokio::select! {
@@ -452,6 +502,8 @@ struct Asked<'a> {
     instructions: &'a str,
     history: &'a [Value],
     session: &'a str,
+    /// The tools' definitions (Responses API form).
+    specs: &'a Value,
     /// Whether the model may call tools (they're sent either way, so the
     /// request starts as the session's others do and their cache serves it).
     tools: bool,
@@ -466,7 +518,7 @@ async fn send(a: Asked<'_>, show: &mut (dyn FnMut(Shown) + Send)) -> Result<(Val
     show(Shown::MessageStart(&json!({ "role": "assistant", "content": [], "api": api, "provider": pid, "model": model, "timestamp": now_ms() })));
     let effort = provider.effort(&model, a.effort);
     if provider.api == Api::Chat {
-        let mut body = chat::request(&model, a.instructions, &chat::messages(a.history), &tools::specs(), effort.as_deref());
+        let mut body = chat::request(&model, a.instructions, &chat::messages(a.history), a.specs, effort.as_deref());
         if !a.tools {
             body["tool_choice"] = json!("none");
         }
@@ -474,7 +526,7 @@ async fn send(a: Asked<'_>, show: &mut (dyn FnMut(Shown) + Send)) -> Result<(Val
         return chat::stream(&provider.base_url, token.as_deref(), &body, &pid, &model, |e| show(Shown::Stream(e))).await;
     }
     let input = responses::input(a.history, &pid, &model);
-    let mut body = responses::request(&model, a.instructions, &input, tools::specs(), effort.as_deref(), a.session);
+    let mut body = responses::request(&model, a.instructions, &input, a.specs.clone(), effort.as_deref(), a.session);
     if !a.tools {
         body["tool_choice"] = json!("none");
     }
@@ -577,7 +629,7 @@ impl Blocks {
 /// after another, in the order called. When `stop` is cancelled, the
 /// call running ends (dropping it ends its command) and what's left
 /// isn't started.
-async fn run_calls(tools: &Tools, calls: &[(&str, &Value)], gate: Option<&dyn Gate>, stop: &CancellationToken) -> Vec<tools::Outcome> {
+async fn run_calls(tools: &Tools, calls: &[(&str, &Value)], gate: Option<&dyn Gate>, harlo: Option<(&dyn Harlo, &[Value])>, stop: &CancellationToken) -> Vec<tools::Outcome> {
     let bad_args = || tools::Outcome { text: "The arguments weren't valid JSON; call the tool again.".into(), failed: true };
     let cut = |text: &str| tools::Outcome { text: text.into(), failed: true };
     if calls.iter().all(|(n, _)| tools::read_only(n)) {
@@ -596,6 +648,21 @@ async fn run_calls(tools: &Tools, calls: &[(&str, &Value)], gate: Option<&dyn Ga
         }
         if args.is_null() {
             out.push(bad_args());
+            continue;
+        }
+        // harlo's: it asks the user itself where it should.
+        if let Some((h, _)) = harlo.filter(|(_, specs)| specs.iter().any(|s| s["name"] == *name)) {
+            let ran = tokio::select! {
+                biased;
+                _ = stop.cancelled() => None,
+                r = h.call(name, args) => Some(r),
+            };
+            out.push(match ran {
+                None => cut(INTERRUPTED),
+                Some(Ok(Value::String(text))) => tools::Outcome { text, failed: false },
+                Some(Ok(v)) => tools::Outcome { text: v.to_string(), failed: false },
+                Some(Err(e)) => cut(&e),
+            });
             continue;
         }
         // What changes something may need the user's yes first.
@@ -618,6 +685,32 @@ async fn run_calls(tools: &Tools, calls: &[(&str, &Value)], gate: Option<&dyn Ga
         out.push(ran.unwrap_or_else(|| cut(INTERRUPTED)));
     }
     out
+}
+
+/// What harlo is asked for its tools, and for what they're for.
+pub const HARLO_TOOLS: &str = "_tools";
+pub const HARLO_INSTRUCTIONS: &str = "_instructions";
+
+/// harlo's tools (MCP's `{name, description, inputSchema}`) as the model
+/// gets them; one named as a tool of ours is left out.
+fn harlo_specs(listed: &Value) -> Vec<Value> {
+    let ours: Vec<Value> = tools::specs().as_array().cloned().unwrap_or_default();
+    listed
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|t| {
+            let name = t["name"].as_str().filter(|n| !n.is_empty())?;
+            if ours.iter().any(|o| o["name"] == name) {
+                return None;
+            }
+            let mut params = t["inputSchema"].clone();
+            if !params.is_object() {
+                params = json!({ "type": "object", "properties": {} });
+            }
+            Some(json!({ "type": "function", "name": name, "description": t["description"].as_str().unwrap_or_default(), "strict": false, "parameters": params }))
+        })
+        .collect()
 }
 
 /// The system prompt: short; the project's own instructions after it.
@@ -707,7 +800,7 @@ mod tests {
             s2.cancel();
         });
         let t = Instant::now();
-        let out = run_calls(&tools, &[("bash", &first), ("bash", &slow), ("bash", &after)], None, &stop).await;
+        let out = run_calls(&tools, &[("bash", &first), ("bash", &slow), ("bash", &after)], None, None, &stop).await;
         assert!(t.elapsed() < Duration::from_secs(5), "the stop didn't end the command");
         assert_eq!(out[0].text, "first");
         assert_eq!(out[1].text, INTERRUPTED);
@@ -740,7 +833,51 @@ mod tests {
         let stop = CancellationToken::new();
         stop.cancel();
         let args = json!({ "path": "." });
-        let out = run_calls(&tools, &[("ls", &args), ("ls", &args)], None, &stop).await;
+        let out = run_calls(&tools, &[("ls", &args), ("ls", &args)], None, None, &stop).await;
         assert!(out.iter().all(|o| o.failed));
+    }
+
+    /// harlo answering: a list, a tool's result, an error.
+    struct FakeHarlo;
+    impl Harlo for FakeHarlo {
+        fn call(&self, tool: &str, args: &Value) -> BoxFuture<'static, Result<Value, String>> {
+            let answer = match tool {
+                "list_sessions" => Ok(json!({ "sessions": [], "asked": args.clone() })),
+                "_instructions" => Ok(json!("What harlo's tools are for.")),
+                "say" => Ok(json!("plain text")),
+                _ => Err(format!("no {tool}")),
+            };
+            Box::pin(async move { answer })
+        }
+    }
+
+    #[test]
+    fn harlos_tools_as_the_model_gets_them() {
+        let listed = json!([
+            { "name": "start_session", "description": "Starts one.", "inputSchema": { "type": "object", "properties": { "agent": { "type": "string" } }, "required": ["agent"] } },
+            { "name": "read", "description": "ours already", "inputSchema": {} },
+            { "name": "", "description": "no name" },
+            { "name": "list_agents", "description": "Lists them." },
+        ]);
+        let specs = harlo_specs(&listed);
+        assert_eq!(specs.len(), 2);
+        assert_eq!(specs[0], json!({ "type": "function", "name": "start_session", "description": "Starts one.", "strict": false,
+            "parameters": { "type": "object", "properties": { "agent": { "type": "string" } }, "required": ["agent"] } }));
+        assert_eq!(specs[1]["parameters"], json!({ "type": "object", "properties": {} }));
+    }
+
+    #[tokio::test]
+    async fn harlos_calls_go_to_harlo() {
+        let dir = std::env::temp_dir();
+        let tools = Tools::new(dir.clone(), dir.join("harlo-agent"));
+        let specs = harlo_specs(&json!([{ "name": "list_sessions" }, { "name": "say" }, { "name": "start_session" }]));
+        let (asked, none) = (json!({ "x": 1 }), json!({}));
+        let calls = [("list_sessions", &asked), ("say", &none), ("start_session", &none), ("nope", &none)];
+        let out = run_calls(&tools, &calls, None, Some((&FakeHarlo, &specs)), &CancellationToken::new()).await;
+        assert_eq!((serde_json::from_str::<Value>(&out[0].text).unwrap(), out[0].failed), (json!({ "sessions": [], "asked": { "x": 1 } }), false));
+        assert_eq!((out[1].text.as_str(), out[1].failed), ("plain text", false));
+        assert_eq!((out[2].text.as_str(), out[2].failed), ("no start_session", true));
+        // (Not one of harlo's: ours, and there's no such tool.)
+        assert!(out[3].failed && out[3].text.contains("no tool called nope"), "{}", out[3].text);
     }
 }

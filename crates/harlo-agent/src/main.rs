@@ -10,7 +10,9 @@
 //!                              [--resume | --session <file>]
 //! harlo-agent --version        and the commit it was built from
 //! harlo-agent --mode rpc [--session <file> | --no-session] [-m model] [--thinking level]
-//!                              pi's RPC protocol on stdin/stdout (for harlo)
+//!                         [--harlo-tools]
+//!                              pi's RPC protocol on stdin/stdout (for harlo;
+//!                              with harlo's own tools on the same pipe)
 //! ```
 //!
 //! Each run is saved as a session (in pi's format) under
@@ -90,7 +92,7 @@ async fn run(args: Vec<String>) -> Result<()> {
             Ok(())
         }
         Some("--mode") if args.get(1).is_some_and(|m| m == "rpc") => {
-            let (mut keep, mut model, mut effort) = (rpc::Keep::New, None, None);
+            let (mut keep, mut model, mut effort, mut harlo_tools) = (rpc::Keep::New, None, None, false);
             let mut it = args.into_iter().skip(2);
             while let Some(a) = it.next() {
                 match a.as_str() {
@@ -98,10 +100,11 @@ async fn run(args: Vec<String>) -> Result<()> {
                     "--no-session" => keep = rpc::Keep::Nowhere,
                     "-m" | "--model" => model = it.next(),
                     "--thinking" => effort = it.next(),
+                    "--harlo-tools" => harlo_tools = true,
                     other => bail!("unknown option {other}"),
                 }
             }
-            rpc::serve(keep, model, effort).await
+            rpc::serve(keep, model, effort, harlo_tools).await
         }
         Some("-p") => {
             let mut model = None;

@@ -8,6 +8,12 @@
 //! harlo's approval modes say: `always-ask` before write, edit and bash,
 //! `write` before bash, `yolo`/`auto` never; in plan mode files can't be
 //! changed and commands ask. Reading never asks.
+//!
+//! Started by harlo with `--harlo-tools`: harlo's own tools (other
+//! sessions, reports to a parent, the project's plan) go to it on the same
+//! pipe: `{"type":"harlo_call", id, tool, args}` out, and its answer
+//! `{"type":"harlo_result", call: <that id>, ok, result|error}` in (a
+//! command like any other, answered). harlo knows the caller by the pipe.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -21,7 +27,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
-use crate::agent::{Compacted, Agent, Gate, Inbox, Shown};
+use crate::agent::{Compacted, Agent, Gate, Harlo, Inbox, Shown};
 use crate::{providers, session};
 
 /// The thinking levels offered when the model doesn't list its own (the
@@ -29,6 +35,8 @@ use crate::{providers, session};
 const LEVELS: [&str; 3] = ["low", "medium", "high"];
 const DEFAULT_LEVEL: &str = "medium";
 const PLAN_REFUSAL: &str = "Plan mode is on: don't change files yet. Look around, then present your plan; the user turns plan mode off when it's time to make the changes.";
+/// How long harlo has to answer one of its tools.
+const HARLO_WAIT: std::time::Duration = std::time::Duration::from_secs(90);
 const DENIED: &str = "The user denied this call. Don't try it another way: ask what they'd like instead, or carry on without it.";
 
 /// Where the session is kept.
@@ -46,6 +54,9 @@ struct Shared {
     /// Tools the user always allows in this session.
     always: Mutex<HashSet<String>>,
     next_ui: AtomicU64,
+    /// Calls of harlo's tools, waiting for its answer.
+    harlo_waiting: Mutex<HashMap<String, oneshot::Sender<Value>>>,
+    next_harlo: AtomicU64,
     /// What get_state and get_messages say (also while a run has the agent).
     view: Mutex<View>,
     inbox: Arc<Mutex<Inbox>>,
@@ -210,7 +221,30 @@ impl Gate for Approvals {
     }
 }
 
-pub async fn serve(keep: Keep, model: Option<String>, effort: Option<String>) -> Result<()> {
+/// harlo's tools, called on the pipe.
+struct Pipe(Arc<Shared>);
+
+impl Harlo for Pipe {
+    fn call(&self, tool: &str, args: &Value) -> BoxFuture<'static, Result<Value, String>> {
+        let sh = self.0.clone();
+        let id = format!("hc-{}", sh.next_harlo.fetch_add(1, Ordering::Relaxed) + 1);
+        let (tx, rx) = oneshot::channel();
+        sh.harlo_waiting.lock().unwrap().insert(id.clone(), tx);
+        sh.emit(json!({ "type": "harlo_call", "id": id, "tool": tool, "args": args }));
+        Box::pin(async move {
+            let answer = tokio::time::timeout(HARLO_WAIT, rx).await;
+            sh.harlo_waiting.lock().unwrap().remove(&id);
+            match answer {
+                Ok(Ok(a)) if a["ok"] == true => Ok(a["result"].clone()),
+                Ok(Ok(a)) => Err(a["error"].as_str().unwrap_or("harlo couldn't do that").to_owned()),
+                Ok(Err(_)) => Err("harlo is gone".to_owned()),
+                Err(_) => Err("harlo didn't answer in time".to_owned()),
+            }
+        })
+    }
+}
+
+pub async fn serve(keep: Keep, model: Option<String>, effort: Option<String>, harlo_tools: bool) -> Result<()> {
     let cwd = std::env::current_dir()?;
     let root = session::root().ok_or_else(|| anyhow::anyhow!("No home folder to keep sessions in"))?;
     let (log, past, name) = match keep {
@@ -244,6 +278,8 @@ pub async fn serve(keep: Keep, model: Option<String>, effort: Option<String>) ->
         modes: Mutex::new(Modes { approval: "always-ask".into(), plan: false }),
         always: Mutex::default(),
         next_ui: AtomicU64::new(0),
+        harlo_waiting: Mutex::default(),
+        next_harlo: AtomicU64::new(0),
         view: Mutex::default(),
         inbox: agent.inbox.clone(),
         running: Mutex::default(),
@@ -251,6 +287,9 @@ pub async fn serve(keep: Keep, model: Option<String>, effort: Option<String>) ->
         models: Mutex::default(),
     });
     agent.gate = Some(Arc::new(Approvals(shared.clone())));
+    if harlo_tools {
+        agent.harlo = Some(Arc::new(Pipe(shared.clone())));
+    }
     {
         let mut v = shared.view.lock().unwrap();
         v.model = agent.model.clone();
@@ -369,6 +408,14 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
             if let Some(tx) = sh.waiting.lock().unwrap().remove(ui) {
                 let _ = tx.send(cmd.clone());
             }
+        }
+        // (`call`: the call's id; `id` is the command's own, answered.)
+        "harlo_result" => {
+            let call = cmd["call"].as_str().unwrap_or_default();
+            if let Some(tx) = sh.harlo_waiting.lock().unwrap().remove(call) {
+                let _ = tx.send(cmd.clone());
+            }
+            reply(Ok(Value::Null))
         }
         "harlo_set_modes" => {
             let mut m = sh.modes.lock().unwrap();

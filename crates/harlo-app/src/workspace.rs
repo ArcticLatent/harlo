@@ -1071,6 +1071,12 @@ fn due_resumes(resumes: &serde_json::Map<String, serde_json::Value>, now: i64) -
 
 /// Oh My Pi, started in the home folder, moves to a temporary one unless told
 /// not to: its session wouldn't be where it was started.
+/// harlo-agent: harlo's tools on its pipe (when orchestration is off,
+/// harlo says so and it has none).
+fn harlo_tools_arg(kind: HarnessKind) -> Option<String> {
+    (kind == HarnessKind::Harlo).then(|| "--harlo-tools".to_owned())
+}
+
 fn omp_home_arg(kind: HarnessKind, cwd: &Path) -> Option<String> {
     if kind != HarnessKind::Omp {
         return None;
@@ -1130,6 +1136,8 @@ fn workspace_wants(u: &SessionUpdate) -> bool {
             | SessionUpdate::GateAnswered { .. }
             // (Its helpers stop with it.)
             | SessionUpdate::Stopped
+            // (harlo-agent calling harlo's tools.)
+            | SessionUpdate::HarloCall { .. }
     )
 }
 
@@ -1901,7 +1909,7 @@ impl Workspace {
                 program,
                 cwd: info.cwd.clone(),
                 session: SessionTarget::Resume(info.path.clone()),
-                extra_args: overlay.iter().map(|p| format!("--config={}", harlo_harness::on_host(p))).chain(omp_home_arg(info.harness, &info.cwd)).collect(),
+                extra_args: overlay.iter().map(|p| format!("--config={}", harlo_harness::on_host(p))).chain(omp_home_arg(info.harness, &info.cwd)).chain(harlo_tools_arg(info.harness)).collect(),
                 // (Orchestration: the agent's harlo tools know who's calling.)
                 env: vec![("HARLO_SESSION".into(), token.clone())],
                 remote,
@@ -1960,7 +1968,7 @@ impl Workspace {
             // `--ephemeral` (testing): new sessions are not saved.
             session: if std::env::args().any(|a| a == "--ephemeral") { SessionTarget::Ephemeral } else { SessionTarget::New },
             extra_args: {
-                let mut args: Vec<String> = overlay.iter().map(|p| format!("--config={}", harlo_harness::on_host(p))).chain(omp_home_arg(kind, &cwd)).collect();
+                let mut args: Vec<String> = overlay.iter().map(|p| format!("--config={}", harlo_harness::on_host(p))).chain(omp_home_arg(kind, &cwd)).chain(harlo_tools_arg(kind)).collect();
                 if !model.trim().is_empty() && kind != HarnessKind::Demo {
                     args.extend(["--model".into(), model.trim().to_owned()]);
                 }
@@ -5479,6 +5487,8 @@ impl Workspace {
         // Approvals the agent asked for with harlo's tools, answered.
         let mut gates: Vec<(String, String, serde_json::Value)> = Vec::new();
         let mut stopped = false;
+        // harlo's tools, called on the session's pipe.
+        let mut harlo_calls: Vec<(String, String, serde_json::Value)> = Vec::new();
         // Claude's limits as it just said (a host's may be another account's).
         let mut limits: Option<serde_json::Value> = None;
         let needed_input = entry.info.needs_input;
@@ -5524,6 +5534,7 @@ impl Workspace {
                 SessionUpdate::Limits(info) => limits = Some(info),
                 SessionUpdate::GateAnswered { id, question, answer } => gates.push((id, question, answer)),
                 SessionUpdate::Stopped => stopped = true,
+                SessionUpdate::HarloCall { id, tool, args } => harlo_calls.push((id, tool, args)),
                 _ => {}
             }
         }
@@ -5658,6 +5669,11 @@ impl Workspace {
                 let busy = self.live.get(key).is_some_and(|e| e.info.status == SessionStatus::Busy);
                 live.handle.prompt(&message, Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });
             }
+        }
+        // Its calls of harlo's tools: the caller is the session itself.
+        for (call, tool, args) in harlo_calls {
+            let result = self.as_mut().orchestrate_as(Some(key.to_owned()), false, &tool, &args);
+            crate::orchestration::answer_pipe(self.qt_thread(), key.to_owned(), call, tool, args, result);
         }
         for note in notes {
             self.as_mut().notify(key, note);
@@ -6603,7 +6619,7 @@ impl Workspace {
             "start_session" => {
                 let agent = text("agent").to_lowercase();
                 let Some(kind) = HarnessKind::parse(&agent).filter(|k| *k != HarnessKind::Demo || agent == "demo") else {
-                    return Err(format!("Unknown agent \"{agent}\": use claude, opencode, pi, omp or hermes (list_agents)."));
+                    return Err(format!("Unknown agent \"{agent}\": use claude, opencode, pi, omp, hermes or harlo (list_agents)."));
                 };
                 if !self.usable_harness(kind) {
                     return Err(format!("{} is turned off in harlo (Settings → Providers).", kind.label()));
@@ -6782,7 +6798,7 @@ impl Workspace {
                     }
                     let agent = h.agent.clone();
                     let Some(kind) = HarnessKind::parse(&agent).filter(|k| *k != HarnessKind::Demo || agent == "demo") else {
-                        return Err(format!("Unknown agent \"{agent}\" for \"{}\": use claude, opencode, pi, omp or hermes (list_agents).", h.title));
+                        return Err(format!("Unknown agent \"{agent}\" for \"{}\": use claude, opencode, pi, omp, hermes or harlo (list_agents).", h.title));
                     };
                     if !self.usable_harness(kind) {
                         return Err(format!("{} is turned off in harlo (Settings → Providers): pick another agent for \"{}\".", kind.label(), h.title));

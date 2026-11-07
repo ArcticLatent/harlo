@@ -130,6 +130,9 @@ pub enum SessionUpdate {
     Todos(Value),
     /// omp side question frame (`btw_delta` / `btw_record`).
     Btw(Value),
+    /// The agent calling one of harlo's tools on its pipe (harlo-agent):
+    /// the workspace answers it.
+    HarloCall { id: String, tool: String, args: Value },
     /// omp goal (`{ id, objective, status, tokenBudget?, tokensUsed,
     /// timeUsedSeconds, … }`), or null when there is none.
     Goal(Value),
@@ -1127,6 +1130,7 @@ fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<Sessi
             pending.push(SessionUpdate::SubagentActivity(frame.clone()))
         }
         HarnessEvent::Btw(frame) => pending.push(SessionUpdate::Btw(frame.clone())),
+        HarnessEvent::HarloCall { id, tool, args } => pending.push(SessionUpdate::HarloCall { id: id.clone(), tool: tool.clone(), args: args.clone() }),
         HarnessEvent::Goal(goal) => {
             st.goal = goal.clone();
             pending.push(SessionUpdate::Goal(st.goal.clone()));
@@ -1750,6 +1754,62 @@ mod tests {
             }
         }
         assert!(refused.is_empty(), "{refused:?}");
+    }
+
+    /// harlo-agent with harlo's tools on its pipe (`--harlo-tools`), on
+    /// the plan: its calls come as `HarloCall`, the answer goes back with
+    /// `send_raw` (whose command gets an id of its own), and the model uses
+    /// the result. Scratch folder as above.
+    #[tokio::test]
+    #[ignore]
+    async fn harlo_agent_calls_harlos_tools() {
+        let home = PathBuf::from(std::env::var("HARLO_TEST_HOME").expect("a scratch HARLO_TEST_HOME"));
+        assert!(home.starts_with("/tmp/"), "not a scratch folder: {home:?}");
+        let work = home.join("work-tools");
+        std::fs::create_dir_all(&work).unwrap();
+        let handle = SessionHandle::spawn(HarnessConfig {
+            kind: HarnessKind::Harlo,
+            program: Some(std::env::var("HARLO_TEST_HARLO_AGENT").expect("HARLO_TEST_HARLO_AGENT").into()),
+            cwd: work.clone(),
+            session: SessionTarget::New,
+            extra_args: vec!["--harlo-tools".into()],
+            env: vec![("XDG_DATA_HOME".to_owned(), home.join("data").to_string_lossy().into_owned())],
+            remote: None,
+        });
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        handle.subscribe(ChannelSink(tx));
+        let mut rows = Vec::new();
+        assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::Status(SessionStatus::Idle))).await);
+        handle.send_raw(json!({ "type": "set_thinking_level", "level": "low" }));
+        handle.prompt("Call the list_sessions tool, then tell me the title of the session it lists, exactly.", Vec::new(), SendMode::Normal);
+        let mut asked: Vec<(String, Value)> = Vec::new();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(180);
+        while let Ok(Some(u)) = tokio::time::timeout_at(deadline, rx.recv()).await {
+            match u {
+                SessionUpdate::Rows(changes) => apply(&mut rows, changes),
+                SessionUpdate::HarloCall { id, tool, args } => {
+                    let result = match tool.as_str() {
+                        "_tools" => json!([{ "name": "list_sessions", "description": "harlo's open sessions: each one's id and title.", "inputSchema": { "type": "object", "properties": {} } }]),
+                        "_instructions" => json!("harlo's sessions: list them with list_sessions."),
+                        _ => json!({ "sessions": [{ "id": "s-1", "title": "marmalade-otter", "agent": "pi", "status": "idle" }] }),
+                    };
+                    asked.push((tool, args));
+                    handle.send_raw(json!({ "type": "harlo_result", "call": id, "ok": true, "result": result }));
+                }
+                SessionUpdate::Status(SessionStatus::Idle) => break,
+                _ => {}
+            }
+        }
+        while let Ok(Some(u)) = tokio::time::timeout(Duration::from_millis(1500), rx.recv()).await {
+            if let SessionUpdate::Rows(changes) = u {
+                apply(&mut rows, changes);
+            }
+        }
+        let tools: Vec<&str> = asked.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(tools, ["_tools", "_instructions", "list_sessions"], "{rows:?}");
+        let replies: Vec<&str> = rows.iter().filter(|r| r.kind == crate::RowKind::Markdown).map(|r| r.html.as_str()).collect();
+        assert!(replies.last().is_some_and(|r| r.contains("marmalade-otter")), "{replies:?}");
+        assert!(rows.iter().any(|r| r.kind == crate::RowKind::Tool), "{rows:?}");
     }
 
     #[tokio::test]

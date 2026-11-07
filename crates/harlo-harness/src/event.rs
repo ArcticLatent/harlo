@@ -136,6 +136,9 @@ pub enum HarnessEvent {
     SubagentActivity(Value),
     /// omp side question (`btw_delta` / `btw_record` frame).
     Btw(Value),
+    /// harlo-agent calling one of harlo's tools on its pipe (answered with
+    /// a `harlo_result` command of the same id).
+    HarloCall { id: String, tool: String, args: Value },
     /// omp goal mode changed (`goal_updated`): the goal, or null.
     Goal(Value),
     Renamed(Option<String>),
@@ -273,6 +276,7 @@ impl Translator {
             },
             "subagent_lifecycle" | "subagent_progress" => E::SubagentActivity(frame),
             "btw_delta" | "btw_record" => E::Btw(frame),
+            "harlo_call" => E::HarloCall { id: str_of(&frame, "id"), tool: str_of(&frame, "tool"), args: frame["args"].clone() },
             "goal_updated" => E::Goal(frame["goal"].clone()),
             "queue_update" => E::QueueChanged {
                 steering: string_list(&frame["steering"]),
@@ -467,6 +471,14 @@ mod tests {
         let ev = t.translate(json!({"type":"message_update","messageId":"msg-7","message":{"role":"assistant"},"assistantMessageEvent":{"type":"thinking_delta","contentIndex":1,"delta":"hmm"}}));
         let HarnessEvent::BlockDelta { id, index, kind, .. } = &ev[0] else { panic!() };
         assert_eq!((id.as_str(), *index, *kind), ("msg-7", 1, BlockKind::Thinking));
+    }
+
+    #[test]
+    fn harlo_agent_calls_harlos_tools() {
+        let mut t = Translator::new(HarnessKind::Harlo);
+        let ev = t.translate(json!({"type":"harlo_call","id":"hc-3","tool":"list_sessions","args":{"all":true}}));
+        let HarnessEvent::HarloCall { id, tool, args } = &ev[0] else { panic!("{ev:?}") };
+        assert_eq!((id.as_str(), tool.as_str(), args), ("hc-3", "list_sessions", &json!({"all":true})));
     }
 
     #[test]

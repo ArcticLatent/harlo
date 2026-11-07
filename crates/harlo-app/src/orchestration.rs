@@ -1,6 +1,7 @@
 //! The running harlo's side of orchestration (see `harlo_core::orchestration`):
-//! a local socket where `harlo --mcp-bridge` hands over agents' tool calls.
-//! Each call is carried out on the UI thread, where the sessions are.
+//! a local socket where `harlo --mcp-bridge` hands over agents' tool calls,
+//! and harlo-agent's calls on its own pipe ([`answer_pipe`]). Each call is
+//! carried out on the UI thread, where the sessions are.
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;
@@ -68,13 +69,34 @@ fn handle(thread: &CxxQtThread<Workspace>, call: &Value) -> Result<Value, String
             .map_err(|_| "harlo is closing".to_owned())?;
     }
     let result = rx.recv_timeout(Duration::from_secs(60)).map_err(|_| "harlo didn't answer in time".to_owned())??;
+    finish(thread, &tool, &args, result)
+}
+
+/// A harlo-agent session's call on its pipe, done on the UI thread
+/// (`result`): finished here in the background, then the answer to the
+/// session.
+pub fn answer_pipe(thread: CxxQtThread<Workspace>, key: String, call: String, tool: String, args: Value, result: Result<Value, String>) {
+    std::thread::spawn(move || {
+        let answer = match result.and_then(|r| finish(&thread, &tool, &args, r)) {
+            Ok(result) => json!({ "type": "harlo_result", "call": call, "ok": true, "result": result }),
+            Err(error) => json!({ "type": "harlo_result", "call": call, "ok": false, "error": error }),
+        };
+        if let Some(live) = crate::registry::get(&key) {
+            live.handle.send_raw(answer);
+        }
+    });
+}
+
+/// What's left of a call after the UI thread's part: specs and the plan
+/// worked on, a session's messages read.
+fn finish(thread: &CxxQtThread<Workspace>, tool: &str, args: &Value, result: Value) -> Result<Value, String> {
     // Specs and the plan: their work here, with what the UI thread gave.
     if result["_defer"] == true {
         if tool.starts_with("spec_") {
             let cwd = std::path::PathBuf::from(result["cwd"].as_str().unwrap_or_default());
-            return harlo_core::specs::call(&harlo_core::specs::root_of(&cwd), &tool, &args);
+            return harlo_core::specs::call(&harlo_core::specs::root_of(&cwd), tool, args);
         }
-        let outcome = crate::plans::tool(&tool, &args, &result);
+        let outcome = crate::plans::tool(tool, args, &result);
         let _ = thread.queue(|this| this.plans_changed());
         return outcome;
     }
