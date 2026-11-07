@@ -116,8 +116,12 @@ const DROPPED_VARS: &[&str] = &["SSH_AUTH_SOCK", "SSH_AGENT_PID", "GPG_AGENT_INF
 #[derive(Debug)]
 pub struct Sandbox {
     pub network: bool,
-    /// The project: the repository's top folder, or the working directory.
+    /// The project: the repository's top folder, or the working directory
+    /// (the working directory when the repository holds the home folder).
     pub project: PathBuf,
+    /// Whether commands may change the project: not when it's the home
+    /// folder or holds it (a session there, or at /, keeps home read-only).
+    pub project_writable: bool,
     /// Where commands may write (existing, resolved), the project first.
     pub writable: Vec<PathBuf>,
     /// What's hidden (existing, resolved; none that holds the project).
@@ -176,8 +180,13 @@ impl Sandbox {
     /// (both hidden, wherever they are).
     pub fn new(p: &Policy, cwd: &Path, home: &Path, config: &Path, sessions: Option<&Path>) -> Sandbox {
         let cwd = resolve(cwd);
-        let (project, common) = git_folders(&cwd);
-        let project = project.unwrap_or_else(|| cwd.clone());
+        let holds_home = |p: &Path| resolve(home).starts_with(p);
+        // (A repository of the home folder, say dotfiles, isn't the project.)
+        let (project, common) = match git_folders(&cwd) {
+            (Some(top), common) if !holds_home(&top) => (top, common),
+            _ => (cwd.clone(), None),
+        };
+        let project_writable = !holds_home(&project);
         let existing = |paths: Vec<PathBuf>| -> Vec<PathBuf> {
             let mut out: Vec<PathBuf> = Vec::new();
             for p in paths {
@@ -189,8 +198,11 @@ impl Sandbox {
             }
             out
         };
-        let mut writable = vec![project.clone()];
-        writable.extend(common.filter(|c| !c.starts_with(&project)));
+        let mut writable = Vec::new();
+        if project_writable {
+            writable.push(project.clone());
+            writable.extend(common.filter(|c| !c.starts_with(&project)));
+        }
         writable.push(PathBuf::from("/tmp"));
         writable.extend(CACHES.iter().map(|c| home.join(c)));
         // (Caches moved elsewhere; none that holds home.)
@@ -211,7 +223,7 @@ impl Sandbox {
         hidden.extend(p.hidden.iter().cloned());
         // (One that holds the project would hide it: left visible.)
         let hidden = existing(hidden).into_iter().filter(|h| !project.starts_with(h)).collect();
-        Sandbox { network: p.network, project, writable, hidden, env: p.env.clone(), broken: None }
+        Sandbox { network: p.network, project, project_writable, writable, hidden, env: p.env.clone(), broken: None }
     }
 
     /// bwrap's arguments to run `bash -c command` in `cwd`.
@@ -275,6 +287,13 @@ impl Sandbox {
         if self.writable.iter().any(|w| real.starts_with(w)) {
             return Ok(());
         }
+        if !self.project_writable {
+            return Err(format!(
+                "{} can't be changed: this session works in {}, the home folder or above it, which Harlo's sandbox keeps read-only (only /tmp and tool caches can be changed). If the task really needs this file, ask the user.",
+                path.display(),
+                self.project.display()
+            ));
+        }
         Err(format!("{} is outside the folders Harlo's sandbox lets you change ({}, /tmp and tool caches). Change files in the project; if the task really needs this file, ask the user.", path.display(), self.project.display()))
     }
 
@@ -283,9 +302,13 @@ impl Sandbox {
         if let Some(why) = &self.broken {
             return format!("Commands can't run on this machine: Harlo's sandbox can't start ({why}). Tell the user if you need to run one.");
         }
+        let changeable = if self.project_writable {
+            format!("{}, /tmp and tool caches", self.project.display())
+        } else {
+            format!("/tmp and tool caches (this session works in {}, the home folder or above it, which stays read-only: to change a file there, use outside_sandbox for a command and say why)", self.project.display())
+        };
         format!(
-            "Commands run in a sandbox: they can change only {}, /tmp and tool caches (the rest is read-only), and places that hold secrets (SSH keys, credentials, sign-ins, browser profiles) are hidden. The network is {}. If a command fails because of the sandbox (say, git push needs SSH keys), run it again with outside_sandbox: true and say why: the user is asked first.",
-            self.project.display(),
+            "Commands run in a sandbox: they can change only {changeable} (the rest is read-only), and places that hold secrets (SSH keys, credentials, sign-ins, browser profiles) are hidden. The network is {}. If a command fails because of the sandbox (say, git push needs SSH keys), run it again with outside_sandbox: true and say why: the user is asked first.",
             if self.network { "available" } else { "off" }
         )
     }
@@ -429,6 +452,31 @@ pub mod tests {
         assert!(sb.may_write(Path::new("/tmp/x")).is_ok());
         assert!(sb.may_write(&home.join("other/x")).unwrap_err().contains("outside the folders"));
         assert!(sb.may_write(&home.join("proj/../other/x")).is_err());
+    }
+
+    #[test]
+    fn the_home_folder_is_never_the_writable_project() {
+        let s = home_outside_tmp("home");
+        let home = s.0.join("home");
+        std::fs::create_dir_all(home.join("notes")).unwrap();
+        // A session in the home folder, or above it: home stays read-only.
+        for cwd in [home.clone(), s.0.clone(), PathBuf::from("/")] {
+            let sb = Sandbox::new(&on(), &cwd, &home, &home.join("none"), None);
+            assert!(!sb.project_writable && !sb.writable.iter().any(|w| home.starts_with(w)), "{cwd:?}: {:?}", sb.writable);
+            assert!(sb.may_write(&home.join("x")).unwrap_err().contains("keeps read-only"), "{cwd:?}");
+            assert!(sb.may_write(Path::new("/tmp/x")).is_ok());
+            assert!(sb.describe().contains("stays read-only"));
+        }
+        // A repository of the whole home folder (dotfiles): a folder in it
+        // is the project, not home.
+        assert!(std::process::Command::new("git").arg("-C").arg(&home).args(["init", "-q"]).status().unwrap().success());
+        let sb = Sandbox::new(&on(), &home.join("notes"), &home, &home.join("none"), None);
+        assert_eq!((sb.project.as_path(), sb.project_writable), (home.join("notes").as_path(), true));
+        assert!(sb.may_write(&home.join("notes/a.md")).is_ok() && sb.may_write(&home.join("x")).is_err());
+        assert!(!sb.writable.contains(&home.join(".git")), "nor its git folder");
+        // A project of its own inside home is as before.
+        let sb = Sandbox::new(&on(), &home.join("proj"), &home, &home.join("none"), None);
+        assert!(sb.project_writable && sb.project == home.join("proj"));
     }
 
     #[test]
