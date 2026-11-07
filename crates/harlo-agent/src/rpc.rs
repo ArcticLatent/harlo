@@ -66,6 +66,8 @@ struct Shared {
     pending: Mutex<Pending>,
     /// The plan's models.
     models: Mutex<Vec<providers::ModelInfo>>,
+    /// The session's subagents running (`task`), by id.
+    subagents: Arc<Mutex<HashMap<String, CancellationToken>>>,
 }
 
 struct Modes {
@@ -285,10 +287,16 @@ pub async fn serve(keep: Keep, model: Option<String>, effort: Option<String>, ha
         running: Mutex::default(),
         pending: Mutex::default(),
         models: Mutex::default(),
+        subagents: agent.subagents.clone(),
     });
     agent.gate = Some(Arc::new(Approvals(shared.clone())));
     if harlo_tools {
         agent.harlo = Some(Arc::new(Pipe(shared.clone())));
+    }
+    // Its subagents' frames, as omp's.
+    {
+        let sh = shared.clone();
+        agent.notify = Some(Arc::new(move |frame| sh.emit(frame)));
     }
     {
         let mut v = shared.view.lock().unwrap();
@@ -555,7 +563,17 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
             "name": "compact", "description": "Summarize the conversation so far to free up context",
             "source": "builtin", "input": { "hint": "what to keep (optional)" },
         }] }))),
+        // (The running ones come as events.)
         "get_subagents" => reply(Ok(json!({ "subagents": [] }))),
+        "cancel_subagent" => {
+            let id = cmd["subagentId"].as_str().unwrap_or_default();
+            let token = sh.subagents.lock().unwrap().get(id).cloned();
+            if let Some(t) = &token {
+                t.cancel();
+            }
+            reply(Ok(json!({ "cancelled": token.is_some() })))
+        }
+        "steer_subagent" => reply(Err("Harlo's subagents can't be steered: cancel one, or wait for its answer.".into())),
         "new_session" => {
             if busy {
                 return reply(Err("A run is working: stop it first.".into()));

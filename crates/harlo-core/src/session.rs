@@ -1877,6 +1877,66 @@ mod tests {
         eprintln!("reported {} time(s); reminded: {reminded}", reports.len());
     }
 
+    /// harlo-agent's task subagents, on the plan: two explore subagents,
+    /// one per folder, at the same time; the Subagents box hears them start
+    /// and end, the reply has what each found, and the saved session lists
+    /// them. Scratch folder as above.
+    #[tokio::test]
+    #[ignore]
+    async fn harlo_agent_runs_task_subagents() {
+        let home = PathBuf::from(std::env::var("HARLO_TEST_HOME").expect("a scratch HARLO_TEST_HOME"));
+        assert!(home.starts_with("/tmp/"), "not a scratch folder: {home:?}");
+        let work = home.join("work-task");
+        for (dir, code) in [("alpha", "4417"), ("beta", "9023")] {
+            std::fs::create_dir_all(work.join(dir)).unwrap();
+            std::fs::write(work.join(dir).join("notes.txt"), format!("Some notes.\nThe {dir} code is {code}.\n")).unwrap();
+        }
+        let handle = SessionHandle::spawn(HarnessConfig {
+            kind: HarnessKind::Harlo,
+            program: Some(std::env::var("HARLO_TEST_HARLO_AGENT").expect("HARLO_TEST_HARLO_AGENT").into()),
+            cwd: work.clone(),
+            session: SessionTarget::New,
+            extra_args: vec![],
+            env: vec![("XDG_DATA_HOME".to_owned(), home.join("data").to_string_lossy().into_owned())],
+            remote: None,
+        });
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        handle.subscribe(ChannelSink(tx));
+        let mut rows = Vec::new();
+        assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::Status(SessionStatus::Idle))).await);
+        handle.send_raw(json!({ "type": "harlo_set_modes", "approval": "yolo", "plan": false }));
+        handle.send_raw(json!({ "type": "set_thinking_level", "level": "low" }));
+        handle.prompt(
+            "Use the task tool once, with two explore subagents at the same time: one finds the code in alpha/notes.txt, the other the code in beta/notes.txt. Don't read the files yourself. Then tell me both codes.",
+            Vec::new(),
+            SendMode::Normal,
+        );
+        let (mut frames, mut meta) = (Vec::new(), SessionMetaInfo::default());
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(240);
+        while let Ok(Some(u)) = tokio::time::timeout_at(deadline, rx.recv()).await {
+            match u {
+                SessionUpdate::Rows(changes) => apply(&mut rows, changes),
+                SessionUpdate::SubagentActivity(f) => frames.push(f),
+                SessionUpdate::Meta(m) => meta = m,
+                SessionUpdate::Status(SessionStatus::Idle) => break,
+                _ => {}
+            }
+        }
+        while let Ok(Some(u)) = tokio::time::timeout(Duration::from_millis(1500), rx.recv()).await {
+            match u {
+                SessionUpdate::Rows(changes) => apply(&mut rows, changes),
+                SessionUpdate::Meta(m) => meta = m,
+                _ => {}
+            }
+        }
+        let with = |status: &str| frames.iter().filter(|f| f["type"] == "subagent_lifecycle" && f["payload"]["status"] == status).count();
+        assert_eq!((with("running"), with("completed")), (2, 2), "{frames:?}");
+        let replies: Vec<&str> = rows.iter().filter(|r| r.kind == crate::RowKind::Markdown).map(|r| r.html.as_str()).collect();
+        assert!(replies.last().is_some_and(|r| r.contains("4417") && r.contains("9023")), "{replies:?}");
+        let saved = crate::subagents::from_session_file(&meta.session_file.expect("its file"));
+        assert!(saved.len() == 2 && saved.iter().all(|s| s["status"] == "completed" && s["sessionFile"].is_string()), "{saved:?}");
+    }
+
     #[tokio::test]
     async fn demo_run_reaches_subscribers() {
         let handle = SessionHandle::spawn(cfg(HarnessKind::Demo, SessionTarget::New));

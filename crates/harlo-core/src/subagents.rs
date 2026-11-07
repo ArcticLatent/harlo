@@ -101,12 +101,18 @@ pub fn from_session_file(path: &std::path::Path) -> Vec<Value> {
     let exists = |file: &std::path::Path| if remote { file.file_name().is_some_and(|n| remote_files.contains(&*n.to_string_lossy())) } else { file.exists() };
     let mut list = Vec::new();
     let mut outcome: std::collections::HashMap<String, String> = Default::default();
+    // (harlo-agent's say how each ended.)
+    let mut own: std::collections::HashMap<String, String> = Default::default();
     for line in text.lines() {
         let Ok(entry) = serde_json::from_str::<Value>(line) else { continue };
         let m = &entry["message"];
         if entry["type"] == "message" && m["role"] == "toolResult" && m["toolName"] == "task" {
             for p in m["details"]["progress"].as_array().into_iter().flatten() {
                 let Some(id) = p["id"].as_str() else { continue };
+                // (Only how it ended: omp's say "pending" here.)
+                if let Some(status) = p["status"].as_str().filter(|s| matches!(*s, "completed" | "failed" | "aborted")) {
+                    own.insert(id.to_owned(), status.to_owned());
+                }
                 let mut payload = json!({ "id": id, "parentToolCallId": m["toolCallId"] });
                 for key in ["agent", "agentSource", "index", "assignment", "task", "description"] {
                     if !p[key].is_null() {
@@ -140,7 +146,7 @@ pub fn from_session_file(path: &std::path::Path) -> Vec<Value> {
                 std::fs::read_to_string(f).is_ok_and(|t| t.contains("\"name\":\"yield\""))
             }
         });
-        let status = outcome.get(&id).cloned().unwrap_or_else(|| if delivered { "completed".into() } else { "ended".into() });
+        let status = outcome.get(&id).or_else(|| own.get(&id)).cloned().unwrap_or_else(|| if delivered { "completed".into() } else { "ended".into() });
         entry["status"] = json!(status);
     }
     list
@@ -216,6 +222,27 @@ mod tests {
         assert!(list[0]["sessionFile"].as_str().unwrap().ends_with("s1/ListFiles.jsonl"));
         assert!(list[2]["sessionFile"].is_null());
         assert!(from_session_file(&dir.join("missing.jsonl")).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reads_harlo_agents_subagents() {
+        let dir = std::env::temp_dir().join(format!("harlo-subagents-harlo-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("s2")).unwrap();
+        let progress = json!([
+            { "id": "task-1", "agent": "explore", "description": "Look in alpha", "assignment": "Find the code.", "status": "completed", "usage": { "requests": 2 } },
+            { "id": "task-2", "agent": "general", "description": "Fix beta", "assignment": "Fix it.", "status": "aborted" },
+        ]);
+        let line = json!({ "type": "message", "message": { "role": "toolResult", "toolName": "task", "toolCallId": "call_9",
+            "content": [{ "type": "text", "text": "## Look in alpha (completed)" }], "details": { "progress": progress } } });
+        let file = dir.join("s2.jsonl");
+        std::fs::write(&file, format!("{}\n{line}\n", json!({ "type": "session" }))).unwrap();
+        std::fs::write(dir.join("s2/task-1.jsonl"), "{\"type\":\"session\"}\n").unwrap();
+        let list = from_session_file(&file);
+        let view: Vec<(&str, &str, &str)> = list.iter().map(|e| (e["id"].as_str().unwrap(), e["status"].as_str().unwrap(), e["description"].as_str().unwrap())).collect();
+        assert_eq!(view, [("task-1", "completed", "Look in alpha"), ("task-2", "aborted", "Fix beta")]);
+        assert!(list[0]["sessionFile"].as_str().unwrap().ends_with("s2/task-1.jsonl"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

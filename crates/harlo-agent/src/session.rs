@@ -98,6 +98,12 @@ impl Log {
         Log { id, path, cwd: cwd.to_owned(), file: None, last: None, off: false, parent: None }
     }
 
+    /// A session kept at `path`, started by the session at `parent` (a
+    /// subagent's).
+    pub fn at(path: PathBuf, cwd: &Path, parent: &Path) -> Log {
+        Log { id: uuid(), path, cwd: cwd.to_owned(), file: None, last: None, off: false, parent: Some(parent.to_owned()) }
+    }
+
     /// A session kept nowhere.
     pub fn ephemeral(cwd: &Path) -> Log {
         Log { id: uuid(), path: PathBuf::new(), cwd: cwd.to_owned(), file: None, last: None, off: true, parent: None }

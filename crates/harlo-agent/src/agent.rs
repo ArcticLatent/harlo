@@ -85,6 +85,9 @@ pub trait Harlo: Send + Sync {
     fn call(&self, tool: &str, args: &Value) -> BoxFuture<'static, Result<Value, String>>;
 }
 
+/// Frames for harlo beside a run's own events (its subagents').
+pub type Notify = Arc<dyn Fn(Value) + Send + Sync>;
+
 /// Messages sent while a run works: steering goes in at the next step,
 /// follow-ups when it would stop (one at a time).
 #[derive(Default)]
@@ -115,6 +118,13 @@ pub struct Agent {
     pub last_usage: Value,
     pub gate: Option<Arc<dyn Gate>>,
     pub harlo: Option<Arc<dyn Harlo>>,
+    /// A subagent's tools (None: all of them, and `task`).
+    pub allowed: Option<&'static [&'static str]>,
+    /// What its requests share a cache by (None: its session's id).
+    pub cache_key: Option<String>,
+    pub notify: Option<Notify>,
+    /// Its subagents running, by id.
+    pub subagents: Arc<Mutex<HashMap<String, CancellationToken>>>,
     /// harlo's tools as the model gets them, and what they're for (asked
     /// at each run's start).
     harlo_tools: Vec<Value>,
@@ -150,6 +160,10 @@ impl Agent {
             last_usage: Value::Null,
             gate: None,
             harlo: None,
+            allowed: None,
+            cache_key: None,
+            notify: None,
+            subagents: Arc::default(),
             harlo_tools: Vec::new(),
             harlo_text: String::new(),
             inbox: Arc::default(),
@@ -321,19 +335,33 @@ impl Agent {
             for ((id, name), args) in ids.iter().zip(&names).zip(&args) {
                 show(Shown::ToolStart { call_id: id, name, args });
             }
-            let pairs: Vec<(&str, &Value)> = names.iter().copied().zip(&args).collect();
-            let harlo = self.harlo.as_deref().map(|h| (h, self.harlo_tools.as_slice()));
-            let outcomes = run_calls(&self.tools, &pairs, self.gate.as_deref(), harlo, stop).await;
+            let triples: Vec<(&str, &str, &Value)> = ids.iter().copied().zip(names.iter().copied()).zip(&args).map(|((i, n), a)| (i, n, a)).collect();
+            // (Subagents: what they take from this session, when asked for.)
+            let task = names.contains(&"task").then(|| self.task_ctx());
+            let extra = Extra {
+                gate: self.gate.as_deref(),
+                harlo: self.harlo.as_deref().map(|h| (h, self.harlo_tools.as_slice())),
+                allowed: self.allowed,
+                task: task.as_ref(),
+            };
+            let outcomes = run_calls(&self.tools, &triples, &extra, stop).await;
             handed_over |= hands_over(&names, &outcomes);
             for ((c, name), o) in calls.iter().zip(&names).zip(outcomes) {
                 show(Shown::ToolEnd { call_id: c["id"].as_str().unwrap_or_default(), name, text: &o.text, failed: o.failed });
-                self.push(
-                    json!({
-                        "role": "toolResult", "toolCallId": c["id"], "toolName": c["name"],
-                        "content": [{ "type": "text", "text": o.text }], "isError": o.failed, "timestamp": now_ms(),
-                    }),
-                    show,
-                )?;
+                let mut result = json!({
+                    "role": "toolResult", "toolCallId": c["id"], "toolName": c["name"],
+                    "content": [{ "type": "text", "text": o.text }], "isError": o.failed, "timestamp": now_ms(),
+                });
+                if !o.details.is_null() {
+                    // (Subagents' requests count as this session's.)
+                    let u = &o.details["usage"];
+                    self.totals.requests += u["requests"].as_u64().unwrap_or(0);
+                    self.totals.input += u["input"].as_u64().unwrap_or(0);
+                    self.totals.cached += u["cached"].as_u64().unwrap_or(0);
+                    self.totals.output += u["output"].as_u64().unwrap_or(0);
+                    result["details"] = o.details;
+                }
+                self.push(result, show)?;
             }
             if stop.is_cancelled() {
                 self.stopped(show)?;
@@ -362,12 +390,27 @@ impl Agent {
     /// One request with the history: the reply, as pi's assistant message.
     async fn ask(&mut self, show: &mut (dyn FnMut(Shown) + Send)) -> Result<Value> {
         let (system, specs) = (self.system(), self.specs());
-        let asked = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &self.history, session: &self.log.id, specs: &specs, tools: true };
+        let key = self.cache_key.clone().unwrap_or_else(|| self.log.id.clone());
+        let asked = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &self.history, session: &key, specs: &specs, tools: true };
         let (message, usage) = send(asked, show).await?;
         self.count(&usage);
         show(Shown::Usage { model: message["model"].as_str().unwrap_or_default(), usage: &usage });
         self.last_usage = usage;
         Ok(message)
+    }
+
+    fn task_ctx(&self) -> crate::task::Ctx {
+        crate::task::Ctx {
+            model: self.model.clone(),
+            effort: self.effort.clone(),
+            cwd: self.cwd.clone(),
+            gate: self.gate.clone(),
+            parent_file: (!self.log.path.as_os_str().is_empty()).then(|| self.log.path.clone()),
+            cache_key: self.cache_key.clone().unwrap_or_else(|| self.log.id.clone()),
+            notify: self.notify.clone(),
+            windows: self.windows.clone(),
+            running: self.subagents.clone(),
+        }
     }
 
     /// The system prompt: the project's, then what harlo's tools are for.
@@ -380,7 +423,7 @@ impl Agent {
 
     /// The tools the model gets: its own, then harlo's.
     fn specs(&self) -> Value {
-        let mut all = tools::specs();
+        let mut all = tools::specs_of(self.allowed, self.allowed.is_none() && crate::task::enabled());
         if let Some(list) = all.as_array_mut() {
             list.extend(self.harlo_tools.iter().cloned());
         }
@@ -458,7 +501,8 @@ impl Agent {
         let mut asked: Vec<Value> = self.history[..cut].to_vec();
         asked.push(json!({ "role": "user", "content": [{ "type": "text", "text": compact::request(focus) }], "timestamp": now_ms() }));
         let (system, specs) = (self.system(), self.specs());
-        let request = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &asked, session: &self.log.id, specs: &specs, tools: false };
+        let key = self.cache_key.clone().unwrap_or_else(|| self.log.id.clone());
+        let request = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &asked, session: &key, specs: &specs, tools: false };
         // (The summary isn't shown as it's written.)
         let mut quiet = |_: Shown| {};
         let sent = tokio::select! {
@@ -646,11 +690,25 @@ impl Blocks {
 /// after another, in the order called. When `stop` is cancelled, the
 /// call running ends (dropping it ends its command) and what's left
 /// isn't started.
-async fn run_calls(tools: &Tools, calls: &[(&str, &Value)], gate: Option<&dyn Gate>, harlo: Option<(&dyn Harlo, &[Value])>, stop: &CancellationToken) -> Vec<tools::Outcome> {
-    let bad_args = || tools::Outcome { text: "The arguments weren't valid JSON; call the tool again.".into(), failed: true };
-    let cut = |text: &str| tools::Outcome { text: text.into(), failed: true };
-    if calls.iter().all(|(n, _)| tools::read_only(n)) {
-        let all = join_all(calls.iter().map(|(name, args)| async move { if args.is_null() { bad_args() } else { tools.call(name, args).await } }));
+/// What a round's calls may go through besides the tools themselves.
+#[derive(Default)]
+struct Extra<'a> {
+    gate: Option<&'a dyn Gate>,
+    harlo: Option<(&'a dyn Harlo, &'a [Value])>,
+    /// A subagent's tools (None: all).
+    allowed: Option<&'a [&'a str]>,
+    task: Option<&'a crate::task::Ctx>,
+}
+
+/// `calls`: (id, name, arguments).
+async fn run_calls(tools: &Tools, calls: &[(&str, &str, &Value)], extra: &Extra<'_>, stop: &CancellationToken) -> Vec<tools::Outcome> {
+    let bad_args = || tools::Outcome::new("The arguments weren't valid JSON; call the tool again.", true);
+    let cut = |text: &str| tools::Outcome::new(text, true);
+    let (gate, harlo) = (extra.gate, extra.harlo);
+    // (A subagent's: only its own.)
+    let not_here = |name: &str| extra.allowed.is_some_and(|only| !only.contains(&name));
+    if calls.iter().all(|(_, n, _)| tools::read_only(n) && !not_here(n)) {
+        let all = join_all(calls.iter().map(|(_, name, args)| async move { if args.is_null() { bad_args() } else { tools.call(name, args).await } }));
         return tokio::select! {
             biased;
             _ = stop.cancelled() => calls.iter().map(|_| cut(INTERRUPTED)).collect(),
@@ -658,7 +716,11 @@ async fn run_calls(tools: &Tools, calls: &[(&str, &Value)], gate: Option<&dyn Ga
         };
     }
     let mut out = Vec::new();
-    for (name, args) in calls {
+    for (id, name, args) in calls {
+        if not_here(name) {
+            out.push(cut(&format!("You can't use {name} here: your tools are {}.", extra.allowed.unwrap_or_default().join(", "))));
+            continue;
+        }
         if stop.is_cancelled() {
             out.push(cut(NOT_RUN));
             continue;
@@ -676,10 +738,17 @@ async fn run_calls(tools: &Tools, calls: &[(&str, &Value)], gate: Option<&dyn Ga
             };
             out.push(match ran {
                 None => cut(INTERRUPTED),
-                Some(Ok(Value::String(text))) => tools::Outcome { text, failed: false },
-                Some(Ok(v)) => tools::Outcome { text: v.to_string(), failed: false },
+                Some(Ok(Value::String(text))) => tools::Outcome::new(text, false),
+                Some(Ok(v)) => tools::Outcome::new(v.to_string(), false),
                 Some(Err(e)) => cut(&e),
             });
+            continue;
+        }
+        // Subagents: their own calls ask where they should.
+        if *name == "task"
+            && let Some(ctx) = extra.task
+        {
+            out.push(crate::task::run(args, id, ctx, stop).await);
             continue;
         }
         // What changes something may need the user's yes first.
@@ -823,7 +892,7 @@ mod tests {
             s2.cancel();
         });
         let t = Instant::now();
-        let out = run_calls(&tools, &[("bash", &first), ("bash", &slow), ("bash", &after)], None, None, &stop).await;
+        let out = run_calls(&tools, &[("1", "bash", &first), ("2", "bash", &slow), ("3", "bash", &after)], &Extra::default(), &stop).await;
         assert!(t.elapsed() < Duration::from_secs(5), "the stop didn't end the command");
         assert_eq!(out[0].text, "first");
         assert_eq!(out[1].text, INTERRUPTED);
@@ -856,7 +925,7 @@ mod tests {
         let stop = CancellationToken::new();
         stop.cancel();
         let args = json!({ "path": "." });
-        let out = run_calls(&tools, &[("ls", &args), ("ls", &args)], None, None, &stop).await;
+        let out = run_calls(&tools, &[("1", "ls", &args), ("2", "ls", &args)], &Extra::default(), &stop).await;
         assert!(out.iter().all(|o| o.failed));
     }
 
@@ -895,8 +964,9 @@ mod tests {
         let tools = Tools::new(dir.clone(), dir.join("harlo-agent"));
         let specs = harlo_specs(&json!([{ "name": "list_sessions" }, { "name": "say" }, { "name": "start_session" }]));
         let (asked, none) = (json!({ "x": 1 }), json!({}));
-        let calls = [("list_sessions", &asked), ("say", &none), ("start_session", &none), ("nope", &none)];
-        let out = run_calls(&tools, &calls, None, Some((&FakeHarlo, &specs)), &CancellationToken::new()).await;
+        let calls = [("1", "list_sessions", &asked), ("2", "say", &none), ("3", "start_session", &none), ("4", "nope", &none)];
+        let extra = Extra { harlo: Some((&FakeHarlo, &specs)), ..Default::default() };
+        let out = run_calls(&tools, &calls, &extra, &CancellationToken::new()).await;
         assert_eq!((serde_json::from_str::<Value>(&out[0].text).unwrap(), out[0].failed), (json!({ "sessions": [], "asked": { "x": 1 } }), false));
         assert_eq!((out[1].text.as_str(), out[1].failed), ("plain text", false));
         assert_eq!((out[2].text.as_str(), out[2].failed), ("no start_session", true));
@@ -906,7 +976,7 @@ mod tests {
 
     #[test]
     fn what_hands_a_helpers_turn_over() {
-        let o = |failed: bool| tools::Outcome { text: String::new(), failed };
+        let o = |failed: bool| tools::Outcome::new("", failed);
         assert!(!hands_over(&["report_done"], &[o(true)]), "a refused report");
         assert!(hands_over(&["read", "report_done"], &[o(false), o(false)]));
         assert!(hands_over(&["ask_parent"], &[o(false)]));

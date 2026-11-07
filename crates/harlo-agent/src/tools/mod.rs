@@ -33,23 +33,44 @@ pub struct Tools {
     seen: Mutex<HashMap<PathBuf, (SystemTime, u64)>>,
 }
 
-/// A tool's result for the model, and whether it failed.
+/// A tool's result for the model, whether it failed, and what the log
+/// keeps beside it (`details`; null for none).
 pub struct Outcome {
     pub text: String,
     pub failed: bool,
+    pub details: Value,
+}
+
+impl Outcome {
+    pub fn new(text: impl Into<String>, failed: bool) -> Outcome {
+        Outcome { text: text.into(), failed, details: Value::Null }
+    }
 }
 
 fn ok(text: impl Into<String>) -> Outcome {
-    Outcome { text: text.into(), failed: false }
+    Outcome::new(text, false)
 }
 
 fn fail(text: impl Into<String>) -> Outcome {
-    Outcome { text: text.into(), failed: true }
+    Outcome::new(text, true)
 }
 
 /// Tools that only look: several run at once.
 pub fn read_only(name: &str) -> bool {
     matches!(name, "read" | "grep" | "find" | "ls")
+}
+
+/// The tools' definitions for the Responses API: those in `only` (all
+/// when None), and `task` with them when `task`.
+pub fn specs_of(only: Option<&[&str]>, task: bool) -> Value {
+    let mut all: Vec<Value> = specs().as_array().cloned().unwrap_or_default();
+    if let Some(only) = only {
+        all.retain(|t| t["name"].as_str().is_some_and(|n| only.contains(&n)));
+    }
+    if task {
+        all.push(crate::task::spec());
+    }
+    Value::Array(all)
 }
 
 /// The tools' definitions for the Responses API.
@@ -120,7 +141,7 @@ impl Tools {
             "edit" => self.edit(s("path"), &args["edits"]),
             "bash" => {
                 let (text, failed) = bash::run(s("command"), &self.cwd, args["timeout"].as_u64(), &self.spill_dir).await;
-                Outcome { text, failed }
+                Outcome::new(text, failed)
             }
             "grep" => self.grep(s("pattern"), s("path"), s("glob"), args["ignore_case"].as_bool() == Some(true)).await,
             "find" => self.find(s("pattern"), s("path")).await,

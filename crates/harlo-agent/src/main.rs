@@ -27,6 +27,7 @@ mod providers;
 mod responses;
 mod rpc;
 mod session;
+mod task;
 mod tools;
 
 use std::io::Write as _;
@@ -180,6 +181,14 @@ async fn ask(prompt: &str, model: Option<String>, effort: Option<String>, from: 
         }
     };
     let mut agent = agent::Agent::new(cwd, log, past, model, effort);
+    // Subagents: a line as each starts and ends.
+    agent.notify = Some(std::sync::Arc::new(|frame: serde_json::Value| {
+        let p = &frame["payload"];
+        if frame["type"] == "subagent_lifecycle" {
+            let what = p["description"].as_str().map(|d| format!(" {d}")).unwrap_or_default();
+            eprintln!("\x1b[35m⇉ {} {}{what}\x1b[0m", p["id"].as_str().unwrap_or_default(), p["status"].as_str().unwrap_or_default());
+        }
+    }));
     let mut out = std::io::stdout();
     let mut thinking = false;
     // Whether the last thing printed ended a line.
