@@ -1,7 +1,7 @@
 {
   "name": "harlo",
   "short_name": "harlo",
-  "description": "Your pi and omp sessions, from your phone.",
+  "description": "Your Harlo and Claude Code sessions, from your phone.",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#151312",

@@ -381,8 +381,8 @@ pub mod qobject {
         #[qinvokable]
         fn known_models(self: &Workspace) -> QString;
         /// Starts a multirun: one prompt sent to several lanes. `form` is JSON
-        /// `{ projectId, prompt, starter, attachments, askFirst, worktrees,
-        /// base, lanes: [{ harness, model }] }`. Opens its overview; returns
+        /// `{ projectId, prompt, starter, attachments, worktrees, base,
+        /// lanes: [{ harness, model }] }`. Opens its overview; returns
         /// the run id.
         #[qinvokable]
         fn start_run(self: Pin<&mut Workspace>, form: &QString) -> QString;
@@ -532,7 +532,7 @@ pub mod qobject {
         /// Starts a session from the new-session page and sends its first
         /// message. `form` is JSON: `{ projectId (-1 = home), harness ("" =
         /// the project's), worktreeBranch ("" = current checkout), base,
-        /// starter (id or ""), text, attachments: [paths], askFirst }`.
+        /// starter (id or ""), text, attachments: [paths] }`.
         /// With a worktree, the session opens once it is ready and this
         /// returns ""; otherwise it returns the new session's key.
         #[qinvokable]

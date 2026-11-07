@@ -1096,8 +1096,8 @@ ApplicationWindow {
     }
 
     // ---- click-driven checks of recent features (real input) ----------
-    // Approvals: Approve on the tool row; omp's goal-tool wording, the
-    // waiting footer and the bar; Deny in the bar.
+    // Approvals: Approve on the tool row, the waiting footer and the bar;
+    // Deny in the bar.
     SequentialAnimation {
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksapproval"
         PauseAnimation { duration: 1200 }
@@ -1122,44 +1122,15 @@ ApplicationWindow {
             win.check(win.findText("Approval needed: bash", chat.requestDock) !== null, "the bar names the tool")
             win.clickText("Approve", chat.transcript) } }
         PauseAnimation { duration: 2500 }
-        ScriptAction { script: { win.check(!chat.session.hasRequest && win.findText("Waiting for your approval", chat.transcript) === null, "Approve on the row runs it"); win.sendByKeys("fast: approve goal") } }
+        ScriptAction { script: { win.check(!chat.session.hasRequest && win.findText("Waiting for your approval", chat.transcript) === null, "Approve on the row runs it"); win.sendByKeys("fast: approve again") } }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
-            win.check(win.findText("Let omp mark the goal complete?", chat.transcript) !== null, "goal approval reads 'Let omp mark the goal complete?'")
-            win.check(win.findText("Approval needed: omp wants to update its goal", chat.requestDock) !== null, "the bar explains the goal approval")
-            win.shot("clicks-approval-goal") } }
+            win.check(win.findText("Approval needed: bash", chat.requestDock) !== null, "the next one asks again")
+            win.shot("clicks-approval-bar") } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: win.clickText("Deny", chat.requestDock) }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: { win.check(!chat.session.hasRequest && win.findText("✗", chat.transcript) !== null, "Deny in the bar fails the call"); win.summary(); Qt.quit() } }
-    }
-
-    // Goal from the New Session page: toggle, budget warning, Enter, then
-    // Pause / Resume / Drop in the dock.
-    SequentialAnimation {
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksgoal"
-        PauseAnimation { duration: 1200 }
-        ScriptAction { script: { win.openDraft(-1); chat.draftView.harness = "demo"; if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth=")) } }
-        PauseAnimation { duration: 600 }
-        ScriptAction { script: { win.clickItem(win.findName("draftInput"), "draft input"); TestInput.typeText("Make the parser handle nested lists"); win.clickItem(win.findName("draftGoalButton", chat.draftView), "Goal") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: { win.check(chat.draftView.goalOn, "Goal toggle turns goal mode on"); win.clickItem(win.findName("goalBudget"), "budget field"); TestInput.typeText("100") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: { win.check(win.findText("100 tokens: too small for one turn", chat.draftView) !== null, "budget 100 warns 'too small for one turn'"); TestInput.key(Qt.Key_A, Qt.ControlModifier); TestInput.typeText("50k") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: { win.check(win.findText("50,000 tokens", chat.draftView) !== null, "budget 50k reads '50,000 tokens'"); win.shot("clicks-goal-draft") } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: TestInput.key(Qt.Key_Return, 0) }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: { const g = chat.session.goalJson ? JSON.parse(chat.session.goalJson) : {}; win.check(g.status === "active" && g.tokenBudget === 50000 && g.objective === "Make the parser handle nested lists", "Enter starts the session as a 50k goal"); win.clickText("Pause", chat.goalDock) } }
-        PauseAnimation { duration: 800 }
-        ScriptAction { script: { win.check(JSON.parse(chat.session.goalJson).status === "paused", "Pause pauses"); win.clickText("Resume", chat.goalDock) } }
-        PauseAnimation { duration: 800 }
-        ScriptAction { script: { win.check(JSON.parse(chat.session.goalJson).status === "active", "Resume resumes"); win.clickText("Drop", chat.goalDock) } }
-        PauseAnimation { duration: 600 }
-        ScriptAction { script: win.clickText("Discard") }
-        PauseAnimation { duration: 800 }
-        ScriptAction { script: { win.check(chat.session.goalJson === "" && !chat.goalDock.visible, "Drop + Discard removes the goal"); win.summary(); Qt.quit() } }
     }
 
     // Motion: the sidebar and the side panel slide open and shut (caught
@@ -1879,21 +1850,9 @@ ApplicationWindow {
             win.summary(); Qt.quit() } }
     }
     // The composer's bottom bar: every control shown at a usable size and
-    // inside the window, the provider's logo by the model, Ask first and
-    // Send by clicks.
-    // A narrow chat folds goal, btw and Ask first into ⋯.
+    // inside the window, the provider's logo by the model, and Send by
+    // clicks.
     readonly property var barButtons: ["attachButton", "permissionsButton", "modeButton", "modelButton", "micButton", "sendButton", "expandButton"]
-        .concat(chat.composerItem.compactBar ? ["moreButton"] : ["goalButton", "btwButton", "askFirstButton"])
-    function clickAskFirst() {
-        if (chat.composerItem.compactBar) {
-            win.clickItem(win.findName("moreButton", chat.composerItem), "⋯")
-            win.clickLater = "Ask first"
-        } else {
-            win.clickItem(win.findName("askFirstButton", chat.composerItem), "Ask first")
-        }
-    }
-    // Clicked after a pause (menu items appear once the menu has opened).
-    property string clickLater: ""
     property string approvalBefore: ""
     property string approvalNext: ""
     SequentialAnimation {
@@ -1913,18 +1872,6 @@ ApplicationWindow {
             win.check(logo !== null && logo.url.startsWith("data:image/svg+xml"), "the provider's logo shows by it")
             win.check(!win.findName("sendButton", c).enabled, "Send is off with nothing typed")
             win.shot("clicks-composer")
-            win.clickAskFirst() } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: if (win.clickLater !== "") { win.clickText(win.clickLater); win.clickLater = "" } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            win.check(chat.session.askFirst && (chat.composerItem.compactBar || win.findName("askFirstButton", chat.composerItem).on), "clicking Ask first turns it on")
-            win.clickAskFirst() } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: if (win.clickLater !== "") { win.clickText(win.clickLater); win.clickLater = "" } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            win.check(!chat.session.askFirst, "clicking again turns it off")
             win.rowsBefore = chat.transcript.count
             win.clickItem(win.findName("composerInput"), "composer")
             TestInput.typeText("fast: hello from the bar") } }
@@ -1955,7 +1902,7 @@ ApplicationWindow {
         ScriptAction { script: {
             win.check(!chat.composerItem.expanded && chat.transcript.count > win.rowsBefore, "sending goes back to the chat")
             win.approvalBefore = chat.composerItem.approvalMode
-            win.check(["always-ask", "write", "yolo"].includes(win.approvalBefore), "the shield starts at omp's configured mode (" + win.approvalBefore + ")")
+            win.check(["always-ask", "write", "yolo"].includes(win.approvalBefore), "the shield starts in a mode (" + win.approvalBefore + ")")
             win.clickItem(win.findName("permissionsButton", chat.composerItem), "shield") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
@@ -2080,7 +2027,7 @@ ApplicationWindow {
         ScriptAction { script: {
             const h = JSON.parse(Remotes.hostsJson())
             win.check(h.length === 1 && h[0].name === "box", "the host is saved")
-            win.check(h.length === 1 && h[0].state === "connected" && h[0].omp !== "", "it connects and finds omp (" + (h.length ? h[0].state + " " + h[0].message : "") + ")")
+            win.check(h.length === 1 && h[0].state === "connected" && h[0].harlo !== "", "it connects and can run Harlo (" + (h.length ? h[0].state + " " + h[0].message : "") + ")")
             win.check(win.findName("remoteHost-box", settingsDialog.contentItem) !== null, "and is listed")
             win.shotPopup(settingsDialog, "clicks-remote-settings")
             win.clickItem(win.findName("remoteConnect-box", settingsDialog.contentItem), "Disconnect") } }
@@ -2094,7 +2041,7 @@ ApplicationWindow {
             settingsDialog.close() } }
         PauseAnimation { duration: 400 }
         // Stage 2: the host as the instance shown (its own projects and
-        // sessions), a project there, and an omp session.
+        // sessions), a project there, and a Harlo session.
         ScriptAction { script: win.clickItem(win.findName("instanceButton"), "the instance button") }
         PauseAnimation { duration: 1200 }
         ScriptAction { script: {
@@ -2126,7 +2073,7 @@ ApplicationWindow {
         ScriptAction { script: {
             const p = Workspace.projectList().map(l => l.split("\t")).find(p => p[1] === "repo")
             win.remoteProject = p ? Number(p[0]) : -1
-            win.check(p !== undefined && p[2] === "omp", "the remote folder is a project (omp, found there)")
+            win.check(p !== undefined && p[2] === "harlo", "the remote folder is a project (Harlo, harlo's own there)")
             const texts = []
             const walk = it => { for (const c of it.children) { if (c.visible && typeof c.text === "string" && c.text.indexOf("box") >= 0) texts.push(c.text); walk(c) } }
             walk(sidebar)
@@ -2135,9 +2082,9 @@ ApplicationWindow {
         PauseAnimation { duration: 6000 }
         ScriptAction { script: {
             win.log("remote session:", chat.session.harness, chat.session.status, chat.session.cwd, chat.session.modelName, Workspace.approvalMode(chat.session.key))
-            win.check(chat.session.harness === "omp" && chat.session.cwd === "ssh://box" + win.argValue("--cwd="), "a new session there runs omp in the remote folder")
-            win.check(chat.session.modelName !== "", "omp answers over SSH (model " + chat.session.modelName + ")")
-            win.check(["always-ask", "write", "yolo"].includes(Workspace.approvalMode(chat.session.key)), "its approval mode comes from that machine's config")
+            win.check(chat.session.harness === "harlo" && chat.session.cwd === "ssh://box" + win.argValue("--cwd="), "a new session there runs Harlo in the remote folder")
+            win.check(chat.session.modelName !== "", "Harlo answers over SSH (model " + chat.session.modelName + ")")
+            win.check(Workspace.approvalMode(chat.session.key) === "always-ask", "it starts asking first")
             win.shot("clicks-remote-session")
             // Local again: box's projects, sessions and tabs are out of sight.
             win.instanceKey = chat.session.key
@@ -2151,7 +2098,7 @@ ApplicationWindow {
             // The phone's New Session: every machine's projects, whichever the window shows.
             const ph = JSON.parse(Workspace.phoneTestCall(JSON.stringify({ op: "projects" })))
             const onBox = (ph.projects || []).find(p => p.host === "box")
-            win.check(onBox && onBox.where.startsWith("box:") && onBox.agents.indexOf("omp") >= 0, "the phone still gets box's project, with its machine and agents (" + JSON.stringify(onBox) + ")")
+            win.check(onBox && onBox.where.startsWith("box:") && onBox.agents.indexOf("harlo") >= 0, "the phone still gets box's project, with its machine and agents (" + JSON.stringify(onBox) + ")")
             win.check(tabs.indexOf(win.instanceKey) < 0 && win.findText("box", sidebar) === null, "box's tab and sessions are out of sight (" + tabs + ")")
             // Opening box's session (a notification, say) goes back to box.
             Workspace.open(win.instanceKey) } }
@@ -2170,7 +2117,7 @@ ApplicationWindow {
         ScriptAction { script: {
             const find = it => { for (const c of it.children) { if (c.visible && c.html !== undefined && c.html.indexOf("Hi from the remote host") >= 0) return c; const f = find(c); if (f) return f } return null }
             win.check(win.findText("Remote hello", chat.transcript) !== null && find(chat.transcript) !== null, "opening it reads its transcript over SSH")
-            win.check(chat.session.harness === "pi" && chat.session.cwd === "ssh://box" + win.argValue("--cwd="), "as a pi session in the remote folder")
+            win.check(chat.session.harness === "harlo" && chat.session.cwd === "ssh://box" + win.argValue("--cwd="), "as a Harlo session in the remote folder")
             win.shot("clicks-remote-saved")
             // Stage 4: the Changes panel and a terminal on the host.
             windowSettings.rightMode = "changes"
@@ -2379,8 +2326,8 @@ ApplicationWindow {
         PauseAnimation { duration: 1200 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            // Only omp and pi here (clicksmcpagents covers Claude and OpenCode).
-            for (const id of ["claude", "opencode"]) Workspace.setProviderEnabled(id, false)
+            // Only Harlo here (clicksmcpagents covers Claude).
+            Workspace.setProviderEnabled("claude", false)
             Workspace.addProject(win.argValue("--cwd="))
             win.mcpProject = Workspace.projectRoots(1)[0]
             settingsDialog.openPage("mcp") } }
@@ -2401,7 +2348,7 @@ ApplicationWindow {
         PauseAnimation { duration: 2500 }
         ScriptAction { script: {
             const l = win.mcpList("global")
-            win.check(l.length === 1 && l[0].name === "fake" && l[0].harnesses.join() === "omp,pi", "Create saves it for omp and pi (" + JSON.stringify(l.map(s => s.name + ":" + s.harnesses)) + ")")
+            win.check(l.length === 1 && l[0].name === "fake" && l[0].harnesses.join() === "harlo", "Create saves it for Harlo (" + JSON.stringify(l.map(s => s.name + ":" + s.harnesses)) + ")")
             const st = JSON.parse(Mcp.statusJson("global")).fake
             win.check(st && st.state === "connected" && st.tools.length === 2, "and tests it: connected, 2 tools (" + JSON.stringify(st) + ")")
             const pill = win.findName("mcpStatus-fake", settingsDialog.contentItem)
@@ -2411,7 +2358,7 @@ ApplicationWindow {
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
             const l = win.mcpList("global")
-            win.check(!l[0].form.enabled && win.findName("mcpStatus-fake", settingsDialog.contentItem).text === "Disabled", "the card's switch turns it off (in both files)")
+            win.check(!l[0].form.enabled && win.findName("mcpStatus-fake", settingsDialog.contentItem).text === "Disabled", "the card's switch turns it off")
             win.clickItem(win.findName("mcpToggle-fake", settingsDialog.contentItem), "the card's switch") } }
         PauseAnimation { duration: 2000 }
         ScriptAction { script: {
@@ -2427,18 +2374,14 @@ ApplicationWindow {
             win.check(bar !== null && bar.parent.objectName === "settingsFooter" && bar.mapToItem(null, 0, bar.height).y <= d.mapToItem(null, 0, d.height).y + 1
                       && flick.contentHeight > flick.height, "Save / Cancel / Delete float at the bottom while the page scrolls")
             win.shotPopup(settingsDialog, "clicks-mcp-server")
-            win.clickItem(win.findName("mcpForPi", d), "untick pi") } }
-        // (Unticking pi reflows the page: click the timeout where it is now.)
-        PauseAnimation { duration: 200 }
-        ScriptAction { script: {
-            const d = settingsDialog.contentItem
+            win.check(win.findName("mcpForHarlo", d) !== null && win.findName("mcpForHarlo", d).checked, "it's ticked for Harlo")
             win.clickItem(win.findName("mcpTimeout", d), "timeout")
             TestInput.typeText("45")
             win.clickItem(win.findName("mcpSave", d), "Save") } }
         PauseAnimation { duration: 800 }
         ScriptAction { script: {
             const l = win.mcpList("global")
-            win.check(l.length === 1 && l[0].harnesses.join() === "omp" && l[0].form.timeoutSecs === 45, "unticking pi removes it from pi's file; the timeout is kept (" + JSON.stringify(l[0]) + ")")
+            win.check(l.length === 1 && l[0].harnesses.join() === "harlo" && l[0].form.timeoutSecs === 45, "the timeout is saved (" + JSON.stringify(l[0]) + ")")
             settingsDialog.contentItem && win.clickItem(win.findName("mcpScope", settingsDialog.contentItem), "scope") } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: win.clickText("repo") }
@@ -2457,7 +2400,7 @@ ApplicationWindow {
         PauseAnimation { duration: 3500 }
         ScriptAction { script: {
             const l = win.mcpList(win.mcpProject)
-            win.check(l.length === 2 && l.every(s => s.harnesses.join() === "omp,pi"), "importing two servers adds both to the project (" + JSON.stringify(l.map(s => s.name)) + ")")
+            win.check(l.length === 2 && l.every(s => s.harnesses.join() === "harlo"), "importing two servers adds both to the project (" + JSON.stringify(l.map(s => s.name)) + ")")
             const st = JSON.parse(Mcp.statusJson(win.mcpProject))
             win.check(st.one && st.one.state === "connected" && st.web && st.web.state === "failed", "and tests them (" + (st.web ? st.web.error : "") + ")")
             win.clickItem(win.findName("mcpServer-web", settingsDialog.contentItem), "web") } }
@@ -2469,7 +2412,7 @@ ApplicationWindow {
         ScriptAction { script: {
             const l = win.mcpList(win.mcpProject)
             win.check(l.length === 1 && l[0].name === "one", "Delete removes it")
-            win.check(Workspace.fileStamp(win.mcpProject + "/.omp/mcp.json") !== "" && Workspace.fileStamp(win.mcpProject + "/.pi/mcp.json") !== "", "project servers are in .omp/mcp.json and .pi/mcp.json")
+            win.check(Workspace.fileStamp(win.mcpProject + "/.harlo/mcp.json") !== "", "project servers are in .harlo/mcp.json")
             win.summary(); Qt.quit() } }
     }
     // Phone access from the desktop: the sidebar's button, the consent
@@ -2678,141 +2621,6 @@ ApplicationWindow {
             win.summary(); Qt.quit() } }
     }
 
-    // OpenCode sessions, against a stand-in server (scripts/fake-opencode.py,
-    // --fake-opencode=): a reply, a permission, a form, model / variant /
-    // Plan (agent) switches (the stand-in's replies report them), stopping,
-    // and the session in the sidebar, reopened with its history and resumed.
-    property string openCodeKey: ""
-    SequentialAnimation {
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksopencode"
-        PauseAnimation { duration: 900 }
-        ScriptAction { script: {
-            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            Workspace.setSetting("opencode_path", win.argValue("--fake-opencode="))
-            Workspace.addProject(win.argValue("--cwd=")) } }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: { win.openCodeKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "opencode") } }
-        PauseAnimation { duration: 2500 }
-        // Named before it exists in OpenCode: created with the name.
-        ScriptAction { script: { Workspace.renameSession(win.openCodeKey, "My OpenCode chat"); win.sendByKeys("hello there") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            win.check(chat.session.harness === "opencode", "an OpenCode session (" + chat.session.harness + ")")
-            win.check(win.chatText().indexOf("Hello from fake opencode (model fakeai/fake-small, variant default, agent build)") >= 0, "it streams the reply (" + win.chatText().slice(-160) + ")")
-            win.check(chat.session.modelId.indexOf("fake-small") >= 0, "the model OpenCode chose shows (" + chat.session.modelId + ")")
-            win.check(chat.session.contextText.indexOf("1k/128k") >= 0, "and its context use (" + chat.session.contextText + ")")
-            win.sendByKeys("please approve listing the folder") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            win.check(chat.session.requestIsApproval && win.findText("Approval needed: shell", chat.requestDock) !== null, "a shell call asks for permission") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: { win.shotWindow("clicks-opencode-approval"); win.clickText("Approve", chat.transcript) } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            win.check(!chat.session.hasRequest && win.chatText().indexOf("Listed it.") >= 0 && win.chatText().indexOf("notes.txt") >= 0, "Approve lets it run")
-            win.sendByKeys("approve it again") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            const always = win.findName("alwaysAllowInline", chat.transcript)
-            win.check(always !== null && always.ToolTip.text === "Remember: ls *", "it offers Always allow, naming what it remembers (" + (always ? always.ToolTip.text : "none") + ")")
-            if (always) win.clickItem(always, "Always allow") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            win.check(!chat.session.hasRequest && win.chatText().indexOf("Listed it, and may from now on.") >= 0, "Always allow reaches OpenCode as always")
-            win.sendByKeys("ask me which database") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            win.check(chat.session.hasRequest && chat.session.requestMethod === "ask" && win.findText("Which database?", chat.askPanel) !== null, "its form shows in the ask panel")
-            win.clickText("Postgres", chat.askPanel) } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: win.clickText("Send answers", chat.askPanel) }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            // The label goes back as the field's value.
-            win.check(win.chatText().indexOf("You picked pg.") >= 0, "the answer goes back (" + win.chatText().slice(-80) + ")")
-            chat.session.setModel("fakeai", "fake-large")
-            win.clickItem(win.findName("modeButton", chat.composerItem), "Plan") } }
-        PauseAnimation { duration: 700 }
-        ScriptAction { script: win.sendByKeys("what now") }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            win.check(win.chatText().indexOf("(model fakeai/fake-large, variant default, agent plan)") >= 0, "the model and Plan reach OpenCode (" + win.chatText().slice(-110) + ")")
-            win.clickItem(win.findName("modeButton", chat.composerItem), "Build")
-            chat.session.setModel("fakeai", "fake-small") } }
-        PauseAnimation { duration: 500 }
-        // The model list: one served on this computer last, under Local.
-        ScriptAction { script: win.clickItem(win.findName("modelButton", chat.composerItem), "the model button") }
-        PauseAnimation { duration: 1200 }
-        ScriptAction { script: {
-            const names = chat.session.models.map(m => m.split("\t")[2])
-            win.check(chat.session.models.some(m => m.split("\t")[4] === "1" && m.split("\t")[1] === "qwen-home"), "the local model is known as local (" + names + ")")
-            win.check(win.findText("LOCAL") !== null, "under a Local heading")
-            win.shotWindow("clicks-opencode-models")
-            TestInput.key(Qt.Key_Escape, 0) } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: { chat.session.loadThinkingLevels() } }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: {
-            win.check(chat.session.thinkingLevels.length === 3 && chat.session.thinkingLevels[0] === "default" && chat.session.thinkingLevels[2] === "high", "its variants are the thinking levels, after its default (" + chat.session.thinkingLevels + ")")
-            chat.session.setThinkingLevel("high") } }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: win.sendByKeys("and now") }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            win.check(win.chatText().indexOf("(model fakeai/fake-small, variant high, agent build)") >= 0, "the variant and Build reach OpenCode (" + win.chatText().slice(-110) + ")")
-            // The shield: edits go through, commands still ask.
-            win.clickItem(win.findName("permissionsButton", chat.composerItem), "the shield") } }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: {
-            win.check(Workspace.approvalMode(win.openCodeKey) === "write", "the shield is on edits (" + Workspace.approvalMode(win.openCodeKey) + ")")
-            win.sendByKeys("please rewrite the notes") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            win.check(!chat.session.hasRequest && win.chatText().indexOf("Rewrote it.") >= 0, "an edit goes through without asking")
-            win.sendByKeys("approve one more listing") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            win.check(chat.session.requestIsApproval, "a command still asks")
-            win.clickText("Deny", chat.transcript) } }
-        PauseAnimation { duration: 1200 }
-        ScriptAction { script: win.clickItem(win.findName("permissionsButton", chat.composerItem), "the shield") }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: {
-            win.check(Workspace.approvalMode(win.openCodeKey) === "yolo", "the shield is on auto")
-            win.sendByKeys("approve the listing too") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            win.check(!chat.session.hasRequest && win.chatText().split("Listed it.").length >= 3, "on auto, commands go through too")
-            win.sendByKeys("go slow please") } }
-        PauseAnimation { duration: 1200 }
-        ScriptAction { script: {
-            win.check(chat.session.status === "busy", "a slow reply runs")
-            win.clickItem(win.findName("stopButton", chat.composerItem), "Stop") } }
-        PauseAnimation { duration: 1200 }
-        ScriptAction { script: {
-            win.check(chat.session.status === "idle", "Stop interrupts it (" + chat.session.status + ")")
-            Workspace.closeSession(win.openCodeKey) } }
-        // The scanner lists it from OpenCode's database; open it again.
-        PauseAnimation { duration: 3500 }
-        ScriptAction { script: {
-            let saved = ""
-            // Its own session (in the test's data folder) only.
-            for (let i = 0; Workspace.keyAt(i) !== ""; i++) if (Workspace.keyAt(i).indexOf(win.selftestDir + "/data/opencode/sessions/ses_") === 0) saved = Workspace.keyAt(i)
-            win.check(saved !== "", "the session is in the sidebar (" + saved + ")")
-            if (saved === "") { win.summary(); Qt.quit() }
-            else Workspace.open(saved) } }
-        PauseAnimation { duration: 2000 }
-        ScriptAction { script: {
-            win.check(win.chatText().indexOf("hello there") >= 0 && win.chatText().indexOf("You picked pg.") >= 0, "reopened, it shows its history")
-            win.check(chat.session.title === "My OpenCode chat", "and the name it was given before it began (" + chat.session.title + ")")
-            if (chat.session.harness !== "opencode") { win.check(false, "the reopened session is the OpenCode one"); win.summary(); Qt.quit() }
-            else win.sendByKeys("one more") } }
-        PauseAnimation { duration: 2000 }
-        ScriptAction { script: {
-            win.check(win.chatText().split("Hello from fake opencode").length > 4 && chat.session.status === "idle", "and it carries on (resumed)")
-            win.shot("clicks-opencode")
-            win.summary(); Qt.quit() } }
-    }
 
     // Provider marks: a Claude project's sessions of each provider show
     // their provider's mark (the status on its corner) in the sidebar and
@@ -2837,17 +2645,12 @@ ApplicationWindow {
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
             Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
-            Workspace.setSetting("opencode_path", win.argValue("--fake-opencode="))
             Workspace.addProject(win.argValue("--cwd=")) } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
             const id = JSON.parse(Workspace.projectsJson())[0].id
             Workspace.setProjectHarness(id, "claude")
-            Workspace.newSession(id, "opencode") } }
-        PauseAnimation { duration: 2000 }
-        ScriptAction { script: win.sendByKeys("hello there") }
-        PauseAnimation { duration: 1200 }
-        ScriptAction { script: Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "claude") }
+            Workspace.newSession(id, "claude") } }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: win.sendByKeys("hello there") }
         PauseAnimation { duration: 1200 }
@@ -2857,18 +2660,18 @@ ApplicationWindow {
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
             const marks = win.findAllNamed("sessionProvider", sidebar, []).map(m => m.provider).sort()
-            win.check(marks.join(",") === "claude,demo,opencode", "each session shows its provider's mark (" + marks + ")")
+            win.check(marks.join(",") === "claude,demo", "each session shows its provider's mark (" + marks + ")")
             const p = win.findName("projectProvider-repo", sidebar)
             win.check(p !== null && p.provider === "claude", "the project shows what its new sessions run")
             win.check(win.findText("Demo", win.findName("sessionProviderChip")) !== null, "the header names the provider")
             const tabMarks = win.findAllNamed("tabProvider", win.contentItem, []).map(m => m.provider).sort()
-            win.check(tabMarks.join(",") === "claude,demo,opencode", "and so do the tabs (" + tabMarks + ")")
-            const oc = win.findAllNamed("sessionProvider", sidebar, []).find(m => m.provider === "opencode")
-            const at = oc.mapToItem(null, oc.width / 2, oc.height / 2)
+            win.check(tabMarks.join(",") === "claude,demo", "and so do the tabs (" + tabMarks + ")")
+            const cl = win.findAllNamed("sessionProvider", sidebar, []).find(m => m.provider === "claude")
+            const at = cl.mapToItem(null, cl.width / 2, cl.height / 2)
             TestInput.moveTo(at.x, at.y) } }
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
-            win.check(win.findText("OpenCode") !== null, "hovered, the mark says which provider")
+            win.check(win.findText("Claude") !== null, "hovered, the mark says which provider")
             win.shotWindow("clicks-marks")
             const p = JSON.parse(Workspace.projectsJson())[0]
             sidebar.projectMenu.projectId = p.id; sidebar.projectMenu.path = p.path; sidebar.projectMenu.name = p.name; sidebar.projectMenu.harness = p.harness
@@ -2876,7 +2679,7 @@ ApplicationWindow {
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
             const marks = win.findAllNamed("menuProvider", null, []).map(m => m.provider)
-            win.check(marks.filter(m => m === "claude").length === 2 && marks.indexOf("opencode") >= 0, "the project menu shows the providers' marks (" + marks + ")")
+            win.check(marks.filter(m => m === "claude").length === 2 && marks.indexOf("harlo") >= 0, "the project menu shows the providers' marks (" + marks + ")")
             win.shotWindow("clicks-marks-menu")
             sidebar.projectMenu.close(); win.openDraft(-1) } }
         PauseAnimation { duration: 700 }
@@ -2884,7 +2687,7 @@ ApplicationWindow {
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
             const marks = win.findAllNamed("menuProvider", null, []).map(m => m.provider)
-            win.check(marks.indexOf("claude") >= 0 && marks.indexOf("opencode") >= 0 && marks.indexOf("pi") >= 0, "so does New session's (" + marks + ")")
+            win.check(marks.indexOf("claude") >= 0 && marks.indexOf("harlo") >= 0, "so does New session's (" + marks + ")")
             win.shotWindow("clicks-marks-draft")
             TestInput.key(Qt.Key_Escape, 0)
             win.summary(); Qt.quit() } }
@@ -2898,7 +2701,6 @@ ApplicationWindow {
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            Workspace.setSetting("omp_path", win.selftestDir + "/missing-omp")
             Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
             Workspace.refreshQuota() } }
         PauseAnimation { duration: 2500 }
@@ -2923,10 +2725,9 @@ ApplicationWindow {
             win.summary(); Qt.quit() } }
     }
 
-    // Subagents of Claude and OpenCode sessions (Stage 4), against the
-    // stand-ins: "delegate" starts one; the dock lists it by its
-    // description, its transcript opens, a reopened session lists it from
-    // disk / OpenCode's database; an OpenCode subagent can be cancelled.
+    // Subagents of Claude sessions (Stage 4), against the stand-in:
+    // "delegate" starts one; the dock lists it by its description, its
+    // transcript opens, a reopened session lists it from disk.
     function subagentsOf() { try { return JSON.parse(chat.session.subagentsJson || "[]") } catch (e) { return [] } }
     property string delegateKey: ""
     SequentialAnimation {
@@ -2935,7 +2736,6 @@ ApplicationWindow {
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
             Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
-            Workspace.setSetting("opencode_path", win.argValue("--fake-opencode="))
             Workspace.addProject(win.argValue("--cwd=")) } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: { win.delegateKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "claude") } }
@@ -2966,54 +2766,14 @@ ApplicationWindow {
         ScriptAction { script: {
             const a = win.subagentsOf()
             win.check(chat.session.harness === "claude" && a.length === 1 && a[0].name === "Look around" && a[0].status === "completed" && !!a[0].sessionFile, "reopened: listed from disk (" + JSON.stringify(a) + ")")
-            win.delegateKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "opencode") } }
-        PauseAnimation { duration: 2500 }
-        ScriptAction { script: win.sendByKeys("please delegate this") }
-        PauseAnimation { duration: 2500 }
-        ScriptAction { script: {
-            const a = win.subagentsOf()
-            win.check(a.length === 1 && a[0].name === "Look around" && a[0].agent === "explore" && a[0].status === "completed" && String(a[0].childSession).indexOf("ses_") === 0, "OpenCode: the subagent is listed, done (" + JSON.stringify(a) + ")")
-            win.check(win.chatText().indexOf("The subagent found notes.md.") >= 0, "and the reply")
-            if (a.length) chat.subagentDialog.show(a[0], false) } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            const t = chat.subagentDialog.transcriptSession.transcriptText()
-            win.check(t.indexOf("List the files") >= 0 && t.indexOf("Found notes.md.") >= 0, "View: its session (" + t.slice(0, 120).replace(/\n/g, " | ") + ")")
-            chat.subagentDialog.close()
-            win.sendByKeys("delegate slowly please") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            const a = win.subagentsOf()
-            win.check(a.length === 2 && a[1].status === "running", "a slow one runs (" + (a[1] ? a[1].status : "none") + ")")
-            chat.subagentDock.expanded = true
-            const c = win.findName("subagentCancel", chat.subagentDock)
-            win.check(c !== null, "with Cancel")
-            if (c) win.clickItem(c, "Cancel") } }
-        PauseAnimation { duration: 2000 }
-        ScriptAction { script: {
-            const a = win.subagentsOf()
-            win.check(a.length === 2 && a[1].status === "aborted" && win.chatText().indexOf("The subagent was stopped.") >= 0, "Cancel stops it (" + (a[1] ? a[1].status : "none") + ")")
-            win.shotWindow("clicks-delegate-opencode")
-            Workspace.closeSession(win.delegateKey) } }
-        PauseAnimation { duration: 3500 }
-        ScriptAction { script: {
-            let saved = ""
-            for (let i = 0; Workspace.keyAt(i) !== ""; i++) if (Workspace.keyAt(i).indexOf(win.selftestDir + "/data/opencode/sessions/ses_") === 0) saved = Workspace.keyAt(i)
-            win.check(saved !== "", "the OpenCode session (not its subagents) is in the sidebar")
-            if (saved !== "") Workspace.open(saved) } }
-        PauseAnimation { duration: 2000 }
-        ScriptAction { script: {
-            const a = win.subagentsOf()
-            win.check(chat.session.harness === "opencode" && a.length === 2 && a[0].status === "completed" && a[1].status === "aborted" && a.every(x => x.id.indexOf("call_") === 0), "reopened: listed from OpenCode's database, linked to their calls (" + JSON.stringify(a.map(x => [x.id, x.status])) + ")")
             win.summary(); Qt.quit() } }
     }
 
-    // MCP servers for Claude and OpenCode (Stage 4): a new server is for
-    // the installed agents; it lands in each one's own dialect (Claude's
-    // global ones through `claude mcp`, the stand-in here); OpenCode's
-    // switch works, Claude has none; removing reaches both; a project gets
-    // .mcp.json and opencode.json; a commented opencode.jsonc is read, not
-    // rewritten.
+    // MCP servers for Claude and Harlo (Stage 4): a new server is for the
+    // installed agents; it lands in each one's own dialect (Claude's global
+    // ones through `claude mcp`, the stand-in here); Harlo's switch works,
+    // Claude has none; removing reaches both; a project gets .mcp.json and
+    // .harlo/mcp.json.
     function readJson(path) { try { return JSON.parse(TestInput.readFile(path) || "{}") } catch (e) { return {} } }
     SequentialAnimation {
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksmcpagents"
@@ -3021,55 +2781,49 @@ ApplicationWindow {
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
             Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
-            Workspace.setSetting("opencode_path", win.argValue("--fake-opencode="))
-            for (const id of ["omp", "pi"]) Workspace.setProviderEnabled(id, false)
             settingsDialog.openPage("mcp") } }
         PauseAnimation { duration: 600 }
         ScriptAction { script: win.clickItem(win.findName("mcpAdd", settingsDialog.contentItem), "Add MCP server") }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
-            const d = settingsDialog.contentItem, c = win.findName("mcpForClaude", d), o = win.findName("mcpForOpenCode", d)
-            win.check(c !== null && c.checked && o !== null && o.checked && win.findName("mcpForOmp", d) === null, "a new server is for Claude and OpenCode (the installed agents that are on)")
+            const d = settingsDialog.contentItem, c = win.findName("mcpForClaude", d), h = win.findName("mcpForHarlo", d)
+            win.check(c !== null && c.checked && h !== null && h.checked, "a new server is for Claude and Harlo (the installed agents that are on)")
             win.shotWindow("clicks-mcp-agents")
             win.clickItem(win.findName("mcpBack", d), "back")
-            const err = Mcp.save("global", "", JSON.stringify({ name: "files", enabled: true, transport: "stdio", command: ["npx", "-y", "files-mcp"], env: [["TOKEN", "t"]], url: "", headers: [], cwd: "", timeoutSecs: 20 }), JSON.stringify(["claude", "opencode"]))
+            const err = Mcp.save("global", "", JSON.stringify({ name: "files", enabled: true, transport: "stdio", command: ["npx", "-y", "files-mcp"], env: [["TOKEN", "t"]], url: "", headers: [], cwd: "", timeoutSecs: 20 }), JSON.stringify(["claude", "harlo"]))
             win.check(err === "", "saved (" + err + ")") } }
         PauseAnimation { duration: 600 }
         ScriptAction { script: {
             const claude = win.readJson(win.selftestDir + "/claude-config/.claude.json").mcpServers || {}
-            const oc = (win.readJson(win.selftestDir + "/config/opencode/opencode.json").mcp || {})
+            const hs = win.readJson(win.selftestDir + "/config/harlo-agent/mcp.json").mcpServers || {}
             win.check(JSON.stringify(claude.files) === JSON.stringify({ type: "stdio", command: "npx", args: ["-y", "files-mcp"], env: { TOKEN: "t" } }), "Claude's dialect, through claude mcp (" + JSON.stringify(claude.files) + ")")
-            win.check(JSON.stringify(oc.files) === JSON.stringify({ type: "local", command: ["npx", "-y", "files-mcp"], environment: { TOKEN: "t" }, timeout: 20000, enabled: true }), "OpenCode's dialect (" + JSON.stringify(oc.files) + ")")
+            win.check(JSON.stringify(hs.files) === JSON.stringify({ command: "npx", args: ["-y", "files-mcp"], env: { TOKEN: "t" }, timeout: 20, enabled: true }), "Harlo's dialect (" + JSON.stringify(hs.files) + ")")
             const l = win.mcpList("global")
-            win.check(l.length === 1 && l[0].harnesses.join(",") === "claude,opencode" && !l[0].differs, "listed once, for both")
+            win.check(l.length === 1 && l[0].harnesses.join(",") === "claude,harlo" && !l[0].differs, "listed once, for both")
             win.check(Mcp.setEnabled("global", "files", false) === "", "switched off") } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
-            const oc = win.readJson(win.selftestDir + "/config/opencode/opencode.json").mcp || {}
+            const hs = win.readJson(win.selftestDir + "/config/harlo-agent/mcp.json").mcpServers || {}
             const claude = win.readJson(win.selftestDir + "/claude-config/.claude.json").mcpServers || {}
-            win.check(oc.files.enabled === false && !!claude.files && win.mcpList("global")[0].differs, "OpenCode's is off; Claude's stays (no switch)")
+            win.check(hs.files.enabled === false && !!claude.files && win.mcpList("global")[0].differs, "Harlo's is off; Claude's stays (no switch)")
             win.check(Mcp.remove("global", "files") === "", "removed") } }
         PauseAnimation { duration: 600 }
         ScriptAction { script: {
-            const oc = win.readJson(win.selftestDir + "/config/opencode/opencode.json").mcp || {}
+            const hs = win.readJson(win.selftestDir + "/config/harlo-agent/mcp.json").mcpServers || {}
             const claude = win.readJson(win.selftestDir + "/claude-config/.claude.json").mcpServers || {}
-            win.check(!oc.files && !claude.files && win.mcpList("global").length === 0, "gone from both")
+            win.check(!hs.files && !claude.files && win.mcpList("global").length === 0, "gone from both")
             const project = win.argValue("--cwd=")
-            win.check(Mcp.save(project, "", JSON.stringify({ name: "web", enabled: true, transport: "http", command: [], env: [], url: "https://example.com/mcp", headers: [["Authorization", "Bearer x"]], cwd: "" }), JSON.stringify(["claude", "opencode"])) === "", "a project server") } }
+            win.check(Mcp.save(project, "", JSON.stringify({ name: "web", enabled: true, transport: "http", command: [], env: [], url: "https://example.com/mcp", headers: [["Authorization", "Bearer x"]], cwd: "" }), JSON.stringify(["claude", "harlo"])) === "", "a project server") } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
             const project = win.argValue("--cwd=")
-            const claude = win.readJson(project + "/.mcp.json").mcpServers || {}, oc = win.readJson(project + "/opencode.json").mcp || {}
-            win.check(claude.web && claude.web.type === "http" && claude.web.headers.Authorization === "Bearer x" && oc.web && oc.web.type === "remote" && oc.web.url === "https://example.com/mcp", "in the project's .mcp.json and opencode.json")
-            const wt = win.selftestDir + "/wt", l = win.mcpList(wt)
-            win.check(l.length === 1 && l[0].name === "commented" && l[0].harnesses.join(",") === "opencode", "a commented opencode.jsonc is read")
-            const err = Mcp.save(wt, "commented", JSON.stringify(Object.assign({}, l[0].form, { url: "https://other/mcp" })), JSON.stringify(["opencode"]))
-            win.check(err.indexOf("has comments") >= 0 && TestInput.readFile(wt + "/opencode.jsonc").indexOf("// keep me") >= 0, "and not rewritten (" + err + ")")
+            const claude = win.readJson(project + "/.mcp.json").mcpServers || {}, hs = win.readJson(project + "/.harlo/mcp.json").mcpServers || {}
+            win.check(claude.web && claude.web.type === "http" && claude.web.headers.Authorization === "Bearer x" && hs.web && hs.web.url === "https://example.com/mcp", "in the project's .mcp.json and .harlo/mcp.json")
             settingsDialog.close()
             win.summary(); Qt.quit() } }
     }
 
-    // Edit & resend for Claude and OpenCode (Stage 4): hovering a prompt
+    // Edit & resend for Claude (Stage 4): hovering a prompt
     // offers it; it forks the session before that prompt (the original
     // stays as it was) and puts the prompt back in the composer; the next
     // message goes on in the fork.
@@ -3089,8 +2843,7 @@ ApplicationWindow {
         ScriptAction { script: {
             const t = win.chatText()
             win.check(t.indexOf("effort low") >= 0 && t.indexOf("second, edited") >= 0 && t.indexOf("second message") < 0, "a restart (effort) resumes the fork (" + t.slice(-90) + ")")
-            forkSteps.harness = "opencode"
-            forkSteps.restart() } }
+            win.summary(); Qt.quit() } }
     }
     SequentialAnimation {
         id: forkSteps
@@ -3100,7 +2853,6 @@ ApplicationWindow {
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
             Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
-            Workspace.setSetting("opencode_path", win.argValue("--fake-opencode="))
             Workspace.addProject(win.argValue("--cwd=")) } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, forkSteps.harness) }
@@ -3162,34 +2914,9 @@ ApplicationWindow {
         ScriptAction { script: {
             const d = settingsDialog.contentItem, h = JSON.parse(Remotes.hostsJson())[0]
             win.check(win.findName("hostAgent-box-claude", d) !== null && win.findText("Claude 2.1.296", d) !== null, "the host's agents are listed, with versions")
-            const install = win.findName("hostInstall-box-opencode", d)
-            win.check(install !== null && install.command === "curl -fsSL https://opencode.ai/install | bash", "a missing one offers its installer (" + (install ? install.command : "none") + ")")
             win.check(win.findName("hostSignIn-box-claude", d) !== null && h.claudeAuth === "no", "Claude not signed in there: Sign in")
             win.check(win.findName("hostInstall-box-claude", d) === null && win.findName("hostRecheck-box", d) !== null, "and Check again")
             win.shotWindow("clicks-remote-agents")
-            // Install runs in the background: the page stays.
-            win.clickItem(install, "Install OpenCode") } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            const d = settingsDialog.contentItem
-            win.check(settingsDialog.visible && win.findName("hostInstalling-box-opencode", d) !== null && !windowSettings.terminalOpen, "installing: a progress bar, the page stays, no terminal")
-            win.shotWindow("clicks-remote-installing") } }
-        PauseAnimation { duration: 3500 }
-        ScriptAction { script: {
-            const d = settingsDialog.contentItem, m = win.findName("hostInstallMessage-box-opencode", d)
-            win.check(m && m.text === "OpenCode is installed on box.", "done: it says so (" + (m ? m.text : "none") + ")")
-            win.clickItem(win.findName("hostInstall-box-pi", d), "Install Pi") } }
-        PauseAnimation { duration: 3000 }
-        ScriptAction { script: {
-            const d = settingsDialog.contentItem, m = win.findName("hostInstallMessage-box-pi", d)
-            win.check(m && m.text === "Installing Pi on box failed: error: no space left on device", "a failure says why (" + (m ? m.text : "none") + ")")
-            win.check(Remotes.installOutputCommand("box", "pi").indexOf("tail -n +1 ") === 0, "and its output can be shown")
-            win.shotWindow("clicks-remote-install-failed")
-            win.clickItem(win.findName("hostInstallOutput-box-pi", d), "View output") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            win.check(!settingsDialog.visible && windowSettings.terminalOpen, "View output: the terminal shows it")
-            win.toggleTerminal()
             Workspace.addProject("ssh://box" + win.argValue("--cwd=")) } }
         PauseAnimation { duration: 2500 }
         ScriptAction { script: {
@@ -3198,7 +2925,7 @@ ApplicationWindow {
             sidebar.projectMenu.popup(sidebar, 120, 160) } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
-            win.check(win.findText("New Claude session") !== null && win.findText("New Oh My Pi session") !== null && win.findText("New Pi session") === null && win.findText("New OpenCode session") === null, "a remote project offers the agents its host has (Claude, omp; not pi, missing there)")
+            win.check(win.findText("New Claude session") !== null && win.findText("New Harlo session") !== null, "a remote project offers Claude (found there) and Harlo (harlo's own)")
             sidebar.projectMenu.close()
             const p = JSON.parse(Workspace.projectsJson()).find(p => p.remote)
             win.remoteClaudeKey = Workspace.newSession(p.id, "claude") } }
@@ -3288,20 +3015,20 @@ ApplicationWindow {
         ScriptAction { script: {
             const d = settingsDialog.contentItem, row = win.findName("hostProvider-claude", d)
             win.check(Workspace.instance === "box" && row !== null && row.detail.indexOf("Version 2.1.296") === 0 && row.detail.indexOf("not signed in") > 0, "Providers shows box's agents (" + (row ? row.detail : "none") + ")")
-            win.check(win.findName("hostProviderInstall-opencode", d) !== null && win.findName("provider-claude", d) === null, "with Install for the missing ones, not this computer's list")
+            win.check(win.findName("provider-claude", d) === null, "not this computer's list")
             win.shotWindow("clicks-remote-providers")
             settingsDialog.openPage("mcp") } }
         PauseAnimation { duration: 800 }
         ScriptAction { script: {
-            const err = Mcp.save("host:box", "", JSON.stringify({ name: "boxtools", enabled: true, transport: "stdio", command: ["box-mcp"], url: "", headers: [], env: [], cwd: "", timeoutSecs: null, exposure: "", description: "" }), JSON.stringify(["omp", "claude"]))
+            const err = Mcp.save("host:box", "", JSON.stringify({ name: "boxtools", enabled: true, transport: "stdio", command: ["box-mcp"], url: "", headers: [], env: [], cwd: "", timeoutSecs: null, exposure: "", description: "" }), JSON.stringify(["harlo", "claude"]))
             const home = win.selftestDir + "/claude-config"
-            const omp = JSON.parse(TestInput.readFile(home + "/.omp/agent/mcp.json") || "{}").mcpServers || {}
+            const hs = JSON.parse(TestInput.readFile(home + "/.config/harlo-agent/mcp.json") || "{}").mcpServers || {}
             const claude = JSON.parse(TestInput.readFile(home + "/.claude.json") || "{}").mcpServers || {}
-            win.check(err === "" && omp.boxtools && omp.boxtools.command === "box-mcp", "MCP on box writes box's own omp config (" + err + ")")
+            win.check(err === "" && hs.boxtools && hs.boxtools.command === "box-mcp", "MCP on box writes box's own Harlo config (" + err + ")")
             win.check(claude.boxtools !== undefined, "and box's Claude (claude mcp there)")
             const l = JSON.parse(Mcp.listJson("host:box"))
-            win.check(l.servers.some(x => x.name === "boxtools" && x.harnesses.indexOf("claude") >= 0 && x.harnesses.indexOf("omp") >= 0), "which the page lists for box")
-            // Orchestration on box: its skills and omp's bridge, over SSH.
+            win.check(l.servers.some(x => x.name === "boxtools" && x.harnesses.indexOf("claude") >= 0 && x.harnesses.indexOf("harlo") >= 0), "which the page lists for box")
+            // Orchestration on box: its skills, over SSH.
             settingsDialog.openPage("orchestration") } }
         PauseAnimation { duration: 2000 }
         ScriptAction { script: win.clickItem(win.findName("orchSkill-harlo-advisor", settingsDialog.contentItem), "harlo-advisor on box") }
@@ -3310,11 +3037,6 @@ ApplicationWindow {
             const home = win.selftestDir + "/claude-config"
             win.check(TestInput.readFile(home + "/.agents/skills/harlo-advisor/SKILL.md").indexOf("name: harlo-advisor") >= 0 && TestInput.readFile(home + "/.claude/skills/harlo-advisor/.harlo-skill") !== "", "a skill installs on box (both folders, marked)")
             win.check(win.findName("orchSkill-harlo-advisor", settingsDialog.contentItem).checked, "and shows as installed there")
-            win.clickItem(win.findName("orchBridge-omp", settingsDialog.contentItem), "omp's bridge on box") } }
-        PauseAnimation { duration: 2500 }
-        ScriptAction { script: {
-            const c = JSON.parse(TestInput.readFile(win.selftestDir + "/claude-config/.omp/agent/mcp.json") || "{}").mcpServers || {}
-            win.check(c.harlo && c.harlo.command === "python3" && String(c.harlo.args[0]).endsWith("/harlo_mcp_bridge.py") && String(c.harlo.args[1]).endsWith(".sock"), "omp on box gets the bridge there (" + JSON.stringify(c.harlo) + ")")
             win.shotWindow("clicks-remote-orchestration")
             settingsDialog.close() } }
         PauseAnimation { duration: 400 }
@@ -3331,81 +3053,6 @@ ApplicationWindow {
             win.summary(); Qt.quit() } }
     }
 
-    // OpenCode on a remote host: its server there, reached through a port
-    // forwarded over SSH (the stand-in, its data in the test's folder): a
-    // reply, an approval, a name; the host's OpenCode sessions listed from
-    // that server, reopened with their history and resumed.
-    property string remoteOpenCodeKey: ""
-    SequentialAnimation {
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksremoteopencode"
-        PauseAnimation { duration: 900 }
-        ScriptAction { script: {
-            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            Remotes.saveHost("", "box", "ssh " + win.argValue("--ssh="))
-            Remotes.connectHost("box") } }
-        PauseAnimation { duration: 2500 }
-        ScriptAction { script: {
-            const h = JSON.parse(Remotes.hostsJson())[0]
-            win.check(h.state === "connected" && h.opencode !== "" && h.versions.opencode === "2.0.25", "the host has OpenCode (" + JSON.stringify(h.versions) + ")")
-            Workspace.addProject("ssh://box" + win.argValue("--cwd=")) } }
-        PauseAnimation { duration: 800 }
-        ScriptAction { script: {
-            const p = JSON.parse(Workspace.projectsJson()).find(p => p.remote)
-            sidebar.projectMenu.projectId = p.id; sidebar.projectMenu.path = "ssh://box" + win.argValue("--cwd="); sidebar.projectMenu.name = p.name; sidebar.projectMenu.harness = p.harness
-            sidebar.projectMenu.popup(sidebar, 120, 160) } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            win.check(win.findText("New OpenCode session") !== null, "a remote project offers OpenCode")
-            sidebar.projectMenu.close()
-            win.remoteOpenCodeKey = Workspace.newSession(JSON.parse(Workspace.projectsJson()).find(p => p.remote).id, "opencode") } }
-        PauseAnimation { duration: 4000 }
-        ScriptAction { script: win.sendByKeys("hello there") }
-        PauseAnimation { duration: 2500 }
-        ScriptAction { script: {
-            win.check(chat.session.harness === "opencode" && win.chatText().indexOf("Hello from fake opencode") >= 0, "OpenCode answers from the host (" + win.chatText().slice(-80) + ")")
-            win.check(Workspace.sessionFile(Workspace.activeKey).indexOf("ssh://box/opencode-sessions/ses_") === 0, "the session is the host's (" + Workspace.sessionFile(Workspace.activeKey) + ")")
-            win.sendByKeys("please approve listing") } }
-        PauseAnimation { duration: 2000 }
-        ScriptAction { script: {
-            win.check(chat.session.requestIsApproval, "its permission comes over")
-            win.clickText("Approve", chat.transcript) } }
-        PauseAnimation { duration: 2000 }
-        ScriptAction { script: {
-            win.check(!chat.session.hasRequest && win.chatText().indexOf("Listed it.") >= 0, "and the answer goes back")
-            Workspace.renameSession(win.remoteOpenCodeKey, "Remote OpenCode")
-            win.sendByKeys("please delegate this") } }
-        PauseAnimation { duration: 3000 }
-        ScriptAction { script: {
-            const a = win.subagentsOf()
-            win.check(a.length === 1 && a[0].status === "completed" && String(a[0].sessionFile).indexOf("ssh://box/opencode-sessions/ses_") === 0, "a subagent there (" + (a[0] ? a[0].status + " " + a[0].sessionFile : "none") + ")")
-            if (a.length) chat.subagentDialog.show(a[0], false) } }
-        PauseAnimation { duration: 2500 }
-        ScriptAction { script: {
-            const t = chat.subagentDialog.transcriptSession.transcriptText()
-            win.check(t.indexOf("List the files") >= 0 && t.indexOf("Found notes.md.") >= 0, "its session opens from the host's server")
-            chat.subagentDialog.close() } }
-        PauseAnimation { duration: 1000 }
-        ScriptAction { script: Workspace.closeSession(win.remoteOpenCodeKey) }
-        PauseAnimation { duration: 7000 }
-        ScriptAction { script: {
-            let saved = ""
-            for (let i = 0; Workspace.keyAt(i) !== ""; i++) if (Workspace.keyAt(i).indexOf("ssh://box/opencode-sessions/ses_") === 0) saved = Workspace.keyAt(i)
-            win.check(saved !== "", "the host's OpenCode session is in the sidebar (" + saved + ")")
-            if (saved === "") { win.summary(); Qt.quit() }
-            else Workspace.open(saved) } }
-        PauseAnimation { duration: 3000 }
-        ScriptAction { script: {
-            win.check(chat.session.harness === "opencode" && win.chatText().indexOf("hello there") >= 0 && win.chatText().indexOf("Listed it.") >= 0 && chat.session.title === "Remote OpenCode", "reopened: its history and name, from the host (" + chat.session.title + ")")
-            const a = win.subagentsOf()
-            win.check(a.length === 1 && a[0].status === "completed" && a[0].id.indexOf("call_") === 0, "and its subagent, linked to its call (" + JSON.stringify(a.map(x => [x.id, x.status])) + ")")
-            if (chat.session.harness !== "opencode") { win.summary(); Qt.quit() }
-            else win.sendByKeys("one more") } }
-        PauseAnimation { duration: 4000 }
-        ScriptAction { script: {
-            win.check(win.chatText().split("Hello from fake opencode").length > 3 && chat.session.status === "idle", "and it carries on there (resumed)")
-            win.shotWindow("clicks-remote-opencode")
-            win.summary(); Qt.quit() } }
-    }
 
     // Orchestration: an agent drives harlo through its MCP bridge (the
     // stand-in Claude as the client): it starts a helper session, which
@@ -3479,24 +3126,8 @@ ApplicationWindow {
             Qt.quit() } }
     }
 
-    // The real OpenCode (not in the click suite): one tiny turn on a free
-    // model in --cwd.
-    SequentialAnimation {
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "opencodereal"
-        PauseAnimation { duration: 800 }
-        ScriptAction { script: { Workspace.addProject(win.argValue("--cwd=")) } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: { win.openCodeKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "opencode") } }
-        PauseAnimation { duration: 8000 }
-        ScriptAction { script: { chat.session.setModel("opencode", "ling-3.1-flash-free"); win.sendByKeys("Reply with exactly: OK") } }
-        PauseAnimation { duration: 60000 }
-        ScriptAction { script: {
-            win.log("status:", chat.session.status, "model:", chat.session.modelId, "context:", chat.session.contextText)
-            win.log("transcript:", win.chatText().replace(/\n/g, " | "))
-            Qt.quit() } }
-    }
 
-    // A real subagent (not in the click suite): --harness= claude|opencode,
+    // A real subagent (not in the click suite): --harness= claude|harlo,
     // --model=provider/id; one tiny delegated task.
     SequentialAnimation {
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "delegatereal"
@@ -3609,7 +3240,6 @@ ApplicationWindow {
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
             Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
-            for (const id of ["opencode", "pi", "omp"]) Workspace.setSetting(id + "_path", win.selftestDir + "/missing-" + id)
             updateToasts.doneTimeout = 1500
             Updates.checkLocal() } }
         PauseAnimation { duration: 2000 }
@@ -3664,7 +3294,7 @@ ApplicationWindow {
             Workspace.addProject(base + "/webapp")
             Workspace.addProject(base + "/api")
             Workspace.saveTemplate(JSON.stringify({ name: "Review a pull request", harness: "claude", approval: "always-ask", text: "Review the open pull request: correctness first, then tests." }))
-            Workspace.saveTemplate(JSON.stringify({ name: "Fix the failing tests", harness: "omp", approval: "write", text: "Run the tests and fix what fails." })) } }
+            Workspace.saveTemplate(JSON.stringify({ name: "Fix the failing tests", harness: "harlo", approval: "write", text: "Run the tests and fix what fails." })) } }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: win.clickItem(win.findText("Fix the login redirect loop", sidebar), "the session") }
         PauseAnimation { duration: 2000 }
@@ -3843,8 +3473,6 @@ ApplicationWindow {
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
             Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
-            Workspace.setSetting("opencode_path", win.argValue("--fake-opencode="))
-            for (const id of ["pi", "omp"]) Workspace.setSetting(id + "_path", win.selftestDir + "/missing-" + id)
             Workspace.addProject(win.argValue("--cwd=")) } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: { Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "claude") } }
@@ -3857,14 +3485,14 @@ ApplicationWindow {
         PauseAnimation { duration: 2500 }
         ScriptAction { script: {
             const agent = win.findName("delegateAgentAsk"), note = win.findName("delegateNote")
-            win.check(agent && agent.currentText === "OpenCode", "Second opinion: another agent by default (" + (agent ? agent.currentText : "") + ")")
+            win.check(agent && agent.currentText === "Harlo", "Second opinion: another agent by default (" + (agent ? agent.currentText : "") + ")")
             win.check(note && note.text === "is the cache right?", "the composer's text is the question")
             win.shotWindow("clicks-delegate-advisor")
             win.clickItem(win.findName("delegateStart"), "Ask") } }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
             const t = win.chatText()
-            win.check(t.indexOf("Get a second opinion from OpenCode (agent \"opencode\", its default model)") >= 0 && t.indexOf("The question: is the cache right?") >= 0, "the agent gets harlo's instruction (" + t.slice(0, 120) + ")")
+            win.check(t.indexOf("Get a second opinion from Harlo (agent \"harlo\", its default model)") >= 0 && t.indexOf("The question: is the cache right?") >= 0, "the agent gets harlo's instruction (" + t.slice(0, 120) + ")")
             win.check(chat.composerItem.text === "", "and the composer is empty")
             win.clickItem(win.findName("delegateButton"), "the Delegate button") } }
         PauseAnimation { duration: 400 }
@@ -3872,7 +3500,7 @@ ApplicationWindow {
         PauseAnimation { duration: 600 }
         ScriptAction { script: {
             const a = win.findName("delegateAgentMember1"), b = win.findName("delegateAgentMember2"), m = win.findName("delegateModelMember1")
-            win.check(a && b && a.currentText === "Claude" && b.currentText === "OpenCode", "Committee: this agent and another (" + (a ? a.currentText : "") + ", " + (b ? b.currentText : "") + ")")
+            win.check(a && b && a.currentText === "Claude" && b.currentText === "Harlo", "Committee: this agent and another (" + (a ? a.currentText : "") + ", " + (b ? b.currentText : "") + ")")
             win.check(m && m.count > 2, "with Claude's models to pick from (" + (m ? m.count : 0) + ")")
             m.currentIndex = 1
             m.activated(1)
@@ -3881,12 +3509,12 @@ ApplicationWindow {
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
             const t = win.chatText()
-            win.check(/- Claude \(agent "claude", model "[^"]+"\)/.test(t) && t.indexOf("- OpenCode (agent \"opencode\"") >= 0 && t.indexOf("The problem: flaky tests") >= 0, "both members, with the chosen model, go to the agent")
+            win.check(/- Claude \(agent "claude", model "[^"]+"\)/.test(t) && t.indexOf("- Harlo (agent \"harlo\"") >= 0 && t.indexOf("The problem: flaky tests") >= 0, "both members, with the chosen model, go to the agent")
             win.summary(); Qt.quit() } }
     }
 
     // The Delegate menu with real agents (not in the click suite): Claude
-    // (Haiku) asks OpenCode (a free model) for a second opinion.
+    // (Haiku) asks Harlo (its default model) for a second opinion.
     SequentialAnimation {
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "delegatemenureal"
         PauseAnimation { duration: 800 }
@@ -3902,8 +3530,7 @@ ApplicationWindow {
         ScriptAction { script: {
             const p = chat.composerItem.delegatePopover
             const row = win.findName("delegateAgentAsk").parent
-            row.pick("opencode")
-            row.model = "opencode/ling-3.1-flash-free"
+            row.pick("harlo")
             win.log("sending:", JSON.stringify(row.chosen()))
             p.start() } }
         PauseAnimation { duration: 100000 }
@@ -3962,8 +3589,7 @@ ApplicationWindow {
 
     // Settings → Orchestration: skills installed into both skill folders
     // (and removed), a user's own skill of the same name left alone, and
-    // the bridge in pi's MCP config (another server kept; omp's own
-    // "harlo" left alone).
+    // the page's switch.
     SequentialAnimation {
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksorchestration"
         PauseAnimation { duration: 900 }
@@ -3995,41 +3621,19 @@ ApplicationWindow {
             const h = win.selftestDir + "/home"
             win.check(TestInput.readFile(h + "/.agents/skills/harlo-advisor/SKILL.md") === "" && TestInput.readFile(h + "/.claude/skills/harlo-advisor/SKILL.md") === "", "removed from both folders")
             win.check(TestInput.readFile(h + "/.agents/skills/harlo-handoff/SKILL.md") === "mine\n", "the user's skill still there")
-            win.clickItem(win.findName("orchBridge-pi", settingsDialog.contentItem), "pi's bridge switch") } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            const c = JSON.parse(TestInput.readFile(win.selftestDir + "/home/.pi/agent/mcp.json")).mcpServers
-            win.check(c.harlo && c.harlo.args.indexOf("--mcp-bridge") >= 0 && c.harlo.args.indexOf("--socket") >= 0 && c.harlo.exposure === "direct", "pi: harlo's bridge added (" + JSON.stringify(c.harlo) + ")")
-            win.check(c.other && c.other.command === "other-server", "pi's other server kept")
-            win.clickItem(win.findName("orchBridge-omp", settingsDialog.contentItem), "omp's bridge switch") } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            const d = settingsDialog.contentItem, p = win.findName("orchProblem", d)
-            const c = JSON.parse(TestInput.readFile(win.selftestDir + "/home/.omp/agent/mcp.json")).mcpServers
-            win.check(c.harlo.command === "someone-elses" && !win.findName("orchBridge-omp", d).checked, "omp's own harlo server left alone")
-            win.check(p && p.text.indexOf("already has") >= 0, "and said so (" + (p ? p.text : "") + ")")
-            win.clickItem(win.findName("orchBridge-pi", d), "pi's bridge switch, off") } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            const c = JSON.parse(TestInput.readFile(win.selftestDir + "/home/.pi/agent/mcp.json")).mcpServers
-            win.check(!c.harlo && c.other, "pi: the bridge removed, the other server kept")
-            Workspace.setOrchestrationBridge("pi", true)
             win.clickItem(win.findName("orchEnabled", settingsDialog.contentItem), "Orchestration's switch, off") } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
             const h = win.selftestDir + "/home", d = settingsDialog.contentItem
-            const c = JSON.parse(TestInput.readFile(h + "/.pi/agent/mcp.json")).mcpServers
             win.check(TestInput.readFile(h + "/.claude/skills/harlo/SKILL.md") === "" && TestInput.readFile(h + "/.agents/skills/harlo-committee/SKILL.md") === "", "off: harlo's skills removed")
-            win.check(!c.harlo && c.other && TestInput.readFile(h + "/.agents/skills/harlo-handoff/SKILL.md") === "mine\n", "and pi's bridge (the user's own things kept)")
-            win.check(win.findName("orchSkillsAll", d) === null && win.findName("orchBridge-pi", d) === null, "and the page shows only the switch")
+            win.check(TestInput.readFile(h + "/.agents/skills/harlo-handoff/SKILL.md") === "mine\n", "the user's own skill kept")
+            win.check(win.findName("orchSkillsAll", d) === null, "and the page shows only the switch")
             win.shotWindow("clicks-orchestration-off")
             win.clickItem(win.findName("orchEnabled", d), "Orchestration's switch, on") } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
             const h = win.selftestDir + "/home"
-            const c = JSON.parse(TestInput.readFile(h + "/.pi/agent/mcp.json")).mcpServers
             win.check(TestInput.readFile(h + "/.claude/skills/harlo/SKILL.md") !== "" && TestInput.readFile(h + "/.agents/skills/harlo-committee/SKILL.md") !== "" && TestInput.readFile(h + "/.claude/skills/harlo-advisor/SKILL.md") === "", "on again: the same skills back")
-            win.check(c.harlo && c.harlo.args.indexOf("--mcp-bridge") >= 0, "and pi's bridge")
             win.summary()
             Qt.quit() } }
     }
@@ -4076,35 +3680,33 @@ ApplicationWindow {
     }
 
     // Settings → Providers: each provider's state, its
-    // details, and its switch, which decides what New session offers. Only
-    // a stand-in claude is installed (--fake-claude=); the others point at
-    // nothing, so no real agent starts.
+    // details, and its switch, which decides what New session offers: a
+    // stand-in claude (--fake-claude=) and Harlo, turned off.
     SequentialAnimation {
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksproviders"
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
             Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
-            for (const id of ["opencode", "pi", "omp"]) Workspace.setSetting(id + "_path", win.selftestDir + "/missing-" + id)
             settingsDialog.openPage("providers") } }
         PauseAnimation { duration: 2000 }
         ScriptAction { script: {
             const d = settingsDialog.contentItem, st = id => { const l = win.findName("providerStatus-" + id, d); return l ? l.text : "(none)" }
             win.check(st("claude") === "Available · 17 models", "Claude: available, 17 models (" + st("claude") + ")")
-            win.check(st("opencode") === "Not installed" && st("pi") === "Not installed", "the others: not installed (" + st("opencode") + ")")
+            win.check(st("harlo") !== "(none)" && st("harlo") !== "Not installed", "Harlo: harlo's own (" + st("harlo") + ")")
             win.clickItem(win.findName("provider-claude", d), "the Claude row") } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
             const d = settingsDialog.contentItem
             win.check(win.findText("Version 2.1.296", d) !== null && win.findText("Opus 4.8", d) !== null, "its details: version and models")
             win.shotWindow("clicks-providers")
-            win.clickItem(win.findName("providerSwitch-pi", d), "Pi's switch") } }
+            win.clickItem(win.findName("providerSwitch-harlo", d), "Harlo's switch") } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
             const ids = JSON.parse(Workspace.chatProvidersJson()).map(p => p.id)
-            const st = win.findName("providerStatus-pi", settingsDialog.contentItem)
-            win.check(st && st.text === "Disabled" && ids.indexOf("pi") < 0 && ids.indexOf("omp") >= 0, "turned off: Disabled, and not offered (" + ids + ")")
-            win.check(ids.indexOf("claude") >= 0 && ids.indexOf("opencode") >= 0, "Claude and OpenCode are offered (" + ids + ")")
+            const st = win.findName("providerStatus-harlo", settingsDialog.contentItem)
+            win.check(st && st.text === "Disabled" && ids.indexOf("harlo") < 0, "turned off: Disabled, and not offered (" + ids + ")")
+            win.check(ids.indexOf("claude") >= 0, "Claude is offered (" + ids + ")")
             settingsDialog.close(); win.openDraft(-1) } }
         PauseAnimation { duration: 700 }
         ScriptAction { script: {
@@ -4114,9 +3716,9 @@ ApplicationWindow {
             win.clickItem(win.findName("draftHarness", chat.draftView), "the provider chip") } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
-            win.check(win.findText("Oh My Pi") !== null && win.findText("Pi") === null, "New session offers what's on")
+            win.check(win.findText("Claude") !== null && win.findText("Harlo") === null, "New session offers what's on")
             TestInput.key(Qt.Key_Escape, 0)
-            Workspace.setProviderEnabled("pi", true)
+            Workspace.setProviderEnabled("harlo", true)
             win.summary(); Qt.quit() } }
     }
 
@@ -4129,7 +3731,6 @@ ApplicationWindow {
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
             Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
-            for (const id of ["opencode", "pi", "omp"]) Workspace.setSetting(id + "_path", win.selftestDir + "/missing-" + id)
             Workspace.refreshProviders()
             Workspace.addProject(win.argValue("--cwd=")) } }
         PauseAnimation { duration: 1500 }
@@ -4170,8 +3771,8 @@ ApplicationWindow {
     // contrast, diff colours, chat width, animations, the fonts' sizes and
     // word wrap; each takes effect at once.
     // The setup guide: shown on a first start, not to a harlo set up before;
-    // the agents (a fake Claude; the others missing: their Install buttons,
-    // never pressed), the default agent and its model (then the new-session
+    // the agents (a fake Claude and Harlo, both there: no Install
+    // buttons), the default agent and its model (then the new-session
     // page starts with it), git (the services' cards, the default, a
     // server; no sign-in), the theme; Finish marks it done; Settings opens
     // it again.
@@ -4181,7 +3782,6 @@ ApplicationWindow {
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
             Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
-            for (const id of ["opencode", "pi", "omp"]) Workspace.setSetting(id + "_path", win.selftestDir + "/missing-" + id)
             Workspace.refreshProviders() } }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
@@ -4190,9 +3790,8 @@ ApplicationWindow {
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
             win.check(setupGuide.visible && setupGuide.step === 0, "a first start shows the guide")
-            win.check(["claude", "opencode", "pi", "omp"].every(id => win.findName("setupAgent-" + id) !== null), "a card for each agent")
-            const install = win.findName("setupInstall-pi")
-            win.check(install !== null && install.visible && win.findName("setupInstall-claude") === null || !win.findName("setupInstall-claude").visible, "Install for a missing agent, not for an installed one")
+            win.check(["claude", "harlo"].every(id => win.findName("setupAgent-" + id) !== null), "a card for each agent")
+            win.check(["claude", "harlo"].every(id => win.findName("setupInstall-" + id) === null), "no Install for an installed one")
             win.clickItem(win.findName("setupDefault-claude"), "Claude by default") } }
         PauseAnimation { duration: 600 }
         ScriptAction { script: {
@@ -4604,23 +4203,16 @@ ApplicationWindow {
             win.summary(); Qt.quit() } }
     }
 
-    // Accounts (Settings → Providers): signing the agents in from harlo.
-    // Claude and omp against stand-ins (scripts/fake-signin.py: their
-    // links and prompts, the test's code and key only); OpenCode and pi,
-    // when installed, the real ones in the scratch home with a made-up
-    // DeepSeek key (stored there, never used), signed out again.
+    // Accounts (Settings → Providers): signing Claude in from harlo, against
+    // a stand-in (scripts/fake-signin.py: its link and prompt, the test's
+    // code only), and out again.
     SequentialAnimation {
         id: accountsTest
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksaccounts"
-        property string opencode: win.argValue("--real-opencode=")
-        property string pi: win.argValue("--real-pi=")
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
             Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
-            Workspace.setSetting("omp_path", win.argValue("--fake-omp="))
-            Workspace.setSetting("opencode_path", accountsTest.opencode || win.selftestDir + "/missing-opencode")
-            Workspace.setSetting("pi_path", accountsTest.pi || win.selftestDir + "/missing-pi")
             settingsDialog.openPage("providers") } }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: win.clickItem(win.findName("provider-claude"), "the Claude row") }
@@ -4659,127 +4251,6 @@ ApplicationWindow {
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
             win.check(JSON.parse(Accounts.status("claude")).accounts.length === 0 && win.findName("accountsNone-claude") !== null, "signed out")
-            win.clickItem(win.findName("provider-omp"), "the omp row") } }
-        PauseAnimation { duration: 800 }
-        ScriptAction { script: win.clickItem(win.findName("signIn-omp"), "omp's Sign in…") }
-        PauseAnimation { duration: 2000 }
-        ScriptAction { script: {
-            const p = JSON.parse(Accounts.providers("omp"))
-            win.check(p.list.length === 3, "omp's providers, from its list (" + p.list.map(x => x.name) + ")")
-            const claudeSub = win.findName("signInMethod-1-login")
-            win.check(claudeSub !== null && !claudeSub.enabled && win.findText(p.list[0].note) !== null, "a Claude subscription isn't offered in omp, with why")
-            win.clickItem(win.findName("signInMethod-2-login"), "DeepSeek") } }
-        PauseAnimation { duration: 2000 }
-        ScriptAction { script: {
-            const f = signInDialog.flow
-            win.check(f && f.steps.some(s => s.kind === "link" && s.url === "https://platform.deepseek.com/api_keys") && !f.steps.some(s => (s.text || "").indexOf("OpenRouter") >= 0),
-                      "omp's link to get a key (its list not repeated)")
-            win.check(f && f.ask && f.ask.kind === "secret", "and its question for the key, hidden as typed (" + JSON.stringify(f ? f.ask : null) + ")")
-            win.clickItem(win.findName("signInAnswer"), "the key box")
-            TestInput.typeText("sk-good")
-            win.clickItem(win.findName("signInSend"), "Continue") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            const f = signInDialog.flow
-            win.check(f && f.state === "done", "omp signed in (" + (f ? f.state + " " + f.message : "") + ")")
-            win.clickItem(win.findName("signInClose"), "Done") } }
-        PauseAnimation { duration: 600 }
-        ScriptAction { script: {
-            if (accountsTest.opencode === "") { win.check(true, "OpenCode (not installed here; skipped)"); return }
-            win.clickItem(win.findName("provider-opencode"), "the OpenCode row") } }
-        PauseAnimation { duration: 800 }
-        ScriptAction { script: {
-            if (accountsTest.opencode === "") return
-            win.clickItem(win.findName("signIn-opencode"), "OpenCode's Sign in…") } }
-        PauseAnimation { duration: 800 }
-        // (The real OpenCode and pi start up: their time varies with the machine's load.)
-        ScriptAction { script: win.waitUntil(accountsTest, () => accountsTest.opencode === "" || JSON.parse(Accounts.providers("opencode")).list.length > 20, 40000) }
-        PauseAnimation { duration: 100 }
-        ScriptAction { script: {
-            if (accountsTest.opencode === "") return
-            const p = JSON.parse(Accounts.providers("opencode"))
-            win.check(p.list.length > 20 && p.list.some(x => x.id === "deepseek"), "OpenCode's providers (" + p.list.length + (p.error ? ", " + p.error : "") + ")")
-            const search = win.findName("signInSearch")
-            win.clickItem(search, "the search")
-            TestInput.typeText("deepseek") } }
-        PauseAnimation { duration: 600 }
-        ScriptAction { script: if (accountsTest.opencode !== "") win.clickItem(win.findName("signInMethod-deepseek-key"), "DeepSeek's Add key") }
-        PauseAnimation { duration: 600 }
-        ScriptAction { script: {
-            if (accountsTest.opencode === "") return
-            win.clickItem(win.findName("signInKey"), "the key field")
-            TestInput.typeText("sk-made-up-for-a-test")
-            win.clickItem(win.findName("signInSave"), "Save key") } }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: win.waitUntil(accountsTest, () => accountsTest.opencode === "" || signInDialog.flow && ["done", "failed"].indexOf(signInDialog.flow.state) >= 0
-                                                                   && JSON.parse(Accounts.status("opencode")).state !== "loading", 30000) }
-        PauseAnimation { duration: 100 }
-        ScriptAction { script: {
-            if (accountsTest.opencode === "") return
-            const f = signInDialog.flow, st = JSON.parse(Accounts.status("opencode"))
-            const ds = st.accounts.find(a => a.label === "DeepSeek")
-            win.check(f && f.state === "done" && ds && ds.detail === "API key", "OpenCode keeps the key: DeepSeek · API key (" + (f ? f.state + " " + f.message : "") + ", " + JSON.stringify(st.accounts) + ")")
-            win.clickItem(win.findName("signInClose"), "Done") } }
-        PauseAnimation { duration: 600 }
-        ScriptAction { script: {
-            if (accountsTest.opencode === "") return
-            const st = JSON.parse(Accounts.status("opencode")), ds = st.accounts.find(a => a.label === "DeepSeek")
-            win.clickItem(ds ? win.findName("signOut-opencode-" + ds.id) : null, "DeepSeek's Sign out") } }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: win.waitUntil(accountsTest, () => {
-            const st = JSON.parse(Accounts.status("opencode"))
-            return accountsTest.opencode === "" || st.state !== "loading" && !st.accounts.some(a => a.label === "DeepSeek")
-        }, 30000) }
-        PauseAnimation { duration: 100 }
-        ScriptAction { script: {
-            if (accountsTest.opencode !== "") win.check(!JSON.parse(Accounts.status("opencode")).accounts.some(a => a.label === "DeepSeek"), "signed out of DeepSeek in OpenCode")
-            if (accountsTest.pi === "") { win.check(true, "pi (not installed here; skipped)"); return }
-            win.clickItem(win.findName("provider-pi"), "the pi row") } }
-        PauseAnimation { duration: 800 }
-        ScriptAction { script: if (accountsTest.pi !== "") win.clickItem(win.findName("signIn-pi"), "pi's Sign in…") }
-        PauseAnimation { duration: 800 }
-        ScriptAction { script: win.waitUntil(accountsTest, () => accountsTest.pi === "" || JSON.parse(Accounts.providers("pi")).list.some(x => x.id === "deepseek"), 40000) }
-        PauseAnimation { duration: 100 }
-        ScriptAction { script: {
-            if (accountsTest.pi === "") return
-            const p = JSON.parse(Accounts.providers("pi"))
-            const anthropic = p.list.find(x => x.id === "anthropic")
-            win.check(p.list.some(x => x.id === "deepseek") && anthropic && anthropic.methods.find(m => m.id === "oauth").blocked === true && !anthropic.methods.find(m => m.id === "api_key").blocked,
-                      "pi's providers: Anthropic by API key only (" + p.list.length + (p.error ? ", " + p.error : "") + ")")
-            win.clickItem(win.findName("signInSearch"), "the search")
-            TestInput.typeText("deepseek") } }
-        PauseAnimation { duration: 600 }
-        ScriptAction { script: if (accountsTest.pi !== "") win.clickItem(win.findName("signInMethod-deepseek-api_key"), "DeepSeek (pi)") }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: win.waitUntil(accountsTest, () => accountsTest.pi === "" || signInDialog.flow && (!!signInDialog.flow.ask || signInDialog.flow.state === "failed"), 30000) }
-        PauseAnimation { duration: 100 }
-        ScriptAction { script: {
-            if (accountsTest.pi === "") return
-            const f = signInDialog.flow
-            win.check(f && f.ask && f.ask.kind === "secret", "pi asks for the key (" + JSON.stringify(f ? f.ask : null) + ")")
-            win.clickItem(win.findName("signInAnswer"), "the key box")
-            TestInput.typeText("sk-made-up-for-a-test")
-            win.clickItem(win.findName("signInSend"), "Continue") } }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: win.waitUntil(accountsTest, () => accountsTest.pi === "" || signInDialog.flow && ["done", "failed"].indexOf(signInDialog.flow.state) >= 0
-                                                                   && JSON.parse(Accounts.status("pi")).state !== "loading", 30000) }
-        PauseAnimation { duration: 100 }
-        ScriptAction { script: {
-            if (accountsTest.pi === "") return
-            const f = signInDialog.flow, st = JSON.parse(Accounts.status("pi"))
-            win.check(f && f.state === "done" && st.accounts.some(a => a.id === "deepseek" && a.signOut), "pi keeps the key: DeepSeek (" + (f ? f.state + " " + f.message : "") + ", " + JSON.stringify(st.accounts) + ")")
-            win.clickItem(win.findName("signInClose"), "Done") } }
-        PauseAnimation { duration: 600 }
-        ScriptAction { script: if (accountsTest.pi !== "") win.clickItem(win.findName("signOut-pi-deepseek"), "pi's DeepSeek Sign out") }
-        PauseAnimation { duration: 1000 }
-        // (pi's sign-out starts Node: slow on a busy machine.)
-        ScriptAction { script: win.waitUntil(accountsTest, () => {
-            const st = JSON.parse(Accounts.status("pi"))
-            return accountsTest.pi === "" || st.state !== "loading" && !st.accounts.some(a => a.id === "deepseek")
-        }, 40000) }
-        PauseAnimation { duration: 100 }
-        ScriptAction { script: {
-            if (accountsTest.pi !== "") win.check(!JSON.parse(Accounts.status("pi")).accounts.some(a => a.id === "deepseek"), "signed out of DeepSeek in pi")
             settingsDialog.close()
             win.summary(); Qt.quit() } }
     }
@@ -5034,22 +4505,8 @@ ApplicationWindow {
             win.summary(); Qt.quit() } }
     }
     property int blockedCount: 0
-    // Real omp, no prompts (not in the click suite): approval and plan
-    // modes rewrite the session's overlay while it runs.
-    property string modesKey: ""
     property bool otherAddress: false
-    SequentialAnimation {
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "ompmodes"
-        PauseAnimation { duration: 1200 }
-        ScriptAction { script: win.modesKey = Workspace.newSession(-1, "omp") }
-        PauseAnimation { duration: 5000 }
-        ScriptAction { script: { win.log("start mode:", Workspace.approvalMode(win.modesKey), "status:", chat.session.status); Workspace.setApprovalMode(win.modesKey, "always-ask"); Workspace.setPlanMode(win.modesKey, true); win.log("modes set") } }
-        PauseAnimation { duration: 5000 }
-        ScriptAction { script: { win.log("status:", chat.session.status); Workspace.setPlanMode(win.modesKey, false); win.log("plan off") } }
-        PauseAnimation { duration: 5000 }
-        ScriptAction { script: { win.log("status:", chat.session.status); Qt.quit() } }
-    }
-    // The real thing, read-only (not in the click suite): omp usage via harlo.
+    // The real thing, read-only (not in the click suite): plan limits via harlo.
     SequentialAnimation {
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "quotareal"
         PauseAnimation { duration: 800 }
@@ -5301,61 +4758,7 @@ ApplicationWindow {
         ScriptAction { script: Qt.quit() }
     }
 
-    // A goal straight from the new-session page (demo harness).
-    SequentialAnimation {
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "draftgoal"
-        PauseAnimation { duration: 1200 }
-        ScriptAction { script: { win.openDraft(-1); chat.draftView.harness = "demo" } }
-        PauseAnimation { duration: 600 }
-        ScriptAction { script: { const d = chat.draftView; d.text = "Make the parser handle nested lists"; d.asGoal = true; d.goalBudget = "abc"; win.log("bad budget canSend:", d.canSend); d.goalBudget = "100"; win.shot("draft-goal-tiny") } }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: { const d = chat.draftView; d.goalBudget = "50k"; win.log("goalOn:", d.goalOn, "canSend:", d.canSend) } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: win.shot("draft-goal") }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: { chat.draftView.parallel = true; win.log("parallel turns goal off:", chat.draftView.asGoal); chat.draftView.parallel = false; chat.draftView.asGoal = true; chat.draftView.send() } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: { const g = chat.session.goalJson !== "" ? JSON.parse(chat.session.goalJson) : null; win.log("session goal:", g ? g.objective + " | " + g.status + " | budget " + g.tokenBudget : "none", "rows:", chat.transcript.count); win.shot("draft-goal-started") } }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: Qt.quit() }
-    }
-
-    // omp goal mode (demo harness): start from the composer, pause/resume,
-    // complete; then a goal that runs into its token budget, and drop.
-    SequentialAnimation {
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "goal"
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: Workspace.newSession(-1, "demo") }
-        PauseAnimation { duration: 1000 }
-        ScriptAction { script: { chat.composerItem.text = "Make the parser handle nested lists, with tests"; chat.composerItem.goalPopup.open() } }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: win.shotPopup(chat.composerItem.goalPopup, "goal-popover") }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: { chat.composerItem.goalPopup.start(); win.log("composer after start:", JSON.stringify(chat.composerItem.text)) } }
-        PauseAnimation { duration: 1300 }
-        ScriptAction { script: { const g = JSON.parse(chat.session.goalJson); win.log("goal:", g.status, g.tokensUsed, "dock visible:", chat.goalDock.visible); win.shot("goal-active") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: chat.session.goalCommand("pause", "", 0) }
-        PauseAnimation { duration: 900 }
-        ScriptAction { script: { const g = JSON.parse(chat.session.goalJson); win.log("paused:", g.status, g.tokensUsed); win.shot("goal-paused") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: chat.session.goalCommand("resume", "", 0) }
-        PauseAnimation { duration: 4000 }
-        ScriptAction { script: { const g = JSON.parse(chat.session.goalJson); win.log("finished:", g.status, g.tokensUsed, g.timeUsedSeconds); win.shot("goal-complete") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: { chat.goalDock.dismissed = JSON.parse(chat.session.goalJson).id; win.log("dismissed, dock visible:", chat.goalDock.visible); chat.session.goalCommand("create", "", 0) } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: { win.log("empty objective error:", chat.session.goalError); chat.session.goalCommand("create", "Refactor the store module", 9000) } }
-        PauseAnimation { duration: 1800 }
-        ScriptAction { script: { const g = JSON.parse(chat.session.goalJson); win.log("budget goal:", g.status, g.tokensUsed + "/" + g.tokenBudget, "error:", JSON.stringify(chat.session.goalError)); win.shot("goal-budget") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: chat.session.goalCommand("drop", "", 0) }
-        PauseAnimation { duration: 600 }
-        ScriptAction { script: { win.log("after drop: goalJson", JSON.stringify(chat.session.goalJson), "dock visible:", chat.goalDock.visible) } }
-        ScriptAction { script: Qt.quit() }
-    }
-
-    // omp tool approvals on their tool row (demo harness), approve then deny.
+    // Tool approvals on their tool row (demo harness), approve then deny.
     SequentialAnimation {
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "approval"
         PauseAnimation { duration: 1500 }
@@ -5757,7 +5160,7 @@ ApplicationWindow {
         ScriptAction {
             script: {
                 Workspace.addProject(win.argValue("--cwd="))
-                const id = Workspace.startRun(JSON.stringify({ projectId: 1, prompt: "Add a cache to the parser", starter: "", attachments: [], askFirst: false,
+                const id = Workspace.startRun(JSON.stringify({ projectId: 1, prompt: "Add a cache to the parser", starter: "", attachments: [],
                     worktrees: true, base: "main", lanes: [{ harness: "demo", model: "fast/small" }, { harness: "demo", model: "slow/large" }] }))
                 win.log("run:", id, "active:", Workspace.activeKey)
             }
@@ -5812,7 +5215,7 @@ ApplicationWindow {
         PauseAnimation { duration: 3000 }
         ScriptAction { script: Workspace.open(win.argValue("--open=")) }
         PauseAnimation { duration: 1500 }
-        ScriptAction { script: { win.log("branches:", chat.branchCount, "rows:", chat.transcript.count); win.shot("branches-header"); chat.branchDialog.show(win.argValue("--open="), "omp", "/tmp") } }
+        ScriptAction { script: { win.log("branches:", chat.branchCount, "rows:", chat.transcript.count); win.shot("branches-header"); chat.branchDialog.show(win.argValue("--open="), "harlo", "/tmp") } }
         PauseAnimation { duration: 1200 }
         ScriptAction { script: { win.log("dialog:", chat.branchDialog.branches.map(b => (b.current ? "*" : "") + b.lastUser + "@" + b.divergesAt).join(" | "), "selected", chat.branchDialog.selected); win.shotPopup(chat.branchDialog, "branches-dialog") } }
         PauseAnimation { duration: 500 }
@@ -5852,9 +5255,9 @@ ApplicationWindow {
         ScriptAction { script: Qt.quit() }
     }
 
-    // omp todos, queue editing and side questions (demo harness).
+    // Todos and queue editing (demo harness).
     SequentialAnimation {
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "ompextras"
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "extras"
         PauseAnimation { duration: 1500 }
         ScriptAction { script: Workspace.newSession(-1, "demo") }
         PauseAnimation { duration: 1000 }
@@ -5868,14 +5271,12 @@ ApplicationWindow {
         PauseAnimation { duration: 600 }
         ScriptAction { script: { win.log("after promote:", chat.session.queued.join(" | ")); chat.session.removeQueued(0) } }
         PauseAnimation { duration: 600 }
-        ScriptAction { script: { win.log("after remove:", chat.session.queued.join(" | ")); chat.composerItem.openBtw(); chat.session.askBtw("why does the cache need a lock?", "") } }
-        PauseAnimation { duration: 1200 }
-        ScriptAction { script: { win.log("btw:", chat.session.btwJson.length > 0 ? JSON.parse(chat.session.btwJson).map(r => r.status + ": " + r.answer).join(" / ") : "-"); win.shotPopup(chat.composerItem.btwPopup, "btw-popover") } }
+        ScriptAction { script: win.log("after remove:", chat.session.queued.join(" | ")) }
         PauseAnimation { duration: 400 }
         ScriptAction { script: Qt.quit() }
     }
 
-    // omp subagents (demo harness): dock, transcript dialog, steer, cancel.
+    // Subagents (demo harness): dock, transcript dialog, steer, cancel.
     SequentialAnimation {
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "subagents"
         PauseAnimation { duration: 1500 }
@@ -5957,20 +5358,19 @@ ApplicationWindow {
         ScriptAction { script: Qt.quit() }
     }
 
-    // Commit message written by a (stand-in) harness: --fake-omp=<script>.
+    // Commit message written by a (stand-in) Harlo: --fake-harlo=<script>.
     SequentialAnimation {
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "commitmsg"
         PauseAnimation { duration: 1500 }
         ScriptAction {
             script: {
-                Workspace.setSetting("omp_path", win.argValue("--fake-omp="))
                 Workspace.addProject(win.argValue("--cwd="))
                 Workspace.newSession(1, "demo")
                 windowSettings.rightMode = "changes"
             }
         }
         PauseAnimation { duration: 1500 }
-        ScriptAction { script: { win.log("changes:", git.unstagedCount, "harness:", changes.harness); git.generateMessage("omp", Workspace.setting("omp_path"), "", false); win.log("generating:", git.generating) } }
+        ScriptAction { script: { win.log("changes:", git.unstagedCount, "harness:", changes.harness); git.generateMessage(win.argValue("--fake-harlo="), "", false); win.log("generating:", git.generating) } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: win.shot("commitmsg-writing") }
         PauseAnimation { duration: 2500 }
@@ -6006,13 +5406,13 @@ ApplicationWindow {
         ScriptAction { script: Qt.quit() }
     }
 
-    // omp `ask` questions and a `select` with descriptions (demo harness).
+    // `ask` questions and a `select` with descriptions (demo harness).
     SequentialAnimation {
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "ask"
         PauseAnimation { duration: 1500 }
         ScriptAction { script: Workspace.newSession(-1, "demo") }
         PauseAnimation { duration: 1000 }
-        ScriptAction { script: { chat.session.setAskFirstForSession(true); win.log("ask first:", chat.session.askFirst); chat.submit("please ask me something", "") } }
+        ScriptAction { script: { chat.submit("please ask me something", "") } }
         PauseAnimation { duration: 800 }
         ScriptAction { script: { win.log("request:", chat.session.requestMethod, "questions:", JSON.parse(chat.session.requestJson).questions.length, "complete:", chat.askPanel.complete); win.shot("ask-open") } }
         PauseAnimation { duration: 300 }
@@ -6199,7 +5599,7 @@ ApplicationWindow {
         PauseAnimation { duration: 400 }
         ScriptAction { script: win.shotPopup(sidebar.sessionMenu, "menu-session") }
         PauseAnimation { duration: 300 }
-        ScriptAction { script: { sidebar.sessionMenu.close(); sidebar.projectMenu.harness = "omp"; sidebar.projectMenu.popup(sidebar, 120, 110) } }
+        ScriptAction { script: { sidebar.sessionMenu.close(); sidebar.projectMenu.harness = "harlo"; sidebar.projectMenu.popup(sidebar, 120, 110) } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: win.shotPopup(sidebar.projectMenu, "menu-project") }
         PauseAnimation { duration: 300 }
@@ -6211,7 +5611,7 @@ ApplicationWindow {
         PauseAnimation { duration: 400 }
         ScriptAction { script: win.shotPopup(sidebar.trashDialog, "dialog-trash") }
         PauseAnimation { duration: 300 }
-        ScriptAction { script: { sidebar.trashDialog.close(); sidebar.openNewWorktree(-1, "houdini-mcp", "omp") } }
+        ScriptAction { script: { sidebar.trashDialog.close(); sidebar.openNewWorktree(-1, "houdini-mcp", "harlo") } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: win.shotPopup(sidebar.worktreeDialogs.newDialog, "dialog-worktree") }
         PauseAnimation { duration: 300 }

@@ -16,7 +16,7 @@ welcome.
 
 harlo is Linux-only today, but most of it isn't tied to Linux: the Rust core
 and the Qt 6 interface run on macOS and Windows, and so do the agents
-(Claude Code, OpenCode, pi, Oh My Pi). I'd love to have harlo there, and I'm
+(Harlo, without its sandbox, and Claude Code). I'd love to have harlo there, and I'm
 looking for **contributors and maintainers** for a macOS app and a Windows
 app. If you'd like to take one on, open an issue titled "macOS port" or
 "Windows port" and introduce yourself; I'll help you find your way around
@@ -26,7 +26,8 @@ What's Linux-specific today, and would need a macOS / Windows counterpart:
 
 | Area | Where | Today on Linux |
 |---|---|---|
-| Starting and stopping agents | `crates/harlo-harness/src/process.rs`, `claude_run.rs`, `opencode.rs` | Unix process groups and signals, `PR_SET_PDEATHSIG` |
+| Starting and stopping agents | `crates/harlo-harness/src/process.rs`, `claude_run.rs`, `crates/harlo-agent/src/tools/bash.rs` | Unix process groups and signals, `PR_SET_PDEATHSIG` |
+| Harlo's sandbox | `crates/harlo-agent/src/sandbox.rs` | bubblewrap |
 | Notifications | `crates/harlo-app/src/notify.rs` | `notify-send` |
 | One running harlo | `crates/harlo-app/src/instance.rs` | a local socket in the runtime folder |
 | Start at login | `crates/harlo-app/src/workspace.rs` (`set_autostart`) | an XDG autostart entry |

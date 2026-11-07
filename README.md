@@ -8,7 +8,7 @@
 </p>
 
 <p align="center"><b>Your coding agents, in a truly native app.</b><br>
-Claude Code, OpenCode, pi, Oh My Pi and Hermes on your Linux computer and your other machines,<br>
+Harlo, harlo's own agent, and Claude Code on your Linux computer and your other machines,<br>
 with your own local models and an iPhone app to follow and answer them. Written in Rust and Qt, not Electron.</p>
 
 <p align="center">
@@ -42,7 +42,7 @@ Many agent apps are a web page in an Electron window. harlo is a desktop app:
 
 | | |
 |---|---|
-| **Five agents, one chat** | Claude Code, OpenCode, pi, Oh My Pi and Hermes. Your existing Claude Code, OpenCode, pi and Oh My Pi sessions show up in the sidebar; click one to carry on. Each agent uses your own login and settings. |
+| **Two agents, one chat** | Harlo, harlo's own agent, works with your ChatGPT plan, an OpenAI key or any OpenAI-compatible server, your own models included; it sees images, uses MCP servers and runs its commands in a sandbox. Claude Code uses your own login and settings, and your existing Claude Code sessions show up in the sidebar; click one to carry on. |
 | **Changes and diffs** | Every file an agent touched, side-by-side diffs, review comments sent back to the agent, and undo for any turn. A folder of repositories shows each one's changes. |
 | **Pull requests and CI** | Commit, push, open a pull request and follow its checks on GitHub, GitLab or Forgejo (your own server too). Failed checks go back to the agent in one click. |
 | **Your other machines** | Add a machine over SSH and run sessions there as you would here: its files, terminal, changes, worktrees, sign-ins, models, stats, specs and plans. |
@@ -51,7 +51,7 @@ Many agent apps are a web page in an Electron window. harlo is a desktop app:
 | **Plan limits** | Your Claude and ChatGPT plan's limits as they change, on each machine, a notification when one is used up and when it resets, and Stop and continue at the reset. The context bar marks where each agent compacts. |
 | **Worktrees** | Sessions in worktrees of their own, side by side, or one task run by several agents in parallel; merge the one you keep. |
 | **Dictation** | Speak your prompt. Recognised on your computer (whisper.cpp); nothing leaves it. |
-| **Guard rails** | Approvals, plan mode, spending limits per session and per day, an action log of every command and edit, quiet hours. Bare pi gets permissions, questions, a to-do list, subagents and web access from harlo's extensions (Settings → Extensions), off until you turn them on. |
+| **Guard rails** | Approvals, plan mode, spending limits per session and per day, an action log of every command and edit, quiet hours. Harlo's commands run in a sandbox (bubblewrap) that can change only the project, /tmp and tool caches and can't see your keys and sign-ins. |
 | **And** | A terminal, a file browser and editor, Mermaid diagrams in the chat, templates, scheduled prompts, MCP servers, hand off and second opinions between agents, export as Markdown, 31 themes. |
 
 <p align="center">
@@ -128,7 +128,8 @@ It speaks plain HTTP: put it behind something that adds HTTPS (Caddy, a Cloudfla
 
 | Crate | Role |
 |---|---|
-| `crates/harlo-harness` | Runs the agents (pi and omp over RPC, Claude Code's stream-json, OpenCode's server, Hermes over the Agent Client Protocol) and turns what they say into one stream of events |
+| `crates/harlo-harness` | Runs the agents (Harlo over its RPC, Claude Code's stream-json) and turns what they say into one stream of events |
+| `crates/harlo-agent` | Harlo, harlo's own agent (`harlo-agent`): the model loop, its tools, the sandbox, MCP and subagents |
 | `crates/harlo-core` | Sessions, transcripts, markdown, git, worktrees, search, remote machines, model servers, phone protocol, state. No Qt. Its `harlo-engines` program sets up and runs model servers on other machines |
 | `crates/harlo-app` | The desktop app: cxx-qt bridges and the QML interface |
 | `crates/harlo-relay` | The relay |

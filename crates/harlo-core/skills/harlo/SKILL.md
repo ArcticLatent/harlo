@@ -1,15 +1,15 @@
 ---
 name: harlo
-description: harlo's tools for running other coding agents (Harlo, Claude, pi, omp) as sessions you start, prompt, read and stop. Read this before using harlo-handoff, harlo-advisor or harlo-committee, or whenever the user asks you to start, delegate to, or check on another agent in harlo.
+description: harlo's tools for running other coding agents (Harlo, Claude) as sessions you start, prompt, read and stop. Read this before using harlo-handoff, harlo-advisor or harlo-committee, or whenever the user asks you to start, delegate to, or check on another agent in harlo.
 ---
 
 harlo is the desktop app you're running in. It shows each coding-agent session as a tab, and its MCP server `harlo` lets you run other sessions yourself. The tools reach you as `mcp__harlo__<tool>` (or `harlo_<tool>`, depending on your agent).
 
-The tools exist only inside harlo. If they're missing, tell the user that harlo has to be running, and that pi and omp need harlo's bridge (harlo: Settings → Orchestration). Don't try to work around it.
+The tools exist only inside harlo. If they're missing, tell the user that harlo has to be running, with Orchestration on (harlo: Settings → Orchestration). Don't try to work around it.
 
 ## Tools
 
-**`list_agents`**: the agents harlo can start (`harlo`, `claude`, `pi`, `omp`) and whether each is installed.
+**`list_agents`**: the agents harlo can start (`harlo`, `claude`) and whether each is installed.
 
 **`start_session`**: `{ agent, prompt, title?, model?, thinking?, folder?, worktree?, notify? }`. Starts a session and sends it `prompt`.
 - `agent`: an id from `list_agents`.
@@ -71,5 +71,5 @@ harlo draws Mermaid diagrams (```` ```mermaid ```` blocks) in replies as picture
 ## Choosing an agent
 
 - The user named one: use it.
-- A second opinion is worth more from a different agent or model family than your own (say Claude and a Harlo or pi session on another provider's model).
+- A second opinion is worth more from a different agent or model family than your own (say Claude and a Harlo session on another provider's model).
 - Otherwise, use your own agent.

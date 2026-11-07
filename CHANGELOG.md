@@ -4,6 +4,49 @@ What's new in each harlo release, newest first. `packaging/release.sh`
 releases the version at the top: each section starts with `## <version>`,
 and its text becomes the release's notes.
 
+## 2.0.0
+
+- Harlo, harlo's own coding agent, written in Rust and shipped with harlo.
+  It works with your ChatGPT plan (or the Codex sign-in), an OpenAI key or
+  any OpenAI-compatible server, your own model servers included; it reads
+  and edits files, runs commands, sees images, uses MCP servers, runs
+  subagents, summarizes long sessions, and its sessions can be edited and
+  resent and branched. It runs on your other machines too: harlo puts its
+  agent there, signs it in and gives it that machine's model servers.
+- Harlo's commands run in a sandbox (bubblewrap), on by default: they can
+  change only the project, /tmp and tool caches, and can't see your SSH and
+  GPG keys, cloud credentials, keyrings, browser profiles or the agents'
+  sign-ins. A command that needs more asks you first, every time. Settings →
+  Providers → Harlo turns it, or its network, off.
+- harlo now runs two agents, Harlo and Claude Code. pi, Oh My Pi, OpenCode
+  and Hermes are gone, with what only they used: goals, side questions,
+  Ask first, Settings → Extensions and the permission and question bridges.
+  Your old sessions of theirs stay on disk, no longer listed. Projects,
+  templates and scheduled prompts that chose one of them now use Harlo.
+- Harlo's sessions have the permissions shield, and Plan limits show your
+  Claude and ChatGPT plans (on each machine, Claude's from its Claude Code).
+- Commit messages are written by Harlo, or by Claude Code when Harlo can't.
+- Helpers: agents can split a big task into helper sessions, which you
+  approve (Settings → Orchestration says when they may ask, or start them
+  on their own). Helpers show under the session that started them, follow
+  its permission mode, report back or ask it, can work in worktrees of
+  their own, and stop when it does. Delegate on the new-session page splits
+  a task, gets a second opinion or forms a committee, and a project's Team
+  says which agents and models its helpers are.
+- Plans run with helpers: each step goes to a helper in order, steps marked
+  to run alongside the one before run together, a failed step gets one
+  more try, and finished steps are committed when you turn that on.
+- The Settled shelf: finished sessions and helpers go on their project's
+  shelf, shown faded until you point at one; those settled for 30 days are
+  archived (Settings → Worktrees).
+- The chat: rows use the whole column, text can be selected across
+  paragraphs, and code blocks in lists and quotes are shaded boxes with
+  Copy. Unsent images and files stay in a session's composer while you're
+  in another one.
+- For the iPhone app's next version: helpers fold under their session,
+  Mermaid diagrams, the plan above the composer, your machines and model
+  servers, and a New Session laid out like a session's composer.
+
 ## 1.1.1
 
 - For the iPhone app's next version: its plan limits (on this computer and

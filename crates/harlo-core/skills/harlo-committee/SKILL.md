@@ -11,7 +11,7 @@ Read the **harlo** skill first: it has the tools.
 
 ## Members
 
-Contrast is the point, so pick two agents or models from different families. For example: `claude`, and `harlo`, `pi` or `omp` on another provider's model. Use the strongest reasoning models available. If the user names members, use those. Check with `list_agents` what's installed. If only one family is available, tell the user the committee will be less independent.
+Contrast is the point, so pick two agents or models from different families. For example: `claude`, and `harlo` on another provider's model. Use the strongest reasoning models available. If the user names members, use those. Check with `list_agents` what's installed. If only one family is available, tell the user the committee will be less independent.
 
 ## Rules
 

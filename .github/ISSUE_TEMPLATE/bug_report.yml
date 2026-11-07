@@ -39,10 +39,8 @@ body:
       description: Which agent the session used, if it's about a session.
       multiple: true
       options:
+        - Harlo
         - Claude Code
-        - OpenCode
-        - pi
-        - Oh My Pi (omp)
         - Not about a session
   - type: input
     id: version
