@@ -124,6 +124,11 @@ impl Tools {
         kept.extend(originals);
     }
 
+    /// Whether any output is set aside (so `recall` is offered).
+    pub fn has_originals(&self) -> bool {
+        !self.originals.lock().unwrap().is_empty()
+    }
+
     /// An output set aside, as it was (with a note when the file it read
     /// has changed since).
     fn recall(&self, id: &str) -> Outcome {

@@ -5,8 +5,11 @@
 //! returns one as it was. All at once, so the prompt cache breaks once and
 //! then serves again.
 //!
-//! - When: past [`threshold`] (70% of where compaction starts), checked
-//!   before each request; and first when a request is refused as too long.
+//! - When: first when a request is refused as too long; and, when it's
+//!   turned on (`HARLO_AGENT_STUB_AT`), past [`threshold`], checked before
+//!   each request. Off by default: measured on long tasks against
+//!   summarizing alone, it passed as often but saved no tokens, and the
+//!   model never recalled anything.
 //! - Which: tool results before the newest `keep` tokens (as compaction
 //!   keeps), [`MIN_TOKENS`] or more, not set aside already; only when they
 //!   free enough to be worth the cache.
@@ -26,13 +29,14 @@ const MIN_SAVED: u64 = 2_000;
 /// …or this share of the context (whichever is more).
 const MIN_SHARE: u64 = 10;
 
-/// Where setting aside starts, for compaction's `threshold` (0: never).
-/// `HARLO_AGENT_STUB_AT` sets it instead (tokens), or `off`.
+/// Where setting aside starts as the context grows, for compaction's
+/// `threshold` (0: it doesn't). `HARLO_AGENT_STUB_AT` turns it on: a number
+/// of tokens, or `on` for 70% of where compaction starts.
 pub fn threshold(compact_at: u64) -> u64 {
     match std::env::var("HARLO_AGENT_STUB_AT").ok().map(|v| v.trim().to_owned()) {
-        Some(v) if v == "off" || v == "0" => 0,
-        Some(v) if v.parse::<u64>().is_ok() => v.parse().unwrap(),
-        _ => compact_at * 7 / 10,
+        Some(v) if v == "on" => compact_at * 7 / 10,
+        Some(v) => v.parse().unwrap_or(0),
+        None => 0,
     }
 }
 
@@ -232,10 +236,9 @@ mod tests {
 
     #[test]
     fn where_it_starts() {
-        // (Unless HARLO_AGENT_STUB_AT is set, as the benchmark does.)
+        // (Off unless HARLO_AGENT_STUB_AT is set, as the benchmark does.)
         if std::env::var_os("HARLO_AGENT_STUB_AT").is_none() {
-            assert_eq!(threshold(100_000), 70_000);
-            assert_eq!(threshold(0), 0);
+            assert_eq!(threshold(100_000), 0);
         }
     }
 }

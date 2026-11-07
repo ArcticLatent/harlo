@@ -292,8 +292,8 @@ impl Agent {
             if round > 0 {
                 self.take_steering(show)?;
             }
-            // Getting full: old tool outputs set aside first (cheap, and
-            // `recall` gets them back).
+            // Getting full: old tool outputs set aside first, when that's
+            // turned on (cheap, and `recall` gets them back).
             if let Some(keep) = self.set_aside_point().await {
                 self.set_aside(keep, 0, show)?;
             }
@@ -451,6 +451,11 @@ impl Agent {
     fn specs(&self) -> Value {
         let mut all = tools::specs_of(self.allowed, self.allowed.is_none() && crate::task::enabled());
         if let Some(list) = all.as_array_mut() {
+            // (`recall` once there's something to recall: the request that
+            // first has a stub breaks the cache anyway.)
+            if !self.tools.has_originals() {
+                list.retain(|t| t["name"] != "recall");
+            }
             list.extend(self.harlo_tools.iter().cloned());
         }
         all
