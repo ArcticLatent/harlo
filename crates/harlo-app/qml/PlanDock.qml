@@ -28,6 +28,14 @@ Rectangle {
     readonly property bool agentBusy: !!session && (session.status === "busy" || session.status === "starting")
     readonly property var run: plan.run || null
     readonly property bool paused: !!run && (run.paused || "") !== ""
+    // The session is in Plan: the plan waits for you to build it.
+    readonly property bool planning: !!session && session.key !== "" && Workspace.modesRevision >= 0 && Workspace.planMode(session.key)
+    /// Build: out of Plan, and the agent works through the plan.
+    function build() {
+        Workspace.setPlanMode(session.key, false)
+        session.planMode = false
+        session.send("Build it: work through the plan, step by step.", "normal")
+    }
     // Open to begin with: the plan is what you'd look at (fold it by hand).
     property bool expanded: true
     /// The most its steps take before they scroll.
@@ -97,6 +105,20 @@ Rectangle {
                 color: Theme.muted
                 font.pixelSize: Theme.px(12)
                 elide: Text.ElideRight
+            }
+            // In Plan: switch to Build and start on the plan.
+            FlatButton {
+                objectName: "planBuild"
+                visible: root.planning && !root.run && root.finished < root.steps.length
+                enabled: !root.agentBusy
+                text: "Build"
+                accent: Theme.success
+                padding: 3
+                font.pixelSize: Theme.px(11.5)
+                onClicked: root.build()
+                ToolTip.visible: hovered
+                ToolTip.text: root.agentBusy ? "Once the agent has finished planning" : "Switch to Build and have the agent work through the plan"
+                ToolTip.delay: 500
             }
             Button {
                 id: toggle
