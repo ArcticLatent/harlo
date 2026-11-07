@@ -167,7 +167,7 @@ impl Remotes {
                 json!({
                     "name": h.name, "ssh": ssh_text(h), "state": s.state, "message": s.message, "ping": s.ping,
                     "os": s.info.os, "home": s.info.home, "pi": s.info.pi, "omp": s.info.omp,
-                    "claude": s.info.claude, "opencode": s.info.opencode, "hermes": s.info.hermes, "versions": s.info.versions, "claudeAuth": s.info.claude_auth,
+                    "claude": s.info.claude, "versions": s.info.versions, "claudeAuth": s.info.claude_auth,
                     "bwrap": s.info.bwrap,
                     // (Harlo: harlo puts its agent there; or why it can't, once checked.)
                     "harlo": if !s.info.os.is_empty() && s.info.has("harlo") { "harlo's own" } else { "" },
@@ -344,11 +344,7 @@ impl Remotes {
         let name = name.to_string();
         remote::set_disconnected(&name, true);
         if let Some(host) = remote::host(&name) {
-            crate::runtime().spawn_blocking(move || {
-                // (Its own connection, so closing the shared one leaves it.)
-                harlo_harness::stop_opencode_on(&host.name);
-                remote::disconnect(&host);
-            });
+            crate::runtime().spawn_blocking(move || remote::disconnect(&host));
         }
         self.as_mut().rust_mut().states.remove(&name);
         self.bump();

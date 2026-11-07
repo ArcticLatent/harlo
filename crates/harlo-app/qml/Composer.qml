@@ -34,9 +34,7 @@ Rectangle {
     /// omp's approval mode for this session; "" for pi.
     readonly property string approvalMode: Workspace.modesRevision >= 0 ? Workspace.approvalMode(session.key) : ""
     readonly property bool planOn: Workspace.modesRevision >= 0 && Workspace.planMode(session.key)
-    // (Hermes has no plan mode.)
-    readonly property bool canPlan: session.harness !== "hermes"
-    function togglePlan() { if (canPlan) Workspace.setPlanMode(session.key, !planOn) }
+    function togglePlan() { Workspace.setPlanMode(session.key, !planOn) }
     // Helpers it started are at work (Stop stops them too, as it waits).
     readonly property bool helpersWorking: Workspace.orchestrationRevision >= 0 && session.key !== "" && Workspace.helpersWorking(session.key)
     function stop() {
@@ -390,7 +388,7 @@ Rectangle {
                         Item { Layout.fillWidth: true }
                         // (A local model: its engine.)
                         Label {
-                            readonly property string engine: mrow.modelData.local ? Theme.modelEngine(root.session.harness, mrow.modelData.provider + (root.session.harness === "hermes" ? ":" : "/") + mrow.modelData.id) : ""
+                            readonly property string engine: mrow.modelData.local ? Theme.modelEngine(root.session.harness, mrow.modelData.provider + "/" + mrow.modelData.id) : ""
                             text: engine || Theme.providerOf(mrow.modelData.provider + ":" + mrow.modelData.id)
                             color: Theme.muted
                             font.pixelSize: Theme.px(11)
@@ -465,8 +463,7 @@ Rectangle {
         AppMenuItem {
             visible: root.session.thinkingLevels.length === 0
             enabled: false
-            text: root.levelsReading ? "Reading thinking levels…"
-                : root.session.harness === "hermes" ? "Hermes sets its reasoning in its own config" : "No thinking levels for this model"
+            text: root.levelsReading ? "Reading thinking levels…" : "No thinking levels for this model"
         }
         Repeater {
             model: root.session.thinkingLevels
@@ -740,13 +737,7 @@ Rectangle {
             visible: root.approvalMode !== "" && !root.dictationActive
             iconName: root.approvalMode === "always-ask" ? "shield-user" : root.approvalMode === "write" ? "shield-star" : "shield-check"
             tint: root.approvalMode === "always-ask" ? Theme.foreground : root.approvalMode === "write" ? Theme.success : Theme.info
-            // (Hermes decides its own commands: it asks only before edits and
-            // commands it finds risky, whatever the mode.)
-            tip: (root.session.harness === "hermes"
-                    ? (root.approvalMode === "always-ask" ? "Permissions: ask — Hermes asks before it edits files and before commands it considers risky; it runs safe ones (ls, cat…) itself"
-                       : root.approvalMode === "write" ? "Permissions: edits — Hermes edits files in the project freely, asks before commands it considers risky"
-                       : "Permissions: auto — Hermes edits and runs commands without asking")
-                    : root.approvalMode === "always-ask" ? "Permissions: ask — the agent asks before it edits files or runs commands"
+            tip: (root.approvalMode === "always-ask" ? "Permissions: ask — the agent asks before it edits files or runs commands"
                     : root.approvalMode === "write" ? "Permissions: edits — the agent edits files freely, asks before running commands"
                     : "Permissions: auto — the agent edits and runs commands without asking")
                  + "\nClick to switch"
@@ -814,7 +805,6 @@ Rectangle {
         // Build or Plan (Tab): plan first, without changing files.
         ComposerLabelButton {
             objectName: "modeButton"
-            visible: root.canPlan
             iconName: "ai-agent"
             text: bar.tight ? "" : root.planOn ? "Plan" : "Build"
             tint: root.planOn ? Theme.warning : Theme.success

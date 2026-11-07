@@ -42,7 +42,7 @@ pub fn apply_event(list: &mut Vec<Value>, frame: &Value) {
         let short: String = first.chars().take(120).collect();
         entry["description"] = json!(short);
     }
-    // One subagent, listed twice (an OpenCode child read from the database
+    // One subagent, listed twice (a child read
     // before its call named it): the call's entry stays.
     if let Some(child) = entry["childSession"].as_str().map(str::to_owned) {
         let id = id.to_owned();

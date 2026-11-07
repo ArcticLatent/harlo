@@ -73,7 +73,7 @@ pub fn sessions_root(kind: HarnessKind) -> Option<PathBuf> {
                 .join("harlo-agent/sessions"),
         ),
         // Their sessions are listed their own way (not pi's file layout).
-        HarnessKind::Claude | HarnessKind::OpenCode | HarnessKind::Hermes | HarnessKind::Demo => None,
+        HarnessKind::Claude | HarnessKind::Demo => None,
     }
 }
 
@@ -82,12 +82,6 @@ pub fn sessions_root(kind: HarnessKind) -> Option<PathBuf> {
 pub fn list_files(kind: HarnessKind) -> Vec<(PathBuf, SystemTime, u64)> {
     if kind == HarnessKind::Claude {
         return crate::claude::list_files();
-    }
-    if kind == HarnessKind::OpenCode {
-        return crate::opencode::list_sessions();
-    }
-    if crate::acp::is_acp(kind) {
-        return crate::acp::list_sessions(kind);
     }
     let Some(root) = sessions_root(kind) else { return Vec::new() };
     let Ok(dirs) = std::fs::read_dir(&root) else { return Vec::new() };
@@ -116,12 +110,6 @@ pub fn list_files(kind: HarnessKind) -> Vec<(PathBuf, SystemTime, u64)> {
 pub fn read_session(kind: HarnessKind, path: &Path) -> Option<SessionInfo> {
     if kind == HarnessKind::Claude {
         return crate::claude::read_session(path);
-    }
-    if kind == HarnessKind::OpenCode {
-        return crate::opencode::read_session(path);
-    }
-    if crate::acp::is_acp(kind) {
-        return crate::acp::read_session(path);
     }
     let meta = std::fs::metadata(path).ok()?;
     let size = meta.len();

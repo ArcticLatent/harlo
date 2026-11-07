@@ -287,13 +287,6 @@ pub fn user_entry_id(file: Option<PathBuf>, harness: &str, ordinal: usize) -> Op
         // (A remote host's transcript: its copy here, brought up to date.)
         "claude" if harlo_core::remote::is_remote(&f) => harlo_core::remote::local_copy(&f).ok().map(|c| harlo_harness::claude::user_entries(&c)),
         "claude" => Some(harlo_harness::claude::user_entries(&f)),
-        // (A remote host's, through its server.)
-        "opencode" if harlo_core::remote::is_remote(&f) => harlo_core::remote::host_of(&f)
-            .and_then(|h| harlo_core::remote::host(&h))
-            .map(|h| harlo_harness::opencode_remote_user_entries(&harlo_core::remote::launch(&h), &f)),
-        "opencode" => Some(harlo_harness::opencode::user_entries(&f)),
-        // An ACP agent's: harlo numbers its prompts (`u0`, `u1`, …).
-        "hermes" => Some((0..=ordinal).map(|i| format!("u{i}")).collect()),
         // (pi / omp: a remote host's file, from its copy here.)
         _ if harlo_core::remote::is_remote(&f) => harlo_core::remote::local_copy(&f).ok().and_then(|c| harlo_harness::branches::current_user_entries(&c).ok()),
         _ => harlo_harness::branches::current_user_entries(&f).ok(),
@@ -742,11 +735,6 @@ impl ChatSession {
             let saved = match harness.as_str() {
                 "claude" if remote => harlo_core::subagents::claude_on_host(&file),
                 "claude" => harlo_harness::claude::subagents(&file),
-                "opencode" if remote => harlo_core::remote::host_of(&file)
-                    .and_then(|h| harlo_core::remote::host(&h))
-                    .map(|h| harlo_harness::opencode_remote_subagents(&harlo_core::remote::launch(&h), &file))
-                    .unwrap_or_default(),
-                "opencode" => harlo_harness::opencode::subagents(&file),
                 _ => harlo_core::subagents::from_session_file(&file),
             };
             if saved.is_empty() {
@@ -1132,8 +1120,6 @@ impl ChatSession {
     pub fn load_models(self: Pin<&mut Self>) {
         let answer = |mut this: Pin<&mut Self>, data: Value| {
             let mut list = QStringList::default();
-            // (Hermes doesn't say where its models are: its own servers' addresses.)
-            let hermes = (this.harness.to_string() == "hermes").then(|| harlo_core::model_servers::servers(HarnessKind::Hermes));
             let mut seen = std::collections::HashMap::new();
             for m in data["models"].as_array().into_iter().flatten() {
                 // (omp's leftovers from a local engine that's gone; Claude
@@ -1147,9 +1133,7 @@ impl ChatSession {
                 let s = |k: &str| m[k].as_str().unwrap_or_default().replace('\t', " ");
                 let reasoning = if m["reasoning"].as_bool() == Some(true) { "1" } else { "0" };
                 // Served on this computer or the local network.
-                let local = m["baseUrl"].as_str().is_some_and(harlo_harness::is_local_url)
-                    || hermes.as_ref().is_some_and(|servers| harlo_core::model_servers::hermes_local(&format!("{}:{}", s("provider"), s("id")), servers));
-                let local = if local { "1" } else { "0" };
+                let local = if m["baseUrl"].as_str().is_some_and(harlo_harness::is_local_url) { "1" } else { "0" };
                 list.append(QString::from(&format!("{}\t{}\t{}\t{}\t{}", s("provider"), s("id"), s("name"), reasoning, local)));
             }
             this.as_mut().set_models(list);
@@ -1238,7 +1222,7 @@ impl ChatSession {
                         && self.session_file.as_ref() != Some(&file)
                     {
                         self.as_mut().rust_mut().session_file = Some(file.clone());
-                        if matches!(self.harness.to_string().as_str(), "omp" | "claude" | "opencode") {
+                        if matches!(self.harness.to_string().as_str(), "omp" | "claude") {
                             self.as_mut().load_saved_subagents(file);
                         }
                     }

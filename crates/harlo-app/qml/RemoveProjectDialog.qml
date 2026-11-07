@@ -14,8 +14,7 @@ AppDialog {
 
     property int projectId: -1
     property string projectName: ""
-    /// What its sessions are: `{ count, trash, opencode, listed, archived,
-    /// running, worktree }`.
+    /// What its sessions are: `{ count, trash, archived, running, worktree }`.
     property var sessions: ({})
     readonly property int count: sessions.count || 0
     readonly property bool deleting: deleteSessions.checked && count > 0
@@ -71,8 +70,6 @@ AppDialog {
             font.pixelSize: Theme.px(12)
             text: [
                 dlg.sessions.trash ? dlg.plural(dlg.sessions.trash, "goes", "go") + " to the trash, so you can still restore " + (dlg.sessions.trash === 1 ? "it" : "them") + " from there." : "",
-                dlg.sessions.opencode ? dlg.plural(dlg.sessions.opencode, "OpenCode session is", "OpenCode sessions are") + " deleted with subagents' sessions. This can't be undone." : "",
-                dlg.sessions.listed ? dlg.plural(dlg.sessions.listed, "Hermes session stays", "Hermes sessions stay") + " in Hermes' own copy; harlo stops listing " + (dlg.sessions.listed === 1 ? "it" : "them") + "." : "",
                 dlg.sessions.archived ? "Including " + dlg.sessions.archived + " archived." : "",
                 dlg.sessions.running ? dlg.plural(dlg.sessions.running, "is", "are") + " running, and will be stopped." : "",
                 dlg.sessions.worktree ? "Worktree folders stay on disk." : "",

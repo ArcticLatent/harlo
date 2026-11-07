@@ -11,7 +11,7 @@ Read the **harlo** skill first: it has the tools.
 
 ## From the user's request
 
-1. **The agent:** the one they named (`claude`, `opencode`, `pi`, `omp`, maybe with a model). Otherwise, your own agent.
+1. **The agent:** the one they named (`harlo`, `claude`, `pi`, `omp`, maybe with a model). Otherwise, your own agent.
 2. **Isolation:** "in a worktree" or "worktree" → pass `worktree` with a short branch name taken from the task.
 3. **The task:** everything else they said.
 

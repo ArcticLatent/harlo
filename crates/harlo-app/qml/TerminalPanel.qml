@@ -15,11 +15,7 @@ Rectangle {
     color: Theme.codeBg
 
     readonly property string home: Workspace.homeDir()
-    // A folder asked for (a remote host's home, to install an agent there),
-    // until the session changes.
-    property string pinnedFolder: ""
-    onCwdChanged: pinnedFolder = ""
-    readonly property string folder: pinnedFolder !== "" ? pinnedFolder : cwd !== "" ? cwd : home
+    readonly property string folder: cwd !== "" ? cwd : home
     /// folder → { tabs: [TerminalView], active: index, next: number for the next tab's name }
     property var folders: ({})
     readonly property var entry: folders[folder] || null
@@ -41,7 +37,6 @@ Rectangle {
     /// Another shell in the current folder, made current.
     /// A new tab that runs `command` once its shell is up.
     function runInNewTab(command) { newTab(command) }
-    function runIn(folder, command) { pinnedFolder = folder; newTab(command) }
     function newTab(command) {
         const f = folder
         const e = folders[f] || { tabs: [], active: 0, next: 1 }

@@ -598,20 +598,14 @@ pub fn stop_group(mut child: std::process::Child) {
     let _ = child.wait();
 }
 
-/// Removes a server (blocking): out of each agent that has it; one harlo set
-/// up stopped and forgotten, its models deleted with `delete_files`.
-/// `step(what, done, of)` says how far. What went wrong, whether OpenCode
-/// was busy (its open sessions keep the server until they close), and what
-/// it did ("Taken out of OpenCode and pi. Deleted 2 models from Ollama
-/// (15.2 GB).").
 /// Takes a server out of every agent here that has it (by its name and
-/// address; `reread`: the agent picks the change up, false while it
-/// can't); one harlo set up, no agent having it now, is stopped and
-/// forgotten, and its model files deleted with `delete_files`. `step` says
-/// how far. `(errors, an agent couldn't reread, what it did)`.
-pub fn remove(name: &str, url: &str, delete_files: bool, step: &dyn Fn(&str, usize, usize), reread: &dyn Fn(HarnessKind) -> bool) -> (Vec<String>, bool, String) {
+/// address; `reread`: the agent picks the change up); one harlo set up, no
+/// agent having it now, is stopped and forgotten, and its model files
+/// deleted with `delete_files`. `step(what, done, of)` says how far.
+/// `(errors, what it did)`: "Taken out of Harlo and pi. Deleted 2 models
+/// from Ollama (15.2 GB).".
+pub fn remove(name: &str, url: &str, delete_files: bool, step: &dyn Fn(&str, usize, usize), reread: &dyn Fn(HarnessKind)) -> (Vec<String>, String) {
     let mut errors = Vec::new();
-    let mut busy = false;
     let mut agents: Vec<&str> = Vec::new();
     let mut summary: Vec<String> = Vec::new();
     let gb = |b: u64| format!("{:.1} GB", b as f64 / 1e9);
@@ -624,7 +618,7 @@ pub fn remove(name: &str, url: &str, delete_files: bool, step: &dyn Fn(&str, usi
         step(&format!("Taking it out of {}'s config", k.label()), 0, 0);
         match model_servers::remove(k, name) {
             Ok(()) => {
-                busy |= !reread(k);
+                reread(k);
                 agents.push(k.label());
             }
             Err(e) => errors.push(format!("{}: {e}", k.label())),
@@ -638,7 +632,7 @@ pub fn remove(name: &str, url: &str, delete_files: bool, step: &dyn Fn(&str, usi
     // Set up by harlo, and no agent has it now: stopped and forgotten.
     let still = model_servers::AGENTS.iter().any(|k| model_servers::servers(*k).iter().any(|s| s.base_url == url));
     if still || !commands_of(url)["start"].as_str().is_some_and(|c| !c.is_empty()) {
-        return (errors, busy, summary.join(" "));
+        return (errors, summary.join(" "));
     }
     // Ollama's models out of its store first (it must run for that).
     if !ollama.is_empty() {
@@ -705,7 +699,7 @@ pub fn remove(name: &str, url: &str, delete_files: bool, step: &dyn Fn(&str, usi
             dir = d.parent();
         }
     }
-    (errors, busy, summary.join(" "))
+    (errors, summary.join(" "))
 }
 
 /// The models an Ollama server serves in harlo: what its setup saved, and

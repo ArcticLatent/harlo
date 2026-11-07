@@ -9,9 +9,9 @@ import harlo
 AppDialog {
     id: dlg
     objectName: "modelServerDialog"
-    /// The agents it can go to: pi, Oh My Pi, OpenCode, Hermes and Harlo, where installed.
+    /// The agents it can go to: Harlo, pi and Oh My Pi, where installed.
     readonly property var agents: (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()) : [])
-        .filter(p => ["pi", "omp", "opencode", "hermes", "harlo"].includes(p.id) && p.state !== "missing")
+        .filter(p => ["pi", "omp", "harlo"].includes(p.id) && p.state !== "missing")
     /// The ones chosen (ids).
     property var chosen: []
     /// A server was added.
@@ -21,27 +21,22 @@ AppDialog {
     property var picked: ({})
     property string error: ""
     readonly property int pickedCount: search.models.filter(m => picked[m.id] !== false).length
-    /// Hermes refuses models with under 64k tokens of context.
-    readonly property bool hermesFits: { const m = search.models.filter(x => picked[x.id] !== false); return m.length === 0 || m.some(x => !x.context || x.context >= 64000) }
 
     function findModels() {
         error = ""
         Accounts.findModels(address.text, key.text)
     }
     function add() {
-        let busy = false
         const models = search.models.filter(m => picked[m.id] !== false)
-        for (const id of chosen.filter(x => x !== "hermes" || hermesFits)) {
+        for (const id of chosen) {
             const a = agents.find(x => x.id === id)
             // Provider names it has already.
             const taken = [...new Set((a.modelIds || []).map(m => m.split(/[\/:]/)[0]).filter(p => p !== ""))]
             const err = Accounts.addServer(id, name.text, search.baseUrl, key.text, JSON.stringify(models), JSON.stringify(taken))
-            if (err === "OPENCODE_BUSY") { busy = true; continue }
             if (err !== "") { error = (chosen.length > 1 ? a.label + ": " : "") + err; return }
         }
         close()
         added()
-        if (busy) Workspace.showNotice("Added. OpenCode's open sessions get its models once they're all closed.", false)
     }
     function contextText(n) { return n >= 1000 ? Math.round(n / 1000) + "k context" : n + " context" }
 
@@ -164,13 +159,11 @@ AppDialog {
                     AppCheckBox {
                         required property var modelData
                         text: modelData.label
-                        enabled: modelData.id !== "hermes" || dlg.hermesFits
-                        checked: enabled && dlg.chosen.includes(modelData.id)
+                        checked: dlg.chosen.includes(modelData.id)
                         onToggled: dlg.chosen = checked ? dlg.chosen.concat([modelData.id]) : dlg.chosen.filter(x => x !== modelData.id)
                     }
                 }
             }
-            Note { visible: !dlg.hermesFits && dlg.agents.some(a => a.id === "hermes"); text: "Not Hermes: it needs models with at least 64k tokens of context." }
             Note { text: "Models show as " + (name.text.trim() || "name") + "/<model>, saved in each agent's own config." }
             Note { visible: dlg.error !== ""; color: Theme.error; text: dlg.error }
             RowLayout {
@@ -179,7 +172,7 @@ AppDialog {
                 FlatButton {
                     objectName: "modelServerAdd"
                     text: dlg.pickedCount === 1 ? "Add 1 model" : "Add " + dlg.pickedCount + " models"
-                    enabled: dlg.pickedCount > 0 && name.text.trim() !== "" && dlg.chosen.some(x => x !== "hermes" || dlg.hermesFits)
+                    enabled: dlg.pickedCount > 0 && name.text.trim() !== "" && dlg.chosen.length > 0
                     accent: Theme.primary
                     font.pixelSize: Theme.px(12)
                     onClicked: dlg.add()

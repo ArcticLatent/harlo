@@ -1368,12 +1368,10 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "libc",
- "rusqlite",
  "serde",
  "serde_json",
  "tokio",
  "tracing",
- "ureq",
 ]
 
 [[package]]

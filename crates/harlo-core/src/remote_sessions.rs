@@ -1,7 +1,6 @@
 //! Saved sessions on remote hosts, for the sidebar: the pi / omp / Claude / Harlo
 //! session files of a host are listed over SSH and changed ones read in a
-//! batch; OpenCode's come from its server there and Hermes's from harlo's
-//! index. All are reported like local scan results (paths and folders as
+//! batch, reported like local scan results (paths and folders as
 //! `ssh://host/…`): those outside the host's projects go in its Other
 //! sessions, as here.
 
@@ -17,14 +16,12 @@ use crate::remote::{self, Host};
 use crate::scanner::ScanDelta;
 
 /// Lists `<kind>\t<mtime>\t<size>\t<path>` for each session file (GNU find,
-/// else BSD stat), then `has\t<agent>` for OpenCode and Hermes when they're
-/// there (so the first look needn't wait for the host's check).
+/// else BSD stat).
 /// `HARLO_TEST_PI_SESSIONS` (tests) replaces pi's folder.
 const LIST_SCRIPT: &str = r#"list() { [ -d "$2" ] || return 0
 if find "$2" -maxdepth 0 -printf '' 2>/dev/null; then find "$2" -mindepth 2 -maxdepth 2 -name '*.jsonl' -type f -printf "$1\t%T@\t%s\t%p\n"
 else for f in "$2"/*/*.jsonl; do [ -f "$f" ] && printf '%s\t%s\t%s\t%s\n' "$1" "$(stat -f %m "$f")" "$(stat -f %z "$f")" "$f"; done; fi; }
-list omp "$HOME/.omp/agent/sessions"; list pi "${HARLO_TEST_PI_SESSIONS:-${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/sessions}"; list claude "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"; list harlo "${XDG_DATA_HOME:-$HOME/.local/share}/harlo-agent/sessions"
-for p in opencode hermes; do case ":${HARLO_TEST_HIDE_AGENTS:-}:" in *":$p:"*) continue;; esac; command -v "$p" >/dev/null 2>&1 && printf 'has\t%s\n' "$p"; done; true"#;
+list omp "$HOME/.omp/agent/sessions"; list pi "${HARLO_TEST_PI_SESSIONS:-${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/sessions}"; list claude "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"; list harlo "${XDG_DATA_HOME:-$HOME/.local/share}/harlo-agent/sessions"; true"#;
 
 /// The agent a listed file is of.
 fn listed_kind(name: &str) -> HarnessKind {
@@ -54,74 +51,17 @@ pub struct RemoteScanner {
 
 impl RemoteScanner {
     /// One host: what changed since the last poll among its sessions.
-    /// `roots`: that host's project folders (`ssh://` paths), each of which
-    /// OpenCode is asked about too.
-    pub fn poll(&mut self, host: &Host, roots: &[PathBuf]) -> Result<ScanDelta> {
-        self.poll_with(host, roots, true)
-    }
-
-    /// Like [`poll`](Self::poll), but OpenCode's sessions aren't asked for
-    /// (its server there may take a while to start): the ones already shown
-    /// stay. A host's first look, so the others show at once.
-    pub fn poll_quick(&mut self, host: &Host, roots: &[PathBuf]) -> Result<ScanDelta> {
-        self.poll_with(host, roots, false)
-    }
-
-    fn poll_with(&mut self, host: &Host, roots: &[PathBuf], ask_opencode: bool) -> Result<ScanDelta> {
+    pub fn poll(&mut self, host: &Host) -> Result<ScanDelta> {
         let listing = remote::run_ok(host, LIST_SCRIPT, Duration::from_secs(30))?;
         let mut seen: HashMap<PathBuf, (HarnessKind, i64, u64)> = HashMap::new();
-        let mut there: HashSet<&str> = HashSet::new();
         for line in listing.lines() {
-            if let Some(agent) = line.strip_prefix("has\t") {
-                there.insert(agent.trim());
-                continue;
-            }
             let mut parts = line.splitn(4, '\t');
             let (Some(kind), Some(mtime), Some(size), Some(path)) = (parts.next(), parts.next(), parts.next(), parts.next()) else { continue };
             let kind = listed_kind(kind);
             let mtime = mtime.split('.').next().and_then(|m| m.parse().ok()).unwrap_or(0);
             seen.insert(remote::join(&host.name, path), (kind, mtime, size.parse().unwrap_or(0)));
         }
-        // OpenCode's sessions: from its server there (its database is there).
-        let mut from_api: HashMap<PathBuf, SessionInfo> = HashMap::new();
-        let found = |agent: &str| there.contains(agent) || remote::found_on(&host.name, agent);
-        let mut opencode_listed = false;
-        if ask_opencode && found("opencode") {
-            let folders: Vec<String> = roots.iter().map(|r| harlo_harness::on_host(r)).collect();
-            match harlo_harness::opencode_remote_sessions(&remote::launch(host), &folders) {
-                Ok(list) => {
-                    opencode_listed = true;
-                    for (info, changed) in list {
-                        // (Its last change in the size's place: a rename shows too.)
-                        let mtime = info.modified.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
-                        seen.insert(info.path.clone(), (HarnessKind::OpenCode, mtime, changed));
-                        from_api.insert(info.path.clone(), info);
-                    }
-                }
-                Err(e) => tracing::debug!("{}: OpenCode's sessions: {e:#}", host.name),
-            }
-        }
-        // An ACP agent's: the ones harlo started there (its index).
-        for kind in [HarnessKind::Hermes] {
-            if found(kind.as_str()) {
-                for info in harlo_harness::acp::remote_sessions(kind, &host.name) {
-                    let mtime = info.modified.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
-                    seen.insert(info.path.clone(), (kind, mtime, info.size));
-                    from_api.insert(info.path.clone(), info);
-                }
-            }
-        }
         let prefix = format!("ssh://{}/", host.name);
-        // OpenCode not asked (or not answering): what it listed before stays.
-        if !opencode_listed {
-            for (path, info) in &self.infos {
-                if let Some(info) = info.as_ref().filter(|i| i.harness == HarnessKind::OpenCode && path.to_string_lossy().starts_with(&prefix))
-                    && let Some((m, sz)) = self.known.get(path)
-                {
-                    seen.entry(path.clone()).or_insert((info.harness, *m, *sz));
-                }
-            }
-        }
         note_files(&prefix, &seen);
         // Gone from the host.
         let gone: Vec<PathBuf> = self.known.keys().filter(|p| p.to_string_lossy().starts_with(&prefix) && !seen.contains_key(*p)).cloned().collect();
@@ -135,14 +75,7 @@ impl RemoteScanner {
             .filter(|(p, (_, m, s))| self.known.get(*p) != Some(&(*m, *s)))
             .map(|(p, (k, m, s))| (p.clone(), *k, *m, *s))
             .collect();
-        // (OpenCode's and ACP agents' came with the listing.)
-        let listed = |k: HarnessKind| matches!(k, HarnessKind::OpenCode | HarnessKind::Hermes);
-        for (path, _, mtime, size) in changed.iter().filter(|c| listed(c.1)) {
-            self.known.insert(path.clone(), (*mtime, *size));
-            self.infos.insert(path.clone(), from_api.remove(path));
-        }
-        let files: Vec<(PathBuf, HarnessKind, i64, u64)> = changed.iter().filter(|c| !listed(c.1)).cloned().collect();
-        for chunk in files.chunks(BATCH) {
+        for chunk in changed.chunks(BATCH) {
             let texts = read_batch(host, chunk.iter().map(|c| c.0.as_path()))?;
             for (path, kind, mtime, size) in chunk {
                 let info = texts.get(path).and_then(|(head, tail)| {
@@ -296,8 +229,7 @@ mod tests {
         std::fs::write(sessions.join("c.jsonl"), big).unwrap();
         let host = Host { ssh: { let mut a = host.ssh.clone(); a.insert(0, "-o".into()); a.insert(1, format!("SetEnv=HARLO_TEST_PI_SESSIONS={}", dir.join("pi/sessions").display())); a }, ..host };
         let mut scanner = RemoteScanner::default();
-        let roots = vec![remote::join("t", &proj.to_string_lossy())];
-        let delta = scanner.poll(&host, &roots).unwrap();
+        let delta = scanner.poll(&host).unwrap();
         let mut titles: Vec<String> = delta.upserts.iter().map(|i| i.first_message.clone()).collect();
         titles.sort();
         assert_eq!(titles, ["big one", "inside the project", "outside"], "{:?}", delta.upserts);
@@ -305,13 +237,11 @@ mod tests {
         // (Outside the project: in Other sessions, its folder on the host.)
         assert!(delta.upserts.iter().any(|i| i.cwd == remote::join("t", "/elsewhere")));
         // Nothing changed: nothing to report.
-        assert!(scanner.poll(&host, &roots).unwrap().is_empty());
+        assert!(scanner.poll(&host).unwrap().is_empty());
         // Removed on the host.
         std::fs::remove_file(sessions.join("a.jsonl")).unwrap();
-        let delta = scanner.poll(&host, &roots).unwrap();
+        let delta = scanner.poll(&host).unwrap();
         assert_eq!(delta.removed.len(), 1);
-        // No projects: they stay (in Other sessions).
-        assert!(scanner.poll(&host, &[]).unwrap().removed.is_empty());
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

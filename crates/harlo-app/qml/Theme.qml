@@ -98,12 +98,12 @@ QtObject {
     readonly property bool wrapCode: look.wrap === true
     /// An agent's avatar colours: a soft fill and its letters, from the theme.
     function agentColor(id) {
-        const base = ({ claude: "#E5895A", omp: "#9B8AFB", pi: "#4FC1AE", opencode: "#5B9BF0", demo: "#A7AAB2" })[id] || "#A7AAB2"
+        const base = ({ claude: "#E5895A", omp: "#9B8AFB", pi: "#4FC1AE", demo: "#A7AAB2" })[id] || "#A7AAB2"
         const col = Qt.color(base)
         return { fill: Qt.rgba(col.r, col.g, col.b, isLight ? 0.16 : 0.2), ink: isLight ? blend(col, Qt.rgba(0, 0, 0, 1), 0.25) : blend(col, Qt.rgba(1, 1, 1, 1), 0.15) }
     }
     function agentInitials(id) {
-        return ({ claude: "CL", omp: "OM", pi: "PI", opencode: "OC", demo: "DE" })[id] || (id || "?").slice(0, 2).toUpperCase()
+        return ({ claude: "CL", omp: "OM", pi: "PI", demo: "DE" })[id] || (id || "?").slice(0, 2).toUpperCase()
     }
     // Project colours (Settings → Projects), from the theme, so they suit
     // every theme. Stored by key.
@@ -137,8 +137,7 @@ QtObject {
     /// "Qwen3-4B-UD-Q4_K_XL" and Ollama's "hf.co/unsloth/Qwen3-4B-GGUF:UD-Q4_K_XL"
     /// are both "Qwen3-4B · UD-Q4_K_XL".
     function modelLabel(id) {
-        // (Hermes names its servers' models "custom:<server>:<model>".)
-        let name = id.replace(/^custom[\/:][^:\/]+:/, "")
+        let name = id
         let quant = ""
         // (Wherever it is: an agent may put its server's name in front.)
         const hf = name.indexOf("hf.co/")
@@ -152,28 +151,21 @@ QtObject {
         }
         return quant !== "" ? name + " · " + quant : name
     }
-    /// Who serves a model, from its id: "provider/model" (pi, OpenCode,
-    /// omp), or Hermes' "custom:<server>:<model>" for its servers (the
-    /// server, not "custom").
+    /// Who serves a model, from its id: "provider/model".
     function providerOf(id) {
-        const hermes = (id || "").match(/^custom[\/:]([^:\/]+):/)
-        return hermes ? hermes[1] : (id || "").split(/[\/:]/)[0]
+        return (id || "").split(/[\/:]/)[0]
     }
-    /// The model server behind a session's model ("provider/model"; Hermes'
-    /// "custom:<server>:<model>"), from Settings → Model servers: `{ name,
+    /// The model server behind a session's model ("provider/model"), from
+    /// Settings → Model servers: `{ name,
     /// engine ("" for one harlo didn't set up), address (host:port), place
     /// ("here", "network", "online") }`, or null for a provider's own models.
     function serverOf(harness, modelId) {
         if (!modelId || Accounts.revision < 0) return null
-        const hermes = modelId.match(/^custom[\/:]([^:\/]+):/)
-        const name = harness === "hermes" ? (hermes ? hermes[1] : "") : modelId.split("/")[0]
+        const name = modelId.split("/")[0]
         // (omp's own providers for a llama.cpp or Ollama it finds on their usual ports.)
         if (name === "llama.cpp" || (harness === "omp" && name === "ollama"))
             return { name: name, engine: name === "ollama" ? "Ollama" : "llama.cpp", address: "127.0.0.1:" + (name === "ollama" ? 11434 : 8080), place: "here" }
-        // (Hermes' current model can be "custom:<model>": the server that has it.)
-        const list = JSON.parse(Accounts.servers(harness))
-        const bare = modelId.replace(/^custom[\/:]/, "")
-        const sv = list.find(s => s.name === name) || (harness === "hermes" ? list.find(s => (s.models || []).includes(bare)) : undefined)
+        const sv = JSON.parse(Accounts.servers(harness)).find(s => s.name === name)
         if (!sv) return null
         return { name: sv.name, engine: sv.engine === "Your command" ? "" : (sv.engine || ""), address: sv.baseUrl.replace(/^https?:\/\//, "").replace(/\/v1\/?$/, ""), place: sv.place }
     }
@@ -183,7 +175,7 @@ QtObject {
         return sv ? sv.engine : ""
     }
     function toolLabel(name) {
-        // harlo's own (Claude's "mcp__harlo__x", OpenCode's "harlo_x"): what it does.
+        // harlo's own (Claude's "mcp__harlo__x", others' "harlo_x"): what it does.
         const h = /^(?:mcp__harlo__|harlo_)(.+)$/.exec(name || "")
         if (h && harloTools[h[1]]) return harloTools[h[1]]
         const m = /^mcp__([^_]+(?:_[^_]+)*?)__(.+)$/.exec(name || "")
@@ -209,7 +201,7 @@ QtObject {
                       request_approval: "writing the question…", report_done: "writing the report…", ask_parent: "writing the question…" })[h[1]] || "" : ""
     }
     function harnessLabel(id) {
-        return ({ harlo: "Harlo", claude: "Claude", opencode: "OpenCode", pi: "Pi", omp: "Oh My Pi", hermes: "Hermes", demo: "Demo" })[id] || id
+        return ({ harlo: "Harlo", claude: "Claude", pi: "Pi", omp: "Oh My Pi", demo: "Demo" })[id] || id
     }
     // Text on a primary-coloured fill (buttons, check marks).
     readonly property color textOnPrimary: luminance(primary) > 0.55 ? "#1a1a1a" : (isLight ? "#ffffff" : "#1a1310")

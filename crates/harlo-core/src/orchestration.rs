@@ -4,8 +4,7 @@
 //! stdio server the agent starts like any other. It answers the protocol
 //! itself and hands each tool call to the running harlo over a local
 //! socket, saying who's calling: `HARLO_SESSION` (set in every agent harlo
-//! starts), or `HARLO_OPENCODE` (OpenCode's shared server, whose running
-//! session is the caller). With no harlo running it offers no tools, so an
+//! starts). With no harlo running it offers no tools, so an
 //! agent started elsewhere sees nothing amiss. Agents start MCP servers with
 //! few environment variables, so each entry names the socket (`--socket`)
 //! and sets `HARLO_SESSION` itself (or as `${HARLO_SESSION}`).
@@ -68,7 +67,7 @@ pub fn tools(starting: Starting) -> Value {
     let mut tools = json!([
         {
             "name": "list_agents",
-            "description": "The coding agents harlo can start sessions with (claude, opencode, pi, omp, hermes, harlo): their ids and whether they're installed.",
+            "description": "The coding agents harlo can start sessions with (harlo, claude, pi, omp): their ids and whether they're installed.",
             "inputSchema": s(json!({}), &[]),
         },
         {
@@ -80,7 +79,7 @@ pub fn tools(starting: Starting) -> Value {
             "name": "start_session",
             "description": format!("Starts a new harlo session with a coding agent and sends it a first prompt. {} It becomes your helper, in your permission mode: the user sees it under your session, and harlo sends you its report when it finishes (unless notify is false), its questions for you, and when it waits for the user. Start every independent helper, then end your turn: harlo wakes you with what comes back; don't poll. The new agent has none of your context: make the prompt a self-contained briefing.", when_to_start(starting)),
             "inputSchema": s(json!({
-                "agent": { "type": "string", "description": "claude, opencode, pi, omp, hermes or harlo (see list_agents)." },
+                "agent": { "type": "string", "description": "harlo, claude, pi or omp (see list_agents)." },
                 "prompt": { "type": "string", "description": "The first message: the task, its context, the relevant files, what's done and what's left." },
                 "title": { "type": "string", "description": "A short name for the session." },
                 "model": { "type": "string", "description": "provider/model, if not the agent's default." },
@@ -116,8 +115,7 @@ pub fn tools(starting: Starting) -> Value {
             "description": "Asks the user to decide something only they may decide (to go ahead with a risky or irreversible step, or a choice that's theirs). harlo shows it in your session and on their phone, and notifies them; no agent can answer it. Then end your turn: their answer comes to you as a message.",
             "inputSchema": s(json!({
                 "question": { "type": "string", "description": "What they decide, with what they need to know to decide it." },
-                "options": { "type": "array", "items": { "type": "string" }, "description": "Their choices (default: Approve, Reject)." },
-                "helper": { "type": "string", "description": "Your helper id, if your briefing gave you one." }
+                "options": { "type": "array", "items": { "type": "string" }, "description": "Their choices (default: Approve, Reject)." }
             }), &["question"]),
         }
     ]);
@@ -135,7 +133,7 @@ pub fn tools(starting: Starting) -> Value {
                     "items": s(json!({
                         "title": { "type": "string", "description": "A short name for the part." },
                         "prompt": { "type": "string", "description": "Its first message, a self-contained briefing (it has none of your context): the part, the relevant files, what \"done\" looks like, what not to touch." },
-                        "agent": { "type": "string", "description": "claude, opencode, pi, omp, hermes or harlo. Leave it (and model) out for the project's usual helpers (the user's choice), unless a part needs another agent or model." },
+                        "agent": { "type": "string", "description": "harlo, claude, pi or omp. Leave it (and model) out for the project's usual helpers (the user's choice), unless a part needs another agent or model." },
                         "model": { "type": "string", "description": "provider/model, if not the agent's default." },
                         "worktree": { "type": "string", "description": "A new git worktree on this branch name to work in (for parts that edit files)." }
                     }), &["title", "prompt"])
@@ -236,14 +234,13 @@ pub fn helper_tools() -> Value {
             "inputSchema": s(json!({
                 "outcome": { "type": "string", "enum": ["succeeded", "failed"], "description": "failed if the task isn't done: never hide a failure in the summary." },
                 "summary": { "type": "string", "description": "Three sentences: what you did, what you found, what's left." },
-                "files": { "type": "array", "items": { "type": "string" }, "description": "The files you changed (paths), if any." },
-                "helper": { "type": "string", "description": "Your helper id, if your briefing gave you one." }
+                "files": { "type": "array", "items": { "type": "string" }, "description": "The files you changed (paths), if any." }
             }), &["outcome", "summary"]),
         },
         {
             "name": "ask_parent",
             "description": "Asks the session that started you a question the task doesn't settle. Then end your turn: harlo wakes you with its answer. (For what only the user may decide, use request_approval.)",
-            "inputSchema": s(json!({ "question": { "type": "string" }, "helper": { "type": "string", "description": "Your helper id, if your briefing gave you one." } }), &["question"]),
+            "inputSchema": s(json!({ "question": { "type": "string" } }), &["question"]),
         }
     ])
 }
@@ -276,10 +273,8 @@ impl Report {
 /// What a helper's first message starts with: what it is, and how its
 /// result goes back (`tools`: it has harlo's tools; else it says it in
 /// its last reply).
-pub fn helper_brief(parent: &str, task: &str, tools: bool, code: &str) -> String {
+pub fn helper_brief(parent: &str, task: &str, tools: bool) -> String {
     let parent = if parent.trim().is_empty() { String::new() } else { format!(" (\"{}\")", parent.trim()) };
-    // (OpenCode's sessions share harlo's tools: who's calling.)
-    let id = if tools && !code.is_empty() { format!("\n- Your helper id is {code}: pass it as `helper` with each of harlo's tools you call (report_done, ask_parent, request_approval).") } else { String::new() };
     let how = if tools {
         "- When the task leaves a decision open, call harlo's ask_parent tool with your question, then end your turn: the answer comes to you as a message.\n\
          - For what only the user may decide (going ahead with a risky or irreversible step, a choice that's theirs), call request_approval, then end your turn.\n\
@@ -290,7 +285,7 @@ pub fn helper_brief(parent: &str, task: &str, tools: bool, code: &str) -> String
     format!(
         "[harlo] You're a helper: another agent's session{parent} started you with the task below, and harlo sends it your result.\n\
          - Do only this task, yourself: start no helper sessions unless it asks.\n\
-         {how}{id}\n\n\
+         {how}\n\n\
          The task:\n\n{task}"
     )
 }
@@ -420,8 +415,8 @@ pub const BASE_INSTRUCTIONS: &str = "harlo's sessions: start other coding agents
 
 /// What the bridge sends harlo for a tool call (one line), and harlo's
 /// answer (one line): `{ok, result}` or `{ok: false, error}`.
-pub fn call_line(session: &str, opencode: bool, tool: &str, args: &Value) -> String {
-    json!({ "session": session, "opencode": opencode, "tool": tool, "args": args }).to_string()
+pub fn call_line(session: &str, tool: &str, args: &Value) -> String {
+    json!({ "session": session, "tool": tool, "args": args }).to_string()
 }
 
 /// harlo draws Mermaid: told to every session with harlo's tools.
@@ -446,7 +441,6 @@ fn ask_harlo(line: &str) -> Option<Value> {
 /// `harlo --mcp-bridge`: an MCP server on stdin / stdout.
 pub fn run_bridge() {
     let session = std::env::var("HARLO_SESSION").unwrap_or_default();
-    let opencode = std::env::var_os("HARLO_OPENCODE").is_some();
     let stdin = std::io::stdin();
     let mut out = std::io::stdout();
     for line in stdin.lock().lines().map_while(Result::ok) {
@@ -458,7 +452,7 @@ pub fn run_bridge() {
             // What this session's tools are for (the project's specs and
             // plan add to it).
             "initialize" => {
-                let said = ask_harlo(&call_line(&session, opencode, INSTRUCTIONS, &json!({}))).filter(|a| a["ok"] == true);
+                let said = ask_harlo(&call_line(&session, INSTRUCTIONS, &json!({}))).filter(|a| a["ok"] == true);
                 reply(json!({
                     "protocolVersion": msg["params"]["protocolVersion"].as_str().unwrap_or("2025-06-18"),
                     "capabilities": { "tools": {} },
@@ -471,13 +465,13 @@ pub fn run_bridge() {
             // running or orchestration off in it. (A socket left by a
             // harlo that crashed doesn't count.)
             "tools/list" => {
-                let listed = ask_harlo(&call_line(&session, opencode, TOOLS, &json!({}))).filter(|a| a["ok"] == true);
+                let listed = ask_harlo(&call_line(&session, TOOLS, &json!({}))).filter(|a| a["ok"] == true);
                 reply(json!({ "tools": listed.map(|a| a["result"].clone()).filter(Value::is_array).unwrap_or_else(|| json!([])) }))
             }
             "tools/call" => {
                 let p = &msg["params"];
                 let tool = p["name"].as_str().unwrap_or_default();
-                let answer = ask_harlo(&call_line(&session, opencode, tool, &p["arguments"]));
+                let answer = ask_harlo(&call_line(&session, tool, &p["arguments"]));
                 let (text, error) = match answer {
                     Some(a) if a["ok"] == true => (a["result"].to_string(), false),
                     Some(a) => (a["error"].as_str().unwrap_or("harlo couldn't do that").to_owned(), true),
@@ -494,8 +488,8 @@ pub fn run_bridge() {
 }
 
 // Settings → Orchestration: the skills that teach agents to use the tools,
-// and the bridge in pi's and omp's MCP config. (Claude and
-// OpenCode get the bridge with each session harlo starts.)
+// and the bridge in pi's and omp's MCP config. (Claude and Harlo get the
+// bridge with each session harlo starts.)
 
 /// A skill harlo installs.
 pub struct Skill {
@@ -519,8 +513,8 @@ fn home() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
 }
 
-/// Where agents find skills: `~/.agents/skills` (pi, omp, OpenCode) and
-/// Claude's (Claude, omp, OpenCode).
+/// Where agents find skills: `~/.agents/skills` (pi, omp) and Claude's
+/// (Claude, omp).
 pub fn skill_dirs() -> [PathBuf; 2] {
     let claude = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from).unwrap_or_else(|| home().join(".claude"));
     [home().join(".agents/skills"), claude.join("skills")]
@@ -630,9 +624,9 @@ pub fn refresh_bridges(harlo: &std::path::Path) {
 
 /// An agent to delegate to (the composer's Delegate menu).
 pub struct Member {
-    /// "OpenCode"
+    /// "Oh My Pi"
     pub label: String,
-    /// "opencode"
+    /// "omp"
     pub agent: String,
     /// "" for its default.
     pub model: String,
@@ -716,7 +710,7 @@ mod tests {
     fn delegate_prompts() {
         let h = delegate_prompt("handoff", &[m("Claude", "claude", "")], "  keep the API  ", true).unwrap();
         assert!(h.contains("Claude (agent \"claude\", its default model)") && h.contains("as `worktree`") && h.ends_with("Also: keep the API"));
-        let a = delegate_prompt("advisor", &[m("OpenCode", "opencode", "openai/gpt-5")], "", false).unwrap();
+        let a = delegate_prompt("advisor", &[m("Harlo", "harlo", "openai/gpt-5")], "", false).unwrap();
         assert!(a.contains("model \"openai/gpt-5\"") && a.contains("Do NOT write code.") && a.ends_with("the current task."));
         let c = delegate_prompt("committee", &[m("Claude", "claude", ""), m("pi", "pi", "google/gemini")], "flaky tests", false).unwrap();
         assert!(c.contains("- Claude (agent") && c.contains("- pi (agent \"pi\", model \"google/gemini\")") && c.ends_with("The problem: flaky tests"));
@@ -751,10 +745,9 @@ mod tests {
         let m = finished_message("Harlo", "T", "k", Some(&r), None, None, Some("gpt-6.1-sol: 3 requests, 9.1k tokens in (70% cached), 400 out"));
         assert!(m.ends_with("Files changed: a.rs, b.rs\n\nUsed: gpt-6.1-sol: 3 requests, 9.1k tokens in (70% cached), 400 out"), "{m}");
         // The brief: with the tools, or a report in words.
-        let b = helper_brief("Lead", "Do X", true, "");
-        assert!(b.contains("session (\"Lead\") started you") && b.contains("report_done") && b.ends_with("The task:\n\nDo X") && !b.contains("helper id"));
-        assert!(!helper_brief("", "Do X", false, "h-1").contains("report_done"));
-        assert!(helper_brief("", "Do X", true, "h-1").contains("Your helper id is h-1: pass it as `helper`"));
+        let b = helper_brief("Lead", "Do X", true);
+        assert!(b.contains("session (\"Lead\") started you") && b.contains("report_done") && b.ends_with("The task:\n\nDo X"));
+        assert!(!helper_brief("", "Do X", false).contains("report_done"));
         assert!(worktree_note("helper/x", "/p").contains("a new git worktree on branch helper/x, your own copy of the project apart from its main checkout (/p)"));
         assert!(approval_answer("Merge?", &json!({ "value": "Approve" })).ends_with("(\"Merge?\"): Approve"));
         assert!(approval_answer("Merge?", &json!({ "cancelled": true })).contains("dismissed"));
@@ -791,11 +784,11 @@ mod tests {
         assert!(parse_proposal(&json!({ "why": "x", "helpers": [{ "title": "a", "prompt": " " }] })).unwrap_err().contains("\"a\" has no prompt"));
         let many: Vec<Value> = (0..=MAX_PROPOSED).map(|i| json!({ "title": i.to_string(), "prompt": "p" })).collect();
         assert!(parse_proposal(&json!({ "why": "x", "helpers": many })).is_err());
-        let q = proposal_question("Two parts.", &[("API".into(), "Claude".into(), String::new(), "split/api".into()), ("UI".into(), "OpenCode".into(), "openai/gpt-5".into(), String::new())]);
-        assert_eq!(q, "Two parts.\n\n• API (Claude, worktree split/api)\n• UI (OpenCode, gpt-5)");
+        let q = proposal_question("Two parts.", &[("API".into(), "Claude".into(), String::new(), "split/api".into()), ("UI".into(), "Harlo".into(), "openai/gpt-5".into(), String::new())]);
+        assert_eq!(q, "Two parts.\n\n• API (Claude, worktree split/api)\n• UI (Harlo, gpt-5)");
         assert!(proposal_answer(None).contains("do the work yourself"));
-        let a = proposal_answer(Some(&[("API".into(), Ok("k1".into())), ("UI".into(), Err("OpenCode is turned off".into()))]));
-        assert!(a.contains("started your helpers: \"API\" (k1).") && a.contains("These didn't start: \"UI\": OpenCode is turned off."), "{a}");
+        let a = proposal_answer(Some(&[("API".into(), Ok("k1".into())), ("UI".into(), Err("Harlo is turned off".into()))]));
+        assert!(a.contains("started your helpers: \"API\" (k1).") && a.contains("These didn't start: \"UI\": Harlo is turned off."), "{a}");
     }
 }
 

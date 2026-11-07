@@ -147,7 +147,7 @@ impl SearchIndex {
     }
 
     /// `update` for sessions anywhere: each with the stamp it has (a remote
-    /// host's, an OpenCode database row's), read by `read` when it changed.
+    /// host's), read by `read` when it changed.
     pub fn update_with(&mut self, files: &[(PathBuf, i64, i64)], read: impl Fn(&Path) -> Vec<Value>) -> Result<usize> {
         self.update_parts(files, |p, _| Part { messages: read(p), ..Default::default() })
     }

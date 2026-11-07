@@ -1,9 +1,7 @@
-//! Harnesses (pi, omp, Claude Code, OpenCode) and the translation of their
+//! Harnesses (pi, omp, Claude Code, Harlo) and the translation of their
 //! protocols into one normalized event vocabulary.
 
 mod demo;
-pub mod acp;
-mod acp_run;
 mod ask_bridge;
 pub mod branches;
 pub mod claude;
@@ -12,8 +10,6 @@ pub mod event;
 pub mod file_blocks;
 pub mod framing;
 pub mod mirror;
-pub mod opencode;
-mod opencode_run;
 mod permission_bridge;
 pub mod process;
 pub mod protocol_log;
@@ -21,16 +17,6 @@ pub mod store;
 
 pub use event::{BlockKind, HarnessEvent, HarnessKind, NoticeLevel, Translator};
 pub use process::{Harness, HarnessConfig, RemoteLaunch, SendMode, SessionTarget, image_from_file, on_host, resolve_program};
-pub use opencode_run::shutdown as stop_opencode;
-pub use opencode_run::shutdown_on as stop_opencode_on;
-pub use opencode_run::reload_if_idle as reload_opencode_if_idle;
-pub use acp::shutdown as stop_acp;
-/// A remote host's OpenCode: its sessions, a saved one, its prompts. And
-/// deleting a session (here or there).
-pub use opencode_run::{
-    delete_session as opencode_delete_session, remote_saved as opencode_remote_saved, remote_sessions as opencode_remote_sessions,
-    remote_subagents as opencode_remote_subagents, remote_user_entries as opencode_remote_user_entries,
-};
 pub use store::SessionInfo;
 
 /// Whether a model's server (its `baseUrl`) is this computer or the local
@@ -75,7 +61,7 @@ pub fn is_local_url(url: &str) -> bool {
 }
 
 /// harlo's MCP bridge (`<harlo> --mcp-bridge`), given to the agents harlo
-/// starts here (Claude with each run, OpenCode with its server). Unset: no
+/// starts here (Claude with each run). Unset: no
 /// bridge (tests, other users of this crate).
 static MCP_BRIDGE: std::sync::OnceLock<(std::path::PathBuf, std::path::PathBuf)> = std::sync::OnceLock::new();
 
@@ -171,7 +157,7 @@ mod tests {
         for url in ["http://127.0.0.1:8080/v1", "http://localhost:11434", "http://192.168.1.20:1234/v1", "http://10.0.0.5/v1", "http://[::1]:8080", "http://100.101.102.103:8080", "http://gpu-box.local:8000/v1", "http://box.tail1234.ts.net/v1"] {
             assert!(is_local_url(url), "{url}");
         }
-        for url in ["https://api.openai.com/v1", "https://opencode.ai/inference/openai/v1", "https://8.8.8.8/v1", "http://100.200.1.1", ""] {
+        for url in ["https://api.openai.com/v1", "https://8.8.8.8/v1", "http://100.200.1.1", ""] {
             assert!(!is_local_url(url), "{url}");
         }
     }

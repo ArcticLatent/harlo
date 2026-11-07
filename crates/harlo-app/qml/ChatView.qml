@@ -677,7 +677,7 @@ Rectangle {
                     required property string modelData
                     required property int index
                     // Every agent's can be dropped, and a follow-up sent now.
-                    readonly property bool editable: ["omp", "claude", "pi", "opencode", "hermes", "harlo", "demo"].includes(session.harness)
+                    readonly property bool editable: ["omp", "claude", "pi", "harlo", "demo"].includes(session.harness)
                     width: parent.width
                     implicitHeight: 22
                     HoverHandler { id: queuedHover }
@@ -868,13 +868,13 @@ Rectangle {
         RowLayout {
             id: limitLine
             objectName: "limitLine"
-            // Whose limits: Claude's sign-in, else the model's provider (as
-            // omp names its accounts; OpenCode's "openai" is ChatGPT's).
+            // Whose limits: Claude's sign-in, Harlo's Codex sign-in, else the
+            // model's provider (as omp names its accounts).
             readonly property string provider: {
-                if (session.harness === "claude") return "Claude"
-                if (!["pi", "omp", "opencode"].includes(session.harness)) return ""
                 const p = (session.modelId || "").split("/")[0]
-                return session.harness === "opencode" && p === "openai" ? "openai-codex" : p
+                if (session.harness === "claude") return "Claude"
+                if (session.harness === "harlo") return p === "codex" ? "openai-codex" : ""
+                return ["pi", "omp"].includes(session.harness) ? p : ""
             }
             // Its machine's limits (another's: what its Claude sessions said).
             readonly property string host: (/^ssh:\/\/([^\/]+)/.exec(session.cwd) || [])[1] || ""

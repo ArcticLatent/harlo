@@ -3,8 +3,8 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import harlo
 
-// Settings → MCP: the tool servers your agents (omp, pi, Claude, OpenCode,
-// Hermes, Harlo) can call, globally or in a project. A grid of servers with their status
+// Settings → MCP: the tool servers your agents (omp, pi, Claude, Harlo)
+// can call, globally or in a project. A grid of servers with their status
 // (harlo tests them: the agents don't report one), and a page per server
 // to edit it.
 ColumnLayout {
@@ -68,7 +68,7 @@ ColumnLayout {
         editing = e
     }
     /// The agents that are on (Settings → Providers) and have MCP servers.
-    readonly property var agents: (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.chatProvidersJson()) : []).filter(p => ["omp", "pi", "claude", "opencode", "hermes", "harlo"].includes(p.id))
+    readonly property var agents: (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.chatProvidersJson()) : []).filter(p => ["omp", "pi", "claude", "harlo"].includes(p.id))
     /// A new server is for the installed ones (all of them if none is).
     function defaultAgents() {
         const ids = agents.map(a => a.id), installed = ids.filter(id => Mcp.installedOn(id, page.scope))
@@ -363,7 +363,7 @@ ColumnLayout {
                 model: page.agents
                 AppCheckBox {
                     required property var modelData
-                    objectName: "mcpFor" + ({ omp: "Omp", pi: "Pi", claude: "Claude", opencode: "OpenCode", hermes: "Hermes", harlo: "Harlo" })[modelData.id]
+                    objectName: "mcpFor" + ({ omp: "Omp", pi: "Pi", claude: "Claude", harlo: "Harlo" })[modelData.id]
                     text: modelData.label
                     checked: page.editing !== null && page.editing.harnesses.includes(modelData.id)
                     onToggled: page.toggleHarness(modelData.id, checked)
@@ -429,7 +429,7 @@ ColumnLayout {
         SectionTitle_ { text: detail.local ? "Environment variables" : "Request headers" }
         RowLayout {
             Layout.fillWidth: true
-            Hint_ { text: detail.local ? "Values the server needs, such as an API key. ${VAR} reads one from your environment (OpenCode: {env:VAR}); omp, pi and Harlo also run !command." : "Such as Authorization: Bearer …" }
+            Hint_ { text: detail.local ? "Values the server needs, such as an API key. ${VAR} reads one from your environment; omp, pi and Harlo also run !command." : "Such as Authorization: Bearer …" }
             FlatButton { text: page.showSecrets ? "Hide values" : "Show values"; outlined: false; font.pixelSize: Theme.px(12); onClicked: page.showSecrets = !page.showSecrets }
         }
         PairsEditor_ {
@@ -621,7 +621,7 @@ ColumnLayout {
         ColumnLayout {
             width: parent.width
             spacing: 8
-            Hint_ { text: "Paste an mcpServers snippet from Claude, Cursor, VS Code, pi or omp (or OpenCode's mcp)." }
+            Hint_ { text: "Paste an mcpServers snippet from Claude, Cursor, VS Code, pi or omp." }
             ScrollView {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 180

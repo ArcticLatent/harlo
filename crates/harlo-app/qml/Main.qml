@@ -774,12 +774,6 @@ ApplicationWindow {
             if (chat.isDraft) chat.draftView.loadHostModels()
             else chat.session.recheckModels()
         }
-        onClosed: if (!settingsDialog.visible) Accounts.release()
-        onRunInTerminal: (folder, command) => {
-            if (settingsDialog.visible) settingsDialog.close()
-            if (!windowSettings.terminalOpen) win.toggleTerminal()
-            Qt.callLater(() => terminal.runIn(folder, command))
-        }
     }
     // The firewall stops a paired phone on one of harlo's addresses.
     PhoneFirewallToast {
@@ -842,7 +836,6 @@ ApplicationWindow {
         onSetupRequested: win.openSetupGuide()
         onPairDeviceRequested: pairDeviceDialog.open()
         onSignInRequested: (agent, label) => signInDialog.openFor(agent, label)
-        onClosed: if (!signInDialog.visible) Accounts.release()
         onTrayToggled: on => win.setTrayEnabled(on)
         onPromptRailToggled: on => chat.transcript.promptRail = on
         onOpenFileRequested: path => {

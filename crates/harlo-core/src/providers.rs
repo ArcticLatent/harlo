@@ -1,8 +1,7 @@
-//! Settings → Providers: whether each agent (Claude, OpenCode, Pi, Oh My
-//! Pi) is installed, its version and its models. Checked on demand: Claude's
-//! models are a curated list, OpenCode's come from a private server, pi's
-//! and omp's from a short RPC run with no session (no prompt is sent, so
-//! nothing is spent).
+//! Settings → Providers: whether each agent (Harlo, Claude, Pi, Oh My Pi)
+//! is installed, its version and its models. Checked on demand: Claude's
+//! models are a curated list, the others' come from a short RPC run with
+//! no session (no prompt is sent, so nothing is spent).
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -31,7 +30,7 @@ pub fn program(kind: HarnessKind, configured: &str) -> Option<PathBuf> {
     harlo_harness::resolve_program(kind)
 }
 
-/// "2.1.296 (Claude Code)", "opencode v2.0.25", "omp/18.8.9" → the number.
+/// "2.1.296 (Claude Code)", "harlo-agent v2.0.25", "omp/18.8.9" → the number.
 pub fn version_number(line: &str) -> String {
     line.split(|c: char| c.is_whitespace() || c == '/')
         .map(|w| w.trim_start_matches('v'))
@@ -81,20 +80,7 @@ pub fn check(kind: HarnessKind, configured: &str, runtime: &tokio::runtime::Hand
             .into_iter()
             .map(|(id, name)| (id, name, false))
             .collect()),
-        HarnessKind::OpenCode => match version.as_deref().and_then(harlo_harness::opencode::version_number) {
-            Some(v) if !harlo_harness::opencode::supported(&v) => Err(format!("OpenCode {v} is too old: harlo needs 2.0.20 or later")),
-            _ => harlo_harness::opencode::Server::start(&program, &scratch)
-                .and_then(|server| harlo_harness::opencode::models(&server, &scratch))
-                .map_err(|e| format!("{e:#}")),
-        },
         HarnessKind::Pi | HarnessKind::Omp | HarnessKind::Harlo => runtime.block_on(rpc_models(kind, program.clone(), scratch)),
-        // An ACP agent: the models a session of its offers.
-        HarnessKind::Hermes => harlo_harness::acp::models(kind, &program)
-            .map(|m| {
-                let servers = crate::model_servers::servers(kind);
-                m.into_iter().map(|(id, name)| (id.clone(), name, crate::model_servers::hermes_local(&id, &servers))).collect()
-            })
-            .map_err(|e| format!("{e:#}")),
         HarnessKind::Demo => Ok(Vec::new()),
     };
     match models {
@@ -205,7 +191,7 @@ mod tests {
     #[test]
     fn version_numbers() {
         assert_eq!(super::version_number("2.1.296 (Claude Code)"), "2.1.296");
-        assert_eq!(super::version_number("opencode v2.0.25"), "2.0.25");
+        assert_eq!(super::version_number("harlo-agent v2.0.25"), "2.0.25");
         assert_eq!(super::version_number("omp/18.8.9"), "18.8.9");
         assert_eq!(super::version_number("1.0.4"), "1.0.4");
     }

@@ -53,12 +53,8 @@ Rectangle {
         id: trashDialog
         property string key: ""
         property string label: ""
-        // What happens to it: its file goes to the trash; OpenCode deletes
-        // it (it's in OpenCode's database); Hermes keeps it (ACP has no
-        // deleting), harlo stops listing it.
+        // What happens to it: its file goes to the trash.
         property string harness: ""
-        readonly property bool opencode: harness === "opencode"
-        readonly property bool listOnly: harness === "hermes"
         // (One name for it everywhere; what it does here, said below.)
         title: "Delete session?"
         modal: true
@@ -68,9 +64,7 @@ Rectangle {
             DialogButton { text: "Delete"; DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole; accent: false; destructive: true }
         }
         Label {
-            text: trashDialog.label + "\n\n" + (trashDialog.opencode ? "OpenCode deletes it with its subagents' sessions. This can't be undone."
-                                     : trashDialog.listOnly ? Theme.harnessLabel(trashDialog.harness) + " can't delete sessions, so it keeps its own copy; harlo stops listing it."
-                                     : "Its file goes to the trash, so you can still restore it from there.")
+            text: trashDialog.label + "\n\nIts file goes to the trash, so you can still restore it from there."
             width: 360; wrapMode: Text.Wrap; color: Theme.muted
         }
         onAccepted: Workspace.trashSession(key)

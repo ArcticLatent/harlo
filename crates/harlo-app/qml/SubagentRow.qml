@@ -3,7 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import harlo
 
-// One subagent (omp's, Claude's, OpenCode's): status, name, task, the tool
+// One subagent (omp's, Claude's, Harlo's): status, name, task, the tool
 // it is running, and View / Steer / Cancel (where its provider can).
 // Used by the subagent dock and under task tool rows.
 Rectangle {

@@ -442,7 +442,7 @@ pub fn resets_due(accounts: &[Value], since: i64, now: i64) -> Vec<(String, Stri
 }
 
 /// Whose limits a session draws on: Claude's sign-in, else its model's
-/// provider (as omp names its accounts; OpenCode's "openai" is ChatGPT's).
+/// provider (as omp names its accounts).
 /// "" for an agent without plan limits.
 pub fn session_provider(harness: &str, model_id: &str) -> String {
     if harness == "claude" {
@@ -453,11 +453,10 @@ pub fn session_provider(harness: &str, model_id: &str) -> String {
     if harness == "harlo" {
         return if model_id.split('/').next() == Some("codex") { "openai-codex".to_owned() } else { String::new() };
     }
-    if !matches!(harness, "pi" | "omp" | "opencode") {
+    if !matches!(harness, "pi" | "omp") {
         return String::new();
     }
-    let p = model_id.split('/').next().unwrap_or_default();
-    if harness == "opencode" && p == "openai" { "openai-codex".to_owned() } else { p.to_owned() }
+    model_id.split('/').next().unwrap_or_default().to_owned()
 }
 
 /// A session's plan limit as the line above the composer says it (None:
@@ -574,10 +573,10 @@ mod tests {
         let claude = session_limit(&accounts, "claude", "").unwrap();
         assert_eq!((claude["label"].as_str(), claude["out"].as_bool(), claude["resetAt"].as_i64()), (Some("Session (5 h)"), Some(true), Some(2000)));
         // Under 90%, an agent without plan limits, a provider with none here.
-        assert!(session_limit(&accounts, "opencode", "openai/gpt-6").is_none());
-        assert!(session_limit(&accounts, "hermes", "anthropic/x").is_none());
+        assert!(session_limit(&accounts, "harlo", "codex/gpt-6").is_none());
+        assert!(session_limit(&accounts, "harlo", "llama/x").is_none());
         assert!(session_limit(&accounts, "pi", "anthropic/x").is_none());
-        assert_eq!(session_provider("opencode", "openai/gpt-6"), "openai-codex");
+        assert_eq!(session_provider("harlo", "codex/gpt-6"), "openai-codex");
     }
 
     #[test]

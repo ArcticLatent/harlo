@@ -754,7 +754,7 @@ mod tests {
         let c = parse("fs", &json!({ "command": "npx", "args": ["-y", "srv", "${HARLO_NOPE:-.}"], "cwd": "tools", "timeout": 5 }), p).unwrap();
         assert_eq!(c.kind, Kind::Stdio { program: "npx".into(), args: vec!["-y".into(), "srv".into(), ".".into()] });
         assert_eq!((c.cwd.as_deref(), c.timeout), (Some("/proj/tools"), Duration::from_secs(5)));
-        // (A url alone is an address; OpenCode's argv form works too.)
+        // (A url alone is an address; a command given as an argv works too.)
         assert!(matches!(parse("u", &json!({ "url": "http://h/mcp" }), p).unwrap().kind, Kind::Http { .. }));
         assert_eq!(parse("o", &json!({ "command": ["srv", "--x"] }), p).unwrap().kind, Kind::Stdio { program: "srv".into(), args: vec!["--x".into()] });
         assert!(parse("s", &json!({ "type": "sse", "url": "http://h/sse" }), p).unwrap_err().contains("SSE"));

@@ -117,7 +117,7 @@ pub mod qobject {
         #[qinvokable]
         fn remove_project(self: Pin<&mut Workspace>, id: i32);
         /// What a project's sessions are, for asking before removing it:
-        /// `{ count, trash, opencode, listed, archived, running, worktree }`.
+        /// `{ count, trash, archived, running, worktree }`.
         #[qinvokable]
         fn project_sessions(self: &Workspace, id: i32) -> QString;
         /// Removes a project and deletes its sessions, each as Delete session
@@ -1108,7 +1108,7 @@ fn is_home(folder: &str, home: &str) -> bool {
 /// read, without waiting for them).
 fn has_shield(harness: &str, cwd: &Path) -> bool {
     match harness {
-        "omp" | "demo" | "claude" | "opencode" | "hermes" => true,
+        "omp" | "demo" | "claude" => true,
         "pi" => match harlo_core::remote::host_of(cwd) {
             None => harlo_core::pi_packages::enabled(harlo_core::pi_packages::PERMISSIONS),
             Some(h) => harlo_core::pi_packages::enabled_on(&h, harlo_core::pi_packages::PERMISSIONS, false),
@@ -1452,36 +1452,15 @@ impl cxx_qt::Initialize for Workspace {
                     }
                 }
                 looked_at = now;
-                for (name, host_roots) in hosts {
+                for (name, _) in hosts {
                     if harlo_core::remote::is_disconnected(&name) || retry_at.get(&name).is_some_and(|(t, _)| std::time::Instant::now() < *t) {
                         continue;
                     }
                     let host = harlo_core::remote::host(&name);
-                    // A host's first look: what's quick to read shows first,
-                    // OpenCode's (its server there starting) right after.
-                    if !scanned.contains(&name)
-                        && let Some(h) = host.clone()
-                    {
-                        let r = host_roots.clone();
-                        let (s, quick) = tokio::task::spawn_blocking(move || {
-                            let mut scanner = scanner;
-                            let delta = scanner.poll_quick(&h, &r);
-                            (scanner, delta)
-                        })
-                        .await
-                        .expect("remote scan task");
-                        scanner = s;
-                        if let Ok(delta) = quick
-                            && !delta.is_empty()
-                            && thread.queue(move |this| this.apply_scan(delta)).is_err()
-                        {
-                            return;
-                        }
-                    }
                     let (s, result) = tokio::task::spawn_blocking(move || {
                         let mut scanner = scanner;
                         let result = match &host {
-                            Some(h) => scanner.poll(h, &host_roots),
+                            Some(h) => scanner.poll(h),
                             // Removed from Settings: its sessions leave.
                             None => Ok(scanner.forget_host(&name)),
                         };
@@ -1495,10 +1474,7 @@ impl cxx_qt::Initialize for Workspace {
                     if harlo_core::remote::is_disconnected(&name)
                         && let Some(host) = harlo_core::remote::host(&name)
                     {
-                        tokio::task::spawn_blocking(move || {
-                            harlo_harness::stop_opencode_on(&host.name);
-                            harlo_core::remote::disconnect(&host);
-                        });
+                        tokio::task::spawn_blocking(move || harlo_core::remote::disconnect(&host));
                     }
                     match result {
                         Ok(delta) => {
@@ -1633,9 +1609,7 @@ impl Workspace {
         let saved = |s: &sidebar::ProjectSession| self.file_for_key(&s.key).is_some();
         let v = serde_json::json!({
             "count": list.len(),
-            "trash": count(&|s| saved(s) && s.harness != "opencode" && s.harness != "hermes"),
-            "opencode": count(&|s| saved(s) && s.harness == "opencode"),
-            "listed": count(&|s| saved(s) && s.harness == "hermes"),
+            "trash": count(&|s| saved(s)),
             "archived": count(&|s| s.archived),
             "running": count(&|s| s.running),
             "worktree": count(&|s| s.worktree),
@@ -1649,34 +1623,17 @@ impl Workspace {
         for s in &list {
             let file = self.file_for_key(&s.key);
             self.as_mut().close_session(&QString::from(&s.key));
-            match file {
-                // An ACP agent's: out of harlo's list (ACP can't delete one).
-                Some(f) => match harlo_harness::acp::session_of(&f) {
-                    Some(r) => {
-                        harlo_harness::acp::forget(&r);
-                        self.as_mut().rust_mut().sessions.remove(&f);
-                    }
-                    None => files.push(f),
-                },
-                None => {}
-            }
+            files.extend(file);
         }
         self.as_mut().rebuild();
-        // The files and OpenCode's (its server), off the UI thread: the
-        // project goes when they have, so they don't pass through Other
-        // sessions on the way.
-        let program = self.program_for(HarnessKind::OpenCode).unwrap_or_else(|| PathBuf::from("opencode"));
+        // The files, off the UI thread: the project goes when they have, so
+        // they don't pass through Other sessions on the way.
         self.background(
             move || {
                 files
                     .into_iter()
                     .map(|file| {
-                        let done = if harlo_harness::opencode::is_session_path(&file) {
-                            let remote = harlo_core::remote::host_of(&file).and_then(|h| harlo_core::remote::host(&h)).map(|h| harlo_core::remote::launch(&h));
-                            harlo_harness::opencode_delete_session(&program, remote.as_ref(), &file).map_err(|e| format!("{e:#}"))
-                        } else {
-                            harlo_core::remote::trash(&file).map_err(|e| format!("{e:#}"))
-                        };
+                        let done = harlo_core::remote::trash(&file).map_err(|e| format!("{e:#}"));
                         (file, done)
                     })
                     .collect::<Vec<_>>()
@@ -2924,7 +2881,7 @@ impl Workspace {
         if let Some(live) = registry::get(&child) {
             live.handle.send_raw(json!({ "type": "set_session_name", "name": title }));
         }
-        self.as_mut().adopt(&child, &key, &title, kind.as_str(), true, None, "");
+        self.as_mut().adopt(&child, &key, &title, kind.as_str(), true, None);
         // (Its progress shows in the session's Subagents box.)
         send_first_prompt(&child, FirstPrompt { text: prompt, ..Default::default() }, Some(self.qt_thread()));
         QString::default()
@@ -3065,30 +3022,6 @@ impl Workspace {
         let key_s = key.to_string();
         let Some(file) = self.file_for_key(&key_s) else { return };
         self.as_mut().close_session(key);
-        // An ACP agent's: out of harlo's list (ACP can't delete one).
-        if let Some(r) = harlo_harness::acp::session_of(&file) {
-            harlo_harness::acp::forget(&r);
-            self.as_mut().rust_mut().sessions.remove(&file);
-            self.rebuild();
-            return;
-        }
-        // OpenCode's are in its database: deleted through its server.
-        if harlo_harness::opencode::is_session_path(&file) {
-            let program = self.program_for(HarnessKind::OpenCode).unwrap_or_else(|| PathBuf::from("opencode"));
-            let remote = harlo_core::remote::host_of(&file).and_then(|h| harlo_core::remote::host(&h)).map(|h| harlo_core::remote::launch(&h));
-            let path = file.clone();
-            self.background(
-                move || harlo_harness::opencode_delete_session(&program, remote.as_ref(), &path),
-                move |mut this, result| match result {
-                    Ok(()) => {
-                        this.as_mut().rust_mut().sessions.remove(&file);
-                        this.rebuild();
-                    }
-                    Err(e) => this.set_error_text(QString::from(&format!("Could not delete the OpenCode session: {e:#}"))),
-                },
-            );
-            return;
-        }
         match harlo_core::remote::trash(&file) {
             Ok(()) => {
                 self.as_mut().rust_mut().sessions.remove(&file);
@@ -3387,8 +3320,8 @@ impl Workspace {
                     // Run lanes start in the background; the run's overview is the tab.
                     let key = this.as_mut().start_session_thinking(kind, path.clone(), &model, &thinking, lane.is_none() && parent.is_none());
                     // Started by an agent: its subagent.
-                    if let Some((parent, title, notify, code)) = parent {
-                        this.as_mut().adopt(&key, &parent, &title, kind.as_str(), notify, plan_step, &code);
+                    if let Some((parent, title, notify)) = parent {
+                        this.as_mut().adopt(&key, &parent, &title, kind.as_str(), notify, plan_step);
                     }
                     if let Some(lane) = lane {
                         if let Some(mut l) = this.find_run(&lane.0).and_then(|r| r.lanes.into_iter().find(|l| l.idx == lane.1)) {
@@ -4478,9 +4411,9 @@ impl Workspace {
     /// The shield's mode a session starts in, before it's switched.
     fn starting_approval(&self, harness: &str, cwd: &Path) -> QString {
         // Claude asks first unless told otherwise (its own settings may
-        // differ); for pi, OpenCode and Hermes the shield answers what they ask;
-        // harlo-agent asks as it's told.
-        if matches!(harness, "pi" | "claude" | "opencode" | "hermes" | "harlo") {
+        // differ); for pi the shield answers what it asks; harlo-agent asks
+        // as it's told.
+        if matches!(harness, "pi" | "claude" | "harlo") {
             return QString::from("always-ask");
         }
         // On a remote host: that machine's omp config (read with its overlay).
@@ -4608,10 +4541,9 @@ impl Workspace {
             let modes = self.modes.get(key).cloned().unwrap_or_default();
             self.as_mut().save_overlay(path, model, modes);
         }
-        // Claude switches its permission mode, OpenCode its agent, Hermes its
-        // mode, on the spot; pi's permission prompts are answered by harlo;
-        // harlo-agent takes the modes itself.
-        if self.live.get(key).is_some_and(|e| matches!(e.info.harness.as_str(), "pi" | "claude" | "opencode" | "hermes" | "harlo"))
+        // Claude switches its permission mode on the spot; pi's permission
+        // prompts are answered by harlo; harlo-agent takes the modes itself.
+        if self.live.get(key).is_some_and(|e| matches!(e.info.harness.as_str(), "pi" | "claude" | "harlo"))
             && let Some(live) = registry::get(key)
         {
             let modes = self.modes.get(key).cloned().unwrap_or_default();
@@ -4773,10 +4705,6 @@ impl Workspace {
                 });
             }
             return QString::from(known.map(|k| k.0).unwrap_or_default().as_str());
-        }
-        // An OpenCode session (a subagent's): when it last changed.
-        if let Some(t) = harlo_harness::opencode::stamp(Path::new(&path.to_string())) {
-            return QString::from(&t);
         }
         let stamp = std::fs::metadata(path.to_string()).ok().map(|m| {
             let modified = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
@@ -5595,25 +5523,16 @@ impl Workspace {
         entry.info.needs_input = !entry.requests.is_empty();
         let _ = needed_input;
         let file_changed = entry.info.session_file != file_before;
-        // Whose limits it's using: Claude's sign-in, or (omp, pi, OpenCode)
-        // the model's provider, as omp names its accounts (OpenCode's
-        // "openai" is the ChatGPT sign-in, omp's "openai-codex").
+        // Whose limits it's using: Claude's sign-in, or (omp, pi) the
+        // model's provider, as omp names its accounts.
         let limited_by = match entry.info.harness.as_str() {
             "claude" => Some("Claude".to_owned()),
-            "omp" | "pi" | "opencode" => entry.model_id.split_once('/').map(|(p, _)| p.to_owned()).filter(|p| !p.is_empty()),
+            "omp" | "pi" => entry.model_id.split_once('/').map(|(p, _)| p.to_owned()).filter(|p| !p.is_empty()),
             // Harlo: the plan's through the Codex sign-in ("codex/…"); the
             // official sign-in, API keys and other servers say no limits.
             "harlo" => (entry.model_id.split_once('/').map(|(p, _)| p) == Some("codex")).then(|| "openai-codex".to_owned()),
-            // Hermes: its provider; one of its own servers by its name
-            // ("custom/<server>:<model>"); none when it picks ("auto").
-            "hermes" => match entry.model_id.split_once('/') {
-                Some(("custom", rest)) => rest.split_once(':').map(|(server, _)| server.to_owned()),
-                Some((p, _)) if !p.is_empty() && p != "auto" => Some(p.to_owned()),
-                _ => None,
-            },
             _ => None,
-        }
-        .map(|p| if entry.info.harness == "opencode" && p == "openai" { "openai-codex".to_owned() } else { p });
+        };
         // (The machine it runs on: its meter.)
         let on_host = harlo_core::remote::host_of(&entry.info.cwd).unwrap_or_default();
         let pi_openai = entry.info.harness == "pi" && limited_by.as_deref() == Some("openai");
@@ -5729,7 +5648,7 @@ impl Workspace {
         }
         // Its calls of harlo's tools: the caller is the session itself.
         for (call, tool, args) in harlo_calls {
-            let result = self.as_mut().orchestrate_as(Some(key.to_owned()), false, &tool, &args);
+            let result = self.as_mut().orchestrate_as(Some(key.to_owned()), &tool, &args);
             crate::orchestration::answer_pipe(self.qt_thread(), key.to_owned(), call, tool, args, result);
         }
         for note in notes {
@@ -6248,8 +6167,7 @@ struct WorktreeStart {
     thinking: String,
     lane: Option<(String, i64)>,
     /// Started by an agent (orchestration): its session, the title, notify.
-    /// (Its helper id: see `OrchChild::code`.)
-    parent: Option<(String, String, bool, String)>,
+    parent: Option<(String, String, bool)>,
     /// The shield's mode to start in.
     approval: Option<String>,
     /// The step of its parent's plan it does (a run with helpers).
@@ -6289,9 +6207,6 @@ struct OrchChild {
     parent: String,
     title: String,
     agent: String,
-    /// Its helper id, from its briefing ("" none): OpenCode's sessions
-    /// share a server, so they say who they are with it.
-    code: String,
     /// Its report (or last reply) goes back to the parent when it
     /// finishes, and its questions.
     notify: bool,
@@ -6503,19 +6418,9 @@ fn branches_json(list: Vec<harlo_harness::branches::BranchInfo>) -> String {
 }
 
 /// A saved session's messages for the search index: read as its agent
-/// writes them, here or (over SSH, or through OpenCode's server) on its host.
+/// writes them, here or (over SSH) on its host.
 fn session_messages(path: &Path, kind: HarnessKind) -> Vec<serde_json::Value> {
     let remote = harlo_core::remote::host_of(path).and_then(|h| harlo_core::remote::host(&h));
-    if kind == HarnessKind::OpenCode {
-        return match &remote {
-            Some(host) => harlo_harness::opencode_remote_saved(&harlo_core::remote::launch(host), path).messages,
-            None => harlo_harness::opencode::saved(path).messages,
-        };
-    }
-    // An ACP agent's: harlo's copy.
-    if harlo_harness::acp::is_acp(kind) {
-        return harlo_harness::acp::cached(path).map(|s| s.messages).unwrap_or_default();
-    }
     match remote {
         Some(_) => harlo_core::remote::local_copy(path).ok().and_then(|copy| harlo_harness::store::read_saved_for(kind, &copy).ok()).map(|s| s.messages).unwrap_or_default(),
         None => harlo_harness::store::read_saved_for(kind, path).map(|s| s.messages).unwrap_or_default(),
@@ -6534,30 +6439,14 @@ fn session_part(path: &Path, kind: HarnessKind, resume: Option<&harlo_harness::c
 
 impl Workspace {
     /// An agent's tool call (orchestration): `token` is its session's
-    /// `HARLO_SESSION`; `opencode`: it came through OpenCode's server (whose
-    /// running session is the caller).
-    pub(crate) fn orchestrate(self: Pin<&mut Self>, token: &str, opencode: bool, tool: &str, args: &serde_json::Value) -> Result<serde_json::Value, String> {
-        // (OpenCode's: a helper says its id; else the one at work.)
-        let named = args["helper"].as_str().map(str::trim).filter(|c| opencode && !c.is_empty()).and_then(|c| {
-            self.orch_children.iter().find(|(k, ch)| ch.code == c && self.live.contains_key(*k)).map(|(k, _)| k.clone())
-        });
-        let caller = self.orch_tokens.get(token).cloned().or(named).or_else(|| {
-            if !opencode {
-                return None;
-            }
-            // (Without an id: not a helper that has one, if any is at work;
-            // its parent starting another, say.)
-            let busy = |e: &&LiveEntry| e.info.harness == "opencode" && e.info.status == SessionStatus::Busy;
-            let has_id = |k: &str| self.orch_children.get(k).is_some_and(|c| !c.code.is_empty());
-            let latest = |only_unnamed: bool| self.live.values().filter(busy).filter(|e| !only_unnamed || !has_id(&e.info.key)).max_by_key(|e| e.info.started_at).map(|e| e.info.key.clone());
-            latest(true).or_else(|| latest(false))
-        });
-        self.orchestrate_as(caller, opencode, tool, args)
+    /// `HARLO_SESSION`.
+    pub(crate) fn orchestrate(self: Pin<&mut Self>, token: &str, tool: &str, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+        let caller = self.orch_tokens.get(token).cloned();
+        self.orchestrate_as(caller, tool, args)
     }
 
-    /// A tool call from `caller` (None: not a session harlo knows;
-    /// `opencode`: through OpenCode's shared server).
-    fn orchestrate_as(mut self: Pin<&mut Self>, caller: Option<String>, opencode: bool, tool: &str, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    /// A tool call from `caller` (None: not a session harlo knows).
+    fn orchestrate_as(mut self: Pin<&mut Self>, caller: Option<String>, tool: &str, args: &serde_json::Value) -> Result<serde_json::Value, String> {
         use serde_json::json;
         if !self.orchestration_on {
             return Err("Orchestration is turned off in harlo (Settings → Orchestration).".into());
@@ -6575,8 +6464,7 @@ impl Workspace {
         if tool == harlo_core::orchestration::TOOLS {
             let mut tools = harlo_core::orchestration::tools(self.agents_starting()).as_array().cloned().unwrap_or_default();
             // A helper: its report and its questions for its parent.
-            // (OpenCode lists its tools once for all its sessions: always.)
-            if opencode || caller.as_ref().and_then(|c| self.orch_children.get(c)).is_some_and(|c| c.notify) {
+            if caller.as_ref().and_then(|c| self.orch_children.get(c)).is_some_and(|c| c.notify) {
                 tools.extend(harlo_core::orchestration::helper_tools().as_array().cloned().unwrap_or_default());
             }
             if let Some((_, specs, plan, commits)) = &features {
@@ -6676,7 +6564,7 @@ impl Workspace {
             "start_session" => {
                 let agent = text("agent").to_lowercase();
                 let Some(kind) = HarnessKind::parse(&agent).filter(|k| *k != HarnessKind::Demo || agent == "demo") else {
-                    return Err(format!("Unknown agent \"{agent}\": use claude, opencode, pi, omp, hermes or harlo (list_agents)."));
+                    return Err(format!("Unknown agent \"{agent}\": use harlo, claude, pi or omp (list_agents)."));
                 };
                 if !self.usable_harness(kind) {
                     return Err(format!("{} is turned off in harlo (Settings → Providers).", kind.label()));
@@ -6722,7 +6610,6 @@ impl Workspace {
                 // A helper works as its parent may: the same permission mode.
                 let approval = caller.as_deref().and_then(|c| self.approval_of(c)).filter(|_| has_shield(kind.as_str(), &cwd));
                 // A helper: told what it is and how its result goes back.
-                let code = helper_code(kind);
                 let branch = text("worktree");
                 // (The closest: a project can be inside another's folder.)
                 let project = self.projects.iter().filter(|p| cwd.starts_with(&p.path)).max_by_key(|p| p.path.components().count()).cloned();
@@ -6737,7 +6624,7 @@ impl Workspace {
                     (Some(p), false) => format!("{prompt}{}", harlo_core::orchestration::worktree_note(&branch, &p.path.to_string_lossy())),
                     _ => prompt,
                 };
-                let prompt = if notify { harlo_core::orchestration::helper_brief(&self.title_of(&parent), &prompt, self.has_harlo_tools(kind, &cwd), &code) } else { prompt };
+                let prompt = if notify { harlo_core::orchestration::helper_brief(&self.title_of(&parent), &prompt, self.has_harlo_tools(kind, &cwd)) } else { prompt };
                 // In a new worktree: made in the background; it shows when ready.
                 if !branch.is_empty() {
                     let Some(project) = project else {
@@ -6749,7 +6636,7 @@ impl Workspace {
                         &QString::from(&branch),
                         &QString::default(),
                         &QString::from(kind.as_str()),
-                        WorktreeStart { first: Some(first), model, thinking: thinking.clone(), lane: None, parent: caller.as_ref().map(|_| (parent, title.clone(), notify, code)), approval, plan_step: None },
+                        WorktreeStart { first: Some(first), model, thinking: thinking.clone(), lane: None, parent: caller.as_ref().map(|_| (parent, title.clone(), notify)), approval, plan_step: None },
                     );
                     return Ok(json!({ "status": "creating the worktree; the session starts in it shortly (see list_sessions)", "branch": branch, "title": title }));
                 }
@@ -6759,7 +6646,7 @@ impl Workspace {
                     live.handle.send_raw(json!({ "type": "set_session_name", "name": title }));
                 }
                 if caller.is_some() {
-                    self.as_mut().adopt(&key, &parent, &title, kind.as_str(), notify, None, &code);
+                    self.as_mut().adopt(&key, &parent, &title, kind.as_str(), notify, None);
                 }
                 if let Some(mode) = &approval {
                     self.as_mut().set_approval_mode(&QString::from(&key), &QString::from(mode));
@@ -6855,7 +6742,7 @@ impl Workspace {
                     }
                     let agent = h.agent.clone();
                     let Some(kind) = HarnessKind::parse(&agent).filter(|k| *k != HarnessKind::Demo || agent == "demo") else {
-                        return Err(format!("Unknown agent \"{agent}\" for \"{}\": use claude, opencode, pi, omp, hermes or harlo (list_agents).", h.title));
+                        return Err(format!("Unknown agent \"{agent}\" for \"{}\": use harlo, claude, pi or omp (list_agents).", h.title));
                     };
                     if !self.usable_harness(kind) {
                         return Err(format!("{} is turned off in harlo (Settings → Providers): pick another agent for \"{}\".", kind.label(), h.title));
@@ -6901,8 +6788,8 @@ impl Workspace {
     }
 
     /// `key` was started by `parent`'s agent: it's that session's subagent.
-    fn adopt(mut self: Pin<&mut Self>, key: &str, parent: &str, title: &str, agent: &str, notify: bool, plan_step: Option<u32>, code: &str) {
-        self.as_mut().rust_mut().orch_children.insert(key.to_owned(), OrchChild { parent: parent.to_owned(), title: title.to_owned(), agent: agent.to_owned(), code: code.to_owned(), notify, status: "running".into(), report: None, asking: false, told_waiting: false, plan_step, stopped: false });
+    fn adopt(mut self: Pin<&mut Self>, key: &str, parent: &str, title: &str, agent: &str, notify: bool, plan_step: Option<u32>) {
+        self.as_mut().rust_mut().orch_children.insert(key.to_owned(), OrchChild { parent: parent.to_owned(), title: title.to_owned(), agent: agent.to_owned(), notify, status: "running".into(), report: None, asking: false, told_waiting: false, plan_step, stopped: false });
         // (A plan's step: who does it.)
         if let Some(id) = plan_step {
             crate::plans::update(self.plan_file(parent).as_deref(), parent, |p| {
@@ -7092,7 +6979,7 @@ impl Workspace {
             .iter()
             .map(|args| {
                 let title = args["title"].as_str().unwrap_or_default().to_owned();
-                let result = self.as_mut().orchestrate_as(Some(key.to_owned()), false, "start_session", args).map(|r| match r["session"].as_str() {
+                let result = self.as_mut().orchestrate_as(Some(key.to_owned()), "start_session", args).map(|r| match r["session"].as_str() {
                     Some(session) => session.to_owned(),
                     None => format!("starting in a new worktree on {}; see list_sessions", r["branch"].as_str().unwrap_or_default()),
                 });
@@ -7115,8 +7002,8 @@ impl Workspace {
         self.live.get(key).map(|e| if !e.info.name.is_empty() { e.info.name.clone() } else { e.info.first_message.chars().take(80).collect() }).unwrap_or_default()
     }
 
-    /// A session of `kind` in `cwd` gets harlo's tools: Claude, OpenCode and
-    /// Hermes with each start; pi and omp with the bridge in their config.
+    /// A session of `kind` in `cwd` gets harlo's tools: Claude and Harlo with
+    /// each start; pi and omp with the bridge in their config.
     fn has_harlo_tools(&self, kind: HarnessKind, cwd: &Path) -> bool {
         if !harlo_core::orchestration::BRIDGE_AGENTS.contains(&kind) {
             return true;
@@ -7236,8 +7123,7 @@ impl Workspace {
             let title = format!("Step {n}: {}", step.title);
             let branch = if together { format!("plan/{}-{id}-{stamp}", git::branch_slug(&step.title).chars().take(30).collect::<String>().trim_matches('-')) } else { String::new() };
             let task = harlo_core::plan::step_prompt(&plan, id, &merge, commits, together);
-            let code = helper_code(run.agent);
-            let prompt = harlo_core::orchestration::helper_brief(&owner_title, &task, tools, &code);
+            let prompt = harlo_core::orchestration::helper_brief(&owner_title, &task, tools);
             if let Err(e) = crate::plans::update(file.as_deref(), owner, |p| p.hand_out(id, "", &branch)) {
                 tracing::warn!("plan run: {e}");
                 continue;
@@ -7250,7 +7136,7 @@ impl Workspace {
                     &QString::from(&branch),
                     &QString::from(&base),
                     &QString::from(run.agent.as_str()),
-                    WorktreeStart { first: Some(first), model: run.model.clone(), thinking: run.thinking.clone(), lane: None, parent: Some((owner.to_owned(), title.clone(), true, code)), approval: approval.clone(), plan_step: Some(id) },
+                    WorktreeStart { first: Some(first), model: run.model.clone(), thinking: run.thinking.clone(), lane: None, parent: Some((owner.to_owned(), title.clone(), true)), approval: approval.clone(), plan_step: Some(id) },
                 );
                 continue;
             }
@@ -7258,7 +7144,7 @@ impl Workspace {
             if let Some(live) = registry::get(&key) {
                 live.handle.send_raw(json!({ "type": "set_session_name", "name": title }));
             }
-            self.as_mut().adopt(&key, owner, &title, run.agent.as_str(), true, Some(id), &code);
+            self.as_mut().adopt(&key, owner, &title, run.agent.as_str(), true, Some(id));
             if let Some(mode) = &approval {
                 self.as_mut().set_approval_mode(&QString::from(&key), &QString::from(mode));
             }
@@ -7709,12 +7595,6 @@ fn agent_label(agent: &str) -> &str {
 }
 
 /// A session's `HARLO_SESSION` token (its agent's harlo tools say it).
-/// A helper's id for its briefing: OpenCode's (its sessions share one
-/// server, so harlo can't tell them apart otherwise), else "".
-fn helper_code(kind: HarnessKind) -> String {
-    if kind == HarnessKind::OpenCode { format!("h-{}", &orch_token()[..8]) } else { String::new() }
-}
-
 fn orch_token() -> String {
     let mut b = [0u8; 16];
     if let Ok(mut f) = std::fs::File::open("/dev/urandom") {

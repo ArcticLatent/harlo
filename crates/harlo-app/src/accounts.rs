@@ -7,8 +7,7 @@
 //! - omp: `omp login` (its list, then its links and prompts).
 //! - pi: pi's own login (its `ModelRuntime`) through `pi_auth.mjs`, run with
 //!   the Node pi runs on.
-//! - OpenCode: its server's integrations (`/api/integration`), on a private
-//!   `opencode serve`.
+//! - Harlo: harlo-agent's `login` (ChatGPT, or the Codex sign-in).
 //!
 //! The agents keep their credentials; harlo shows the links and hands what
 //! the user types to the agent, as a terminal would, and never reads them.
@@ -80,14 +79,12 @@ pub mod qobject {
         #[qinvokable]
         fn load_providers(self: Pin<&mut Accounts>, agent: &QString);
         /// `{ state, list: [{ id, name, connected, note, methods: [{ id,
-        /// type: "login" | "oauth" | "key" | "external" | "command", label,
-        /// form, blocked }] }], error }`.
+        /// type: "login", label, blocked }] }], error }`.
         #[qinvokable]
         fn providers(self: &Accounts, agent: &QString) -> QString;
-        /// Starts signing in (`flow` follows). `answers`: JSON of what the
-        /// dialog asked first (OpenCode's key and form fields).
+        /// Starts signing in (`flow` follows).
         #[qinvokable]
-        fn start(self: Pin<&mut Accounts>, agent: &QString, provider: &QString, method: &QString, answers: &QString);
+        fn start(self: Pin<&mut Accounts>, agent: &QString, provider: &QString, method: &QString);
         /// Answers what the sign-in asks (`flow.ask`).
         #[qinvokable]
         fn answer(self: Pin<&mut Accounts>, text: &QString);
@@ -97,9 +94,6 @@ pub mod qobject {
         /// Signs an account out. An error, or "" (`status` follows).
         #[qinvokable]
         fn sign_out(self: Pin<&mut Accounts>, agent: &QString, id: &QString) -> QString;
-        /// The dialog and Settings closed: OpenCode's private server goes.
-        #[qinvokable]
-        fn release(self: Pin<&mut Accounts>);
         /// Whether pi or omp uses Claude through a Claude subscription,
         /// which Anthropic bills as extra usage (checked in the background
         /// every 10 minutes; `revision` follows a change).
@@ -120,8 +114,7 @@ pub mod qobject {
         fn find_models(self: Pin<&mut Accounts>, url: &QString, key: &QString);
         /// Adds a server and the models picked (`models`: JSON `[{ id,
         /// context }]`) to the agent's config; `taken`: JSON of the provider
-        /// names it has already. An error, "" (done), or "OPENCODE_BUSY"
-        /// (done; OpenCode's open sessions see it once they're closed).
+        /// names it has already. An error, or "" (done).
         #[qinvokable]
         fn add_server(self: &Accounts, agent: &QString, name: &QString, base_url: &QString, key: &QString, models: &QString, taken: &QString) -> QString;
         /// The file an agent's servers are in, for opening ("" when it has
@@ -139,8 +132,7 @@ pub mod qobject {
         #[qinvokable]
         fn stop_server(self: Pin<&mut Accounts>, url: &QString);
         /// Adds a server one agent has to another (its address, key and
-        /// models as that agent has them): "" or why not ("OPENCODE_BUSY":
-        /// added, for OpenCode's next sessions).
+        /// models as that agent has them): "" or why not.
         #[qinvokable]
         fn copy_server(self: &Accounts, from: &QString, to: &QString, name: &QString, taken: &QString) -> QString;
         /// Reads which servers the agents on `host` have (`hostServers`
@@ -506,10 +498,9 @@ impl Accounts {
         });
     }
 
-    pub fn start(mut self: Pin<&mut Self>, agent: &QString, provider: &QString, method: &QString, answers: &QString) {
+    pub fn start(mut self: Pin<&mut Self>, agent: &QString, provider: &QString, method: &QString) {
         self.as_mut().cancel();
         let (agent, provider, method) = (agent.to_string(), provider.to_string(), method.to_string());
-        let answers: Value = serde_json::from_str(&answers.to_string()).unwrap_or_default();
         let id = self.next_id + 1;
         self.as_mut().rust_mut().next_id = id;
         let (tx, rx) = mpsc::unbounded_channel();
@@ -526,7 +517,7 @@ impl Accounts {
         };
         let report = Report { flow: Arc::new(Mutex::new(flow)), thread: self.qt_thread(), host, forwards: Default::default() };
         crate::runtime().spawn(async move {
-            let outcome = sign_in(k, &provider, &method, &answers, &report, rx).await;
+            let outcome = sign_in(k, &provider, &method, &report, rx).await;
             match outcome {
                 Ok(said) => report.finish(true, &said),
                 Err(e) => report.finish(false, &e),
@@ -589,13 +580,6 @@ impl Accounts {
             });
         });
         QString::default()
-    }
-
-    pub fn release(self: Pin<&mut Self>) {
-        if self.current.is_none() {
-            *OPENCODE.lock().unwrap() = None;
-            *OPENCODE_HOSTS.lock().unwrap() = None;
-        }
     }
 
     pub fn extra_usage(mut self: Pin<&mut Self>, agent: &QString) -> bool {
@@ -666,21 +650,11 @@ fn servers_json(k: HarnessKind) -> Value {
                 };
                 // Set up by harlo: it starts and stops it.
                 let managed = place == "here" && commands_of(&s.base_url)["start"].as_str().is_some_and(|c| !c.is_empty());
-                // Hermes takes it (not under its least context). A server on
-                // this computer that didn't say: asked (Ollama's models).
-                let hermes = model_servers::details(k, &s.name).is_none_or(|(url, _, mut models)| {
-                    if place == "here" && models.iter().any(|m| m.context.is_none()) && model_servers::answers(&url) {
-                        for m in models.iter_mut().filter(|m| m.context.is_none()) {
-                            m.context = harlo_core::engines::model_context(&url, &m.id);
-                        }
-                    }
-                    model_servers::hermes_fits(&models).is_ok()
-                });
                 let contexts: Vec<Value> = model_servers::details(k, &s.name).map(|(_, _, m)| m.iter().map(|m| json!(m.context)).collect()).unwrap_or_default();
                 // Another machine's, reached here through SSH: that machine.
                 let via = model_servers::through(&s.base_url).map(|(h, _)| h).unwrap_or_default();
                 json!({
-                    "name": s.name, "baseUrl": s.base_url, "models": s.models, "contexts": contexts, "place": place, "managed": managed, "hermesOk": hermes,
+                    "name": s.name, "baseUrl": s.base_url, "models": s.models, "contexts": contexts, "place": place, "managed": managed,
                     "engine": if via.is_empty() { engine_of(&s.base_url).to_owned() } else { String::new() }, "via": via,
                 })
             })
@@ -732,9 +706,10 @@ impl Accounts {
         let models = with_levels(&base_url.to_string(), models);
         let taken: Vec<String> = serde_json::from_str(&taken.to_string()).unwrap_or_default();
         match model_servers::add(k, &name.to_string(), &base_url.to_string(), &key.to_string(), &models, &taken) {
-            // OpenCode's sessions read it when its server starts again.
-            Ok(()) if !reread(k) => QString::from("OPENCODE_BUSY"),
-            Ok(()) => QString::default(),
+            Ok(()) => {
+                reread(k);
+                QString::default()
+            }
             Err(e) => QString::from(&e),
         }
     }
@@ -750,8 +725,10 @@ impl Accounts {
         };
         let taken: Vec<String> = serde_json::from_str(&taken.to_string()).unwrap_or_default();
         match model_servers::add(to, &name, &url, &key, &models, &taken) {
-            Ok(()) if !reread(to) => QString::from("OPENCODE_BUSY"),
-            Ok(()) => QString::default(),
+            Ok(()) => {
+                reread(to);
+                QString::default()
+            }
             Err(e) => QString::from(&e),
         }
     }
@@ -1092,8 +1069,10 @@ impl Accounts {
     pub fn remove_server_from(mut self: Pin<&mut Self>, agent: &QString, name: &QString) -> QString {
         let Some(k) = kind(&agent.to_string()) else { return QString::from("harlo can't change this agent's model servers.") };
         let out = match model_servers::remove(k, &name.to_string()) {
-            Ok(()) if !reread(k) => QString::from("OPENCODE_BUSY"),
-            Ok(()) => QString::default(),
+            Ok(()) => {
+                reread(k);
+                QString::default()
+            }
             Err(e) => QString::from(&e),
         };
         // (Another machine's, used here: its forward goes when nothing here has it.)
@@ -1104,7 +1083,7 @@ impl Accounts {
 
     pub fn remove_server(mut self: Pin<&mut Self>, name: &QString, url: &QString, delete_files: bool) {
         let (name, url) = (name.to_string(), url.to_string());
-        let first = json!({ "url": url, "state": "running", "step": "Removing it", "done": 0, "total": 0, "error": "", "busy": false });
+        let first = json!({ "url": url, "state": "running", "step": "Removing it", "done": 0, "total": 0, "error": "" });
         self.as_mut().set_removal(QString::from(&first.to_string()));
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
@@ -1125,11 +1104,10 @@ impl Accounts {
                     v["total"] = json!(total);
                 })
             };
-            let (errors, busy, summary) = remove(&name, &url, delete_files, &step, &reread);
+            let (errors, summary) = remove(&name, &url, delete_files, &step, &reread);
             say(&|v| {
                 v["state"] = json!("done");
                 v["error"] = json!(errors.join("\n"));
-                v["busy"] = json!(busy);
                 v["summary"] = json!(summary);
             });
             let _ = thread.queue(|mut this| this.as_mut().load_servers());
@@ -1138,18 +1116,11 @@ impl Accounts {
 }
 
 
-/// After harlo changed an agent's model servers: its sessions read them
-/// again. OpenCode's server reloads when it's idle (false: busy, its open
-/// sessions get them when they close); pi's and omp's idle sessions start
+/// After harlo changed an agent's model servers: its idle sessions start
 /// again when next used (they read their models only when they start).
-fn reread(k: HarnessKind) -> bool {
-    match k {
-        HarnessKind::OpenCode => harlo_harness::reload_opencode_if_idle(),
-        HarnessKind::Pi | HarnessKind::Omp | HarnessKind::Harlo => {
-            crate::registry::restart_idle(k.as_str());
-            true
-        }
-        _ => true,
+fn reread(k: HarnessKind) {
+    if matches!(k, HarnessKind::Pi | HarnessKind::Omp | HarnessKind::Harlo) {
+        crate::registry::restart_idle(k.as_str());
     }
 }
 
@@ -1193,7 +1164,7 @@ fn unused_json() -> Value {
                 });
                 json!({
                     "name": name, "baseUrl": url, "models": models.iter().map(|m| m.id.clone()).collect::<Vec<_>>(), "contexts": models.iter().map(|m| json!(m.context)).collect::<Vec<_>>(),
-                    "place": "here", "managed": true, "hermesOk": model_servers::hermes_fits(&models).is_ok(), "engine": engine_of(&url),
+                    "place": "here", "managed": true, "engine": engine_of(&url),
                 })
             })
             .collect(),
@@ -1219,7 +1190,7 @@ fn with_levels(url: &str, models: Vec<model_servers::Found>) -> Vec<model_server
 /// before any agent reads its file.
 pub(crate) fn offer_levels() {
     for (url, _) in set_up_servers().into_iter().filter(|(url, _)| matches!(engine_of(url), "Basalt" | "Strata")) {
-        for k in [HarnessKind::Pi, HarnessKind::OpenCode, HarnessKind::Harlo] {
+        for k in [HarnessKind::Pi, HarnessKind::Harlo] {
             for s in model_servers::servers(k).into_iter().filter(|s| s.base_url == url) {
                 if let Err(e) = model_servers::offer_levels(k, &s.name) {
                     tracing::warn!("thinking levels for {}: {e}", s.name);
@@ -1274,21 +1245,10 @@ impl ModelServer {
     }
 }
 
-/// The server a model (`provider/id`, Hermes's `custom:…`) is on, among an
-/// agent's `list`, and the provider's name for it.
-fn server_among(k: HarnessKind, model: &str, list: &[model_servers::Server]) -> Option<(String, Option<model_servers::Server>)> {
-    // Hermes: "custom:<server>:<model>", or its current model as just
-    // "custom:<model>" (the server whose models have it, then).
-    let provider = match k {
-        HarnessKind::Hermes => match model_servers::hermes_server_of(model).filter(|n| list.iter().any(|s| s.name == *n)) {
-            Some(name) => name.to_owned(),
-            None => {
-                let id = model.strip_prefix("custom:").or_else(|| model.strip_prefix("custom/")).unwrap_or(model);
-                list.iter().find(|s| s.models.iter().any(|m| m == id))?.name.clone()
-            }
-        },
-        _ => model.split_once('/')?.0.to_owned(),
-    };
+/// The server a model (`provider/id`) is on, among an agent's `list`, and
+/// the provider's name for it.
+fn server_among(model: &str, list: &[model_servers::Server]) -> Option<(String, Option<model_servers::Server>)> {
+    let provider = model.split_once('/')?.0.to_owned();
     let found = list.iter().find(|s| s.name == provider).cloned();
     Some((provider, found))
 }
@@ -1309,7 +1269,7 @@ fn omp_usual(provider: &str) -> Option<[String; 2]> {
 pub(crate) fn managed_server(agent: &str, model: &str) -> Option<ModelServer> {
     let k = kind(agent)?;
     let managed = |url: &str| commands_of(url)["start"].as_str().is_some_and(|c| !c.is_empty());
-    let (provider, found) = server_among(k, model, &model_servers::servers(k))?;
+    let (provider, found) = server_among(model, &model_servers::servers(k))?;
     if let Some(s) = found {
         if managed(&s.base_url) {
             return Some(ModelServer::Here { name: s.name, url: s.base_url });
@@ -1322,7 +1282,7 @@ pub(crate) fn managed_server(agent: &str, model: &str) -> Option<ModelServer> {
         && let Some(urls) = omp_usual(&provider)
     {
         let url = urls.iter().find(|u| managed(u))?.clone();
-        let name = [HarnessKind::Pi, HarnessKind::OpenCode, HarnessKind::Hermes, HarnessKind::Harlo, HarnessKind::Omp]
+        let name = [HarnessKind::Pi, HarnessKind::Harlo, HarnessKind::Omp]
             .iter()
             .find_map(|k| model_servers::servers(*k).into_iter().find(|s| s.base_url.trim_end_matches('/') == url))
             .map_or_else(|| provider.clone(), |s| s.name);
@@ -1370,7 +1330,7 @@ pub(crate) fn host_server(host: &str, agent: &str, model: &str) -> Option<ModelS
             models: s["models"].as_array().into_iter().flatten().filter_map(|m| m.as_str().map(str::to_owned)).collect(),
         })
         .collect();
-    let (provider, found) = server_among(k, model, &list)?;
+    let (provider, found) = server_among(model, &list)?;
     let (name, url) = match found {
         Some(s) => (s.name, s.base_url),
         None => (provider.clone(), omp_usual(&provider).filter(|_| k == HarnessKind::Omp)?[0].clone()),
@@ -1394,7 +1354,7 @@ pub(crate) fn host_server(host: &str, agent: &str, model: &str) -> Option<ModelS
 
 /// After a llama.cpp server harlo set up starts: the context it serves
 /// this time (it fits it to free memory) into each agent that has it.
-/// What couldn't be updated (Hermes under its least context, say).
+/// What couldn't be updated.
 pub(crate) fn sync_context(url: &str) -> Vec<String> {
     let start = commands_of(url)["start"].as_str().unwrap_or_default().to_owned();
     let llama = start.contains("llama-server");
@@ -1818,32 +1778,6 @@ fn accounts_of(k: HarnessKind, host: Option<&Host>) -> Result<Vec<Value>, String
                 })
                 .collect())
         }
-        HarnessKind::OpenCode => {
-            let server = opencode_server_on(host)?;
-            let v = server.get("/api/integration", None).map_err(|e| format!("{e:#}"))?;
-            let mut out = Vec::new();
-            for i in v["data"].as_array().into_iter().flatten() {
-                for c in i["connections"].as_array().into_iter().flatten() {
-                    let detail = match (c["type"].as_str(), c["method"].as_str()) {
-                        (Some("env"), _) => format!("From ${}", c["name"].as_str().unwrap_or_default()),
-                        (_, Some("key")) => "API key".to_owned(),
-                        (_, Some("oauth")) => "Signed in".to_owned(),
-                        _ => "Connected".to_owned(),
-                    };
-                    let needs = c["status"]["status"] == "needs_auth";
-                    out.push(json!({ "id": c["id"].as_str().unwrap_or_default(), "label": i["name"], "signOut": c["type"] == "credential",
-                                     "detail": if needs { "Needs signing in again".to_owned() } else { detail } }));
-                }
-            }
-            Ok(out)
-        }
-        HarnessKind::Hermes => Ok(hermes_signed_in(host)
-            .into_iter()
-            .map(|id| {
-                let name = HERMES_PROVIDERS.iter().find(|p| p.0 == id).map_or(id.as_str(), |p| p.1);
-                json!({ "id": id, "label": name, "detail": "Signed in", "signOut": true })
-            })
-            .collect()),
         HarnessKind::Harlo => harlo_accounts(&match host {
             Some(h) => run_there(h, &harlo_there(h)?, &["status", "--json"], Duration::from_secs(30))?,
             None => run(&program(k).ok_or("harlo-agent isn't installed.")?, &["status", "--json"], Duration::from_secs(15))?,
@@ -1913,69 +1847,6 @@ fn providers_of(k: HarnessKind, host: Option<&Host>) -> Result<Vec<Value>, Strin
                 })
                 .collect())
         }
-        HarnessKind::OpenCode => {
-            let server = opencode_server_on(host)?;
-            let v = server.get("/api/integration", None).map_err(|e| format!("{e:#}"))?;
-            Ok(v["data"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .map(|i| {
-                    let mut env = Vec::new();
-                    let methods: Vec<Value> = i["methods"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .filter_map(|m| match m["type"].as_str()? {
-                            "env" => {
-                                env.extend(m["names"].as_array().into_iter().flatten().filter_map(|n| n.as_str().map(|n| format!("${n}"))));
-                                None
-                            }
-                            t @ ("key" | "oauth" | "external" | "command") => Some(json!({
-                                "id": m["id"].as_str().unwrap_or(t), "type": t,
-                                "label": m["label"].as_str().unwrap_or(if t == "key" { "API key" } else { "Sign in" }),
-                                "form": m["form"].as_array().cloned().unwrap_or_default(),
-                            })),
-                            _ => None,
-                        })
-                        .collect();
-                    let note = if env.is_empty() { String::new() } else { format!("Or set {} before starting harlo.", env.join(" or ")) };
-                    json!({ "id": i["id"], "name": i["name"], "connected": i["connections"].as_array().is_some_and(|c| !c.is_empty()), "note": note, "methods": methods })
-                })
-                .filter(|p| p["methods"].as_array().is_some_and(|m| !m.is_empty()))
-                .collect())
-        }
-        // Hermes sets up its providers itself, in a terminal.
-        // Its own setup (in harlo's terminal, where Hermes runs: it asks
-        // there), then the providers it signs in to with a link and a code
-        // or takes a key for.
-        HarnessKind::Hermes => {
-            let place = host.map_or("here".to_owned(), |h| format!("on {}", h.name));
-            let signed_in = hermes_signed_in(host);
-            let mut list = vec![json!({
-                "id": "hermes", "name": "Hermes' own setup",
-                "note": format!("Every provider Hermes knows, and its default model: `hermes model`, in harlo's terminal {place}. When it's done, pick Check again in the model list."),
-                "methods": [{ "id": "model", "type": "terminal", "label": "Set up", "command": "hermes model" }],
-            })];
-            list.extend(HERMES_PROVIDERS.iter().map(|&(id, name, how)| {
-                let methods = match how {
-                    HermesWay::Code => json!([{ "id": "oauth", "type": "login", "label": "Sign in" }]),
-                    HermesWay::Key => json!([{ "id": "key", "type": "key", "label": "API key" }]),
-                    // (A Claude subscription isn't for other apps.)
-                    HermesWay::KeyNotSubscription => json!([
-                        { "id": "oauth", "type": "login", "label": "Claude account", "blocked": true },
-                        { "id": "key", "type": "key", "label": "API key" },
-                    ]),
-                };
-                let note = match how {
-                    HermesWay::Code => "Sign in with a link and a code.",
-                    HermesWay::Key => "",
-                    HermesWay::KeyNotSubscription => CLAUDE_SUBSCRIPTION,
-                };
-                json!({ "id": id, "name": name, "connected": signed_in.iter().any(|p| p == id), "note": note, "methods": methods })
-            }));
-            Ok(list)
-        }
         HarnessKind::Harlo => Ok(vec![
             json!({
                 "id": "chatgpt", "name": "ChatGPT",
@@ -2019,11 +1890,6 @@ fn sign_out(k: HarnessKind, id: &str, host: Option<&Host>) -> Result<(), String>
                 let v = pi_helper(&["logout", id], Duration::from_secs(30))?;
                 v["error"].as_str().map_or(Ok(()), |e| Err(e.to_owned()))
             }
-        },
-        HarnessKind::OpenCode => opencode_server_on(host)?.request("DELETE", &format!("/api/credential/{}", harlo_harness::opencode::url_encode(id)), None, None).map(|_| ()).map_err(|e| format!("{e:#}")),
-        HarnessKind::Hermes => match host {
-            Some(h) => run_there(h, "hermes", &["auth", "logout", id], Duration::from_secs(30)).map(|_| ()),
-            None => run(&program(k).ok_or("Hermes isn't installed.")?, &["auth", "logout", id], Duration::from_secs(30)).map(|_| ()),
         },
         HarnessKind::Harlo => {
             let args: &[&str] = if id == "codex" { &["logout", "--codex"] } else { &["logout"] };
@@ -2251,39 +2117,7 @@ fn pi_helper(args: &[&str], limit: Duration) -> Result<Value, String> {
     }
 }
 
-// ---- OpenCode -----------------------------------------------------------------
-
-/// A private `opencode serve` for signing in, kept until Settings closes.
-static OPENCODE: Mutex<Option<Arc<harlo_harness::opencode::Server>>> = Mutex::new(None);
-
-/// The same on hosts, for signing in there.
-static OPENCODE_HOSTS: Mutex<Option<HashMap<String, Arc<harlo_harness::opencode::Server>>>> = Mutex::new(None);
-
-fn opencode_server_on(host: Option<&Host>) -> Result<Arc<harlo_harness::opencode::Server>, String> {
-    let Some(host) = host else { return opencode_server() };
-    let mut all = OPENCODE_HOSTS.lock().unwrap();
-    let all = all.get_or_insert_with(HashMap::new);
-    if let Some(server) = all.get(&host.name).filter(|s| s.alive()) {
-        return Ok(server.clone());
-    }
-    let server = Arc::new(harlo_harness::opencode::Server::start_remote(&harlo_core::remote::launch(host)).map_err(|e| format!("{e:#}"))?);
-    all.insert(host.name.clone(), server.clone());
-    Ok(server)
-}
-
-fn opencode_server() -> Result<Arc<harlo_harness::opencode::Server>, String> {
-    let mut s = OPENCODE.lock().unwrap();
-    if let Some(server) = s.as_ref().filter(|s| s.alive()) {
-        return Ok(server.clone());
-    }
-    let opencode = program(HarnessKind::OpenCode).ok_or("OpenCode isn't installed.")?;
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
-    let server = Arc::new(harlo_harness::opencode::Server::start(&opencode, &home).map_err(|e| format!("{e:#}"))?);
-    *s = Some(server.clone());
-    Ok(server)
-}
-
-/// A device code in OpenCode's instructions ("Enter code: ABCD-1234").
+/// A device code in an agent's instructions ("Enter code: ABCD-1234").
 fn device_code(text: &str) -> Option<String> {
     text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
         .find(|w| {
@@ -2293,121 +2127,10 @@ fn device_code(text: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-// ---- Hermes ------------------------------------------------------------------------
-
-/// How Hermes signs in to a provider.
-#[derive(Clone, Copy)]
-enum HermesWay {
-    /// A link and a code (`hermes auth add <id> --type oauth`).
-    Code,
-    /// An API key.
-    Key,
-    /// An API key; its subscription sign-in is a Claude one.
-    KeyNotSubscription,
-}
-
-/// The providers Hermes signs in to without its own setup (`hermes auth
-/// add`), by its ids. (A sign-in that ends on `localhost` isn't here: on
-/// another machine it wouldn't reach Hermes.)
-const HERMES_PROVIDERS: &[(&str, &str, HermesWay)] = &[
-    ("nous", "Nous Portal", HermesWay::Code),
-    ("openai-codex", "OpenAI Codex (ChatGPT plan)", HermesWay::Code),
-    ("xai-oauth", "xAI Grok (SuperGrok / Premium+)", HermesWay::Code),
-    ("openrouter", "OpenRouter", HermesWay::Key),
-    ("anthropic", "Anthropic", HermesWay::KeyNotSubscription),
-    ("openai-api", "OpenAI API", HermesWay::Key),
-    ("gemini", "Google AI Studio", HermesWay::Key),
-    ("deepseek", "DeepSeek", HermesWay::Key),
-    ("xai", "xAI API", HermesWay::Key),
-    ("zai", "Z.AI / GLM", HermesWay::Key),
-    ("kimi-coding", "Kimi / Moonshot", HermesWay::Key),
-    ("minimax", "MiniMax", HermesWay::Key),
-    ("alibaba", "Qwen Cloud", HermesWay::Key),
-    ("huggingface", "Hugging Face", HermesWay::Key),
-    ("nvidia", "NVIDIA NIM", HermesWay::Key),
-    ("ai-gateway", "Vercel AI Gateway", HermesWay::Key),
-    ("opencode-zen", "OpenCode Zen", HermesWay::Key),
-    ("opencode-go", "OpenCode Go", HermesWay::Key),
-    ("kilocode", "Kilo Code", HermesWay::Key),
-    ("ollama-cloud", "Ollama Cloud", HermesWay::Key),
-    ("arcee", "Arcee AI", HermesWay::Key),
-    ("xiaomi", "Xiaomi MiMo", HermesWay::Key),
-    ("stepfun", "StepFun Step Plan", HermesWay::Key),
-];
-
-/// The providers `hermes auth list` has credentials for (blocking; none if
-/// it doesn't answer).
-fn hermes_signed_in(host: Option<&Host>) -> Vec<String> {
-    let out = match host {
-        Some(h) => harlo_core::remote::run(h, "hermes auth list </dev/null", Duration::from_secs(30)).ok().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()),
-        None => program(HarnessKind::Hermes).and_then(|p| run(&p, &["auth", "list"], Duration::from_secs(30)).ok()),
-    };
-    hermes_listed(&out.unwrap_or_default())
-}
-
-/// "deepseek (1 credentials):" → "deepseek".
-fn hermes_listed(text: &str) -> Vec<String> {
-    text.lines()
-        .filter(|l| !l.starts_with(' '))
-        .filter_map(|l| {
-            let (id, rest) = l.trim_end().split_once(" (")?;
-            (rest.ends_with("):") && rest.contains("credential") && !id.contains(' ')).then(|| id.to_owned())
-        })
-        .collect()
-}
-
-/// Adds an API key to Hermes (blocking). It's handed over on Hermes's
-/// input, so it isn't in the list of processes, here or there.
-fn hermes_add_key(host: Option<&Host>, provider: &str, key: &str) -> Result<(), String> {
-    use std::io::Write;
-    let mut cmd = agent_command(HarnessKind::Hermes, "hermes", host, &["auth", "add", provider, "--type", "api-key", "--label", "harlo"])?;
-    // (Here, without the terminal harlo may have been started from: Hermes
-    // would ask for the key there.)
-    if host.is_none() {
-        use std::os::unix::process::CommandExt;
-        // SAFETY: setsid is async-signal-safe.
-        unsafe {
-            cmd.pre_exec(|| {
-                libc::setsid();
-                Ok(())
-            });
-        }
-    }
-    let mut child = cmd
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("hermes: {e}"))?;
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(format!("{key}\n").as_bytes()).map_err(|e| e.to_string())?;
-    }
-    let deadline = std::time::Instant::now() + Duration::from_secs(60);
-    while child.try_wait().ok().flatten().is_none() {
-        if std::time::Instant::now() > deadline {
-            let _ = child.kill();
-            return Err("Hermes didn't answer in time.".into());
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    let out = child.wait_with_output().map_err(|e| e.to_string())?;
-    if out.status.success() {
-        return Ok(());
-    }
-    let said = format!("{}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
-    Err(signin::plain(&said)
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with("Paste your API key") && !l.contains("may be echoed"))
-        .last()
-        .unwrap_or("Hermes didn't take the key.")
-        .to_owned())
-}
-
 // ---- signing in ------------------------------------------------------------------
 
 /// Signs in; what to say when it's done.
-async fn sign_in(k: HarnessKind, provider: &str, method: &str, answers: &Value, report: &Report, rx: mpsc::UnboundedReceiver<String>) -> Result<String, String> {
+async fn sign_in(k: HarnessKind, provider: &str, method: &str, report: &Report, rx: mpsc::UnboundedReceiver<String>) -> Result<String, String> {
     match k {
         HarnessKind::Claude => {
             let mut args = vec!["auth", "login"];
@@ -2424,25 +2147,6 @@ async fn sign_in(k: HarnessKind, provider: &str, method: &str, answers: &Value, 
             Ok("omp is signed in.".into())
         }
         HarnessKind::Pi => pi_sign_in(provider, method, report, rx).await,
-        HarnessKind::OpenCode => {
-            let (provider, method, answers, report) = (provider.to_owned(), method.to_owned(), answers.clone(), report.clone());
-            tokio::task::spawn_blocking(move || opencode_sign_in(&provider, &method, &answers, &report, rx)).await.map_err(|e| e.to_string())?
-        }
-        HarnessKind::Hermes => {
-            let name = HERMES_PROVIDERS.iter().find(|p| p.0 == provider).map_or(provider, |p| p.1).to_owned();
-            if answers["type"] == "key" {
-                let key = answers["key"].as_str().unwrap_or_default().trim().to_owned();
-                if key.is_empty() {
-                    return Err("Paste the API key first.".into());
-                }
-                let (host, provider) = (report.host.clone(), provider.to_owned());
-                tokio::task::spawn_blocking(move || hermes_add_key(host.as_ref(), &provider, &key)).await.map_err(|e| e.to_string())??;
-                return Ok(format!("Hermes saved the key for {name}. Pick one of its models in the model list."));
-            }
-            report.text(&format!("Hermes signs in to {name}: open the link and enter the code there."));
-            command(sign_in_command(k, "hermes", report.host.as_ref(), &["auth", "add", provider, "--type", "oauth", "--no-browser"])?, None, report, rx).await?;
-            Ok(format!("Hermes is signed in to {name}. Pick one of its models in the model list."))
-        }
         HarnessKind::Harlo => {
             let codex = provider == "codex";
             let mut args = vec!["login"];
@@ -2655,89 +2359,8 @@ async fn pi_sign_in(provider: &str, method: &str, report: &Report, mut rx: mpsc:
     }
 }
 
-/// OpenCode's integrations: an API key (with its form's answers), a
-/// browser sign-in (an attempt: opened, then waited for, or its code
-/// asked), an external one, or a command it runs (blocking).
-fn opencode_sign_in(provider: &str, method: &str, answers: &Value, report: &Report, mut rx: mpsc::UnboundedReceiver<String>) -> Result<String, String> {
-    let server = opencode_server_on(report.host.as_ref())?;
-    let id = harlo_harness::opencode::url_encode(provider);
-    let answer = answers["answer"].as_object().filter(|a| !a.is_empty()).map(|a| Value::Object(a.clone())).unwrap_or(Value::Null);
-    let call = |m: &str, path: &str, body: Option<&Value>| server.request(m, path, body, None).map_err(|e| format!("{e:#}"));
-    let cancelled = |rx: &mut mpsc::UnboundedReceiver<String>| matches!(rx.try_recv(), Err(mpsc::error::TryRecvError::Disconnected));
-    let kind = answers["type"].as_str().unwrap_or("oauth");
-    match kind {
-        "key" => {
-            let key = answers["key"].as_str().unwrap_or_default().trim().to_owned();
-            if key.is_empty() {
-                return Err("Paste the API key first.".into());
-            }
-            call("POST", &format!("/api/integration/{id}/connect/key"), Some(&json!({ "key": key, "answer": answer })))?;
-            Ok("OpenCode saved the key.".into())
-        }
-        "external" => {
-            call("POST", &format!("/api/integration/{id}/connect/external"), Some(&json!({ "methodID": method, "answer": answer })))?;
-            Ok("OpenCode is set up.".into())
-        }
-        "command" => {
-            let a = call("POST", &format!("/api/integration/{id}/connect/command"), Some(&json!({ "methodID": method })))?;
-            let attempt = a["data"]["attemptID"].as_str().unwrap_or_default().to_owned();
-            report.text("OpenCode runs the provider's own sign-in; finish it where it opens.");
-            loop {
-                std::thread::sleep(Duration::from_millis(1500));
-                if cancelled(&mut rx) {
-                    let _ = call("DELETE", &format!("/api/integration/{id}/connect/command/{attempt}"), None);
-                    return Err("Cancelled.".into());
-                }
-                let s = call("GET", &format!("/api/integration/{id}/connect/command/{attempt}"), None)?;
-                match s["data"]["status"].as_str() {
-                    Some("complete") => return Ok("OpenCode is signed in.".into()),
-                    Some("pending") => {}
-                    _ => return Err(s["data"]["message"].as_str().unwrap_or("It didn't finish.").to_owned()),
-                }
-            }
-        }
-        _ => {
-            let a = call("POST", &format!("/api/integration/{id}/connect/oauth"), Some(&json!({ "methodID": method, "answer": answer })))?;
-            let d = &a["data"];
-            let attempt = d["attemptID"].as_str().unwrap_or_default().to_owned();
-            let instructions = d["instructions"].as_str().unwrap_or_default();
-            report.text(instructions);
-            let url = d["url"].as_str().unwrap_or_default();
-            match device_code(instructions) {
-                Some(code) => report.device(&code, url),
-                None => report.link(url, "Open the sign-in page", true),
-            }
-            if d["mode"] == "code" {
-                report.ask(json!({ "kind": "code", "message": "Paste the code the page shows", "optional": false }));
-                let Some(code) = rx.blocking_recv() else {
-                    let _ = call("DELETE", &format!("/api/integration/{id}/connect/oauth/{attempt}"), None);
-                    return Err("Cancelled.".into());
-                };
-                call("POST", &format!("/api/integration/{id}/connect/oauth/{attempt}/complete"), Some(&json!({ "code": code.trim() })))?;
-                return Ok("OpenCode is signed in.".into());
-            }
-            loop {
-                std::thread::sleep(Duration::from_millis(1500));
-                if cancelled(&mut rx) {
-                    let _ = call("DELETE", &format!("/api/integration/{id}/connect/oauth/{attempt}"), None);
-                    return Err("Cancelled.".into());
-                }
-                let s = call("GET", &format!("/api/integration/{id}/connect/oauth/{attempt}"), None)?;
-                match s["data"]["status"].as_str() {
-                    Some("complete") => return Ok("OpenCode is signed in.".into()),
-                    Some("pending") => {}
-                    Some("expired") => return Err("The sign-in expired. Try again.".into()),
-                    _ => return Err(s["data"]["message"].as_str().unwrap_or("The sign-in failed.").to_owned()),
-                }
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use harlo_harness::HarnessKind;
-
     #[test]
     fn says_why_a_server_did_not_start() {
         let said = super::start_failure("12:05:13 FATAL server failed during startup | Device budget cannot hold model weights and required execution resources");
@@ -2768,23 +2391,12 @@ mod tests {
             Server { name: "llamacpp".into(), base_url: "http://127.0.0.1:8090/v1".into(), models: vec!["SmolLM2".into()] },
             Server { name: "ollama".into(), base_url: "http://127.0.0.1:11434/v1".into(), models: vec!["qwen3:4b".into()] },
         ];
-        let name = |k, m| super::server_among(k, m, &list).map(|(p, s)| (p, s.map(|s| s.base_url)));
-        assert_eq!(name(HarnessKind::Pi, "llamacpp/SmolLM2"), Some(("llamacpp".into(), Some("http://127.0.0.1:8090/v1".into()))));
-        assert_eq!(name(HarnessKind::Pi, "anthropic/claude"), Some(("anthropic".into(), None)));
-        assert_eq!(name(HarnessKind::Pi, "no-provider"), None);
-        assert_eq!(name(HarnessKind::Hermes, "custom:ollama:qwen3:4b").unwrap().0, "ollama");
-        assert_eq!(name(HarnessKind::Hermes, "custom:SmolLM2").unwrap().0, "llamacpp");
+        let name = |m| super::server_among(m, &list).map(|(p, s)| (p, s.map(|s| s.base_url)));
+        assert_eq!(name("llamacpp/SmolLM2"), Some(("llamacpp".into(), Some("http://127.0.0.1:8090/v1".into()))));
+        assert_eq!(name("anthropic/claude"), Some(("anthropic".into(), None)));
+        assert_eq!(name("no-provider"), None);
         assert_eq!(super::omp_usual("ollama").unwrap()[0], "http://127.0.0.1:11434/v1");
         assert!(super::omp_usual("anthropic").is_none());
-    }
-
-    /// Which server a Hermes model is on, from this computer's configs.
-    #[test]
-    #[ignore = "this computer's configs"]
-    fn finds_hermes_servers() {
-        for id in ["custom/llamacpp:Qwen3-Coder-30B-A3B-Instruct-UD-Q4_K_XL", "custom:llamacpp:Qwen3-Coder-30B-A3B-Instruct-UD-Q4_K_XL", "custom:Qwen3-Coder-30B-A3B-Instruct-UD-Q4_K_XL", "custom/Qwen3-Coder-30B-A3B-Instruct-UD-Q4_K_XL", "llamacpp/Qwen3-Coder-30B-A3B-Instruct-UD-Q4_K_XL"] {
-            println!("{id} → {:?}", super::managed_server("hermes", id));
-        }
     }
 
     /// What's left running on this computer (looks only).
@@ -2843,13 +2455,6 @@ mod tests {
         }
         assert!(t.elapsed() < Duration::from_secs(4), "still running after {:?}", t.elapsed());
         let _ = c.kill();
-    }
-
-    #[test]
-    fn hermes_says_what_it_is_signed_in_to() {
-        let list = "openai-codex (1 credentials):\n  #1  device_code          oauth   id=53fd36 priority=0 device_code ←\n\ndeepseek (2 credentials):\n  #1  harlo  api_key id=944702 priority=0 manual ←\nSome other line (with brackets):\n";
-        assert_eq!(super::hermes_listed(list), ["openai-codex", "deepseek"]);
-        assert!(super::hermes_listed("").is_empty());
     }
 
     #[test]

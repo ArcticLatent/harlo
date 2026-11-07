@@ -1,7 +1,6 @@
 //! Agent updates: the newest version of each agent (from the npm registry,
-//! where the four JavaScript ones publish theirs; Hermes' from its GitHub
-//! releases) against the installed one, and the agent's own command to
-//! update itself.
+//! where they publish theirs) against the installed one, and the agent's
+//! own command to update itself.
 
 use std::time::Duration;
 
@@ -9,8 +8,6 @@ use std::time::Duration;
 fn package(agent: &str) -> Option<&'static str> {
     match agent {
         "claude" => Some("@anthropic-ai/claude-code"),
-        // (OpenCode 2; `opencode-ai` is the old 1.x line.)
-        "opencode" => Some("@opencode/cli"),
         "pi" => Some("@earendil-works/pi-coding-agent"),
         "omp" => Some("@oh-my-pi/pi-coding-agent"),
         _ => None,
@@ -19,27 +16,21 @@ fn package(agent: &str) -> Option<&'static str> {
 
 /// Where an agent's newest version is published.
 fn latest_url(agent: &str) -> Option<String> {
-    match agent {
-        // (GitHub's API: once an hour at most, well inside its allowance.)
-        "hermes" => Some("https://api.github.com/repos/NousResearch/hermes-agent/releases/latest".to_owned()),
-        _ => package(agent).map(|p| format!("https://registry.npmjs.org/{p}/latest")),
-    }
+    package(agent).map(|p| format!("https://registry.npmjs.org/{p}/latest"))
 }
 
 /// The agent's command to update itself (arguments after the program).
 pub fn update_args(agent: &str) -> &'static [&'static str] {
     match agent {
         "claude" => &["update"],
-        "opencode" => &["upgrade"],
         "pi" => &["update", "--self"],
         "omp" => &["update"],
-        "hermes" => &["update", "--yes"],
         _ => &[],
     }
 }
 
 /// The newest published version of an agent, or None (offline, say).
-/// `HARLO_TEST_LATEST=claude=2.1.300,opencode=…` answers for the tests.
+/// `HARLO_TEST_LATEST=claude=2.1.300,pi=…` answers for the tests.
 pub fn latest(agent: &str) -> Option<String> {
     if let Ok(test) = std::env::var("HARLO_TEST_LATEST") {
         return test.split(',').find_map(|kv| kv.split_once('=').filter(|(k, _)| *k == agent).map(|(_, v)| v.to_owned()));
@@ -48,7 +39,7 @@ pub fn latest(agent: &str) -> Option<String> {
     let agent_http: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(10))).build().into();
     let body = agent_http.get(&url).header("Accept", "application/json").header("User-Agent", concat!("harlo/", env!("CARGO_PKG_VERSION"))).call().ok()?.body_mut().read_to_string().ok()?;
     let v: serde_json::Value = serde_json::from_str(&body).ok()?;
-    v["version"].as_str().or_else(|| v["tag_name"].as_str()).map(|s| s.trim().trim_start_matches('v').to_owned()).filter(|s| !s.is_empty())
+    v["version"].as_str().map(|s| s.trim().trim_start_matches('v').to_owned()).filter(|s| !s.is_empty())
 }
 
 // ---- harlo itself -------------------------------------------------------------
@@ -469,11 +460,11 @@ mod tests {
 
     #[test]
     fn changes_since_your_version() {
-        let log = "# Changelog\n\nIntro, not a release.\n\n## 1.0.2\n\n- Check now, in Settings.\n\n## 1.0.1\n\n- OpenCode: denying a permission\n  ends the run (`shutdown`).\n- **Archiving** hides it; see [the docs](https://x.y/z).\n\n## 1.0.0\n\nThe first release.\n\n### Agents\n\n- Claude Code.\n";
+        let log = "# Changelog\n\nIntro, not a release.\n\n## 1.0.2\n\n- Check now, in Settings.\n\n## 1.0.1\n\n- Agents: denying a permission\n  ends the run (`shutdown`).\n- **Archiving** hides it; see [the docs](https://x.y/z).\n\n## 1.0.0\n\nThe first release.\n\n### Agents\n\n- Claude Code.\n";
         assert_eq!(changes_since(log, "1.0.1", "1.0.2"), "• Check now, in Settings.");
         assert_eq!(
             changes_since(log, "1.0.0", "1.0.2"),
-            "harlo 1.0.2\n• Check now, in Settings.\nharlo 1.0.1\n• OpenCode: denying a permission ends the run (shutdown).\n• Archiving hides it; see the docs."
+            "harlo 1.0.2\n• Check now, in Settings.\nharlo 1.0.1\n• Agents: denying a permission ends the run (shutdown).\n• Archiving hides it; see the docs."
         );
         // A paragraph is an item too; subheadings are left out.
         assert_eq!(changes_since(log, "0.9.0", "1.0.0"), "The first release.\n• Claude Code.");

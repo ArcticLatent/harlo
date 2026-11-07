@@ -11,10 +11,6 @@ pub enum HarnessKind {
     Omp,
     /// Claude Code (`claude`, stream-json; see `claude.rs`).
     Claude,
-    /// OpenCode 2.x (a private `opencode serve`; see `opencode.rs`).
-    OpenCode,
-    /// Hermes Agent (`hermes acp`: the Agent Client Protocol; see `acp.rs`).
-    Hermes,
     /// harlo's own agent (`harlo-agent --mode rpc`: pi's protocol, with
     /// harlo's approvals and modes built in).
     Harlo,
@@ -24,15 +20,13 @@ pub enum HarnessKind {
 
 impl HarnessKind {
     /// The providers, in Settings → Providers' order.
-    pub const PROVIDERS: [HarnessKind; 6] = [Self::Harlo, Self::Claude, Self::OpenCode, Self::Pi, Self::Omp, Self::Hermes];
+    pub const PROVIDERS: [HarnessKind; 4] = [Self::Harlo, Self::Claude, Self::Pi, Self::Omp];
 
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "pi" => Some(Self::Pi),
             "omp" => Some(Self::Omp),
             "claude" => Some(Self::Claude),
-            "opencode" => Some(Self::OpenCode),
-            "hermes" => Some(Self::Hermes),
             "harlo" => Some(Self::Harlo),
             "demo" => Some(Self::Demo),
             _ => None,
@@ -44,8 +38,6 @@ impl HarnessKind {
             Self::Pi => "pi",
             Self::Omp => "omp",
             Self::Claude => "claude",
-            Self::OpenCode => "opencode",
-            Self::Hermes => "hermes",
             Self::Harlo => "harlo",
             Self::Demo => "demo",
         }
@@ -57,8 +49,6 @@ impl HarnessKind {
             Self::Pi => "Pi",
             Self::Omp => "Oh My Pi",
             Self::Claude => "Claude",
-            Self::OpenCode => "OpenCode",
-            Self::Hermes => "Hermes",
             Self::Harlo => "Harlo",
             Self::Demo => "Demo",
         }
@@ -67,7 +57,7 @@ impl HarnessKind {
     /// harlo can run sessions with it (a provider it only lists is shown in
     /// Settings → Providers but not offered).
     pub fn can_chat(self) -> bool {
-        matches!(self, Self::Pi | Self::Omp | Self::Claude | Self::OpenCode | Self::Hermes | Self::Harlo | Self::Demo)
+        matches!(self, Self::Pi | Self::Omp | Self::Claude | Self::Harlo | Self::Demo)
     }
 
     /// The program's name (on PATH, on another machine).

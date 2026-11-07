@@ -120,7 +120,7 @@ mod tests {
             format!("{{\"type\":\"session\",\"id\":\"s1\",\"cwd\":\"{}\",\"timestamp\":\"2026-01-01T00:00:00Z\"}}\n{{\"type\":\"message\",\"message\":{{\"role\":\"user\",\"content\":[{{\"type\":\"text\",\"text\":\"on the host\"}}]}}}}\n", proj.display()),
         )
         .unwrap();
-        let delta = crate::remote_sessions::RemoteScanner::default().poll_quick(&host, &[remote::join("t", &proj.to_string_lossy())]).unwrap();
+        let delta = crate::remote_sessions::RemoteScanner::default().poll(&host).unwrap();
         let found = delta.upserts.iter().find(|i| i.path.ends_with("--proj--/s.jsonl")).unwrap_or_else(|| panic!("{:?}", delta.upserts.iter().map(|i| &i.path).collect::<Vec<_>>()));
         assert_eq!(found.harness, HarnessKind::Harlo);
         remote::disconnect(&host);

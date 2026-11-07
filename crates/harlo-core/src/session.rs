@@ -615,26 +615,7 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
         driver.ensure_harness(&mut st, &mut pending);
     } else if let Some(path) = session_file {
         let tx = aux_tx.clone();
-        let remote = driver.cfg.remote.clone();
-        let program = driver.cfg.program.clone().or_else(|| harlo_harness::resolve_program(kind));
         tokio::task::spawn_blocking(move || {
-            // OpenCode's sessions are in its database, not a file (a remote
-            // host's: through its server).
-            if kind == harlo_harness::HarnessKind::OpenCode {
-                let saved = match &remote {
-                    Some(r) => harlo_harness::opencode_remote_saved(r, &path),
-                    None => harlo_harness::opencode::saved(&path),
-                };
-                let _ = tx.send(Aux::Loaded(saved, 0));
-                return;
-            }
-            // An ACP agent's: its replay (it has no file either).
-            if harlo_harness::acp::is_acp(kind) {
-                let program = if remote.is_some() { Some(std::path::PathBuf::from(kind.as_str())) } else { program };
-                let saved = program.map(|p| harlo_harness::acp::saved(&path, &p, remote.as_ref())).unwrap_or_default();
-                let _ = tx.send(Aux::Loaded(saved, 0));
-                return;
-            }
             // A remote session: read from its copy here, brought up to date
             // over SSH with what was added.
             let (saved, size, missing) = if crate::remote::is_remote(&path) {
@@ -1235,18 +1216,15 @@ fn compact_at(cfg: &HarnessConfig, meta: &SessionMetaInfo) -> u64 {
         return 0;
     }
     let window = meta.context_window;
-    let (provider, model) = meta.model_id.split_once('/').unwrap_or(("", &meta.model_id));
     let at = match (&cfg.remote, cfg.kind) {
         (Some(r), HarnessKind::Pi) => crate::compaction::pi_on(&r.host, &harlo_harness::on_host(&cfg.cwd), &meta.model_id, window),
         (Some(r), HarnessKind::Omp) => crate::compaction::omp_on(&r.host, &meta.model_id, window),
-        (Some(r), HarnessKind::Hermes) => crate::compaction::hermes_on(&r.host, model, provider, window),
         (Some(_), _) => None,
         (None, HarnessKind::Pi) => {
             let dir = cfg.env.iter().find(|(k, _)| k == "PI_CODING_AGENT_DIR").map(|(_, v)| std::path::Path::new(v));
             crate::compaction::pi(dir, &cfg.cwd, &meta.model_id, window)
         }
         (None, HarnessKind::Omp) => crate::compaction::omp(&meta.model_id, window),
-        (None, HarnessKind::Hermes) => crate::compaction::hermes(model, provider, window),
         _ => None,
     };
     at.unwrap_or(0)
@@ -1910,7 +1888,7 @@ mod tests {
         assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::Status(SessionStatus::Idle))).await);
         handle.send_raw(json!({ "type": "harlo_set_modes", "approval": "yolo", "plan": false }));
         handle.send_raw(json!({ "type": "set_thinking_level", "level": "low" }));
-        let brief = crate::orchestration::helper_brief("main", "Create add.py with a function add(a, b) that returns their sum.", true, "");
+        let brief = crate::orchestration::helper_brief("main", "Create add.py with a function add(a, b) that returns their sum.", true);
         handle.prompt(&brief, Vec::new(), SendMode::Normal);
         let mut reports: Vec<Result<crate::orchestration::Report, String>> = Vec::new();
         let mut file = None;

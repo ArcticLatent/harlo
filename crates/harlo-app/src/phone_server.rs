@@ -527,7 +527,7 @@ fn subagent_json(s: &Value) -> Value {
 /// `ordinal`-th message, as the desktop does.
 async fn branch(live: &crate::registry::LiveRef, file: Option<std::path::PathBuf>, ordinal: Option<usize>, fork: bool) -> Value {
     let Some(ordinal) = ordinal else { return json!({ "error": "That isn't one of your messages." }) };
-    if !matches!(live.harness.as_str(), "pi" | "omp" | "claude" | "opencode" | "hermes" | "harlo") || (fork && live.harness != "omp") {
+    if !matches!(live.harness.as_str(), "pi" | "omp" | "claude" | "harlo") || (fork && live.harness != "omp") {
         return json!({ "error": "This agent can't do that." });
     }
     let harness = live.harness.clone();

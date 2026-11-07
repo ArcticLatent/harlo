@@ -83,7 +83,7 @@ fn main() {
             0
         }
         "remove" => {
-            let (errors, _, summary) = servers::remove(&arg(2), &arg(1), arg(3) == "1", &|_, _, _| {}, &|_| true);
+            let (errors, summary) = servers::remove(&arg(2), &arg(1), arg(3) == "1", &|_, _, _| {}, &|_| {});
             print(&json!({ "errors": errors, "summary": summary }))
         }
         "version" => {

@@ -129,61 +129,6 @@ fn omp_model_threshold<'a>(map: &'a Yaml, model: &str) -> Option<&'a Yaml> {
         .map(|(_, v)| v)
 }
 
-/// Hermes: at `compression.threshold` of the window (50%, at least 75% for a
-/// window under 512k, or a model's `model_thresholds`), not under 64k (but
-/// at most 85% then), and not past `threshold_tokens`, from
-/// `~/.hermes/config.yaml` (`$HERMES_HOME`).
-pub fn hermes(model: &str, provider: &str, window: u64) -> Option<u64> {
-    let dir = std::env::var_os("HERMES_HOME").map(PathBuf::from).unwrap_or_else(|| home().join(".hermes"));
-    hermes_at(&read_yaml(&dir.join("config.yaml")), model, provider, window)
-}
-
-/// The same on another machine (its `~/.hermes/config.yaml` as last read).
-pub fn hermes_on(host: &str, model: &str, provider: &str, window: u64) -> Option<u64> {
-    hermes_at(&yaml(&crate::remote::home_file_soon(host, ".hermes/config.yaml", REREAD)?), model, provider, window)
-}
-
-fn hermes_at(config: &Yaml, model: &str, provider: &str, window: u64) -> Option<u64> {
-    let c = &config["compression"];
-    if window == 0 || c["enabled"].as_bool() == Some(false) {
-        return None;
-    }
-    let number = |y: &Yaml| y.as_f64().or_else(|| y.as_i64().map(|n| n as f64));
-    let mut percent = number(&c["threshold"]).unwrap_or(0.5);
-    // The longest part of the model's name with its own (`provider:part` is
-    // only for that provider, and wins a tie).
-    if let Some(map) = c["model_thresholds"].as_hash() {
-        let provider = provider.trim().to_lowercase();
-        let best = map
-            .iter()
-            .filter_map(|(k, v)| {
-                let key = k.as_str()?;
-                let rank = match key.split_once(':') {
-                    None => model.contains(key).then_some((key.len(), 0)),
-                    Some((scope, part)) => (scope.trim().to_lowercase() == provider && model.contains(part)).then_some((part.len(), 1)),
-                };
-                Some((rank?, number(v)?))
-            })
-            .max_by_key(|(rank, _)| *rank);
-        if let Some((_, p)) = best {
-            percent = p;
-        }
-    }
-    if window < 512_000 {
-        percent = percent.max(0.75);
-    }
-    let at = (window as f64 * percent) as u64;
-    let mut floored = at.max(64_000);
-    let cap = (window as f64 * 0.85) as u64;
-    if floored > at && floored > cap {
-        floored = at.max(cap);
-    }
-    if let Some(most) = c["threshold_tokens"].as_i64().filter(|n| *n > 0) {
-        floored = floored.min((most as u64).min(window));
-    }
-    Some(floored)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,19 +161,5 @@ mod tests {
         assert_eq!(omp_at(&models, "a/c", 200_000), Some(120_000));
         assert_eq!(omp_at(&models, "l/q", 200_000), Some(80_000), "80% of its 100k");
         assert_eq!(omp_at(&yaml("compaction:\n  strategy: \"off\"\n"), "a/b", 200_000), None);
-    }
-
-    #[test]
-    fn hermes_compresses_at_its_share() {
-        let none = Yaml::Null;
-        assert_eq!(hermes_at(&none, "m", "p", 1_000_000), Some(500_000));
-        assert_eq!(hermes_at(&none, "m", "p", 200_000), Some(150_000), "75% under 512k");
-        assert_eq!(hermes_at(&none, "m", "p", 64_000), Some(54_400), "85% of a small window");
-        let set = yaml("compression:\n  threshold: 0.6\n  threshold_tokens: 400000\n  model_thresholds:\n    gpt: 0.7\n    codex:gpt-5: 0.9\n");
-        assert_eq!(hermes_at(&set, "m", "p", 1_000_000), Some(400_000), "capped");
-        assert_eq!(hermes_at(&set, "gpt-5.5", "codex", 1_000_000), Some(400_000));
-        assert_eq!(hermes_at(&set, "gpt-4", "x", 600_000), Some(400_000));
-        assert_eq!(hermes_at(&yaml("compression:\n  model_thresholds:\n    gpt: 0.6\n    codex:gpt-5: 0.9\n"), "gpt-5.5", "codex", 1_000_000), Some(900_000));
-        assert_eq!(hermes_at(&yaml("compression:\n  enabled: false\n"), "m", "p", 200_000), None);
     }
 }

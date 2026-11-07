@@ -6,7 +6,7 @@ import harlo
 // Signing an agent in to a model provider (Settings → Providers →
 // Accounts): pick what to sign in to, then follow the agent's own sign-in
 // here: the page to open (harlo opens it), a device code, what it asks for
-// (an API key, a code from the page). The agent keeps the credential.
+// (a code from the page). The agent keeps the credential.
 AppDialog {
     id: dlg
     objectName: "signInDialog"
@@ -15,17 +15,13 @@ AppDialog {
     standardButtons: Dialog.NoButton
 
     signal signedInOnHost()
-    /// An agent's own setup, in harlo's terminal: in `folder` (a host's
-    /// home folder, for an agent there).
-    signal runInTerminal(string folder, string command)
     property string agent: ""
     property string agentLabel: ""
-    /// "pick", "form" (OpenCode: a key and its fields first) or "flow".
+    /// "pick" or "flow".
     property string page: "pick"
     property var chosen: null
     property var method: null
     property string search: ""
-    property var answers: ({})
     /// Links already opened in the browser (by address).
     property var openedUrls: ({})
 
@@ -45,43 +41,11 @@ AppDialog {
         open()
     }
     function begin(provider, m) {
-        if (m.type === "terminal") {
-            const at = agent.indexOf("@")
-            const host = at >= 0 ? agent.substring(at + 1) : ""
-            const h = host !== "" ? JSON.parse(Remotes.hostsJson()).find(x => x.name === host) : null
-            // (Its home unknown: the shell starts in it all the same.)
-            runInTerminal(host === "" ? Workspace.homeDir() : "ssh://" + host + (h && h.home ? h.home : "/~"), m.command)
-            close()
-            return
-        }
         chosen = provider
         method = m
-        answers = ({})
-        const fields = (m.form || []).filter(f => !f.hidden)
-        if (m.type === "key" || fields.length > 0) { page = "form"; return }
-        go({ type: m.type })
-    }
-    function go(extra) {
         openedUrls = ({})
         page = "flow"
-        Accounts.start(agent, chosen.id, method.id, JSON.stringify(Object.assign({ type: method.type }, extra)))
-    }
-    function formAnswer() {
-        const a = {}
-        for (const f of (method.form || [])) {
-            if (f.type === "external") continue
-            const v = answers[f.key] !== undefined ? answers[f.key] : f.default
-            if (v !== undefined && v !== "") a[f.key] = v
-        }
-        return a
-    }
-    function shows(f) {
-        if (f.hidden) return false
-        return (f.when || []).every(c => {
-            const v = answers[c.key]
-            if (v === undefined) return false
-            return c.op === "eq" ? String(v) === String(c.value) : String(v) !== String(c.value)
-        })
+        Accounts.start(agent, chosen.id, method.id)
     }
     onClosed: {
         if (running) Accounts.cancel()
@@ -90,7 +54,6 @@ AppDialog {
             Workspace.refreshProviders()
             if (onHost) signedInOnHost()
         }
-        if (onHost) Accounts.release()
     }
     onFlowChanged: {
         if (!flow || !visible) return
@@ -178,7 +141,7 @@ AppDialog {
                             FlatButton {
                                 required property var modelData
                                 objectName: "signInMethod-" + row.modelData.id + "-" + modelData.id
-                                text: row.modelData.methods.length > 1 || modelData.type === "terminal" ? modelData.label : (modelData.type === "key" ? "Add key" : "Sign in")
+                                text: row.modelData.methods.length > 1 ? modelData.label : "Sign in"
                                 enabled: modelData.blocked !== true
                                 font.pixelSize: Theme.px(11.5)
                                 padding: 4
@@ -202,81 +165,6 @@ AppDialog {
                 text: "Nothing matches."
                 color: Theme.muted
                 font.pixelSize: Theme.px(12.5)
-            }
-        }
-
-        // ---- a key, and what else the provider needs (OpenCode) ------------------
-        ColumnLayout {
-            visible: dlg.page === "form" && dlg.method !== null
-            Layout.fillWidth: true
-            spacing: 8
-            Label {
-                visible: dlg.method !== null && dlg.method.type === "key"
-                text: dlg.method ? dlg.method.label : ""
-                color: Theme.foreground
-                font.pixelSize: Theme.px(12.5)
-            }
-            AppTextField {
-                id: keyField
-                objectName: "signInKey"
-                visible: dlg.method !== null && dlg.method.type === "key"
-                Layout.fillWidth: true
-                echoMode: TextInput.Password
-                placeholderText: "Paste the API key"
-            }
-            Repeater {
-                model: dlg.method ? (dlg.method.form || []) : []
-                ColumnLayout {
-                    id: field
-                    required property var modelData
-                    visible: dlg.shows(modelData)
-                    Layout.fillWidth: true
-                    spacing: 4
-                    Label {
-                        text: (field.modelData.title || field.modelData.key) + (field.modelData.required ? "" : " (optional)")
-                        color: Theme.foreground
-                        font.pixelSize: Theme.px(12.5)
-                    }
-                    Label {
-                        visible: (field.modelData.description || "") !== ""
-                        Layout.fillWidth: true
-                        wrapMode: Text.Wrap
-                        text: field.modelData.description || ""
-                        color: Theme.muted
-                        font.pixelSize: Theme.px(11.5)
-                    }
-                    FlatButton {
-                        visible: field.modelData.type === "external"
-                        text: "Open " + (field.modelData.title || "the page")
-                        font.pixelSize: Theme.px(12)
-                        onClicked: Qt.openUrlExternally(field.modelData.url)
-                    }
-                    ComboBox {
-                        visible: field.modelData.type === "string" && (field.modelData.options || []).length > 0
-                        Layout.fillWidth: true
-                        model: (field.modelData.options || []).map(o => o.label || o.value)
-                        onActivated: i => { dlg.answers[field.modelData.key] = field.modelData.options[i].value; dlg.answersChanged() }
-                        Component.onCompleted: if ((field.modelData.options || []).length > 0 && dlg.answers[field.modelData.key] === undefined) {
-                            dlg.answers[field.modelData.key] = field.modelData.default || field.modelData.options[0].value
-                            dlg.answersChanged()
-                        }
-                    }
-                    AppTextField {
-                        visible: (field.modelData.type === "string" && (field.modelData.options || []).length === 0) || field.modelData.type === "number" || field.modelData.type === "integer"
-                        Layout.fillWidth: true
-                        placeholderText: field.modelData.placeholder || ""
-                        text: field.modelData.default !== undefined ? String(field.modelData.default) : ""
-                        onTextEdited: {
-                            dlg.answers[field.modelData.key] = field.modelData.type === "string" ? text : Number(text)
-                            dlg.answersChanged()
-                        }
-                    }
-                    AppSwitch {
-                        visible: field.modelData.type === "boolean"
-                        checked: field.modelData.default === true
-                        onToggled: { dlg.answers[field.modelData.key] = checked; dlg.answersChanged() }
-                    }
-                }
             }
         }
 
@@ -441,14 +329,6 @@ AppDialog {
                 visible: dlg.page !== "pick" && !dlg.running
                 text: "Back"
                 onClicked: { dlg.page = "pick"; Accounts.loadProviders(dlg.agent) }
-            }
-            DialogButton {
-                visible: dlg.page === "form"
-                objectName: "signInSave"
-                text: dlg.method && dlg.method.type === "key" ? "Save key" : "Continue"
-                accent: true
-                enabled: dlg.method !== null && (dlg.method.type !== "key" || keyField.text.trim() !== "")
-                onClicked: { dlg.go({ key: keyField.text.trim(), answer: dlg.formAnswer() }); keyField.text = "" }
             }
             DialogButton {
                 objectName: "signInClose"

@@ -137,11 +137,6 @@ fn main() {
 
     // Parsing the syntax definitions takes a moment; do it off the UI thread.
     runtime().spawn_blocking(harlo_core::markdown::warm_up);
-    // Settings → MCP opens without waiting: Hermes' servers are read once
-    // now (it takes Hermes half a second; kept until its config changes).
-    runtime().spawn_blocking(|| harlo_core::mcp::load(&harlo_core::mcp::Scope::Global));
-    // Settings → Model servers too (Hermes' are read with `hermes config`).
-    runtime().spawn_blocking(|| harlo_core::model_servers::servers(harlo_harness::HarnessKind::Hermes));
 
     // A widgets-capable application: the desktop's tray (KDE's needs widgets)
     // and native file dialogs work. Also names the QtCore `Settings` file
@@ -187,8 +182,6 @@ fn main() {
     for h in harlo_core::remote::hosts() {
         harlo_core::remote::set_disconnected(&h.name, true);
     }
-    harlo_harness::stop_opencode();
-    harlo_harness::stop_acp();
     // Model servers harlo started (Settings → Model servers).
     harlo_core::servers::stop_started_servers();
     harlo_core::remote::disconnect_all();

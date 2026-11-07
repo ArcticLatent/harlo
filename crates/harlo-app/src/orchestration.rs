@@ -57,14 +57,14 @@ pub fn serve(thread: CxxQtThread<Workspace>) {
 /// One tool call: done on the UI thread (and, for read_session, the
 /// session's messages asked for here).
 fn handle(thread: &CxxQtThread<Workspace>, call: &Value) -> Result<Value, String> {
-    let (session, opencode) = (call["session"].as_str().unwrap_or_default().to_owned(), call["opencode"] == true);
+    let session = call["session"].as_str().unwrap_or_default().to_owned();
     let (tool, args) = (call["tool"].as_str().unwrap_or_default().to_owned(), call["args"].clone());
     let (tx, rx) = std::sync::mpsc::channel();
     {
         let (tool, args) = (tool.clone(), args.clone());
         thread
             .queue(move |this| {
-                let _ = tx.send(this.orchestrate(&session, opencode, &tool, &args));
+                let _ = tx.send(this.orchestrate(&session, &tool, &args));
             })
             .map_err(|_| "harlo is closing".to_owned())?;
     }

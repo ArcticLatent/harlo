@@ -23,7 +23,7 @@ const SCHEME: &str = "ssh://";
 
 /// Folders where pi and omp usually live, ahead of the remote PATH (a
 /// non-interactive SSH command gets a minimal one).
-pub const PATH_PREFIX: &str = "$HOME/.local/bin:$HOME/.bun/bin:$HOME/.pi/agent/bin:$HOME/.opencode/bin:$HOME/.npm-global/bin:$HOME/.cargo/bin:/usr/local/bin";
+pub const PATH_PREFIX: &str = "$HOME/.local/bin:$HOME/.bun/bin:$HOME/.pi/agent/bin:$HOME/.npm-global/bin:$HOME/.cargo/bin:/usr/local/bin";
 
 /// A shell's PATH with the folders of [`PATH_PREFIX`] that are there and
 /// not on it yet, in front (for a terminal: the agents harlo starts there
@@ -481,8 +481,6 @@ pub struct HostInfo {
     pub pi: String,
     pub omp: String,
     pub claude: String,
-    pub opencode: String,
-    pub hermes: String,
     /// Their versions (`program` → "1.0.4").
     pub versions: std::collections::BTreeMap<String, String>,
     /// Claude's sign-in there: "yes" (its credentials file), "keychain"
@@ -505,7 +503,7 @@ pub fn launch(host: &Host) -> harlo_harness::RemoteLaunch {
 }
 
 /// The agents harlo runs, as the host check names them.
-pub const AGENTS: [&str; 5] = ["omp", "pi", "claude", "opencode", "hermes"];
+pub const AGENTS: [&str; 3] = ["omp", "pi", "claude"];
 
 /// How to install each agent (its official one-line installer).
 pub fn install_command(agent: &str) -> &'static str {
@@ -513,8 +511,6 @@ pub fn install_command(agent: &str) -> &'static str {
         "pi" => "curl -fsSL https://pi.dev/install.sh | sh",
         "omp" => "curl -fsSL https://omp.sh/install | sh",
         "claude" => "curl -fsSL https://claude.ai/install.sh | bash",
-        "opencode" => "curl -fsSL https://opencode.ai/install | bash",
-        "hermes" => "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash",
         _ => "",
     }
 }
@@ -525,7 +521,7 @@ pub fn install_command(agent: &str) -> &'static str {
 // (HARLO_TEST_HOME: the click tests' scratch home on the test host.)
 const CHECK_SCRIPT: &str = r#"printf 'os=%s\narch=%s\nhome=%s\n' "$(uname -s)" "$(uname -m)" "${HARLO_TEST_HOME:-$HOME}"
 ver() { if command -v timeout >/dev/null 2>&1; then timeout 10 "$@"; else "$@"; fi; }
-for p in pi omp claude opencode hermes; do
+for p in pi omp claude; do
   w=$(command -v "$p" 2>/dev/null || true)
   case ":${HARLO_TEST_HIDE_AGENTS:-}:" in *":$p:"*) w="";; esac
   printf '%s=%s\n' "$p" "$w"
@@ -558,8 +554,6 @@ fn parse_check(text: &str) -> HostInfo {
                 "pi" => info.pi = v.to_owned(),
                 "omp" => info.omp = v.to_owned(),
                 "claude" => info.claude = v.to_owned(),
-                "opencode" => info.opencode = v.to_owned(),
-                "hermes" => info.hermes = v.to_owned(),
                 "claude_auth" => info.claude_auth = v.to_owned(),
                 "bwrap" => info.bwrap = v.to_owned(),
                 k if k.ends_with("_version") => {
@@ -594,8 +588,6 @@ impl HostInfo {
             "pi" => !self.pi.is_empty(),
             "omp" => !self.omp.is_empty(),
             "claude" => !self.claude.is_empty(),
-            "opencode" => !self.opencode.is_empty(),
-            "hermes" => !self.hermes.is_empty(),
             // (harlo brings it.)
             "harlo" => crate::agent_host::not_there(self).is_none(),
             _ => false,

@@ -42,8 +42,8 @@ Popup {
         { id: "orchestration", title: "Orchestration", icon: "ai-agent", group: "agents", keywords: "orchestration skills handoff advisor committee second opinion delegate subagent agents start sessions mcp bridge tools" },
         { id: "remote", title: "Remote Instances", icon: "server", group: "agents", keywords: "remote ssh server host machine nas instance connect" },
         { id: "about", title: "About Harlo", icon: "information", group: "about", keywords: "about version release licence license mit website source code github changelog what's new report problem issue bug logs" },
-        { id: "providers", title: "Providers", icon: "robot-2", group: "agents", keywords: "providers harnesses claude opencode pi omp oh my pi binary path program agent models version enable disable debug log logs protocol crash diagnostics goal subagent model role sign in login log in account accounts api key oauth credentials" },
-        { id: "servers", title: "Model servers", icon: "server", group: "agents", keywords: "model servers local models ollama lm studio llama.cpp vllm sglang gateway openai compatible custom provider models.json models.yml opencode.json pi omp opencode hermes basalt" },
+        { id: "providers", title: "Providers", icon: "robot-2", group: "agents", keywords: "providers harnesses harlo claude pi omp oh my pi binary path program agent models version enable disable debug log logs protocol crash diagnostics goal subagent model role sign in login log in account accounts api key oauth credentials" },
+        { id: "servers", title: "Model servers", icon: "server", group: "agents", keywords: "model servers local models ollama lm studio llama.cpp vllm sglang gateway openai compatible custom provider models.json models.yml providers.json pi omp harlo basalt" },
         { id: "packages", title: "Extensions", icon: "code-box", group: "agents", keywords: "pi packages extensions permissions guardrails subagents web todo claude update" },
     ]
     // (About goes last, under no heading.)
@@ -2575,7 +2575,7 @@ Popup {
                 subtitle: orch.info.loading ? "Looking at " + orch.info.host + "…"
                     : "Optional: orchestration works without them, since the tools explain themselves and the Delegate button sends its own instructions. "
                       + "Turn on handoff, advisor or committee if you ask for those in your own words (\"get a second opinion from…\"), so agents follow the same recipe each time. "
-                      + "harlo installs them into " + orch.info.skillDirs.join(" and ") + ", where Claude, OpenCode, pi and omp find them, also outside harlo" + (orch.info.host === "" ? "; it keeps them up to date." : ".") + (orch.info.busy ? " Working…" : "")
+                      + "harlo installs them into " + orch.info.skillDirs.join(" and ") + ", where Claude, pi and omp find them, also outside harlo" + (orch.info.host === "" ? "; it keeps them up to date." : ".") + (orch.info.busy ? " Working…" : "")
             }
             Group {
                 visible: Workspace.orchestrationOn
@@ -2661,7 +2661,7 @@ Popup {
                 Remotes.connectHost(name)
             }
             SectionHeader {
-                subtitle: "Work on other machines over SSH. Each one is an instance, with its own projects and sessions: switch to it from the instance menu at the top of the sidebar, then + Project adds its folders; its chats, terminal, git and files work there. harlo signs in with your SSH keys or agent. Each connected machine shows which agents it has (omp, pi, Claude, OpenCode), installs the missing ones for you, and opens a terminal there to sign Claude in."
+                subtitle: "Work on other machines over SSH. Each one is an instance, with its own projects and sessions: switch to it from the instance menu at the top of the sidebar, then + Project adds its folders; its chats, terminal, git and files work there. harlo signs in with your SSH keys or agent. Each connected machine shows which agents it has (omp, pi, Claude), installs the missing ones for you, and opens a terminal there to sign Claude in."
             }
             RowLayout {
                 Layout.fillWidth: true
@@ -2795,7 +2795,7 @@ Popup {
                         spacing: 6
                         readonly property string folder: "ssh://" + hostBox.modelData.name + (hostBox.modelData.home || "")
                         Repeater {
-                            model: ["omp", "pi", "claude", "opencode", "hermes"]
+                            model: ["omp", "pi", "claude"]
                             Rectangle {
                                 id: agentChip
                                 required property string modelData
@@ -2920,7 +2920,7 @@ Popup {
             spacing: 0
             property int revision: 0
             readonly property var agents: (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()) : [])
-                .filter(p => ["pi", "omp", "opencode", "hermes", "harlo"].includes(p.id) && p.state !== "missing")
+                .filter(p => ["pi", "omp", "harlo"].includes(p.id) && p.state !== "missing")
             // Other machines that are connected, and the servers their agents have.
             readonly property var hostNames: (Remotes.revision >= 0 ? JSON.parse(Remotes.hostsJson()) : []).filter(h => h.state === "connected").map(h => h.name)
             readonly property var onHosts: Accounts.hostServers !== "" ? JSON.parse(Accounts.hostServers) : ({})
@@ -2938,12 +2938,12 @@ Popup {
                     for (const sv of JSON.parse(Accounts.servers(a.id))) {
                         const same = rows.find(r => r.name === sv.name && r.baseUrl === sv.baseUrl)
                         if (same) { same.agents.push(a.label); same.agentIds.push(a.id) }
-                        else rows.push({ name: sv.name, baseUrl: sv.baseUrl, models: sv.models, place: sv.place, managed: sv.managed, hermesOk: sv.hermesOk !== false, engine: sv.engine || "", contexts: sv.contexts || [], agents: [a.label], agentIds: [a.id] })
+                        else rows.push({ name: sv.name, baseUrl: sv.baseUrl, models: sv.models, place: sv.place, managed: sv.managed, engine: sv.engine || "", contexts: sv.contexts || [], agents: [a.label], agentIds: [a.id] })
                     }
                 }
                 // Set up by harlo, in no agent yet.
                 for (const sv of JSON.parse(Accounts.servers("")))
-                    rows.push({ name: sv.name, baseUrl: sv.baseUrl, models: sv.models, place: sv.place, managed: true, hermesOk: sv.hermesOk !== false, engine: sv.engine || "", contexts: sv.contexts || [], agents: [], agentIds: [] })
+                    rows.push({ name: sv.name, baseUrl: sv.baseUrl, models: sv.models, place: sv.place, managed: true, engine: sv.engine || "", contexts: sv.contexts || [], agents: [], agentIds: [] })
                 return rows
             }
             // What a row says it runs: engine · models · context, then where.
@@ -2974,8 +2974,7 @@ Popup {
                 const taken = [...new Set((agent.modelIds || []).map(m => m.split(/[\/:]/)[0]).filter(p => p !== ""))]
                 // (From an agent that has it, else what harlo saved at its address.)
                 const err = Accounts.copyServer(row.agentIds.length > 0 ? row.agentIds[0] : row.baseUrl, agent.id, row.name, JSON.stringify(taken))
-                if (err !== "" && err !== "OPENCODE_BUSY") { Workspace.showNotice(err, true); return false }
-                if (err === "OPENCODE_BUSY") Workspace.showNotice("Added. OpenCode's open sessions get its models once they're all closed.", false)
+                if (err !== "") { Workspace.showNotice(err, true); return false }
                 Accounts.loadServers()
                 Workspace.refreshProviders()
                 return true
@@ -2983,8 +2982,7 @@ Popup {
             // Out of one agent (the others keep it).
             function uncopy(row, agent) {
                 const err = Accounts.removeServerFrom(agent.id, row.name)
-                if (err === "OPENCODE_BUSY") Workspace.showNotice("Removed. OpenCode's open sessions keep its models until they're all closed.", false)
-                else if (err !== "") { Workspace.showNotice(err, true); return false }
+                if (err !== "") { Workspace.showNotice(err, true); return false }
                 Workspace.refreshProviders()
                 return true
             }
@@ -3028,7 +3026,7 @@ Popup {
                         if (!removeServerDialog.removing || !j || j.state !== "done" || !removeServerDialog.row || j.url !== removeServerDialog.row.baseUrl) return
                         removeServerDialog.removing = false
                         removeServerDialog.finished = true
-                        removeServerDialog.summary = (j.summary || "Removed.") + (j.busy ? " OpenCode's open sessions keep its models until they're all closed." : "")
+                        removeServerDialog.summary = j.summary || "Removed."
                         removeServerDialog.problems = j.error || ""
                         Workspace.refreshProviders()
                     }
@@ -3112,7 +3110,7 @@ Popup {
             Connections { target: Accounts; function onRevisionChanged() { srv.check() } }
             Timer { interval: 3000; repeat: true; running: srv.visible; onTriggered: srv.check() }
             SectionHeader {
-                subtitle: "Models you run yourself or your company serves, for pi, Oh My Pi, OpenCode and Hermes: they show in the model lists (under Local when they run on this computer or your network). Claude Code only uses Anthropic's models."
+                subtitle: "Models you run yourself or your company serves, for Harlo, pi and Oh My Pi: they show in the model lists (under Local when they run on this computer or your network). Claude Code only uses Anthropic's models."
             }
             // The two ways to add one: set one up here, or connect to one.
             Rectangle {
@@ -3182,7 +3180,7 @@ Popup {
                 Layout.topMargin: 12
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
-                text: "Model servers are for pi, Oh My Pi, OpenCode and Hermes; none of them is installed."
+                text: "Model servers are for Harlo, pi and Oh My Pi; none of them is installed."
                 color: Theme.muted
                 font.pixelSize: Theme.px(12.5)
             }
@@ -3280,8 +3278,6 @@ Popup {
                                     // (Oh My Pi finds Ollama on its usual port by itself.)
                                     readonly property bool builtIn: modelData.id === "omp" && serverItem.modelData.engine === "Ollama" && /:11434\/v1$/.test(serverItem.modelData.baseUrl)
                                     readonly property bool has: builtIn || serverItem.modelData.agentIds.includes(modelData.id)
-                                    // Hermes refuses models with under 64k of context.
-                                    readonly property bool fits: modelData.id !== "hermes" || serverItem.modelData.hermesOk
                                     objectName: "serverAgent-" + serverItem.modelData.name + "-" + modelData.id
                                     text: modelData.label
                                     font.pixelSize: Theme.px(12)
@@ -3291,13 +3287,13 @@ Popup {
                                     property bool busy: false
                                     property bool want: false
                                     checked: busy ? want : has
-                                    enabled: !busy && !builtIn && (has || fits)
+                                    enabled: !busy && !builtIn
                                     onToggled: {
                                         const want = checked
                                         checked = Qt.binding(() => agentBox.busy ? agentBox.want : agentBox.has)
                                         agentBox.want = want
                                         agentBox.busy = true
-                                        // (After the spinner is drawn: Hermes takes a moment.)
+                                        // (After the spinner is drawn.)
                                         change.start()
                                     }
                                     Timer {
@@ -3319,8 +3315,8 @@ Popup {
                                         implicitWidth: 14
                                         implicitHeight: 14
                                     }
-                                    ToolTip.visible: hovered && (builtIn || (!fits && !has))
-                                    ToolTip.text: builtIn ? "Oh My Pi finds Ollama on this port by itself (as “ollama”), with all its models." : "Hermes needs at least 64k tokens of context, more than this serves."
+                                    ToolTip.visible: hovered && builtIn
+                                    ToolTip.text: "Oh My Pi finds Ollama on this port by itself (as “ollama”), with all its models."
                                     ToolTip.delay: 300
                                 }
                                 }
@@ -3357,7 +3353,7 @@ Popup {
                                         }
                                         Label {
                                             visible: hostRow.there.state === "ready" && hostRow.agentIds.length === 0
-                                            text: "no pi, Oh My Pi, OpenCode or Hermes there"
+                                            text: "no Harlo, pi or Oh My Pi there"
                                             color: Theme.textFaint
                                             font.pixelSize: Theme.px(12)
                                             height: implicitHeight + 6
@@ -3369,12 +3365,10 @@ Popup {
                                                 required property string modelData
                                                 readonly property bool has: (hostRow.there.agents[modelData] || []).some(sv => sv.name === serverItem.modelData.name && sv.baseUrl === serverItem.modelData.baseUrl)
                                                 objectName: "serverHostAgent-" + serverItem.modelData.name + "-" + hostRow.modelData + "-" + modelData
-                                                text: ({ pi: "pi", omp: "Oh My Pi", opencode: "OpenCode", hermes: "Hermes" })[modelData] || modelData
+                                                text: ({ pi: "pi", omp: "Oh My Pi", harlo: "Harlo" })[modelData] || modelData
                                                 font.pixelSize: Theme.px(12)
-                                                // Hermes refuses models with under 64k of context.
-                                                readonly property bool fits: modelData !== "hermes" || serverItem.modelData.hermesOk
                                                 checked: has
-                                                enabled: !hostRow.there.busy && (has || fits)
+                                                enabled: !hostRow.there.busy
                                                 onToggled: {
                                                     const want = checked
                                                     checked = Qt.binding(() => has)
@@ -3382,8 +3376,7 @@ Popup {
                                                     else Accounts.removeServerOn(hostRow.modelData, modelData, serverItem.modelData.name)
                                                 }
                                                 ToolTip.visible: hovered
-                                                ToolTip.text: !fits && !has ? "Hermes needs at least 64k tokens of context, more than this serves."
-                                                    : serverItem.modelData.place === "here"
+                                                ToolTip.text: serverItem.modelData.place === "here"
                                                     ? "Its sessions on " + hostRow.modelData + " reach this computer's server through the SSH connection, while harlo is open."
                                                     : "Its sessions on " + hostRow.modelData + " use the same address; it has to reach it from there."
                                                 ToolTip.delay: 400
@@ -3556,13 +3549,12 @@ Popup {
                     readonly property string host: modelData
                     readonly property var e: srv.hostEngines[host] || ({ state: "loading", list: [], busy: {} })
                     readonly property var there: srv.onHosts[host] || ({ state: "loading", agents: {} })
-                    readonly property var agentIds: ["pi", "omp", "opencode", "hermes"].filter(id => (there.agents || {})[id] !== undefined)
+                    readonly property var agentIds: ["pi", "omp", "harlo"].filter(id => (there.agents || {})[id] !== undefined)
                     // Rows as this computer's: models by id, their contexts.
                     readonly property var rows: (e.list || []).map(r => ({
                         name: r.name, baseUrl: r.baseUrl, engine: r.engine, running: r.running, log: r.log, managed: true, here: r.here || "",
                         models: (r.models || []).map(m => m.id), contexts: (r.models || []).map(m => m.context || 0), rawModels: r.models || [],
-                        hermesOk: (r.models || []).length === 0 || (r.models || []).some(m => !m.context || m.context >= 64000),
-                        agentIds: ["pi", "omp", "opencode", "hermes"].filter(id => ((there.agents || {})[id] || []).some(sv => sv.baseUrl === r.baseUrl)),
+                        agentIds: ["pi", "omp", "harlo"].filter(id => ((there.agents || {})[id] || []).some(sv => sv.baseUrl === r.baseUrl)),
                     }))
                     Layout.fillWidth: true
                     spacing: 0
@@ -3677,7 +3669,7 @@ Popup {
                                         spacing: 16
                                         Label {
                                             visible: hostBlock.there.state === "ready" && hostBlock.agentIds.length === 0
-                                            text: "No pi, Oh My Pi, OpenCode or Hermes on " + hostBlock.host
+                                            text: "No Harlo, pi or Oh My Pi on " + hostBlock.host
                                             color: Theme.textFaint
                                             font.pixelSize: Theme.px(12)
                                             height: implicitHeight + 6
@@ -3688,21 +3680,17 @@ Popup {
                                             AppCheckBox {
                                                 required property string modelData
                                                 readonly property bool has: hostServer.modelData.agentIds.includes(modelData)
-                                                readonly property bool fits: modelData !== "hermes" || hostServer.modelData.hermesOk
                                                 objectName: "hostServerAgent-" + hostBlock.host + "-" + hostServer.modelData.name + "-" + modelData
-                                                text: ({ pi: "pi", omp: "Oh My Pi", opencode: "OpenCode", hermes: "Hermes" })[modelData] || modelData
+                                                text: ({ pi: "pi", omp: "Oh My Pi", harlo: "Harlo" })[modelData] || modelData
                                                 font.pixelSize: Theme.px(12)
                                                 checked: has
-                                                enabled: !hostBlock.there.busy && (has || fits)
+                                                enabled: !hostBlock.there.busy
                                                 onToggled: {
                                                     const want = checked
                                                     checked = Qt.binding(() => has)
                                                     if (want) Accounts.addHostEngine(hostBlock.host, JSON.stringify({ name: hostServer.modelData.name, baseUrl: hostServer.modelData.baseUrl, models: hostServer.modelData.rawModels, agents: [modelData] }))
                                                     else Accounts.removeServerOn(hostBlock.host, modelData, hostServer.modelData.name)
                                                 }
-                                                ToolTip.visible: hovered && !fits && !has
-                                                ToolTip.text: "Hermes needs at least 64k tokens of context, more than this serves."
-                                                ToolTip.delay: 400
                                             }
                                         }
                                         BusyIndicator {
@@ -3737,20 +3725,18 @@ Popup {
                                             AppCheckBox {
                                                 required property var modelData
                                                 readonly property bool has: hostServer.modelData.here !== "" && srv.list.some(r => r.baseUrl === hostServer.modelData.here && r.agentIds.includes(modelData.id))
-                                                readonly property bool fits: modelData.id !== "hermes" || hostServer.modelData.hermesOk
                                                 objectName: "hostServerHere-" + hostBlock.host + "-" + hostServer.modelData.name + "-" + modelData.id
                                                 text: modelData.label
                                                 font.pixelSize: Theme.px(12)
                                                 checked: has
-                                                enabled: hostServer.busy === "" && (has || fits)
+                                                enabled: hostServer.busy === ""
                                                 onToggled: {
                                                     const want = checked
                                                     checked = Qt.binding(() => has)
                                                     Accounts.useHostEngine(hostBlock.host, JSON.stringify({ name: hostServer.modelData.name, baseUrl: hostServer.modelData.baseUrl, models: hostServer.modelData.rawModels }), modelData.id, want)
                                                 }
                                                 ToolTip.visible: hovered
-                                                ToolTip.text: !fits && !has ? "Hermes needs at least 64k tokens of context, more than this serves."
-                                                    : "Its sessions on this computer reach the server on " + hostBlock.host + " through the SSH connection; harlo starts it there first when it's stopped."
+                                                ToolTip.text: "Its sessions on this computer reach the server on " + hostBlock.host + " through the SSH connection; harlo starts it there first when it's stopped."
                                                 ToolTip.delay: 400
                                             }
                                         }
@@ -3950,7 +3936,7 @@ Popup {
                 Group {
                     visible: hostAgents.host !== null && hostAgents.host.state === "connected"
                     Repeater {
-                        model: ["omp", "pi", "claude", "opencode", "hermes", "harlo"]
+                        model: ["omp", "pi", "claude", "harlo"]
                         SettingRow {
                             id: hostAgent
                             required property string modelData
