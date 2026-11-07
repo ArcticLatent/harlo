@@ -57,6 +57,13 @@ Item {
     function isActivity(kind) { return kind === "tool" || kind === "thinking" }
     /// A turn's head: avatar and name, over its first row.
     readonly property real headHeight: Theme.px(30)
+    // A reply's model has no name yet: the agent's list is read once, as
+    // soon as the agent runs (not started just for that).
+    property bool wantModelNames: false
+    readonly property bool readModelNames: wantModelNames && session.models.length === 0 && !session.modelsAnswered
+                                           && (session.status === "idle" || session.status === "busy")
+    onReadModelNamesChanged: if (readModelNames) { wantModelNames = false; session.loadModels() }
+    onSessionChanged: wantModelNames = false
     /// A reply's model as the head shows it (its name when the agent
     /// listed it; "" unknown: the session's).
     function replyModelName(id) {
@@ -72,11 +79,10 @@ Item {
         id: head
         property string replyModel
         readonly property string shownModel: root.replyModelName(replyModel)
-        // Another model than now: its name comes with the agent's list (read
-        // once, from a running agent).
-        Component.onCompleted: if (visible && replyModel !== "" && shownModel === replyModel && root.session.models.length === 0
-                                   && !root.session.modelsAnswered && (root.session.status === "idle" || root.session.status === "busy"))
-            root.session.loadModels()
+        // Another model than now: its name comes with the agent's list.
+        readonly property bool unnamed: visible && replyModel !== "" && shownModel === replyModel
+        onUnnamedChanged: if (unnamed) root.wantModelNames = true
+        Component.onCompleted: if (unnamed) root.wantModelNames = true
         visible: false
         x: (view.width - view.contentWidthLimit) / 2
         width: view.contentWidthLimit
