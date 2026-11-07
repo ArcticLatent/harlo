@@ -706,7 +706,7 @@ async fn compact_now(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, f
         let too_little = matches!(outcome, Compacted::Nothing);
         let result = match outcome {
             Compacted::Done(r) => Ok(r),
-            Compacted::Nothing => Err("There's too little to summarize yet.".to_owned()),
+            Compacted::Nothing => Err("There's nothing to compact yet: the conversation is still short.".to_owned()),
             Compacted::Stopped => Err("Stopped.".to_owned()),
             Compacted::Failed(e) => Err(e),
         };
@@ -720,9 +720,9 @@ async fn compact_now(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, f
             }
             sh.emit(r);
         } else if too_little {
-            // (Typed, with nothing shown yet: a compaction's line says why.)
-            sh.emit(json!({ "type": "compaction_start", "reason": "manual" }));
-            sh.emit(json!({ "type": "compaction_end", "reason": "manual", "result": null, "aborted": false, "willRetry": false, "errorMessage": result.err() }));
+            // (Typed, with nothing shown yet: a line says why, not as a
+            // failure.)
+            sh.emit(json!({ "type": "notice", "level": "warning", "message": result.err() }));
         }
         if typed {
             sh.emit(json!({ "type": "agent_end", "messages": [] }));

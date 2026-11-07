@@ -665,7 +665,8 @@ impl Agent {
     pub async fn compact(&mut self, reason: &str, focus: Option<&str>, stop: &CancellationToken, show: &mut (dyn FnMut(Shown) + Send)) -> Compacted {
         let at = compact::threshold(self.window().await);
         // (Too long even so: only the newest message kept.)
-        let cut = compact::cut(&self.history, compact::keep(at)).or_else(|| if reason == "overflow" { compact::cut(&self.history, 1) } else { None });
+        let keep = if reason == "manual" { compact::keep(at).min(compact::ASKED_KEEP) } else { compact::keep(at) };
+        let cut = compact::cut(&self.history, keep).or_else(|| if reason == "overflow" { compact::cut(&self.history, 1) } else { None });
         let Some(cut) = cut else { return Compacted::Nothing };
         let Some(first_kept) = self.ids.get(cut).cloned() else { return Compacted::Nothing };
         show(Shown::CompactionStart { reason });

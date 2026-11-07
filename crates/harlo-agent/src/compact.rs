@@ -5,9 +5,9 @@
 //! - When: past the window less [`RESERVE`] (by the last request's usage),
 //!   checked before each request; or when a request is refused for being
 //!   too long (then it's sent again once, compacted); or when asked.
-//! - Where: the newest [`KEEP`] tokens (a quarter of a small window) are
-//!   kept, cut before a message of the user's or the model's, never between
-//!   a call and its result.
+//! - Where: the newest [`KEEP`] tokens (a quarter of a small window;
+//!   [`ASKED_KEEP`] when you ask) are kept, cut before a message of the
+//!   user's or the model's, never between a call and its result.
 //! - How: the model gets the conversation up to the cut as it already has
 //!   it (so its cache serves it) and a request to summarize, with no tools
 //!   used. The files read and changed are listed by code, across
@@ -22,6 +22,9 @@ use serde_json::Value;
 pub const RESERVE: u64 = 16_384;
 /// Tokens of the newest messages kept as they are.
 pub const KEEP: u64 = 20_000;
+/// The same when you ask for it (/compact): the latest exchange or so, so a
+/// session shorter than [`KEEP`] can be compacted too.
+pub const ASKED_KEEP: u64 = 2_000;
 
 /// The context size compaction starts at for a model's window (0: unknown,
 /// never). `HARLO_AGENT_COMPACT_AT` (tokens) sets it instead, to try it.
@@ -228,6 +231,21 @@ mod tests {
         assert_eq!(f, (vec!["a.rs".to_owned(), "old.rs".into()], vec!["b.rs".to_owned(), "c.rs".into(), "d.rs".into()]));
         let s = with_files("## Goal\nx", &f);
         assert!(s.ends_with("## Files changed\nb.rs\nc.rs\nd.rs") && s.contains("## Files read\na.rs\nold.rs"), "{s}");
+    }
+
+    #[test]
+    fn asked_for_a_shorter_session_compacts_too() {
+        // About 10k tokens: under KEEP, so nothing on its own; asked for, the
+        // older part goes and the newest exchanges stay.
+        let mut h = Vec::new();
+        for _ in 0..10 {
+            h.push(user(&"q".repeat(400)));
+            h.push(json!({ "role": "assistant", "content": [{ "type": "text", "text": "a".repeat(3600) }] }));
+        }
+        assert_eq!(cut(&h, KEEP), None);
+        assert_eq!(cut(&h, ASKED_KEEP), Some(16), "the last two exchanges kept");
+        // A couple of short messages: nothing, even asked.
+        assert_eq!(cut(&[user("say one"), user("say two")], ASKED_KEEP), None);
     }
 
     #[test]
