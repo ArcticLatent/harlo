@@ -8,14 +8,19 @@ use serde_json::{Value, json};
 
 use crate::auth::RESOURCE;
 
-/// What a stream says, as it comes.
+/// What a stream says, as it comes. `index`: the item's place in the
+/// response's output.
 #[derive(Debug)]
 pub enum Event {
-    Text(String),
-    Reasoning(String),
-    /// An output item, complete (a message, reasoning, a function call):
-    /// what goes back in `input` next time.
-    Item(Value),
+    /// An output item started (a message, reasoning, a function call).
+    Added { index: usize, item: Value },
+    Text { index: usize, delta: String },
+    /// Reasoning summary text; `part` counts the summary's parts.
+    Reasoning { index: usize, part: usize, delta: String },
+    /// A function call's arguments, as they come.
+    Args { index: usize, delta: String },
+    /// An output item, complete: what goes back in `input` next time.
+    Item { index: usize, item: Value },
     /// Finished: its usage (`input_tokens`, `output_tokens`, …) and its
     /// output items (complete; some servers leave the reasoning's
     /// encrypted content out of the items as they come).
@@ -29,28 +34,62 @@ fn client() -> &'static reqwest::Client {
     CLIENT.get_or_init(reqwest::Client::new)
 }
 
-/// A model the signed-in account may use: (id, name to show).
-pub async fn models(token: &str) -> Result<Vec<(String, String)>> {
+/// The models list as the server sends it.
+pub async fn models_raw(token: &str) -> Result<Value> {
     let resp = client().get(format!("{RESOURCE}/models")).bearer_auth(token).send().await?;
     let status = resp.status();
     let body: Value = resp.json().await.unwrap_or(Value::Null);
     if !status.is_success() {
         bail!("{}", refusal(status.as_u16(), &body));
     }
+    Ok(body)
+}
+
+/// A model the signed-in account may use.
+#[derive(Clone, Debug)]
+pub struct ModelInfo {
+    pub id: String,
+    /// Its name for people.
+    pub name: String,
+    /// Tokens, or 0 when not said.
+    pub context_window: u64,
+    /// Reasoning efforts it takes (none said: empty).
+    pub levels: Vec<String>,
+}
+
+/// The models: (id, name to show), in the server's order.
+pub async fn models(token: &str) -> Result<Vec<(String, String)>> {
+    Ok(models_info(token).await?.into_iter().map(|m| (m.id, m.name)).collect())
+}
+
+pub async fn models_info(token: &str) -> Result<Vec<ModelInfo>> {
+    Ok(parse_models(&models_raw(token).await?))
+}
+
+fn parse_models(body: &Value) -> Vec<ModelInfo> {
+    let window = |m: &Value| ["context_window", "contextWindow", "context_length"].iter().find_map(|k| m[*k].as_u64()).unwrap_or(0);
+    let levels = |m: &Value| -> Vec<String> {
+        m["supported_reasoning_levels"].as_array().into_iter().flatten().filter_map(|l| l["effort"].as_str().or_else(|| l.as_str()).map(str::to_owned)).collect()
+    };
     // A plan's list (`models`, in the server's order, only those to list);
     // an API key's (`data`).
     if let Some(list) = body["models"].as_array() {
-        return Ok(list
+        return list
             .iter()
             .filter(|m| m["visibility"].as_str().is_none_or(|v| v == "list"))
             .filter_map(|m| {
                 let id = m["slug"].as_str().or_else(|| m["id"].as_str())?.to_owned();
                 let name = m["display_name"].as_str().unwrap_or(&id).to_owned();
-                Some((id, name))
+                Some(ModelInfo { id, name, context_window: window(m), levels: levels(m) })
             })
-            .collect());
+            .collect();
     }
-    Ok(body["data"].as_array().into_iter().flatten().filter_map(|m| m["id"].as_str().map(|id| (id.to_owned(), id.to_owned()))).collect())
+    body["data"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|m| m["id"].as_str().map(|id| ModelInfo { id: id.to_owned(), name: id.to_owned(), context_window: window(m), levels: levels(m) }))
+        .collect()
 }
 
 /// A request's body: the model, its instructions, the history, tools.
@@ -231,9 +270,13 @@ pub async fn stream(token: &str, session: &str, body: &Value, mut on: impl FnMut
             }
             let Ok(ev) = serde_json::from_str::<Value>(&data) else { continue };
             match ev["type"].as_str().unwrap_or_default() {
-                "response.output_text.delta" => on(Event::Text(ev["delta"].as_str().unwrap_or_default().to_owned())),
-                "response.reasoning_summary_text.delta" => on(Event::Reasoning(ev["delta"].as_str().unwrap_or_default().to_owned())),
-                "response.output_item.done" => on(Event::Item(ev["item"].clone())),
+                "response.output_item.added" => on(Event::Added { index: index(&ev), item: ev["item"].clone() }),
+                "response.output_text.delta" => on(Event::Text { index: index(&ev), delta: delta(&ev) }),
+                "response.reasoning_summary_text.delta" => {
+                    on(Event::Reasoning { index: index(&ev), part: ev["summary_index"].as_u64().unwrap_or(0) as usize, delta: delta(&ev) })
+                }
+                "response.function_call_arguments.delta" => on(Event::Args { index: index(&ev), delta: delta(&ev) }),
+                "response.output_item.done" => on(Event::Item { index: index(&ev), item: ev["item"].clone() }),
                 "response.completed" => {
                     let output = ev["response"]["output"].as_array().cloned().unwrap_or_default();
                     on(Event::Completed { usage: ev["response"]["usage"].clone(), output });
@@ -252,6 +295,14 @@ pub async fn stream(token: &str, session: &str, body: &Value, mut on: impl FnMut
         }
     }
     Err(anyhow!("The connection closed before the reply finished"))
+}
+
+fn index(ev: &Value) -> usize {
+    ev["output_index"].as_u64().unwrap_or(0) as usize
+}
+
+fn delta(ev: &Value) -> String {
+    ev["delta"].as_str().unwrap_or_default().to_owned()
 }
 
 /// (end of the event's text, end including the blank line).

@@ -8,6 +8,9 @@
 //! harlo-agent models           the models your plan can use
 //! harlo-agent -p "…" [-m model] [--thinking low|medium|high]
 //!                              [--resume | --session <file>]
+//! harlo-agent --version        and the commit it was built from
+//! harlo-agent --mode rpc [--session <file> | --no-session] [-m model] [--thinking level]
+//!                              pi's RPC protocol on stdin/stdout (for harlo)
 //! ```
 //!
 //! Each run is saved as a session (in pi's format) under
@@ -17,6 +20,7 @@
 mod agent;
 mod auth;
 mod responses;
+mod rpc;
 mod session;
 mod tools;
 
@@ -56,10 +60,32 @@ async fn run(args: Vec<String>) -> Result<()> {
         }
         Some("models") => {
             let token = auth::access_token(false).await?;
+            if args.get(1).is_some_and(|a| a == "--json") {
+                println!("{:#}", responses::models_raw(&token).await?);
+                return Ok(());
+            }
             for (id, name) in responses::models(&token).await? {
                 println!("{id}\t{name}");
             }
             Ok(())
+        }
+        Some("--version" | "-V") => {
+            println!("harlo-agent {} ({})", env!("CARGO_PKG_VERSION"), env!("HARLO_AGENT_COMMIT"));
+            Ok(())
+        }
+        Some("--mode") if args.get(1).is_some_and(|m| m == "rpc") => {
+            let (mut keep, mut model, mut effort) = (rpc::Keep::New, None, None);
+            let mut it = args.into_iter().skip(2);
+            while let Some(a) = it.next() {
+                match a.as_str() {
+                    "--session" => keep = rpc::Keep::File(it.next().ok_or_else(|| anyhow::anyhow!("--session needs the file"))?.into()),
+                    "--no-session" => keep = rpc::Keep::Nowhere,
+                    "-m" | "--model" => model = it.next(),
+                    "--thinking" => effort = it.next(),
+                    other => bail!("unknown option {other}"),
+                }
+            }
+            rpc::serve(keep, model, effort).await
         }
         Some("-p") => {
             let mut model = None;
@@ -151,20 +177,24 @@ async fn ask(prompt: &str, model: Option<String>, effort: Option<String>, from: 
             }
         };
         match s {
-            agent::Shown::Reasoning(t) => {
-                if !thinking {
-                    eprint!("\x1b[2m");
-                    thinking = true;
+            agent::Shown::Stream(e) => match e["type"].as_str() {
+                Some("thinking_delta") => {
+                    if !thinking {
+                        eprint!("\x1b[2m");
+                        thinking = true;
+                    }
+                    eprint!("{}", e["delta"].as_str().unwrap_or_default());
                 }
-                eprint!("{t}");
-            }
-            agent::Shown::Text(t) => {
-                end_thinking(&mut thinking);
-                print!("{t}");
-                fresh = t.ends_with('\n');
-                let _ = out.flush();
-            }
-            agent::Shown::ToolStart { name, args } => {
+                Some("text_delta") => {
+                    end_thinking(&mut thinking);
+                    let t = e["delta"].as_str().unwrap_or_default();
+                    print!("{t}");
+                    fresh = t.ends_with('\n');
+                    let _ = out.flush();
+                }
+                _ => {}
+            },
+            agent::Shown::ToolStart { name, args, .. } => {
                 end_thinking(&mut thinking);
                 line(&mut fresh);
                 eprintln!("\x1b[36m→ {name}\x1b[0m \x1b[2m{}\x1b[0m", summary(name, args));
@@ -180,6 +210,7 @@ async fn ask(prompt: &str, model: Option<String>, effort: Option<String>, from: 
                 line(&mut fresh);
                 eprintln!("\x1b[2m[{model} · {} in ({} cached), {} out]\x1b[0m", usage["input_tokens"], usage["input_tokens_details"]["cached_tokens"], usage["output_tokens"]);
             }
+            agent::Shown::MessageStart(_) | agent::Shown::MessageEnd(_) | agent::Shown::Queue { .. } => {}
         }
     };
     // Ctrl+C stops the turn; a second one quits at once.

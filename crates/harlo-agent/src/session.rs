@@ -50,6 +50,8 @@ pub struct Log {
     file: Option<File>,
     /// The newest entry's id (the next one's parent).
     last: Option<String>,
+    /// Writes nothing (`--no-session`).
+    off: bool,
 }
 
 /// A session read back: its log (appending continues it), the messages
@@ -59,6 +61,8 @@ pub struct Loaded {
     pub messages: Vec<Value>,
     pub model: Option<String>,
     pub effort: Option<String>,
+    /// Its name (`session_info`), if it was given one.
+    pub name: Option<String>,
 }
 
 impl Log {
@@ -66,7 +70,12 @@ impl Log {
     pub fn new(root: &Path, cwd: &Path) -> Log {
         let id = uuid();
         let path = dir_for(root, cwd).join(format!("{}_{id}.jsonl", iso(SystemTime::now()).replace([':', '.'], "-")));
-        Log { id, path, cwd: cwd.to_owned(), file: None, last: None }
+        Log { id, path, cwd: cwd.to_owned(), file: None, last: None, off: false }
+    }
+
+    /// A session kept nowhere.
+    pub fn ephemeral(cwd: &Path) -> Log {
+        Log { id: uuid(), path: PathBuf::new(), cwd: cwd.to_owned(), file: None, last: None, off: true }
     }
 
     pub fn open(path: &Path) -> Result<Loaded> {
@@ -96,7 +105,7 @@ impl Log {
             at = e["parentId"].as_str();
         }
         branch.reverse();
-        let (mut model, mut effort) = (None, None);
+        let (mut model, mut effort, mut name) = (None, None, None);
         let mut messages = Vec::new();
         for e in &branch {
             match e["type"].as_str() {
@@ -104,6 +113,7 @@ impl Log {
                 Some("custom_message") => messages.push(json!({ "role": "custom", "customType": e["customType"], "content": e["content"], "display": e["display"] })),
                 Some("model_change") => model = e["modelId"].as_str().map(str::to_owned),
                 Some("thinking_level_change") => effort = e["thinkingLevel"].as_str().filter(|l| *l != "off").map(str::to_owned),
+                Some("session_info") => name = e["name"].as_str().filter(|n| !n.is_empty()).map(str::to_owned),
                 _ => {}
             }
         }
@@ -113,13 +123,17 @@ impl Log {
             cwd: header["cwd"].as_str().map(PathBuf::from).unwrap_or_default(),
             file: None,
             last: entries.last().and_then(|e| e["id"].as_str()).map(str::to_owned),
+            off: false,
         };
-        Ok(Loaded { log, messages, model, effort })
+        Ok(Loaded { log, messages, model, effort, name })
     }
 
     /// Appends `entry` (its `type` and fields), giving it an id, its parent
     /// and the time.
     pub fn append(&mut self, mut entry: Value) -> Result<()> {
+        if self.off {
+            return Ok(());
+        }
         let id = short_id();
         entry["id"] = json!(id);
         entry["parentId"] = json!(self.last);
