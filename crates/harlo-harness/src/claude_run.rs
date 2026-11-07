@@ -1180,22 +1180,62 @@ fn subagent_update(shared: &Arc<Shared>, call: &str, patch: Value) {
     shared.emit(HarnessEvent::SubagentActivity(json!({ "type": "subagent_lifecycle", "payload": entry })));
 }
 
-/// Claude's to-do list (its last TodoWrite) as harlo's to-do card shows
-/// it: one phase without a name.
+/// Claude's to-do list as harlo's to-do card shows it (one phase without a
+/// name): its tasks (TaskCreate, then TaskUpdate by id), or the list of its
+/// last TodoWrite (older Claude Code), whichever came last.
 fn todo_phases(messages: &[Value]) -> Value {
-    let last = messages
-        .iter()
-        .rev()
-        .filter(|m| m["role"] == "assistant")
-        .flat_map(|m| m["content"].as_array().into_iter().flatten().rev())
-        .find(|b| b["type"] == "toolCall" && b["name"] == "TodoWrite");
-    let tasks: Vec<Value> = last
-        .and_then(|b| b["arguments"]["todos"].as_array())
-        .into_iter()
-        .flatten()
-        .filter_map(|t| Some(json!({ "content": t["content"].as_str()?, "status": t["status"].as_str().unwrap_or("pending") })))
-        .collect();
-    if tasks.is_empty() { json!([]) } else { json!([{ "name": "", "tasks": tasks }]) }
+    // (A task's id: "Task #3 created…" in its result.)
+    let created_id = |call: &Value| {
+        let id = call["id"].as_str()?;
+        let result = messages.iter().find(|m| m["role"] == "toolResult" && m["toolCallId"] == id)?;
+        let text = result["content"][0]["text"].as_str()?;
+        let rest = text.split_once('#')?.1;
+        let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+        (!digits.is_empty()).then_some(digits)
+    };
+    // (id, content, status)
+    let mut tasks: Vec<(String, String, String)> = Vec::new();
+    let calls = messages.iter().filter(|m| m["role"] == "assistant").flat_map(|m| m["content"].as_array().into_iter().flatten()).filter(|b| b["type"] == "toolCall");
+    for b in calls {
+        let args = &b["arguments"];
+        match b["name"].as_str().unwrap_or_default() {
+            "TodoWrite" => {
+                tasks = args["todos"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|t| Some((String::new(), t["content"].as_str()?.to_owned(), t["status"].as_str().unwrap_or("pending").to_owned())))
+                    .collect();
+            }
+            "TaskCreate" => {
+                let Some(subject) = args["subject"].as_str() else { continue };
+                let id = created_id(b).unwrap_or_else(|| (tasks.iter().filter_map(|t| t.0.parse::<u64>().ok()).max().unwrap_or(0) + 1).to_string());
+                tasks.retain(|t| t.0 != id);
+                tasks.push((id, subject.to_owned(), "pending".to_owned()));
+            }
+            "TaskUpdate" => {
+                let id = args["taskId"].as_str().map(str::to_owned).or_else(|| args["taskId"].as_u64().map(|n| n.to_string())).unwrap_or_default();
+                if args["status"] == "deleted" {
+                    tasks.retain(|t| t.0 != id);
+                    continue;
+                }
+                if let Some(t) = tasks.iter_mut().find(|t| t.0 == id) {
+                    if let Some(subject) = args["subject"].as_str() {
+                        t.1 = subject.to_owned();
+                    }
+                    if let Some(status) = args["status"].as_str() {
+                        t.2 = status.to_owned();
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    if tasks.is_empty() {
+        return json!([]);
+    }
+    let tasks: Vec<Value> = tasks.into_iter().map(|(_, content, status)| json!({ "content": content, "status": status })).collect();
+    json!([{ "name": "", "tasks": tasks }])
 }
 
 /// Task / Agent calls in Claude's message: subagents starting.
@@ -1548,6 +1588,29 @@ mod tests {
         assert_eq!(todo_phases(&messages), json!([{ "name": "", "tasks": [{ "content": "Write it", "status": "completed" }, { "content": "Test it", "status": "in_progress" }] }]));
         // An emptied list: no card.
         assert_eq!(todo_phases(&[call(json!([]))]), json!([]));
+    }
+
+    #[test]
+    fn its_tasks_are_the_cards() {
+        let use_ = |id: &str, name: &str, args: Value| json!({ "role": "assistant", "content": [{ "type": "toolCall", "id": id, "name": name, "arguments": args }] });
+        let result = |id: &str, text: &str| json!({ "role": "toolResult", "toolCallId": id, "content": [{ "type": "text", "text": text }] });
+        let messages = vec![
+            use_("a", "TaskCreate", json!({ "subject": "Decide", "description": "d", "activeForm": "Deciding" })),
+            result("a", "Task #1 created successfully: Decide"),
+            use_("b", "TaskCreate", json!({ "subject": "Write", "description": "d" })),
+            result("b", "Task #2 created successfully: Write"),
+            // (Its result not seen yet: the next number.)
+            use_("c", "TaskCreate", json!({ "subject": "Check", "description": "d" })),
+            use_("d", "TaskUpdate", json!({ "taskId": "1", "status": "completed" })),
+            use_("e", "TaskUpdate", json!({ "taskId": "2", "status": "in_progress", "subject": "Write it" })),
+            use_("f", "TaskUpdate", json!({ "taskId": "9", "status": "completed" })),
+            use_("g", "TaskList", json!({})),
+        ];
+        assert_eq!(todo_phases(&messages), json!([{ "name": "", "tasks": [
+            { "content": "Decide", "status": "completed" }, { "content": "Write it", "status": "in_progress" }, { "content": "Check", "status": "pending" }] }]));
+        let mut gone = messages.clone();
+        gone.push(use_("h", "TaskUpdate", json!({ "taskId": "3", "status": "deleted" })));
+        assert_eq!(todo_phases(&gone)[0]["tasks"].as_array().map(Vec::len), Some(2));
     }
 
     #[test]
