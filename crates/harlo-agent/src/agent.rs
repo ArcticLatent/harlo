@@ -103,7 +103,7 @@ impl Agent {
             let token = auth::access_token(force).await?;
             let mut items = Vec::new();
             let totals = &mut self.totals;
-            let result = responses::stream(&token, &body, |ev| match ev {
+            let result = responses::stream(&token, &self.id, &body, |ev| match ev {
                 responses::Event::Text(t) => show(Shown::Text(&t)),
                 responses::Event::Reasoning(t) => show(Shown::Reasoning(&t)),
                 responses::Event::Item(i) => items.push(i),

@@ -64,8 +64,17 @@ pub fn request(model: &str, instructions: &str, input: &[Value], tools: Value, e
 }
 
 /// Sends one request and calls `on` with each event until it completes.
-pub async fn stream(token: &str, body: &Value, mut on: impl FnMut(Event)) -> Result<()> {
-    let resp = reqwest::Client::new().post(format!("{RESOURCE}/responses")).bearer_auth(token).json(body).send().await?;
+/// `session`: the session's id, sent as its affinity headers too, so its
+/// requests go where their shared start is cached.
+pub async fn stream(token: &str, session: &str, body: &Value, mut on: impl FnMut(Event)) -> Result<()> {
+    let resp = reqwest::Client::new()
+        .post(format!("{RESOURCE}/responses"))
+        .bearer_auth(token)
+        .header("session-id", session)
+        .header("x-client-request-id", session)
+        .json(body)
+        .send()
+        .await?;
     let status = resp.status();
     if !status.is_success() {
         let body: Value = resp.json().await.unwrap_or(Value::Null);
