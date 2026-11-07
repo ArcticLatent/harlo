@@ -404,11 +404,13 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
                 return reply(Err(format!("{e:#}")));
             }
             let _ = load_models(sh).await;
-            // A level this model doesn't take: the nearest it does.
+            // A level this model doesn't take: the usual one, else its first
+            // that thinks (one that only has off and high: high).
             let levels = sh.levels(&model);
             let effort = sh.view.lock().unwrap().effort.clone();
             if !levels.contains(&effort) {
-                let level = if levels.iter().any(|l| l == DEFAULT_LEVEL) { DEFAULT_LEVEL.to_owned() } else { levels[0].clone() };
+                let thinks = (effort != "off").then(|| levels.iter().find(|l| *l != "off")).flatten();
+                let level = if levels.iter().any(|l| l == DEFAULT_LEVEL) && effort != "off" { DEFAULT_LEVEL.to_owned() } else { thinks.unwrap_or(&levels[0]).clone() };
                 match agent.try_lock() {
                     Ok(mut a) => a.effort = (level != "off").then(|| level.clone()),
                     Err(_) => sh.pending.lock().unwrap().effort = Some(level.clone()),

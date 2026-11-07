@@ -269,7 +269,7 @@ impl Agent {
         let pid = provider.id.clone();
         let api = if provider.api == Api::Chat { "openai-completions" } else { "openai-responses" };
         show(Shown::MessageStart(&json!({ "role": "assistant", "content": [], "api": api, "provider": pid, "model": model, "timestamp": now_ms() })));
-        let effort = self.effort.as_deref().filter(|_| provider.reasons(&model));
+        let effort = provider.effort(&model, self.effort.as_deref());
         let totals = &mut self.totals;
         let last_usage = &mut self.last_usage;
         let mut counted = |usage: &Value, show: &mut (dyn FnMut(Shown) + Send)| {
@@ -281,14 +281,14 @@ impl Agent {
             *last_usage = usage.clone();
         };
         if provider.api == Api::Chat {
-            let body = chat::request(&model, &self.instructions, &chat::messages(&self.history), &tools::specs(), effort);
+            let body = chat::request(&model, &self.instructions, &chat::messages(&self.history), &tools::specs(), effort.as_deref());
             let token = provider.token(false).await?;
             let (message, usage) = chat::stream(&provider.base_url, token.as_deref(), &body, &pid, &model, |e| show(Shown::Stream(e))).await?;
             counted(&usage, show);
             return Ok(message);
         }
         let input = responses::input(&self.history, &pid, &model);
-        let body = responses::request(&model, &self.instructions, &input, tools::specs(), effort, &self.log.id);
+        let body = responses::request(&model, &self.instructions, &input, tools::specs(), effort.as_deref(), &self.log.id);
         // (The plan's affinity headers keep a session's requests where its cache is.)
         let affinity = provider.is_plan().then_some(self.log.id.as_str());
         let mut force = false;

@@ -288,7 +288,7 @@ pub fn ports_in_use() -> Vec<(u16, String)> {
             out.push((p, v["name"].as_str().filter(|n| !n.is_empty()).map_or_else(|| engine_of(&url).to_lowercase(), str::to_owned)));
         }
     }
-    for k in [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::OpenCode, HarnessKind::Hermes] {
+    for k in model_servers::AGENTS {
         for s in model_servers::servers(k) {
             let host = s.base_url.split("://").nth(1).unwrap_or_default().split(['/', ':']).next().unwrap_or_default().to_owned();
             if ["127.0.0.1", "localhost"].contains(&host.as_str())
@@ -617,7 +617,7 @@ pub fn remove(name: &str, url: &str, delete_files: bool, step: &dyn Fn(&str, usi
     let gb = |b: u64| format!("{:.1} GB", b as f64 / 1e9);
     // (Ollama's models to delete: named before the agents' entries go.)
     let ollama = if delete_files && engine_of(url) == "Ollama" { ollama_models_of(url) } else { Vec::new() };
-    for k in [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::OpenCode, HarnessKind::Hermes] {
+    for k in model_servers::AGENTS {
         if !model_servers::servers(k).iter().any(|s| s.name == name && s.base_url == url) {
             continue;
         }
@@ -636,7 +636,7 @@ pub fn remove(name: &str, url: &str, delete_files: bool, step: &dyn Fn(&str, usi
     // (Another machine's, used here: its forward goes with it.)
     model_servers::forget_unused_uses();
     // Set up by harlo, and no agent has it now: stopped and forgotten.
-    let still = [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::OpenCode, HarnessKind::Hermes].iter().any(|k| model_servers::servers(*k).iter().any(|s| s.base_url == url));
+    let still = model_servers::AGENTS.iter().any(|k| model_servers::servers(*k).iter().any(|s| s.base_url == url));
     if still || !commands_of(url)["start"].as_str().is_some_and(|c| !c.is_empty()) {
         return (errors, busy, summary.join(" "));
     }
@@ -712,7 +712,7 @@ pub fn remove(name: &str, url: &str, delete_files: bool, step: &dyn Fn(&str, usi
 /// what agents list for it (taken before they're taken out).
 pub fn ollama_models_of(url: &str) -> Vec<String> {
     let mut names: Vec<String> = saved_models(&commands_of(url)).into_iter().map(|m| m.id).collect();
-    for k in [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::OpenCode, HarnessKind::Hermes] {
+    for k in model_servers::AGENTS {
         for s in model_servers::servers(k).into_iter().filter(|s| s.base_url == url) {
             names.extend(s.models);
         }

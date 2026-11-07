@@ -10,6 +10,7 @@
 //! | omp | `~/.omp/agent/models.yml` | the same, as YAML |
 //! | OpenCode | `~/.config/opencode/opencode.json` | `provider.<name>`: `npm: @ai-sdk/openai-compatible`, `options.baseURL`, `models: { id: { limit } }` |
 //! | Hermes | `$HERMES_HOME/config.yaml`, with `hermes config` | `providers.<name>`: `api`, `api_key` / `key_env`, `models: { id: { context_length } }` |
+//! | Harlo | `$XDG_CONFIG_HOME/harlo-agent/providers.json` | as pi's |
 //!
 //! The rest of each file stays as it was: pi's and OpenCode's JSON keep
 //! their order, omp's YAML its text and comments (the new provider goes in
@@ -63,9 +64,15 @@ pub fn file(kind: HarnessKind) -> Option<PathBuf> {
         HarnessKind::Pi => Some(std::env::var_os("PI_CODING_AGENT_DIR").map(PathBuf::from).unwrap_or_else(|| home().join(".pi/agent")).join("models.json")),
         HarnessKind::Omp => Some(home().join(".omp/agent/models.yml")),
         HarnessKind::OpenCode | HarnessKind::Hermes => Some(crate::mcp::config_path(kind, &crate::mcp::Scope::Global)),
+        HarnessKind::Harlo => Some(
+            std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).unwrap_or_else(|| home().join(".config")).join("harlo-agent/providers.json"),
+        ),
         _ => None,
     }
 }
+
+/// The agents on this computer whose model servers harlo sets up.
+pub const AGENTS: [HarnessKind; 5] = [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::OpenCode, HarnessKind::Hermes, HarnessKind::Harlo];
 
 /// The address typed, as harlo asks it: a scheme, no trailing `/` or
 /// `/models`.
@@ -418,7 +425,7 @@ fn offer_levels_in(kind: HarnessKind, file: &Path, name: &str) -> Result<bool, S
     let mut v: Value = serde_json::from_str(&text).map_err(|e| format!("{shown} isn't valid JSON ({e})"))?;
     let (top, field, wanted) = match kind {
         HarnessKind::OpenCode => ("provider", "variants", opencode_variants(true)),
-        HarnessKind::Pi => ("providers", "thinkingLevelMap", pi_levels(true)),
+        HarnessKind::Pi | HarnessKind::Harlo => ("providers", "thinkingLevelMap", pi_levels(true)),
         _ => return Ok(false),
     };
     let Some(models) = v.get_mut(top).and_then(|p| p.get_mut(name)).and_then(|p| p.get_mut("models")) else { return Ok(false) };
@@ -653,7 +660,7 @@ fn with_server(kind: HarnessKind, text: &str, shown: &str, name: &str, base_url:
     let text = match kind {
         _ if !again => text,
         HarnessKind::Omp => omp_without(&text, name).map_err(|e| format!("{e} ({shown})"))?,
-        HarnessKind::Pi | HarnessKind::OpenCode => {
+        HarnessKind::Pi | HarnessKind::OpenCode | HarnessKind::Harlo => {
             let mut v: Value = serde_json::from_str(&text).map_err(|e| format!("{shown} isn't valid JSON ({e})"))?;
             let key = if kind == HarnessKind::OpenCode { "provider" } else { "providers" };
             v[key].as_object_mut().map(|m| m.remove(name));
@@ -1077,7 +1084,7 @@ pub fn use_from(host: &str, url: &str) -> Result<String, String> {
 /// cancelled).
 pub fn forget_unused_uses() {
     let mut uses = load_uses();
-    let used: Vec<String> = [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::OpenCode, HarnessKind::Hermes]
+    let used: Vec<String> = AGENTS
         .iter()
         .flat_map(|k| servers(*k))
         .map(|s| s.base_url.trim_end_matches('/').to_owned())
@@ -1425,6 +1432,34 @@ mod tests {
         std::fs::write(&f, "{ broken").unwrap();
         assert!(add_to(HarnessKind::Pi, &f, "x", "http://b/v1", "", &models, &[]).unwrap_err().contains("valid JSON"));
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "{ broken");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// harlo-agent's file is laid out as pi's (harlo-agent reads it so).
+    #[test]
+    fn harlo_agents_servers() {
+        let dir = std::env::temp_dir().join(format!("harlo-model-servers-harlo-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let f = dir.join("providers.json");
+        let thinks = Found { id: "qwen3".into(), context: Some(32768), reasoning: true, levels: false };
+        add_to(HarnessKind::Harlo, &f, "llamacpp", "http://127.0.0.1:8090/v1", "", &[thinks.clone(), found("plain", None)], &["chatgpt".into()]).unwrap();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&f).unwrap()).unwrap();
+        assert_eq!(
+            v["providers"]["llamacpp"],
+            json!({ "baseUrl": "http://127.0.0.1:8090/v1", "api": "openai-completions", "apiKey": "none", "models": [
+                { "id": "qwen3", "contextWindow": 32768, "reasoning": true, "thinkingLevelMap": pi_levels(false) }, { "id": "plain" }] })
+        );
+        assert_eq!(servers_in(HarnessKind::Harlo, &f)[0].models, ["qwen3", "plain"]);
+        assert!(add_to(HarnessKind::Harlo, &f, "chatgpt", "http://b/v1", "", &[found("m", None)], &["chatgpt".into()]).unwrap_err().contains("already"));
+        // Its levels offered later, its context changed, set up again, taken out.
+        assert!(offer_levels_in(HarnessKind::Harlo, &f, "llamacpp").unwrap());
+        assert!(set_context_in(HarnessKind::Harlo, &f, "llamacpp", 65536).unwrap());
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&f).unwrap()).unwrap();
+        assert_eq!((v["providers"]["llamacpp"]["models"][0]["thinkingLevelMap"].clone(), v["providers"]["llamacpp"]["models"][1]["contextWindow"].as_u64()), (pi_levels(true), Some(65536)));
+        add_to(HarnessKind::Harlo, &f, "llamacpp", "http://127.0.0.1:8090/v1", "$KEY", &[thinks], &[]).unwrap();
+        assert_eq!(details_in(HarnessKind::Harlo, &providers_in(HarnessKind::Harlo, &f), "llamacpp").unwrap().1, "$KEY");
+        remove_from(HarnessKind::Harlo, &f, "llamacpp").unwrap();
+        assert!(servers_in(HarnessKind::Harlo, &f).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

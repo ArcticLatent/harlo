@@ -9,9 +9,9 @@ import harlo
 AppDialog {
     id: dlg
     objectName: "modelServerDialog"
-    /// The agents it can go to: pi, Oh My Pi, OpenCode and Hermes, where installed.
+    /// The agents it can go to: pi, Oh My Pi, OpenCode, Hermes and Harlo, where installed.
     readonly property var agents: (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()) : [])
-        .filter(p => ["pi", "omp", "opencode", "hermes"].includes(p.id) && p.state !== "missing")
+        .filter(p => ["pi", "omp", "opencode", "hermes", "harlo"].includes(p.id) && p.state !== "missing")
     /// The ones chosen (ids).
     property var chosen: []
     /// A server was added.

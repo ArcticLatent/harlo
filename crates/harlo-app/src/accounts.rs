@@ -632,7 +632,7 @@ impl Accounts {
     pub fn load_servers(self: Pin<&mut Self>) {
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
-            let mut all: Vec<(String, Value)> = [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::OpenCode, HarnessKind::Hermes].iter().map(|k| (k.as_str().to_owned(), servers_json(*k))).collect();
+            let mut all: Vec<(String, Value)> = model_servers::AGENTS.iter().map(|k| (k.as_str().to_owned(), servers_json(*k))).collect();
             // ("": those harlo set up that no agent has.)
             all.push((String::new(), unused_json()));
             let _ = thread.queue(move |mut this| {
@@ -977,7 +977,7 @@ impl Accounts {
             }
             // (And out of the agents here that reach it through SSH.)
             if let Some(here) = model_servers::used_here(host, url) {
-                for kind in [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::OpenCode, HarnessKind::Hermes] {
+                for kind in model_servers::AGENTS {
                     for s in model_servers::servers(kind).into_iter().filter(|s| s.base_url.trim_end_matches('/') == here) {
                         if let Err(e) = model_servers::remove(kind, &s.name) {
                             errors.push(format!("{} here: {e}", kind.label()));
@@ -1145,7 +1145,7 @@ impl Accounts {
 fn reread(k: HarnessKind) -> bool {
     match k {
         HarnessKind::OpenCode => harlo_harness::reload_opencode_if_idle(),
-        HarnessKind::Pi | HarnessKind::Omp => {
+        HarnessKind::Pi | HarnessKind::Omp | HarnessKind::Harlo => {
             crate::registry::restart_idle(k.as_str());
             true
         }
@@ -1177,7 +1177,7 @@ fn reread(k: HarnessKind) -> bool {
 /// Servers harlo set up that no agent has (closed before adding them, or
 /// unticked everywhere): listed like the others, with no agent ticked.
 fn unused_json() -> Value {
-    let used: Vec<String> = [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::OpenCode, HarnessKind::Hermes].iter().flat_map(|k| model_servers::servers(*k)).map(|s| s.base_url).collect();
+    let used: Vec<String> = model_servers::AGENTS.iter().flat_map(|k| model_servers::servers(*k)).map(|s| s.base_url).collect();
     Value::Array(
         set_up_servers()
             .into_iter()
@@ -1219,7 +1219,7 @@ fn with_levels(url: &str, models: Vec<model_servers::Found>) -> Vec<model_server
 /// before any agent reads its file.
 pub(crate) fn offer_levels() {
     for (url, _) in set_up_servers().into_iter().filter(|(url, _)| matches!(engine_of(url), "Basalt" | "Strata")) {
-        for k in [HarnessKind::Pi, HarnessKind::OpenCode] {
+        for k in [HarnessKind::Pi, HarnessKind::OpenCode, HarnessKind::Harlo] {
             for s in model_servers::servers(k).into_iter().filter(|s| s.base_url == url) {
                 if let Err(e) = model_servers::offer_levels(k, &s.name) {
                     tracing::warn!("thinking levels for {}: {e}", s.name);
@@ -1322,7 +1322,7 @@ pub(crate) fn managed_server(agent: &str, model: &str) -> Option<ModelServer> {
         && let Some(urls) = omp_usual(&provider)
     {
         let url = urls.iter().find(|u| managed(u))?.clone();
-        let name = [HarnessKind::Pi, HarnessKind::OpenCode, HarnessKind::Hermes, HarnessKind::Omp]
+        let name = [HarnessKind::Pi, HarnessKind::OpenCode, HarnessKind::Hermes, HarnessKind::Harlo, HarnessKind::Omp]
             .iter()
             .find_map(|k| model_servers::servers(*k).into_iter().find(|s| s.base_url.trim_end_matches('/') == url))
             .map_or_else(|| provider.clone(), |s| s.name);
@@ -1403,7 +1403,7 @@ pub(crate) fn sync_context(url: &str) -> Vec<String> {
     }
     let served = if llama { harlo_core::engines::served_context(url) } else { None };
     let mut problems = Vec::new();
-    for k in [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::OpenCode, HarnessKind::Hermes] {
+    for k in model_servers::AGENTS {
         for s in model_servers::servers(k).into_iter().filter(|s| s.base_url == url) {
             // llama.cpp: what it serves this time. Ollama (nothing loaded
             // yet): only a context the agent lacks, from the model's own.

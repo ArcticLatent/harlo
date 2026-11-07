@@ -70,7 +70,7 @@ Rectangle {
             readonly property string lastOther: Workspace.meterPin === "" && Workspace.meterLast !== "" && !providers.some(p => p.provider === Workspace.meterLast) ? Workspace.meterLast : ""
             // (This computer's servers: another machine's aren't known here.)
             readonly property bool lastLocal: lastOther !== "" && host === "" && Accounts.revision >= 0
-                && ["pi", "omp", "opencode", "hermes", ""].some(a => JSON.parse(Accounts.servers(a)).some(s => s.name === lastOther && s.place !== "online"))
+                && ["pi", "omp", "opencode", "hermes", "harlo", ""].some(a => JSON.parse(Accounts.servers(a)).some(s => s.name === lastOther && s.place !== "online"))
                 || ["ollama", "llama.cpp", "lm-studio"].includes(lastOther)
             // Pinned, else the last used, else the fullest.
             readonly property var shown: {
@@ -192,7 +192,7 @@ Rectangle {
             readonly property var list: {
                 const rows = []
                 if (Accounts.revision < 0) return rows
-                for (const a of ["pi", "omp", "opencode", "hermes", ""])
+                for (const a of ["pi", "omp", "opencode", "hermes", "harlo", ""])
                     for (const sv of JSON.parse(Accounts.servers(a)))
                         if (sv.managed && !rows.some(r => r.baseUrl === sv.baseUrl)) rows.push(sv)
                 return rows

@@ -2920,7 +2920,7 @@ Popup {
             spacing: 0
             property int revision: 0
             readonly property var agents: (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()) : [])
-                .filter(p => ["pi", "omp", "opencode", "hermes"].includes(p.id) && p.state !== "missing")
+                .filter(p => ["pi", "omp", "opencode", "hermes", "harlo"].includes(p.id) && p.state !== "missing")
             // Other machines that are connected, and the servers their agents have.
             readonly property var hostNames: (Remotes.revision >= 0 ? JSON.parse(Remotes.hostsJson()) : []).filter(h => h.state === "connected").map(h => h.name)
             readonly property var onHosts: Accounts.hostServers !== "" ? JSON.parse(Accounts.hostServers) : ({})

@@ -24,7 +24,7 @@ AppDialog {
     readonly property var agents: host !== ""
         ? ["pi", "omp", "opencode", "hermes"].filter(id => hostAgents[id] !== undefined).map(id => ({ id: id, label: ({ pi: "pi", omp: "Oh My Pi", opencode: "OpenCode", hermes: "Hermes" })[id] }))
         : (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()) : [])
-            .filter(p => ["pi", "omp", "opencode", "hermes"].includes(p.id) && p.state !== "missing")
+            .filter(p => ["pi", "omp", "opencode", "hermes", "harlo"].includes(p.id) && p.state !== "missing")
     /// Opens it for `machine` ("" for this computer); while a setup runs,
     /// that one shows, wherever it is.
     function openOn(machine, row) {
