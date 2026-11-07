@@ -188,7 +188,7 @@ pub fn sign_out(sign: Sign) -> Result<bool> {
 
 /// Signs in in the browser: a listener on 127.0.0.1:1455 takes the
 /// callback. `open` gets the URL to show or open.
-pub async fn sign_in(open: impl Fn(&str)) -> Result<Credentials> {
+pub async fn sign_in(open: impl Fn(&str), paste: bool) -> Result<Credentials> {
     let host = host_id()?;
     let saved = saved_client_id();
     let verifier = random_token();
@@ -216,7 +216,7 @@ pub async fn sign_in(open: impl Fn(&str)) -> Result<Credentials> {
     }
     let url = reqwest::Url::parse_with_params(AUTHORIZE_URL, &params)?;
     open(url.as_str());
-    let (code, issued) = wait_for_callback(&listener, &state, "harlo is connected to your ChatGPT plan. You can close this tab.").await?;
+    let (code, issued) = wait_for_callback(&listener, &state, "harlo is connected to your ChatGPT plan. You can close this tab.", paste).await?;
     let client_id = issued.or(saved).ok_or_else(|| anyhow!("OpenAI's answer didn't include this app's client id; try again"))?;
     let token = token_request(TOKEN_URL, &[
         ("grant_type", "authorization_code"),
@@ -251,7 +251,7 @@ pub async fn sign_in(open: impl Fn(&str)) -> Result<Credentials> {
 
 /// Signs in as the Codex CLI does (its client id, PKCE, the same loopback
 /// callback), naming harlo as the originator.
-pub async fn codex_sign_in(open: impl Fn(&str)) -> Result<Credentials> {
+pub async fn codex_sign_in(open: impl Fn(&str), paste: bool) -> Result<Credentials> {
     let verifier = random_token();
     let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
     let state = random_token();
@@ -273,7 +273,7 @@ pub async fn codex_sign_in(open: impl Fn(&str)) -> Result<Credentials> {
     ];
     let url = reqwest::Url::parse_with_params(&format!("{CODEX_ISSUER}/oauth/authorize"), &params)?;
     open(url.as_str());
-    let (code, _) = wait_for_callback(&listener, &state, "harlo is signed in with your ChatGPT account (the Codex sign-in). You can close this tab.").await?;
+    let (code, _) = wait_for_callback(&listener, &state, "harlo is signed in with your ChatGPT account (the Codex sign-in). You can close this tab.", paste).await?;
     let token = token_request(
         &format!("{CODEX_ISSUER}/oauth/token"),
         &[("grant_type", "authorization_code"), ("client_id", CODEX_CLIENT_ID), ("code", &code), ("code_verifier", &verifier), ("redirect_uri", &redirect)],
@@ -306,35 +306,99 @@ fn codex_credentials(token: &Value, before: Option<&Credentials>) -> Result<Cred
     Ok(Credentials { client_id: CODEX_CLIENT_ID.to_owned(), access_token: access, refresh_token: refresh, expires_at, scopes, email, account_id })
 }
 
+/// What a callback said.
+#[derive(Debug, PartialEq)]
+enum Callback {
+    /// The code, and the client id issued on registration.
+    Code(String, Option<String>),
+    Declined(String),
+    /// For another sign-in (an older link).
+    Stale,
+    /// Not the callback.
+    Other,
+}
+
+fn read_callback(url: &reqwest::Url, state: &str) -> Callback {
+    if url.path() != CALLBACK_PATH {
+        return Callback::Other;
+    }
+    let q = |k: &str| url.query_pairs().find(|(n, _)| n == k).map(|(_, v)| v.into_owned());
+    if let Some(err) = q("error") {
+        return Callback::Declined(err);
+    }
+    if q("state").as_deref() != Some(state) {
+        return Callback::Stale;
+    }
+    match q("code") {
+        Some(code) => Callback::Code(code, q("client_id").filter(|c| !c.is_empty())),
+        None => Callback::Other,
+    }
+}
+
 /// The browser's redirect: (code, the client id issued on registration).
-async fn wait_for_callback(listener: &tokio::net::TcpListener, state: &str, done: &str) -> Result<(String, Option<String>)> {
+/// `paste`: or the address the page ended on, pasted on the input (when
+/// the browser is on another computer and its redirect can't reach here).
+async fn wait_for_callback(listener: &tokio::net::TcpListener, state: &str, done: &str, paste: bool) -> Result<(String, Option<String>)> {
+    use tokio::io::AsyncBufReadExt;
+    let mut lines = paste.then(|| tokio::io::BufReader::new(tokio::io::stdin()).lines());
+    if paste {
+        print!("If the page doesn't say you're signed in, paste the address it ended on: ");
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+    }
     loop {
-        let (mut sock, _) = listener.accept().await?;
+        let pasted = async {
+            match lines.as_mut() {
+                Some(l) => l.next_line().await,
+                None => std::future::pending().await,
+            }
+        };
+        let mut sock = tokio::select! {
+            got = listener.accept() => got?.0,
+            line = pasted => {
+                let Some(line) = line? else {
+                    lines = None;
+                    continue;
+                };
+                let Ok(url) = reqwest::Url::parse(line.trim()) else {
+                    if !line.trim().is_empty() {
+                        println!("That isn't the address the page ended on (it starts with http://).");
+                    }
+                    continue;
+                };
+                match read_callback(&url, state) {
+                    Callback::Code(code, issued) => return Ok((code, issued)),
+                    Callback::Declined(err) => bail!("ChatGPT sign-in was declined ({err})"),
+                    Callback::Stale => println!("That address is from another sign-in: use this one's link."),
+                    Callback::Other => println!("That isn't the address the page ended on (it ends in {CALLBACK_PATH}?code=…)."),
+                }
+                continue;
+            }
+        };
         let mut buf = vec![0u8; 8192];
         let n = sock.read(&mut buf).await.unwrap_or(0);
         let head = String::from_utf8_lossy(&buf[..n]);
         let target = head.lines().next().and_then(|l| l.split_whitespace().nth(1)).unwrap_or_default().to_owned();
         let Ok(url) = reqwest::Url::parse(&format!("http://127.0.0.1{target}")) else { continue };
-        if url.path() != CALLBACK_PATH {
-            let _ = sock.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
-            continue;
-        }
-        let q = |k: &str| url.query_pairs().find(|(n, _)| n == k).map(|(_, v)| v.into_owned());
         let reply = |ok: bool, text: &str| {
             let body = format!("<!doctype html><meta charset=utf-8><title>harlo</title><body style=\"font-family:sans-serif;padding:3em\"><h2>{}</h2><p>{text}</p></body>", if ok { "Signed in" } else { "Not signed in" });
             format!("HTTP/1.1 {}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", if ok { "200 OK" } else { "400 Bad Request" }, body.len())
         };
-        if let Some(err) = q("error") {
-            let _ = sock.write_all(reply(false, "ChatGPT wasn't connected. You can close this tab.").as_bytes()).await;
-            bail!("ChatGPT sign-in was declined ({err})");
+        match read_callback(&url, state) {
+            Callback::Other => {
+                let _ = sock.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
+            }
+            Callback::Declined(err) => {
+                let _ = sock.write_all(reply(false, "ChatGPT wasn't connected. You can close this tab.").as_bytes()).await;
+                bail!("ChatGPT sign-in was declined ({err})");
+            }
+            Callback::Stale => {
+                let _ = sock.write_all(reply(false, "This sign-in link is out of date. Start again from harlo.").as_bytes()).await;
+            }
+            Callback::Code(code, issued) => {
+                let _ = sock.write_all(reply(true, done).as_bytes()).await;
+                return Ok((code, issued));
+            }
         }
-        if q("state").as_deref() != Some(state) {
-            let _ = sock.write_all(reply(false, "This sign-in link is out of date. Start again from harlo.").as_bytes()).await;
-            continue;
-        }
-        let Some(code) = q("code") else { continue };
-        let _ = sock.write_all(reply(true, done).as_bytes()).await;
-        return Ok((code, q("client_id").filter(|c| !c.is_empty())));
     }
 }
 
@@ -440,6 +504,16 @@ mod tests {
 
     fn jwt(claims: &Value) -> String {
         format!("e30.{}.sig", URL_SAFE_NO_PAD.encode(claims.to_string()))
+    }
+
+    #[test]
+    fn a_pasted_callback() {
+        let u = |s: &str| reqwest::Url::parse(s).unwrap();
+        assert_eq!(read_callback(&u("http://localhost:1455/auth/callback?code=c1&state=s1"), "s1"), Callback::Code("c1".into(), None));
+        assert_eq!(read_callback(&u("http://127.0.0.1:1455/auth/callback?code=c1&state=s1&client_id=app_x"), "s1"), Callback::Code("c1".into(), Some("app_x".into())));
+        assert_eq!(read_callback(&u("http://localhost:1455/auth/callback?code=c1&state=old"), "s1"), Callback::Stale);
+        assert_eq!(read_callback(&u("http://localhost:1455/auth/callback?error=access_denied&state=s1"), "s1"), Callback::Declined("access_denied".into()));
+        assert_eq!(read_callback(&u("http://localhost:1455/favicon.ico"), "s1"), Callback::Other);
     }
 
     #[test]

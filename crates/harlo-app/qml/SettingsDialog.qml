@@ -3950,7 +3950,7 @@ Popup {
                 Group {
                     visible: hostAgents.host !== null && hostAgents.host.state === "connected"
                     Repeater {
-                        model: ["omp", "pi", "claude", "opencode", "hermes"]
+                        model: ["omp", "pi", "claude", "opencode", "hermes", "harlo"]
                         SettingRow {
                             id: hostAgent
                             required property string modelData
@@ -3965,7 +3965,9 @@ Popup {
                             divider: index > 0
                             icon: "harness-" + modelData
                             title: Theme.harnessLabel(modelData)
-                            detail: install && install.state === "running" ? install.message
+                            // (Harlo: harlo puts its agent there when it's needed.)
+                            detail: modelData === "harlo" ? (found ? "harlo puts its agent there as sessions start" : (h.harloWhy || "Not checked yet"))
+                                : install && install.state === "running" ? install.message
                                 : !found ? (install && install.state === "failed" ? install.message : "Not installed there")
                                 : (version !== "" ? "Version " + version : "Installed") + (h[modelData] ? " · " + h[modelData] : "")
                                   + (modelData === "claude" && h.claudeAuth === "no" ? " · not signed in" : "")
@@ -3975,7 +3977,7 @@ Popup {
                                 spacing: 6
                                 FlatButton {
                                     objectName: "hostProviderInstall-" + hostAgent.modelData
-                                    visible: !hostAgent.found && !(hostAgent.install && hostAgent.install.state === "running")
+                                    visible: !hostAgent.found && hostAgent.modelData !== "harlo" && !(hostAgent.install && hostAgent.install.state === "running")
                                     text: "Install"
                                     font.pixelSize: Theme.px(12)
                                     onClicked: Remotes.installAgent(Workspace.instance, hostAgent.modelData)

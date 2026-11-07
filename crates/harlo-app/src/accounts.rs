@@ -1844,10 +1844,10 @@ fn accounts_of(k: HarnessKind, host: Option<&Host>) -> Result<Vec<Value>, String
                 json!({ "id": id, "label": name, "detail": "Signed in", "signOut": true })
             })
             .collect()),
-        HarnessKind::Harlo if host.is_some() => Ok(Vec::new()),
-        HarnessKind::Harlo => {
-            harlo_accounts(&run(&program(k).ok_or("harlo-agent isn't installed.")?, &["status", "--json"], Duration::from_secs(15))?)
-        }
+        HarnessKind::Harlo => harlo_accounts(&match host {
+            Some(h) => run_there(h, &harlo_there(h)?, &["status", "--json"], Duration::from_secs(30))?,
+            None => run(&program(k).ok_or("harlo-agent isn't installed.")?, &["status", "--json"], Duration::from_secs(15))?,
+        }),
         // omp: from its models (Settings → Providers has them).
         _ => Ok(Vec::new()),
     }
@@ -1976,7 +1976,6 @@ fn providers_of(k: HarnessKind, host: Option<&Host>) -> Result<Vec<Value>, Strin
             }));
             Ok(list)
         }
-        HarnessKind::Harlo if host.is_some() => Err("Harlo runs only on this computer, so far.".into()),
         HarnessKind::Harlo => Ok(vec![
             json!({
                 "id": "chatgpt", "name": "ChatGPT",
@@ -2026,12 +2025,33 @@ fn sign_out(k: HarnessKind, id: &str, host: Option<&Host>) -> Result<(), String>
             Some(h) => run_there(h, "hermes", &["auth", "logout", id], Duration::from_secs(30)).map(|_| ()),
             None => run(&program(k).ok_or("Hermes isn't installed.")?, &["auth", "logout", id], Duration::from_secs(30)).map(|_| ()),
         },
-        HarnessKind::Harlo if host.is_some() => Err("Harlo runs only on this computer, so far.".into()),
         HarnessKind::Harlo => {
             let args: &[&str] = if id == "codex" { &["logout", "--codex"] } else { &["logout"] };
-            run(&program(k).ok_or("harlo-agent isn't installed.")?, args, Duration::from_secs(15)).map(|_| ())
+            match host {
+                Some(h) => run_there(h, &harlo_there(h)?, args, Duration::from_secs(30)).map(|_| ()),
+                None => run(&program(k).ok_or("harlo-agent isn't installed.")?, args, Duration::from_secs(15)).map(|_| ()),
+            }
         }
         _ => Err("Sign out in omp itself (its /logout).".into()),
+    }
+}
+
+/// Harlo's agent on another machine (put there first if this build of it
+/// isn't): its path there (blocking).
+fn harlo_there(host: &Host) -> Result<String, String> {
+    harlo_core::agent_host::program_on(&host.name).map_err(|e| format!("{e:#}"))
+}
+
+/// The client id OpenAI gave harlo here, for a machine that has none yet:
+/// the registration is per ChatGPT account and meant to be reused, so a
+/// sign-in there doesn't ask to name and allow harlo again. (An id, not a
+/// secret; the machine keeps its own host id.)
+fn share_client_id(host: &Host) {
+    let Some(file) = harlo_core::model_servers::file(HarnessKind::Harlo).map(|f| f.with_file_name("client-id")) else { return };
+    let Some(id) = std::fs::read_to_string(file).ok().map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()) else { return };
+    let script = r#"d="${XDG_CONFIG_HOME:-$HOME/.config}/harlo-agent"; [ -s "$d/client-id" ] || { mkdir -p "$d" && chmod 700 "$d" && umask 077 && cat > "$d/client-id"; }"#;
+    if let Err(e) = harlo_core::remote::run_ok_with_input(host, script, id.as_bytes(), Duration::from_secs(20)) {
+        tracing::warn!("harlo's client id to {}: {e:#}", host.name);
     }
 }
 
@@ -2424,15 +2444,36 @@ async fn sign_in(k: HarnessKind, provider: &str, method: &str, answers: &Value, 
             Ok(format!("Hermes is signed in to {name}. Pick one of its models in the model list."))
         }
         HarnessKind::Harlo => {
-            if report.host.is_some() {
-                return Err("Harlo runs only on this computer, so far.".into());
+            let codex = provider == "codex";
+            let mut args = vec!["login"];
+            if codex {
+                args.push("--codex");
             }
-            if provider == "codex" {
-                command(agent_command(k, "harlo-agent", None, &["login", "--codex"])?, None, report, rx).await?;
-                return Ok("Harlo is signed in with the Codex sign-in. Its models are listed as codex/…, and harlo shows your plan's usage.".into());
+            let cmd = match report.host.clone() {
+                // There: harlo's copy of the agent, its sign-in the machine's
+                // own (the page's return to localhost is forwarded there), or
+                // the address the page ended on pasted.
+                Some(h) => {
+                    let program = tokio::task::spawn_blocking(move || {
+                        let program = harlo_there(&h)?;
+                        if !codex {
+                            share_client_id(&h);
+                        }
+                        Ok::<_, String>(program)
+                    })
+                    .await
+                    .map_err(|e| e.to_string())??;
+                    args.push("--paste");
+                    sign_in_command(k, &harlo_core::remote::quote(&program), report.host.as_ref(), &args)?
+                }
+                None => agent_command(k, "harlo-agent", None, &args)?,
+            };
+            command(cmd, None, report, rx).await?;
+            let place = report.host.as_ref().map_or(String::new(), |h| format!(" on {}", h.name));
+            if codex {
+                return Ok(format!("Harlo is signed in{place} with the Codex sign-in. Its models are listed as codex/…, and harlo shows your plan's usage."));
             }
-            command(agent_command(k, "harlo-agent", None, &["login"])?, None, report, rx).await?;
-            Ok("Harlo is signed in with ChatGPT.".into())
+            Ok(format!("Harlo is signed in{place} with ChatGPT."))
         }
         HarnessKind::Demo => Err("harlo can't sign this agent in.".into()),
     }

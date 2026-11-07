@@ -2,7 +2,9 @@
 //! on a task in the current folder with its tools (`-p`).
 //!
 //! ```text
-//! harlo-agent login            sign in with ChatGPT (in the browser)
+//! harlo-agent login [--codex] [--paste]
+//!                              sign in with ChatGPT (in the browser; --paste:
+//!                              or the address the page ended on, pasted)
 //! harlo-agent logout           forget the sign-in here
 //! harlo-agent status           who's signed in
 //! harlo-agent models           the models your plan can use
@@ -49,7 +51,7 @@ async fn main() -> ExitCode {
 
 async fn run(args: Vec<String>) -> Result<()> {
     match args.first().map(String::as_str) {
-        Some("login") => login(sign_of(&args)).await,
+        Some("login") => login(sign_of(&args), args.iter().any(|a| a == "--paste")).await,
         Some("logout") => {
             let sign = sign_of(&args);
             if auth::sign_out(sign)? {
@@ -162,20 +164,20 @@ fn sign_of(args: &[String]) -> auth::Sign {
     if args.iter().any(|a| a == "--codex") { auth::Sign::Codex } else { auth::Sign::Plan }
 }
 
-async fn login(sign: auth::Sign) -> Result<()> {
+async fn login(sign: auth::Sign, paste: bool) -> Result<()> {
     let open = |url: &str| {
         println!("Continue with ChatGPT in your browser. If it doesn't open, visit:\n\n{url}\n");
         let _ = std::process::Command::new("xdg-open").arg(url).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
     };
     if sign == auth::Sign::Codex {
-        let creds = auth::codex_sign_in(open).await?;
+        let creds = auth::codex_sign_in(open, paste).await?;
         println!(
             "Signed in with the Codex sign-in{}.\n\nModels codex/… use your ChatGPT plan through Codex's backend, and harlo shows the plan's usage.",
             if creds.email.is_empty() { String::new() } else { format!(" as {}", creds.email) }
         );
         return Ok(());
     }
-    let creds = auth::sign_in(open).await?;
+    let creds = auth::sign_in(open, paste).await?;
     println!(
         "Signed in{}.\n\nYou're using your ChatGPT plan: harlo-agent's requests use your plan's usage, which you can manage in ChatGPT → Settings → Usage.",
         if creds.email.is_empty() { String::new() } else { format!(" as {}", creds.email) }
