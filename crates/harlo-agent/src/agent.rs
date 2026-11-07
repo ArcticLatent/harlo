@@ -19,7 +19,7 @@ use tokio_util::sync::CancellationToken;
 use crate::providers::{self, Api};
 use crate::session::{Log, Past, now_ms};
 use crate::tools::{self, Tools};
-use crate::{chat, compact, responses};
+use crate::{chat, compact, responses, stubs};
 
 /// Rounds of tool calls in one run, at most.
 const MAX_ROUNDS: usize = 200;
@@ -62,6 +62,9 @@ pub enum Shown<'a> {
     /// The plan's limits, as a response gave them: `{ provider, account,
     /// windows }`.
     Limits(&'a Value),
+    /// Old tool outputs set aside (see `stubs`): how many, the tokens that
+    /// frees, the context's size about now.
+    SetAside { count: usize, saved: u64, after: u64 },
 }
 
 /// How a compaction went.
@@ -149,7 +152,11 @@ impl Agent {
         let spill = std::env::temp_dir().join("harlo-agent");
         Agent {
             instructions: instructions(&cwd),
-            tools: Tools::new(cwd.clone(), spill),
+            tools: {
+                let t = Tools::new(cwd.clone(), spill);
+                t.set_aside(past.originals, true);
+                t
+            },
             cwd,
             model,
             effort,
@@ -191,6 +198,7 @@ impl Agent {
         self.history.clear();
         self.ids.clear();
         self.files = Default::default();
+        self.tools.set_aside([], true);
         self.logged = (None, None);
     }
 
@@ -201,6 +209,7 @@ impl Agent {
         self.history = past.messages;
         self.ids = past.ids;
         self.files = past.files;
+        self.tools.set_aside(past.originals, true);
         self.logged = (past.model, past.effort);
     }
 
@@ -272,8 +281,9 @@ impl Agent {
         }
         self.ask_harlo().await;
         self.push_user(prompt, show)?;
-        // (A request too long for the model: compacted and sent again, once.)
-        let mut retried = false;
+        // A request too long for the model: sent again with old outputs set
+        // aside, then (still too long) compacted: 0, 1, 2 steps taken.
+        let mut overflow = 0;
         // A helper (harlo gave it report_done): whether it reported (or
         // asked) in this run, and whether it was reminded to.
         let helper = self.harlo_tools.iter().any(|t| t["name"] == "report_done");
@@ -281,6 +291,11 @@ impl Agent {
         for round in 0..MAX_ROUNDS {
             if round > 0 {
                 self.take_steering(show)?;
+            }
+            // Getting full: old tool outputs set aside first (cheap, and
+            // `recall` gets them back).
+            if let Some(keep) = self.set_aside_point().await {
+                self.set_aside(keep, 0, show)?;
             }
             // Near the end of the window: the older part summarized first
             // (if that fails, the request goes as it is).
@@ -300,10 +315,18 @@ impl Agent {
             };
             let reply = match reply {
                 Ok(r) => r,
-                Err(e) if !retried && compact::overflowed(&e) => {
-                    retried = true;
+                Err(e) if overflow < 2 && compact::overflowed(&e) => {
                     // (The reply it started shows as nothing.)
                     show(Shown::MessageEnd(&json!({ "role": "assistant", "content": [], "timestamp": now_ms() })));
+                    // (All but the newest message's, for a context that's
+                    // already too long.)
+                    if overflow == 0 {
+                        overflow = 1;
+                        if self.set_aside(1, 0, show)? > 0 {
+                            continue;
+                        }
+                    }
+                    overflow = 2;
                     match self.compact("overflow", None, stop, show).await {
                         Compacted::Done(_) => continue,
                         Compacted::Stopped => {
@@ -315,7 +338,7 @@ impl Agent {
                 }
                 Err(e) => return Err(e),
             };
-            retried = false;
+            overflow = 0;
             let calls: Vec<Value> = reply["content"].as_array().into_iter().flatten().filter(|b| b["type"] == "toolCall").cloned().collect();
             self.push(reply, show)?;
             if calls.is_empty() {
@@ -474,6 +497,43 @@ impl Agent {
         };
         self.windows.insert(self.model.clone(), w);
         w
+    }
+
+    /// Whether the context is past where old outputs are set aside: how
+    /// much of the newest conversation to keep as it is.
+    async fn set_aside_point(&mut self) -> Option<u64> {
+        let tokens = self.context_tokens();
+        if tokens == 0 {
+            return None;
+        }
+        let at = compact::threshold(self.window().await);
+        let from = stubs::threshold(at);
+        (from > 0 && tokens >= from).then(|| compact::keep(at))
+    }
+
+    /// Sets old tool outputs aside (see `stubs`), keeping the newest `keep`
+    /// tokens as they are; `context`: the context's size (0: the last
+    /// request's). The tokens freed (0: not enough to be worth it).
+    fn set_aside(&mut self, keep: u64, context: u64, show: &mut (dyn FnMut(Shown) + Send)) -> Result<u64> {
+        let context = if context == 0 { self.context_tokens() } else { context };
+        let (picked, saved) = stubs::pick(&self.history, keep, context);
+        if picked.is_empty() {
+            return Ok(0);
+        }
+        let texts: Vec<String> = picked.iter().map(|&i| stubs::stub_text(&self.history, &self.history[i])).collect();
+        let originals: Vec<_> = picked.iter().map(|&i| stubs::original(&self.history, &self.history[i])).collect();
+        let list: Vec<Value> = picked.iter().zip(&texts).map(|(&i, t)| json!({ "id": self.history[i]["toolCallId"], "text": t })).collect();
+        self.log.append(json!({ "type": "harlo_stubs", "stubs": list, "tokensBefore": context, "tokensSaved": saved }))?;
+        for (&i, t) in picked.iter().zip(&texts) {
+            self.history[i] = stubs::as_stub(&self.history[i], t);
+        }
+        self.tools.set_aside(originals, false);
+        let after = context.saturating_sub(saved);
+        if context > 0 {
+            self.last_usage = json!({ "input_tokens": after, "output_tokens": 0 });
+        }
+        show(Shown::SetAside { count: picked.len(), saved, after });
+        Ok(saved)
     }
 
     /// Whether the context is past where it's compacted.

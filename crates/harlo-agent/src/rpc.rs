@@ -116,6 +116,8 @@ impl Shared {
             Shown::Queue { steering, follow_up } => self.emit(json!({ "type": "queue_update", "steering": steering, "followUp": follow_up })),
             Shown::CompactionStart { reason } => self.emit(json!({ "type": "compaction_start", "reason": reason })),
             Shown::Limits(l) => self.emit(json!({ "type": "harlo_limits", "provider": l["provider"], "account": l["account"], "windows": l["windows"] })),
+            // (The context's size drops: harlo's meter follows it.)
+            Shown::SetAside { after, .. } => self.view.lock().unwrap().last_usage = json!({ "input_tokens": after, "output_tokens": 0 }),
             Shown::CompactionEnd { reason, result, error, will_retry } => {
                 if let Some(r) = result {
                     let mut v = self.view.lock().unwrap();

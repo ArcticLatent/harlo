@@ -71,6 +71,8 @@ pub struct Loaded {
     pub effort: Option<String>,
     /// Its name (`session_info`), if it was given one.
     pub name: Option<String>,
+    /// Outputs set aside, for `recall`.
+    pub originals: Vec<(String, crate::tools::Original)>,
 }
 
 /// What a session holds for the agent going on with it.
@@ -79,6 +81,8 @@ pub struct Past {
     pub messages: Vec<Value>,
     pub ids: Vec<String>,
     pub files: (Vec<String>, Vec<String>),
+    /// Outputs set aside (their stubs are in `messages`), for `recall`.
+    pub originals: Vec<(String, crate::tools::Original)>,
     pub model: Option<String>,
     pub effort: Option<String>,
 }
@@ -86,7 +90,7 @@ pub struct Past {
 impl Loaded {
     /// Its log, what the agent goes on from, and its name.
     pub fn into_parts(self) -> (Log, Past, Option<String>) {
-        (self.log, Past { messages: self.messages, ids: self.ids, files: self.files, model: self.model, effort: self.effort }, self.name)
+        (self.log, Past { messages: self.messages, ids: self.ids, files: self.files, originals: self.originals, model: self.model, effort: self.effort }, self.name)
     }
 }
 
@@ -140,6 +144,7 @@ impl Log {
         let mut messages = Vec::new();
         let mut ids: Vec<String> = Vec::new();
         let mut files = (Vec::new(), Vec::new());
+        let mut originals = Vec::new();
         for e in &branch {
             let id = e["id"].as_str().unwrap_or_default().to_owned();
             match e["type"].as_str() {
@@ -163,6 +168,8 @@ impl Log {
                     let list = |k: &str| e["details"][k].as_array().into_iter().flatten().filter_map(|f| f.as_str().map(str::to_owned)).collect();
                     files = (list("readFiles"), list("modifiedFiles"));
                 }
+                // Old outputs set aside: their stubs in place.
+                Some("harlo_stubs") => originals.extend(crate::stubs::replay(e, &mut messages)),
                 // (`provider/model`; a bare one is the plan's.)
                 Some("model_change") => {
                     model = e["modelId"].as_str().map(|m| match e["provider"].as_str().filter(|p| !p.is_empty()) {
@@ -184,7 +191,7 @@ impl Log {
             off: false,
             parent: None,
         };
-        Ok(Loaded { log, messages, ids, model, effort, name, files })
+        Ok(Loaded { log, messages, ids, model, effort, name, files, originals })
     }
 
     /// Appends `entry` (its `type` and fields), giving it an id, its parent
@@ -262,7 +269,7 @@ impl Log {
         let new = dir.join(format!("{}_{id}.jsonl", iso(SystemTime::now()).replace([':', '.'], "-")));
         let mut log = Log { id, path: new.clone(), cwd, file: None, last: None, off: false, parent: Some(path.to_owned()) };
         if branch.is_empty() {
-            return Ok((Loaded { log, messages: Vec::new(), ids: Vec::new(), model: None, effort: None, name: None, files: Default::default() }, said));
+            return Ok((Loaded { log, messages: Vec::new(), ids: Vec::new(), model: None, effort: None, name: None, files: Default::default(), originals: Vec::new() }, said));
         }
         let mut out = log.header().to_string();
         out.push('\n');

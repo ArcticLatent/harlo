@@ -29,6 +29,7 @@ mod providers;
 mod responses;
 mod rpc;
 mod session;
+mod stubs;
 mod task;
 mod tools;
 mod usage;
@@ -291,6 +292,11 @@ async fn ask(prompt: &str, model: Option<String>, effort: Option<String>, from: 
                 (None, Some(e)) => eprintln!("\x1b[31mCouldn't summarize: {e}\x1b[0m"),
                 (None, None) => {}
             },
+            agent::Shown::SetAside { count, saved, after } => {
+                end_thinking(&mut thinking);
+                line(&mut fresh);
+                eprintln!("\x1b[2mSet {count} old tool output{} aside: about {saved} tokens freed, {after} now\x1b[0m", if count == 1 { "" } else { "s" });
+            }
             agent::Shown::MessageStart(_) | agent::Shown::MessageEnd(_) | agent::Shown::Queue { .. } | agent::Shown::Limits(_) => {}
         }
     };

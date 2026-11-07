@@ -31,8 +31,8 @@ pub const AT_ONCE: usize = 4;
 const RESULT_SHOWN: usize = 2000;
 
 /// What each kind may use.
-pub const EXPLORE: &[&str] = &["read", "grep", "find", "ls", "bash"];
-pub const GENERAL: &[&str] = &["read", "write", "edit", "bash", "grep", "find", "ls"];
+pub const EXPLORE: &[&str] = &["read", "grep", "find", "ls", "bash", "recall"];
+pub const GENERAL: &[&str] = &["read", "write", "edit", "bash", "grep", "find", "ls", "recall"];
 
 /// Whether sessions get `task` (`HARLO_AGENT_NO_TASK` set: not, to compare).
 pub fn enabled() -> bool {

@@ -31,6 +31,16 @@ pub struct Tools {
     pub spill_dir: PathBuf,
     /// Files as this session last saw them: (modified, size).
     seen: Mutex<HashMap<PathBuf, (SystemTime, u64)>>,
+    /// Outputs set aside (see `stubs`), by call id, for `recall`.
+    originals: Mutex<HashMap<String, Original>>,
+}
+
+/// An output set aside: the result as it was, and the file it read (to
+/// say when it's changed since).
+#[derive(Clone)]
+pub struct Original {
+    pub result: Value,
+    pub read: Option<PathBuf>,
 }
 
 /// A tool's result for the model, whether it failed, and what the log
@@ -57,7 +67,7 @@ fn fail(text: impl Into<String>) -> Outcome {
 
 /// Tools that only look: several run at once.
 pub fn read_only(name: &str) -> bool {
-    matches!(name, "read" | "grep" | "find" | "ls")
+    matches!(name, "read" | "grep" | "find" | "ls" | "recall")
 }
 
 /// The tools' definitions for the Responses API: those in `only` (all
@@ -94,12 +104,44 @@ pub fn specs() -> Value {
           json!({ "pattern": { "type": "string" }, "path": { "type": "string" } }), &["pattern"]),
         f("ls", "List a folder (folders end with /). Up to 500 entries.",
           json!({ "path": { "type": "string" } }), &[]),
+        f("recall", "Get back a tool's output that was set aside to save context (its place in the conversation says so, with the id to give). It comes back as it was then; to see a file as it is now, read it again.",
+          json!({ "id": { "type": "string" } }), &["id"]),
     ])
 }
 
 impl Tools {
     pub fn new(cwd: PathBuf, spill_dir: PathBuf) -> Self {
-        Tools { cwd, spill_dir, seen: Mutex::new(HashMap::new()) }
+        Tools { cwd, spill_dir, seen: Mutex::new(HashMap::new()), originals: Mutex::new(HashMap::new()) }
+    }
+
+    /// Outputs set aside, kept for `recall` (`replace`: the session's
+    /// started over or changed, its old ones go).
+    pub fn set_aside(&self, originals: impl IntoIterator<Item = (String, Original)>, replace: bool) {
+        let mut kept = self.originals.lock().unwrap();
+        if replace {
+            kept.clear();
+        }
+        kept.extend(originals);
+    }
+
+    /// An output set aside, as it was (with a note when the file it read
+    /// has changed since).
+    fn recall(&self, id: &str) -> Outcome {
+        let id = id.trim();
+        let Some(o) = self.originals.lock().unwrap().get(id).cloned() else {
+            return fail(format!("Nothing was set aside with the id {id:?}: copy the id from the note where the output was."));
+        };
+        let text = o.result["content"].as_array().into_iter().flatten().filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join("\n");
+        let when = o.result["timestamp"].as_u64().map(|ms| std::time::UNIX_EPOCH + std::time::Duration::from_millis(ms));
+        let changed = o.read.as_ref().filter(|p| {
+            let modified = std::fs::metadata(self.path(&p.to_string_lossy())).and_then(|m| m.modified()).ok();
+            matches!((when, modified), (Some(w), Some(m)) if m > w)
+        });
+        let mut out = Outcome::new(text, o.result["isError"] == true);
+        if let Some(p) = changed {
+            out.text.push_str(&format!("\n\n[{} has changed since this was read: read it again for what it is now.]", p.display()));
+        }
+        out
     }
 
     fn path(&self, p: &str) -> PathBuf {
@@ -146,6 +188,7 @@ impl Tools {
             "grep" => self.grep(s("pattern"), s("path"), s("glob"), args["ignore_case"].as_bool() == Some(true)).await,
             "find" => self.find(s("pattern"), s("path")).await,
             "ls" => self.ls(s("path")),
+            "recall" => self.recall(s("id")),
             _ => fail(format!("There's no tool called {name}.")),
         }
     }
