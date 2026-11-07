@@ -219,7 +219,7 @@ fn instructions(cwd: &Path) -> String {
     let mut s = String::from(
         "You are harlo-agent, a coding agent. You work in the user's project with your tools, and finish the task you're given.\n\
          \n\
-         - Look before you change: read a file before editing it, and search (grep, find) rather than guess paths.\n\
+         - Look before you change: read a file before editing it. When the task names a file, read it; search (grep, find) only when you don't know where something is.\n\
          - Change files with edit (small, exact replacements) or write (new files). Never edit files through bash.\n\
          - Run commands with bash to build, test and check your work. Commands can't take input.\n\
          - When a tool fails, read its message: it says what to do next.\n\
@@ -229,7 +229,38 @@ fn instructions(cwd: &Path) -> String {
         s.push_str(&format!("\n<project_instructions path=\"{}\">\n{}\n</project_instructions>\n", path.display(), text.trim()));
     }
     s.push_str(&format!("\nWorking directory: {}\n", cwd.display()));
+    if let Some(listing) = listing(cwd) {
+        s.push_str(&format!("\nIts files when the session started:\n{listing}\n"));
+    }
     s
+}
+
+/// Entries of the working directory shown in the instructions, at most.
+const LISTED: usize = 50;
+
+/// The working directory's entries (folders end in /), sorted, without
+/// .git; a note says how many more there are.
+fn listing(cwd: &Path) -> Option<String> {
+    let mut names: Vec<String> = std::fs::read_dir(cwd)
+        .ok()?
+        .flatten()
+        .filter(|e| e.file_name() != ".git")
+        .map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if e.file_type().is_ok_and(|t| t.is_dir()) { format!("{name}/") } else { name }
+        })
+        .collect();
+    if names.is_empty() {
+        return Some("(empty)".into());
+    }
+    names.sort();
+    let more = names.len().saturating_sub(LISTED);
+    names.truncate(LISTED);
+    let mut out = names.join("\n");
+    if more > 0 {
+        out.push_str(&format!("\n… and {more} more (use ls)"));
+    }
+    Some(out)
 }
 
 /// AGENTS.md (or CLAUDE.md) in the working directory and the folders
@@ -276,6 +307,23 @@ mod tests {
         assert_eq!(out[1].text, INTERRUPTED);
         assert_eq!(out[2].text, NOT_RUN);
         assert!(!marker.exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_instructions_list_the_folder() {
+        let dir = std::env::temp_dir().join(format!("harlo-agent-list-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join(".git")).unwrap();
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(dir.join("b.py"), "").unwrap();
+        std::fs::write(dir.join("a.py"), "").unwrap();
+        assert_eq!(listing(&dir).as_deref(), Some("a.py\nb.py\nsrc/"));
+        for i in 0..60 {
+            std::fs::write(dir.join(format!("f{i:02}")), "").unwrap();
+        }
+        let l = listing(&dir).unwrap();
+        assert_eq!(l.lines().count(), LISTED + 1);
+        assert!(l.ends_with("… and 13 more (use ls)"), "{l}");
         let _ = std::fs::remove_dir_all(dir);
     }
 
