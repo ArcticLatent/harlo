@@ -25,6 +25,7 @@ mod agent;
 mod auth;
 mod chat;
 mod compact;
+mod mcp;
 mod providers;
 mod responses;
 mod rpc;
@@ -41,7 +42,10 @@ use anyhow::{Result, bail};
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    match run(std::env::args().skip(1).collect()).await {
+    let result = run(std::env::args().skip(1).collect()).await;
+    // (MCP servers end with it.)
+    mcp::stop_all();
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("harlo-agent: {e:#}");
@@ -297,6 +301,11 @@ async fn ask(prompt: &str, model: Option<String>, effort: Option<String>, from: 
                 line(&mut fresh);
                 eprintln!("\x1b[2mSet {count} old tool output{} aside: about {saved} tokens freed, {after} now\x1b[0m", if count == 1 { "" } else { "s" });
             }
+            agent::Shown::Notice { text, .. } => {
+                end_thinking(&mut thinking);
+                line(&mut fresh);
+                eprintln!("\x1b[33m{text}\x1b[0m");
+            }
             agent::Shown::MessageStart(_) | agent::Shown::MessageEnd(_) | agent::Shown::Queue { .. } | agent::Shown::Limits(_) => {}
         }
     };
@@ -310,6 +319,7 @@ async fn ask(prompt: &str, model: Option<String>, effort: Option<String>, from: 
             s.cancel();
             if tokio::signal::ctrl_c().await.is_ok() {
                 eprintln!("\x1b[0m");
+                mcp::stop_all();
                 std::process::exit(130);
             }
         }
@@ -333,6 +343,7 @@ async fn ask(prompt: &str, model: Option<String>, effort: Option<String>, from: 
         eprintln!("\x1b[2mSession: {} (continue it with --resume)\x1b[0m", agent.session_file().display());
     }
     if result? == agent::Ended::Stopped {
+        mcp::stop_all();
         std::process::exit(130);
     }
     Ok(())

@@ -65,6 +65,9 @@ pub enum Shown<'a> {
     /// Old tool outputs set aside (see `stubs`): how many, the tokens that
     /// frees, the context's size about now.
     SetAside { count: usize, saved: u64, after: u64 },
+    /// Something the user should know ("warning", "info"): an MCP server
+    /// that didn't start, say.
+    Notice { level: &'a str, text: &'a str },
 }
 
 /// How a compaction went.
@@ -135,6 +138,8 @@ pub struct Agent {
     /// at each run's start).
     harlo_tools: Vec<Value>,
     harlo_text: String,
+    /// MCP servers, once started (at the first prompt; not a subagent's).
+    mcp: Option<crate::mcp::Mcp>,
     pub inbox: Arc<Mutex<Inbox>>,
 }
 
@@ -176,6 +181,7 @@ impl Agent {
             subagents: Arc::default(),
             harlo_tools: Vec::new(),
             harlo_text: String::new(),
+            mcp: None,
             inbox: Arc::default(),
         }
     }
@@ -280,6 +286,7 @@ impl Agent {
             self.logged.1 = self.effort.clone();
         }
         self.ask_harlo().await;
+        self.start_mcp(show).await;
         self.push_user(prompt, show)?;
         // A request too long for the model: sent again with old outputs set
         // aside, then (still too long) compacted: 0, 1, 2 steps taken.
@@ -369,6 +376,7 @@ impl Agent {
                 harlo: self.harlo.as_deref().map(|h| (h, self.harlo_tools.as_slice())),
                 allowed: self.allowed,
                 task: task.as_ref(),
+                mcp: self.mcp.as_ref(),
             };
             let outcomes = run_calls(&self.tools, &triples, &extra, stop).await;
             handed_over |= hands_over(&names, &outcomes);
@@ -439,6 +447,27 @@ impl Agent {
         }
     }
 
+    /// Starts the MCP servers configured (once; not for a subagent), or
+    /// lists again the tools of those that said they changed.
+    async fn start_mcp(&mut self, show: &mut (dyn FnMut(Shown) + Send)) {
+        if self.allowed.is_some() {
+            return;
+        }
+        let notes = match &mut self.mcp {
+            Some(m) => m.refresh().await,
+            None => {
+                let (configs, mut notes) = crate::mcp::load(&self.cwd);
+                let (m, started) = crate::mcp::Mcp::start(configs, &self.cwd).await;
+                notes.extend(started);
+                self.mcp = Some(m);
+                notes
+            }
+        };
+        for n in &notes {
+            show(Shown::Notice { level: "warning", text: n });
+        }
+    }
+
     /// The system prompt: the project's, then what harlo's tools are for.
     fn system(&self) -> String {
         if self.harlo_text.is_empty() {
@@ -455,6 +484,9 @@ impl Agent {
             // first has a stub breaks the cache anyway.)
             if !self.tools.has_originals() {
                 list.retain(|t| t["name"] != "recall");
+            }
+            if let Some(m) = self.mcp.as_ref().filter(|_| self.allowed.is_none()) {
+                list.extend(m.specs().iter().cloned());
             }
             list.extend(self.harlo_tools.iter().cloned());
         }
@@ -775,6 +807,23 @@ struct Extra<'a> {
     /// A subagent's tools (None: all).
     allowed: Option<&'a [&'a str]>,
     task: Option<&'a crate::task::Ctx>,
+    mcp: Option<&'a crate::mcp::Mcp>,
+}
+
+impl Extra<'_> {
+    /// Whether a call only looks (several of those run at once, and they
+    /// don't need the user's yes).
+    fn read_only(&self, name: &str) -> bool {
+        tools::read_only(name) || self.mcp.is_some_and(|m| m.read_only(name))
+    }
+}
+
+/// A call of ours or of an MCP server's.
+async fn call_tool(tools: &Tools, mcp: Option<&crate::mcp::Mcp>, name: &str, args: &Value) -> tools::Outcome {
+    match mcp.filter(|m| m.has(name)) {
+        Some(m) => m.call(name, args, &tools.spill_dir).await,
+        None => tools.call(name, args).await,
+    }
 }
 
 /// `calls`: (id, name, arguments).
@@ -784,8 +833,9 @@ async fn run_calls(tools: &Tools, calls: &[(&str, &str, &Value)], extra: &Extra<
     let (gate, harlo) = (extra.gate, extra.harlo);
     // (A subagent's: only its own.)
     let not_here = |name: &str| extra.allowed.is_some_and(|only| !only.contains(&name));
-    if calls.iter().all(|(_, n, _)| tools::read_only(n) && !not_here(n)) {
-        let all = join_all(calls.iter().map(|(_, name, args)| async move { if args.is_null() { bad_args() } else { tools.call(name, args).await } }));
+    let mcp = extra.mcp;
+    if calls.iter().all(|(_, n, _)| extra.read_only(n) && !not_here(n)) {
+        let all = join_all(calls.iter().map(|(_, name, args)| async move { if args.is_null() { bad_args() } else { call_tool(tools, mcp, name, args).await } }));
         return tokio::select! {
             biased;
             _ = stop.cancelled() => calls.iter().map(|_| cut(INTERRUPTED)).collect(),
@@ -829,7 +879,7 @@ async fn run_calls(tools: &Tools, calls: &[(&str, &str, &Value)], extra: &Extra<
             continue;
         }
         // What changes something may need the user's yes first.
-        if let Some(gate) = gate.filter(|_| !tools::read_only(name)) {
+        if let Some(gate) = gate.filter(|_| !extra.read_only(name)) {
             let verdict = tokio::select! {
                 biased;
                 _ = stop.cancelled() => Err(NOT_RUN.to_owned()),
@@ -843,7 +893,7 @@ async fn run_calls(tools: &Tools, calls: &[(&str, &str, &Value)], extra: &Extra<
         let ran = tokio::select! {
             biased;
             _ = stop.cancelled() => None,
-            o = tools.call(name, args) => Some(o),
+            o = call_tool(tools, mcp, name, args) => Some(o),
         };
         out.push(ran.unwrap_or_else(|| cut(INTERRUPTED)));
     }

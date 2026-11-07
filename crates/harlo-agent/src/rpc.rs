@@ -35,6 +35,7 @@ use crate::{providers, session};
 const LEVELS: [&str; 3] = ["low", "medium", "high"];
 const DEFAULT_LEVEL: &str = "medium";
 const PLAN_REFUSAL: &str = "Plan mode is on: don't change files yet. Look around, then present your plan; the user turns plan mode off when it's time to make the changes.";
+const PLAN_REFUSAL_MCP: &str = "Plan mode is on: this MCP tool may change things (its server doesn't mark it read-only), so it can't run yet. Use what only looks, then present your plan.";
 /// How long harlo has to answer one of its tools.
 const HARLO_WAIT: std::time::Duration = std::time::Duration::from_secs(90);
 const DENIED: &str = "The user denied this call. Don't try it another way: ask what they'd like instead, or carry on without it.";
@@ -116,6 +117,7 @@ impl Shared {
             Shown::Queue { steering, follow_up } => self.emit(json!({ "type": "queue_update", "steering": steering, "followUp": follow_up })),
             Shown::CompactionStart { reason } => self.emit(json!({ "type": "compaction_start", "reason": reason })),
             Shown::Limits(l) => self.emit(json!({ "type": "harlo_limits", "provider": l["provider"], "account": l["account"], "windows": l["windows"] })),
+            Shown::Notice { level, text } => self.emit(json!({ "type": "notice", "level": level, "message": text })),
             // (The context's size drops: harlo's meter follows it.)
             Shown::SetAside { after, .. } => self.view.lock().unwrap().last_usage = json!({ "input_tokens": after, "output_tokens": 0 }),
             Shown::CompactionEnd { reason, result, error, will_retry } => {
@@ -188,13 +190,16 @@ impl Gate for Approvals {
                 let m = sh.modes.lock().unwrap();
                 (m.approval.clone(), m.plan)
             };
-            if plan && matches!(name.as_str(), "write" | "edit") {
-                return Err(PLAN_REFUSAL.to_owned());
+            // (An MCP server's tool that may change things: as bash, but
+            // not in plan mode.)
+            let mcp = name.starts_with(crate::mcp::PREFIX);
+            if plan && (mcp || matches!(name.as_str(), "write" | "edit")) {
+                return Err(if mcp { PLAN_REFUSAL_MCP.to_owned() } else { PLAN_REFUSAL.to_owned() });
             }
             let free = matches!(approval.as_str(), "yolo" | "auto");
             let ask = match approval.as_str() {
                 _ if free => false,
-                "write" => name == "bash",
+                "write" => name == "bash" || mcp,
                 _ => true,
             };
             if !ask || sh.always.lock().unwrap().contains(&name) {
@@ -205,6 +210,10 @@ impl Gate for Approvals {
             sh.waiting.lock().unwrap().insert(id.clone(), tx);
             let detail = match name.as_str() {
                 "bash" => args["command"].as_str().unwrap_or_default().to_owned(),
+                _ if mcp => {
+                    let a = args.to_string();
+                    if a.chars().count() > 300 { format!("{}…", a.chars().take(299).collect::<String>()) } else { a }
+                }
                 "edit" => format!("{} ({} change{})", args["path"].as_str().unwrap_or_default(), args["edits"].as_array().map_or(0, Vec::len), if args["edits"].as_array().map_or(0, Vec::len) == 1 { "" } else { "s" }),
                 _ => args["path"].as_str().unwrap_or_default().to_owned(),
             };
