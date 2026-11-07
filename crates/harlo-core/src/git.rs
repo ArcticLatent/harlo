@@ -984,6 +984,19 @@ fn now_ms() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
 }
 
+/// Where a working tree's turn snapshots go: `refs/harlo/turns/<key>/`,
+/// the key from its top folder. A repository's worktrees share its refs,
+/// so each keeps its own (a helper's snapshot of its worktree is never
+/// taken for its parent's, in the main checkout). Snapshots straight
+/// under `refs/harlo/turns/` (before worktrees had their own) aren't used.
+fn turn_prefix(root: &Path) -> String {
+    // (FNV-1a: the same key from one version of harlo to the next; of the
+    // real path, however it's reached.)
+    let real = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let key = real.to_string_lossy().bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| (h ^ b as u64).wrapping_mul(0x0100_0000_01b3));
+    format!("{TURN_REFS}{key:016x}/")
+}
+
 /// Before a turn starts: the repository's files, as a snapshot to undo the
 /// turn to. None outside a git repository (or if git fails).
 pub fn snapshot_turn(dir: &Path) -> Option<String> {
@@ -993,7 +1006,7 @@ pub fn snapshot_turn(dir: &Path) -> Option<String> {
     if !crate::remote::is_remote(&root) && (root == Path::new("/") || home.is_some_and(|h| h == root)) {
         return None;
     }
-    let id = snapshot_worktree(&root, &format!("{TURN_REFS}{}", now_ms()), "harlo: before a turn").ok()?;
+    let id = snapshot_worktree(&root, &format!("{}{}", turn_prefix(&root), now_ms()), "harlo: before a turn").ok()?;
     prune_turns(&root);
     Some(id)
 }
@@ -1006,14 +1019,12 @@ fn snapshot_folder_turn(dir: &Path) -> Option<String> {
         return None;
     }
     let ms = now_ms();
-    let refname = format!("{TURN_REFS}{ms}");
     let done = std::thread::scope(|scope| {
         let handles: Vec<_> = repos
             .iter()
             .map(|root| {
-                let refname = &refname;
                 scope.spawn(move || {
-                    let ok = snapshot_worktree(root, refname, "harlo: before a turn").is_ok();
+                    let ok = snapshot_worktree(root, &format!("{}{ms}", turn_prefix(root)), "harlo: before a turn").is_ok();
                     prune_turns(root);
                     ok
                 })
@@ -1085,25 +1096,34 @@ pub fn folder_undo_turn(dir: &Path, snapshot: &str) -> Result<UndoPlan> {
     }
 }
 
-/// A repository's turn snapshots, oldest first: `(unix ms, commit)`.
+/// A working tree's turn snapshots (its own, not its repository's other
+/// worktrees'), oldest first: `(unix ms, commit)`.
 pub fn turn_snapshots(root: &Path) -> Vec<(i64, String)> {
-    let mut out: Vec<(i64, String)> = output_in(root, &["for-each-ref", "--format=%(refname) %(objectname)", TURN_REFS])
+    snapshots_under(root, &turn_prefix(root))
+}
+
+/// The snapshots right under `prefix`, oldest first.
+fn snapshots_under(root: &Path, prefix: &str) -> Vec<(i64, String)> {
+    let mut out: Vec<(i64, String)> = output_in(root, &["for-each-ref", "--format=%(refname) %(objectname)", prefix])
         .lines()
         .filter_map(|l| {
             let (name, id) = l.split_once(' ')?;
-            Some((name.strip_prefix(TURN_REFS)?.parse().ok()?, id.to_owned()))
+            Some((name.strip_prefix(prefix)?.parse().ok()?, id.to_owned()))
         })
         .collect();
     out.sort();
     out
 }
 
-/// Old snapshots go (the newest `TURNS_KEPT`, a month at most).
+/// Old snapshots go (the newest `TURNS_KEPT`, a month at most); unkeyed
+/// ones from before (a month old).
 fn prune_turns(root: &Path) {
+    let prefix = turn_prefix(root);
     let all = turn_snapshots(root);
     let cutoff = now_ms() - TURNS_DAYS * 86_400_000;
     let keep_from = all.len().saturating_sub(TURNS_KEPT);
-    let gone: String = all.iter().enumerate().filter(|(i, (ms, _))| *i < keep_from || *ms < cutoff).map(|(_, (ms, _))| format!("delete {TURN_REFS}{ms}\n")).collect();
+    let mut gone: String = all.iter().enumerate().filter(|(i, (ms, _))| *i < keep_from || *ms < cutoff).map(|(_, (ms, _))| format!("delete {prefix}{ms}\n")).collect();
+    gone.extend(snapshots_under(root, TURN_REFS).into_iter().filter(|(ms, _)| *ms < cutoff).map(|(ms, _)| format!("delete {TURN_REFS}{ms}\n")));
     if !gone.is_empty() {
         let mut cmd = git(root);
         cmd.args(["update-ref", "--stdin"]).input(gone.as_bytes());
@@ -1427,6 +1447,27 @@ mod tests {
         std::fs::create_dir_all(&plain).unwrap();
         assert!(snapshot_turn(&plain).is_none());
         let _ = std::fs::remove_dir_all(&plain);
+    }
+
+    #[test]
+    fn a_worktree_keeps_its_own_turns() {
+        // A helper's worktree and the main checkout share the repository's
+        // refs: each sees only its own snapshots, so an undo in one never
+        // goes back to the other's files.
+        let root = repo("wt-turns");
+        let wt = root.with_file_name(format!("harlo-git-wt-turns-wt-{}", std::process::id()));
+        sh(&root, &["worktree", "add", "-q", "-b", "helper", wt.to_str().unwrap()]);
+        let main_snap = snapshot_turn(&root).expect("main's");
+        std::fs::write(wt.join("primes.py"), "x").unwrap();
+        let wt_snap = snapshot_turn(&wt).expect("the worktree's");
+        assert_eq!(turn_snapshots(&root).iter().map(|(_, id)| id.clone()).collect::<Vec<_>>(), [main_snap.clone()]);
+        assert_eq!(folder_turn_snapshots(&wt).iter().map(|(_, id)| id.clone()).collect::<Vec<_>>(), [wt_snap]);
+        assert!(undo_plan(&root, &main_snap).unwrap().restore.is_empty() && undo_plan(&root, &main_snap).unwrap().remove.is_empty());
+        // One from before (unkeyed, as the worktree's would have been): not used.
+        sh(&root, &["update-ref", &format!("{TURN_REFS}{}", now_ms()), &main_snap]);
+        assert_eq!(turn_snapshots(&root).len(), 1);
+        sh(&root, &["worktree", "remove", "--force", wt.to_str().unwrap()]);
+        let _ = std::fs::remove_dir_all(&wt);
     }
 
     #[test]
