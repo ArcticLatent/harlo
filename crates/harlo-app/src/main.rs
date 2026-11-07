@@ -1,4 +1,5 @@
-//! harlo: native desktop front end for the pi and omp coding agents.
+//! harlo: native desktop front end for coding agents (its own, Harlo, and
+//! Claude Code).
 
 mod accounts;
 mod audio;

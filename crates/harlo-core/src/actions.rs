@@ -7,8 +7,8 @@ use std::collections::BTreeSet;
 
 use serde_json::{Value, json};
 
-/// What kind of action a tool call is, from its name (omp, pi, Claude
-/// Code and Harlo name theirs differently).
+/// What kind of action a tool call is, from its name (Claude Code and
+/// Harlo name theirs differently).
 pub fn kind(name: &str) -> &'static str {
     let lower = name.to_lowercase();
     let short = lower.rsplit(['.', ':']).next().unwrap_or(&lower).trim_start_matches("mcp__");

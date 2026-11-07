@@ -28,7 +28,7 @@ pub mod qobject {
         #[qproperty(QString, active_key, cxx_name = "activeKey")]
         #[qproperty(QString, active_title, cxx_name = "activeTitle")]
         #[qproperty(i32, project_count, cxx_name = "projectCount")]
-        /// Plan limits (omp's accounts, Claude's): `{ accounts, updatedAt, error, loading }`.
+        /// Plan limits (Harlo's plan's, Claude's): `{ accounts, updatedAt, error, loading }`.
         #[qproperty(QString, quota_json, cxx_name = "quotaJson")]
         /// Other machines' plan limits, as their Claude sessions say them:
         /// `{ "<host>": { accounts, updatedAt } }` (this one's: `quotaJson`).
@@ -236,7 +236,7 @@ pub mod qobject {
         #[qinvokable]
         fn set_setting(self: &Workspace, key: &QString, value: &QString);
         /// Saves a session template (`{ id?, name, harness, model, approval,
-        /// askFirst, goal, worktree, text }`; the same name replaces one):
+        /// worktree, text }`; the same name replaces one):
         /// its id, or "" without a name.
         #[qinvokable]
         fn save_template(self: Pin<&mut Workspace>, json: &QString) -> QString;
@@ -286,7 +286,7 @@ pub mod qobject {
         /// also catches up runs missed while harlo was closed.
         #[qinvokable]
         fn tick_schedules(self: Pin<&mut Workspace>);
-        /// Re-reads plan limits (`omp usage --json`) in the background.
+        /// Re-reads plan limits in the background.
         #[qinvokable]
         fn refresh_quota(self: Pin<&mut Workspace>);
         /// Another machine's limits, asked for now (Settings → Plan limits).
@@ -311,14 +311,14 @@ pub mod qobject {
         #[qinvokable]
         fn set_autostart(self: &Workspace, on: bool) -> QString;
         /// The session's approval mode (`always-ask`, `write`, `yolo`):
-        /// chosen in harlo, else the omp config's; "" for pi sessions.
+        /// chosen in harlo, else the one it starts in; "" without a shield.
         #[qinvokable]
         fn approval_mode(self: &Workspace, key: &QString) -> QString;
         /// The mode a new session of `harness` in the project (-1: none)
         /// starts in; "" when it has none.
         #[qinvokable]
         fn draft_approval(self: &Workspace, harness: &QString, project_id: i32) -> QString;
-        /// Switches it; the running omp re-reads its overlay.
+        /// Switches it; the running agent takes it at once.
         #[qinvokable]
         fn set_approval_mode(self: Pin<&mut Workspace>, key: &QString, mode: &QString);
         /// The thinking level set on a session, kept for next time.
@@ -369,7 +369,7 @@ pub mod qobject {
         /// `family\tdark preview\tlight preview` per theme family.
         #[qinvokable]
         fn theme_families(self: &Workspace) -> QStringList;
-        /// Where `pi` / `omp` was found on this system, or "".
+        /// Where the agent's program was found on this system, or "".
         #[qinvokable]
         fn detected_program(self: &Workspace, harness: &QString) -> QString;
         #[qinvokable]
@@ -521,10 +521,6 @@ pub mod qobject {
         /// Installs or removes a skill; the problem, if any.
         #[qinvokable]
         fn set_orchestration_skill(self: Pin<&mut Workspace>, name: &QString, on: bool) -> QString;
-        /// Adds harlo's tools to pi's or omp's MCP config, or removes them;
-        /// the problem, if any.
-        #[qinvokable]
-        fn set_orchestration_bridge(self: Pin<&mut Workspace>, agent: &QString, on: bool) -> QString;
         /// Looks again at what's set up for orchestration on the instance
         /// shown (a host: in the background, then `orchestrationRevision`).
         #[qinvokable]
@@ -832,8 +828,6 @@ struct LiveEntry {
     model_id: String,
     /// Its thinking level ("" its default, or not known).
     thinking: String,
-    /// omp goal status ("" when there is no goal).
-    goal_status: String,
 }
 
 /// Something a session did that may notify (Settings → Notifications).
@@ -842,8 +836,6 @@ enum Note {
     /// It asks you something (an ask / select / approval): in words, and
     /// the request as phones get it.
     Question(String, serde_json::Value),
-    /// Its omp goal ended (status, objective).
-    GoalSettled(String, String),
 }
 
 /// How solid glass menus and dialogs are by default (80%).
@@ -928,9 +920,6 @@ pub struct WorkspaceRust {
     limits_asked: Option<std::time::Instant>,
     /// When each other machine's limits were last asked for.
     host_limits_asked: HashMap<String, std::time::Instant>,
-    /// Each other machine's pi: whether its "openai" sign-in is a ChatGPT
-    /// login (its turns then use the OpenAI Codex plan).
-    host_pi_openai_plan: HashMap<String, bool>,
     /// Resets told of ("provider|label|when"), and when harlo started (unix
     /// ms; resets before then aren't).
     limits_told: std::collections::HashSet<String>,
@@ -993,14 +982,8 @@ pub struct WorkspaceRust {
     notified_at: HashMap<String, std::time::Instant>,
     /// Running sessions that are run lanes: live key → (run id, lane index).
     lane_keys: HashMap<String, (String, i64)>,
-    /// omp sessions' `--config` overlay files and the model each was last
-    /// written for.
-    overlays: HashMap<String, (PathBuf, String)>,
     /// Sessions' approval and plan modes, by live key.
     modes: HashMap<String, SessionModes>,
-    /// A remote host's omp approval mode (its config, read over SSH off the
-    /// UI thread; asked for once).
-    remote_approval: Arc<std::sync::Mutex<HashMap<String, Option<String>>>>,
     /// Remote files' stamps (`fileStamp`): the last known, and whether a
     /// fresh one is being asked for.
     remote_stamps: Arc<std::sync::Mutex<HashMap<String, (String, bool)>>>,
@@ -1069,8 +1052,6 @@ fn due_resumes(resumes: &serde_json::Map<String, serde_json::Value>, now: i64) -
         .collect()
 }
 
-/// Oh My Pi, started in the home folder, moves to a temporary one unless told
-/// not to: its session wouldn't be where it was started.
 /// harlo-agent: harlo's tools on its pipe (when orchestration is off,
 /// harlo says so and it has none).
 /// Harlo's: harlo's tools, and its sandbox when it isn't the default
@@ -1088,36 +1069,12 @@ fn harlo_args(kind: HarnessKind, sandbox: bool, network: bool) -> Vec<String> {
     args
 }
 
-fn omp_home_arg(kind: HarnessKind, cwd: &Path) -> Option<String> {
-    if kind != HarnessKind::Omp {
-        return None;
-    }
-    let home = match harlo_core::remote::host_of(cwd) {
-        Some(host) => harlo_core::remote::info_of(&host)?.home,
-        None => std::env::var("HOME").ok()?,
-    };
-    is_home(&harlo_harness::on_host(cwd), &home).then(|| "--allow-home".to_owned())
+/// Whether the agent's sessions have a shield (harlo's approval modes).
+fn has_shield(harness: &str, _cwd: &Path) -> bool {
+    matches!(harness, "demo" | "claude" | "harlo")
 }
 
-fn is_home(folder: &str, home: &str) -> bool {
-    !home.is_empty() && folder.trim_end_matches('/') == home.trim_end_matches('/')
-}
-
-/// Whether the agent's sessions have a shield. pi's is its permission
-/// extension, when it's on (another machine's: as its settings were last
-/// read, without waiting for them).
-fn has_shield(harness: &str, cwd: &Path) -> bool {
-    match harness {
-        "omp" | "demo" | "claude" => true,
-        "pi" => match harlo_core::remote::host_of(cwd) {
-            None => harlo_core::pi_packages::enabled(harlo_core::pi_packages::PERMISSIONS),
-            Some(h) => harlo_core::pi_packages::enabled_on(&h, harlo_core::pi_packages::PERMISSIONS, false),
-        },
-        _ => false,
-    }
-}
-
-/// A session's approval mode (None: the omp config's) and plan mode.
+/// A session's approval mode (None: the one it starts in) and plan mode.
 #[derive(Default, Clone)]
 struct SessionModes {
     approval: Option<String>,
@@ -1141,7 +1098,6 @@ fn workspace_wants(u: &SessionUpdate) -> bool {
             | SessionUpdate::UiRequest(_)
             | SessionUpdate::UiCleared(_)
             | SessionUpdate::Notable(_)
-            | SessionUpdate::Goal(_)
             | SessionUpdate::Limits(_)
             // (The user's answer to an approval request: to the agent.)
             | SessionUpdate::GateAnswered { .. }
@@ -1165,11 +1121,6 @@ impl SessionSink for WorkspaceSink {
 
 impl cxx_qt::Initialize for Workspace {
     fn initialize(mut self: Pin<&mut Self>) {
-        // Overlays of earlier runs, and the shared one older versions wrote.
-        let _ = std::fs::remove_dir_all(overlays_dir());
-        if let Some(dir) = harlo_core::db::default_path().parent() {
-            let _ = std::fs::remove_file(dir.join("omp-overlay.yml"));
-        }
         match Db::open(&harlo_core::db::default_path()) {
             Ok(db) => {
                 let projects = db.projects().unwrap_or_default();
@@ -1355,7 +1306,7 @@ impl cxx_qt::Initialize for Workspace {
                         let _ = tokio::task::spawn_blocking(move || {
                             let kinds: HashMap<PathBuf, HarnessKind> = list.iter().map(|(p, _, _, k)| (p.clone(), *k)).collect();
                             let files: Vec<(PathBuf, i64, i64)> = list.into_iter().map(|(p, m, s, _)| (p, m, s)).collect();
-                            if let Err(e) = index.lock().unwrap().update_parts(&files, |p, resume| session_part(p, kinds.get(p).copied().unwrap_or(HarnessKind::Pi), resume)) {
+                            if let Err(e) = index.lock().unwrap().update_parts(&files, |p, resume| session_part(p, kinds.get(p).copied().unwrap_or(HarnessKind::Harlo), resume)) {
                                 tracing::warn!("search index: {e:#}");
                             }
                         })
@@ -1382,12 +1333,9 @@ impl cxx_qt::Initialize for Workspace {
         let on = self.setting_str("orchestration") != "0";
         self.as_mut().set_orchestration_on(on);
         harlo_harness::set_orchestration(on);
-        // Installed skills and bridges: brought up to this harlo.
+        // Installed skills: brought up to this harlo.
         if on {
             harlo_core::orchestration::refresh_skills();
-            if let Ok(exe) = std::env::current_exe() {
-                harlo_core::orchestration::refresh_bridges(&exe);
-            }
         }
 
         // Poll the session directories in the background.
@@ -1876,15 +1824,14 @@ impl Workspace {
             existing
         } else {
             let info = self.sessions.get(Path::new(key)).cloned()?;
-            let (program, mut remote) = self.launch_for(info.harness, &info.cwd);
-            let overlay = self.as_mut().new_overlay(info.harness, "", remote.as_mut());
+            let (program, remote) = self.launch_for(info.harness, &info.cwd);
             let token = orch_token();
             let cfg = HarnessConfig {
                 kind: info.harness,
                 program,
                 cwd: info.cwd.clone(),
                 session: SessionTarget::Resume(info.path.clone()),
-                extra_args: overlay.iter().map(|p| format!("--config={}", harlo_harness::on_host(p))).chain(omp_home_arg(info.harness, &info.cwd)).chain(self.harlo_args(info.harness)).collect(),
+                extra_args: self.harlo_args(info.harness),
                 // (Orchestration: the agent's harlo tools know who's calling.)
                 env: vec![("HARLO_SESSION".into(), token.clone())],
                 remote,
@@ -1895,9 +1842,6 @@ impl Workspace {
             };
             let key = self.as_mut().register_live(handle, info.harness.as_str(), info.cwd.clone(), Some(info.path.clone()), SessionStatus::Loading);
             self.as_mut().rust_mut().orch_tokens.insert(token, key.clone());
-            if let Some(path) = overlay {
-                self.as_mut().rust_mut().overlays.insert(key.clone(), (path, String::new()));
-            }
             self.as_mut().restore_modes(&key, &info.path);
             key
         };
@@ -1933,8 +1877,7 @@ impl Workspace {
     /// The same, at a thinking level ("" the agent's default): Claude's
     /// from its start (it restarts to change it), others' set as it opens.
     fn start_session_thinking(mut self: Pin<&mut Self>, kind: HarnessKind, cwd: PathBuf, model: &str, thinking: &str, activate: bool) -> String {
-        let (program, mut remote) = self.launch_for(kind, &cwd);
-        let overlay = self.as_mut().new_overlay(kind, model.trim(), remote.as_mut());
+        let (program, remote) = self.launch_for(kind, &cwd);
         let token = orch_token();
         let cfg = HarnessConfig {
             kind,
@@ -1943,7 +1886,7 @@ impl Workspace {
             // `--ephemeral` (testing): new sessions are not saved.
             session: if std::env::args().any(|a| a == "--ephemeral") { SessionTarget::Ephemeral } else { SessionTarget::New },
             extra_args: {
-                let mut args: Vec<String> = overlay.iter().map(|p| format!("--config={}", harlo_harness::on_host(p))).chain(omp_home_arg(kind, &cwd)).chain(self.harlo_args(kind)).collect();
+                let mut args: Vec<String> = self.harlo_args(kind);
                 if !model.trim().is_empty() && kind != HarnessKind::Demo {
                     args.extend(["--model".into(), model.trim().to_owned()]);
                 }
@@ -1962,9 +1905,6 @@ impl Workspace {
         };
         let key = self.as_mut().register_live(handle, kind.as_str(), cwd, None, SessionStatus::Starting);
         self.as_mut().rust_mut().orch_tokens.insert(token, key.clone());
-        if let Some(path) = overlay {
-            self.as_mut().rust_mut().overlays.insert(key.clone(), (path, model.trim().to_owned()));
-        }
         if activate {
             self.as_mut().activate(&key);
         }
@@ -1996,7 +1936,7 @@ impl Workspace {
             unread: false,
             started_at: SystemTime::now(),
         };
-        self.as_mut().rust_mut().live.insert(key.clone(), LiveEntry { info, sub, requests: Vec::new(), model: String::new(), model_id: String::new(), thinking: String::new(), goal_status: String::new() });
+        self.as_mut().rust_mut().live.insert(key.clone(), LiveEntry { info, sub, requests: Vec::new(), model: String::new(), model_id: String::new(), thinking: String::new() });
         key
     }
 
@@ -2300,7 +2240,6 @@ impl Workspace {
             };
             let answer = match if signed_out { Ok(Vec::new()) } else { harlo_core::providers::host_models(kind, remote, cwd).await } {
                 Ok(list) => serde_json::json!({ "models": list.into_iter().map(|(id, name, local)| serde_json::json!({ "id": id, "name": name, "local": local })).collect::<Vec<_>>() }),
-                // (Oh My Pi quits at once with no model to start on.)
                 Err(e) if e == "harness exited before responding" => serde_json::json!({ "error": "it quit before answering, which usually means it has no login there yet." }),
                 Err(e) => serde_json::json!({ "error": e }),
             };
@@ -2556,11 +2495,6 @@ impl Workspace {
 
     fn drop_live(mut self: Pin<&mut Self>, key: &str) {
         self.as_mut().rust_mut().modes.remove(key);
-        // (A remote overlay goes when its omp exits.)
-        if let Some((path, _)) = self.as_mut().rust_mut().overlays.remove(key)
-            && !harlo_core::remote::is_remote(&path) {
-                let _ = std::fs::remove_file(path);
-            }
         if let Some(entry) = self.as_mut().rust_mut().live.remove(key)
             && let Some(live) = registry::remove(key) {
                 live.handle.unsubscribe(entry.sub);
@@ -3227,10 +3161,8 @@ impl Workspace {
         let (harness, worktree_branch, base, starter, text) = (field("harness"), field("worktreeBranch"), field("base"), field("starter"), field("text"));
         // The model picked ("" the agent's own).
         let model = field("model");
-        let ask_first = form["askFirst"].as_bool().unwrap_or(false);
         // The shield's mode to start in ("" the agent's own).
-        let approval = Some(field("approval")).filter(|m| harlo_core::omp_overlay::APPROVAL_MODES.contains(&m.as_str()));
-        let goal = form["goal"].as_bool().unwrap_or(false).then(|| form["goalBudget"].as_u64().unwrap_or(0));
+        let approval = Some(field("approval")).filter(|m| harlo_core::session::APPROVAL_MODES.contains(&m.as_str()));
         let attachments: Vec<String> = form["attachments"].as_array().map(|a| a.iter().filter_map(|p| p.as_str().map(str::to_owned)).collect()).unwrap_or_default();
         let mut message = text.trim().to_owned();
         let harness_name = if harness.is_empty() {
@@ -3238,16 +3170,11 @@ impl Workspace {
         } else {
             harness.to_string()
         };
-        let goal = goal.filter(|_| matches!(harness_name.as_str(), "omp" | "demo"));
-        // A goal runs on its own; asking first would stall it.
-        if ask_first && goal.is_none() && matches!(harness_name.as_str(), "omp" | "demo") && !message.is_empty() {
-            message.push_str(harlo_harness::file_blocks::ASK_FIRST_NOTE);
-        }
         if let Some(s) = harlo_core::starters::find(&starter) {
             message = harlo_core::starters::wrap(s, &message);
         }
         let server = Some((harness_name.clone(), model.clone()));
-        let first = FirstPrompt { text: message, attachments: attachments.iter().map(|p| PathBuf::from(url_to_path(p))).collect(), goal, server };
+        let first = FirstPrompt { text: message, attachments: attachments.iter().map(|p| PathBuf::from(url_to_path(p))).collect(), server };
         if first.text.trim().is_empty() && first.attachments.is_empty() {
             return QString::default();
         }
@@ -3976,8 +3903,8 @@ impl Workspace {
         self.as_mut().set_schedules_revision(next);
     }
 
-    /// Plan limits: omp's accounts (`omp usage`) and Claude Code's (its own
-    /// `/usage`).
+    /// Plan limits: Harlo's ChatGPT plan's (`harlo-agent usage`) and Claude
+    /// Code's (its own `/usage`).
     /// Each source keeps its last numbers when it can't be asked.
     pub fn refresh_quota(mut self: Pin<&mut Self>) {
         self.as_mut().refresh_limits(true);
@@ -4001,11 +3928,6 @@ impl Workspace {
         }
         self.as_mut().rust_mut().limits_asked = Some(std::time::Instant::now());
         // Each when it's on (Settings → Providers) and there.
-        let omp = self
-            .provider_enabled(HarnessKind::Omp)
-            .then(|| self.program_for(HarnessKind::Omp).or_else(|| harlo_harness::resolve_program(HarnessKind::Omp)))
-            .flatten()
-            .filter(|p| p.is_file());
         let claude = self
             .provider_enabled(HarnessKind::Claude)
             .then(|| self.program_for(HarnessKind::Claude).or_else(|| harlo_harness::resolve_program(HarnessKind::Claude)))
@@ -4020,7 +3942,7 @@ impl Workspace {
             .then(|| self.program_for(HarnessKind::Harlo).or_else(|| harlo_harness::resolve_program(HarnessKind::Harlo)))
             .flatten()
             .filter(|p| p.is_file());
-        if omp.is_none() && claude.is_none() && harlo.is_none() && !keep_claude {
+        if claude.is_none() && harlo.is_none() && !keep_claude {
             self.as_mut().set_quota_json(QString::from(&serde_json::json!({ "accounts": [], "error": "" }).to_string()));
             self.publish_phone_limits();
             return;
@@ -4033,7 +3955,6 @@ impl Workspace {
         self.publish_phone_limits();
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
-            let from_omp = omp.map(|p| harlo_core::quota::fetch(&p));
             let from_claude = claude.map(|(p, d)| harlo_core::quota::claude(&p, &d));
             let from_harlo = harlo.map(|p| harlo_core::quota::fetch_harlo(&p));
             let _ = thread.queue(move |mut this| {
@@ -4052,21 +3973,15 @@ impl Workspace {
                         errors.push(format!("Claude: {e:#}"));
                     }
                 }
-                match from_omp {
-                    Some(Ok(list)) => accounts.extend(list),
-                    None => {}
-                    Some(Err(e)) => {
-                        accounts.extend(kept(false));
-                        errors.push(format!("{e:#}"));
-                    }
-                }
-                // (Into omp's account when it's the same one.)
                 match from_harlo {
                     Some(Ok(Some(usage))) => {
                         harlo_core::quota::apply_live(&mut accounts, &usage);
                     }
                     Some(Ok(None)) | None => {}
-                    Some(Err(e)) => errors.push(format!("{e:#}")),
+                    Some(Err(e)) => {
+                        accounts.extend(kept(false));
+                        errors.push(format!("{e:#}"));
+                    }
                 }
                 let updated = if errors.is_empty() { serde_json::json!(chrono::Local::now().timestamp_millis()) } else { previous["updatedAt"].clone() };
                 let json = serde_json::json!({ "accounts": accounts, "updatedAt": updated, "error": errors.join("\n") });
@@ -4127,67 +4042,38 @@ impl Workspace {
         self.refresh_host_limits(host, true, false);
     }
 
-    /// Another machine's limits: from its omp (`omp usage`: the accounts
-    /// it's signed in to there) and, `ask_claude`, its Claude Code (its
-    /// `/usage`, as here). Each at most once a minute unless `now` (Refresh);
-    /// nothing when it isn't connected. What one can't say keeps its last
-    /// numbers.
+    /// Another machine's limits, `ask_claude`: its Claude Code's (its
+    /// `/usage`, as here). At most once a minute unless `now` (Refresh);
+    /// nothing when it isn't connected. When it can't say, the last numbers
+    /// stay. (A Harlo session there says its own as it runs.)
     fn refresh_host_limits(mut self: Pin<&mut Self>, host: &str, ask_claude: bool, now: bool) {
         if host.is_empty() || harlo_core::remote::is_disconnected(host) {
             return;
         }
         let Some(h) = harlo_core::remote::host(host) else { return };
-        let due = |this: &Self, key: &str| now || this.host_limits_asked.get(key).is_none_or(|t| t.elapsed() >= Duration::from_secs(60));
-        // (Not checked yet: tried; else only what's there, and Claude when signed in.)
         let info = harlo_core::remote::info_of(host);
-        let omp = info.as_ref().is_none_or(|i| i.has("omp")) && due(&self, host);
+        // (Not checked yet: tried; else only when it's there and signed in.)
         let claude_key = format!("{host}#claude");
-        let claude = ask_claude && info.as_ref().is_none_or(|i| i.has("claude") && i.claude_auth != "no") && due(&self, &claude_key);
-        if !omp && !claude {
+        let due = now || self.host_limits_asked.get(&claude_key).is_none_or(|t| t.elapsed() >= Duration::from_secs(60));
+        if !(ask_claude && due && info.as_ref().is_none_or(|i| i.has("claude") && i.claude_auth != "no")) {
             return;
         }
-        let stamp = std::time::Instant::now();
-        if omp {
-            self.as_mut().rust_mut().host_limits_asked.insert(host.to_owned(), stamp);
-        }
-        if claude {
-            self.as_mut().rust_mut().host_limits_asked.insert(claude_key, stamp);
-        }
+        self.as_mut().rust_mut().host_limits_asked.insert(claude_key, std::time::Instant::now());
         let host = host.to_owned();
         self.as_mut().change_host_limits(&host, |entry| entry["loading"] = json!(true));
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
-            let (from_omp, from_claude) = std::thread::scope(|s| {
-                let c = claude.then(|| s.spawn(|| harlo_core::quota::claude_on(&h)));
-                let o = omp.then(|| harlo_core::quota::fetch_on(&h));
-                (o, c.map(|c| c.join().unwrap_or_else(|_| Err(anyhow::anyhow!("Claude Code's limits: failed")))))
-            });
+            let from_claude = harlo_core::quota::claude_on(&h);
             let _ = thread.queue(move |mut this| {
                 let mut errors = Vec::new();
-                let omp_accounts = match from_omp {
-                    Some(Ok((a, pi_plan))) => {
-                        this.as_mut().rust_mut().host_pi_openai_plan.insert(host.clone(), pi_plan);
-                        Some(a)
-                    }
-                    Some(Err(e)) => {
-                        tracing::debug!("{host}'s limits from omp: {e:#}");
-                        // (No omp there: nothing to say.)
-                        if harlo_core::remote::found_on(&host, "omp") {
-                            errors.push(format!("{e:#}"));
-                        }
-                        None
-                    }
-                    None => None,
-                };
-                // Some(None): signed in without a plan (an API key): none.
+                // None: signed in without a plan (an API key): none.
                 let claude_account = match from_claude {
-                    Some(Ok(a)) => Some(a),
-                    Some(Err(e)) => {
+                    Ok(a) => Some(a),
+                    Err(e) => {
                         tracing::debug!("{host}'s Claude limits: {e:#}");
                         errors.push(format!("{e:#}"));
                         None
                     }
-                    None => None,
                 };
                 this.as_mut().change_host_limits(&host, |entry| {
                     let before: Vec<serde_json::Value> = entry["accounts"].as_array().cloned().unwrap_or_default();
@@ -4195,10 +4081,7 @@ impl Workspace {
                         Some(a) => a.into_iter().collect(),
                         None => before.iter().filter(|a| a["provider"] == "Claude").cloned().collect(),
                     };
-                    match omp_accounts {
-                        Some(a) => merged.extend(a.into_iter().filter(|a| a["provider"] != "Claude")),
-                        None => merged.extend(before.iter().filter(|a| a["provider"] != "Claude").cloned()),
-                    }
+                    merged.extend(before.iter().filter(|a| a["provider"] != "Claude").cloned());
                     *entry = json!({ "accounts": merged, "updatedAt": chrono::Local::now().timestamp_millis(), "error": errors.join("\n") });
                 });
             });
@@ -4255,27 +4138,6 @@ impl Workspace {
             let when = info["unifiedWindows"].as_object().into_iter().flat_map(|w| w.values()).filter(|w| w["status"] == "rejected").filter_map(|w| w["resetsAt"].as_i64()).max();
             let body = when.map_or_else(|| "Claude stops until it resets.".to_owned(), |s| format!("It resets at {}.", harlo_core::quota::reset_time(s * 1000)));
             self.as_mut().notify_limit(&format!("limit-{label}"), &format!("{} is used up", harlo_core::quota::limit_name("Claude", &label)), &body, false);
-        }
-    }
-
-    /// Whether pi's "openai" sign-in on that machine ("" this one) is a
-    /// ChatGPT login.
-    fn pi_openai_is_plan(&self, host: &str) -> bool {
-        if host.is_empty() {
-            harlo_core::quota::pi_openai_is_plan_here()
-        } else {
-            self.host_pi_openai_plan.get(host).copied().unwrap_or(false)
-        }
-    }
-
-    /// A turn on a provider whose limits omp reads: asked for again (at most
-    /// once a minute).
-    fn after_limited_turn(self: Pin<&mut Self>, provider: &str) {
-        let known = serde_json::from_str::<serde_json::Value>(&self.quota_json.to_string())
-            .ok()
-            .is_some_and(|j| j["accounts"].as_array().into_iter().flatten().any(|a| a["provider"] == provider));
-        if known && self.limits_asked.is_none_or(|t| t.elapsed() >= Duration::from_secs(60)) {
-            self.refresh_limits(false);
         }
     }
 
@@ -4408,45 +4270,15 @@ impl Workspace {
         self.starting_approval(&harness, &cwd)
     }
 
-    /// The shield's mode a session starts in, before it's switched.
-    fn starting_approval(&self, harness: &str, cwd: &Path) -> QString {
-        // Claude asks first unless told otherwise (its own settings may
-        // differ); for pi the shield answers what it asks; harlo-agent asks
-        // as it's told.
-        if matches!(harness, "pi" | "claude" | "harlo") {
-            return QString::from("always-ask");
-        }
-        // On a remote host: that machine's omp config (read with its overlay).
-        let remote = harlo_core::remote::host_of(cwd);
-        match remote {
-            // Read over SSH in the background; until then, ask first.
-            Some(host) => {
-                let mut cache = self.remote_approval.lock().unwrap();
-                match cache.get(&host) {
-                    Some(Some(mode)) => QString::from(mode),
-                    Some(None) => QString::from("always-ask"),
-                    None => {
-                        cache.insert(host.clone(), None);
-                        let (cache, thread) = (std::sync::Arc::clone(&self.remote_approval), self.qt_thread());
-                        crate::runtime().spawn_blocking(move || {
-                            let mode = harlo_core::omp_overlay::approval_mode(&harlo_core::remote::home_file_peek(&host, OMP_CONFIG).unwrap_or_default());
-                            cache.lock().unwrap().insert(host.clone(), Some(mode));
-                            let _ = thread.queue(|mut this| {
-                                let next = this.modes_revision + 1;
-                                this.as_mut().set_modes_revision(next);
-                            });
-                        });
-                        QString::from("always-ask")
-                    }
-                }
-            }
-            None => QString::from(&user_approval_mode()),
-        }
+    /// The shield's mode a session starts in, before it's switched: ask
+    /// first (Claude's own settings may differ).
+    fn starting_approval(&self, _harness: &str, _cwd: &Path) -> QString {
+        QString::from("always-ask")
     }
 
     pub fn set_approval_mode(mut self: Pin<&mut Self>, key: &QString, mode: &QString) {
         let (key, mode) = (key.to_string(), mode.to_string());
-        if !harlo_core::omp_overlay::APPROVAL_MODES.contains(&mode.as_str()) {
+        if !harlo_core::session::APPROVAL_MODES.contains(&mode.as_str()) {
             return;
         }
         self.as_mut().rust_mut().modes.entry(key.clone()).or_default().approval = Some(mode.clone());
@@ -4498,7 +4330,7 @@ impl Workspace {
     /// this: its agent gets them when it does.
     fn restore_modes(mut self: Pin<&mut Self>, key: &str, file: &Path) {
         let Some(saved) = self.meta.get(file).cloned() else { return };
-        if harlo_core::omp_overlay::APPROVAL_MODES.contains(&saved.approval.as_str()) {
+        if harlo_core::session::APPROVAL_MODES.contains(&saved.approval.as_str()) {
             self.as_mut().rust_mut().modes.entry(key.to_owned()).or_default().approval = Some(saved.approval);
             self.as_mut().modes_changed(key);
         }
@@ -4535,15 +4367,11 @@ impl Workspace {
         self.as_mut().modes_changed(&key);
     }
 
-    /// Rewrites the session's overlay (omp re-reads it) and tells views.
+    /// Gives the session its modes and tells views.
     fn modes_changed(mut self: Pin<&mut Self>, key: &str) {
-        if let Some((path, model)) = self.overlays.get(key).cloned() {
-            let modes = self.modes.get(key).cloned().unwrap_or_default();
-            self.as_mut().save_overlay(path, model, modes);
-        }
-        // Claude switches its permission mode on the spot; pi's permission
-        // prompts are answered by harlo; harlo-agent takes the modes itself.
-        if self.live.get(key).is_some_and(|e| matches!(e.info.harness.as_str(), "pi" | "claude" | "harlo"))
+        // Claude switches its permission mode on the spot; Harlo takes the
+        // modes itself.
+        if self.live.get(key).is_some_and(|e| matches!(e.info.harness.as_str(), "claude" | "harlo"))
             && let Some(live) = registry::get(key)
         {
             let modes = self.modes.get(key).cloned().unwrap_or_default();
@@ -4731,23 +4559,20 @@ impl Workspace {
         let starter = form["starter"].as_str().unwrap_or_default().to_owned();
         let lanes: Vec<(String, String)> = form["lanes"]
             .as_array()
-            .map(|a| a.iter().map(|l| (l["harness"].as_str().unwrap_or("omp").to_owned(), l["model"].as_str().unwrap_or_default().to_owned())).collect())
+            .map(|a| a.iter().map(|l| (l["harness"].as_str().unwrap_or("harlo").to_owned(), l["model"].as_str().unwrap_or_default().to_owned())).collect())
             .unwrap_or_default();
         if lanes.len() < 2 || (prompt.is_empty() && starter.is_empty()) {
             self.set_notice_text("A run needs a prompt and at least two lanes.", true);
             return QString::default();
         }
-        // The message every lane gets (starter instructions, Ask first).
+        // The message every lane gets (with the starter's instructions).
         let mut message = prompt.clone();
-        if form["askFirst"].as_bool() == Some(true) && !message.is_empty() {
-            message.push_str(harlo_harness::file_blocks::ASK_FIRST_NOTE);
-        }
         let starter_info = harlo_core::starters::find(&starter);
         if let Some(st) = starter_info {
             message = harlo_core::starters::wrap(st, &message);
         }
         let attachments: Vec<PathBuf> = form["attachments"].as_array().map(|a| a.iter().filter_map(|p| p.as_str().map(|p| PathBuf::from(url_to_path(p)))).collect()).unwrap_or_default();
-        let first = FirstPrompt { text: message, attachments, goal: None, server: None };
+        let first = FirstPrompt { text: message, attachments, server: None };
         let title: String = {
             let t = harlo_harness::file_blocks::title_text(&prompt);
             let t = if t.is_empty() { starter_info.map(|s| s.label.to_owned()).unwrap_or_default() } else { t };
@@ -5129,80 +4954,13 @@ impl Workspace {
         list
     }
 
-    /// A new omp session's `--config` overlay (see `harlo_core::omp_overlay`):
-    /// goals continue between turns, and subagents fall back to the
-    /// session's model (`model`, `provider/id`, when already known). None
-    /// when Settings → Providers turns both off.
     /// How a session in `cwd` runs: here with Settings' program, or on its
-    /// remote host over SSH (that machine's PATH finds pi / omp).
+    /// remote host over SSH.
     fn launch_for(&self, kind: HarnessKind, cwd: &Path) -> (Option<PathBuf>, Option<RemoteLaunch>) {
         match harlo_core::remote::host_of(cwd).and_then(|h| harlo_core::remote::host(&h)) {
             Some(host) => (None, Some(harlo_core::remote::launch(&host))),
             None => (self.program_for(kind), None),
         }
-    }
-
-    /// A new omp session's `--config` overlay. On a remote host the launch
-    /// command writes it (a private file in /tmp, removed when omp exits);
-    /// the complete version, with that machine's omp config merged in,
-    /// follows over SSH.
-    fn new_overlay(self: Pin<&mut Self>, kind: HarnessKind, model: &str, remote: Option<&mut RemoteLaunch>) -> Option<PathBuf> {
-        if kind != HarnessKind::Omp {
-            return None;
-        }
-        let goal = self.setting_str("goal_continue") != "0";
-        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        if let Some(remote) = remote {
-            let file = format!("/tmp/harlo-overlay-{:016x}-{n}.yml", run_token());
-            let first = harlo_core::omp_overlay::Overlay { goal_continue: goal, subagent_fallback: None, approval_mode: None, plan: None }.render();
-            let quoted = harlo_core::remote::quote(&file);
-            remote.prelude.push_str(&format!(" ( umask 077; cat > {quoted} <<'HARLO_OVERLAY'\n{first}HARLO_OVERLAY\n);"));
-            remote.cleanup = format!("rm -f {quoted}");
-            let path = harlo_core::remote::join(&remote.host, &file);
-            self.save_overlay(path.clone(), model.to_owned(), SessionModes::default());
-            return Some(path);
-        }
-        let dir = overlays_dir();
-        std::fs::create_dir_all(&dir).ok()?;
-        let path = dir.join(format!("{}-{n}.yml", std::process::id()));
-        self.save_overlay(path.clone(), model.to_owned(), SessionModes::default());
-        path.exists().then_some(path)
-    }
-
-    /// Writes an overlay (omp watches it): here at once, on a remote host
-    /// in the background (then views re-read the approval mode).
-    fn save_overlay(self: Pin<&mut Self>, path: PathBuf, model: String, modes: SessionModes) {
-        let (goal, subagents) = (self.setting_str("goal_continue") != "0", self.setting_str("subagent_fallback") != "0");
-        let Some(host) = harlo_core::remote::host_of(&path) else {
-            let text = overlay_text(&user_omp_config(), true, goal, subagents, &model, &modes);
-            if let Err(e) = std::fs::write(&path, text) {
-                tracing::warn!("could not write {}: {e}", path.display());
-            }
-            return;
-        };
-        let thread = self.qt_thread();
-        crate::runtime().spawn_blocking(move || {
-            let config = harlo_core::remote::home_file_cached(&host, OMP_CONFIG, Duration::from_secs(60));
-            if let Err(e) = harlo_core::remote::write(&path, overlay_text(&config, false, goal, subagents, &model, &modes).as_bytes()) {
-                tracing::warn!("could not write {}: {e:#}", path.display());
-            }
-            let _ = thread.queue(|mut this| {
-                let next = this.modes_revision + 1;
-                this.as_mut().set_modes_revision(next);
-            });
-        });
-    }
-
-    /// The session's model changed: its overlay follows (omp re-reads it).
-    fn update_overlay(mut self: Pin<&mut Self>, key: &str, model: &str) {
-        let Some((path, last)) = self.overlays.get(key).cloned() else { return };
-        if model.is_empty() || model == last {
-            return;
-        }
-        let modes = self.modes.get(key).cloned().unwrap_or_default();
-        self.as_mut().rust_mut().overlays.insert(key.to_owned(), (path.clone(), model.to_owned()));
-        self.save_overlay(path, model.to_owned(), modes);
     }
 
     /// The binary set in Settings for a harness, if any (else found on PATH).
@@ -5294,17 +5052,14 @@ impl Workspace {
 
     /// The iOS app's notification for `note`, while it's closed (see
     /// `phone_push`): questions and approvals, finished and failed runs.
-    fn push_to_phones(&self, key: &str, note: &Note, goal_active: bool, quiet: &harlo_core::notifications::Quiet) {
+    fn push_to_phones(&self, key: &str, note: &Note, quiet: &harlo_core::notifications::Quiet) {
         use crate::phone_push::What;
         use harlo_core::Notable;
         let (what, body) = match note {
-            // Between a goal's turns omp goes on by itself: its end notifies.
-            Note::Event(Notable::Completed { .. }) if goal_active => return,
             Note::Event(Notable::Completed { last_message, .. }) => (What::Done, last_message.clone()),
             Note::Event(Notable::Error { message }) => (What::Failed, message.clone()),
             Note::Event(Notable::SubagentDone { .. }) => return,
             Note::Question(text, request) => (What::Ask(request.clone()), text.clone()),
-            Note::GoalSettled(status, objective) => (What::Done, format!("Goal {}: {objective}", if status.starts_with("complete") { "complete" } else { status.as_str() })),
         };
         let title = self.rows.iter().find(|r| r.key == key).map(|r| r.title.clone()).unwrap_or_default();
         let body = harlo_core::notifications::summary(&body, harlo_core::notifications::LAST_MESSAGE_CHARS);
@@ -5322,16 +5077,13 @@ impl Workspace {
         if self.is_helper(key) && !matches!(note, Note::Question(..)) {
             return;
         }
-        let goal_active = entry.is_some_and(|e| e.goal_status == "active");
-        self.push_to_phones(key, &note, goal_active, &settings.quiet);
+        self.push_to_phones(key, &note, &settings.quiet);
         let model = entry.map(|e| e.model.clone()).unwrap_or_default();
         let plan = self.modes.get(key).is_some_and(|m| m.plan);
         let title_case = |s: &str| s.split(['-', '_', ' ']).filter(|w| !w.is_empty()).map(|w| { let mut c = w.chars(); c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default() }).collect::<Vec<_>>().join(" ");
         let mut agent = if plan { "Plan".to_owned() } else { "Build".to_owned() };
         // event, last message, fallback title and body
         let (event, last, fallback) = match note {
-            // Between a goal's turns omp goes on by itself: its end notifies.
-            Note::Event(Notable::Completed { .. }) if goal_active => return,
             Note::Event(Notable::Completed { last_message, .. }) => ("completion", last_message, (format!("{agent} agent is ready"), format!("{} completed the task", if model.is_empty() { "The agent".to_owned() } else { model.clone() }))),
             Note::Event(Notable::Error { message }) => ("error", message, ("Tool error".to_owned(), "An error occurred".to_owned())),
             Note::Event(Notable::SubagentDone { agent: sub, status, task, .. }) => {
@@ -5341,16 +5093,7 @@ impl Workspace {
                 (if failed { "error" } else { "subagent" }, last, (format!("{agent} is ready"), format!("{agent} finished")))
             }
             Note::Question(text, _) => ("question", text, ("Input needed".to_owned(), "The agent is waiting for your answer".to_owned())),
-            Note::GoalSettled(status, objective) => {
-                let title = match status.as_str() {
-                    "complete" | "completed" => "Goal complete",
-                    "budget-limited" => "Goal reached its token budget",
-                    _ => "Goal blocked",
-                };
-                ("completion", objective, (title.to_owned(), String::new()))
-            }
         };
-        let goal_note = fallback.1.is_empty();
         if !settings.enabled || !settings.event(event).is_some_and(|e| e.0) {
             return;
         }
@@ -5390,11 +5133,7 @@ impl Workspace {
                 ("model_name", model),
                 ("last_message", last),
             ];
-            let (title, body) = if goal_note {
-                (fallback.0, vars[6].1.clone())
-            } else {
-                settings.render_event(event, &vars, (&fallback.0, &fallback.1))
-            };
+            let (title, body) = settings.render_event(event, &vars, (&fallback.0, &fallback.1));
             let _ = thread.queue(move |mut this| this.as_mut().deliver(&tag, event, &key, &title, &body, settings.sound));
         });
     }
@@ -5462,7 +5201,6 @@ impl Workspace {
         let mut became_idle = false;
         let mut became_busy = false;
         let mut lane_file: Option<PathBuf> = None;
-        let mut model_id: Option<String> = None;
         let mut cost: Option<f64> = None;
         let mut notes: Vec<Note> = Vec::new();
         let mut answered = false;
@@ -5489,9 +5227,8 @@ impl Workspace {
                     entry.info.name = m.name;
                     entry.info.first_message = m.first_message;
                     entry.model = m.model;
-                    entry.model_id = m.model_id.clone();
+                    entry.model_id = m.model_id;
                     entry.thinking = m.thinking;
-                    model_id = Some(m.model_id);
                 }
                 SessionUpdate::UiRequest(r) => {
                     if !entry.requests.iter().any(|(q, _)| q.id == r.id) {
@@ -5501,13 +5238,6 @@ impl Workspace {
                     }
                 }
                 SessionUpdate::Notable(n) => notes.push(Note::Event(n)),
-                SessionUpdate::Goal(goal) => {
-                    let status = goal["status"].as_str().unwrap_or_default().to_owned();
-                    if entry.goal_status == "active" && matches!(status.as_str(), "complete" | "completed" | "budget-limited" | "blocked") {
-                        notes.push(Note::GoalSettled(status.clone(), goal["objective"].as_str().unwrap_or_default().to_owned()));
-                    }
-                    entry.goal_status = status;
-                }
                 SessionUpdate::UiCleared(id) => {
                     let before = entry.requests.len();
                     entry.requests.retain(|(q, _)| q.id != id);
@@ -5523,23 +5253,14 @@ impl Workspace {
         entry.info.needs_input = !entry.requests.is_empty();
         let _ = needed_input;
         let file_changed = entry.info.session_file != file_before;
-        // Whose limits it's using: Claude's sign-in, or (omp, pi) the
-        // model's provider, as omp names its accounts.
-        let limited_by = match entry.info.harness.as_str() {
-            "claude" => Some("Claude".to_owned()),
-            "omp" | "pi" => entry.model_id.split_once('/').map(|(p, _)| p.to_owned()).filter(|p| !p.is_empty()),
-            // Harlo: the plan's through the Codex sign-in ("codex/…"); the
-            // official sign-in, API keys and other servers say no limits.
-            "harlo" => (entry.model_id.split_once('/').map(|(p, _)| p) == Some("codex")).then(|| "openai-codex".to_owned()),
-            _ => None,
-        };
+        // Whose limits it's using: Claude's sign-in, or Harlo's plan
+        // through the Codex sign-in ("codex/…"; the official sign-in, API
+        // keys and other servers say no limits).
+        let limited_by = Some(harlo_core::quota::session_provider(&entry.info.harness, &entry.model_id)).filter(|p| !p.is_empty());
         // (The machine it runs on: its meter.)
         let on_host = harlo_core::remote::host_of(&entry.info.cwd).unwrap_or_default();
-        let pi_openai = entry.info.harness == "pi" && limited_by.as_deref() == Some("openai");
         let remote_file = entry.info.session_file.clone().filter(|f| harlo_core::remote::is_remote(f));
         let used = limited_by.clone().filter(|_| became_busy);
-        // A turn on a provider whose limits are asked for (Claude and Harlo say their own).
-        let turn_on = limited_by.filter(|p| became_idle && p != "Claude" && entry.info.harness != "harlo");
         if became_idle && !active {
             entry.info.unread = true;
         }
@@ -5572,9 +5293,6 @@ impl Workspace {
             && let (Some((run, idx)), Some(db)) = (self.lane_keys.get(key), &self.db) {
                 let _ = db.set_lane_file(run, *idx, &file);
             }
-        if let Some(model) = model_id {
-            self.as_mut().update_overlay(key, &model);
-        }
         // What it cost since the last report: the day's too.
         if let Some(cost) = cost {
             let today = chrono::Local::now().format("%Y-%m-%d").to_string();
@@ -5586,13 +5304,6 @@ impl Workspace {
             }
             self.as_mut().refresh_spending();
         }
-        // pi's "openai" signed in with ChatGPT: the OpenAI Codex plan's
-        // limits (an API key has none).
-        let (used, turn_on) = if pi_openai && (used.is_some() || turn_on.is_some()) && self.pi_openai_is_plan(&on_host) {
-            (used.map(|_| "openai-codex".to_owned()), turn_on.map(|_| "openai-codex".to_owned()))
-        } else {
-            (used, turn_on)
-        };
         if let Some(used) = used.filter(|u| *u != self.setting_str(&meter_setting(&on_host))) {
             self.save_setting(&meter_setting(&on_host), &used);
             if on_host == self.instance.to_string() {
@@ -5606,14 +5317,6 @@ impl Workspace {
                 self.as_mut().apply_live_limits(&info);
             } else {
                 self.as_mut().apply_host_limits(&on_host, &info);
-            }
-        }
-        if let Some(provider) = turn_on {
-            // (Another machine's: asked of its own omp.)
-            if on_host.is_empty() {
-                self.as_mut().after_limited_turn(&provider);
-            } else {
-                self.as_mut().refresh_host_limits(&on_host, false, false);
             }
         }
         // A session an agent started: its state, and its report back; its
@@ -5944,7 +5647,7 @@ impl Workspace {
     /// A session's approval mode and Plan, for phones.
     fn phone_modes(&self, key: &str) -> serde_json::Value {
         let approval = self.approval_mode(&QString::from(key)).to_string();
-        let approvals: Vec<&str> = if approval.is_empty() { Vec::new() } else { harlo_core::omp_overlay::APPROVAL_MODES.to_vec() };
+        let approvals: Vec<&str> = if approval.is_empty() { Vec::new() } else { harlo_core::session::APPROVAL_MODES.to_vec() };
         json!({ "approval": approval, "approvals": approvals, "plan": self.plan_mode(&QString::from(key)) })
     }
 
@@ -6232,17 +5935,14 @@ struct OrchChild {
 struct FirstPrompt {
     text: String,
     attachments: Vec<PathBuf>,
-    /// omp: start a goal with the text as its objective instead of sending
-    /// it (`Some(token budget)`, 0 for none).
-    goal: Option<u64>,
     /// Its agent and model (`provider/id`): their server, when harlo can
     /// start it, started first if it's stopped.
     server: Option<(String, String)>,
 }
 
 /// Sends a new session's first message (attachments are read off the UI
-/// thread). The harness holds it until it has started. A goal that omp
-/// refuses is reported through `notify` (the session stays open).
+/// thread). The harness holds it until it has started. `notify`: where a
+/// model server that doesn't start is told of.
 fn send_first_prompt(key: &str, first: FirstPrompt, notify: Option<CxxQtThread<Workspace>>) {
     let Some(live) = registry::get(key) else { return };
     crate::runtime().spawn_blocking(move || {
@@ -6266,21 +5966,7 @@ fn send_first_prompt(key: &str, first: FirstPrompt, notify: Option<CxxQtThread<W
         }
         let prepared = harlo_core::attach::prepare_for(&first.attachments, host.as_deref());
         let text = format!("{}{}", prepared.prefix, first.text);
-        let Some(budget) = first.goal else {
-            live.handle.prompt(&text, prepared.images, harlo_harness::SendMode::Normal);
-            return;
-        };
-        let mut command = serde_json::json!({ "type": "goal", "op": "create", "objective": text.trim() });
-        if budget > 0 {
-            command["token_budget"] = serde_json::json!(budget);
-        }
-        crate::runtime().spawn(async move {
-            if let Err(e) = live.handle.request(command).await
-                && let Some(thread) = notify
-            {
-                let _ = thread.queue(move |this| this.set_notice_text(&format!("omp did not start the goal: {e}"), true));
-            }
-        });
+        live.handle.prompt(&text, prepared.images, harlo_harness::SendMode::Normal);
     });
 }
 
@@ -6311,11 +5997,6 @@ fn image_blocks(n: usize) -> String {
     (1..=n).map(|i| format!("<file name=\"Photo {i}\"></file>\n")).collect()
 }
 
-/// Where the omp sessions' `--config` overlays live (cleared at startup).
-fn overlays_dir() -> PathBuf {
-    harlo_core::db::default_path().parent().map(|p| p.join("omp-overlays")).unwrap_or_else(|| PathBuf::from("omp-overlays"))
-}
-
 /// What a question asks, for its notification: an ask's first question,
 /// else the dialog's message or title.
 fn question_text(r: &harlo_core::UiRequest) -> String {
@@ -6323,12 +6004,6 @@ fn question_text(r: &harlo_core::UiRequest) -> String {
     [asked, r.message.as_str(), r.title.as_str()].into_iter().map(str::trim).find(|t| !t.is_empty()).unwrap_or_default().to_owned()
 }
 
-/// omp's config file, relative to the home folder.
-const OMP_CONFIG: &str = ".omp/agent/config.yml";
-
-/// An overlay's text, with the user's omp config (`config`) merged in. (On
-/// this computer: without the models of local engines that are gone, which
-/// its subagents would try first.)
 /// Pasted images from before last week: they've been sent or dropped by now.
 fn prune_pasted(dir: &Path) {
     let week = std::time::Duration::from_secs(7 * 24 * 3600);
@@ -6337,52 +6012,6 @@ fn prune_pasted(dir: &Path) {
             let _ = std::fs::remove_file(entry.path());
         }
     }
-}
-
-fn overlay_text(config: &str, here: bool, goal: bool, subagents: bool, model: &str, modes: &SessionModes) -> String {
-    let mut roles = harlo_core::omp_overlay::model_roles(config);
-    if here {
-        let mut seen = std::collections::HashMap::new();
-        roles = harlo_core::omp_overlay::without_models(&roles, |provider, id| {
-            let port = match provider {
-                "llama.cpp" => 8080,
-                "ollama" => 11434,
-                "lm-studio" => 1234,
-                _ => return false,
-            };
-            harlo_core::model_servers::stale_discovered(provider, id, &format!("http://127.0.0.1:{port}"), &mut seen)
-        });
-    }
-    let policies = harlo_core::omp_overlay::tool_policies(config);
-    harlo_core::omp_overlay::Overlay {
-        goal_continue: goal,
-        subagent_fallback: subagents.then_some((&roles, model)),
-        approval_mode: modes.approval.as_deref(),
-        plan: modes.plan.then_some(&policies),
-    }
-    .render()
-}
-
-/// Random per run, so remote overlay names can't be guessed.
-fn run_token() -> u64 {
-    use std::hash::{BuildHasher, Hasher};
-    static TOKEN: OnceLock<u64> = OnceLock::new();
-    *TOKEN.get_or_init(|| {
-        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
-        h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos()));
-        h.write_u32(std::process::id());
-        h.finish()
-    })
-}
-
-/// The text of omp's global config ("" if none).
-fn user_omp_config() -> String {
-    harlo_core::omp_overlay::user_config_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default()
-}
-
-/// The approval mode omp's config sets (its default: `yolo`).
-fn user_approval_mode() -> String {
-    harlo_core::omp_overlay::approval_mode(&user_omp_config())
 }
 
 fn worktrees_dir() -> PathBuf {
@@ -6428,8 +6057,8 @@ fn session_messages(path: &Path, kind: HarnessKind) -> Vec<serde_json::Value> {
 }
 
 /// What the search index needs of a session: a local Claude transcript only
-/// grows, so it's read on from `resume`. (pi's and Oh My Pi's are trees: what
-/// was added can change which messages came before.)
+/// grows, so it's read on from `resume`. (Harlo's are trees: what was added
+/// can change which messages came before.)
 fn session_part(path: &Path, kind: HarnessKind, resume: Option<&harlo_harness::claude::Resume>) -> harlo_harness::claude::Part {
     if kind == HarnessKind::Claude && !harlo_core::remote::is_remote(path) {
         return harlo_harness::claude::read_part(path, resume).unwrap_or_default();
@@ -6564,7 +6193,7 @@ impl Workspace {
             "start_session" => {
                 let agent = text("agent").to_lowercase();
                 let Some(kind) = HarnessKind::parse(&agent).filter(|k| *k != HarnessKind::Demo || agent == "demo") else {
-                    return Err(format!("Unknown agent \"{agent}\": use harlo, claude, pi or omp (list_agents)."));
+                    return Err(format!("Unknown agent \"{agent}\": use harlo or claude (list_agents)."));
                 };
                 if !self.usable_harness(kind) {
                     return Err(format!("{} is turned off in harlo (Settings → Providers).", kind.label()));
@@ -6624,7 +6253,7 @@ impl Workspace {
                     (Some(p), false) => format!("{prompt}{}", harlo_core::orchestration::worktree_note(&branch, &p.path.to_string_lossy())),
                     _ => prompt,
                 };
-                let prompt = if notify { harlo_core::orchestration::helper_brief(&self.title_of(&parent), &prompt, self.has_harlo_tools(kind, &cwd)) } else { prompt };
+                let prompt = if notify { harlo_core::orchestration::helper_brief(&self.title_of(&parent), &prompt) } else { prompt };
                 // In a new worktree: made in the background; it shows when ready.
                 if !branch.is_empty() {
                     let Some(project) = project else {
@@ -6742,7 +6371,7 @@ impl Workspace {
                     }
                     let agent = h.agent.clone();
                     let Some(kind) = HarnessKind::parse(&agent).filter(|k| *k != HarnessKind::Demo || agent == "demo") else {
-                        return Err(format!("Unknown agent \"{agent}\" for \"{}\": use harlo, claude, pi or omp (list_agents).", h.title));
+                        return Err(format!("Unknown agent \"{agent}\" for \"{}\": use harlo or claude (list_agents).", h.title));
                     };
                     if !self.usable_harness(kind) {
                         return Err(format!("{} is turned off in harlo (Settings → Providers): pick another agent for \"{}\".", kind.label(), h.title));
@@ -6907,11 +6536,11 @@ impl Workspace {
         let tree = cwd.as_ref().and_then(|cwd| {
             self.worktrees.iter().filter(|w| !w.removed && !w.base.is_empty() && cwd.starts_with(&w.path) && !harlo_core::remote::is_remote(&w.path)).max_by_key(|w| w.path.components().count()).map(|w| (w.path.clone(), w.branch.clone(), w.base.clone()))
         });
-        // What it used: from its file when its agent saves pi's form (and
+        // What it used: from its file when its agent is Harlo (and
         // its subagents' beside it), else its cost as it said.
         let model = self.live.get(key).map(|e| e.model_id.clone()).unwrap_or_default();
         let meta_cost = self.spend.get(key).map_or(0.0, |s| s.cost);
-        let file = matches!(HarnessKind::parse(&child.agent), Some(HarnessKind::Pi | HarnessKind::Omp | HarnessKind::Harlo)).then(|| self.file_for_key(key)).flatten();
+        let file = matches!(HarnessKind::parse(&child.agent), Some(HarnessKind::Harlo)).then(|| self.file_for_key(key)).flatten();
         let (agent, title, key) = (agent_label(&child.agent).to_owned(), child.title.clone(), key.to_owned());
         // (Files and git in the background, then the message.)
         crate::runtime().spawn_blocking(move || {
@@ -6966,7 +6595,7 @@ impl Workspace {
             return None;
         }
         let mode = self.modes.get(key).and_then(|m| m.approval.clone()).unwrap_or_else(|| self.starting_approval(&entry.info.harness, &entry.info.cwd).to_string());
-        harlo_core::omp_overlay::APPROVAL_MODES.contains(&mode.as_str()).then_some(mode)
+        harlo_core::session::APPROVAL_MODES.contains(&mode.as_str()).then_some(mode)
     }
 
     /// The user answered `key`'s split offer: its helpers started (if they
@@ -7000,19 +6629,6 @@ impl Workspace {
             return row.title.clone();
         }
         self.live.get(key).map(|e| if !e.info.name.is_empty() { e.info.name.clone() } else { e.info.first_message.chars().take(80).collect() }).unwrap_or_default()
-    }
-
-    /// A session of `kind` in `cwd` gets harlo's tools: Claude and Harlo with
-    /// each start; pi and omp with the bridge in their config.
-    fn has_harlo_tools(&self, kind: HarnessKind, cwd: &Path) -> bool {
-        if !harlo_core::orchestration::BRIDGE_AGENTS.contains(&kind) {
-            return true;
-        }
-        match harlo_core::remote::host_of(cwd) {
-            None => harlo_core::orchestration::bridge_installed(kind),
-            // A host's: what Settings last found there.
-            Some(h) => self.orch_hosts.get(&h).is_some_and(|f| f["bridges"][kind.as_str()] == true),
-        }
     }
 
     /// Runs a session's plan with helpers (`agent`: "" for the session's
@@ -7114,7 +6730,6 @@ impl Workspace {
             return;
         }
         let owner_title = self.title_of(owner);
-        let tools = self.has_harlo_tools(run.agent, &cwd);
         let approval = self.approval_of(owner).filter(|_| has_shield(run.agent.as_str(), &cwd));
         let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() % 100_000);
         for id in ready {
@@ -7123,7 +6738,7 @@ impl Workspace {
             let title = format!("Step {n}: {}", step.title);
             let branch = if together { format!("plan/{}-{id}-{stamp}", git::branch_slug(&step.title).chars().take(30).collect::<String>().trim_matches('-')) } else { String::new() };
             let task = harlo_core::plan::step_prompt(&plan, id, &merge, commits, together);
-            let prompt = harlo_core::orchestration::helper_brief(&owner_title, &task, tools);
+            let prompt = harlo_core::orchestration::helper_brief(&owner_title, &task);
             if let Err(e) = crate::plans::update(file.as_deref(), owner, |p| p.hand_out(id, "", &branch)) {
                 tracing::warn!("plan run: {e}");
                 continue;
@@ -7246,18 +6861,8 @@ impl Workspace {
             None => orch::overview(None).unwrap_or_default(),
             Some(h) => self.orch_hosts.get(h).cloned().unwrap_or_else(|| serde_json::json!({ "loading": true })),
         };
-        let agents: Vec<serde_json::Value> = HarnessKind::PROVIDERS
-            .iter()
-            .map(|k| {
-                let bridge = if orch::BRIDGE_AGENTS.contains(k) { found["bridges"][k.as_str()].clone() } else { serde_json::json!("built-in") };
-                let config = match host {
-                    None => harlo_core::sidebar::tilde(&harlo_core::mcp::config_path(*k, &harlo_core::mcp::Scope::Global)),
-                    // (Its path, without asking the host for its home now.)
-                    Some(h) => format!("{h}:~/{}", if *k == HarnessKind::Pi { ".pi/agent/mcp.json" } else { ".omp/agent/mcp.json" }),
-                };
-                serde_json::json!({ "id": k.as_str(), "name": k.label(), "bridge": bridge, "config": orch::BRIDGE_AGENTS.contains(k).then_some(config) })
-            })
-            .collect();
+        // (Each gets harlo's tools from harlo when it starts.)
+        let agents: Vec<serde_json::Value> = HarnessKind::PROVIDERS.iter().map(|k| serde_json::json!({ "id": k.as_str(), "name": k.label(), "bridge": "built-in" })).collect();
         let skills = found.get("skills").cloned().unwrap_or_else(|| {
             serde_json::json!(orch::SKILLS.iter().map(|s| serde_json::json!({ "name": s.name, "summary": s.summary, "installed": false })).collect::<Vec<_>>())
         });
@@ -7323,7 +6928,6 @@ impl Workspace {
         if on == self.orchestration_on {
             return QString::default();
         }
-        let exe = std::env::current_exe().unwrap_or_default();
         let mut problems: Vec<String> = Vec::new();
         if on {
             // What was installed when it was turned off.
@@ -7333,23 +6937,12 @@ impl Workspace {
                     problems.push(format!("{e:#}"));
                 }
             }
-            for kind in kept["bridges"].as_array().into_iter().flatten().filter_map(|v| HarnessKind::parse(v.as_str()?)) {
-                if let Err(e) = orch::set_bridge(kind, true, &exe) {
-                    problems.push(format!("{e:#}"));
-                }
-            }
             self.save_setting("orchestration_kept", "");
         } else {
             let skills = orch::installed_skills();
-            let bridges: Vec<&str> = orch::BRIDGE_AGENTS.iter().filter(|k| orch::bridge_installed(**k)).map(|k| k.as_str()).collect();
-            self.save_setting("orchestration_kept", &serde_json::json!({ "skills": skills, "bridges": bridges }).to_string());
+            self.save_setting("orchestration_kept", &serde_json::json!({ "skills": skills }).to_string());
             for name in &skills {
                 if let Err(e) = orch::set_skill(name, false) {
-                    problems.push(format!("{e:#}"));
-                }
-            }
-            for kind in orch::BRIDGE_AGENTS.into_iter().filter(|k| bridges.contains(&k.as_str())) {
-                if let Err(e) = orch::set_bridge(kind, false, &exe) {
                     problems.push(format!("{e:#}"));
                 }
             }
@@ -7369,22 +6962,6 @@ impl Workspace {
             return QString::default();
         }
         match harlo_core::orchestration::set_skill(&name.to_string(), on) {
-            Ok(()) => QString::default(),
-            Err(e) => QString::from(&format!("{e:#}")),
-        }
-    }
-
-    pub fn set_orchestration_bridge(self: Pin<&mut Self>, agent: &QString, on: bool) -> QString {
-        let Some(kind) = HarnessKind::parse(&agent.to_string()).filter(|k| harlo_core::orchestration::BRIDGE_AGENTS.contains(k)) else {
-            return QString::from("Only pi and omp take harlo's tools from their config.");
-        };
-        let inst = self.instance.to_string();
-        if !inst.is_empty() {
-            self.orchestrate_on_host(inst, move |h| harlo_core::orchestration::set_bridge_on(kind, Some(h), on, std::path::Path::new("")));
-            return QString::default();
-        }
-        let result = std::env::current_exe().map_err(anyhow::Error::from).and_then(|exe| harlo_core::orchestration::set_bridge(kind, on, &exe));
-        match result {
             Ok(()) => QString::default(),
             Err(e) => QString::from(&format!("{e:#}")),
         }
@@ -7635,20 +7212,12 @@ mod tests {
     }
 
     #[test]
-    fn only_the_home_folder_counts_as_home() {
-        assert!(super::is_home("/home/abra", "/home/abra"));
-        assert!(super::is_home("/home/abra/", "/home/abra"));
-        assert!(!super::is_home("/home/abra/project", "/home/abra"));
-        assert!(!super::is_home("/", ""));
-    }
-
-    #[test]
     fn harlos_sandbox_goes_on_its_command_line() {
         use super::{HarnessKind, harlo_args};
         assert_eq!(harlo_args(HarnessKind::Harlo, true, true), ["--harlo-tools"]);
         assert_eq!(harlo_args(HarnessKind::Harlo, true, false), ["--harlo-tools", "--sandbox", "no-network"]);
         assert_eq!(harlo_args(HarnessKind::Harlo, false, true), ["--harlo-tools", "--sandbox", "off"]);
-        assert!(harlo_args(HarnessKind::Pi, false, false).is_empty());
+        assert!(harlo_args(HarnessKind::Claude, false, false).is_empty());
     }
 
     use super::url_to_path;

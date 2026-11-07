@@ -1,6 +1,7 @@
-//! Provider plan limits: from `omp usage --json` (every account omp is
-//! signed in to), and Claude Code's (its `/usage`, which Claude Code reads
-//! with its own sign-in). Per account its plan and each limit window's use.
+//! Provider plan limits: Harlo's ChatGPT plan's (`harlo-agent usage
+//! --json`, and what a running session says), and Claude Code's (its
+//! `/usage`, which Claude Code reads with its own sign-in). Per account its
+//! plan and each limit window's use.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -8,71 +9,6 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
-
-/// One account's limits, flattened for display:
-/// `{ provider, plan, account, limitReached, windows: [{ label, usedFraction,
-/// used, limit, unit, resetsAt (ms), status }] }`.
-pub fn parse(report: &Value) -> Vec<Value> {
-    report["reports"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|r| {
-            let meta = &r["metadata"];
-            let windows: Vec<Value> = r["limits"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .map(|l| {
-                    let a = &l["amount"];
-                    json!({
-                        "label": l["label"].as_str().or_else(|| l["window"]["label"].as_str()).unwrap_or("limit"),
-                        "usedFraction": a["usedFraction"].as_f64().unwrap_or(0.0),
-                        "used": a["used"], "limit": a["limit"], "unit": a["unit"],
-                        "resetsAt": l["window"]["resetsAt"],
-                        "status": l["status"].as_str().unwrap_or("ok"),
-                    })
-                })
-                .collect();
-            json!({
-                "provider": r["provider"].as_str().unwrap_or("provider"),
-                "plan": meta["planType"].as_str().unwrap_or(""),
-                "account": meta["email"].as_str().or_else(|| meta["accountId"].as_str()).unwrap_or(""),
-                "limitReached": meta["limitReached"].as_bool().unwrap_or(false),
-                "windows": windows,
-            })
-        })
-        .collect()
-}
-
-/// Runs `<omp> usage --json` (up to a minute) and parses it.
-pub fn fetch(omp: &Path) -> Result<Vec<Value>> {
-    let mut child = Command::new(omp)
-        .args(["usage", "--json"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .with_context(|| format!("running {} usage", omp.display()))?;
-    let deadline = Instant::now() + Duration::from_secs(60);
-    loop {
-        if child.try_wait()?.is_some() {
-            break;
-        }
-        if Instant::now() > deadline {
-            let _ = child.kill();
-            bail!("omp usage took too long");
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    let out = child.wait_with_output()?;
-    if !out.status.success() {
-        let err = String::from_utf8_lossy(&out.stderr);
-        bail!("omp usage failed: {}", err.lines().last().unwrap_or("").trim());
-    }
-    let report: Value = serde_json::from_slice(&out.stdout).context("reading omp usage output")?;
-    Ok(parse(&report))
-}
 
 /// Harlo's Codex sign-in's usage (`<harlo-agent> usage --json`, up to 20
 /// s), as `apply_live` takes it; None when that sign-in isn't there.
@@ -101,49 +37,6 @@ pub fn fetch_harlo(agent: &Path) -> Result<Option<Value>> {
         bail!("Harlo's usage: {}", err.lines().last().unwrap_or("").trim().trim_start_matches("harlo-agent: "));
     }
     Ok(Some(serde_json::from_slice(&out.stdout).context("reading Harlo's usage")?))
-}
-
-/// pi's "openai" sign-in, as its auth.json names it: a ChatGPT login
-/// ("oauth") uses the same plan as OpenAI Codex; an API key ("api_key") is
-/// paid per token and has no plan limits.
-pub fn pi_openai_is_plan(sign_in_type: &str) -> bool {
-    sign_in_type == "oauth"
-}
-
-/// The same, of pi on this machine (`$PI_CODING_AGENT_DIR`, else
-/// `~/.pi/agent`). Only the sign-in's type is read.
-pub fn pi_openai_is_plan_here() -> bool {
-    let dir = std::env::var_os("PI_CODING_AGENT_DIR").map(PathBuf::from).unwrap_or_else(|| std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".pi/agent"));
-    std::fs::read_to_string(dir.join("auth.json"))
-        .ok()
-        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-        .is_some_and(|v| v["openai"]["type"].as_str().is_some_and(pi_openai_is_plan))
-}
-
-/// The type of pi's "openai" sign-in there, printed on a line of its own
-/// before omp's report (pi runs on node, so node reads it; nothing else of
-/// the file leaves the machine).
-const PI_OPENAI_TYPE: &str = r#"a="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/auth.json"; t=$(node -e 'try{const a=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(String((a.openai||{}).type||""))}catch(e){}' "$a" 2>/dev/null); printf 'pi-openai:%s\n' "$t"; "#;
-
-/// Another machine's limits: its omp's (`omp usage --json`), and whether pi
-/// there uses its ChatGPT plan for "openai" (blocking).
-pub fn fetch_on(host: &crate::remote::Host) -> Result<(Vec<Value>, bool)> {
-    let out = crate::remote::run(host, &format!("{PI_OPENAI_TYPE}omp usage --json </dev/null"), Duration::from_secs(60))?;
-    if !out.status.success() {
-        let err = String::from_utf8_lossy(&out.stderr);
-        bail!("omp usage on {} failed: {}", host.name, err.lines().last().unwrap_or("").trim());
-    }
-    let (pi_plan, report) = split_host_report(&out.stdout);
-    let report: Value = serde_json::from_slice(report).context("reading omp usage output")?;
-    Ok((parse(&report), pi_plan))
-}
-
-/// The `pi-openai:<type>` line, then omp's report.
-fn split_host_report(out: &[u8]) -> (bool, &[u8]) {
-    let Some(rest) = out.strip_prefix(b"pi-openai:") else { return (false, out) };
-    let end = rest.iter().position(|b| *b == b'\n').unwrap_or(rest.len());
-    let kind = String::from_utf8_lossy(&rest[..end]).trim().to_owned();
-    (pi_openai_is_plan(&kind), rest.get(end + 1..).unwrap_or_default())
 }
 
 /// Claude Code's plan limits, as Claude Code itself reports them: its
@@ -351,8 +244,7 @@ pub fn apply_claude_live(accounts: &mut Vec<Value>, info: &Value) -> Vec<String>
     ran_out
 }
 
-/// A limit window's name for its length, as omp names it ("5 hours",
-/// "7 days"), so the two agree on a window.
+/// A limit window's name for its length ("5 hours", "7 days").
 pub fn window_label(minutes: i64) -> String {
     let secs = minutes.max(0) * 60;
     let (n, unit) = if secs >= 86_400 { ((secs as f64 / 86_400.0).round() as i64, "day") } else { (((secs as f64 / 3600.0).round() as i64).max(1), "hour") };
@@ -361,9 +253,8 @@ pub fn window_label(minutes: i64) -> String {
 
 /// A Harlo session's word on its plan's limits (from the response's
 /// headers: `{ provider, account, windows: [{ windowMinutes, usedPercent,
-/// resetsAt (s) }] }`) into that account in `accounts`: the one omp lists
-/// for the same provider and email (or without either known), else a new
-/// one. Each window replaces the one of its name; the rest stay as they
+/// resetsAt (s) }] }`) into that account in `accounts`: the one for the
+/// same provider and email (or without either known), else a new one. Each window replaces the one of its name; the rest stay as they
 /// were. Returns the windows that have just run out.
 pub fn apply_live(accounts: &mut Vec<Value>, info: &Value) -> Vec<String> {
     let provider = info["provider"].as_str().unwrap_or_default();
@@ -441,9 +332,8 @@ pub fn resets_due(accounts: &[Value], since: i64, now: i64) -> Vec<(String, Stri
     out
 }
 
-/// Whose limits a session draws on: Claude's sign-in, else its model's
-/// provider (as omp names its accounts).
-/// "" for an agent without plan limits.
+/// Whose limits a session draws on: Claude's sign-in, or Harlo's ChatGPT
+/// plan; "" for one without plan limits.
 pub fn session_provider(harness: &str, model_id: &str) -> String {
     if harness == "claude" {
         return "Claude".to_owned();
@@ -453,10 +343,7 @@ pub fn session_provider(harness: &str, model_id: &str) -> String {
     if harness == "harlo" {
         return if model_id.split('/').next() == Some("codex") { "openai-codex".to_owned() } else { String::new() };
     }
-    if !matches!(harness, "pi" | "omp") {
-        return String::new();
-    }
-    model_id.split('/').next().unwrap_or_default().to_owned()
+    String::new()
 }
 
 /// A session's plan limit as the line above the composer says it (None:
@@ -575,19 +462,7 @@ mod tests {
         // Under 90%, an agent without plan limits, a provider with none here.
         assert!(session_limit(&accounts, "harlo", "codex/gpt-6").is_none());
         assert!(session_limit(&accounts, "harlo", "llama/x").is_none());
-        assert!(session_limit(&accounts, "pi", "anthropic/x").is_none());
         assert_eq!(session_provider("harlo", "codex/gpt-6"), "openai-codex");
-    }
-
-    #[test]
-    fn a_machine_says_how_pi_signs_in_to_openai() {
-        let (plan, rest) = super::split_host_report(b"pi-openai:oauth\n{\"reports\":[]}");
-        assert!(plan);
-        assert_eq!(rest, b"{\"reports\":[]}");
-        assert!(!super::split_host_report(b"pi-openai:api_key\n{}").0);
-        assert!(!super::split_host_report(b"pi-openai:\n{}").0);
-        // (An older harlo's command: just omp's report.)
-        assert_eq!(super::split_host_report(b"{}"), (false, &b"{}"[..]));
     }
 
     use super::*;
@@ -630,28 +505,6 @@ mod tests {
         assert_eq!(limit_name("Claude", "Session (5 h)"), "Claude's 5-hour limit");
         assert_eq!(limit_name("openai-codex", "7 days"), "ChatGPT's weekly limit");
         assert_eq!(limit_name("Claude", "Weekly · Opus"), "Claude's weekly Opus limit");
-    }
-
-    #[test]
-    fn parses_omp_usage() {
-        let report = json!({ "generatedAt": 1, "reports": [{
-            "provider": "openai-codex", "fetchedAt": 1,
-            "limits": [{ "id": "openai-codex:primary", "label": "7 days", "scope": { "provider": "openai-codex", "windowId": "7d", "shared": true },
-                "window": { "id": "7d", "label": "7 days", "durationMs": 604800000, "resetsAt": 1792300303000_i64 },
-                "amount": { "used": 2, "limit": 100, "remaining": 98, "usedFraction": 0.02, "remainingFraction": 0.98, "unit": "percent" },
-                "status": "ok" }],
-            "metadata": { "planType": "prolite", "allowed": true, "limitReached": false, "email": "me@example.com" } }],
-            "accountsWithoutUsage": [], "disabledCredentials": [] });
-        let accounts = parse(&report);
-        assert_eq!(accounts.len(), 1);
-        let a = &accounts[0];
-        assert_eq!(a["provider"], "openai-codex");
-        assert_eq!(a["plan"], "prolite");
-        assert_eq!(a["account"], "me@example.com");
-        assert_eq!(a["windows"][0]["label"], "7 days");
-        assert_eq!(a["windows"][0]["usedFraction"], 0.02);
-        assert_eq!(a["windows"][0]["resetsAt"], 1792300303000_i64);
-        assert!(parse(&json!({})).is_empty());
     }
 
     #[test]

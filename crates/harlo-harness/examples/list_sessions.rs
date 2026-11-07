@@ -1,9 +1,9 @@
-//! Prints every pi/omp session found on disk: `cargo run -p harlo-harness --example list_sessions`.
+//! Prints every Harlo and Claude Code session found on disk: `cargo run -p harlo-harness --example list_sessions`.
 
 use harlo_harness::{HarnessKind, store};
 
 fn main() {
-    for kind in [HarnessKind::Pi, HarnessKind::Omp] {
+    for kind in HarnessKind::PROVIDERS {
         let start = std::time::Instant::now();
         let files = store::list_files(kind);
         let infos: Vec<_> = files.iter().filter_map(|(p, _, _)| store::read_session(kind, p)).collect();

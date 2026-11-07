@@ -662,7 +662,7 @@ mod tests {
         assert_eq!((team["agent"].as_str(), team["model"].as_str(), team["thinking"].as_str()), (Some("harlo"), Some(""), Some("high")));
         assert_eq!(get("team_helpers_4").as_deref(), Some(r#"{"agent":"claude","model":"haiku","thinking":""}"#));
         let templates = crate::templates::parse(&get("templates").unwrap());
-        assert_eq!((templates[0].harness.as_str(), templates[0].model.as_str(), templates[0].goal), ("harlo", "", false));
+        assert_eq!((templates[0].harness.as_str(), templates[0].model.as_str()), ("harlo", ""));
         assert_eq!((templates[1].harness.as_str(), templates[1].model.as_str()), ("claude", "opus"));
         // Once: one chosen afterwards stays.
         db.set_project_harness(projects[1].id, "omp").unwrap();

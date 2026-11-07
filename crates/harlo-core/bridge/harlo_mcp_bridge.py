@@ -3,8 +3,7 @@
 # file when it changes). An MCP server on stdin/stdout, as the agents start
 # them, that hands each tool call to harlo through the socket harlo forwards
 # here over SSH (argv[1]). The caller is HARLO_SESSION (set in each session
-# harlo starts) or, for OpenCode's shared server, HARLO_OPENCODE. With no
-# harlo at the other end it offers no tools.
+# harlo starts). With no harlo at the other end it offers no tools.
 import json
 import os
 import socket
@@ -12,7 +11,6 @@ import sys
 
 SOCK = sys.argv[1] if len(sys.argv) > 1 else ""
 SESSION = os.environ.get("HARLO_SESSION", "")
-OPENCODE = bool(os.environ.get("HARLO_OPENCODE"))
 
 
 def ask(tool, args):
@@ -21,7 +19,7 @@ def ask(tool, args):
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         s.settimeout(120)
         s.connect(SOCK)
-        line = {"session": SESSION, "opencode": OPENCODE, "tool": tool, "args": args}
+        line = {"session": SESSION, "tool": tool, "args": args}
         s.sendall((json.dumps(line) + "\n").encode())
         data = b""
         while not data.endswith(b"\n"):

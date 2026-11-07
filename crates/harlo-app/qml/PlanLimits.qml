@@ -3,9 +3,9 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import harlo
 
-// Provider plan limits, from Claude Code's sign-in and from omp (`omp
-// usage`): per account its plan and a bar per limit window, with when it
-// resets. `host`: another machine's, from its own Claude Code and omp.
+// Provider plan limits, from Claude Code's sign-in and Harlo's ChatGPT plan:
+// per account its plan and a bar per limit window, with when it resets.
+// `host`: another machine's, from its own Claude Code and Harlo sessions.
 ColumnLayout {
     id: root
     property string host: ""
@@ -64,8 +64,8 @@ ColumnLayout {
         Layout.fillWidth: true
         visible: root.accounts.length === 0 && !root.report.error && !root.report.loading
         text: root.host === ""
-            ? "No limits to show. They come from Claude Code (signed in with a Claude plan) and from omp, for the providers it's signed in to (omp usage)."
-            : "No limits from " + root.host + " yet. They come from its own Claude Code (signed in with a Claude plan) and its omp (omp usage), once it's connected."
+            ? "No limits to show. They come from Claude Code (signed in with a Claude plan) and from Harlo (signed in with a ChatGPT plan)."
+            : "No limits from " + root.host + " yet. They come from its own Claude Code (signed in with a Claude plan) once it's connected, and from Harlo's sessions there."
         color: Theme.muted
         font.pixelSize: Theme.px(12)
         wrapMode: Text.Wrap
@@ -93,7 +93,7 @@ ColumnLayout {
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 8
-                    // Claude Code's sign-in: its mark; omp's accounts: the model provider's logo.
+                    // Claude Code's sign-in: its mark; Harlo's plan: the provider's logo.
                     ProviderMark { visible: card.acc.provider === "Claude"; provider: "claude"; tip: ""; color: Theme.foreground }
                     ProviderLogo { visible: card.acc.provider !== "Claude"; provider: card.acc.provider; implicitWidth: 14; implicitHeight: 14 }
                     Label { text: card.acc.provider; color: Theme.foreground; font.bold: true; font.pixelSize: Theme.px(13) }

@@ -1,6 +1,6 @@
 //! Synthetic harness for UI development and benchmarks. It speaks the
 //! normalized event vocabulary directly, so it exercises the same reducer
-//! and UI paths as pi/omp without spending tokens.
+//! and UI paths as a real agent without spending tokens.
 //!
 //! Commands understood:
 //! - `prompt`: streams a canned answer (thinking, a tool call, markdown).
@@ -8,25 +8,21 @@
 //!   `edit` makes the call an edit of notes.md, `tests` a test run.
 //! - `abort`: stops the current stream.
 //! - `harlo_demo_history { count }`: emits `count` finished exchanges at once.
-//! - A prompt containing `ask` sends an omp-style `ask` request (two
+//! - A prompt containing `ask` sends an `ask` request (two
 //!   questions); one containing `choose` sends a `select` with option
 //!   descriptions. Answers come back as an info notice.
-//! - A prompt containing `subagents` starts two pretend omp subagents
+//! - A prompt containing `subagents` starts two pretend subagents
 //!   (`get_subagents`, `cancel_subagent`, `steer_subagent` answer for them;
-//!   each has a transcript file in omp's format).
+//!   each has a transcript file).
 //! - A prompt containing `todos` runs a pretend `todo` tool call (the phases
 //!   come back from `get_state`); `queue demo` fills the message queue
-//!   (`remove_queued_message` / `promote_queued_message` work on it); `btw`
-//!   streams a side answer.
+//!   (`remove_queued_message` / `promote_queued_message` work on it).
 //! - A prompt containing `approve` asks for approval before its tool call,
-//!   as omp does in `always-ask` mode (`Allow tool: bash` with Approve/Deny).
+//!   as in `always-ask` mode (`Allow tool: bash` with Approve/Deny).
 //! - `get_available_models` / `set_model`, `get_available_thinking_levels` /
 //!   `set_thinking_level` and `set_session_name` change what `get_state`
 //!   reports.
 //! - Each prompt costs $0.25 (`get_session_stats`), for spending limits.
-//! - `goal` (create / get / pause / resume / drop) runs a pretend omp goal:
-//!   it uses tokens while active and completes after a few seconds, or
-//!   stops at its token budget (`goal_updated` reports each change).
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -52,7 +48,6 @@ pub(crate) fn spawn() -> (Harness, mpsc::UnboundedReceiver<HarnessEvent>) {
         let todos: Arc<std::sync::Mutex<Value>> = Arc::new(std::sync::Mutex::new(json!([])));
         let queue: Arc<std::sync::Mutex<(Vec<String>, Vec<String>)>> = Arc::default();
         let approval: Approval = Arc::default();
-        let goal: Arc<std::sync::Mutex<Value>> = Arc::new(std::sync::Mutex::new(Value::Null));
         // The model, thinking level and name (`get_state`), as set.
         let mut model = json!({ "provider": "anthropic", "id": "claude-demo", "name": "Claude Demo" });
         let (mut thinking, mut name) = ("medium".to_owned(), String::new());
@@ -152,7 +147,7 @@ pub(crate) fn spawn() -> (Harness, mpsc::UnboundedReceiver<HarnessEvent>) {
                 }
                 "get_session_stats" => respond(json!({ "contextUsage": { "tokens": 0, "contextWindow": 0 }, "cost": cost })),
                 "get_state" => {
-                    let mut state = json!({ "model": model, "thinkingLevel": thinking, "todoPhases": todos.lock().unwrap().clone(), "goal": goal_state(&goal.lock().unwrap()) });
+                    let mut state = json!({ "model": model, "thinkingLevel": thinking, "todoPhases": todos.lock().unwrap().clone() });
                     if !name.is_empty() {
                         state["sessionName"] = json!(name);
                     }
@@ -175,62 +170,7 @@ pub(crate) fn spawn() -> (Harness, mpsc::UnboundedReceiver<HarnessEvent>) {
                     name = cmd["name"].as_str().unwrap_or_default().to_owned();
                     respond(Value::Null);
                 }
-                "goal" => {
-                    let op = cmd["op"].as_str().unwrap_or_default();
-                    let mut g = goal.lock().unwrap();
-                    let status = g["status"].as_str().unwrap_or_default().to_owned();
-                    let open = matches!(status.as_str(), "active" | "paused" | "budget-limited");
-                    let error = match op {
-                        "get" => None,
-                        "create" if cmd["objective"].as_str().is_none_or(|o| o.trim().is_empty()) => Some("objective is required when op=create"),
-                        "create" if open => Some("A goal is already active; drop it first."),
-                        "create" => {
-                            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
-                            *g = json!({ "id": format!("goal-{}", seq.fetch_add(1, Ordering::Relaxed)), "objective": cmd["objective"], "status": "active",
-                                         "tokensUsed": 0, "timeUsedSeconds": 0, "createdAt": now, "updatedAt": now });
-                            if let Some(budget) = cmd["token_budget"].as_u64() {
-                                g["tokenBudget"] = json!(budget);
-                            }
-                            tokio::spawn(run_goal(events.clone(), Arc::clone(&goal)));
-                            None
-                        }
-                        "pause" if status == "active" || status == "budget-limited" => { g["status"] = json!("paused"); None }
-                        "resume" if status == "paused" => { g["status"] = json!("active"); None }
-                        "drop" if open => { g["status"] = json!("dropped"); None }
-                        _ => Some("No goal to change."),
-                    };
-                    match error {
-                        Some(e) => fail(e),
-                        None => {
-                            if op != "get" {
-                                let _ = events.send(HarnessEvent::Goal(g.clone()));
-                            }
-                            if g["status"] == "dropped" {
-                                *g = Value::Null;
-                            }
-                            respond(json!({ "goal": if g.is_null() { Value::Null } else { g.clone() }, "state": goal_state(&g) }));
-                        }
-                    }
-                }
-                "btw" => {
-                    let question = cmd["question"].as_str().unwrap_or_default().to_owned();
-                    let id = format!("btw-{}", seq.fetch_add(1, Ordering::Relaxed));
-                    let record = json!({ "id": id, "question": question, "answer": "", "status": "running", "leafId": null, "createdAt": 0, "updatedAt": 0 });
-                    let _ = events.send(HarnessEvent::Btw(json!({ "type": "btw_record", "record": record })));
-                    respond(json!({ "record": record }));
-                    let events = events.clone();
-                    tokio::spawn(async move {
-                        let mut answer = String::new();
-                        for piece in ["The lock ", "keeps two ", "workers from ", "writing the cache at once."] {
-                            tokio::time::sleep(Duration::from_millis(120)).await;
-                            answer.push_str(piece);
-                            let _ = events.send(HarnessEvent::Btw(json!({ "type": "btw_delta", "recordId": id, "delta": piece })));
-                        }
-                        let done = json!({ "id": id, "question": question, "answer": answer, "status": "complete", "leafId": null, "createdAt": 0, "updatedAt": 1 });
-                        let _ = events.send(HarnessEvent::Btw(json!({ "type": "btw_record", "record": done })));
-                    });
-                }
-                // Like omp, the list leaves out detached (background) subagents;
+                // The list leaves out detached (background) subagents;
                 // only their events tell about them.
                 "get_subagents" => respond(json!({ "subagents": subagents.lock().unwrap().iter().filter(|a| a["detached"] != true).cloned().collect::<Vec<_>>() })),
                 "cancel_subagent" => {
@@ -336,42 +276,6 @@ fn emit_exchange(events: &mpsc::UnboundedSender<HarnessEvent>, seq: &AtomicU64, 
     let _ = events.send(HarnessEvent::MessageEnd { id: aid, message });
 }
 
-/// omp's `GoalModeState` for a goal (null without one).
-fn goal_state(goal: &Value) -> Value {
-    if goal.is_null() {
-        return Value::Null;
-    }
-    json!({ "enabled": goal["status"] == "active", "mode": "active", "goal": goal })
-}
-
-/// Uses tokens while the goal is active; completes after eight active
-/// ticks, or stops at the token budget.
-async fn run_goal(events: mpsc::UnboundedSender<HarnessEvent>, goal: Arc<std::sync::Mutex<Value>>) {
-    let mut active_ticks = 0;
-    loop {
-        tokio::time::sleep(Duration::from_millis(400)).await;
-        let mut g = goal.lock().unwrap();
-        match g["status"].as_str() {
-            Some("active") => {}
-            Some("paused") => continue,
-            _ => return,
-        }
-        active_ticks += 1;
-        let used = g["tokensUsed"].as_u64().unwrap_or(0) + 3500;
-        g["tokensUsed"] = json!(used);
-        g["timeUsedSeconds"] = json!(g["timeUsedSeconds"].as_u64().unwrap_or(0) + 1);
-        if g["tokenBudget"].as_u64().is_some_and(|b| used >= b) {
-            g["status"] = json!("budget-limited");
-        } else if active_ticks >= 8 {
-            g["status"] = json!("complete");
-        }
-        let _ = events.send(HarnessEvent::Goal(g.clone()));
-        if g["status"] != "active" {
-            return;
-        }
-    }
-}
-
 /// The approval the demo waits for: request id and where the answer goes.
 type Approval = Arc<std::sync::Mutex<Option<(String, oneshot::Sender<String>)>>>;
 
@@ -399,12 +303,8 @@ async fn stream_answer(
                     with headings, a list, a table and a code block so every renderer is exercised.";
     let answer = answer_markdown(seq.load(Ordering::Relaxed));
     let call_id = format!("call-{aid}");
-    // "approve goal": the call is omp's own goal tool, which asks for
-    // approval with nothing but its op (as omp does outside yolo mode).
     // "edit": an edit of notes.md; "tests": a test run that passes.
-    let (tool, args) = if approval.is_some() && prompt.contains("goal") {
-        ("goal", json!({"op":"complete"}))
-    } else if prompt.contains("edit") {
+    let (tool, args) = if prompt.contains("edit") {
         ("edit", json!({"path":"notes.md","oldText":"one\ntwo","newText":"one\n2\nthree"}))
     } else if prompt.contains("tests") {
         ("bash", json!({"command":"cargo test"}))
@@ -437,7 +337,7 @@ async fn stream_answer(
         *approval.lock().unwrap() = Some((request_id.clone(), reply));
         send(HarnessEvent::UiRequest(json!({
             "type": "extension_ui_request", "id": request_id, "method": "select",
-            "title": if tool == "goal" { "Allow tool: goal".to_owned() } else { "Allow tool: bash\nReason: demo approval\nCommand: ls -la".to_owned() },
+            "title": "Allow tool: bash\nReason: demo approval\nCommand: ls -la",
             "options": ["Approve", "Deny"]
         })));
         if answer.await.as_deref() != Ok("Approve") {
@@ -458,7 +358,7 @@ async fn stream_answer(
         tokio::time::sleep(Duration::from_millis(120)).await;
     }
     send(HarnessEvent::ToolEnd { call_id: call_id.clone(), is_error: false, result: json!({"content":[{"type":"text","text":out}]}) });
-    // As pi and omp keep it: the result as a message of its own.
+    // As the session keeps it: the result as a message of its own.
     send(HarnessEvent::MessageEnd { id: next_id(&seq), message: json!({
         "role": "toolResult", "toolCallId": call_id, "toolName": tool, "content": [{"type":"text","text":out}], "isError": false, "timestamp": now_ms(),
     }) });
@@ -512,7 +412,7 @@ fn answer_markdown(n: u64) -> String {
 
 The workspace has **two crates** so far, plus the `PLAN.md` file. Here is what each piece does:
 
-1. `harlo-harness` spawns pi or omp and translates their JSONL events.
+1. `harlo-harness` spawns the agents and translates their JSONL events.
 2. `harlo-core` reduces events into transcript rows and renders *markdown*.
 3. `harlo-app` is the Qt/QML front end.
 
@@ -566,7 +466,7 @@ async fn run_subagents(events: mpsc::UnboundedSender<HarnessEvent>, list: Arc<st
     let call = json!({ "type": "toolCall", "id": "demo-task", "name": "task", "arguments": args });
     let _ = events.send(HarnessEvent::MessageEnd { id: "demo-task-msg".into(), message: json!({ "role": "assistant", "content": [call], "stopReason": "toolUse" }) });
     let _ = events.send(HarnessEvent::ToolStart { call_id: "demo-task".into(), name: "task".into(), args });
-    // omp's frames: the subagent's record as the payload.
+    // The frames: the subagent's record as the payload.
     let ping = |events: &mpsc::UnboundedSender<HarnessEvent>, list: &[Value]| {
         for a in list {
             let _ = events.send(HarnessEvent::SubagentActivity(json!({ "type": "subagent_progress", "payload": a })));

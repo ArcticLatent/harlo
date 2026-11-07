@@ -522,19 +522,18 @@ fn subagent_json(s: &Value) -> Value {
     json!({ "id": s["id"], "agent": s["agent"], "description": s["description"], "status": s["status"] })
 }
 
-/// Edit & resend (the session branches there, or a pi session forks, and
-/// the message comes back to edit: `text`) or, omp, fork from the user's
-/// `ordinal`-th message, as the desktop does.
+/// Edit & resend from the user's `ordinal`-th message, as the desktop
+/// does: the session forks there and the message comes back to edit
+/// (`text`). (`fork`, a fork that keeps the message, no agent does now.)
 async fn branch(live: &crate::registry::LiveRef, file: Option<std::path::PathBuf>, ordinal: Option<usize>, fork: bool) -> Value {
     let Some(ordinal) = ordinal else { return json!({ "error": "That isn't one of your messages." }) };
-    if !matches!(live.harness.as_str(), "pi" | "omp" | "claude" | "harlo") || (fork && live.harness != "omp") {
+    if !matches!(live.harness.as_str(), "claude" | "harlo") || fork {
         return json!({ "error": "This agent can't do that." });
     }
     let harness = live.harness.clone();
     let entry = tokio::task::spawn_blocking(move || crate::chat_session::user_entry_id(file, &harness, ordinal)).await.ok().flatten();
     let Some(entry) = entry else { return json!({ "error": "That message can't be branched from yet." }) };
-    let kind = if live.harness == "omp" && !fork { "branch" } else { "fork" };
-    match live.handle.request(json!({ "type": kind, "entryId": entry })).await {
+    match live.handle.request(json!({ "type": "fork", "entryId": entry })).await {
         Ok(data) if data["cancelled"].as_bool() == Some(true) => json!({ "cancelled": true }),
         Ok(data) => {
             live.handle.reload();
@@ -556,7 +555,7 @@ async fn session_op(op: &str, msg: &Value, live: &crate::registry::LiveRef) -> V
         "answer" => live.handle.answer_ui(&text("requestId"), msg["answer"].clone()),
         "setModel" => live.handle.send_raw(json!({ "type": "set_model", "provider": text("provider"), "modelId": text("model") })),
         "setThinking" => live.handle.send_raw(json!({ "type": "set_thinking_level", "level": text("level") })),
-        // omp's queue: take a waiting message back, or send a follow-up now (as steering).
+        // The queue: take a waiting message back, or send a follow-up now (as steering).
         "unqueue" | "promote" => {
             let command = if op == "unqueue" {
                 json!({ "type": "remove_queued_message", "message": text("text"), "queue": text("queue") })
@@ -572,7 +571,7 @@ async fn session_op(op: &str, msg: &Value, live: &crate::registry::LiveRef) -> V
                 Ok(data) => data,
                 Err(e) => return failed(e),
             };
-            let mut models: Vec<Value> = data["models"].as_array().into_iter().flatten().filter(|m| !harlo_core::pi_packages::hidden_model(m["provider"].as_str().unwrap_or_default())).map(|m| json!({
+            let mut models: Vec<Value> = data["models"].as_array().into_iter().flatten().map(|m| json!({
                 "provider": m["provider"], "id": m["id"], "name": m["name"], "reasoning": m["reasoning"].as_bool() == Some(true),
             })).collect();
             // Those on a model server that's stopped (it starts with the next message).

@@ -1159,7 +1159,7 @@ fn write_title(shared: &Arc<Shared>) {
 
 // ---- Subagents (Claude's Task / Agent tool) ---------------------------------
 // One entry per subagent, keyed by the call that started it, in the shape
-// harlo's dock folds (omp's `subagent_lifecycle`). Claude announces them
+// harlo's dock folds (`subagent_lifecycle`). Claude announces them
 // with `system/task_*` frames (2.1.2xx); the call and its result cover
 // older versions and fill in. Claude can't stop one subagent on its own.
 

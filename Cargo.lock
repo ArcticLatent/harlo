@@ -1357,7 +1357,6 @@ dependencies = [
  "tracing",
  "ureq",
  "whisper-rs",
- "yaml-rust",
 ]
 
 [[package]]

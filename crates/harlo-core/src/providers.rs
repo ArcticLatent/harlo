@@ -1,6 +1,6 @@
-//! Settings → Providers: whether each agent (Harlo, Claude, Pi, Oh My Pi)
-//! is installed, its version and its models. Checked on demand: Claude's
-//! models are a curated list, the others' come from a short RPC run with
+//! Settings → Providers: whether each agent (Harlo, Claude) is installed,
+//! its version and its models. Checked on demand: Claude's models are a
+//! curated list, Harlo's come from a short RPC run with
 //! no session (no prompt is sent, so nothing is spent).
 
 use std::path::{Path, PathBuf};
@@ -67,7 +67,7 @@ pub fn version(program: &Path) -> Option<String> {
 }
 
 /// Checks one provider (blocking; run it off the UI thread, inside the
-/// tokio runtime for pi, omp and harlo-agent).
+/// tokio runtime for harlo-agent).
 pub fn check(kind: HarnessKind, configured: &str, runtime: &tokio::runtime::Handle) -> Status {
     let Some(program) = program(kind, configured) else {
         return Status { error: (!configured.trim().is_empty()).then(|| format!("{configured} isn't there")), ..Default::default() };
@@ -80,7 +80,7 @@ pub fn check(kind: HarnessKind, configured: &str, runtime: &tokio::runtime::Hand
             .into_iter()
             .map(|(id, name)| (id, name, false))
             .collect()),
-        HarnessKind::Pi | HarnessKind::Omp | HarnessKind::Harlo => runtime.block_on(rpc_models(kind, program.clone(), scratch)),
+        HarnessKind::Harlo => runtime.block_on(rpc_models(kind, program.clone(), scratch)),
         HarnessKind::Demo => Ok(Vec::new()),
     };
     match models {
@@ -131,7 +131,7 @@ fn claude_signed_out(program: &Path) -> bool {
     serde_json::from_str::<Value>(&out).is_ok_and(|v| v["loggedIn"].as_bool() == Some(false))
 }
 
-/// pi / omp in RPC mode with no session: their model list.
+/// harlo-agent in RPC mode with no session: its model list.
 async fn rpc_models(kind: HarnessKind, program: PathBuf, cwd: PathBuf) -> Result<Vec<(String, String, bool)>, String> {
     models_of(HarnessConfig { kind, program: Some(program), cwd, session: SessionTarget::Ephemeral, extra_args: vec![], env: vec![], remote: None }).await
 }
@@ -162,14 +162,10 @@ async fn models_of(cfg: HarnessConfig) -> Result<Vec<(String, String, bool)>, St
         Ok(Err(e)) => return Err(format!("{e:#}")),
         Err(_) => return Err("it didn't answer in time".to_owned()),
     };
-    let mut seen = std::collections::HashMap::new();
     Ok(data["models"]
         .as_array()
         .into_iter()
         .flatten()
-        // (omp's leftovers from a local engine that's gone.)
-        .filter(|m| !crate::pi_packages::hidden_model(m["provider"].as_str().unwrap_or_default()))
-        .filter(|m| !crate::model_servers::stale_discovered(m["provider"].as_str().unwrap_or_default(), m["id"].as_str().unwrap_or_default(), m["baseUrl"].as_str().unwrap_or_default(), &mut seen))
         .filter_map(|m| {
             let id = m["id"].as_str()?;
             let provider = m["provider"].as_str().unwrap_or_default();
@@ -201,7 +197,7 @@ mod tests {
 mod this_computer {
     /// Every provider on this computer (no prompts are sent):
     /// `cargo test -p harlo-core providers -- --ignored --nocapture`
-    /// (`HARLO_CHECK=pi:5`: only pi, five times).
+    /// (`HARLO_CHECK=harlo:5`: only Harlo, five times).
     #[test]
     #[ignore]
     fn checks_each() {

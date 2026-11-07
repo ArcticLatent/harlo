@@ -1,14 +1,13 @@
 //! Harness-agnostic event vocabulary and the per-harness wire translators.
 //!
-//! This module is the only place that knows pi/omp event shapes. Everything
-//! downstream (reducer, UI) consumes [`HarnessEvent`].
+//! This module is the only place that knows the pi-protocol event shapes
+//! harlo-agent speaks. Everything downstream (reducer, UI) consumes
+//! [`HarnessEvent`].
 
 use serde_json::{Value, json};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HarnessKind {
-    Pi,
-    Omp,
     /// Claude Code (`claude`, stream-json; see `claude.rs`).
     Claude,
     /// harlo's own agent (`harlo-agent --mode rpc`: pi's protocol, with
@@ -20,12 +19,10 @@ pub enum HarnessKind {
 
 impl HarnessKind {
     /// The providers, in Settings → Providers' order.
-    pub const PROVIDERS: [HarnessKind; 4] = [Self::Harlo, Self::Claude, Self::Pi, Self::Omp];
+    pub const PROVIDERS: [HarnessKind; 2] = [Self::Harlo, Self::Claude];
 
     pub fn parse(s: &str) -> Option<Self> {
         match s {
-            "pi" => Some(Self::Pi),
-            "omp" => Some(Self::Omp),
             "claude" => Some(Self::Claude),
             "harlo" => Some(Self::Harlo),
             "demo" => Some(Self::Demo),
@@ -35,8 +32,6 @@ impl HarnessKind {
 
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Pi => "pi",
-            Self::Omp => "omp",
             Self::Claude => "claude",
             Self::Harlo => "harlo",
             Self::Demo => "demo",
@@ -46,8 +41,6 @@ impl HarnessKind {
     /// Its name for people.
     pub fn label(self) -> &'static str {
         match self {
-            Self::Pi => "Pi",
-            Self::Omp => "Oh My Pi",
             Self::Claude => "Claude",
             Self::Harlo => "Harlo",
             Self::Demo => "Demo",
@@ -57,7 +50,7 @@ impl HarnessKind {
     /// harlo can run sessions with it (a provider it only lists is shown in
     /// Settings → Providers but not offered).
     pub fn can_chat(self) -> bool {
-        matches!(self, Self::Pi | Self::Omp | Self::Claude | Self::Harlo | Self::Demo)
+        matches!(self, Self::Claude | Self::Harlo | Self::Demo)
     }
 
     /// The program's name (on PATH, on another machine).
@@ -95,11 +88,11 @@ impl NoticeLevel {
 
 #[derive(Debug, Clone)]
 pub enum HarnessEvent {
-    /// The process is ready for commands (omp: after protocol negotiation).
+    /// The process is ready for commands.
     Ready,
     RunStarted,
     RunEnded,
-    /// No automatic work remains (pi `agent_settled`, omp `session_settled`).
+    /// No automatic work remains (`agent_settled`).
     Settled,
     /// How many commands the agent left running in the background (Claude
     /// Code's): it picks the work up again when one finishes.
@@ -122,19 +115,15 @@ pub enum HarnessEvent {
     Compaction { started: bool, reason: Option<String>, error: Option<String> },
     Retry { started: bool, attempt: u64, max_attempts: u64, error: Option<String> },
     QueueChanged { steering: Vec<String>, follow_up: Vec<String> },
-    /// omp: a subagent started, progressed or ended (the frame, for its id).
+    /// A subagent started, progressed or ended (the frame, for its id).
     SubagentActivity(Value),
-    /// omp side question (`btw_delta` / `btw_record` frame).
-    Btw(Value),
     /// harlo-agent calling one of harlo's tools on its pipe (answered with
     /// a `harlo_result` command of the same id).
     HarloCall { id: String, tool: String, args: Value },
-    /// omp goal mode changed (`goal_updated`): the goal, or null.
-    Goal(Value),
     Renamed(Option<String>),
     ThinkingLevel(String),
     ModelChanged(Value),
-    /// omp pushes its slash-command list when it changes.
+    /// The slash-command list changed (Claude Code's).
     CommandsChanged(Value),
     /// Plan limits after a request. Claude: `rate_limit_info` (each
     /// window's `utilization`, `resetsAt` in seconds and `status`). Harlo:
@@ -145,9 +134,8 @@ pub enum HarnessEvent {
     /// `get_session_stats`).
     ContextChanged,
 
-    /// `system` is true for the harness's own status notices (omp `notice`,
-    /// e.g. "xd://: mounted …"), as opposed to command output or extension
-    /// messages meant for the user.
+    /// `system` is true for the harness's own status notices (`notice`), as
+    /// opposed to messages meant for the user.
     Notice { level: NoticeLevel, text: String, system: bool },
     /// Extension status-bar entry (`setStatus`); `None` clears it.
     Status { key: String, text: Option<String> },
@@ -156,11 +144,9 @@ pub enum HarnessEvent {
     /// A blocking dialog (select/confirm/input/editor/ask) awaiting an
     /// `extension_ui_response`.
     UiRequest(Value),
-    /// The harness withdrew a dialog (omp `cancel` on timeout/abort).
+    /// The harness withdrew a dialog (`cancel` on timeout/abort).
     UiCancel { target_id: String },
 
-    /// omp `prompt_result`: completion of one specific prompt.
-    PromptResult { id: Option<String>, status: String, error: Option<String> },
     /// A command response nobody was waiting for (e.g. a failed fire-and-forget send).
     Response { id: Option<String>, command: String, success: bool, data: Value, error: Option<String> },
 
@@ -176,26 +162,16 @@ pub struct Translator {
     kind: HarnessKind,
     msg_seq: u64,
     current_msg: Option<String>,
-    /// pi's subagent package: its running calls' arguments, and each
-    /// background run's last status.
-    subagent_calls: std::collections::HashMap<String, Value>,
-    subagent_runs: std::collections::HashMap<String, String>,
 }
 
 impl Translator {
     pub fn new(kind: HarnessKind) -> Self {
-        Self { kind, msg_seq: 0, current_msg: None, subagent_calls: Default::default(), subagent_runs: Default::default() }
+        Self { kind, msg_seq: 0, current_msg: None }
     }
 
-    fn message_id(&mut self, frame: &Value, starting: bool) -> String {
-        // omp stamps a stable messageId. pi has none, and its messages never
-        // interleave, so a sequence number per message_start is enough.
-        if let Some(id) = frame["messageId"].as_str() {
-            if starting {
-                self.current_msg = Some(id.to_owned());
-            }
-            return id.to_owned();
-        }
+    fn message_id(&mut self, starting: bool) -> String {
+        // Messages never interleave: a sequence number per message_start is
+        // enough.
         if starting || self.current_msg.is_none() {
             self.msg_seq += 1;
             self.current_msg = Some(format!("{}-m{}", self.kind.as_str(), self.msg_seq));
@@ -206,22 +182,21 @@ impl Translator {
     pub fn translate(&mut self, frame: Value) -> Vec<HarnessEvent> {
         use HarnessEvent as E;
         let ty = frame["type"].as_str().unwrap_or_default().to_owned();
-        let mut also = if self.kind == HarnessKind::Pi { self.pi_subagents(&ty, &frame) } else { Vec::new() };
         let ev = match ty.as_str() {
             "agent_start" => E::RunStarted,
             "agent_end" => E::RunEnded,
-            "agent_settled" | "session_settled" => E::Settled,
+            "agent_settled" => E::Settled,
 
             "message_start" => {
-                let id = self.message_id(&frame, true);
+                let id = self.message_id(true);
                 E::MessageStart { id, message: take(frame, "message") }
             }
             "message_end" => {
-                let id = self.message_id(&frame, false);
+                let id = self.message_id(false);
                 E::MessageEnd { id, message: take(frame, "message") }
             }
             "message_update" => {
-                let id = self.message_id(&frame, false);
+                let id = self.message_id(false);
                 match translate_block_event(id, &frame["assistantMessageEvent"]) {
                     Some(ev) => ev,
                     None => return Vec::new(),
@@ -267,38 +242,23 @@ impl Translator {
                 error: opt_str(&frame, "finalError"),
             },
             "subagent_lifecycle" | "subagent_progress" => E::SubagentActivity(frame),
-            "btw_delta" | "btw_record" => E::Btw(frame),
             "harlo_limits" => E::Limits(json!({ "provider": frame["provider"], "account": frame["account"], "windows": frame["windows"] })),
             "harlo_call" => E::HarloCall { id: str_of(&frame, "id"), tool: str_of(&frame, "tool"), args: frame["args"].clone() },
-            "goal_updated" => E::Goal(frame["goal"].clone()),
             "queue_update" => E::QueueChanged {
                 steering: string_list(&frame["steering"]),
                 follow_up: string_list(&frame["followUp"]),
             },
             "session_info_changed" => E::Renamed(opt_str(&frame, "name")),
-            "session_info_update" => E::Renamed(opt_str(&frame, "title")),
             "thinking_level_changed" => E::ThinkingLevel(
                 opt_str(&frame, "level").or_else(|| opt_str(&frame, "thinkingLevel")).unwrap_or_default(),
             ),
             "model_changed" => E::ModelChanged(take(frame, "model")),
-            "available_commands_update" => E::CommandsChanged(take(frame, "commands")),
             "notice" => E::Notice {
                 level: NoticeLevel::parse(frame["level"].as_str()),
                 text: str_of(&frame, "message"),
                 system: true,
             },
-            "command_output" => E::Notice { level: NoticeLevel::Info, text: str_of(&frame, "text"), system: false },
-            "extension_error" => E::Notice {
-                level: NoticeLevel::Error,
-                text: format!("Extension error ({}): {}", str_of(&frame, "extensionPath"), str_of(&frame, "error")),
-                system: false,
-            },
             "extension_ui_request" => translate_ui_request(frame),
-            "prompt_result" => E::PromptResult {
-                id: opt_str(&frame, "id"),
-                status: str_of(&frame, "status"),
-                error: opt_str(&frame, "error"),
-            },
             "response" => E::Response {
                 id: opt_str(&frame, "id"),
                 command: str_of(&frame, "command"),
@@ -308,59 +268,7 @@ impl Translator {
             },
             _ => E::Other(frame),
         };
-        also.insert(0, ev);
-        also
-    }
-
-    /// pi's subagent package as the subagent dock's events: what a call
-    /// started, how its background runs are doing (a snapshot in the widget
-    /// it keeps for clients without its terminal UI), and where each one's
-    /// session is when it's done.
-    fn pi_subagents(&mut self, ty: &str, frame: &Value) -> Vec<HarnessEvent> {
-        let event = |payload: Value| HarnessEvent::SubagentActivity(json!({ "type": "subagent_lifecycle", "payload": payload }));
-        match ty {
-            "tool_execution_start" if frame["toolName"] == "subagent" => {
-                self.subagent_calls.insert(str_of(frame, "toolCallId"), frame["args"].clone());
-                Vec::new()
-            }
-            "tool_execution_end" if frame["toolName"] == "subagent" => {
-                let call = str_of(frame, "toolCallId");
-                let args = self.subagent_calls.remove(&call).unwrap_or_default();
-                let Some(id) = frame["result"]["details"]["asyncId"].as_str() else { return Vec::new() };
-                self.subagent_runs.entry(id.to_owned()).or_insert_with(|| "running".to_owned());
-                let task = args["task"].as_str().unwrap_or_default();
-                let description: String = task.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default().chars().take(120).collect();
-                vec![event(json!({ "id": id, "agent": args["agent"], "task": task, "description": description, "parentToolCallId": call, "detached": true, "canCancel": false, "canSteer": false }))]
-            }
-            "extension_ui_request" if frame["method"] == "setWidget" && frame["widgetKey"] == "subagent-async" => {
-                let line = frame["widgetLines"][0].as_str().unwrap_or_default();
-                let snapshot: Value = line.strip_prefix("PI_SUBAGENT_ASYNC_JSON:").and_then(|j| serde_json::from_str(j).ok()).unwrap_or_default();
-                let mut out = Vec::new();
-                for run in snapshot["runs"].as_array().into_iter().flatten() {
-                    let Some(id) = run["id"].as_str() else { continue };
-                    let status = match run["state"].as_str().unwrap_or_default() {
-                        "complete" | "completed" => "completed",
-                        "failed" | "error" => "failed",
-                        "cancelled" | "canceled" | "aborted" | "interrupted" => "cancelled",
-                        _ => "running",
-                    };
-                    let before = self.subagent_runs.insert(id.to_owned(), status.to_owned());
-                    // (Runs that ended before this session started stay out.)
-                    if before.as_deref() != Some(status) && (before.is_some() || status == "running") {
-                        out.push(event(json!({ "id": id, "agent": run["label"], "status": status, "detached": true, "canCancel": false, "canSteer": false })));
-                    }
-                }
-                out
-            }
-            "message_end" if frame["message"]["customType"] == "subagent-notify" => frame["message"]["details"]["runs"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter(|run| run["runId"].is_string() && run["sessionLabel"] == "Session file")
-                .map(|run| event(json!({ "id": run["runId"], "status": run["status"], "sessionFile": run["sessionValue"] })))
-                .collect(),
-            _ => Vec::new(),
-        }
+        vec![ev]
     }
 }
 
@@ -445,8 +353,8 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn pi_synthesizes_message_ids() {
-        let mut t = Translator::new(HarnessKind::Pi);
+    fn synthesizes_message_ids() {
+        let mut t = Translator::new(HarnessKind::Harlo);
         let start = t.translate(json!({"type":"message_start","message":{"role":"assistant","content":[]}}));
         let delta = t.translate(json!({"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Hi"}}));
         let HarnessEvent::MessageStart { id: a, .. } = &start[0] else { panic!() };
@@ -456,14 +364,6 @@ mod tests {
         let next = t.translate(json!({"type":"message_start","message":{"role":"user","content":"x"}}));
         let HarnessEvent::MessageStart { id: c, .. } = &next[0] else { panic!() };
         assert_ne!(a, c);
-    }
-
-    #[test]
-    fn omp_uses_message_id() {
-        let mut t = Translator::new(HarnessKind::Omp);
-        let ev = t.translate(json!({"type":"message_update","messageId":"msg-7","message":{"role":"assistant"},"assistantMessageEvent":{"type":"thinking_delta","contentIndex":1,"delta":"hmm"}}));
-        let HarnessEvent::BlockDelta { id, index, kind, .. } = &ev[0] else { panic!() };
-        assert_eq!((id.as_str(), *index, *kind), ("msg-7", 1, BlockKind::Thinking));
     }
 
     #[test]
@@ -481,44 +381,5 @@ mod tests {
         let ev = t.translate(json!({"type":"harlo_call","id":"hc-3","tool":"list_sessions","args":{"all":true}}));
         let HarnessEvent::HarloCall { id, tool, args } = &ev[0] else { panic!("{ev:?}") };
         assert_eq!((id.as_str(), tool.as_str(), args), ("hc-3", "list_sessions", &json!({"all":true})));
-    }
-
-    #[test]
-    fn settled_names_unified() {
-        let mut t = Translator::new(HarnessKind::Omp);
-        assert!(matches!(t.translate(json!({"type":"session_settled"}))[0], HarnessEvent::Settled));
-        assert!(matches!(t.translate(json!({"type":"agent_settled"}))[0], HarnessEvent::Settled));
-    }
-
-    #[test]
-    fn pis_subagent_package_reaches_the_dock() {
-        let mut t = Translator::new(HarnessKind::Pi);
-        let payloads = |events: Vec<HarnessEvent>| -> Vec<Value> {
-            events.into_iter().filter_map(|e| if let HarnessEvent::SubagentActivity(f) = e { Some(f["payload"].clone()) } else { None }).collect()
-        };
-        let snapshot = |state: &str| json!({
-            "type": "extension_ui_request", "id": "w", "method": "setWidget", "widgetKey": "subagent-async",
-            "widgetLines": [format!("PI_SUBAGENT_ASYNC_JSON:{}", json!({ "runs": [{ "id": "r1", "label": "worker", "state": state }] }))],
-        });
-        t.translate(json!({ "type": "tool_execution_start", "toolCallId": "c1", "toolName": "subagent", "args": { "agent": "worker", "task": "Write a poem\nwith two lines" } }));
-        let first = payloads(t.translate(snapshot("queued")));
-        assert_eq!((first[0]["id"].as_str(), first[0]["status"].as_str(), first[0]["canCancel"].as_bool()), (Some("r1"), Some("running"), Some(false)));
-        // The same again says nothing.
-        assert!(payloads(t.translate(snapshot("running"))).is_empty());
-        let started = payloads(t.translate(json!({ "type": "tool_execution_end", "toolCallId": "c1", "toolName": "subagent", "isError": false, "result": { "details": { "asyncId": "r1" } } })));
-        assert_eq!((started[0]["id"].as_str(), started[0]["description"].as_str(), started[0]["parentToolCallId"].as_str()), (Some("r1"), Some("Write a poem"), Some("c1")));
-        assert_eq!(payloads(t.translate(snapshot("complete")))[0]["status"], "completed");
-        let done = payloads(t.translate(json!({ "type": "message_end", "message": { "role": "custom", "customType": "subagent-notify", "details": { "runs": [
-            { "runId": "r1", "status": "completed", "sessionLabel": "Session file", "sessionValue": "/s/run-0/session.jsonl" },
-        ] } } })));
-        assert_eq!(done[0]["sessionFile"], "/s/run-0/session.jsonl");
-        // A run that ended before this session started stays out.
-        let old = json!({ "type": "extension_ui_request", "id": "w", "method": "setWidget", "widgetKey": "subagent-async",
-            "widgetLines": [format!("PI_SUBAGENT_ASYNC_JSON:{}", json!({ "runs": [{ "id": "r0", "label": "worker", "state": "complete" }] }))] });
-        assert!(payloads(t.translate(old)).is_empty());
-        // Clearing it, or another harness: nothing.
-        assert!(payloads(t.translate(json!({ "type": "extension_ui_request", "id": "w", "method": "setWidget", "widgetKey": "subagent-async" }))).is_empty());
-        let mut omp = Translator::new(HarnessKind::Omp);
-        assert!(payloads(omp.translate(snapshot("running"))).is_empty());
     }
 }

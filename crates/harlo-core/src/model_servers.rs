@@ -1,25 +1,19 @@
 //! Your own model servers (Settings → Model servers): any OpenAI-compatible
 //! server, on this computer or elsewhere (Ollama, LM Studio, llama.cpp,
 //! vLLM, SGLang, a company gateway). harlo asks the server what it serves
-//! (`/models`) and adds the models you pick to each chosen agent's own
-//! config, so they show in harlo's model lists and in the agent's own.
+//! (`/models`) and adds the models you pick to Harlo's config, so they show
+//! in harlo's model lists: `$XDG_CONFIG_HOME/harlo-agent/providers.json`,
+//! `providers.<name>`: `baseUrl`, `api`, `apiKey`, `models: [{ id,
+//! contextWindow }]`.
 //!
-//! | agent | where | entry |
-//! |---|---|---|
-//! | pi  | `~/.pi/agent/models.json` (`$PI_CODING_AGENT_DIR`) | `providers.<name>`: `baseUrl`, `api`, `apiKey`, `models: [{ id, contextWindow }]` |
-//! | omp | `~/.omp/agent/models.yml` | the same, as YAML |
-//! | Harlo | `$XDG_CONFIG_HOME/harlo-agent/providers.json` | as pi's |
-//!
-//! The rest of each file stays as it was: pi's and Harlo's JSON keep their
-//! order, omp's YAML its text and comments (the new provider goes in as
-//! text). A name already there isn't replaced.
+//! The rest of the file stays as it was (its JSON keeps its order). A name
+//! already there isn't replaced.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use harlo_harness::HarnessKind;
 use serde_json::{Map, Value, json};
-use yaml_rust::{Yaml, YamlLoader};
 
 /// A model the server serves.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -55,11 +49,9 @@ fn home() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
 }
 
-/// The agent's file its servers are in (pi, omp, Harlo).
+/// The agent's file its servers are in (Harlo's).
 pub fn file(kind: HarnessKind) -> Option<PathBuf> {
     match kind {
-        HarnessKind::Pi => Some(std::env::var_os("PI_CODING_AGENT_DIR").map(PathBuf::from).unwrap_or_else(|| home().join(".pi/agent")).join("models.json")),
-        HarnessKind::Omp => Some(home().join(".omp/agent/models.yml")),
         HarnessKind::Harlo => Some(
             std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).unwrap_or_else(|| home().join(".config")).join("harlo-agent/providers.json"),
         ),
@@ -68,7 +60,7 @@ pub fn file(kind: HarnessKind) -> Option<PathBuf> {
 }
 
 /// The agents on this computer whose model servers harlo sets up.
-pub const AGENTS: [HarnessKind; 3] = [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::Harlo];
+pub const AGENTS: [HarnessKind; 1] = [HarnessKind::Harlo];
 
 /// The address typed, as harlo asks it: a scheme, no trailing `/` or
 /// `/models`.
@@ -186,64 +178,6 @@ pub fn servers(kind: HarnessKind) -> Vec<Server> {
     listed(&providers(kind))
 }
 
-/// A server at a local address, as far as listing a model goes: the start
-/// command harlo has for it ("" for none), whether it answers, and what it
-/// serves if it says (one with a key may not).
-#[derive(Debug, Clone, Default)]
-pub struct LocalServer {
-    start: String,
-    answers: bool,
-    serving: Option<Vec<String>>,
-}
-
-/// A model Oh My Pi lists from its own discovery of a local engine
-/// ("llama.cpp", "ollama", "lm-studio") that's not there: omp keeps the models
-/// it found after their server stopped for good, and takes whatever answers on
-/// an engine's usual port for that engine. `seen` caches by address across a
-/// list.
-pub fn stale_discovered(provider: &str, model: &str, base_url: &str, seen: &mut std::collections::HashMap<String, LocalServer>) -> bool {
-    // (This computer only, where omp looks: a refused connection is instant.)
-    let host = base_url.split("://").nth(1).unwrap_or_default().split(['/', ':']).next().unwrap_or_default();
-    if !["llama.cpp", "ollama", "lm-studio"].contains(&provider) || !["127.0.0.1", "localhost"].contains(&host) {
-        return false;
-    }
-    let url = base_url.trim_end_matches('/').to_owned();
-    let url = if url.ends_with("/v1") { url } else { format!("{url}/v1") };
-    let server = seen.entry(url.clone()).or_insert_with(|| {
-        let answering = answers(&url);
-        LocalServer {
-            start: crate::db::Db::open(&crate::db::default_path())
-                .ok()
-                .and_then(|d| d.get(&format!("model_server.{url}")).ok().flatten())
-                .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-                .and_then(|v| v["start"].as_str().map(str::to_owned))
-                .unwrap_or_default(),
-            answers: answering,
-            serving: answering.then(|| find(&url, "").ok()).flatten().map(|l| l.models.into_iter().map(|m| m.id).collect()),
-        }
-    });
-    discovered_is_stale(provider, model, server)
-}
-
-fn discovered_is_stale(provider: &str, model: &str, server: &LocalServer) -> bool {
-    let same_engine = match provider {
-        "llama.cpp" => server.start.contains("llama-server"),
-        "ollama" => server.start.contains("ollama"),
-        _ => false,
-    };
-    // Another engine harlo set up on that port: not what omp calls it (it's
-    // in omp's file under its own name, if it's there at all).
-    if !server.start.is_empty() && !same_engine {
-        return true;
-    }
-    match &server.serving {
-        Some(models) => !models.iter().any(|m| m == model),
-        // Not answering: harlo starts its own before a message; any other's
-        // gone. (Answering without saying: left as it is.)
-        None => !server.answers && server.start.is_empty(),
-    }
-}
-
 /// The agent's providers, as JSON.
 fn providers(kind: HarnessKind) -> Value {
     file(kind).map(|f| providers_in(kind, &f)).unwrap_or_default()
@@ -254,18 +188,14 @@ fn servers_in(kind: HarnessKind, file: &Path) -> Vec<Server> {
     listed(&providers_in(kind, file))
 }
 
-fn providers_in(kind: HarnessKind, file: &Path) -> Value {
+fn providers_in(_kind: HarnessKind, file: &Path) -> Value {
     let Ok(text) = std::fs::read_to_string(file) else { return Value::Null };
-    providers_of(kind, &text)
+    providers_of(&text)
 }
 
-/// The providers in an agent file's text (pi, omp, Harlo).
-fn providers_of(kind: HarnessKind, text: &str) -> Value {
-    let text = text.to_owned();
-    match kind {
-        HarnessKind::Omp => YamlLoader::load_from_str(&text).ok().and_then(|d| d.into_iter().next()).map_or(Value::Null, |doc| yaml_json(&doc["providers"])),
-        _ => serde_json::from_str::<Value>(&text).map(|v| v["providers"].clone()).unwrap_or_default(),
-    }
+/// The providers in an agent file's text.
+fn providers_of(text: &str) -> Value {
+    serde_json::from_str::<Value>(text).map(|v| v["providers"].clone()).unwrap_or_default()
 }
 
 /// A server as an agent has it, to add to another (`add`): its address,
@@ -293,30 +223,23 @@ pub fn set_context(kind: HarnessKind, name: &str, context: u64) -> Result<bool, 
 
 fn set_context_in(kind: HarnessKind, file: &Path, name: &str, context: u64) -> Result<bool, String> {
     let all = providers_in(kind, file);
-    let Some((url, key, models)) = details_in(&all, name) else { return Ok(false) };
+    let Some((_, _, models)) = details_in(&all, name) else { return Ok(false) };
     if models.iter().all(|m| m.context == Some(context)) {
         return Ok(false);
     }
-    let models: Vec<Found> = models.into_iter().map(|m| Found { context: Some(context), ..m }).collect();
     let shown = file.display();
     let text = std::fs::read_to_string(file).unwrap_or_default();
-    let out = match kind {
-        // (Its text: the block again, comments elsewhere as they are.)
-        HarnessKind::Omp => omp_with(&omp_without(&text, name)?, name, &url, placeholder(&key), &models).map_err(|e| format!("{e} ({shown})"))?,
-        _ => {
-            let mut v: Value = serde_json::from_str(&text).map_err(|e| format!("{shown} isn't valid JSON ({e})"))?;
-            for m in v["providers"][name]["models"].as_array_mut().into_iter().flatten() {
-                m["contextWindow"] = json!(context);
-            }
-            serde_json::to_string_pretty(&v).unwrap_or_default() + "\n"
-        }
-    };
+    let mut v: Value = serde_json::from_str(&text).map_err(|e| format!("{shown} isn't valid JSON ({e})"))?;
+    for m in v["providers"][name]["models"].as_array_mut().into_iter().flatten() {
+        m["contextWindow"] = json!(context);
+    }
+    let out = serde_json::to_string_pretty(&v).unwrap_or_default() + "\n";
     write(file, &out).map_err(|e| format!("Couldn't write {shown}: {e}"))?;
     Ok(true)
 }
 
-/// pi's thinking levels for a model that thinks (null: not offered).
-fn pi_levels(levels: bool) -> Value {
+/// The thinking levels for a model that thinks (null: not offered).
+fn thinking_levels(levels: bool) -> Value {
     // (Their top level: "xhigh", which some of these models' templates alone take.)
     if levels {
         json!({ "off": "none", "minimal": null, "low": "low", "medium": "medium", "high": "xhigh" })
@@ -337,7 +260,7 @@ fn offer_levels_in(kind: HarnessKind, file: &Path, name: &str) -> Result<bool, S
     let text = std::fs::read_to_string(file).map_err(|e| format!("Couldn't read {shown}: {e}"))?;
     let mut v: Value = serde_json::from_str(&text).map_err(|e| format!("{shown} isn't valid JSON ({e})"))?;
     let (top, field, wanted) = match kind {
-        HarnessKind::Pi | HarnessKind::Harlo => ("providers", "thinkingLevelMap", pi_levels(true)),
+        HarnessKind::Harlo => ("providers", "thinkingLevelMap", thinking_levels(true)),
         _ => return Ok(false),
     };
     let Some(models) = v.get_mut(top).and_then(|p| p.get_mut(name)).and_then(|p| p.get_mut("models")) else { return Ok(false) };
@@ -365,61 +288,20 @@ pub fn remove(kind: HarnessKind, name: &str) -> Result<(), String> {
     remove_from(kind, &f, name)
 }
 
-fn remove_from(kind: HarnessKind, file: &Path, name: &str) -> Result<(), String> {
+fn remove_from(_kind: HarnessKind, file: &Path, name: &str) -> Result<(), String> {
     let shown = file.display();
     let text = std::fs::read_to_string(file).map_err(|e| format!("Couldn't read {shown}: {e}"))?;
-    let Some(out) = without_server(kind, &text, &shown.to_string(), name)? else { return Ok(()) };
+    let Some(out) = without_server(&text, &shown.to_string(), name)? else { return Ok(()) };
     write(file, &out).map_err(|e| format!("Couldn't write {shown}: {e}"))
 }
 
-/// pi's, omp's or Harlo's file (`text`) without the provider: None when
-/// it isn't there.
-fn without_server(kind: HarnessKind, text: &str, shown: &str, name: &str) -> Result<Option<String>, String> {
-    if kind == HarnessKind::Omp {
-        return omp_without(text, name).map(Some).map_err(|e| format!("{e} ({shown})"));
-    }
+/// The file (`text`) without the provider: None when it isn't there.
+fn without_server(text: &str, shown: &str, name: &str) -> Result<Option<String>, String> {
     let mut v: Value = serde_json::from_str(text).map_err(|e| format!("{shown} isn't valid JSON ({e})"))?;
     if v["providers"].as_object_mut().and_then(|m| m.remove(name)).is_none() {
         return Ok(None);
     }
     Ok(Some(serde_json::to_string_pretty(&v).unwrap_or_default() + "\n"))
-}
-
-/// omp's file without the provider, taken out as text (its comments and
-/// layout stay).
-fn omp_without(text: &str, name: &str) -> Result<String, String> {
-    let doc = |t: &str| YamlLoader::load_from_str(t).ok().and_then(|d| d.into_iter().next()).unwrap_or(Yaml::Null);
-    let before = doc(text);
-    let Some(others) = before["providers"].as_hash().filter(|_| !before["providers"][name].is_badvalue()).map(|h| h.len() - 1) else {
-        return Ok(text.to_owned());
-    };
-    let lines: Vec<&str> = text.lines().collect();
-    let indent = |l: &str| l.len() - l.trim_start().len();
-    let top = lines.iter().position(|l| l.split(" #").next().unwrap_or(l).trim_end() == "providers:").ok_or("Its providers are written in a way harlo can't change; take the server out by hand")?;
-    let is_name = |l: &str| [format!("{name}:"), format!("\"{name}\":"), format!("'{name}':")].iter().any(|k| l.trim_start().starts_with(k.as_str()));
-    let start = (top + 1..lines.len()).find(|&i| is_name(lines[i]) && indent(lines[i]) > 0).ok_or("Its providers are written in a way harlo can't change; take the server out by hand")?;
-    let ind = indent(lines[start]);
-    // Its block: the lines under it (blank ones too, when more follow).
-    let mut end = start + 1;
-    while end < lines.len() && (lines[end].trim().is_empty() || indent(lines[end]) > ind) {
-        end += 1;
-    }
-    while end > start + 1 && lines[end - 1].trim().is_empty() {
-        end -= 1;
-    }
-    let mut out: Vec<String> = lines[..start].iter().map(|l| l.to_string()).collect();
-    out.extend(lines[end..].iter().map(|l| l.to_string()));
-    if others == 0 {
-        out[top] = "providers: {}".into();
-    }
-    let out = out.join("\n") + "\n";
-    // What omp will read: the others as they were, this one gone.
-    let after = doc(&out);
-    let left = after["providers"].as_hash().map_or(0, |h| h.len());
-    if !after["providers"][name].is_badvalue() || left != others {
-        return Err("Its providers are written in a way harlo can't change; take the server out by hand".into());
-    }
-    Ok(out)
 }
 
 /// The servers among an agent's providers (as JSON).
@@ -433,19 +315,6 @@ fn listed(providers: &Value) -> Vec<Server> {
             (!models.is_empty()).then(|| Server { name: name.clone(), base_url: base_url.to_owned(), models })
         })
         .collect()
-}
-
-/// The parts of YAML a models file uses, as JSON.
-fn yaml_json(y: &Yaml) -> Value {
-    match y {
-        Yaml::Hash(h) => Value::Object(h.iter().filter_map(|(k, v)| Some((k.as_str()?.to_owned(), yaml_json(v)))).collect()),
-        Yaml::Array(a) => Value::Array(a.iter().map(yaml_json).collect()),
-        Yaml::String(s) => json!(s),
-        Yaml::Integer(i) => json!(i),
-        Yaml::Real(r) => r.parse::<f64>().map_or(Value::Null, |f| json!(f)),
-        Yaml::Boolean(b) => json!(b),
-        _ => Value::Null,
-    }
 }
 
 /// Adds a server and the models picked to the agent's file. `key`: what
@@ -468,50 +337,41 @@ fn check_new(name: &str, models: &[Found]) -> Result<(), String> {
     Ok(())
 }
 
-fn add_to(kind: HarnessKind, file: &Path, name: &str, base_url: &str, key: &str, models: &[Found], taken: &[String]) -> Result<(), String> {
+fn add_to(_kind: HarnessKind, file: &Path, name: &str, base_url: &str, key: &str, models: &[Found], taken: &[String]) -> Result<(), String> {
     let name = name.trim();
     check_new(name, models)?;
     let shown = file.display().to_string();
     let text = std::fs::read_to_string(file).unwrap_or_default();
-    let out = with_server(kind, &text, &shown, name, base_url, key, models, taken)?;
+    let out = with_server(&text, &shown, name, base_url, key, models, taken)?;
     write(file, &out).map_err(|e| format!("Couldn't write {shown}: {e}"))
 }
 
-/// pi's, omp's or Harlo's file (`text`; `shown` in errors) with the
-/// server in: a name already there isn't replaced, unless it's the same
-/// server again.
-#[allow(clippy::too_many_arguments)]
-fn with_server(kind: HarnessKind, text: &str, shown: &str, name: &str, base_url: &str, key: &str, models: &[Found], taken: &[String]) -> Result<String, String> {
-    let existing = listed(&providers_of(kind, text));
+/// The file (`text`; `shown` in errors) with the server in: a name
+/// already there isn't replaced, unless it's the same server again.
+fn with_server(text: &str, shown: &str, name: &str, base_url: &str, key: &str, models: &[Found], taken: &[String]) -> Result<String, String> {
+    let existing = listed(&providers_of(text));
     // The same server again (set up again): its entry replaced.
     let again = existing.iter().any(|s| s.name == name && s.base_url == base_url);
     if !again && (existing.iter().any(|s| s.name == name) || taken.iter().any(|t| t == name)) {
         return Err(format!("There's already a provider called {name}. Pick another name."));
     }
-    let text = text.to_owned();
-    let text = match kind {
-        _ if !again => text,
-        HarnessKind::Omp => omp_without(&text, name).map_err(|e| format!("{e} ({shown})"))?,
-        HarnessKind::Pi | HarnessKind::Harlo => {
-            let mut v: Value = serde_json::from_str(&text).map_err(|e| format!("{shown} isn't valid JSON ({e})"))?;
-            v["providers"].as_object_mut().map(|m| m.remove(name));
-            serde_json::to_string_pretty(&v).unwrap_or_default()
-        }
-        _ => text,
+    let text = if again {
+        let mut v: Value = serde_json::from_str(text).map_err(|e| format!("{shown} isn't valid JSON ({e})"))?;
+        v["providers"].as_object_mut().map(|m| m.remove(name));
+        serde_json::to_string_pretty(&v).unwrap_or_default()
+    } else {
+        text.to_owned()
     };
-    match kind {
-        HarnessKind::Omp => omp_with(&text, name, base_url, placeholder(key), models).map_err(|e| format!("{e} ({shown})")),
-        _ => pi_with(&text, name, base_url, placeholder(key), models).map_err(|e| format!("{e} ({shown})")),
-    }
+    entry_with(&text, name, base_url, placeholder(key), models).map_err(|e| format!("{e} ({shown})"))
 }
 
-/// pi and omp offer a provider's models only with a key: one that servers
+/// A provider's models are offered only with a key: one that servers
 /// wanting none ignore.
 fn placeholder(key: &str) -> &str {
     if key.trim().is_empty() { "none" } else { key.trim() }
 }
 
-fn pi_with(text: &str, name: &str, base_url: &str, key: &str, models: &[Found]) -> Result<String, String> {
+fn entry_with(text: &str, name: &str, base_url: &str, key: &str, models: &[Found]) -> Result<String, String> {
     let mut v: Value = if text.trim().is_empty() { json!({}) } else { serde_json::from_str(text).map_err(|e| format!("The file isn't valid JSON ({e}); fix it first"))? };
     let root = v.as_object_mut().ok_or("The file isn't a JSON object")?;
     let providers = root.entry("providers").or_insert_with(|| json!({}));
@@ -527,12 +387,12 @@ fn pi_with(text: &str, name: &str, base_url: &str, key: &str, models: &[Found]) 
             if let Some(c) = m.context {
                 e.insert("contextWindow".into(), json!(c));
             }
-            // A model that thinks: pi's "off" sends "none" (else it sends
+            // A model that thinks: "off" sends "none" (else it sends
             // nothing and the model thinks anyway); its levels in between
             // only where the server tells them apart.
             if m.reasoning {
                 e.insert("reasoning".into(), json!(true));
-                e.insert("thinkingLevelMap".into(), pi_levels(m.levels));
+                e.insert("thinkingLevelMap".into(), thinking_levels(m.levels));
             }
             Value::Object(e)
         })
@@ -541,79 +401,18 @@ fn pi_with(text: &str, name: &str, base_url: &str, key: &str, models: &[Found]) 
     Ok(serde_json::to_string_pretty(&v).unwrap_or_default() + "\n")
 }
 
-/// omp's file with the provider put in as text, after `providers:` (or a
-/// new `providers:` at the end), so its comments and layout stay.
-fn omp_with(text: &str, name: &str, base_url: &str, key: &str, models: &[Found]) -> Result<String, String> {
-    if !text.trim().is_empty() {
-        YamlLoader::load_from_str(text).map_err(|e| format!("The file isn't valid YAML ({e}); fix it first"))?;
-    }
-    let q = |s: &str| serde_json::to_string(s).unwrap_or_default();
-    let block = |ind: &str| {
-        let mut b = format!("{ind}{}:\n{ind}  baseUrl: {}\n{ind}  api: openai-completions\n{ind}  apiKey: {}\n{ind}  models:\n", q(name), q(base_url), q(key));
-        for m in models {
-            b.push_str(&format!("{ind}    - id: {}\n", q(&m.id)));
-            if let Some(c) = m.context {
-                b.push_str(&format!("{ind}      contextWindow: {c}\n"));
-            }
-            if m.reasoning {
-                b.push_str(&format!("{ind}      reasoning: true\n"));
-            }
-        }
-        b
-    };
-    let lines: Vec<&str> = text.lines().collect();
-    let top = lines.iter().position(|l| {
-        let l = l.split(" #").next().unwrap_or(l).trim_end();
-        l == "providers:" || l == "providers: {}"
-    });
-    let out = match top {
-        Some(i) => {
-            // Its providers' indent (two spaces for a first one).
-            let ind = lines[i + 1..]
-                .iter()
-                .find(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#'))
-                .map(|l| l.len() - l.trim_start().len())
-                .filter(|n| *n > 0)
-                .unwrap_or(2);
-            let mut out: Vec<String> = lines[..i].iter().map(|l| l.to_string()).collect();
-            out.push("providers:".into());
-            out.push(block(&" ".repeat(ind)).trim_end().to_owned());
-            out.extend(lines[i + 1..].iter().map(|l| l.to_string()));
-            out.join("\n") + "\n"
-        }
-        None if lines.iter().any(|l| l.starts_with("providers")) => return Err("Its providers are written in a way harlo can't add to; add the server by hand".into()),
-        None => {
-            let mut out = text.trim_end().to_owned();
-            if !out.is_empty() {
-                out.push_str("\n\n");
-            }
-            out.push_str("providers:\n");
-            out.push_str(&block("  "));
-            out
-        }
-    };
-    // What omp will read: the server, as written.
-    let doc = YamlLoader::load_from_str(&out).ok().and_then(|d| d.into_iter().next()).unwrap_or(Yaml::Null);
-    if doc["providers"][name]["baseUrl"].as_str() != Some(base_url) {
-        return Err("Its providers are written in a way harlo can't add to; add the server by hand".into());
-    }
-    Ok(out)
-}
-
 // This computer's servers for another machine's agents: added to their
 // files there with the same address, `localhost:<port>` forwarded back here
 // over the SSH connection (`ssh -O forward -R`), again before each session
 // starts there (a connection that ended took its forwards with it).
 
 /// The agents there whose files harlo writes servers to.
-pub const ON_HOST: [HarnessKind; 3] = [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::Harlo];
+pub const ON_HOST: [HarnessKind; 1] = [HarnessKind::Harlo];
 
 /// An agent's server file on `host`, as an `ssh://` path.
 fn file_on(host: &str, kind: HarnessKind) -> Option<PathBuf> {
     let home = crate::mcp::host_home(host);
     match kind {
-        HarnessKind::Pi => Some(home.join(".pi/agent/models.json")),
-        HarnessKind::Omp => Some(home.join(".omp/agent/models.yml")),
         // (harlo's agent there, as it starts: no XDG_CONFIG_HOME set over SSH.)
         HarnessKind::Harlo => Some(home.join(".config/harlo-agent/providers.json")),
         _ => None,
@@ -657,7 +456,7 @@ fn write_on(file: &Path, text: &str) -> Result<(), String> {
 /// The servers an agent on `host` has.
 pub fn servers_on(host: &str, kind: HarnessKind) -> Result<Vec<Server>, String> {
     let f = file_on(host, kind).ok_or("harlo doesn't add model servers to this agent there.")?;
-    Ok(listed(&providers_of(kind, &read_on(&f)?)))
+    Ok(listed(&providers_of(&read_on(&f)?)))
 }
 
 /// Adds a server to an agent on `host` (see [`add`]). `forward`: it runs on
@@ -676,7 +475,7 @@ pub fn add_on(host: &str, kind: HarnessKind, name: &str, base_url: &str, key: &s
         save_forwards(host, &ports);
     }
     let text = read_on(&f)?;
-    let out = with_server(kind, &text, &f.to_string_lossy(), name, base_url, key, models, &[])?;
+    let out = with_server(&text, &f.to_string_lossy(), name, base_url, key, models, &[])?;
     write_on(&f, &out)
 }
 
@@ -685,7 +484,7 @@ pub fn add_on(host: &str, kind: HarnessKind, name: &str, base_url: &str, key: &s
 pub fn remove_on(host: &str, kind: HarnessKind, name: &str) -> Result<(), String> {
     let f = file_on(host, kind).ok_or("harlo doesn't change this agent's model servers there.")?;
     let text = read_on(&f)?;
-    if let Some(out) = without_server(kind, &text, &f.to_string_lossy(), name)? {
+    if let Some(out) = without_server(&text, &f.to_string_lossy(), name)? {
         write_on(&f, &out)?;
     }
     let used: Vec<u16> = ON_HOST.iter().filter_map(|k| servers_on(host, *k).ok()).flatten().filter_map(|s| local_port(&s.base_url)).collect();
@@ -940,27 +739,26 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let thinking = Found { reasoning: true, ..found("qwen", Some(65536)) };
         let models = [thinking.clone(), found("small", None)];
-        for (kind, file) in [(HarnessKind::Pi, "models.json"), (HarnessKind::Harlo, "providers.json")] {
-            let f = dir.join(file);
-            add_to(kind, &f, "other", "http://10.0.0.2:8000/v1", "", &[thinking.clone()], &[]).unwrap();
-            add_to(kind, &f, "basalt", "http://127.0.0.1:8080/v1", "", &models, &[]).unwrap();
-            // Added before harlo offered them: put in, once, and only there.
-            assert!(offer_levels_in(kind, &f, "basalt").unwrap(), "{kind:?}");
-            assert!(!offer_levels_in(kind, &f, "basalt").unwrap(), "{kind:?}");
-            assert!(!offer_levels_in(kind, &f, "absent").unwrap(), "{kind:?}");
-            let updated = std::fs::read_to_string(&f).unwrap();
-            let v: Value = serde_json::from_str(&updated).unwrap();
-            assert!(!updated.contains("absent"), "{kind:?}");
-            let p = &v["providers"];
-            let map = &p["basalt"]["models"][0]["thinkingLevelMap"];
-            assert!(map["off"] == "none" && map["low"] == "low" && map["medium"] == "medium" && map["high"] == "xhigh" && map["minimal"].is_null());
-            assert!(p["basalt"]["models"][1].get("thinkingLevelMap").is_none());
-            assert!(p["other"]["models"][0]["thinkingLevelMap"]["low"].is_null());
-            // Added with them: the same file.
-            let with = [Found { levels: true, ..thinking.clone() }, found("small", None)];
-            add_to(kind, &f, "basalt", "http://127.0.0.1:8080/v1", "", &with, &["basalt".to_owned()]).unwrap();
-            assert!(!offer_levels_in(kind, &f, "basalt").unwrap(), "{kind:?}");
-        }
+        let (kind, file) = (HarnessKind::Harlo, "providers.json");
+        let f = dir.join(file);
+        add_to(kind, &f, "other", "http://10.0.0.2:8000/v1", "", std::slice::from_ref(&thinking), &[]).unwrap();
+        add_to(kind, &f, "basalt", "http://127.0.0.1:8080/v1", "", &models, &[]).unwrap();
+        // Added before harlo offered them: put in, once, and only there.
+        assert!(offer_levels_in(kind, &f, "basalt").unwrap(), "{kind:?}");
+        assert!(!offer_levels_in(kind, &f, "basalt").unwrap(), "{kind:?}");
+        assert!(!offer_levels_in(kind, &f, "absent").unwrap(), "{kind:?}");
+        let updated = std::fs::read_to_string(&f).unwrap();
+        let v: Value = serde_json::from_str(&updated).unwrap();
+        assert!(!updated.contains("absent"), "{kind:?}");
+        let p = &v["providers"];
+        let map = &p["basalt"]["models"][0]["thinkingLevelMap"];
+        assert!(map["off"] == "none" && map["low"] == "low" && map["medium"] == "medium" && map["high"] == "xhigh" && map["minimal"].is_null());
+        assert!(p["basalt"]["models"][1].get("thinkingLevelMap").is_none());
+        assert!(p["other"]["models"][0]["thinkingLevelMap"]["low"].is_null());
+        // Added with them: the same file.
+        let with = [Found { levels: true, ..thinking.clone() }, found("small", None)];
+        add_to(kind, &f, "basalt", "http://127.0.0.1:8080/v1", "", &with, &["basalt".to_owned()]).unwrap();
+        assert!(!offer_levels_in(kind, &f, "basalt").unwrap(), "{kind:?}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -1021,46 +819,14 @@ mod tests {
     }
 
     #[test]
-    fn hides_omps_leftovers_from_gone_servers() {
-        let mut seen = std::collections::HashMap::new();
-        // Nothing answers on port 9: omp's llama.cpp models there are gone.
-        assert!(stale_discovered("llama.cpp", "qwen", "http://127.0.0.1:9/v1", &mut seen));
-        assert!(stale_discovered("ollama", "qwen", "http://127.0.0.1:9", &mut seen));
-        // Not omp's discovery, or not this computer: left as they are.
-        assert!(!stale_discovered("qwen3-4b", "qwen", "http://127.0.0.1:9/v1", &mut seen));
-        assert!(!stale_discovered("llama.cpp", "qwen", "http://192.168.1.20:9/v1", &mut seen));
-        // One that answers but wants a key to list its models: can't tell, stays.
-        let addr = fake_server();
-        assert!(!stale_discovered("llama.cpp", "qwen", &format!("http://{addr}/v1"), &mut seen));
-
-        let server = |start: &str, serving: Option<&[&str]>| LocalServer { start: start.into(), answers: serving.is_some(), serving: serving.map(|m| m.iter().map(|s| s.to_string()).collect()) };
-        // Someone's own server: what it serves stays, what it doesn't goes.
-        assert!(!discovered_is_stale("llama.cpp", "qwen", &server("", Some(&["qwen"]))));
-        assert!(discovered_is_stale("llama.cpp", "an-older-model", &server("", Some(&["qwen"]))));
-        let ninfer = "exec /x/ninfer-serve --config /x/n.toml";
-        // Another engine harlo set up on llama.cpp's port, stopped or running:
-        // an old model of omp's, and its own under omp's "llama.cpp".
-        assert!(discovered_is_stale("llama.cpp", "Qwen3.8-FN-GSQ-RCO-IQ3_S", &server(ninfer, None)));
-        assert!(discovered_is_stale("llama.cpp", "Qwen3.8-27B-NVFP4", &server(ninfer, Some(&["Qwen3.8-27B-NVFP4"]))));
-        // harlo's own llama.cpp: stopped, kept (it starts before a message);
-        // running, what it serves.
-        let llama = "exec /x/llama-server --models-preset /x/p.ini";
-        assert!(!discovered_is_stale("llama.cpp", "qwen", &server(llama, None)));
-        assert!(!discovered_is_stale("llama.cpp", "qwen", &server(llama, Some(&["qwen"]))));
-        assert!(discovered_is_stale("llama.cpp", "old", &server(llama, Some(&["qwen"]))));
-        assert!(!discovered_is_stale("ollama", "qwen", &server("OLLAMA_HOST=x exec /x/ollama serve", None)));
-    }
-
-    #[test]
     fn copies_and_removes_servers() {
         let dir = std::env::temp_dir().join(format!("harlo-model-servers-copy-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let models = [found("qwen", Some(40960)), found("small", None)];
         // Each agent's entry reads back as added: address, key, models.
         for (kind, file, key) in [
-            (HarnessKind::Pi, "models.json", ""),
-            (HarnessKind::Omp, "models.yml", "$LLAMA_KEY"),
-            (HarnessKind::Harlo, "providers.json", "$LLAMA_KEY"),
+            (HarnessKind::Harlo, "providers.json", ""),
+            (HarnessKind::Harlo, "providers2.json", "$LLAMA_KEY"),
         ] {
             let f = dir.join(file);
             add_to(kind, &f, "other", "http://10.0.0.2:8000/v1", "k", &[found("x", None)], &[]).unwrap();
@@ -1073,7 +839,7 @@ mod tests {
             add_to(kind, &f, "llama", "http://127.0.0.1:8080/v1", key, &thinking, &["llama".to_owned()]).unwrap();
             assert_eq!(details_in(&providers_in(kind, &f), "llama").unwrap().2, thinking.to_vec(), "{kind:?}");
             assert_eq!(servers_in(kind, &f).len(), 2, "{kind:?}");
-            if kind == HarnessKind::Pi {
+            if key.is_empty() {
                 let v: Value = serde_json::from_str(&std::fs::read_to_string(&f).unwrap()).unwrap();
                 let qwen = &v["providers"]["llama"]["models"][0];
                 assert_eq!(qwen["thinkingLevelMap"]["off"], "none");
@@ -1098,22 +864,12 @@ mod tests {
     }
 
     #[test]
-    fn takes_a_server_out_of_omp_keeping_comments() {
-        let text = "# mine\nmodelOverrides:\n  x:\n    contextWindow: 1\nproviders:\n  # the box\n  llama:\n    baseUrl: \"http://127.0.0.1:8080/v1\"\n    models:\n      - id: \"qwen\"\n\n  \"gw\":\n    baseUrl: \"https://gw/v1\"\n    models:\n      - id: a\ntheme: dark # keep\n";
-        let out = omp_without(text, "llama").unwrap();
-        assert_eq!(out, "# mine\nmodelOverrides:\n  x:\n    contextWindow: 1\nproviders:\n  # the box\n\n  \"gw\":\n    baseUrl: \"https://gw/v1\"\n    models:\n      - id: a\ntheme: dark # keep\n");
-        let last = omp_without(&out, "gw").unwrap();
-        assert!(last.contains("providers: {}\n") && last.contains("theme: dark # keep"), "{last}");
-        assert_eq!(omp_without(&last, "gw").unwrap(), last);
-    }
-
-    #[test]
-    fn adds_a_server_to_pi_keeping_the_rest() {
-        let dir = std::env::temp_dir().join(format!("harlo-model-servers-pi-{}", std::process::id()));
+    fn adds_a_server_keeping_the_rest() {
+        let dir = std::env::temp_dir().join(format!("harlo-model-servers-rest-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let f = dir.join("models.json");
+        let f = dir.join("providers.json");
         let models = [found("qwen2.5-coder:7b", None), found("big", Some(65536))];
-        add_to(HarnessKind::Pi, &f, "ollama", "http://localhost:11434/v1", "", &models, &[]).unwrap();
+        add_to(HarnessKind::Harlo, &f, "ollama", "http://localhost:11434/v1", "", &models, &[]).unwrap();
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&f).unwrap()).unwrap();
         assert_eq!(v["providers"]["ollama"], json!({ "baseUrl": "http://localhost:11434/v1", "api": "openai-completions", "apiKey": "none", "models": [{ "id": "qwen2.5-coder:7b" }, { "id": "big", "contextWindow": 65536 }] }));
         {
@@ -1123,27 +879,27 @@ mod tests {
 
         // Someone's own file: its providers and their order stay.
         std::fs::write(&f, r#"{"$schema":"x","providers":{"mine":{"baseUrl":"http://a/v1","api":"openai-completions","models":[{"id":"m","samplingParams":{"top_k":20}}]},"anthropic":{"baseUrl":"https://proxy/v1"}}}"#).unwrap();
-        add_to(HarnessKind::Pi, &f, "gpu", "http://gpu.lan:8000/v1", "$GPU_KEY", &models[..1], &[]).unwrap();
+        add_to(HarnessKind::Harlo, &f, "gpu", "http://gpu.lan:8000/v1", "$GPU_KEY", &models[..1], &[]).unwrap();
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&f).unwrap()).unwrap();
         assert_eq!(v.as_object().unwrap().keys().collect::<Vec<_>>(), ["$schema", "providers"]);
         assert_eq!(v["providers"].as_object().unwrap().keys().collect::<Vec<_>>(), ["mine", "anthropic", "gpu"]);
         assert_eq!(v["providers"]["mine"]["models"][0]["samplingParams"]["top_k"], 20);
         assert_eq!(v["providers"]["gpu"]["apiKey"], "$GPU_KEY");
         // Only those with models of their own are servers.
-        let names: Vec<String> = servers_in(HarnessKind::Pi, &f).into_iter().map(|s| s.name).collect();
+        let names: Vec<String> = servers_in(HarnessKind::Harlo, &f).into_iter().map(|s| s.name).collect();
         assert_eq!(names, ["mine", "gpu"]);
 
-        assert!(add_to(HarnessKind::Pi, &f, "mine", "http://b/v1", "", &models, &[]).unwrap_err().contains("already"));
-        assert!(add_to(HarnessKind::Pi, &f, "openai", "http://b/v1", "", &models, &["openai".into()]).unwrap_err().contains("already"));
-        assert!(add_to(HarnessKind::Pi, &f, "bad name", "http://b/v1", "", &models, &[]).is_err());
-        assert!(add_to(HarnessKind::Pi, &f, "none", "http://b/v1", "", &[], &[]).is_err());
+        assert!(add_to(HarnessKind::Harlo, &f, "mine", "http://b/v1", "", &models, &[]).unwrap_err().contains("already"));
+        assert!(add_to(HarnessKind::Harlo, &f, "openai", "http://b/v1", "", &models, &["openai".into()]).unwrap_err().contains("already"));
+        assert!(add_to(HarnessKind::Harlo, &f, "bad name", "http://b/v1", "", &models, &[]).is_err());
+        assert!(add_to(HarnessKind::Harlo, &f, "none", "http://b/v1", "", &[], &[]).is_err());
         std::fs::write(&f, "{ broken").unwrap();
-        assert!(add_to(HarnessKind::Pi, &f, "x", "http://b/v1", "", &models, &[]).unwrap_err().contains("valid JSON"));
+        assert!(add_to(HarnessKind::Harlo, &f, "x", "http://b/v1", "", &models, &[]).unwrap_err().contains("valid JSON"));
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "{ broken");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// harlo-agent's file is laid out as pi's (harlo-agent reads it so).
+    /// harlo-agent's file, laid out as harlo-agent reads it.
     #[test]
     fn harlo_agents_servers() {
         let dir = std::env::temp_dir().join(format!("harlo-model-servers-harlo-{}", std::process::id()));
@@ -1155,7 +911,7 @@ mod tests {
         assert_eq!(
             v["providers"]["llamacpp"],
             json!({ "baseUrl": "http://127.0.0.1:8090/v1", "api": "openai-completions", "apiKey": "none", "models": [
-                { "id": "qwen3", "contextWindow": 32768, "reasoning": true, "thinkingLevelMap": pi_levels(false) }, { "id": "plain" }] })
+                { "id": "qwen3", "contextWindow": 32768, "reasoning": true, "thinkingLevelMap": thinking_levels(false) }, { "id": "plain" }] })
         );
         assert_eq!(servers_in(HarnessKind::Harlo, &f)[0].models, ["qwen3", "plain"]);
         assert!(add_to(HarnessKind::Harlo, &f, "chatgpt", "http://b/v1", "", &[found("m", None)], &["chatgpt".into()]).unwrap_err().contains("already"));
@@ -1163,53 +919,11 @@ mod tests {
         assert!(offer_levels_in(HarnessKind::Harlo, &f, "llamacpp").unwrap());
         assert!(set_context_in(HarnessKind::Harlo, &f, "llamacpp", 65536).unwrap());
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&f).unwrap()).unwrap();
-        assert_eq!((v["providers"]["llamacpp"]["models"][0]["thinkingLevelMap"].clone(), v["providers"]["llamacpp"]["models"][1]["contextWindow"].as_u64()), (pi_levels(true), Some(65536)));
+        assert_eq!((v["providers"]["llamacpp"]["models"][0]["thinkingLevelMap"].clone(), v["providers"]["llamacpp"]["models"][1]["contextWindow"].as_u64()), (thinking_levels(true), Some(65536)));
         add_to(HarnessKind::Harlo, &f, "llamacpp", "http://127.0.0.1:8090/v1", "$KEY", &[thinks], &[]).unwrap();
         assert_eq!(details_in(&providers_in(HarnessKind::Harlo, &f), "llamacpp").unwrap().1, "$KEY");
         remove_from(HarnessKind::Harlo, &f, "llamacpp").unwrap();
         assert!(servers_in(HarnessKind::Harlo, &f).is_empty());
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn adds_a_server_to_omp_keeping_its_text() {
-        // No file yet.
-        let models = [found("qwen2.5-coder:7b", None), found("big", Some(65536))];
-        let new = omp_with("", "ollama", "http://localhost:11434/v1", "none", &models).unwrap();
-        assert_eq!(new, "providers:\n  \"ollama\":\n    baseUrl: \"http://localhost:11434/v1\"\n    api: openai-completions\n    apiKey: \"none\"\n    models:\n      - id: \"qwen2.5-coder:7b\"\n      - id: \"big\"\n        contextWindow: 65536\n");
-
-        // Its own providers, indented by four, with comments.
-        let own = "# my models\nproviders:\n    # the work gateway\n    work:\n        baseUrl: https://gw/v1\n        models:\n            - id: a\nmodelOverrides: {}\n";
-        let out = omp_with(own, "gpu", "http://gpu.lan:8000/v1", "$GPU_KEY", &models[..1]).unwrap();
-        assert!(out.starts_with("# my models\nproviders:\n    \"gpu\":\n      baseUrl:"));
-        assert!(out.contains("    # the work gateway\n    work:\n        baseUrl: https://gw/v1\n"));
-        let doc = &YamlLoader::load_from_str(&out).unwrap()[0];
-        assert_eq!(doc["providers"]["work"]["models"][0]["id"].as_str(), Some("a"));
-        assert_eq!(doc["providers"]["gpu"]["apiKey"].as_str(), Some("$GPU_KEY"));
-        assert!(doc["modelOverrides"].as_hash().is_some());
-
-        // Other settings, no providers yet.
-        let out = omp_with("modelOverrides:\n  x:\n    contextWindow: 1\n", "ollama", "http://localhost:11434/v1", "none", &models[..1]).unwrap();
-        let doc = &YamlLoader::load_from_str(&out).unwrap()[0];
-        assert_eq!(doc["providers"]["ollama"]["models"][0]["id"].as_str(), Some("qwen2.5-coder:7b"));
-        assert_eq!(doc["modelOverrides"]["x"]["contextWindow"].as_i64(), Some(1));
-        // An empty mapping is filled in.
-        let out = omp_with("providers: {}\n", "ollama", "http://localhost:11434/v1", "none", &models[..1]).unwrap();
-        assert!(YamlLoader::load_from_str(&out).unwrap()[0]["providers"]["ollama"]["baseUrl"].as_str().is_some());
-        // Written another way: harlo leaves it alone.
-        assert!(omp_with("providers: { work: { baseUrl: x } }\n", "o", "http://l/v1", "none", &models).is_err());
-        assert!(omp_with("providers: [\n", "o", "http://l/v1", "none", &models).is_err());
-
-        let dir = std::env::temp_dir().join(format!("harlo-model-servers-omp-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let f = dir.join("models.yml");
-        std::fs::write(&f, own).unwrap();
-        add_to(HarnessKind::Omp, &f, "gpu", "http://gpu.lan:8000/v1", "", &models, &[]).unwrap();
-        let s = servers_in(HarnessKind::Omp, &f);
-        assert_eq!(s.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["gpu", "work"]);
-        assert_eq!(s[0].models, ["qwen2.5-coder:7b", "big"]);
-        assert!(add_to(HarnessKind::Omp, &f, "work", "http://b/v1", "", &models, &[]).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

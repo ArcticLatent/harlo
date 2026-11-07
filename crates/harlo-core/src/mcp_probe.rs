@@ -1,4 +1,4 @@
-//! Tests an MCP server the way pi and omp would reach it: starts a local
+//! Tests an MCP server the way the agents would reach it: starts a local
 //! (stdio) one, or calls a remote (streamable HTTP) one, initializes, and
 //! lists its tools. harlo shows the result as the server's status. (The
 //! harnesses don't report MCP status over RPC.)
@@ -53,7 +53,7 @@ fn tools_of(result: &Value) -> Vec<(String, String)> {
 }
 
 /// `${VAR}`, `${VAR:-default}` from the environment; a whole value of
-/// `!command` is that command's output (as pi and omp do).
+/// `!command` is that command's output (as Harlo does).
 pub fn expand(value: &str) -> String {
     if let Some(cmd) = value.strip_prefix('!') {
         let out = Command::new("sh").arg("-c").arg(cmd).stdin(Stdio::null()).stderr(Stdio::null()).output();
@@ -82,7 +82,7 @@ pub fn probe(form: &Form, project: Option<&Path>, timeout: Duration) -> Probe {
     if form.transport == "stdio" {
         probe_stdio(form, project, timeout)
     } else if form.transport == "sse" {
-        Probe::failed("harlo can't test SSE servers yet; omp sessions still use them.")
+        Probe::failed("harlo can't test SSE servers yet; Claude sessions still use them.")
     } else {
         probe_http(form, timeout)
     }

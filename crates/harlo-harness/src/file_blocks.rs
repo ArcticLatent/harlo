@@ -27,7 +27,7 @@ pub fn split_blocks(text: &str) -> (Vec<String>, String) {
     (names, rest.trim().to_owned())
 }
 
-/// Appended to a prompt by the composer's "Ask first" toggle (omp only):
+/// Was appended to a prompt by the composer's "Ask first" toggle (gone):
 /// the agent clarifies with its `ask` tool before starting.
 pub const ASK_FIRST_NOTE: &str = "\n\nBefore you start, use the ask tool to ask me about anything ambiguous and any decisions I should make, instead of assuming.";
 

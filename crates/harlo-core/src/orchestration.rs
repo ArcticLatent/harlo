@@ -67,7 +67,7 @@ pub fn tools(starting: Starting) -> Value {
     let mut tools = json!([
         {
             "name": "list_agents",
-            "description": "The coding agents harlo can start sessions with (harlo, claude, pi, omp): their ids and whether they're installed.",
+            "description": "The coding agents harlo can start sessions with (harlo, claude): their ids and whether they're installed.",
             "inputSchema": s(json!({}), &[]),
         },
         {
@@ -79,7 +79,7 @@ pub fn tools(starting: Starting) -> Value {
             "name": "start_session",
             "description": format!("Starts a new harlo session with a coding agent and sends it a first prompt. {} It becomes your helper, in your permission mode: the user sees it under your session, and harlo sends you its report when it finishes (unless notify is false), its questions for you, and when it waits for the user. Start every independent helper, then end your turn: harlo wakes you with what comes back; don't poll. The new agent has none of your context: make the prompt a self-contained briefing.", when_to_start(starting)),
             "inputSchema": s(json!({
-                "agent": { "type": "string", "description": "harlo, claude, pi or omp (see list_agents)." },
+                "agent": { "type": "string", "description": "harlo or claude (see list_agents)." },
                 "prompt": { "type": "string", "description": "The first message: the task, its context, the relevant files, what's done and what's left." },
                 "title": { "type": "string", "description": "A short name for the session." },
                 "model": { "type": "string", "description": "provider/model, if not the agent's default." },
@@ -133,7 +133,7 @@ pub fn tools(starting: Starting) -> Value {
                     "items": s(json!({
                         "title": { "type": "string", "description": "A short name for the part." },
                         "prompt": { "type": "string", "description": "Its first message, a self-contained briefing (it has none of your context): the part, the relevant files, what \"done\" looks like, what not to touch." },
-                        "agent": { "type": "string", "description": "harlo, claude, pi or omp. Leave it (and model) out for the project's usual helpers (the user's choice), unless a part needs another agent or model." },
+                        "agent": { "type": "string", "description": "harlo or claude. Leave it (and model) out for the project's usual helpers (the user's choice), unless a part needs another agent or model." },
                         "model": { "type": "string", "description": "provider/model, if not the agent's default." },
                         "worktree": { "type": "string", "description": "A new git worktree on this branch name to work in (for parts that edit files)." }
                     }), &["title", "prompt"])
@@ -271,21 +271,15 @@ impl Report {
 }
 
 /// What a helper's first message starts with: what it is, and how its
-/// result goes back (`tools`: it has harlo's tools; else it says it in
-/// its last reply).
-pub fn helper_brief(parent: &str, task: &str, tools: bool) -> String {
+/// result goes back (harlo's tools).
+pub fn helper_brief(parent: &str, task: &str) -> String {
     let parent = if parent.trim().is_empty() { String::new() } else { format!(" (\"{}\")", parent.trim()) };
-    let how = if tools {
-        "- When the task leaves a decision open, call harlo's ask_parent tool with your question, then end your turn: the answer comes to you as a message.\n\
-         - For what only the user may decide (going ahead with a risky or irreversible step, a choice that's theirs), call request_approval, then end your turn.\n\
-         - When you're done, or can't go on, call report_done once: outcome succeeded or failed (never hide a failure in the summary), a three-sentence summary (what you did, what you found, what's left), and the files you changed. Then end your turn."
-    } else {
-        "- When you're done, or can't go on, end your last reply with a report: \"Outcome: succeeded\" or \"Outcome: failed\" (never hide a failure), what you did, what you found, what's left, and the files you changed."
-    };
     format!(
         "[harlo] You're a helper: another agent's session{parent} started you with the task below, and harlo sends it your result.\n\
          - Do only this task, yourself: start no helper sessions unless it asks.\n\
-         {how}\n\n\
+         - When the task leaves a decision open, call harlo's ask_parent tool with your question, then end your turn: the answer comes to you as a message.\n\
+         - For what only the user may decide (going ahead with a risky or irreversible step, a choice that's theirs), call request_approval, then end your turn.\n\
+         - When you're done, or can't go on, call report_done once: outcome succeeded or failed (never hide a failure in the summary), a three-sentence summary (what you did, what you found, what's left), and the files you changed. Then end your turn.\n\n\
          The task:\n\n{task}"
     )
 }
@@ -380,7 +374,7 @@ pub fn waiting_what(title: &str, question: &str, approval: bool) -> String {
     if !approval {
         return short(question);
     }
-    // (omp's details are under the title: the question is the title.)
+    // (Details under the title: the question is the title.)
     let question = match question.strip_prefix(title.lines().next().unwrap_or_default()) {
         Some(rest) if question.starts_with("Allow tool:") => rest,
         _ => question,
@@ -487,9 +481,8 @@ pub fn run_bridge() {
     }
 }
 
-// Settings → Orchestration: the skills that teach agents to use the tools,
-// and the bridge in pi's and omp's MCP config. (Claude and Harlo get the
-// bridge with each session harlo starts.)
+// Settings → Orchestration: the skills that teach agents to use the tools.
+// (Claude and Harlo get the tools with each session harlo starts.)
 
 /// A skill harlo installs.
 pub struct Skill {
@@ -513,8 +506,7 @@ fn home() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
 }
 
-/// Where agents find skills: `~/.agents/skills` (pi, omp) and Claude's
-/// (Claude, omp).
+/// Where agents find skills: `~/.agents/skills` (many agents) and Claude's.
 pub fn skill_dirs() -> [PathBuf; 2] {
     let claude = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from).unwrap_or_else(|| home().join(".claude"));
     [home().join(".agents/skills"), claude.join("skills")]
@@ -571,62 +563,11 @@ pub fn refresh_skills() {
     }
 }
 
-/// The agents whose MCP config gets the bridge from Settings.
-pub const BRIDGE_AGENTS: [harlo_harness::HarnessKind; 2] = [harlo_harness::HarnessKind::Pi, harlo_harness::HarnessKind::Omp];
-
-/// The bridge's entry: this harlo, its socket. (pi and omp hand their own
-/// variables, `HARLO_SESSION` among them, to the servers they start.)
-fn bridge_form(harlo: &std::path::Path) -> crate::mcp::Form {
-    crate::mcp::Form {
-        name: "harlo".into(),
-        enabled: true,
-        transport: "stdio".into(),
-        command: vec![harlo.to_string_lossy().into_owned(), "--mcp-bridge".into(), "--socket".into(), socket_path().to_string_lossy().into_owned()],
-        exposure: "direct".into(),
-        description: "harlo's sessions: start other coding agents, send them messages, read their replies.".into(),
-        ..Default::default()
-    }
-}
-
-/// An entry is the bridge, here or a host's (and not some other server
-/// called harlo).
-fn is_bridge(entry: &Value) -> bool {
-    entry["args"].as_array().is_some_and(|a| a.iter().any(|x| x == "--mcp-bridge" || x.as_str().is_some_and(|s| s.ends_with("/harlo_mcp_bridge.py"))))
-}
-
-/// The agent has the bridge.
-pub fn bridge_installed(kind: harlo_harness::HarnessKind) -> bool {
-    crate::mcp::entry(kind, &crate::mcp::Scope::Global, "harlo").ok().flatten().is_some_and(|e| is_bridge(&e))
-}
-
-/// Adds the bridge to an agent's MCP config, or removes it.
-pub fn set_bridge(kind: harlo_harness::HarnessKind, on: bool, harlo: &std::path::Path) -> anyhow::Result<()> {
-    let scope = crate::mcp::Scope::Global;
-    let existing = crate::mcp::entry(kind, &scope, "harlo")?;
-    if existing.as_ref().is_some_and(|e| !is_bridge(e)) {
-        anyhow::bail!("{} already has an MCP server called harlo; harlo left it alone.", kind.label());
-    }
-    match on {
-        true => crate::mcp::put_entry(kind, &scope, Some(&bridge_form(harlo)), "harlo"),
-        false if existing.is_some() => crate::mcp::put_entry(kind, &scope, None, "harlo"),
-        false => Ok(()),
-    }
-}
-
-/// Points the installed bridges at this harlo (it may have moved).
-pub fn refresh_bridges(harlo: &std::path::Path) {
-    for kind in BRIDGE_AGENTS.into_iter().filter(|k| bridge_installed(*k)) {
-        if let Err(e) = crate::mcp::put_entry(kind, &crate::mcp::Scope::Global, Some(&bridge_form(harlo)), "harlo") {
-            tracing::warn!("orchestration: updating {}'s bridge: {e:#}", kind.label());
-        }
-    }
-}
-
 /// An agent to delegate to (the composer's Delegate menu).
 pub struct Member {
-    /// "Oh My Pi"
+    /// "Claude"
     pub label: String,
-    /// "omp"
+    /// "claude"
     pub agent: String,
     /// "" for its default.
     pub model: String,
@@ -712,8 +653,8 @@ mod tests {
         assert!(h.contains("Claude (agent \"claude\", its default model)") && h.contains("as `worktree`") && h.ends_with("Also: keep the API"));
         let a = delegate_prompt("advisor", &[m("Harlo", "harlo", "openai/gpt-5")], "", false).unwrap();
         assert!(a.contains("model \"openai/gpt-5\"") && a.contains("Do NOT write code.") && a.ends_with("the current task."));
-        let c = delegate_prompt("committee", &[m("Claude", "claude", ""), m("pi", "pi", "google/gemini")], "flaky tests", false).unwrap();
-        assert!(c.contains("- Claude (agent") && c.contains("- pi (agent \"pi\", model \"google/gemini\")") && c.ends_with("The problem: flaky tests"));
+        let c = delegate_prompt("committee", &[m("Claude", "claude", ""), m("Harlo", "harlo", "google/gemini")], "flaky tests", false).unwrap();
+        assert!(c.contains("- Claude (agent") && c.contains("- Harlo (agent \"harlo\", model \"google/gemini\")") && c.ends_with("The problem: flaky tests"));
         let s = delegate_prompt("split", &[m("Claude", "claude", "")], "", true).unwrap();
         assert!(s.contains("start a helper for each") && s.contains("each in its own new git worktree") && s.contains("[Split] <the part>") && s.ends_with("The task: the current task."));
         // A committee needs two.
@@ -739,15 +680,15 @@ mod tests {
         let m = finished_message("Claude", "Fix", "k1", Some(&r), Some("ignored"), None, None);
         assert!(m.starts_with("[harlo] The Claude session \"Fix\" (k1) finished and reported: FAILED.") && m.ends_with("Files changed: a.rs, b.rs"));
         // None: its last reply, else its error.
-        assert!(finished_message("pi", "T", "k", None, Some("hi"), None, None).contains("without reporting (report_done). Its last reply:\n\nhi"));
-        assert!(finished_message("pi", "T", "k", None, Some(" "), Some("boom"), Some(" ")).ends_with("without reporting: boom"));
+        assert!(finished_message("harlo", "T", "k", None, Some("hi"), None, None).contains("without reporting (report_done). Its last reply:\n\nhi"));
+        assert!(finished_message("harlo", "T", "k", None, Some(" "), Some("boom"), Some(" ")).ends_with("without reporting: boom"));
         // What it used, last.
         let m = finished_message("Harlo", "T", "k", Some(&r), None, None, Some("gpt-6.1-sol: 3 requests, 9.1k tokens in (70% cached), 400 out"));
         assert!(m.ends_with("Files changed: a.rs, b.rs\n\nUsed: gpt-6.1-sol: 3 requests, 9.1k tokens in (70% cached), 400 out"), "{m}");
-        // The brief: with the tools, or a report in words.
-        let b = helper_brief("Lead", "Do X", true);
+        // The brief: what it is, harlo's tools, then the task.
+        let b = helper_brief("Lead", "Do X");
         assert!(b.contains("session (\"Lead\") started you") && b.contains("report_done") && b.ends_with("The task:\n\nDo X"));
-        assert!(!helper_brief("", "Do X", false).contains("report_done"));
+        assert!(!helper_brief("", "Do X").contains("session ("));
         assert!(worktree_note("helper/x", "/p").contains("a new git worktree on branch helper/x, your own copy of the project apart from its main checkout (/p)"));
         assert!(approval_answer("Merge?", &json!({ "value": "Approve" })).ends_with("(\"Merge?\"): Approve"));
         assert!(approval_answer("Merge?", &json!({ "cancelled": true })).contains("dismissed"));
@@ -868,7 +809,7 @@ pub fn remote_bridge(name: &str) -> anyhow::Result<Vec<String>> {
 }
 
 // The same on a remote host (Settings → Orchestration with a host as the
-// instance): its skill folders and its pi / omp config, over SSH.
+// instance): its skill folders, over SSH.
 
 /// A host's skill folders, as it sees them.
 fn host_skill_dirs(name: &str) -> [String; 2] {
@@ -878,8 +819,7 @@ fn host_skill_dirs(name: &str) -> [String; 2] {
 }
 
 /// What's set up for orchestration here (`host` None) or on a host: the
-/// skills, which are installed, the bridges in pi's and omp's config, and
-/// the skill folders.
+/// skills, which are installed, and the skill folders.
 pub fn overview(host: Option<&str>) -> anyhow::Result<Value> {
     let (installed, dirs): (Vec<&str>, Vec<String>) = match host {
         None => (installed_skills(), skill_dirs().iter().map(|d| crate::sidebar::tilde(d)).collect()),
@@ -897,12 +837,8 @@ pub fn overview(host: Option<&str>) -> anyhow::Result<Value> {
             (found, dirs.iter().map(|d| crate::remote::display(&crate::remote::join(name, d))).collect())
         }
     };
-    let bridges: serde_json::Map<String, Value> = BRIDGE_AGENTS
-        .iter()
-        .map(|k| (k.as_str().to_owned(), json!(bridge_installed_on(*k, host))))
-        .collect();
     let skills: Vec<Value> = SKILLS.iter().map(|s| json!({ "name": s.name, "summary": s.summary, "installed": installed.contains(&s.name) })).collect();
-    Ok(json!({ "skills": skills, "bridges": bridges, "skillDirs": dirs }))
+    Ok(json!({ "skills": skills, "skillDirs": dirs }))
 }
 
 /// Installs or removes a skill here or on a host.
@@ -929,43 +865,4 @@ pub fn set_skill_on(host: Option<&str>, name: &str, on: bool) -> anyhow::Result<
         crate::remote::run_ok(&h, &format!("{script}; true"), std::time::Duration::from_secs(20))?;
     }
     Ok(())
-}
-
-/// The bridge's entry for a host's pi or omp: `python3 <bridge> <socket>`
-/// (put there, and the socket forwarded, when a session starts there).
-fn host_bridge_form(name: &str) -> crate::mcp::Form {
-    let (script, sock) = host_bridge_paths(name);
-    crate::mcp::Form {
-        name: "harlo".into(),
-        enabled: true,
-        transport: "stdio".into(),
-        command: vec!["python3".into(), script, sock],
-        exposure: "direct".into(),
-        description: "harlo's sessions: start other coding agents, send them messages, read their replies.".into(),
-        ..Default::default()
-    }
-}
-
-fn scope_of(host: Option<&str>) -> crate::mcp::Scope {
-    host.map_or(crate::mcp::Scope::Global, |h| crate::mcp::Scope::Host(h.to_owned()))
-}
-
-/// The agent has the bridge, here or on a host.
-pub fn bridge_installed_on(kind: harlo_harness::HarnessKind, host: Option<&str>) -> bool {
-    crate::mcp::entry(kind, &scope_of(host), "harlo").ok().flatten().is_some_and(|e| is_bridge(&e))
-}
-
-/// Adds the bridge to an agent's MCP config here or on a host, or removes it.
-pub fn set_bridge_on(kind: harlo_harness::HarnessKind, host: Option<&str>, on: bool, harlo: &std::path::Path) -> anyhow::Result<()> {
-    let Some(name) = host else { return set_bridge(kind, on, harlo) };
-    let scope = scope_of(host);
-    let existing = crate::mcp::entry(kind, &scope, "harlo")?;
-    if existing.as_ref().is_some_and(|e| !is_bridge(e)) {
-        anyhow::bail!("{} on {name} already has an MCP server called harlo; harlo left it alone.", kind.label());
-    }
-    match on {
-        true => crate::mcp::put_entry(kind, &scope, Some(&host_bridge_form(name)), "harlo"),
-        false if existing.is_some() => crate::mcp::put_entry(kind, &scope, None, "harlo"),
-        false => Ok(()),
-    }
 }

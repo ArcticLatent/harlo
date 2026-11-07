@@ -26,7 +26,7 @@ pub mod qobject {
 
     #[auto_cxx_name]
     extern "RustQt" {
-        /// `[{ name, ssh, state, message, os, home, pi, omp }]`; state is
+        /// `[{ name, ssh, state, message, os, home, claude, harlo, … }]`; state is
         /// "", "connecting", "connected" or "error".
         #[qinvokable]
         fn hosts_json(self: &Remotes) -> QString;
@@ -35,7 +35,7 @@ pub mod qobject {
         fn save_host(self: Pin<&mut Remotes>, old_name: &QString, name: &QString, ssh: &QString) -> QString;
         #[qinvokable]
         fn delete_host(self: Pin<&mut Remotes>, name: &QString);
-        /// Opens the shared connection and looks for pi and omp.
+        /// Opens the shared connection and looks at what's there.
         #[qinvokable]
         fn connect_host(self: Pin<&mut Remotes>, name: &QString);
         #[qinvokable]
@@ -166,7 +166,7 @@ impl Remotes {
                 let s = self.states.get(&h.name).cloned().unwrap_or_default();
                 json!({
                     "name": h.name, "ssh": ssh_text(h), "state": s.state, "message": s.message, "ping": s.ping,
-                    "os": s.info.os, "home": s.info.home, "pi": s.info.pi, "omp": s.info.omp,
+                    "os": s.info.os, "home": s.info.home,
                     "claude": s.info.claude, "versions": s.info.versions, "claudeAuth": s.info.claude_auth,
                     "bwrap": s.info.bwrap,
                     // (Harlo: harlo puts its agent there; or why it can't, once checked.)
@@ -240,13 +240,7 @@ impl Remotes {
             let result = remote::check(&host);
             let _ = thread.queue(move |mut this| {
                 let state = match result {
-                    Ok(info) => {
-                        let message = match (info.pi.is_empty(), info.omp.is_empty()) {
-                            (true, true) => "Connected, but neither pi nor omp was found on its PATH.".to_owned(),
-                            _ => String::new(),
-                        };
-                        HostState { state: "connected".into(), message, info, ping: None }
-                    }
+                    Ok(info) => HostState { state: "connected".into(), message: String::new(), info, ping: None },
                     Err(e) => HostState { state: "error".into(), message: format!("{e:#}"), info: HostInfo::default(), ping: None },
                 };
                 let connected = state.state == "connected";

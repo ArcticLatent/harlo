@@ -1,4 +1,4 @@
-//! omp subagents as the UI shows them, built from both sources omp offers:
+//! Harlo's subagents as the UI shows them, built from both sources it offers:
 //! `subagent_lifecycle` / `subagent_progress` events (which also cover
 //! detached background jobs) and the `get_subagents` list (which does not).
 

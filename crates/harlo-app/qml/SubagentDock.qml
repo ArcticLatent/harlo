@@ -3,7 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import harlo
 
-// omp subagents of the session (task tool): live status, current tool, and
+// The subagents of the session (task tool): live status, current tool, and
 // View / Steer / Cancel. A summary line until opened (the transcript
 // shows each subagent under the tool call that started it).
 Rectangle {

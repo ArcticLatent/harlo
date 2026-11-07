@@ -6,7 +6,7 @@
 pkgname=harlo-git
 pkgver=r0.0000000
 pkgrel=1
-pkgdesc="Desktop app for coding agents: Claude Code, OpenCode, pi and Oh My Pi"
+pkgdesc="Desktop app for coding agents: Harlo (its own) and Claude Code"
 arch=('x86_64' 'aarch64')
 url="https://harlo.run"
 license=('MIT' 'OFL-1.1')

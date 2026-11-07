@@ -1,4 +1,4 @@
-//! Branches of a session file. pi and omp sessions are append-only trees
+//! Branches of a session file. Sessions in pi's format are append-only trees
 //! of entries (`id` / `parentId`); editing an earlier message starts a new
 //! branch, and the last written entry marks the current one. These read
 //! every branch and can copy one into a new session file.
@@ -192,8 +192,7 @@ fn branches_in(tree: &Outline) -> Vec<BranchInfo> {
     out
 }
 
-/// Entry ids of the user messages on the current branch, in order. (omp's
-/// `get_branch_messages` lists the user messages of every branch.)
+/// Entry ids of the user messages on the current branch, in order.
 pub fn current_user_entries(path: &Path) -> std::io::Result<Vec<String>> {
     Ok(current_users(&Outline::of_file(path)?))
 }

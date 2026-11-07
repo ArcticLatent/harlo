@@ -1,5 +1,5 @@
 //! Session templates: a new session's set-up saved under a name (the agent,
-//! its model, what runs without asking, Ask first, a goal, a new worktree)
+//! its model, what runs without asking, a new worktree)
 //! with its first message. The new-session page and the phone fill their
 //! draft from one; nothing starts until it's sent. Kept as JSON in the
 //! "templates" setting.
@@ -19,9 +19,6 @@ pub struct Template {
     pub model: String,
     /// The shield's mode ("" = the one it starts in).
     pub approval: String,
-    pub ask_first: bool,
-    /// omp: start as a goal (the message is its objective).
-    pub goal: bool,
     /// Work in a new worktree.
     pub worktree: bool,
     pub text: String,
@@ -42,8 +39,6 @@ impl Template {
             harness: s("harness"),
             model: s("model"),
             approval: if ["always-ask", "write", "yolo"].contains(&approval.as_str()) { approval } else { String::new() },
-            ask_first: v["askFirst"].as_bool().unwrap_or(false),
-            goal: v["goal"].as_bool().unwrap_or(false),
             worktree: v["worktree"].as_bool().unwrap_or(false),
             text: v["text"].as_str().unwrap_or_default().to_owned(),
         })
@@ -51,7 +46,7 @@ impl Template {
 
     pub fn to_json(&self) -> Value {
         json!({ "id": self.id, "name": self.name, "harness": self.harness, "model": self.model, "approval": self.approval,
-                "askFirst": self.ask_first, "goal": self.goal, "worktree": self.worktree, "text": self.text })
+                "worktree": self.worktree, "text": self.text })
     }
 }
 
@@ -105,14 +100,14 @@ mod tests {
         assert_eq!(id, "t1");
         assert_eq!(list[0].approval, "write");
         // The same name: replaced, not added.
-        assert_eq!(save(&mut list, &json!({ "name": "review a pr", "harness": "omp", "goal": true }), "t2").as_deref(), Some("t1"));
+        assert_eq!(save(&mut list, &json!({ "name": "review a pr", "harness": "harlo" }), "t2").as_deref(), Some("t1"));
         assert_eq!(list.len(), 1);
-        assert!(list[0].goal && list[0].harness == "omp");
+        assert!(list[0].harness == "harlo" && list[0].model.is_empty());
         // By id: renamed.
         save(&mut list, &json!({ "id": "t1", "name": "PR review", "approval": "nonsense" }), "t3");
         assert_eq!((list[0].name.as_str(), list[0].approval.as_str()), ("PR review", ""), "an unknown mode is dropped");
         assert_eq!(save(&mut list, &json!({ "name": "  " }), "t4"), None, "a name is needed");
-        save(&mut list, &json!({ "name": "Tests", "worktree": true, "askFirst": true }), "t5");
+        save(&mut list, &json!({ "name": "Tests", "worktree": true }), "t5");
         let back = parse(&to_json(&list).to_string());
         assert_eq!(back, list, "round trip");
         delete(&mut list, "t1");

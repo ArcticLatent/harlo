@@ -24,7 +24,6 @@ ignore = "0.4"
 nucleo-matcher = "0.3"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 alacritty_terminal = "0.26.0"
-yaml-rust = "0.4"
 # Dictation: whisper.cpp built in (CPU), and model downloads.
 whisper-rs = { version = "0.16", features = ["tracing_backend"], optional = true }
 ureq = { version = "3", features = ["platform-verifier"] }

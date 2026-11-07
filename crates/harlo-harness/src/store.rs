@@ -1,12 +1,11 @@
-//! Session files on disk. Neither harness can list sessions over RPC, so
-//! the sidebar is built by reading the session JSONL files directly.
+//! Session files on disk. The sidebar is built by reading the session JSONL
+//! files directly.
 //!
-//! - pi:  `~/.pi/agent/sessions/--<abs-path>--/<ts>_<uuid>.jsonl`. The first
-//!   line is the `session` header; the display name comes from the latest
-//!   `session_info` entry.
-//! - omp: `~/.omp/agent/sessions/<encoded-cwd>/<ts>_<uuid>.jsonl`. Line 1 is
-//!   a fixed-width `title` slot rewritten in place on rename; line 2 is the
-//!   header. Legacy files start directly with the header.
+//! Harlo's: `$XDG_DATA_HOME/harlo-agent/sessions/--<abs-path>--/<ts>_<uuid>.jsonl`
+//! in pi's session format. The first line is the `session` header; the
+//! display name comes from the latest `session_info` entry. (A file may also
+//! start with a fixed-width `title` slot, rewritten in place on rename, with
+//! the header on line 2.) Claude Code's are read by `claude.rs`.
 //!
 //! Only the head and tail of large files are read.
 
@@ -30,7 +29,7 @@ pub struct SessionInfo {
     pub path: PathBuf,
     pub id: String,
     pub cwd: PathBuf,
-    /// Explicit name (omp title slot, pi `session_info`); empty if unnamed.
+    /// Explicit name (a title slot, or `session_info`); empty if unnamed.
     pub name: String,
     /// First line of the first user message.
     pub first_message: String,
@@ -57,13 +56,6 @@ impl SessionInfo {
 pub fn sessions_root(kind: HarnessKind) -> Option<PathBuf> {
     let home = PathBuf::from(std::env::var_os("HOME")?);
     match kind {
-        HarnessKind::Pi => Some(
-            std::env::var_os("PI_CODING_AGENT_DIR")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| home.join(".pi/agent"))
-                .join("sessions"),
-        ),
-        HarnessKind::Omp => Some(home.join(".omp/agent/sessions")),
         // harlo-agent's, in pi's file layout.
         HarnessKind::Harlo => Some(
             std::env::var_os("XDG_DATA_HOME")
@@ -72,7 +64,7 @@ pub fn sessions_root(kind: HarnessKind) -> Option<PathBuf> {
                 .unwrap_or_else(|| home.join(".local/share"))
                 .join("harlo-agent/sessions"),
         ),
-        // Their sessions are listed their own way (not pi's file layout).
+        // Claude Code's are listed their own way.
         HarnessKind::Claude | HarnessKind::Demo => None,
     }
 }
@@ -180,7 +172,7 @@ pub fn session_from_text(kind: HarnessKind, path: &Path, size: u64, modified: Sy
                     info.name = t.trim().to_owned();
                 }
             }
-            // pi: the latest session_info wins; an absent name clears it.
+            // The latest session_info wins; an absent name clears it.
             Some("session_info") => info.name = entry["name"].as_str().unwrap_or_default().trim().to_owned(),
             Some("title_change") => {
                 if let Some(t) = entry["title"].as_str() {
@@ -213,7 +205,7 @@ pub fn read_messages(path: &Path) -> std::io::Result<Vec<Value>> {
 #[derive(Debug, Default)]
 pub struct SavedSession {
     pub messages: Vec<Value>,
-    /// Last selected model id (`modelId`, or omp's `provider/id`).
+    /// Last selected model id (`modelId`, or `provider/id`).
     pub model: String,
     /// The same with its provider, as harlo names models (`provider/id`;
     /// "" when the file doesn't say).
@@ -333,11 +325,11 @@ fn saved_from(lines: &dyn Fn(&mut dyn FnMut(u64, &str))) -> SavedSession {
     lines(&mut |offset, line| {
         let Ok(entry) = serde_json::from_str::<EntryHead>(line) else { return };
         match entry.kind.as_str() {
-            // pi: the latest session_info wins.
+            // The latest session_info wins.
             Some("session_info") => name = entry.name.as_str().unwrap_or_default().trim().to_owned(),
             Some("model_change") => {
                 model = entry.model_id.as_str().or_else(|| entry.model.as_str()).unwrap_or_default().to_owned();
-                // pi: `provider` + `modelId`; omp: `model` as `provider/id`.
+                // `provider` + `modelId`, or `model` as `provider/id`.
                 model_id = match entry.provider.as_str() {
                     Some(p) if !p.is_empty() && !model.is_empty() => format!("{p}/{model}"),
                     _ => model.clone(),
@@ -372,7 +364,7 @@ fn saved_from(lines: &dyn Fn(&mut dyn FnMut(u64, &str))) -> SavedSession {
         let Ok(mut e) = serde_json::from_str::<Value>(line) else { return };
         found[place] = match e["type"].as_str() {
             Some("message") => Some(e["message"].take()),
-            // omp's own messages (e.g. background job results).
+            // Custom messages (e.g. background job results).
             Some("custom_message") => Some(serde_json::json!({
                 "role": "custom", "customType": e["customType"], "content": e["content"], "display": e["display"].as_bool().unwrap_or(true),
             })),
@@ -474,7 +466,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_pi_session() {
+    fn reads_a_session() {
         let dir = tmp_dir("pi");
         let path = write(&dir, "a.jsonl", &[
             r#"{"type":"session","version":3,"id":"abc","timestamp":"2026-10-07T23:51:20.693Z","cwd":"/home/u/proj"}"#,
@@ -482,7 +474,7 @@ mod tests {
             r#"{"type":"message","id":"2","parentId":"1","message":{"role":"user","content":[{"type":"text","text":"\n  Fix the build\nplease"}]}}"#,
             r#"{"type":"session_info","id":"3","parentId":"2","name":"Build fix"}"#,
         ]);
-        let info = read_session(HarnessKind::Pi, &path).unwrap();
+        let info = read_session(HarnessKind::Harlo, &path).unwrap();
         assert_eq!(info.id, "abc");
         assert_eq!(info.cwd, PathBuf::from("/home/u/proj"));
         assert_eq!(info.first_message, "Fix the build");
@@ -490,14 +482,14 @@ mod tests {
     }
 
     #[test]
-    fn reads_omp_title_slot() {
-        let dir = tmp_dir("omp");
+    fn reads_a_title_slot() {
+        let dir = tmp_dir("slot");
         let path = write(&dir, "b.jsonl", &[
             r#"{"type":"title","v":1,"title":"Houdini setup","updatedAt":"x","pad":"   "}"#,
             r#"{"type":"session","version":3,"id":"def","timestamp":"t","cwd":"/tmp"}"#,
             r#"{"type":"message","id":"1","message":{"role":"user","content":"hello"}}"#,
         ]);
-        let info = read_session(HarnessKind::Omp, &path).unwrap();
+        let info = read_session(HarnessKind::Harlo, &path).unwrap();
         assert_eq!((info.name.as_str(), info.first_message.as_str()), ("Houdini setup", "hello"));
     }
 
@@ -521,6 +513,6 @@ mod tests {
     fn rejects_files_without_header() {
         let dir = tmp_dir("bad");
         let path = write(&dir, "c.jsonl", &[r#"{"type":"message"}"#]);
-        assert!(read_session(HarnessKind::Pi, &path).is_none());
+        assert!(read_session(HarnessKind::Harlo, &path).is_none());
     }
 }

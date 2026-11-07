@@ -3,7 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import harlo
 
-// omp's `ask` tool: every question of one call, answered together.
+// The agent's `ask` tool: every question of one call, answered together.
 // Options are radio (single) or check (multi) rows with descriptions; there
 // is always a free-text answer. `request` is the raw extension_ui_request.
 Rectangle {

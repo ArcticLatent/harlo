@@ -1,4 +1,4 @@
-//! Usage statistics across every pi/omp session on disk: sessions, prompts,
+//! Usage statistics across every saved session on disk (Harlo's and Claude's): sessions, prompts,
 //! tokens, cost, activity by day, models and tool calls.
 //!
 //! Each session file is summarised once and cached by (modified time, size);
@@ -33,7 +33,7 @@ pub struct FileStats {
     pub path: PathBuf,
     pub cwd: PathBuf,
     pub harness: String,
-    /// Started by another session (omp subagents).
+    /// Started by another session (a subagent's).
     pub subagent: bool,
     steps: Vec<Step>,
     prompts: Vec<i64>,
@@ -130,7 +130,7 @@ fn cache() -> &'static Mutex<HashMap<PathBuf, CacheEntry>> {
 pub fn all_sessions() -> Vec<Arc<FileStats>> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();
-    for kind in [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::Harlo] {
+    for kind in [HarnessKind::Harlo] {
         for (path, modified, size) in store::list_files(kind) {
             seen.insert(path.clone());
             let cached = cache().lock().unwrap().get(&path).filter(|(m, s, _)| *m == modified && *s == size).map(|(_, _, f)| f.clone());
@@ -153,7 +153,7 @@ pub fn all_sessions() -> Vec<Arc<FileStats>> {
     out
 }
 
-/// Summaries of pi's and Oh My Pi's sessions on other machines, as the
+/// Summaries of Harlo's sessions on other machines, as the
 /// sidebar last listed them (blocking): each read from harlo's copy of it,
 /// brought up to date first when the file there changed. Only those changed
 /// in the last `days` days (0 = all time) are fetched; an older one counts
@@ -377,7 +377,7 @@ mod tests {
             old,
         ];
         let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
-        let fs = Arc::new(summarize(HarnessKind::Pi, &file(&refs)).unwrap());
+        let fs = Arc::new(summarize(HarnessKind::Harlo, &file(&refs)).unwrap());
         assert_eq!((fs.steps.len(), fs.prompts.len(), fs.tools.len()), (3, 1, 3));
         assert_eq!(fs.steps[0].thinking, "high");
 

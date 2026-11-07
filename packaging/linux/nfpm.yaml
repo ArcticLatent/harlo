@@ -19,7 +19,7 @@ homepage: https://harlo.run
 license: MIT
 description: |-
   Desktop app for coding agents.
-  harlo runs Claude Code, OpenCode, pi and Oh My Pi on your computer (and on
+  harlo runs its own agent, Harlo, and Claude Code on your computer (and on
   your other machines over SSH), with a native chat, changes and diffs,
   worktrees, a terminal, and an iPhone app to follow and answer them.
 
@@ -112,7 +112,7 @@ overrides:
       - git
 
 rpm:
-  summary: Desktop app for coding agents (Claude Code, OpenCode, pi, Oh My Pi)
+  summary: Desktop app for coding agents (Harlo, Claude Code)
   group: Development/Tools
 deb:
   fields:

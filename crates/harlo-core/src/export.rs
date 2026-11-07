@@ -10,7 +10,7 @@ use serde_json::Value;
 #[derive(Debug, Clone, Default)]
 pub struct Info {
     pub title: String,
-    /// "Claude", "Oh My Pi"…
+    /// "Claude", "Harlo"…
     pub agent: String,
     pub model: String,
     /// Its folder.

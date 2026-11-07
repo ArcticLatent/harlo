@@ -1,5 +1,5 @@
 //! `Mcp` (QML singleton): Settings → MCP. Lists, saves and removes the MCP
-//! servers pi and omp read (globally or in a project, here or on a remote
+//! servers Harlo and Claude read (globally or in a project, here or on a remote
 //! host), and tests them for a status (the harnesses don't report one).
 
 #[cxx_qt::bridge]
@@ -23,11 +23,11 @@ pub mod qobject {
     #[auto_cxx_name]
     extern "RustQt" {
         /// A scope ("global" or a project's path): `{ servers: [{ name,
-        /// harnesses, differs, form }], errors, files: { omp, pi } }`.
+        /// harnesses, differs, form }], errors, files: { harlo, claude } }`.
         #[qinvokable]
         fn list_json(self: &Mcp, scope: &QString) -> QString;
         /// Saves a server (`form` JSON) for `harnesses` (JSON array of
-        /// "omp" / "pi"); renames from `old_name`. An error, or "".
+        /// "harlo" / "claude"); renames from `old_name`. An error, or "".
         #[qinvokable]
         fn save(self: Pin<&mut Mcp>, scope: &QString, old_name: &QString, form: &QString, harnesses: &QString) -> QString;
         #[qinvokable]
@@ -51,9 +51,6 @@ pub mod qobject {
         /// A pasted command line as words (JSON array).
         #[qinvokable]
         fn split_command(self: &Mcp, line: &QString) -> QString;
-        /// What to run in a terminal to sign in to a server with a harness.
-        #[qinvokable]
-        fn sign_in_command(self: &Mcp, harness: &QString, name: &QString) -> QString;
         /// The agent is installed (its path in Settings → Providers, else
         /// found): new servers are for the installed ones.
         #[qinvokable]
@@ -90,7 +87,6 @@ fn form_json(f: &Form) -> Value {
     json!({
         "name": f.name, "enabled": f.enabled, "transport": f.transport, "command": f.command, "url": f.url,
         "headers": f.headers, "env": f.env, "cwd": f.cwd, "timeoutSecs": f.timeout_secs,
-        "exposure": f.exposure, "description": f.description,
     })
 }
 
@@ -113,8 +109,6 @@ fn form_from(v: &Value) -> Form {
         env: pairs(&v["env"]),
         cwd: v["cwd"].as_str().unwrap_or_default().to_owned(),
         timeout_secs: v["timeoutSecs"].as_f64().filter(|t| *t > 0.0),
-        exposure: v["exposure"].as_str().unwrap_or_default().to_owned(),
-        description: v["description"].as_str().unwrap_or_default().to_owned(),
     }
 }
 
@@ -279,14 +273,5 @@ impl Mcp {
             Some(h) => harlo_core::remote::found_on(&h, &harness.to_string()),
             None => self.installed(harness),
         }
-    }
-
-    pub fn sign_in_command(&self, harness: &QString, name: &QString) -> QString {
-        let name = harlo_core::remote::quote(&name.to_string());
-        QString::from(&match harness.to_string().as_str() {
-            "pi" => format!("pi mcp login {name}"),
-            // omp signs in from its own terminal UI.
-            _ => "omp".to_owned(),
-        })
     }
 }

@@ -3,7 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import harlo
 
-// Usage across all pi/omp sessions: totals, daily activity, token mix,
+// Usage across all Harlo and Claude sessions: totals, daily activity, token mix,
 // efficiency, models and tool calls. Filter by period and project.
 Rectangle {
     id: root

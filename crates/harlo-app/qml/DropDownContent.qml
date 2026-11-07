@@ -115,7 +115,7 @@ Rectangle {
                 placeholderText: "Start a session in the home folder… (Enter)"
                 onAccepted: {
                     if (text.trim() === "") return
-                    Workspace.startDraft(JSON.stringify({ projectId: -1, harness: "", worktreeBranch: "", base: "", starter: "", text: text, attachments: [], askFirst: false }))
+                    Workspace.startDraft(JSON.stringify({ projectId: -1, harness: "", worktreeBranch: "", base: "", starter: "", text: text, attachments: [] }))
                     text = ""
                 }
             }

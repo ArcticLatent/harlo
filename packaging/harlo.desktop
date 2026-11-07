@@ -2,12 +2,12 @@
 Type=Application
 Name=harlo
 GenericName=Coding agent workspace
-Comment=Desktop app for coding agents: Claude Code, OpenCode, pi and Oh My Pi
+Comment=Desktop app for coding agents: Harlo (its own) and Claude Code
 Exec=harlo
 Icon=harlo
 Terminal=false
 Categories=Development;IDE;
-Keywords=ai;agent;coding;claude;opencode;pi;omp;llm;assistant;
+Keywords=ai;agent;coding;claude;harlo;llm;assistant;
 StartupNotify=true
 StartupWMClass=harlo
 SingleMainWindow=true

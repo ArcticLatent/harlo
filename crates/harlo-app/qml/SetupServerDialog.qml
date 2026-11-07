@@ -22,9 +22,9 @@ AppDialog {
     readonly property string machine: host === "" ? "this computer" : host
     readonly property var hostAgents: Accounts.hostServers !== "" ? (JSON.parse(Accounts.hostServers)[host] || {}).agents || {} : ({})
     readonly property var agents: host !== ""
-        ? ["pi", "omp", "harlo"].filter(id => hostAgents[id] !== undefined).map(id => ({ id: id, label: ({ pi: "pi", omp: "Oh My Pi", harlo: "Harlo" })[id] }))
+        ? ["harlo"].filter(id => hostAgents[id] !== undefined).map(id => ({ id: id, label: Theme.harnessLabel(id) }))
         : (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()) : [])
-            .filter(p => ["pi", "omp", "harlo"].includes(p.id) && p.state !== "missing")
+            .filter(p => p.id === "harlo" && p.state !== "missing")
     /// Opens it for `machine` ("" for this computer); while a setup runs,
     /// that one shows, wherever it is.
     function openOn(machine, row) {
@@ -141,9 +141,6 @@ AppDialog {
         }))
         page = "run"
     }
-    /// Oh My Pi finds Ollama on its usual port by itself ("ollama", with all
-    /// its models): nothing to add there.
-    readonly property bool ompFindsIt: !!job && !!job.result && engine !== null && engine.id === "ollama" && /:11434\/v1$/.test(job.result.baseUrl)
     /// Updating an engine (`Settings → Model servers`): this dialog shows how
     /// it goes, without the setup's steps and agents.
     readonly property bool updating: job !== null && job.update === true
@@ -165,13 +162,13 @@ AppDialog {
     function addToAgents() {
         const r = job.result
         if (host !== "") {
-            const ids = chosen.filter(x => agents.some(a => a.id === x) && !(x === "omp" && ompFindsIt))
+            const ids = chosen.filter(x => agents.some(a => a.id === x))
             Accounts.addHostEngine(host, JSON.stringify({ name: r.name, baseUrl: r.baseUrl, models: r.models, agents: ids }))
             close()
             added()
             return
         }
-        for (const id of chosen.filter(x => !(x === "omp" && ompFindsIt))) {
+        for (const id of chosen) {
             const a = agents.find(x => x.id === id)
             const taken = [...new Set((a.modelIds || []).map(m => m.split(/[\/:]/)[0]).filter(p => p !== ""))]
             const err = Accounts.addServer(id, r.name, r.baseUrl, "", JSON.stringify(r.models), JSON.stringify(taken))
@@ -197,7 +194,7 @@ AppDialog {
         }
         if (page === "engine") ServerSetup.refresh()
         // (Another machine's agents may still be being read.)
-        chosen = host !== "" ? ["pi", "omp", "harlo"] : agents.map(a => a.id)
+        chosen = host !== "" ? ["harlo"] : agents.map(a => a.id)
     }
     onClosed: {
         if (job && job.state === "running") return
@@ -687,21 +684,15 @@ AppDialog {
                         AppCheckBox {
                             required property var modelData
                             text: modelData.label
-                            readonly property bool builtIn: modelData.id === "omp" && dlg.ompFindsIt
-                            enabled: !builtIn
-                            checked: builtIn || (enabled && dlg.chosen.includes(modelData.id))
-                            ToolTip.visible: hovered && builtIn
-                            ToolTip.text: "Oh My Pi finds Ollama by itself, with all its models"
-                            ToolTip.delay: 300
+                            checked: dlg.chosen.includes(modelData.id)
                             onToggled: dlg.chosen = checked ? dlg.chosen.concat([modelData.id]) : dlg.chosen.filter(x => x !== modelData.id)
                         }
                     }
                 }
                 Note {
                     visible: dlg.host !== "" && dlg.agents.length === 0
-                    text: "No Harlo, pi or Oh My Pi on " + dlg.host + " yet: it runs there, to add to them later in Settings → Model servers."
+                    text: "No Harlo on " + dlg.host + " yet: it runs there, to add to it later in Settings → Model servers."
                 }
-                Note { visible: dlg.ompFindsIt && dlg.agents.some(a => a.id === "omp"); text: "Oh My Pi finds Ollama on this port by itself (as “ollama”), with all its models: nothing to add there." }
                 Note { visible: dlg.error !== ""; color: Theme.error; text: dlg.error }
             }
             RowLayout {
@@ -715,7 +706,7 @@ AppDialog {
                     objectName: "setupAdd"
                     visible: dlg.job !== null && dlg.job.state === "done" && !dlg.updating
                     text: "Add to the agents"
-                    enabled: dlg.chosen.some(x => !(x === "omp" && dlg.ompFindsIt))
+                    enabled: dlg.chosen.length > 0
                     accent: Theme.primary
                     font.pixelSize: Theme.px(12)
                     onClicked: dlg.addToAgents()

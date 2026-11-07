@@ -26,9 +26,6 @@ pub mod qobject {
         #[qproperty(QString, key)]
         #[qproperty(QString, status)]
         #[qproperty(QString, harness)]
-        /// "Ask first" toggle of the bound session (omp): prompts ask the
-        /// agent to clarify with its `ask` tool before starting.
-        #[qproperty(bool, ask_first, cxx_name = "askFirst")]
         /// Plan mode (set from the workspace's per-session state): messages
         /// ask for a plan, not changes.
         #[qproperty(bool, plan_mode, cxx_name = "planMode")]
@@ -77,22 +74,16 @@ pub mod qobject {
         #[qproperty(QStringList, request_options, cxx_name = "requestOptions")]
         #[qproperty(QString, request_prefill, cxx_name = "requestPrefill")]
         #[qproperty(bool, request_is_approval, cxx_name = "requestIsApproval")]
-        /// The tool row an omp approval is for (its row key), when found.
+        /// The tool row an approval is for (its row key), when found.
         #[qproperty(QString, approval_row, cxx_name = "approvalRow")]
-        /// The whole request as JSON (omp `ask` questions, `select` option details).
+        /// The whole request as JSON (`ask` questions, `select` option details).
         #[qproperty(QString, request_json, cxx_name = "requestJson")]
-        /// omp subagents of this session: the `get_subagents` list as JSON.
+        /// Subagents of this session: the `get_subagents` list as JSON.
         #[qproperty(QString, subagents_json, cxx_name = "subagentsJson")]
         /// Result of the last subagent action (cancel, steer), for a toast.
         #[qproperty(QString, subagent_message, cxx_name = "subagentMessage")]
-        /// omp todo phases as JSON (`[{ name, tasks: [{ content, status }] }]`).
+        /// Todo phases as JSON (`[{ name, tasks: [{ content, status }] }]`).
         #[qproperty(QString, todos_json, cxx_name = "todosJson")]
-        /// omp goal: `{ objective, status, tokenBudget?, tokensUsed, timeUsedSeconds, … }`, or "".
-        #[qproperty(QString, goal_json, cxx_name = "goalJson")]
-        /// Why the last goal command failed (e.g. plan mode), or "".
-        #[qproperty(QString, goal_error, cxx_name = "goalError")]
-        /// omp side questions of this session (records, newest last) as JSON.
-        #[qproperty(QString, btw_json, cxx_name = "btwJson")]
         /// Undo a turn: your messages with a snapshot from before them, as
         /// JSON `{ <row key>: { snapshot, next: <your next message's row
         /// key, "" for the latest turn>, files: <what the latest turn
@@ -126,9 +117,6 @@ pub mod qobject {
         /// (`undoPlanJson` says how it went).
         #[qinvokable]
         fn undo_turn(self: Pin<&mut ChatSession>, row_key: &QString);
-        /// Turns "Ask first" on or off for the bound session.
-        #[qinvokable]
-        fn set_ask_first_for_session(self: Pin<&mut ChatSession>, on: bool);
         #[qinvokable]
         fn abort(self: Pin<&mut ChatSession>);
         /// Answers the current dialog with a value (select/input/editor).
@@ -138,11 +126,11 @@ pub mod qobject {
         fn answer_confirm(self: Pin<&mut ChatSession>, confirmed: bool);
         #[qinvokable]
         fn cancel_request(self: Pin<&mut ChatSession>);
-        /// Answers an omp `ask` request: `answers` is a JSON array of
+        /// Answers an `ask` request: `answers` is a JSON array of
         /// `{ id, selectedOptions, customInput? }`, one per question.
         #[qinvokable]
         fn answer_ask(self: Pin<&mut ChatSession>, answers: &QString);
-        /// Re-reads the omp subagent list.
+        /// Re-reads the subagent list.
         #[qinvokable]
         fn refresh_subagents(self: Pin<&mut ChatSession>);
         #[qinvokable]
@@ -151,13 +139,10 @@ pub mod qobject {
         #[qinvokable]
         fn steer_subagent(self: Pin<&mut ChatSession>, id: &QString, message: &QString);
         /// Branching from one of your messages (`row`: its transcript row):
-        /// omp starts a branch in this session, pi a forked session; the
-        /// message's text comes back in `editRequested` to edit and resend.
+        /// a forked session; the message's text comes back in
+        /// `editRequested` to edit and resend.
         #[qinvokable]
         fn edit_and_resend(self: Pin<&mut ChatSession>, row: i32);
-        /// omp: copies the session up to this message into a new session.
-        #[qinvokable]
-        fn fork_at(self: Pin<&mut ChatSession>, row: i32);
         /// Row index of the block of a message (keys with this prefix) that
         /// a search found, or -1.
         #[qinvokable]
@@ -177,15 +162,6 @@ pub mod qobject {
         /// Sends a queued follow-up now, as steering.
         #[qinvokable]
         fn promote_queued(self: Pin<&mut ChatSession>, index: i32);
-        /// omp goal mode: `op` is create (with `objective`, and a token
-        /// budget when `budget` > 0), pause, resume or drop.
-        #[qinvokable]
-        fn goal_command(self: Pin<&mut ChatSession>, op: &QString, objective: &QString, budget: i32);
-        /// omp side question (`btw`); `record_id` continues a topic.
-        #[qinvokable]
-        fn ask_btw(self: Pin<&mut ChatSession>, question: &QString, record_id: &QString);
-        #[qinvokable]
-        fn cancel_btw(self: Pin<&mut ChatSession>);
         /// Shows a session file read-only (a subagent's transcript), without
         /// starting a harness.
         #[qinvokable]
@@ -287,7 +263,7 @@ pub fn user_entry_id(file: Option<PathBuf>, harness: &str, ordinal: usize) -> Op
         // (A remote host's transcript: its copy here, brought up to date.)
         "claude" if harlo_core::remote::is_remote(&f) => harlo_core::remote::local_copy(&f).ok().map(|c| harlo_harness::claude::user_entries(&c)),
         "claude" => Some(harlo_harness::claude::user_entries(&f)),
-        // (pi / omp: a remote host's file, from its copy here.)
+        // (Harlo: a remote host's file, from its copy here.)
         _ if harlo_core::remote::is_remote(&f) => harlo_core::remote::local_copy(&f).ok().and_then(|c| harlo_harness::branches::current_user_entries(&c).ok()),
         _ => harlo_harness::branches::current_user_entries(&f).ok(),
     })
@@ -324,10 +300,7 @@ pub struct ChatSessionRust {
     key: QString,
     status: QString,
     harness: QString,
-    ask_first: bool,
     plan_mode: bool,
-    /// Sessions with "Ask first" on (by key), kept while the app runs.
-    ask_first_keys: std::collections::HashSet<String>,
     model_name: QString,
     model_id: QString,
     thinking: QString,
@@ -367,13 +340,8 @@ pub struct ChatSessionRust {
     /// A subagent list refresh is already scheduled.
     subagents_due: bool,
     todos_json: QString,
-    goal_json: QString,
-    goal_error: QString,
-    btw_json: QString,
     undo_json: QString,
     undo_plan: QString,
-    /// Side-question records (omp `btw`), oldest first.
-    btw: Vec<Value>,
     /// The session's file, once the harness has reported it.
     session_file: Option<PathBuf>,
     /// The queue as (queue name, exact text), in `queued` order.
@@ -428,8 +396,6 @@ impl ChatSession {
         self.as_mut().rust_mut().requests.clear();
         self.as_mut().rust_mut().status_entries.clear();
         self.as_mut().show_front_request();
-        let ask_first = self.ask_first_keys.contains(&key.to_string());
-        self.as_mut().set_ask_first(ask_first);
         for setter in [
             Self::set_model_name,
             Self::set_model_id,
@@ -469,10 +435,6 @@ impl ChatSession {
         self.as_mut().rust_mut().subagents_listed.clear();
         self.as_mut().set_subagent_message(QString::default());
         self.as_mut().set_todos_json(QString::default());
-        self.as_mut().set_goal_json(QString::default());
-        self.as_mut().set_goal_error(QString::default());
-        self.as_mut().set_btw_json(QString::default());
-        self.as_mut().rust_mut().btw.clear();
         self.as_mut().rust_mut().queue_raw.clear();
         self.as_mut().rust_mut().session_file = None;
 
@@ -541,10 +503,8 @@ impl ChatSession {
     }
 
     pub fn edit_and_resend(self: Pin<&mut Self>, row: i32) {
-        let omp = self.harness.to_string() == "omp";
         self.with_user_entry(row, move |this, entry| {
-            let command = if omp { json!({ "type": "branch", "entryId": entry }) } else { json!({ "type": "fork", "entryId": entry }) };
-            this.request_then(command, |mut this, data| {
+            this.request_then(json!({ "type": "fork", "entryId": entry }), |mut this, data| {
                 if data["cancelled"].as_bool() == Some(true) {
                     return;
                 }
@@ -553,20 +513,6 @@ impl ChatSession {
                 }
                 let text = data["text"].as_str().unwrap_or_default().to_owned();
                 this.as_mut().edit_requested(&QString::from(&text));
-            });
-        });
-    }
-
-    pub fn fork_at(self: Pin<&mut Self>, row: i32) {
-        if self.harness.to_string() != "omp" {
-            return;
-        }
-        self.with_user_entry(row, |this, entry| {
-            this.request_then(json!({ "type": "fork", "entryId": entry }), |this, data| {
-                if data["cancelled"].as_bool() != Some(true)
-                    && let Some(h) = this.handle() {
-                        h.reload();
-                    }
             });
         });
     }
@@ -632,88 +578,6 @@ impl ChatSession {
         self.request_then(json!({ "type": "promote_queued_message", "message": text }), |_, _| {});
     }
 
-    pub fn goal_command(mut self: Pin<&mut Self>, op: &QString, objective: &QString, budget: i32) {
-        let Some(handle) = self.handle().cloned() else { return };
-        let mut command = json!({ "type": "goal", "op": op.to_string() });
-        if op.to_string() == "create" {
-            command["objective"] = json!(objective.to_string().trim());
-            if budget > 0 {
-                command["token_budget"] = json!(budget);
-            }
-        }
-        self.as_mut().set_goal_error(QString::default());
-        let thread = self.qt_thread();
-        let generation = self.generation;
-        crate::runtime().spawn(async move {
-            let result = handle.request(command).await;
-            let _ = thread.queue(move |mut this| {
-                if this.generation != generation {
-                    return;
-                }
-                match result {
-                    Ok(data) => this.as_mut().apply_goal(&data["goal"]),
-                    Err(e) => this.as_mut().set_goal_error(QString::from(&e)),
-                }
-            });
-        });
-    }
-
-    /// A dropped goal is gone; anything else (including complete) shows.
-    fn apply_goal(self: Pin<&mut Self>, goal: &Value) {
-        let json = if goal.is_object() && goal["status"] != "dropped" { goal.to_string() } else { String::new() };
-        self.set_goal_json(QString::from(&json));
-    }
-
-    pub fn ask_btw(self: Pin<&mut Self>, question: &QString, record_id: &QString) {
-        let question = question.to_string();
-        if question.trim().is_empty() {
-            return;
-        }
-        let mut cmd = json!({ "type": "btw", "question": question.trim() });
-        if !record_id.is_empty() {
-            cmd["recordId"] = json!(record_id.to_string());
-        }
-        self.request_then(cmd, |mut this, data| {
-            if let Some(record) = data.get("record") {
-                this.as_mut().apply_btw(json!({ "type": "btw_record", "record": record }));
-            }
-        });
-    }
-
-    pub fn cancel_btw(self: Pin<&mut Self>) {
-        self.request_then(json!({ "type": "btw_cancel" }), |_, _| {});
-    }
-
-    /// Folds a `btw_record` / `btw_delta` frame into the records.
-    fn apply_btw(mut self: Pin<&mut Self>, frame: Value) {
-        let mut records = std::mem::take(&mut self.as_mut().rust_mut().btw);
-        match frame["type"].as_str() {
-            Some("btw_record") => {
-                let record = frame["record"].clone();
-                match records.iter_mut().find(|r| r["id"] == record["id"]) {
-                    Some(r) => *r = record,
-                    None => records.push(record),
-                }
-            }
-            Some("btw_delta") => {
-                let delta = frame["delta"].as_str().unwrap_or_default();
-                if let Some(r) = records.iter_mut().find(|r| r["id"] == frame["recordId"]) {
-                    // The latest turn: the last follow-up, else the record itself.
-                    let turn = match r.get_mut("followUps").and_then(|f| f.as_array_mut()).filter(|f| !f.is_empty()) {
-                        Some(f) => f.last_mut().unwrap(),
-                        None => r,
-                    };
-                    let answer = format!("{}{delta}", turn["answer"].as_str().unwrap_or_default());
-                    turn["answer"] = json!(answer);
-                }
-            }
-            _ => {}
-        }
-        let json = Value::Array(records.clone()).to_string();
-        self.as_mut().rust_mut().btw = records;
-        self.set_btw_json(QString::from(&json));
-    }
-
     pub fn refresh_subagents(self: Pin<&mut Self>) {
         self.request_then(json!({ "type": "get_subagents" }), |mut this, data| {
             let listed = data.get("subagents").and_then(Value::as_array).cloned().unwrap_or_default();
@@ -758,7 +622,7 @@ impl ChatSession {
     /// cover them, so the view shows both.
     fn show_subagents(self: Pin<&mut Self>) {
         let mut all = harlo_core::subagents::merged(&self.subagent_events, &self.subagents_listed);
-        // A remote omp reports its own paths: keep transcripts on its host.
+        // A remote agent reports its own paths: keep transcripts on its host.
         if let Some(host) = harlo_core::remote::host_of(std::path::Path::new(&self.cwd.to_string())) {
             for a in &mut all {
                 if let Some(f) = a["sessionFile"].as_str().filter(|f| f.starts_with('/')) {
@@ -827,15 +691,9 @@ impl ChatSession {
         };
         let Some(h) = self.handle().cloned() else { return };
         let original = text.clone();
-        // Plan mode: a plan first, no changes (omp also denies edits).
+        // Plan mode: a plan first, no changes.
         let text = if self.plan_mode && mode == SendMode::Normal {
             format!("{text}{}", harlo_harness::file_blocks::PLAN_NOTE)
-        } else {
-            text
-        };
-        // "Ask first" (omp): new prompts ask for clarification before work.
-        let text = if self.ask_first && mode == SendMode::Normal && matches!(self.harness.to_string().as_str(), "omp" | "demo") {
-            format!("{text}{}", harlo_harness::file_blocks::ASK_FIRST_NOTE)
         } else {
             text
         };
@@ -1016,16 +874,6 @@ impl ChatSession {
         self.answer(json!({ "confirmed": confirmed }));
     }
 
-    pub fn set_ask_first_for_session(mut self: Pin<&mut Self>, on: bool) {
-        let key = self.key.to_string();
-        if on {
-            self.as_mut().rust_mut().ask_first_keys.insert(key);
-        } else {
-            self.as_mut().rust_mut().ask_first_keys.remove(&key);
-        }
-        self.as_mut().set_ask_first(on);
-    }
-
     pub fn answer_ask(self: Pin<&mut Self>, answers: &QString) {
         match serde_json::from_str::<Value>(&answers.to_string()) {
             Ok(list @ Value::Array(_)) => self.answer(json!({ "answers": list })),
@@ -1120,16 +968,7 @@ impl ChatSession {
     pub fn load_models(self: Pin<&mut Self>) {
         let answer = |mut this: Pin<&mut Self>, data: Value| {
             let mut list = QStringList::default();
-            let mut seen = std::collections::HashMap::new();
             for m in data["models"].as_array().into_iter().flatten() {
-                // (omp's leftovers from a local engine that's gone; Claude
-                // through a Claude Code that isn't here.)
-                if harlo_core::pi_packages::hidden_model(m["provider"].as_str().unwrap_or_default()) {
-                    continue;
-                }
-                if harlo_core::model_servers::stale_discovered(m["provider"].as_str().unwrap_or_default(), m["id"].as_str().unwrap_or_default(), m["baseUrl"].as_str().unwrap_or_default(), &mut seen) {
-                    continue;
-                }
                 let s = |k: &str| m[k].as_str().unwrap_or_default().replace('\t', " ");
                 let reasoning = if m["reasoning"].as_bool() == Some(true) { "1" } else { "0" };
                 // Served on this computer or the local network.
@@ -1222,7 +1061,7 @@ impl ChatSession {
                         && self.session_file.as_ref() != Some(&file)
                     {
                         self.as_mut().rust_mut().session_file = Some(file.clone());
-                        if matches!(self.harness.to_string().as_str(), "omp" | "claude") {
+                        if matches!(self.harness.to_string().as_str(), "harlo" | "claude") {
                             self.as_mut().load_saved_subagents(file);
                         }
                     }
@@ -1270,11 +1109,9 @@ impl ChatSession {
                     self.as_mut().schedule_subagents();
                 }
                 SessionUpdate::Todos(todos) => self.as_mut().set_todos_json(QString::from(&todos.to_string())),
-                SessionUpdate::Goal(goal) => self.as_mut().apply_goal(&goal),
                 // (The workspace notifies.)
                 // (The workspace has these.)
                 SessionUpdate::Notable(_) | SessionUpdate::Limits(_) | SessionUpdate::GateAnswered { .. } | SessionUpdate::Stopped | SessionUpdate::HarloCall { .. } => {}
-                SessionUpdate::Btw(frame) => self.as_mut().apply_btw(frame),
                 SessionUpdate::UiRequest(req) => {
                     self.as_mut().rust_mut().requests.push_back(req);
                     self.as_mut().show_front_request();
@@ -1327,7 +1164,7 @@ impl ChatSession {
         self.match_approval();
     }
 
-    /// Finds the tool row an omp approval belongs to. omp asks while the
+    /// Finds the tool row an approval belongs to. The agent asks while the
     /// tool executes but doesn't say which call it is, so: the unfinished
     /// row of that tool, preferring one whose argument summary appears in
     /// the prompt (`Allow tool: bash` / `Command: …`).

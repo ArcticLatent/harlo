@@ -28,7 +28,7 @@ fn quote(arg: &str) -> String {
 /// The entry for `exe`.
 pub fn entry(exe: &Path) -> String {
     format!(
-        "[Desktop Entry]\nType=Application\nName=harlo\nComment=Coding agents (pi, omp), started in the background\nExec={} --background\nIcon=harlo\nTerminal=false\nX-GNOME-Autostart-enabled=true\nX-KDE-autostart-after=panel\n",
+        "[Desktop Entry]\nType=Application\nName=harlo\nComment=Coding agents (Harlo, Claude Code), started in the background\nExec={} --background\nIcon=harlo\nTerminal=false\nX-GNOME-Autostart-enabled=true\nX-KDE-autostart-after=panel\n",
         quote(&exe.to_string_lossy())
     )
 }

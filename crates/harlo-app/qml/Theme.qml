@@ -98,12 +98,12 @@ QtObject {
     readonly property bool wrapCode: look.wrap === true
     /// An agent's avatar colours: a soft fill and its letters, from the theme.
     function agentColor(id) {
-        const base = ({ claude: "#E5895A", omp: "#9B8AFB", pi: "#4FC1AE", demo: "#A7AAB2" })[id] || "#A7AAB2"
+        const base = ({ claude: "#E5895A", demo: "#A7AAB2" })[id] || "#A7AAB2"
         const col = Qt.color(base)
         return { fill: Qt.rgba(col.r, col.g, col.b, isLight ? 0.16 : 0.2), ink: isLight ? blend(col, Qt.rgba(0, 0, 0, 1), 0.25) : blend(col, Qt.rgba(1, 1, 1, 1), 0.15) }
     }
     function agentInitials(id) {
-        return ({ claude: "CL", omp: "OM", pi: "PI", demo: "DE" })[id] || (id || "?").slice(0, 2).toUpperCase()
+        return ({ claude: "CL", demo: "DE" })[id] || (id || "?").slice(0, 2).toUpperCase()
     }
     // Project colours (Settings → Projects), from the theme, so they suit
     // every theme. Stored by key.
@@ -162,8 +162,8 @@ QtObject {
     function serverOf(harness, modelId) {
         if (!modelId || Accounts.revision < 0) return null
         const name = modelId.split("/")[0]
-        // (omp's own providers for a llama.cpp or Ollama it finds on their usual ports.)
-        if (name === "llama.cpp" || (harness === "omp" && name === "ollama"))
+        // (A llama.cpp on its usual port.)
+        if (name === "llama.cpp")
             return { name: name, engine: name === "ollama" ? "Ollama" : "llama.cpp", address: "127.0.0.1:" + (name === "ollama" ? 11434 : 8080), place: "here" }
         const sv = JSON.parse(Accounts.servers(harness)).find(s => s.name === name)
         if (!sv) return null
@@ -201,7 +201,7 @@ QtObject {
                       request_approval: "writing the question…", report_done: "writing the report…", ask_parent: "writing the question…" })[h[1]] || "" : ""
     }
     function harnessLabel(id) {
-        return ({ harlo: "Harlo", claude: "Claude", pi: "Pi", omp: "Oh My Pi", demo: "Demo" })[id] || id
+        return ({ harlo: "Harlo", claude: "Claude", demo: "Demo" })[id] || id
     }
     // Text on a primary-coloured fill (buttons, check marks).
     readonly property color textOnPrimary: luminance(primary) > 0.55 ? "#1a1a1a" : (isLight ? "#ffffff" : "#1a1310")

@@ -72,14 +72,6 @@ Popup {
     // The first agent that isn't `but` (a fresh view), else `but`.
     function other(but) { return agentIds.find(id => id !== but) || but }
 
-    readonly property var orch: { Workspace.providersRevision; return visible ? JSON.parse(Workspace.orchestrationJson()) : null }
-    // pi and omp take the tools from their MCP config.
-    readonly property var bridge: {
-        const a = orch ? orch.agents.find(x => x.id === root.agentId) : null
-        return a && a.bridge === false ? a : null
-    }
-    property string bridgeNote: ""
-
     function show(which) {
         action = which
         const mine = agentIds.indexOf(agentId) >= 0 ? agentId : (agentIds[0] || "")
@@ -99,7 +91,6 @@ Popup {
         note.text = draft
         // (Helpers editing at once: apart, each on its own branch.)
         worktree.checked = which === "split"
-        bridgeNote = ""
         Workspace.ensureProviders()
         if (host !== "") {
             hostModels = ({})
@@ -228,29 +219,6 @@ Popup {
             visible: root.action === "handoff" || root.action === "split"
             text: root.action === "split" ? "Each in a new git worktree (its own branch, apart from this checkout)"
                                           : "In a new git worktree (its own branch, apart from this checkout)"
-        }
-        // pi / omp without harlo's tools.
-        RowLayout {
-            visible: root.bridge !== null
-            Layout.fillWidth: true
-            spacing: 8
-            Label {
-                Layout.fillWidth: true
-                text: root.bridgeNote !== "" ? root.bridgeNote : (root.bridge ? root.bridge.name : "") + " doesn't have harlo's tools yet."
-                color: Theme.warning
-                font.pixelSize: Theme.px(12)
-                wrapMode: Text.Wrap
-            }
-            FlatButton {
-                objectName: "delegateAddBridge"
-                text: "Add them"
-                font.pixelSize: Theme.px(12)
-                onClicked: {
-                    const name = root.bridge.name
-                    const err = Workspace.setOrchestrationBridge(root.bridge.id, true)
-                    root.bridgeNote = err !== "" ? err : "Added: new " + name + " sessions have them."
-                }
-            }
         }
         RowLayout {
             Layout.fillWidth: true

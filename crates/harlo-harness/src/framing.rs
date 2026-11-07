@@ -1,8 +1,8 @@
-//! JSONL framing shared by pi and omp.
+//! JSONL framing of the pi protocol (harlo-agent's RPC).
 //!
 //! Records are split on LF only. Generic line readers that also split on
 //! U+2028/U+2029 would corrupt valid JSON strings (see pi `rpc.md`).
-//! omp protocol v2 may additionally wrap one oversized logical frame in a
+//! An agent may additionally wrap one oversized logical frame in a
 //! sequence of `rpc_chunk` frames, which [`ChunkAssembler`] reassembles.
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -10,8 +10,7 @@ use base64::Engine;
 use serde_json::Value;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 
-/// Upper bound for one physical line. omp advertises 1 MiB physical frames
-/// and 64 MiB reassembled frames; pi has no limit, so allow the larger one.
+/// Upper bound for one physical line (and one reassembled frame).
 pub const MAX_LINE_BYTES: usize = 64 * 1024 * 1024;
 
 /// Reads one LF-terminated record. Returns `None` at EOF.
@@ -47,7 +46,7 @@ pub async fn read_record<R: AsyncBufRead + Unpin>(
     }
 }
 
-/// Reassembles omp `rpc_chunk` sequences into one logical JSON frame.
+/// Reassembles `rpc_chunk` sequences into one logical JSON frame.
 #[derive(Default)]
 pub struct ChunkAssembler {
     current: Option<PendingChunk>,

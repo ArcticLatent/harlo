@@ -602,7 +602,7 @@ pub fn stop_group(mut child: std::process::Child) {
 /// address; `reread`: the agent picks the change up); one harlo set up, no
 /// agent having it now, is stopped and forgotten, and its model files
 /// deleted with `delete_files`. `step(what, done, of)` says how far.
-/// `(errors, what it did)`: "Taken out of Harlo and pi. Deleted 2 models
+/// `(errors, what it did)`: "Taken out of Harlo. Deleted 2 models
 /// from Ollama (15.2 GB).".
 pub fn remove(name: &str, url: &str, delete_files: bool, step: &dyn Fn(&str, usize, usize), reread: &dyn Fn(HarnessKind)) -> (Vec<String>, String) {
     let mut errors = Vec::new();

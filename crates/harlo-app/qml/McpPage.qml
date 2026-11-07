@@ -3,7 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import harlo
 
-// Settings → MCP: the tool servers your agents (omp, pi, Claude, Harlo)
+// Settings → MCP: the tool servers your agents (Harlo, Claude)
 // can call, globally or in a project. A grid of servers with their status
 // (harlo tests them: the agents don't report one), and a page per server
 // to edit it.
@@ -12,7 +12,6 @@ ColumnLayout {
     /// Settings is narrow.
     property bool compact: false
     /// Sign in from a terminal (Main opens one).
-    signal runInTerminal(string command)
     /// Where the server page's action bar floats (Settings' page bottom).
     property Item footerHost: null
     property bool showAllTools: false
@@ -68,7 +67,7 @@ ColumnLayout {
         editing = e
     }
     /// The agents that are on (Settings → Providers) and have MCP servers.
-    readonly property var agents: (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.chatProvidersJson()) : []).filter(p => ["omp", "pi", "claude", "harlo"].includes(p.id))
+    readonly property var agents: (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.chatProvidersJson()) : []).filter(p => ["claude", "harlo"].includes(p.id))
     /// A new server is for the installed ones (all of them if none is).
     function defaultAgents() {
         const ids = agents.map(a => a.id), installed = ids.filter(id => Mcp.installedOn(id, page.scope))
@@ -200,7 +199,6 @@ ColumnLayout {
     Hint_ {
         Layout.topMargin: 6
         text: "In " + page.agents.map(a => page.listing.files ? page.listing.files[a.id] : "").filter(x => x).join(", ") + ". Changes apply to new sessions."
-              + (!page.scope.startsWith("host:") && page.scope !== "global" && page.agents.some(a => a.id === "pi") ? " pi reads a project's servers only in projects you trust (/trust)." : "")
               + (!page.scope.startsWith("host:") && page.scope !== "global" && page.agents.some(a => a.id === "harlo") ? " Harlo starts a project's servers only as saved here." : "")
     }
     Repeater {
@@ -319,7 +317,6 @@ ColumnLayout {
         readonly property var f: page.editing ? page.editing.form : page.emptyForm
         readonly property var st: page.editing ? page.status[page.editing.oldName] : undefined
         readonly property bool local: f.transport === "stdio"
-        readonly property bool hasPi: page.editing !== null && page.editing.harnesses.includes("pi")
 
         RowLayout {
             Layout.fillWidth: true
@@ -363,7 +360,7 @@ ColumnLayout {
                 model: page.agents
                 AppCheckBox {
                     required property var modelData
-                    objectName: "mcpFor" + ({ omp: "Omp", pi: "Pi", claude: "Claude", harlo: "Harlo" })[modelData.id]
+                    objectName: "mcpFor" + ({ claude: "Claude", harlo: "Harlo" })[modelData.id]
                     text: modelData.label
                     checked: page.editing !== null && page.editing.harnesses.includes(modelData.id)
                     onToggled: page.toggleHarness(modelData.id, checked)
@@ -380,7 +377,7 @@ ColumnLayout {
         RowLayout {
             spacing: 6
             Repeater {
-                model: [["stdio", "Command"], ["http", "Link"], ["sse", "Link (SSE, not pi or Harlo)"]]
+                model: [["stdio", "Command"], ["http", "Link"], ["sse", "Link (SSE, not Harlo)"]]
                 FlatButton {
                     required property var modelData
                     objectName: "mcpTransport-" + modelData[0]
@@ -429,7 +426,7 @@ ColumnLayout {
         SectionTitle_ { text: detail.local ? "Environment variables" : "Request headers" }
         RowLayout {
             Layout.fillWidth: true
-            Hint_ { text: detail.local ? "Values the server needs, such as an API key. ${VAR} reads one from your environment; omp, pi and Harlo also run !command." : "Such as Authorization: Bearer …" }
+            Hint_ { text: detail.local ? "Values the server needs, such as an API key. ${VAR} reads one from your environment; Harlo also runs !command." : "Such as Authorization: Bearer …" }
             FlatButton { text: page.showSecrets ? "Hide values" : "Show values"; outlined: false; font.pixelSize: Theme.px(12); onClicked: page.showSecrets = !page.showSecrets }
         }
         PairsEditor_ {
@@ -478,24 +475,6 @@ ColumnLayout {
                     onEditingFinished: page.setField("cwd", text.trim())
                 }
             }
-            ColumnLayout {
-                Layout.fillWidth: true
-                visible: detail.hasPi
-                Label { text: "How pi shows its tools"; color: Theme.muted; font.pixelSize: Theme.px(12) }
-                ComboField {
-                    Layout.fillWidth: true
-                    readonly property var values: ["", "codemode", "deferred", "direct", "hidden"]
-                    model: ["Default (code mode)", "Code mode: called from scripts", "Deferred: found with tool search", "Direct: like built-in tools", "Hidden"]
-                    currentIndex: Math.max(0, values.indexOf(detail.f.exposure))
-                    onActivated: i => page.setField("exposure", values[i])
-                }
-            }
-            ColumnLayout {
-                Layout.fillWidth: true
-                visible: detail.hasPi
-                Label { text: "Description (pi tells the model)"; color: Theme.muted; font.pixelSize: Theme.px(12) }
-                AppTextField { Layout.fillWidth: true; text: detail.f.description; onEditingFinished: page.setField("description", text) }
-            }
         }
 
         // Status and tools (saved servers).
@@ -508,25 +487,11 @@ ColumnLayout {
                 text: !detail.st ? "Not tested yet."
                     : detail.st.state === "testing" ? "Testing…"
                     : detail.st.state === "connected" ? "Connected" + (detail.st.server ? " to " + detail.st.server : "") + "."
-                    : detail.st.state === "needs_auth" ? "The server wants you to sign in. If you have signed in with pi or omp, sessions still work: harlo's test can't use that sign-in."
+                    : detail.st.state === "needs_auth" ? "The server wants you to sign in. Claude Code signs in to it from its own /mcp; Harlo can't sign in to servers yet, and harlo's test can't use a sign-in."
                     : detail.st.error
                 color: detail.st && detail.st.state === "failed" ? Theme.error : Theme.muted
             }
             FlatButton { objectName: "mcpTest"; text: "Test"; font.pixelSize: Theme.px(12); enabled: !(detail.st && detail.st.state === "testing"); onClicked: Mcp.test(page.scope, page.editing.oldName) }
-        }
-        RowLayout {
-            visible: page.editing !== null && !page.editing.isNew && !detail.local
-            spacing: 8
-            Label { text: "Sign in:"; color: Theme.muted; font.pixelSize: Theme.px(12) }
-            FlatButton { visible: detail.hasPi; text: "with pi"; font.pixelSize: Theme.px(12); onClicked: page.runInTerminal(Mcp.signInCommand("pi", detail.f.name)) }
-            FlatButton {
-                visible: page.editing !== null && page.editing.harnesses.includes("omp")
-                text: "with omp"
-                font.pixelSize: Theme.px(12)
-                onClicked: page.runInTerminal(Mcp.signInCommand("omp", detail.f.name))
-                ToolTip.visible: hovered
-                ToolTip.text: "Opens omp in a terminal; type /mcp reauth " + detail.f.name
-            }
         }
         Repeater {
             model: detail.st && detail.st.state === "connected" ? (page.showAllTools ? detail.st.tools : detail.st.tools.slice(0, 12)) : []
@@ -621,7 +586,7 @@ ColumnLayout {
         ColumnLayout {
             width: parent.width
             spacing: 8
-            Hint_ { text: "Paste an mcpServers snippet from Claude, Cursor, VS Code, pi or omp." }
+            Hint_ { text: "Paste an mcpServers snippet from Claude, Cursor, VS Code or another agent." }
             ScrollView {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 180

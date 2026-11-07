@@ -30,8 +30,8 @@ Rectangle {
     function toggleExpanded() { expanded = !expanded; input.forceActiveFocus() }
     onSessionChanged: expanded = false
 
-    // Per-session modes, kept by the workspace (which writes omp's overlay).
-    /// omp's approval mode for this session; "" for pi.
+    // Per-session modes, kept by the workspace.
+    /// The session's approval mode; "" for an agent without a shield.
     readonly property string approvalMode: Workspace.modesRevision >= 0 ? Workspace.approvalMode(session.key) : ""
     readonly property bool planOn: Workspace.modesRevision >= 0 && Workspace.planMode(session.key)
     function togglePlan() { Workspace.setPlanMode(session.key, !planOn) }
@@ -129,10 +129,6 @@ Rectangle {
     }
     Timer { interval: 80; repeat: true; running: root.recording; onTriggered: root.micLevel = Dictation.level(); onRunningChanged: root.micLevel = 0 }
     Timer { id: noteTimer; interval: 8000; onTriggered: root.dictationNote = "" }
-    // Test hook.
-    function openBtw() { btw.open() }
-    property alias btwPopup: btw
-    property alias goalPopup: goalPopup
     function cursorToEnd() { input.cursorPosition = input.length }
     function insertText(t) { input.insert(input.cursorPosition, t); input.forceActiveFocus() }
     // For `--selftest`: popups live outside the page item.
@@ -400,16 +396,6 @@ Rectangle {
         }
     }
 
-    // Goal and side question open over the composer's left end (from their
-    // buttons, or the ⋯ menu in a narrow chat).
-    GoalPopover {
-        id: goalPopup
-        session: root.session
-        draft: root.text
-        x: 8
-        y: -height - 6
-        onDraftUsed: root.text = ""
-    }
     // Hand off, second opinion, committee (orchestration).
     property alias delegatePopover: delegate
     DelegatePopover {
@@ -427,20 +413,6 @@ Rectangle {
         AppMenuItem { objectName: "delegateCommittee"; text: "Committee…"; hint: "two agents plan"; onTriggered: delegate.show("committee") }
         AppMenuItem { objectName: "delegateSplit"; text: "Split into helpers…"; hint: "parts at once"; onTriggered: delegate.show("split") }
     }
-    BtwPopover {
-        id: btw
-        session: root.session
-        x: 8
-        y: -height - 6
-    }
-    // A narrow chat: goal, side question and Ask first in one menu.
-    AppMenu {
-        id: moreMenu
-        AppMenuItem { text: root.session.goalJson !== "" ? "Goal…" : "Set a goal…"; onTriggered: goalPopup.open() }
-        AppMenuItem { text: "Side question (btw)…"; onTriggered: btw.open() }
-        AppMenuItem { text: "Ask first"; marked: root.session.askFirst; onTriggered: root.session.setAskFirstForSession(!root.session.askFirst) }
-    }
-
     // The thinking levels, asked for when the model is known (ready for
     // the first click) and again when the menu opens; "reading" until the
     // agent answers (it may have to start first).
@@ -614,7 +586,6 @@ Rectangle {
         // stays on the bar.
         readonly property bool narrow: width < 560
         readonly property bool tight: width < 420
-        readonly property bool omp: root.session.harness === "omp" || root.session.harness === "demo"
 
         ComposerIconButton {
             objectName: "attachButton"
@@ -685,52 +656,7 @@ Rectangle {
             tip: "Delegate: hand off to another agent, get a second opinion, or form a committee"
             onClicked: delegateMenu.popup(this, 0, -delegateMenu.implicitHeight - 6)
         }
-        // omp: a goal it keeps working toward across turns.
-        ComposerIconButton {
-            id: goalButton
-            objectName: "goalButton"
-            visible: bar.omp && !root.dictationActive && !bar.tight
-            readonly property bool hasGoal: root.session.goalJson !== ""
-            iconName: hasGoal ? "target-fill" : "target"
-            tint: hasGoal ? Theme.info : Theme.foreground
-            on: goalPopup.opened
-            tip: hasGoal ? "Goal: see it above the composer" : "Set a goal: omp keeps working toward it across turns"
-            onClicked: goalPopup.opened ? goalPopup.close() : goalPopup.open()
-        }
-        // omp: a side question that doesn't interrupt the agent.
-        ComposerIconButton {
-            id: btwButton
-            objectName: "btwButton"
-            visible: bar.omp && !root.dictationActive && !bar.tight
-            iconName: "chat-thread"
-            on: btw.opened
-            tip: "Side question (btw): ask about the session without interrupting the agent"
-            onClicked: btw.opened ? btw.close() : btw.open()
-        }
-        // omp: ask the agent to clarify with its `ask` tool before starting.
-        ComposerIconButton {
-            id: askFirstToggle
-            objectName: "askFirstButton"
-            visible: bar.omp && !root.dictationActive && !bar.tight
-            readonly property bool askOn: root.session.askFirst
-            iconName: "question"
-            tint: askOn ? Theme.primary : Theme.foreground
-            on: askOn
-            tip: askOn ? "Ask first is on: the agent checks with you (its ask tool) before deciding anything you didn't specify"
-                         : "Ask first: have the agent ask about unclear points and decisions before it starts"
-            onClicked: root.session.setAskFirstForSession(!askOn)
-        }
-        ComposerIconButton {
-            objectName: "moreButton"
-            visible: bar.omp && bar.tight && !root.dictationActive
-            iconName: "more"
-            tint: root.session.askFirst || root.session.goalJson !== "" ? Theme.primary : Theme.foreground
-            on: moreMenu.opened
-            tip: "Goal, side question, Ask first"
-            onClicked: moreMenu.popup(this, 0, -moreMenu.implicitHeight - 6)
-        }
-        // What runs without asking (omp's tools.approvalMode; for pi, its
-        // permission extension's prompts that harlo answers); click cycles.
+        // What runs without asking; click cycles.
         ComposerIconButton {
             id: permissionsButton
             objectName: "permissionsButton"
@@ -809,7 +735,6 @@ Rectangle {
             text: bar.tight ? "" : root.planOn ? "Plan" : "Build"
             tint: root.planOn ? Theme.warning : Theme.success
             tip: (root.planOn ? "Plan: the agent explores and proposes a plan; no files change"
-                              + (bar.omp ? " (edits are blocked, commands need your approval)" : "")
                               : "Build: the agent makes changes")
                  + "\nClick or Tab to switch"
             onClicked: { root.togglePlan(); input.forceActiveFocus() }

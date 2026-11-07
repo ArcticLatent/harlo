@@ -1,18 +1,15 @@
-//! MCP servers for omp, pi, Claude and Harlo (Settings → MCP),
-//! globally and per project:
+//! MCP servers for Claude and Harlo (Settings → MCP), globally and per
+//! project:
 //!
 //! | | global | project |
 //! |---|---|---|
-//! | omp | `~/.omp/agent/mcp.json` | `<project>/.omp/mcp.json` |
-//! | pi | `~/.pi/agent/mcp.json` (`$PI_CODING_AGENT_DIR`) | `<project>/.pi/mcp.json` (trusted projects) |
 //! | Claude | `~/.claude.json` (`$CLAUDE_CONFIG_DIR`), changed with `claude mcp` | `<project>/.mcp.json` |
 //! | Harlo | `~/.config/harlo-agent/mcp.json` (`$XDG_CONFIG_HOME`) | `<project>/.harlo/mcp.json` (approved entries) |
 //!
-//! harlo shows one list for all and edits each agent's file in its own
-//! dialect: omp's timeouts are in milliseconds, pi's and Harlo's in
-//! seconds; pi and Harlo have no SSE; only pi has `exposure` and
-//! `description`; Claude has no off switch. Fields harlo doesn't edit (OAuth
-//! settings, pi's per-tool exposure, …) are kept as they are. Claude Code
+//! harlo shows one list for both and edits each agent's file in its own
+//! dialect: Harlo's timeouts are in seconds and it has no SSE; Claude has no
+//! folder, timeout or off switch. Fields harlo doesn't edit (OAuth settings,
+//! …) are kept as they are. Claude Code
 //! rewrites its `~/.claude.json` as it runs, so harlo changes its global
 //! servers with Claude's own `claude mcp add-json / remove`.
 //!
@@ -63,7 +60,7 @@ pub fn host_home(name: &str) -> PathBuf {
 }
 
 /// The harnesses harlo manages MCP servers for, in display order.
-pub const HARNESSES: [HarnessKind; 4] = [HarnessKind::Omp, HarnessKind::Pi, HarnessKind::Claude, HarnessKind::Harlo];
+pub const HARNESSES: [HarnessKind; 2] = [HarnessKind::Claude, HarnessKind::Harlo];
 
 /// The `claude` that changes Claude's global servers (Settings → Providers
 /// sets it; else the installed one).
@@ -84,15 +81,9 @@ pub fn config_path(kind: HarnessKind, scope: &Scope) -> PathBuf {
         (HarnessKind::Claude, Scope::Project(p)) => p.join(".mcp.json"),
         // A host's own (its defaults: harlo can't see its environment).
         (HarnessKind::Claude, Scope::Host(h)) => host_home(h).join(".claude.json"),
-        (HarnessKind::Pi, Scope::Host(h)) => host_home(h).join(".pi/agent/mcp.json"),
-        (HarnessKind::Harlo, Scope::Host(h)) => host_home(h).join(".config/harlo-agent/mcp.json"),
-        (HarnessKind::Harlo, Scope::Global) => harlo_dir().join("mcp.json"),
-        (HarnessKind::Harlo, Scope::Project(p)) => p.join(".harlo/mcp.json"),
-        (_, Scope::Host(h)) => host_home(h).join(".omp/agent/mcp.json"),
-        (HarnessKind::Pi, Scope::Global) => std::env::var_os("PI_CODING_AGENT_DIR").map(PathBuf::from).unwrap_or_else(|| home().join(".pi/agent")).join("mcp.json"),
-        (HarnessKind::Pi, Scope::Project(p)) => p.join(".pi/mcp.json"),
-        (_, Scope::Global) => home().join(".omp/agent/mcp.json"),
-        (_, Scope::Project(p)) => p.join(".omp/mcp.json"),
+        (_, Scope::Host(h)) => host_home(h).join(".config/harlo-agent/mcp.json"),
+        (_, Scope::Global) => harlo_dir().join("mcp.json"),
+        (_, Scope::Project(p)) => p.join(".harlo/mcp.json"),
     }
 }
 
@@ -182,7 +173,7 @@ pub fn harlo_approved(scope: &Scope, name: &str) -> Option<bool> {
 pub struct Form {
     pub name: String,
     pub enabled: bool,
-    /// "stdio", "http" or "sse" (omp only).
+    /// "stdio", "http" or "sse" (Claude only).
     pub transport: String,
     /// The program and its arguments (stdio).
     pub command: Vec<String>,
@@ -191,10 +182,6 @@ pub struct Form {
     pub env: Vec<(String, String)>,
     pub cwd: String,
     pub timeout_secs: Option<f64>,
-    /// pi: codemode (default), deferred, direct, hidden.
-    pub exposure: String,
-    /// pi: shown to the model.
-    pub description: String,
 }
 
 fn pairs(v: &Value) -> Vec<(String, String)> {
@@ -222,7 +209,7 @@ impl Form {
             _ => Vec::new(),
         };
         command.extend(v["args"].as_array().into_iter().flatten().filter_map(|a| a.as_str().map(str::to_owned)));
-        let timeout_secs = v["timeout"].as_f64().filter(|t| *t > 0.0).map(|t| if kind == HarnessKind::Omp { t / 1000.0 } else { t });
+        let timeout_secs = v["timeout"].as_f64().filter(|t| *t > 0.0);
         Form {
             name: name.to_owned(),
             // (Claude has no off switch.)
@@ -234,8 +221,6 @@ impl Form {
             env: pairs(&v["env"]),
             cwd: v["cwd"].as_str().unwrap_or_default().to_owned(),
             timeout_secs,
-            exposure: v["exposure"].as_str().unwrap_or_default().to_owned(),
-            description: v["description"].as_str().unwrap_or_default().to_owned(),
         }
     }
 
@@ -252,9 +237,9 @@ impl Form {
             }
         };
         let stdio = self.transport == "stdio";
-        // The transport: omp and Claude spell it out; pi infers it (written for http).
+        // The transport: Claude spells it out; Harlo infers it (written for http).
         let ty = match (kind, self.transport.as_str()) {
-            (HarnessKind::Omp | HarnessKind::Claude, t) => Some(json!(t)),
+            (HarnessKind::Claude, t) => Some(json!(t)),
             (_, "stdio") => m.get("type").filter(|t| *t == "stdio").cloned(),
             (_, _) => Some(json!("http")),
         };
@@ -272,15 +257,8 @@ impl Form {
             return Value::Object(m);
         }
         set(&mut m, "cwd", if stdio && !self.cwd.trim().is_empty() { Some(json!(self.cwd.trim())) } else { None });
-        let timeout = self.timeout_secs.filter(|t| *t > 0.0).map(|t| match kind {
-            HarnessKind::Omp => json!((t * 1000.0).round() as u64),
-            _ => if t.fract() == 0.0 { json!(t as u64) } else { json!(t) },
-        });
+        let timeout = self.timeout_secs.filter(|t| *t > 0.0).map(|t| if t.fract() == 0.0 { json!(t as u64) } else { json!(t) });
         set(&mut m, "timeout", timeout);
-        if kind == HarnessKind::Pi {
-            set(&mut m, "exposure", (!self.exposure.is_empty()).then(|| json!(self.exposure)));
-            set(&mut m, "description", (!self.description.trim().is_empty()).then(|| json!(self.description.trim())));
-        }
         m.insert("enabled".into(), json!(self.enabled));
         Value::Object(m)
     }
@@ -298,9 +276,6 @@ impl Form {
         }
         if self.transport != "stdio" && !(self.url.starts_with("http://") || self.url.starts_with("https://")) {
             return Some("Enter the server's http:// or https:// address.".into());
-        }
-        if self.transport == "sse" && kinds.contains(&HarnessKind::Pi) {
-            return Some("pi doesn't support SSE servers; untick pi, or use http.".into());
         }
         if self.transport == "sse" && kinds.contains(&HarnessKind::Harlo) {
             return Some("Harlo doesn't support SSE servers; untick Harlo, or use http.".into());
@@ -321,7 +296,7 @@ impl Form {
 /// A configured server, across harnesses.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Listed {
-    /// From omp's copy when it has one, else pi's.
+    /// From Claude's copy when it has one, else Harlo's.
     pub form: Form,
     pub harnesses: Vec<HarnessKind>,
     /// The copies differ (command, address, variables or switch).
@@ -426,7 +401,7 @@ fn write_config(path: &Path, v: &Value) -> Result<()> {
     crate::files::write_text(path, &text).with_context(|| format!("writing {}", path.display()))
 }
 
-/// Both harnesses' servers in a scope.
+/// Both agents' servers in a scope.
 pub fn load(scope: &Scope) -> Listing {
     let mut listing = Listing::default();
     for kind in HARNESSES {
@@ -444,11 +419,6 @@ pub fn load(scope: &Scope) -> Listing {
                 Some(s) => {
                     s.differs |= s.form.shared() != form.shared();
                     s.harnesses.push(kind);
-                    // pi-only fields come from pi's copy.
-                    if kind == HarnessKind::Pi {
-                        s.form.exposure = form.exposure;
-                        s.form.description = form.description;
-                    }
                 }
                 None => listing.servers.push(Listed { form, harnesses: vec![kind], differs: false }),
             }
@@ -593,8 +563,8 @@ pub fn remove(scope: &Scope, name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Servers from a pasted snippet: `{"mcpServers": {…}}` (Claude, Cursor,
-/// pi, omp), `{"mcp": {"servers": {…}}}` / `{"mcp": {…}}`,
+/// Servers from a pasted snippet: `{"mcpServers": {…}}` (Claude, Harlo and
+/// most other tools), `{"mcp": {"servers": {…}}}` / `{"mcp": {…}}`,
 /// `{name: {…}}`, or one server object (named "imported").
 pub fn parse_import(text: &str) -> Result<Vec<Form>> {
     let text = text.trim();
@@ -633,7 +603,7 @@ pub fn parse_import(text: &str) -> Result<Vec<Form>> {
             if let Some(disabled) = s["disabled"].as_bool() {
                 s["enabled"] = json!(!disabled);
             }
-            let mut f = Form::from_entry(HarnessKind::Pi, &name, &s);
+            let mut f = Form::from_entry(HarnessKind::Harlo, &name, &s);
             // Timeouts in other tools' files: milliseconds when large.
             f.timeout_secs = f.timeout_secs.map(|t| if t >= 1000.0 { t / 1000.0 } else { t });
             f
@@ -682,12 +652,16 @@ pub fn split_command(line: &str) -> Vec<String> {
 mod tests {
     use super::*;
 
+    /// Harlo's config folder is one for the process: one test at a time.
+    static HARLO_DIR: Mutex<()> = Mutex::new(());
+
     fn scratch() -> crate::scratch::Scratch {
         crate::scratch::Scratch::new(std::env::temp_dir().join(format!("harlo-mcp-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())))
     }
 
     #[test]
     fn harlos_project_servers_are_approved_as_saved() {
+        let _one = HARLO_DIR.lock().unwrap_or_else(|e| e.into_inner());
         let dir = scratch();
         let project = dir.join("proj");
         std::fs::create_dir_all(project.join(".harlo")).unwrap();
@@ -738,67 +712,67 @@ mod tests {
 
     #[test]
     fn reads_both_dialects() {
-        let omp = json!({"type":"stdio","command":"uvx","args":["blender-mcp"],"env":{"A":"1"},"timeout":300000,"enabled":true});
-        let pi = json!({"command":"uvx","args":["blender-mcp"],"env":{"A":"1"},"timeout":300,"exposure":"direct","description":"Blender","enabled":true});
-        let (fo, fp) = (Form::from_entry(HarnessKind::Omp, "blender", &omp), Form::from_entry(HarnessKind::Pi, "blender", &pi));
-        assert_eq!(fo.command, ["uvx", "blender-mcp"]);
-        assert_eq!((fo.timeout_secs, fp.timeout_secs), (Some(300.0), Some(300.0)));
-        assert_eq!(fo.shared(), fp.shared());
-        assert_eq!((fp.exposure.as_str(), fp.description.as_str()), ("direct", "Blender"));
-        let remote = Form::from_entry(HarnessKind::Pi, "r", &json!({"url":"https://x/mcp","headers":{"Authorization":"Bearer t"}}));
+        let claude = json!({"type":"stdio","command":"uvx","args":["blender-mcp"],"env":{"A":"1"}});
+        let harlo = json!({"command":"uvx","args":["blender-mcp"],"env":{"A":"1"},"timeout":300,"enabled":true});
+        let (fc, fh) = (Form::from_entry(HarnessKind::Claude, "blender", &claude), Form::from_entry(HarnessKind::Harlo, "blender", &harlo));
+        assert_eq!(fc.command, ["uvx", "blender-mcp"]);
+        assert_eq!((fc.timeout_secs, fh.timeout_secs), (None, Some(300.0)));
+        assert_eq!(fc.shared(), fh.shared());
+        let remote = Form::from_entry(HarnessKind::Harlo, "r", &json!({"url":"https://x/mcp","headers":{"Authorization":"Bearer t"}}));
         assert_eq!((remote.transport.as_str(), remote.headers.len()), ("http", 1));
     }
 
     #[test]
     fn writes_each_dialect_keeping_other_fields() {
-        let mut f = Form { name: "s".into(), enabled: true, transport: "stdio".into(), command: vec!["npx".into(), "-y".into(), "srv".into()], timeout_secs: Some(30.0), exposure: "direct".into(), ..Default::default() };
-        let omp = f.to_entry(HarnessKind::Omp, Some(&json!({"oauth":{"clientId":"c"},"requestIdFormat":"string"})));
-        assert_eq!(omp, json!({"oauth":{"clientId":"c"},"requestIdFormat":"string","type":"stdio","command":"npx","args":["-y","srv"],"timeout":30000,"enabled":true}));
-        let pi = f.to_entry(HarnessKind::Pi, Some(&json!({"toolExposure":{"a":"hidden"}})));
-        assert_eq!(pi, json!({"toolExposure":{"a":"hidden"},"command":"npx","args":["-y","srv"],"timeout":30,"exposure":"direct","enabled":true}));
+        let mut f = Form { name: "s".into(), enabled: true, transport: "stdio".into(), command: vec!["npx".into(), "-y".into(), "srv".into()], timeout_secs: Some(30.0), ..Default::default() };
+        let claude = f.to_entry(HarnessKind::Claude, Some(&json!({"oauth":{"clientId":"c"},"timeout":5})));
+        assert_eq!(claude, json!({"oauth":{"clientId":"c"},"type":"stdio","command":"npx","args":["-y","srv"]}));
+        let harlo = f.to_entry(HarnessKind::Harlo, Some(&json!({"note":"kept"})));
+        assert_eq!(harlo, json!({"note":"kept","command":"npx","args":["-y","srv"],"timeout":30,"enabled":true}));
         f.transport = "http".into();
         f.url = "https://h/mcp".into();
-        let remote = f.to_entry(HarnessKind::Pi, Some(&pi));
+        let remote = f.to_entry(HarnessKind::Harlo, Some(&harlo));
         assert!(remote.get("command").is_none() && remote["url"] == "https://h/mcp" && remote["type"] == "http");
     }
 
     #[test]
     fn saves_lists_and_removes_per_harness() {
+        let _one = HARLO_DIR.lock().unwrap_or_else(|e| e.into_inner());
         let dir = scratch();
         let scope = Scope::Project(dir.to_path_buf());
-        // An existing omp file with another server and its own key order.
-        std::fs::create_dir_all(dir.join(".omp")).unwrap();
-        std::fs::write(dir.join(".omp/mcp.json"), "{\n  \"$schema\": \"x\",\n  \"mcpServers\": {\n    \"zed\": {\"command\": \"z\"},\n    \"alpha\": {\"command\": \"a\"}\n  }\n}\n").unwrap();
+        // An existing file with other servers and its own key order.
+        std::fs::write(dir.join(".mcp.json"), "{\n  \"$schema\": \"x\",\n  \"mcpServers\": {\n    \"zed\": {\"command\": \"z\"},\n    \"alpha\": {\"command\": \"a\"}\n  }\n}\n").unwrap();
         let form = Form { name: "files".into(), enabled: true, transport: "stdio".into(), command: vec!["mcp-files".into()], ..Default::default() };
-        save(&scope, "", &form, &[HarnessKind::Omp, HarnessKind::Pi]).unwrap();
-        let omp: Value = serde_json::from_str(&std::fs::read_to_string(dir.join(".omp/mcp.json")).unwrap()).unwrap();
-        assert_eq!(omp["mcpServers"].as_object().unwrap().keys().collect::<Vec<_>>(), ["zed", "alpha", "files"], "order kept");
-        assert_eq!(omp["$schema"], "x");
-        assert!(dir.join(".pi/mcp.json").exists());
+        save(&scope, "", &form, &[HarnessKind::Claude, HarnessKind::Harlo]).unwrap();
+        let claude: Value = serde_json::from_str(&std::fs::read_to_string(dir.join(".mcp.json")).unwrap()).unwrap();
+        assert_eq!(claude["mcpServers"].as_object().unwrap().keys().collect::<Vec<_>>(), ["zed", "alpha", "files"], "order kept");
+        assert_eq!(claude["$schema"], "x");
+        assert!(dir.join(".harlo/mcp.json").exists());
         let l = load(&scope);
         let files = l.servers.iter().find(|s| s.form.name == "files").unwrap();
-        assert_eq!(files.harnesses, [HarnessKind::Omp, HarnessKind::Pi]);
+        assert_eq!(files.harnesses, [HarnessKind::Claude, HarnessKind::Harlo]);
         assert!(!files.differs);
-        // Rename, and only for pi: gone from omp.
+        // Rename, and only for Harlo: gone from Claude's.
         let renamed = Form { name: "files2".into(), ..form.clone() };
-        save(&scope, "files", &renamed, &[HarnessKind::Pi]).unwrap();
+        save(&scope, "files", &renamed, &[HarnessKind::Harlo]).unwrap();
         let l = load(&scope);
         assert!(l.servers.iter().all(|s| s.form.name != "files"));
-        assert_eq!(l.servers.iter().find(|s| s.form.name == "files2").unwrap().harnesses, [HarnessKind::Pi]);
+        assert_eq!(l.servers.iter().find(|s| s.form.name == "files2").unwrap().harnesses, [HarnessKind::Harlo]);
         // A name taken by another server is refused.
-        assert!(save(&scope, "files2", &Form { name: "alpha".into(), ..renamed.clone() }, &[HarnessKind::Omp]).is_err());
+        assert!(save(&scope, "files2", &Form { name: "alpha".into(), ..renamed.clone() }, &[HarnessKind::Claude]).is_err());
         set_enabled(&scope, "files2", false).unwrap();
-        let pi: Value = serde_json::from_str(&std::fs::read_to_string(dir.join(".pi/mcp.json")).unwrap()).unwrap();
-        assert_eq!(pi["mcpServers"]["files2"]["enabled"], false);
+        let harlo: Value = serde_json::from_str(&std::fs::read_to_string(dir.join(".harlo/mcp.json")).unwrap()).unwrap();
+        assert_eq!(harlo["mcpServers"]["files2"]["enabled"], false);
         assert!(!load(&scope).servers.iter().find(|s| s.form.name == "files2").unwrap().form.enabled);
         assert!(set_enabled(&scope, "nope", true).is_err());
         remove(&scope, "files2").unwrap();
         assert!(load(&scope).servers.iter().all(|s| s.form.name != "files2"));
         // A broken file is reported, not overwritten.
-        std::fs::write(dir.join(".pi/mcp.json"), "{oops").unwrap();
+        std::fs::write(dir.join(".harlo/mcp.json"), "{oops").unwrap();
         assert_eq!(load(&scope).errors.len(), 1);
-        assert!(save(&scope, "", &form, &[HarnessKind::Pi]).is_err());
+        assert!(save(&scope, "", &form, &[HarnessKind::Harlo]).is_err());
         std::fs::remove_dir_all(dir).unwrap();
+        let _ = std::fs::remove_dir_all(harlo_dir());
     }
 
     #[test]
@@ -822,11 +796,11 @@ mod tests {
 
     #[test]
     fn checks_forms() {
-        let mut f = Form { name: "ok".into(), transport: "sse".into(), url: "https://x".into(), ..Default::default() };
-        assert!(f.problem(&[HarnessKind::Omp]).is_none());
-        assert!(f.problem(&[HarnessKind::Pi]).is_some());
+        let mut f = Form { name: "ok".into(), transport: "sse".into(), url: "https://x".into(), enabled: true, ..Default::default() };
+        assert!(f.problem(&[HarnessKind::Claude]).is_none());
+        assert!(f.problem(&[HarnessKind::Harlo]).is_some());
         f.name = "bad name".into();
-        assert!(f.problem(&[HarnessKind::Omp]).is_some());
+        assert!(f.problem(&[HarnessKind::Claude]).is_some());
     }
 }
 
@@ -838,7 +812,7 @@ mod real_config {
     fn list_global() {
         let l = super::load(&super::Scope::Global);
         for s in &l.servers {
-            println!("{} {:?} differs={} transport={} timeout={:?} exposure={}", s.form.name, s.harnesses, s.differs, s.form.transport, s.form.timeout_secs, s.form.exposure);
+            println!("{} {:?} differs={} transport={} timeout={:?}", s.form.name, s.harnesses, s.differs, s.form.transport, s.form.timeout_secs);
         }
         println!("errors: {:?}", l.errors);
     }

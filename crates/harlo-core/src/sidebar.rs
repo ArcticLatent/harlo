@@ -563,7 +563,7 @@ mod tests {
 
     fn session(path: &str, cwd: &str, title: &str, age_secs: u64) -> SessionInfo {
         SessionInfo {
-            harness: HarnessKind::Pi,
+            harness: HarnessKind::Harlo,
             path: PathBuf::from(path),
             id: path.into(),
             cwd: PathBuf::from(cwd),

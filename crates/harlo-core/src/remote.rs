@@ -21,9 +21,9 @@ use anyhow::{Context, Result, bail};
 
 const SCHEME: &str = "ssh://";
 
-/// Folders where pi and omp usually live, ahead of the remote PATH (a
+/// Folders where agents usually live, ahead of the remote PATH (a
 /// non-interactive SSH command gets a minimal one).
-pub const PATH_PREFIX: &str = "$HOME/.local/bin:$HOME/.bun/bin:$HOME/.pi/agent/bin:$HOME/.npm-global/bin:$HOME/.cargo/bin:/usr/local/bin";
+pub const PATH_PREFIX: &str = "$HOME/.local/bin:$HOME/.bun/bin:$HOME/.npm-global/bin:$HOME/.cargo/bin:/usr/local/bin";
 
 /// A shell's PATH with the folders of [`PATH_PREFIX`] that are there and
 /// not on it yet, in front (for a terminal: the agents harlo starts there
@@ -477,9 +477,7 @@ pub struct HostInfo {
     /// `uname -m`, as harlo names machines (x86_64, aarch64…).
     pub arch: String,
     pub home: String,
-    /// The agents' paths on the host ("" when missing).
-    pub pi: String,
-    pub omp: String,
+    /// Claude Code's path on the host ("" when missing).
     pub claude: String,
     /// Their versions (`program` → "1.0.4").
     pub versions: std::collections::BTreeMap<String, String>,
@@ -502,14 +500,13 @@ pub fn launch(host: &Host) -> harlo_harness::RemoteLaunch {
     }
 }
 
-/// The agents harlo runs, as the host check names them.
-pub const AGENTS: [&str; 3] = ["omp", "pi", "claude"];
+/// The agents harlo finds on a host, as the host check names them (it
+/// brings Harlo itself).
+pub const AGENTS: [&str; 1] = ["claude"];
 
 /// How to install each agent (its official one-line installer).
 pub fn install_command(agent: &str) -> &'static str {
     match agent {
-        "pi" => "curl -fsSL https://pi.dev/install.sh | sh",
-        "omp" => "curl -fsSL https://omp.sh/install | sh",
         "claude" => "curl -fsSL https://claude.ai/install.sh | bash",
         _ => "",
     }
@@ -521,7 +518,7 @@ pub fn install_command(agent: &str) -> &'static str {
 // (HARLO_TEST_HOME: the click tests' scratch home on the test host.)
 const CHECK_SCRIPT: &str = r#"printf 'os=%s\narch=%s\nhome=%s\n' "$(uname -s)" "$(uname -m)" "${HARLO_TEST_HOME:-$HOME}"
 ver() { if command -v timeout >/dev/null 2>&1; then timeout 10 "$@"; else "$@"; fi; }
-for p in pi omp claude; do
+for p in claude; do
   w=$(command -v "$p" 2>/dev/null || true)
   case ":${HARLO_TEST_HIDE_AGENTS:-}:" in *":$p:"*) w="";; esac
   printf '%s=%s\n' "$p" "$w"
@@ -551,8 +548,6 @@ fn parse_check(text: &str) -> HostInfo {
                 "os" => info.os = v.to_owned(),
                 "arch" => info.arch = crate::remote_helper::normal_arch(v),
                 "home" => info.home = v.to_owned(),
-                "pi" => info.pi = v.to_owned(),
-                "omp" => info.omp = v.to_owned(),
                 "claude" => info.claude = v.to_owned(),
                 "claude_auth" => info.claude_auth = v.to_owned(),
                 "bwrap" => info.bwrap = v.to_owned(),
@@ -585,8 +580,6 @@ impl HostInfo {
     /// The agent is there.
     pub fn has(&self, agent: &str) -> bool {
         match agent {
-            "pi" => !self.pi.is_empty(),
-            "omp" => !self.omp.is_empty(),
             "claude" => !self.claude.is_empty(),
             // (harlo brings it.)
             "harlo" => crate::agent_host::not_there(self).is_none(),
@@ -667,7 +660,7 @@ pub fn disconnect_all() {
     }
 }
 
-/// A file in the host's home (`rel`, like `.omp/agent/config.yml`), read
+/// A file in the host's home (`rel`, like `.claude/settings.json`), read
 /// again only when older than `max_age`; "" when missing or unreachable.
 /// Blocks while reading: call it off the UI thread.
 pub fn home_file_cached(host_name: &str, rel: &str, max_age: Duration) -> String {

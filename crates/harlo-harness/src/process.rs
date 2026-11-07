@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use serde_json::{Value, json};
@@ -13,8 +12,6 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::ask_bridge::{Action, AskBridge};
-use crate::permission_bridge::PermissionBridge;
 use crate::event::{HarnessEvent, HarnessKind, Translator};
 use crate::framing::{ChunkAssembler, read_record};
 use crate::protocol_log::ProtocolLog;
@@ -111,13 +108,9 @@ pub struct Harness {
     tx: mpsc::UnboundedSender<Outgoing>,
     pending: Pending,
     next_id: AtomicU64,
-    /// pi: its `ask_user_question` dialogs as harlo's question card.
-    ask: Arc<Mutex<AskBridge>>,
-    permissions: Arc<Mutex<PermissionBridge>>,
 }
 
 const STDERR_TAIL_LINES: usize = 80;
-const READY_TIMEOUT: Duration = Duration::from_secs(15);
 
 impl Harness {
     /// Spawns the harness. Must be called inside a tokio runtime context.
@@ -145,11 +138,6 @@ impl Harness {
                     Some(p) => p,
                     None => crate::remote_program(&remote.host, cfg.kind)?,
                 };
-                // harlo's tools there (pi and omp take the bridge from their
-                // config on the host): the bridge and the forward in place.
-                if matches!(cfg.kind, HarnessKind::Pi | HarnessKind::Omp) {
-                    let _ = crate::mcp_bridge_for(Some(remote));
-                }
                 let mut cmd = Command::new("ssh");
                 cmd.args(&remote.ssh_args)
                     .arg(remote_script(remote, &program.to_string_lossy(), &args, &cfg.cwd, &cfg.env))
@@ -188,21 +176,17 @@ impl Harness {
         let (events_tx, events_rx) = mpsc::unbounded_channel();
         let pending: Pending = Arc::default();
         let stderr_tail: Arc<Mutex<VecDeque<String>>> = Arc::default();
-        let (ready_tx, ready_rx) = oneshot::channel::<Value>();
-
-        let ask: Arc<Mutex<AskBridge>> = Arc::default();
-        let permissions: Arc<Mutex<PermissionBridge>> = Arc::default();
-        let reader = tokio::spawn(read_loop(cfg.kind, stdout, events_tx.clone(), pending.clone(), ready_tx, log.clone(), (cfg.kind == HarnessKind::Pi).then(|| (ask.clone(), permissions.clone(), tx.clone()))));
+        let reader = tokio::spawn(read_loop(cfg.kind, stdout, events_tx.clone(), pending.clone(), log.clone()));
         let stderr_done = tokio::spawn(stderr_loop(stderr, stderr_tail.clone(), log.clone()));
         let (kill_tx, kill_rx) = oneshot::channel();
-        tokio::spawn(write_loop(cfg.kind, stdin, rx, ready_rx, events_tx.clone(), kill_tx, log));
+        tokio::spawn(write_loop(stdin, rx, events_tx.clone(), kill_tx, log));
         tokio::spawn(wait_loop(child, reader, kill_rx, events_tx, stderr_done, stderr_tail));
 
-        Ok((Self { kind: cfg.kind, tx, pending, next_id: AtomicU64::new(1), ask, permissions }, events_rx))
+        Ok((Self { kind: cfg.kind, tx, pending, next_id: AtomicU64::new(1) }, events_rx))
     }
 
     pub(crate) fn from_parts(kind: HarnessKind, tx: mpsc::UnboundedSender<Outgoing>, pending: Pending) -> Self {
-        Self { kind, tx, pending, next_id: AtomicU64::new(1), ask: Arc::default(), permissions: Arc::default() }
+        Self { kind, tx, pending, next_id: AtomicU64::new(1) }
     }
 
     pub fn kind(&self) -> HarnessKind {
@@ -224,18 +208,9 @@ impl Harness {
 
     /// Sends a command and waits for its response `data`.
     pub async fn request(&self, cmd: Value) -> Result<Value> {
-        // pi: the shield is harlo's own, for its permission prompts.
-        if self.kind == HarnessKind::Pi && cmd["type"] == "harlo_set_modes" {
-            self.permissions.lock().unwrap().set_shield(cmd["approval"].as_str().unwrap_or_default());
-            return Ok(Value::Null);
-        }
-        // pi has no such command: its package's subagents come as events.
-        if self.kind == HarnessKind::Pi && cmd["type"] == "get_subagents" {
-            return Ok(json!({ "subagents": [] }));
-        }
-        // pi can only clear its whole queue: what's kept goes back in, in
+        // The queue can only be cleared whole: what's kept goes back in, in
         // order (as text: a queued message's images don't come back).
-        if matches!(self.kind, HarnessKind::Pi | HarnessKind::Harlo) && matches!(cmd["type"].as_str(), Some("remove_queued_message" | "promote_queued_message")) {
+        if self.kind == HarnessKind::Harlo && matches!(cmd["type"].as_str(), Some("remove_queued_message" | "promote_queued_message")) {
             let promote = cmd["type"] == "promote_queued_message";
             let text = cmd["message"].as_str().unwrap_or_default();
             let queue = if promote { "followUp" } else { cmd["queue"].as_str().unwrap_or("followUp") };
@@ -280,8 +255,7 @@ impl Harness {
     }
 
     /// Sends a user prompt. `images` are `ImageContent` values (see
-    /// [`image_from_file`]). Returns the request id (omp `prompt_result`
-    /// repeats it).
+    /// [`image_from_file`]). Returns the request id.
     pub fn prompt(&self, text: &str, images: Vec<Value>, mode: SendMode) -> String {
         let mut cmd = json!({ "type": "prompt", "message": text });
         if !images.is_empty() {
@@ -309,11 +283,6 @@ impl Harness {
             Value::Array(_) => json!({ "answers": answer }),
             other => json!({ "value": other }),
         };
-        let bridged = self.permissions.lock().unwrap().answer(request_id, &answer).or_else(|| self.ask.lock().unwrap().answer(request_id, &answer));
-        if let Some(response) = bridged {
-            let _ = self.tx.send(Outgoing::Frame(response));
-            return;
-        }
         answer["type"] = json!("extension_ui_response");
         answer["id"] = json!(request_id);
         // Not a command: no id of our own, no response expected.
@@ -347,16 +316,14 @@ pub fn image_from_file(path: &Path) -> Result<Value> {
 
 fn launch_args(cfg: &HarnessConfig) -> Vec<String> {
     let mut args: Vec<String> = match cfg.kind {
-        HarnessKind::Pi | HarnessKind::Harlo => vec!["--mode".into(), "rpc".into()],
-        // rpc-ui registers prompt-capable tools such as `ask`.
-        HarnessKind::Omp => vec!["--mode".into(), "rpc-ui".into()],
+        HarnessKind::Harlo => vec!["--mode".into(), "rpc".into()],
         HarnessKind::Claude | HarnessKind::Demo => vec![],
     };
     match &cfg.session {
         SessionTarget::New => {}
         SessionTarget::Ephemeral => args.push("--no-session".into()),
         SessionTarget::Resume(path) => {
-            args.push(if cfg.kind == HarnessKind::Omp { "--resume" } else { "--session" }.into());
+            args.push("--session".into());
             args.push(if cfg.remote.is_some() { on_host(path) } else { path.to_string_lossy().into_owned() });
         }
     }
@@ -384,8 +351,6 @@ pub fn resolve_program(kind: HarnessKind) -> Option<PathBuf> {
     }
     let home = PathBuf::from(std::env::var_os("HOME")?);
     let known = match kind {
-        HarnessKind::Pi => vec![home.join(".pi/agent/bin/pi"), home.join(".local/bin/pi")],
-        HarnessKind::Omp => vec![home.join(".local/bin/omp"), home.join(".bun/bin/omp")],
         HarnessKind::Claude => vec![home.join(".local/bin/claude"), home.join(".claude/local/claude"), PathBuf::from("/usr/local/bin/claude"), PathBuf::from("/usr/bin/claude")],
         HarnessKind::Harlo => vec![home.join(".local/bin/harlo-agent")],
         HarnessKind::Demo => vec![],
@@ -411,16 +376,12 @@ async fn read_loop(
     stdout: tokio::process::ChildStdout,
     events: mpsc::UnboundedSender<HarnessEvent>,
     pending: Pending,
-    ready_tx: oneshot::Sender<Value>,
     log: Option<Arc<ProtocolLog>>,
-    // pi: its question and permission dialogs, and where their answers go.
-    bridges: Option<(Arc<Mutex<AskBridge>>, Arc<Mutex<PermissionBridge>>, mpsc::UnboundedSender<Outgoing>)>,
 ) {
     let mut reader = BufReader::with_capacity(256 * 1024, stdout);
     let mut buf = Vec::new();
     let mut chunks = ChunkAssembler::default();
     let mut translator = Translator::new(kind);
-    let mut ready_tx = Some(ready_tx);
 
     loop {
         let record = match read_record(&mut reader, &mut buf).await {
@@ -460,48 +421,11 @@ async fn read_loop(
             let _ = events.send(HarnessEvent::ProtocolError("rpc_chunk sequence interrupted".into()));
         }
 
-        match frame["type"].as_str() {
-            Some("ready") => {
-                if let Some(tx) = ready_tx.take() {
-                    let _ = tx.send(frame);
-                }
+        if frame["type"] == "response" {
+            let waiter = frame["id"].as_str().and_then(|id| pending.lock().unwrap().remove(id));
+            if let Some(waiter) = waiter {
+                let _ = waiter.send(frame);
                 continue;
-            }
-            Some("response") => {
-                let waiter = frame["id"].as_str().and_then(|id| pending.lock().unwrap().remove(id));
-                if let Some(waiter) = waiter {
-                    let _ = waiter.send(frame);
-                    continue;
-                }
-            }
-            _ => {}
-        }
-
-        // pi's `ask_user_question`: harlo's question card. Its permission
-        // package's prompts (a subagent's can come at any time): harlo's
-        // approvals.
-        if let Some((ask, permissions, out)) = &bridges {
-            let action = if frame["type"] == "extension_ui_request" {
-                match permissions.lock().unwrap().on_request(&frame) {
-                    Action::Pass => ask.lock().unwrap().on_request(&frame),
-                    action => action,
-                }
-            } else {
-                ask.lock().unwrap().on_event(&frame);
-                Action::Pass
-            };
-            match action {
-                Action::Pass => {}
-                Action::Show(card) => {
-                    if events.send(HarnessEvent::UiRequest(card)).is_err() {
-                        return;
-                    }
-                    continue;
-                }
-                Action::Answer(response) => {
-                    let _ = out.send(Outgoing::Frame(response));
-                    continue;
-                }
             }
         }
 
@@ -516,47 +440,12 @@ async fn read_loop(
 }
 
 async fn write_loop(
-    kind: HarnessKind,
     mut stdin: tokio::process::ChildStdin,
     mut rx: mpsc::UnboundedReceiver<Outgoing>,
-    ready_rx: oneshot::Receiver<Value>,
     events: mpsc::UnboundedSender<HarnessEvent>,
     kill_tx: oneshot::Sender<()>,
     log: Option<Arc<ProtocolLog>>,
 ) {
-    // omp announces itself with a `ready` frame; hold user commands until
-    // then and configure the protocol first. pi has no handshake.
-    if kind == HarnessKind::Omp {
-        let ready = tokio::time::timeout(READY_TIMEOUT, ready_rx).await;
-        let ready = match ready {
-            Ok(Ok(frame)) => frame,
-            _ => {
-                let _ = events.send(HarnessEvent::ProtocolError("omp did not send a ready frame".into()));
-                Value::Null
-            }
-        };
-        let supports_v2 = ready["supportedProtocolVersions"]
-            .as_array()
-            .is_some_and(|v| v.iter().any(|x| x.as_u64() == Some(2)));
-        let mut setup = Vec::new();
-        if supports_v2 {
-            // Oversized frames become rpc_chunk sequences instead of failing.
-            setup.push(json!({ "id": "harlo-setup-protocol", "type": "negotiate_protocol", "protocolVersion": 2 }));
-        }
-        // Without this, every message_update carries a full message snapshot.
-        setup.push(json!({ "id": "harlo-setup-filter", "type": "set_event_filter", "events": null, "messageUpdates": "delta" }));
-        // One `ask` request per tool call, with every question, instead of a
-        // `select` per question. Builds without it answer with a failed
-        // response and keep sending `select`, which the UI also handles.
-        setup.push(json!({ "id": "harlo-setup-ask", "type": "set_ask_dialog", "enabled": true }));
-        // Subagent start/progress/end frames (not their full event streams).
-        setup.push(json!({ "id": "harlo-setup-subagents", "type": "set_subagent_subscription", "level": "progress" }));
-        for frame in setup {
-            if write_frame(&mut stdin, &frame, log.as_deref()).await.is_err() {
-                return;
-            }
-        }
-    }
     let _ = events.send(HarnessEvent::Ready);
 
     let mut kill_tx = Some(kill_tx);
@@ -615,9 +504,8 @@ async fn wait_loop(
     // Drain stdout fully before reporting the exit so no events are lost.
     tokio::select! {
         _ = reader => {}
-        // Asked to stop: its stdin is closed (an orderly exit; pi left
-        // killed holds a lock the next pi waits ~25 s for); killed only if it
-        // lingers.
+        // Asked to stop: its stdin is closed (an orderly exit); killed only
+        // if it lingers.
         Ok(()) = kill_rx => {
             if tokio::time::timeout(std::time::Duration::from_secs(3), child.wait()).await.is_err() {
                 let _ = child.start_kill();
@@ -669,20 +557,18 @@ mod tests {
     #[test]
     fn launch_args_per_harness() {
         let cfg = |kind, session| HarnessConfig { kind, program: None, cwd: PathBuf::from("/"), session, extra_args: vec![], env: vec![], remote: None };
-        assert_eq!(launch_args(&cfg(HarnessKind::Pi, SessionTarget::Resume("/s.jsonl".into()))), ["--mode", "rpc", "--session", "/s.jsonl"]);
         assert_eq!(launch_args(&cfg(HarnessKind::Harlo, SessionTarget::Resume("/s.jsonl".into()))), ["--mode", "rpc", "--session", "/s.jsonl"]);
         assert_eq!(launch_args(&cfg(HarnessKind::Harlo, SessionTarget::Ephemeral)), ["--mode", "rpc", "--no-session"]);
-        assert_eq!(launch_args(&cfg(HarnessKind::Omp, SessionTarget::Resume("/s.jsonl".into()))), ["--mode", "rpc-ui", "--resume", "/s.jsonl"]);
-        assert_eq!(launch_args(&cfg(HarnessKind::Omp, SessionTarget::Ephemeral)), ["--mode", "rpc-ui", "--no-session"]);
+        assert_eq!(launch_args(&cfg(HarnessKind::Claude, SessionTarget::New)), Vec::<String>::new());
     }
 
     #[test]
     fn remote_command_line() {
         let mut remote = RemoteLaunch { host: "nas".into(), ssh_args: vec!["me@nas".into()], prelude: "PATH=\"$HOME/.local/bin:$PATH\";".into(), cleanup: String::new() };
-        let script = remote_script(&remote, "omp", &["--mode".into(), "rpc-ui".into(), "--resume".into(), "/s/it's.jsonl".into()], Path::new("ssh://nas/home/me/my proj"), &[("A".into(), "1 2".into())]);
-        assert_eq!(script, r#"PATH="$HOME/.local/bin:$PATH"; cd '/home/me/my proj' && exec env 'A=1 2' omp --mode rpc-ui --resume '/s/it'\''s.jsonl'"#);
+        let script = remote_script(&remote, "harlo-agent", &["--mode".into(), "rpc".into(), "--session".into(), "/s/it's.jsonl".into()], Path::new("ssh://nas/home/me/my proj"), &[("A".into(), "1 2".into())]);
+        assert_eq!(script, r#"PATH="$HOME/.local/bin:$PATH"; cd '/home/me/my proj' && exec env 'A=1 2' harlo-agent --mode rpc --session '/s/it'\''s.jsonl'"#);
         remote.cleanup = "rm -f /tmp/x".into();
-        assert_eq!(remote_script(&remote, "pi", &[], Path::new("/w"), &[]), r#"PATH="$HOME/.local/bin:$PATH"; cd /w && pi; status=$?; rm -f /tmp/x; exit $status"#);
+        assert_eq!(remote_script(&remote, "harlo-agent", &[], Path::new("/w"), &[]), r#"PATH="$HOME/.local/bin:$PATH"; cd /w && harlo-agent; status=$?; rm -f /tmp/x; exit $status"#);
     }
 
     #[test]
@@ -692,29 +578,28 @@ mod tests {
         }
         crate::set_remote_program(put);
         assert_eq!(crate::remote_program("nas", HarnessKind::Harlo).unwrap(), Path::new("/home/me/.cache/harlo/harlo-agent-00ff"));
-        // The others: that machine's PATH finds them.
-        assert_eq!(crate::remote_program("nas", HarnessKind::Omp).unwrap(), Path::new("omp"));
+        // Others: that machine's PATH finds them.
+        assert_eq!(crate::remote_program("nas", HarnessKind::Claude).unwrap(), Path::new("claude"));
     }
 
-    /// A pi that reads and never answers: harlo's own replies don't wait on
-    /// it, and what's left unanswered ends when it's stopped.
+    /// An agent that reads and never answers: what's left unanswered ends
+    /// when it's stopped.
+    use std::time::Duration;
+
     #[tokio::test]
-    async fn pi_gets_its_subagent_list_from_harlo() {
-        let dir = std::env::temp_dir().join(format!("harlo-silent-pi-{}", std::process::id()));
+    async fn unanswered_requests_end_with_the_stop() {
+        let dir = std::env::temp_dir().join(format!("harlo-silent-agent-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let program = dir.join("pi");
+        let program = dir.join("harlo-agent");
         std::fs::write(&program, "#!/bin/sh\nwhile read -r _; do :; done\n").unwrap();
         std::fs::set_permissions(&program, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-        let cfg = HarnessConfig { kind: HarnessKind::Pi, program: Some(program), cwd: dir.clone(), session: SessionTarget::Ephemeral, extra_args: vec![], env: vec![], remote: None };
+        let cfg = HarnessConfig { kind: HarnessKind::Harlo, program: Some(program), cwd: dir.clone(), session: SessionTarget::Ephemeral, extra_args: vec![], env: vec![], remote: None };
         let spawned = {
             let _dir = crate::protocol_log::TEST_DIR.lock().unwrap_or_else(|e| e.into_inner());
             Harness::spawn(cfg)
         };
         let (harness, _events) = spawned.unwrap();
         let wait = Duration::from_secs(5);
-        let listed = tokio::time::timeout(wait, harness.request(json!({ "type": "get_subagents" }))).await.expect("no waiting on pi").unwrap();
-        assert_eq!(listed, json!({ "subagents": [] }));
-
         let asked = harness.request(json!({ "type": "get_available_models" }));
         tokio::pin!(asked);
         assert!(tokio::time::timeout(Duration::from_millis(200), &mut asked).await.is_err(), "it never answers");
@@ -722,20 +607,6 @@ mod tests {
         let stopped = tokio::time::timeout(wait, asked).await.expect("ended by the stop").unwrap_err();
         assert_eq!(stopped.to_string(), "harness exited before responding");
         std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    /// omp on a real SSH server, no prompts (not run by default):
-    /// `HARLO_TEST_SSH="$(scripts/test-sshd.sh start /tmp/x)" cargo test -p harlo-harness -- --ignored omp_over_ssh`
-    #[tokio::test]
-    #[ignore]
-    async fn omp_over_ssh() {
-        let ssh_args: Vec<String> = std::env::var("HARLO_TEST_SSH").expect("HARLO_TEST_SSH").split_whitespace().map(str::to_owned).collect();
-        let remote = RemoteLaunch { host: "t".into(), ssh_args, prelude: "PATH=\"$HOME/.local/bin:$PATH\"; export PATH;".into(), cleanup: String::new() };
-        let cfg = HarnessConfig { kind: HarnessKind::Omp, program: None, cwd: std::env::temp_dir(), session: SessionTarget::Ephemeral, extra_args: vec![], env: vec![], remote: Some(remote) };
-        let (harness, _events) = Harness::spawn(cfg).unwrap();
-        let state = tokio::time::timeout(Duration::from_secs(30), harness.request(json!({ "type": "get_state" }))).await.unwrap().unwrap();
-        println!("model over ssh: {}", state["model"]["id"]);
-        assert!(state.get("model").is_some(), "{state}");
     }
 
     #[test]

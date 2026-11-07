@@ -111,10 +111,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         for i in 0..KEEP_FILES + 3 {
-            std::fs::write(dir.join(format!("20000101-0000{i:02}-pi-1.jsonl")), "").unwrap();
+            std::fs::write(dir.join(format!("20000101-0000{i:02}-harlo-1.jsonl")), "").unwrap();
         }
         set_dir(Some(dir.clone()));
-        let log = ProtocolLog::open(HarnessKind::Pi, Path::new("/usr/bin/pi"), &["--mode".into(), "rpc".into()], Path::new("/tmp")).unwrap();
+        let log = ProtocolLog::open(HarnessKind::Harlo, Path::new("/usr/bin/harlo-agent"), &["--mode".into(), "rpc".into()], Path::new("/tmp")).unwrap();
         log.frame("out", br#"{"type":"prompt","message":"hi"}"#);
         log.frame("in", b"not json\n");
         log.stderr("warning: something");
@@ -124,7 +124,7 @@ mod tests {
         let mut files: Vec<PathBuf> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.path()).collect();
         files.sort();
         assert_eq!(files.len(), KEEP_FILES);
-        assert!(!files.iter().any(|f| f.ends_with("20000101-000000-pi-1.jsonl")), "oldest pruned");
+        assert!(!files.iter().any(|f| f.ends_with("20000101-000000-harlo-1.jsonl")), "oldest pruned");
         let newest = files.last().unwrap();
         let lines: Vec<Value> = std::fs::read_to_string(newest).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
         assert_eq!(lines.len(), 4);

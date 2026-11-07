@@ -15,7 +15,6 @@ Rectangle {
     property alias draftView: draftView
     property alias subagentDock: subagentDock
     property alias todoDock: todoDock
-    property alias goalDock: goalDock
     property alias requestDock: requestDock
     property alias branchDialog: branchDialog
     property alias subagentDialog: subagentDialog
@@ -189,11 +188,11 @@ Rectangle {
     }
     // Branches of the active session's file (header button when > 1).
     property int branchCount: 0
-    // (Read off the UI thread: a remote session's file over SSH. Only pi's and
-    // Oh My Pi's sessions branch.)
+    // (Read off the UI thread: a remote session's file over SSH. Sessions in
+    // the tree format, Harlo's, can branch.)
     function refreshBranches() {
         const file = Workspace.sessionFile(Workspace.activeKey)
-        if (file === "" || !["pi", "omp", "demo"].includes(session.harness)) branchCount = 0
+        if (file === "" || !["harlo", "demo"].includes(session.harness)) branchCount = 0
         else Workspace.requestSessionBranches(file)
     }
     Connections {
@@ -319,9 +318,7 @@ Rectangle {
             Layout.fillHeight: true
             visible: root.isDraft
             onSignInOnHost: (agent, host) => root.signInOnHost(agent, host)
-            onStartedSession: (key, askFirst) => {
-                if (key !== "" && askFirst)
-                    session.setAskFirstForSession(true)
+            onStartedSession: key => {
                 if (Workspace.tabs.some(t => t.startsWith("view:new\t")))
                     Workspace.closeTab("view:new")
             }
@@ -442,7 +439,6 @@ Rectangle {
                 session: root.session
                 onOpenDiff: path => root.openDiff(path)
                 onEditRequested: row => root.session.editAndResend(row)
-                onForkRequested: row => root.session.forkAt(row)
                 onUndoRequested: key => undoDialog.show(key)
                 onSubagentRequested: (agent, steer) => subagentDialog.show(agent, steer)
                 promptRail: Workspace.setting("prompt_rail") !== "0"
@@ -472,7 +468,7 @@ Rectangle {
 
         }
 
-        // omp's `ask`: all of one call's questions together.
+        // The agent's `ask`: all of one call's questions together.
         AskPanel {
             id: askPanel
             Layout.fillWidth: true
@@ -524,7 +520,7 @@ Rectangle {
                     Label {
                         Layout.fillWidth: true
                         readonly property string tool: session.requestTitle.split("\n")[0].replace(/^Allow tool:\s*/, "")
-                        text: tool === "goal" ? "Approval needed: omp wants to update its goal" : "Approval needed: " + tool
+                        text: "Approval needed: " + tool
                         color: Theme.foreground
                         font.bold: true
                         elide: Text.ElideRight
@@ -611,17 +607,6 @@ Rectangle {
             }
         }
 
-        // omp goal mode.
-        GoalDock {
-            id: goalDock
-            Layout.fillWidth: true
-            Layout.leftMargin: transcript.gutter
-            Layout.rightMargin: transcript.gutter
-            Layout.topMargin: 8
-            session: root.session
-            visible: goal !== null && dismissed !== goal.id && !root.covered
-        }
-
         // The shared plan (a project with the plan on).
         PlanDock {
             id: planDock
@@ -646,7 +631,7 @@ Rectangle {
             visible: tasks.length > 0 && !root.covered
         }
 
-        // omp subagents (task tool).
+        // The agent's subagents (its task tool).
         SubagentDock {
             id: subagentDock
             Layout.fillWidth: true
@@ -677,7 +662,7 @@ Rectangle {
                     required property string modelData
                     required property int index
                     // Every agent's can be dropped, and a follow-up sent now.
-                    readonly property bool editable: ["omp", "claude", "pi", "harlo", "demo"].includes(session.harness)
+                    readonly property bool editable: ["claude", "harlo", "demo"].includes(session.harness)
                     width: parent.width
                     implicitHeight: 22
                     HoverHandler { id: queuedHover }
@@ -788,60 +773,6 @@ Rectangle {
             }
         }
 
-        // pi or omp uses Claude through a Claude subscription: Anthropic
-        // bills that as extra usage (pi says so only in its terminal).
-        Rectangle {
-            id: extraUsageBanner
-            objectName: "extraUsageBanner"
-            readonly property bool applies: root.hasSession && (root.session.harness === "pi" || root.session.harness === "omp")
-                && root.session.modelId.startsWith("anthropic/")
-                && Workspace.setting("extra_usage_notice") !== "0"
-            // (Another machine's: its own sign-in, asked there.)
-            readonly property string agent: !root.hasSession ? "" : root.session.harness
-                + (root.session.cwd.startsWith("ssh://") ? "@" + root.session.cwd.substring(6).split("/")[0] : "")
-            property bool dismissed: false
-            Layout.fillWidth: true
-            Layout.leftMargin: transcript.gutter
-            Layout.rightMargin: transcript.gutter
-            Layout.topMargin: 8
-            visible: applies && !dismissed && Accounts.revision >= 0 && Accounts.extraUsage(agent) && !root.covered
-            implicitHeight: extraUsageRow.implicitHeight + 18
-            radius: 10
-            color: Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, 0.1)
-            border.color: Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, 0.35)
-            RowLayout {
-                id: extraUsageRow
-                anchors.fill: parent
-                anchors.margins: 9
-                anchors.leftMargin: 12
-                spacing: 10
-                Icon { name: "alert"; color: Theme.warning; implicitWidth: 16; implicitHeight: 16 }
-                Label {
-                    Layout.fillWidth: true
-                    wrapMode: Text.Wrap
-                    text: Theme.harnessLabel(root.hasSession ? root.session.harness : "") + " uses Claude through your Claude subscription. Anthropic bills that as extra usage, per token, not from your plan's limits."
-                    color: Theme.foreground
-                    font.pixelSize: Theme.px(12.5)
-                }
-                FlatButton {
-                    text: "Manage extra usage"
-                    font.pixelSize: Theme.px(12)
-                    onClicked: Qt.openUrlExternally("https://claude.ai/settings/usage")
-                }
-                FlatButton {
-                    objectName: "extraUsageHide"
-                    text: "Don't show again"
-                    font.pixelSize: Theme.px(12)
-                    outlined: false
-                    accent: Theme.muted
-                    onClicked: {
-                        Workspace.setSetting("extra_usage_notice", "0")
-                        extraUsageBanner.dismissed = true
-                    }
-                }
-            }
-        }
-
         // Pending attachments
         Flow {
             Layout.fillWidth: true
@@ -868,13 +799,12 @@ Rectangle {
         RowLayout {
             id: limitLine
             objectName: "limitLine"
-            // Whose limits: Claude's sign-in, Harlo's Codex sign-in, else the
-            // model's provider (as omp names its accounts).
+            // Whose limits: Claude's sign-in, or Harlo's Codex sign-in.
             readonly property string provider: {
                 const p = (session.modelId || "").split("/")[0]
                 if (session.harness === "claude") return "Claude"
                 if (session.harness === "harlo") return p === "codex" ? "openai-codex" : ""
-                return ["pi", "omp"].includes(session.harness) ? p : ""
+                return ""
             }
             // Its machine's limits (another's: what its Claude sessions said).
             readonly property string host: (/^ssh:\/\/([^\/]+)/.exec(session.cwd) || [])[1] || ""

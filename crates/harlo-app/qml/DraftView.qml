@@ -18,7 +18,6 @@ Rectangle {
     property string worktreeName: ""
     property string starter: ""          // starter id
     property var attachments: []
-    property bool askFirst: false
     // The shield: what runs without asking ("" the mode it starts in).
     property string approval: ""
     readonly property string startApproval: Workspace.modesRevision >= 0 && !parallel ? Workspace.draftApproval(effectiveHarness, projectId) : ""
@@ -27,21 +26,6 @@ Rectangle {
         const modes = ["always-ask", "write", "yolo"]
         approval = modes[(modes.indexOf(shownApproval) + 1) % modes.length]
     }
-    // omp: start the session as a goal (the text is its objective).
-    property bool asGoal: false
-    property alias goalBudget: goalBudgetField.text
-    /// "200k", "1.5m", "50000" → tokens; 0 for none, -1 when unreadable.
-    function parseBudget(t) {
-        const m = t.trim().toLowerCase().replace(/[, _]/g, "").match(/^(\d+(?:\.\d+)?)([km]?)$/)
-        if (t.trim() === "") return 0
-        if (!m) return -1
-        return Math.round(parseFloat(m[1]) * (m[2] === "k" ? 1e3 : m[2] === "m" ? 1e6 : 1))
-    }
-    /// Less than this is gone in a single turn (the system prompt alone
-    /// is several thousand tokens); the budget field warns.
-    readonly property int minUsefulBudget: 10000
-    readonly property bool goalOn: asGoal && !parallel && (effectiveHarness === "omp" || effectiveHarness === "demo")
-    onAsGoalChanged: if (asGoal) parallel = false
     // Run in parallel: one prompt to several lanes (harness + model each).
     property bool parallel: false
     property var lanes: [{ harness: "harlo", model: "" }, { harness: "harlo", model: "" }]
@@ -49,7 +33,6 @@ Rectangle {
     property var knownModels: []
     onParallelChanged: {
         if (parallel && knownModels.length === 0) knownModels = JSON.parse(Workspace.knownModels())
-        if (parallel) asGoal = false
         if (parallel) fitLanes()
     }
     // A remote project's lanes: its host's agents, and the models they
@@ -75,7 +58,7 @@ Rectangle {
         next[i][field] = value
         lanes = next
     }
-    signal startedSession(string key, bool askFirst)
+    signal startedSession(string key)
     signal addProjectRequested()
     /// Sign this agent in on that host.
     signal signInOnHost(string agent, string host)
@@ -188,8 +171,6 @@ Rectangle {
         harness = t.harness
         setModel(t.model !== "" ? t.model : defaultModel())
         approval = t.approval
-        askFirst = t.askFirst
-        asGoal = t.goal
         useWorktree = t.worktree && currentBranch !== ""
         if (useWorktree && worktreeName === "") worktreeName = Workspace.suggestBranch()
         input.text = t.text
@@ -198,18 +179,17 @@ Rectangle {
     }
     /// The draft as a template (what it would start with now).
     function draftTemplate() {
-        return { name: "", harness: effectiveHarness, model: model, approval: shownApproval, askFirst: askFirst,
-                 goal: goalOn, worktree: useWorktree, text: input.text }
+        return { name: "", harness: effectiveHarness, model: model, approval: shownApproval,
+                 worktree: useWorktree, text: input.text }
     }
-    /// "Claude · claude-opus-4 · edits · goal · new worktree"
+    /// "Claude · claude-opus-4 · edits · new worktree"
     function templateSummary(t) {
         const modes = { "always-ask": "asks before changes", "write": "edits freely", "yolo": "runs without asking" }
         return [t.harness ? Theme.harnessLabel(t.harness) : "", (t.model || "").replace(/^.*\//, ""), modes[t.approval] || "",
-                t.goal ? "goal" : "", t.worktree ? "new worktree" : "", t.askFirst ? "Ask first" : ""].filter(x => x !== "").join(" · ")
+                t.worktree ? "new worktree" : ""].filter(x => x !== "").join(" · ")
     }
     readonly property var starterInfo: starters.find(s => s.id === starter) || null
-    readonly property bool canSend: folder !== "" && (goalOn ? (input.text.trim() !== "" || starter !== "") && parseBudget(goalBudget) >= 0
-                                           : input.text.trim() !== "" || starter !== "" || attachments.length > 0)
+    readonly property bool canSend: folder !== "" && (input.text.trim() !== "" || starter !== "" || attachments.length > 0)
 
     // Opens the page for a project (-1: home folder), keeping any draft text.
     function openFor(id) {
@@ -239,12 +219,12 @@ Rectangle {
             return
         if (parallel) {
             Workspace.startRun(JSON.stringify({
-                projectId: projectId, prompt: input.text, starter: starter, attachments: attachments, askFirst: askFirst,
+                projectId: projectId, prompt: input.text, starter: starter, attachments: attachments,
                 worktrees: laneWorktrees && currentBranch !== "", base: currentBranch, lanes: lanes
             }))
             reset()
             parallel = false
-            startedSession("", false)
+            startedSession("")
             return
         }
         if (useWorktree && currentBranch === "")
@@ -253,14 +233,11 @@ Rectangle {
             worktreeName = Workspace.suggestBranch()
         const key = Workspace.startDraft(JSON.stringify({
             projectId: project ? projectId : -1, harness: effectiveHarness, worktreeBranch: useWorktree ? worktreeName.trim() : "",
-            base: currentBranch, starter: starter, text: typeof instead === "string" ? instead : input.text, attachments: attachments, askFirst: askFirst,
-            approval: startApproval === "" ? "" : approval, goal: goalOn, goalBudget: Math.max(0, parseBudget(goalBudget)), model: activeModel
+            base: currentBranch, starter: starter, text: typeof instead === "string" ? instead : input.text, attachments: attachments,
+            approval: startApproval === "" ? "" : approval, model: activeModel
         }))
-        const ask = askFirst && !goalOn
         reset()
-        asGoal = false
-        goalBudget = ""
-        startedSession(key, ask)
+        startedSession(key)
     }
     // Test hooks.
     property alias text: input.text
@@ -812,8 +789,7 @@ Rectangle {
                         selectionColor: Theme.selection
                         font.pixelSize: Theme.px(14)
                         placeholderTextColor: Theme.muted
-                        placeholderText: root.goalOn ? "The goal: what should be true when it's done? omp works on it turn after turn."
-                            : root.starterInfo
+                        placeholderText: root.starterInfo
                             ? root.starterInfo.prompt + "  Add details, or just send."
                             : "Plan, build, or ask."
                         background: null
@@ -839,34 +815,11 @@ Rectangle {
                         id: draftBar
                         Layout.fillWidth: true
                         spacing: 6
-                        readonly property bool omp: root.effectiveHarness === "omp" || root.effectiveHarness === "demo"
                         ComposerIconButton {
                             objectName: "draftAttachButton"
                             iconName: "add-circle"
                             tip: "Attach files"
                             onClicked: attachDialog.open()
-                        }
-                        // omp: start as a goal it keeps working toward across turns.
-                        ComposerIconButton {
-                            objectName: "draftGoalButton"
-                            visible: draftBar.omp && !root.parallel
-                            iconName: root.asGoal ? "target-fill" : "target"
-                            tint: root.asGoal ? Theme.info : Theme.foreground
-                            on: root.asGoal
-                            tip: root.asGoal ? "Goal is on: omp keeps working toward it, turn after turn, until it's done"
-                                             : "Start as a goal: omp keeps working toward it, turn after turn, until it's done"
-                            onClicked: root.asGoal = !root.asGoal
-                        }
-                        // omp: ask about unclear points before starting.
-                        ComposerIconButton {
-                            objectName: "draftAskButton"
-                            visible: root.effectiveHarness === "omp"
-                            iconName: "question"
-                            tint: root.askFirst ? Theme.primary : Theme.foreground
-                            on: root.askFirst
-                            tip: root.askFirst ? "Ask first is on: the agent asks about unclear points and decisions before it starts"
-                                               : "Ask first: have the agent ask about unclear points and decisions before it starts"
-                            onClicked: root.askFirst = !root.askFirst
                         }
                         // What runs without asking, as the chat's shield; click cycles.
                         ComposerIconButton {
@@ -919,27 +872,6 @@ Rectangle {
                             tip: root.parallel ? "Run in parallel is on: the prompt goes to every lane above"
                                                : "Run in parallel: send the prompt to several models at once and compare"
                             onClicked: root.parallel = !root.parallel
-                        }
-                        AppTextField {
-                            id: goalBudgetField
-                            objectName: "goalBudget"
-                            visible: root.goalOn
-                            Layout.preferredWidth: 110
-                            implicitHeight: 26
-                            font.pixelSize: Theme.px(12)
-                            placeholderText: "budget, e.g. 200k"
-                            color: root.parseBudget(text) < 0 ? Theme.error : Theme.foreground
-                            ToolTip.visible: hovered
-                            ToolTip.text: "Optional: omp stops the goal after this many tokens (200k, 1.5m…)"
-                            Keys.onReturnPressed: root.send()
-                        }
-                        // What the budget field means, and a warning for tiny budgets.
-                        Label {
-                            readonly property int budget: root.parseBudget(goalBudgetField.text)
-                            visible: root.goalOn && goalBudgetField.text.trim() !== ""
-                            text: budget < 0 ? "use e.g. 200k" : budget < root.minUsefulBudget ? budget.toLocaleString(Qt.locale("en_US"), "f", 0) + " tokens: too small for one turn" : budget.toLocaleString(Qt.locale("en_US"), "f", 0) + " tokens"
-                            color: budget < 0 ? Theme.error : budget < root.minUsefulBudget ? Theme.warning : Theme.muted
-                            font.pixelSize: Theme.px(11)
                         }
                         // Fills the gap; shortens (then vanishes) before Send moves.
                         Label {

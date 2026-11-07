@@ -36,7 +36,7 @@ Popup {
         const b = branches[i]
         if (!b) return
         const preview = Workspace.branchPreviewFile(file, b.leaf)
-        if (preview !== "") previewSession.bindFile(preview, harness === "pi" ? "pi" : "omp", cwd)
+        if (preview !== "") previewSession.bindFile(preview, harness !== "" ? harness : "harlo", cwd)
     }
     signal continued(string key)
     property alias previewSession: previewSession

@@ -83,7 +83,7 @@ fn now_ms() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
 }
 
-/// A message's own time (unix ms; pi and omp write it), else now.
+/// A message's own time (unix ms; Harlo writes it), else now.
 fn message_time(message: &Value) -> i64 {
     message["timestamp"].as_i64().filter(|t| *t > 0).unwrap_or_else(now_ms)
 }

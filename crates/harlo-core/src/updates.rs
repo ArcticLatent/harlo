@@ -8,8 +8,6 @@ use std::time::Duration;
 fn package(agent: &str) -> Option<&'static str> {
     match agent {
         "claude" => Some("@anthropic-ai/claude-code"),
-        "pi" => Some("@earendil-works/pi-coding-agent"),
-        "omp" => Some("@oh-my-pi/pi-coding-agent"),
         _ => None,
     }
 }
@@ -23,14 +21,12 @@ fn latest_url(agent: &str) -> Option<String> {
 pub fn update_args(agent: &str) -> &'static [&'static str] {
     match agent {
         "claude" => &["update"],
-        "pi" => &["update", "--self"],
-        "omp" => &["update"],
         _ => &[],
     }
 }
 
 /// The newest published version of an agent, or None (offline, say).
-/// `HARLO_TEST_LATEST=claude=2.1.300,pi=…` answers for the tests.
+/// `HARLO_TEST_LATEST=claude=2.1.300,…` answers for the tests.
 pub fn latest(agent: &str) -> Option<String> {
     if let Ok(test) = std::env::var("HARLO_TEST_LATEST") {
         return test.split(',').find_map(|kv| kv.split_once('=').filter(|(k, _)| *k == agent).map(|(_, v)| v.to_owned()));

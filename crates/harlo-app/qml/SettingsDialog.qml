@@ -34,7 +34,7 @@ Popup {
         { id: "voice", title: "Voice", icon: "mic", group: "harlo", keywords: "voice speech dictation microphone mic whisper transcribe speak" },
         { id: "shortcuts", title: "Shortcuts", icon: "command", group: "harlo", keywords: "keyboard keys hotkeys" },
         { id: "usage", title: "Usage", icon: "bar-chart-2", group: "harlo", keywords: "stats statistics tokens cost models tools" },
-        { id: "projects", title: "Projects", icon: "folder-3", group: "workspace", keywords: "project icon colour color name harness setup remove specs spec plan steps commit review pi packages" },
+        { id: "projects", title: "Projects", icon: "folder-3", group: "workspace", keywords: "project icon colour color name harness setup remove specs spec plan steps commit review" },
         { id: "worktrees", title: "Worktrees", icon: "git-branch", group: "workspace", keywords: "worktree folder location branch settled shelf finished merged closed pull request quiet archive" },
         { id: "git", title: "Git", icon: "git-repository", group: "workspace", keywords: "undo snapshot turn revert rollback github gitlab forgejo codeberg gitea hosting sign in login token credentials changes count repository hidden sidebar uncommitted commit message model ai" },
         { id: "schedules", title: "Schedules", icon: "history", group: "workspace", keywords: "schedule scheduled prompt cron timer daily weekday every hour morning automatic run" },
@@ -42,9 +42,8 @@ Popup {
         { id: "orchestration", title: "Orchestration", icon: "ai-agent", group: "agents", keywords: "orchestration skills handoff advisor committee second opinion delegate subagent agents start sessions mcp bridge tools" },
         { id: "remote", title: "Remote Instances", icon: "server", group: "agents", keywords: "remote ssh server host machine nas instance connect" },
         { id: "about", title: "About Harlo", icon: "information", group: "about", keywords: "about version release licence license mit website source code github changelog what's new report problem issue bug logs" },
-        { id: "providers", title: "Providers", icon: "robot-2", group: "agents", keywords: "providers harnesses harlo claude pi omp oh my pi binary path program agent models version enable disable debug log logs protocol crash diagnostics goal subagent model role sign in login log in account accounts api key oauth credentials" },
-        { id: "servers", title: "Model servers", icon: "server", group: "agents", keywords: "model servers local models ollama lm studio llama.cpp vllm sglang gateway openai compatible custom provider models.json models.yml providers.json pi omp harlo basalt" },
-        { id: "packages", title: "Extensions", icon: "code-box", group: "agents", keywords: "pi packages extensions permissions guardrails subagents web todo claude update" },
+        { id: "providers", title: "Providers", icon: "robot-2", group: "agents", keywords: "providers harnesses harlo claude binary path program agent models version enable disable debug log logs protocol crash diagnostics sandbox bubblewrap sign in login log in account accounts api key oauth credentials" },
+        { id: "servers", title: "Model servers", icon: "server", group: "agents", keywords: "model servers local models ollama lm studio llama.cpp vllm sglang gateway openai compatible custom provider providers.json harlo basalt" },
     ]
     // (About goes last, under no heading.)
     readonly property var groups: [["harlo", "harlo"], ["workspace", "Workspace"], ["agents", "Agents"], ["about", ""]]
@@ -388,7 +387,7 @@ Popup {
                 Layout.leftMargin: 16
                 Layout.topMargin: 24
                 Layout.bottomMargin: 4
-                subtitle: "Your plans' limits, and totals across all pi and omp sessions."
+                subtitle: "Your plans' limits, and totals across all Harlo and Claude sessions."
             }
             // Other machines: those connected, or whose limits were seen.
             readonly property var limitHosts: {
@@ -497,7 +496,7 @@ Popup {
                     Layout.fillWidth: true
                     sourceComponent: ({
                         general: generalPage, appearance: appearancePage, notifications: notificationsPage, voice: voicePage, devices: devicesPage,
-                        shortcuts: shortcutsPage, projects: projectsPage, worktrees: worktreesPage, git: gitPage, schedules: schedulesPage, providers: providersPage, servers: serversPage, packages: packagesPage, remote: remotePage, mcp: mcpPage, orchestration: orchestrationPage,
+                        shortcuts: shortcutsPage, projects: projectsPage, worktrees: worktreesPage, git: gitPage, schedules: schedulesPage, providers: providersPage, servers: serversPage, remote: remotePage, mcp: mcpPage, orchestration: orchestrationPage,
                         about: aboutPage
                     })[root.page] || null
                 }
@@ -1134,16 +1133,6 @@ Popup {
                         onToggled: { Workspace.setSetting("prompt_rail", checked ? "1" : "0"); root.promptRailToggled(checked) }
                     }
                 }
-                SettingRow {
-                    divider: true
-                    title: "Claude subscription notice"
-                    detail: "When Pi or Oh My Pi uses Claude through your Claude subscription, the chat says that Anthropic bills it as extra usage, per token."
-                    icon: "alert"
-                    AppSwitch {
-                        checked: Workspace.setting("extra_usage_notice") !== "0"
-                        onToggled: Workspace.setSetting("extra_usage_notice", checked ? "1" : "0")
-                    }
-                }
             }
         }
     }
@@ -1166,8 +1155,8 @@ Popup {
                 save()
             }
             readonly property var eventRows: [
-                { name: "completion", title: "Agent completion", detail: "A run finishes (and an omp goal ends)." },
-                { name: "subagent", title: "Subagent completion", detail: "An omp subagent finishes." },
+                { name: "completion", title: "Agent completion", detail: "A run finishes." },
+                { name: "subagent", title: "Subagent completion", detail: "A subagent finishes." },
                 { name: "error", title: "Agent errors", detail: "A reply fails, the harness stops unexpectedly, or a subagent fails." },
                 { name: "question", title: "Agent questions", detail: "The agent asks you something or wants a tool approved." },
                 { name: "limits", title: "Plan limits", detail: "A plan limit (Claude's, ChatGPT's) is used up, and when one you'd nearly or fully used resets, with a sound of its own.", fixed: true },
@@ -1747,11 +1736,11 @@ Popup {
                         Label { text: "In"; color: Theme.muted; font.pixelSize: Theme.px(12) }
                         ComboField { id: projectBox; Layout.fillWidth: true; model: ["Home folder"].concat(schedules.projects.map(p => p.name)) }
                         Repeater {
-                            model: [["", "Default"], ["omp", "omp"], ["pi", "pi"]]
+                            model: [["", "Default"], ["harlo", "Harlo"], ["claude", "Claude"]]
                             Pill { required property var modelData; text: modelData[1]; selected: editor.harness === modelData[0]; onClicked: editor.harness = modelData[0] }
                         }
                     }
-                    AppTextField { id: modelField; Layout.fillWidth: true; placeholderText: "Model (optional, e.g. openai-codex/gpt-5.6-luna)"; font.family: Theme.mono; font.pixelSize: Theme.px(12) }
+                    AppTextField { id: modelField; Layout.fillWidth: true; placeholderText: "Model (optional, provider/model)"; font.family: Theme.mono; font.pixelSize: Theme.px(12) }
                     RowLayout {
                         spacing: 6
                         Label { text: "When"; color: Theme.muted; font.pixelSize: Theme.px(12); Layout.rightMargin: 4 }
@@ -2501,7 +2490,6 @@ Popup {
         McpPage {
             compact: root.compact
             footerHost: root.pageFooter
-            onRunInTerminal: command => root.runInTerminalRequested(command)
         }
     }
 
@@ -2534,7 +2522,7 @@ Popup {
                 SettingRow {
                     title: "Orchestration"
                     detail: Workspace.orchestrationOn ? "On: agents get harlo's tools, and the composer has the Delegate button (hand off, second opinion, committee)."
-                                                      : "Off: agents get no harlo tools, there's no Delegate button, and harlo's skills and bridges are removed (turning it on puts them back)."
+                                                      : "Off: agents get no harlo tools, there's no Delegate button, and harlo's skills are removed (turning it on puts them back)."
                     icon: "ai-agent"
                     AppSwitch {
                         objectName: "orchEnabled"
@@ -2575,7 +2563,7 @@ Popup {
                 subtitle: orch.info.loading ? "Looking at " + orch.info.host + "…"
                     : "Optional: orchestration works without them, since the tools explain themselves and the Delegate button sends its own instructions. "
                       + "Turn on handoff, advisor or committee if you ask for those in your own words (\"get a second opinion from…\"), so agents follow the same recipe each time. "
-                      + "harlo installs them into " + orch.info.skillDirs.join(" and ") + ", where Claude, pi and omp find them, also outside harlo" + (orch.info.host === "" ? "; it keeps them up to date." : ".") + (orch.info.busy ? " Working…" : "")
+                      + "harlo installs them into " + orch.info.skillDirs.join(" and ") + ", where Claude Code and Harlo find them, also outside harlo" + (orch.info.host === "" ? "; it keeps them up to date." : ".") + (orch.info.busy ? " Working…" : "")
             }
             Group {
                 visible: Workspace.orchestrationOn
@@ -2611,8 +2599,8 @@ Popup {
                 visible: Workspace.orchestrationOn
                 Layout.topMargin: 22
                 title: "Tools in each agent" + orch.where
-                subtitle: orch.info.host === "" ? "The tools reach agents as an MCP server called harlo. Outside harlo it offers none."
-                    : "The tools reach agents on " + orch.info.host + " through a small bridge there (it needs python3) and harlo's connection to it. Outside harlo they offer none."
+                subtitle: orch.info.host === "" ? "harlo hands its tools to each session it starts: Harlo gets them over its own connection, Claude Code as an MCP server called harlo. Outside harlo they offer none."
+                    : "On " + orch.info.host + ", Harlo gets them over its own connection, and Claude Code through a small bridge there (it needs python3) and harlo's connection to it. Outside harlo they offer none."
             }
             Group {
                 visible: Workspace.orchestrationOn
@@ -2625,17 +2613,8 @@ Popup {
                         divider: index > 0
                         title: modelData.name
                         icon: "harness-" + modelData.id
-                        detail: modelData.bridge === "built-in" ? "Built in: harlo hands its tools to each session it starts." : "Adds the harlo server to " + modelData.config + "."
-                        // (A Row: the hidden one takes no room.)
-                        Row {
-                            Label { visible: agentRow.modelData.bridge === "built-in"; text: "Always on"; color: Theme.muted; font.pixelSize: Theme.px(12) }
-                            AppSwitch {
-                                visible: agentRow.modelData.bridge !== "built-in"
-                                objectName: "orchBridge-" + agentRow.modelData.id
-                                checked: agentRow.modelData.bridge === true
-                                onToggled: { orch.problem = Workspace.setOrchestrationBridge(agentRow.modelData.id, checked); orch.reload(); checked = Qt.binding(() => agentRow.modelData.bridge === true) }
-                            }
-                        }
+                        detail: "Built in: harlo hands its tools to each session it starts."
+                        Label { text: "Always on"; color: Theme.muted; font.pixelSize: Theme.px(12) }
                     }
                 }
             }
@@ -2661,7 +2640,7 @@ Popup {
                 Remotes.connectHost(name)
             }
             SectionHeader {
-                subtitle: "Work on other machines over SSH. Each one is an instance, with its own projects and sessions: switch to it from the instance menu at the top of the sidebar, then + Project adds its folders; its chats, terminal, git and files work there. harlo signs in with your SSH keys or agent. Each connected machine shows which agents it has (omp, pi, Claude), installs the missing ones for you, and opens a terminal there to sign Claude in."
+                subtitle: "Work on other machines over SSH. Each one is an instance, with its own projects and sessions: switch to it from the instance menu at the top of the sidebar, then + Project adds its folders; its chats, terminal, git and files work there. harlo signs in with your SSH keys or agent. Each connected machine shows whether it has Claude Code, installs it for you, and signs Claude in there; harlo brings Harlo itself."
             }
             RowLayout {
                 Layout.fillWidth: true
@@ -2795,7 +2774,7 @@ Popup {
                         spacing: 6
                         readonly property string folder: "ssh://" + hostBox.modelData.name + (hostBox.modelData.home || "")
                         Repeater {
-                            model: ["omp", "pi", "claude"]
+                            model: ["claude"]
                             Rectangle {
                                 id: agentChip
                                 required property string modelData
@@ -2912,7 +2891,7 @@ Popup {
         }
     }
 
-    // Your own model servers, for pi and Oh My Pi (their models files).
+    // Your own model servers, for Harlo (its providers.json).
     Component {
         id: serversPage
         ColumnLayout {
@@ -2920,7 +2899,7 @@ Popup {
             spacing: 0
             property int revision: 0
             readonly property var agents: (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()) : [])
-                .filter(p => ["pi", "omp", "harlo"].includes(p.id) && p.state !== "missing")
+                .filter(p => p.id === "harlo" && p.state !== "missing")
             // Other machines that are connected, and the servers their agents have.
             readonly property var hostNames: (Remotes.revision >= 0 ? JSON.parse(Remotes.hostsJson()) : []).filter(h => h.state === "connected").map(h => h.name)
             readonly property var onHosts: Accounts.hostServers !== "" ? JSON.parse(Accounts.hostServers) : ({})
@@ -3110,7 +3089,7 @@ Popup {
             Connections { target: Accounts; function onRevisionChanged() { srv.check() } }
             Timer { interval: 3000; repeat: true; running: srv.visible; onTriggered: srv.check() }
             SectionHeader {
-                subtitle: "Models you run yourself or your company serves, for Harlo, pi and Oh My Pi: they show in the model lists (under Local when they run on this computer or your network). Claude Code only uses Anthropic's models."
+                subtitle: "Models you run yourself or your company serves, for Harlo: they show in the model lists (under Local when they run on this computer or your network). Claude Code only uses Anthropic's models."
             }
             // The two ways to add one: set one up here, or connect to one.
             Rectangle {
@@ -3180,7 +3159,7 @@ Popup {
                 Layout.topMargin: 12
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
-                text: "Model servers are for Harlo, pi and Oh My Pi; none of them is installed."
+                text: "Model servers are for Harlo, which isn't installed."
                 color: Theme.muted
                 font.pixelSize: Theme.px(12.5)
             }
@@ -3275,9 +3254,7 @@ Popup {
                                 AppCheckBox {
                                     id: agentBox
                                     required property var modelData
-                                    // (Oh My Pi finds Ollama on its usual port by itself.)
-                                    readonly property bool builtIn: modelData.id === "omp" && serverItem.modelData.engine === "Ollama" && /:11434\/v1$/.test(serverItem.modelData.baseUrl)
-                                    readonly property bool has: builtIn || serverItem.modelData.agentIds.includes(modelData.id)
+                                    readonly property bool has: serverItem.modelData.agentIds.includes(modelData.id)
                                     objectName: "serverAgent-" + serverItem.modelData.name + "-" + modelData.id
                                     text: modelData.label
                                     font.pixelSize: Theme.px(12)
@@ -3287,7 +3264,7 @@ Popup {
                                     property bool busy: false
                                     property bool want: false
                                     checked: busy ? want : has
-                                    enabled: !busy && !builtIn
+                                    enabled: !busy
                                     onToggled: {
                                         const want = checked
                                         checked = Qt.binding(() => agentBox.busy ? agentBox.want : agentBox.has)
@@ -3315,9 +3292,6 @@ Popup {
                                         implicitWidth: 14
                                         implicitHeight: 14
                                     }
-                                    ToolTip.visible: hovered && builtIn
-                                    ToolTip.text: "Oh My Pi finds Ollama on this port by itself (as “ollama”), with all its models."
-                                    ToolTip.delay: 300
                                 }
                                 }
                             }
@@ -3353,7 +3327,7 @@ Popup {
                                         }
                                         Label {
                                             visible: hostRow.there.state === "ready" && hostRow.agentIds.length === 0
-                                            text: "no Harlo, pi or Oh My Pi there"
+                                            text: "no Harlo there"
                                             color: Theme.textFaint
                                             font.pixelSize: Theme.px(12)
                                             height: implicitHeight + 6
@@ -3365,7 +3339,7 @@ Popup {
                                                 required property string modelData
                                                 readonly property bool has: (hostRow.there.agents[modelData] || []).some(sv => sv.name === serverItem.modelData.name && sv.baseUrl === serverItem.modelData.baseUrl)
                                                 objectName: "serverHostAgent-" + serverItem.modelData.name + "-" + hostRow.modelData + "-" + modelData
-                                                text: ({ pi: "pi", omp: "Oh My Pi", harlo: "Harlo" })[modelData] || modelData
+                                                text: Theme.harnessLabel(modelData)
                                                 font.pixelSize: Theme.px(12)
                                                 checked: has
                                                 enabled: !hostRow.there.busy
@@ -3549,12 +3523,12 @@ Popup {
                     readonly property string host: modelData
                     readonly property var e: srv.hostEngines[host] || ({ state: "loading", list: [], busy: {} })
                     readonly property var there: srv.onHosts[host] || ({ state: "loading", agents: {} })
-                    readonly property var agentIds: ["pi", "omp", "harlo"].filter(id => (there.agents || {})[id] !== undefined)
+                    readonly property var agentIds: ["harlo"].filter(id => (there.agents || {})[id] !== undefined)
                     // Rows as this computer's: models by id, their contexts.
                     readonly property var rows: (e.list || []).map(r => ({
                         name: r.name, baseUrl: r.baseUrl, engine: r.engine, running: r.running, log: r.log, managed: true, here: r.here || "",
                         models: (r.models || []).map(m => m.id), contexts: (r.models || []).map(m => m.context || 0), rawModels: r.models || [],
-                        agentIds: ["pi", "omp", "harlo"].filter(id => ((there.agents || {})[id] || []).some(sv => sv.baseUrl === r.baseUrl)),
+                        agentIds: ["harlo"].filter(id => ((there.agents || {})[id] || []).some(sv => sv.baseUrl === r.baseUrl)),
                     }))
                     Layout.fillWidth: true
                     spacing: 0
@@ -3669,7 +3643,7 @@ Popup {
                                         spacing: 16
                                         Label {
                                             visible: hostBlock.there.state === "ready" && hostBlock.agentIds.length === 0
-                                            text: "No Harlo, pi or Oh My Pi on " + hostBlock.host
+                                            text: "No Harlo on " + hostBlock.host
                                             color: Theme.textFaint
                                             font.pixelSize: Theme.px(12)
                                             height: implicitHeight + 6
@@ -3681,7 +3655,7 @@ Popup {
                                                 required property string modelData
                                                 readonly property bool has: hostServer.modelData.agentIds.includes(modelData)
                                                 objectName: "hostServerAgent-" + hostBlock.host + "-" + hostServer.modelData.name + "-" + modelData
-                                                text: ({ pi: "pi", omp: "Oh My Pi", harlo: "Harlo" })[modelData] || modelData
+                                                text: Theme.harnessLabel(modelData)
                                                 font.pixelSize: Theme.px(12)
                                                 checked: has
                                                 enabled: !hostBlock.there.busy
@@ -3894,14 +3868,6 @@ Popup {
         }
     }
 
-    // The extensions harlo offers for pi.
-    Component {
-        id: packagesPage
-        PiPackages {
-            onOpenFile: path => { Workspace.openFileTab(path); root.close() }
-        }
-    }
-
     Component {
         id: providersPage
         ColumnLayout {
@@ -3936,7 +3902,7 @@ Popup {
                 Group {
                     visible: hostAgents.host !== null && hostAgents.host.state === "connected"
                     Repeater {
-                        model: ["omp", "pi", "claude", "harlo"]
+                        model: ["harlo", "claude"]
                         SettingRow {
                             id: hostAgent
                             required property string modelData
@@ -3979,7 +3945,7 @@ Popup {
                                 }
                                 FlatButton {
                                     objectName: "hostProviderAccounts-" + hostAgent.modelData
-                                    visible: hostAgent.found && hostAgent.modelData !== "omp"
+                                    visible: hostAgent.found
                                     text: hostAgents.open === hostAgent.modelData ? "Hide accounts" : "Accounts"
                                     font.pixelSize: Theme.px(12)
                                     onClicked: {
@@ -4186,19 +4152,11 @@ Popup {
                                     Layout.fillWidth: true
                                     Layout.topMargin: 4
                                     spacing: 6
-                                    readonly property bool omp: prov.modelData.id === "omp"
                                     readonly property var st: Accounts.revision >= 0 ? JSON.parse(Accounts.status(prov.modelData.id)) : ({ accounts: [] })
-                                    // omp: the providers it has models from (it lists no accounts), with
-                                    // the account its usage report names.
-                                    readonly property var ompFrom: omp ? [...new Set((prov.modelData.modelIds || []).map(m => m.split("/")[0]).filter(p => p !== ""))] : []
-                                    readonly property var quota: omp ? (JSON.parse(Workspace.quotaJson || "{}").accounts || []) : []
-                                    readonly property var rows: !omp ? (st.accounts || []) : ompFrom.map(p => {
-                                        const q = quota.find(a => a.provider === p && a.account)
-                                        return { id: p, label: p, detail: q ? q.account : "Signed in", signOut: false }
-                                    })
+                                    readonly property var rows: st.accounts || []
                                     property string signOutError: ""
-                                    onVisibleChanged: if (visible && !omp) Accounts.refresh(prov.modelData.id)
-                                    Component.onCompleted: if (visible && !omp) Accounts.refresh(prov.modelData.id)
+                                    onVisibleChanged: if (visible) Accounts.refresh(prov.modelData.id)
+                                    Component.onCompleted: if (visible) Accounts.refresh(prov.modelData.id)
                                     Label { text: "Accounts"; color: Theme.foreground; font.pixelSize: Theme.px(12.5); font.weight: Font.Medium }
                                     Repeater {
                                         model: acct.rows
@@ -4221,10 +4179,10 @@ Popup {
                                     }
                                     Label {
                                         objectName: "accountsNone-" + prov.modelData.id
-                                        visible: (acct.omp ? prov.modelData.state !== "checking" : acct.st.state === "ready" && (acct.st.error || "") === "") && acct.rows.length === 0
+                                        visible: acct.st.state === "ready" && (acct.st.error || "") === "" && acct.rows.length === 0
                                         Layout.fillWidth: true
                                         wrapMode: Text.Wrap
-                                        text: acct.omp ? "No models yet: sign omp in to a provider." : "Not signed in to anything yet."
+                                        text: "Not signed in to anything yet."
                                         color: Theme.warning
                                         font.pixelSize: Theme.px(12)
                                     }
@@ -4246,7 +4204,7 @@ Popup {
                                             onClicked: root.signInRequested(prov.modelData.id, prov.modelData.label)
                                         }
                                         Label {
-                                            visible: acct.st.state === "loading" && !acct.omp
+                                            visible: acct.st.state === "loading"
                                             text: "Checking…"
                                             color: Theme.muted
                                             font.pixelSize: Theme.px(12)
@@ -4322,34 +4280,11 @@ Popup {
                 }
             }
             Rule { }
-            SectionHeader { title: "omp" }
-            Group {
-                SettingRow {
-                    title: "Goals continue on their own"
-                    detail: "A goal (the compass button) keeps omp working turn after turn. omp only does that in its terminal UI unless told otherwise; harlo tells it through a config overlay for each omp session it starts (omp-overlays/ in harlo's data folder). Off: each goal turn needs a message from you. Applies to omp started afterwards."
-                    icon: "compass-3"
-                    AppSwitch {
-                        checked: Workspace.setting("goal_continue") !== "0"
-                        onToggled: Workspace.setSetting("goal_continue", checked ? "1" : "0")
-                    }
-                }
-                SettingRow {
-                    divider: true
-                    title: "Subagents fall back to the session's model"
-                    detail: "omp picks a subagent's model from its roles (smol, task, tiny) and fails when that model isn't available, whatever the session uses. On: each of those roles tries your configured model first, then the session's current model. Your omp config is not changed."
-                    icon: "node-tree"
-                    AppSwitch {
-                        checked: Workspace.setting("subagent_fallback") !== "0"
-                        onToggled: Workspace.setSetting("subagent_fallback", checked ? "1" : "0")
-                    }
-                }
-            }
-            Rule { }
             SectionHeader { title: "Diagnostics"; subtitle: "For tracking down problems. harlo.log has this run's messages (the last run's is harlo.log.1); crashes leave a crash-….log with a backtrace." }
             Group {
                 SettingRow {
                     title: "Log harness traffic"
-                    detail: "Writes every message to and from pi/omp, and their error output, to logs/protocol/ (one file per agent process, the last 40 kept). Applies to agents started afterwards; the logs contain your prompts and the agents' answers. Also on with --debug-protocol."
+                    detail: "Writes every message to and from the agents, and their error output, to logs/protocol/ (one file per agent process, the last 40 kept). Applies to agents started afterwards; the logs contain your prompts and the agents' answers. Also on with --debug-protocol."
                     icon: "bug"
                     AppSwitch {
                         checked: Workspace.setting("debug_protocol") === "1"

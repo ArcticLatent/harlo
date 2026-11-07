@@ -1,4 +1,4 @@
-//! Saved sessions on remote hosts, for the sidebar: the pi / omp / Claude / Harlo
+//! Saved sessions on remote hosts, for the sidebar: the Claude and Harlo
 //! session files of a host are listed over SSH and changed ones read in a
 //! batch, reported like local scan results (paths and folders as
 //! `ssh://host/…`): those outside the host's projects go in its Other
@@ -17,19 +17,18 @@ use crate::scanner::ScanDelta;
 
 /// Lists `<kind>\t<mtime>\t<size>\t<path>` for each session file (GNU find,
 /// else BSD stat).
-/// `HARLO_TEST_PI_SESSIONS` (tests) replaces pi's folder.
+/// `HARLO_TEST_SESSIONS` (tests) replaces Harlo's folder, and leaves
+/// Claude's out.
 const LIST_SCRIPT: &str = r#"list() { [ -d "$2" ] || return 0
 if find "$2" -maxdepth 0 -printf '' 2>/dev/null; then find "$2" -mindepth 2 -maxdepth 2 -name '*.jsonl' -type f -printf "$1\t%T@\t%s\t%p\n"
 else for f in "$2"/*/*.jsonl; do [ -f "$f" ] && printf '%s\t%s\t%s\t%s\n' "$1" "$(stat -f %m "$f")" "$(stat -f %z "$f")" "$f"; done; fi; }
-list omp "$HOME/.omp/agent/sessions"; list pi "${HARLO_TEST_PI_SESSIONS:-${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/sessions}"; list claude "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"; list harlo "${XDG_DATA_HOME:-$HOME/.local/share}/harlo-agent/sessions"; true"#;
+[ -n "$HARLO_TEST_SESSIONS" ] || list claude "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"; list harlo "${HARLO_TEST_SESSIONS:-${XDG_DATA_HOME:-$HOME/.local/share}/harlo-agent/sessions}"; true"#;
 
 /// The agent a listed file is of.
 fn listed_kind(name: &str) -> HarnessKind {
     match name {
-        "omp" => HarnessKind::Omp,
         "claude" => HarnessKind::Claude,
-        "harlo" => HarnessKind::Harlo,
-        _ => HarnessKind::Pi,
+        _ => HarnessKind::Harlo,
     }
 }
 
@@ -129,9 +128,12 @@ impl RemoteScanner {
     }
 }
 
-/// The pi, Oh My Pi and Harlo session files last listed on each host, for Stats.
-fn files() -> &'static std::sync::Mutex<HashMap<PathBuf, (HarnessKind, i64, u64)>> {
-    static FILES: std::sync::OnceLock<std::sync::Mutex<HashMap<PathBuf, (HarnessKind, i64, u64)>>> = std::sync::OnceLock::new();
+/// A listed file: its agent, modified time and size.
+type Listed = HashMap<PathBuf, (HarnessKind, i64, u64)>;
+
+/// The Harlo session files last listed on each host, for Stats.
+fn files() -> &'static std::sync::Mutex<Listed> {
+    static FILES: std::sync::OnceLock<std::sync::Mutex<Listed>> = std::sync::OnceLock::new();
     FILES.get_or_init(Default::default)
 }
 
@@ -139,10 +141,10 @@ fn files() -> &'static std::sync::Mutex<HashMap<PathBuf, (HarnessKind, i64, u64)
 fn note_files(prefix: &str, seen: &HashMap<PathBuf, (HarnessKind, i64, u64)>) {
     let mut files = files().lock().unwrap();
     files.retain(|p, _| !p.to_string_lossy().starts_with(prefix));
-    files.extend(seen.iter().filter(|(_, (k, ..))| matches!(k, HarnessKind::Pi | HarnessKind::Omp | HarnessKind::Harlo)).map(|(p, v)| (p.clone(), *v)));
+    files.extend(seen.iter().filter(|(_, (k, ..))| *k == HarnessKind::Harlo).map(|(p, v)| (p.clone(), *v)));
 }
 
-/// pi's, Oh My Pi's and Harlo's session files on other machines, as last listed:
+/// Harlo's session files on other machines, as last listed:
 /// `(ssh path, agent, modified (seconds), size)`.
 pub fn session_files() -> Vec<(PathBuf, HarnessKind, i64, u64)> {
     files().lock().unwrap().iter().map(|(p, (k, m, s))| (p.clone(), *k, *m, *s)).collect()
@@ -203,7 +205,7 @@ mod tests {
         let line = text.lines().find(|l| l.starts_with("harlo\t")).unwrap_or_else(|| panic!("{text}"));
         assert!(line.ends_with("/.local/share/harlo-agent/sessions/--work--/s.jsonl"), "{line}");
         assert_eq!(listed_kind("harlo"), HarnessKind::Harlo);
-        assert_eq!(listed_kind("pi"), HarnessKind::Pi);
+        assert_eq!(listed_kind("claude"), HarnessKind::Claude);
     }
 
     #[test]
@@ -212,9 +214,9 @@ mod tests {
         let args = remote::parse_ssh_command(&std::env::var("HARLO_TEST_SSH").expect("HARLO_TEST_SSH")).unwrap();
         let host = Host { name: "t".into(), ssh: args };
         remote::set_hosts(vec![host.clone()]);
-        // A pi sessions folder of our own (set through the SSH environment).
+        // A sessions folder of our own (set through the SSH environment).
         let dir = std::env::temp_dir().join(format!("harlo-remote-scan-{}", std::process::id()));
-        let sessions = dir.join("pi/sessions/--proj--");
+        let sessions = dir.join("harlo/sessions/--proj--");
         std::fs::create_dir_all(&sessions).unwrap();
         let proj = dir.join("proj");
         std::fs::create_dir_all(&proj).unwrap();
@@ -227,13 +229,13 @@ mod tests {
         // A big one: head and tail.
         let big = format!("{}{}", header(&proj, "big one"), "{\"type\":\"custom\",\"data\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}\n".repeat(10_000));
         std::fs::write(sessions.join("c.jsonl"), big).unwrap();
-        let host = Host { ssh: { let mut a = host.ssh.clone(); a.insert(0, "-o".into()); a.insert(1, format!("SetEnv=HARLO_TEST_PI_SESSIONS={}", dir.join("pi/sessions").display())); a }, ..host };
+        let host = Host { ssh: { let mut a = host.ssh.clone(); a.insert(0, "-o".into()); a.insert(1, format!("SetEnv=HARLO_TEST_SESSIONS={}", dir.join("harlo/sessions").display())); a }, ..host };
         let mut scanner = RemoteScanner::default();
         let delta = scanner.poll(&host).unwrap();
         let mut titles: Vec<String> = delta.upserts.iter().map(|i| i.first_message.clone()).collect();
         titles.sort();
         assert_eq!(titles, ["big one", "inside the project", "outside"], "{:?}", delta.upserts);
-        assert!(delta.upserts.iter().all(|i| i.path.starts_with("ssh://t/") && i.harness == HarnessKind::Pi && secs(i.modified) > 0));
+        assert!(delta.upserts.iter().all(|i| i.path.starts_with("ssh://t/") && i.harness == HarnessKind::Harlo && secs(i.modified) > 0));
         // (Outside the project: in Other sessions, its folder on the host.)
         assert!(delta.upserts.iter().any(|i| i.cwd == remote::join("t", "/elsewhere")));
         // Nothing changed: nothing to report.

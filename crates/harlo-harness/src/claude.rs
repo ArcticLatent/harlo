@@ -206,9 +206,9 @@ fn last_folder(tail: &str) -> Option<PathBuf> {
     Some(cwd.ancestors().find(|d| d.join(".git").exists()).unwrap_or(&cwd).to_path_buf())
 }
 
-/// Whether a transcript is the Claude extension for pi's: it runs Claude Code
-/// for a pi session, whose copy this is (the conversation is pi's, and listed
-/// as pi's). Its file doesn't name it, so this goes by how it runs: a history
+/// Whether a transcript is the Claude extension for pi's: it ran Claude Code
+/// for a pi session, whose copy this is (the conversation is pi's, not a
+/// Claude Code session of its own). Its file doesn't name it, so this goes by how it runs: a history
 /// it wrote in itself has its library's message ids; else Claude Code was
 /// started through the SDK, bypassing permissions, with none of its own tools
 /// and only the extension's. (The quotes can't match text in a message: there

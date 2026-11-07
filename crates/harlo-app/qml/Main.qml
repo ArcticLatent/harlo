@@ -173,7 +173,7 @@ ApplicationWindow {
         }
         function onHostConnected(host) { Remotes.adoptHost(host) }
     }
-    // Plan limits (omp usage): soon after starting, then every 10 minutes.
+    // Plan limits: soon after starting, then every 10 minutes.
     // Self-tests leave the real accounts alone.
     // (The last limits seen show at once; fresh ones soon after.)
     // `--check-start` (a package's check): the window loaded; then quit.
@@ -251,8 +251,6 @@ ApplicationWindow {
     Component.onCompleted: {
         // Phone access, if it's on.
         Phone.autostart()
-        // pi's extensions, once.
-        if (win.selftestDir === "") Accounts.setUpPackages()
         updateNotesProject()
         syncGitFolder()
         fitPanes()

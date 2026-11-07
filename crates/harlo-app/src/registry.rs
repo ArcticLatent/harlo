@@ -35,14 +35,6 @@ pub fn restart_idle(harness: &str) {
     }
 }
 
-/// Each of the harness's sessions on that machine ("" this one): restarted
-/// once it's idle, to pick up a change to its setup.
-pub fn restart_when_idle_on(harness: &str, host: &str) {
-    for live in map().lock().unwrap().values().filter(|l| l.harness == harness && harlo_core::remote::host_of(&l.cwd).unwrap_or_default() == host) {
-        live.handle.restart_when_idle();
-    }
-}
-
 /// Forgets a session. Its harness stops once no view holds the handle.
 pub fn remove(key: &str) -> Option<LiveRef> {
     map().lock().unwrap().remove(key)

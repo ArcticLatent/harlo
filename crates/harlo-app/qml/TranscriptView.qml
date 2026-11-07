@@ -16,9 +16,8 @@ Item {
     readonly property alias gutter: view.gutter
     /// A file-editing tool row asked to show its diff.
     signal openDiff(string path)
-    /// Your message at row `index`: edit and resend it / fork the session there.
+    /// Your message at row `index`: edit and resend it (the session forks there).
     signal editRequested(int index)
-    signal forkRequested(int index)
     /// Undo the turn of one of your messages (its row key).
     signal undoRequested(string rowKey)
     /// Your messages a turn can be undone to (`ChatSession.undoJson`): the
@@ -36,7 +35,7 @@ Item {
     }
     /// A subagent under a task tool row: view (or steer) it.
     signal subagentRequested(var agent, bool steer)
-    /// omp subagents of the session, shown under the tool call that started them.
+    /// The subagents of the session, shown under the tool call that started them.
     readonly property var subagents: session.subagentsJson !== "" ? JSON.parse(session.subagentsJson) : []
 
     function scrollToEnd() { view.follow = true; view.scrollToEnd() }
@@ -125,14 +124,8 @@ Item {
         HoverHandler { id: runHover; cursorShape: Qt.PointingHandCursor }
         TapHandler { onTapped: view.toggleRun(runHead.group, runHead.dflt) }
     }
-    /// What an omp approval asks, in words. omp's own goal tool asks too
-    /// (in approval modes other than yolo), with nothing but its `op`.
+    /// What an approval asks, in words.
     function approvalQuestion(tool, args) {
-        if (tool === "goal") {
-            const op = (args.match(/op=(\w+)/) || [])[1] || ""
-            return ({ complete: "Let omp mark the goal complete?", create: "Let omp set a goal?", resume: "Let omp resume the goal?",
-                      drop: "Let omp drop the goal?", get: "Let omp read the goal?" })[op] || "Let omp change the goal?"
-        }
         return "Allow " + tool + " to run?"
     }
     /// Brings row `i` to the middle and flashes it (search results).
@@ -415,10 +408,10 @@ Item {
                     width: view.width
                     implicitHeight: bubble.height + gap
                     HoverHandler { id: userHover }
-                    // Edit & resend / fork, on hover.
+                    // Edit & resend, on hover.
                     Row {
                         z: 2
-                        visible: userHover.hovered && ["pi", "omp", "claude", "harlo"].includes(root.session.harness)
+                        visible: userHover.hovered && ["claude", "harlo"].includes(root.session.harness)
                         anchors.right: bubble.right
                         anchors.rightMargin: 6
                         anchors.top: bubble.top
@@ -430,20 +423,8 @@ Item {
                             padding: 3
                             ToolTip.visible: hovered
                             ToolTip.delay: 400
-                            ToolTip.text: root.session.harness === "omp"
-                                ? "Branch the session here and put this message back in the composer"
-                                : "Fork into a new session from here and put this message back in the composer"
+                            ToolTip.text: "Fork into a new session from here and put this message back in the composer"
                             onClicked: root.editRequested(userRow.index)
-                        }
-                        FlatButton {
-                            visible: root.session.harness === "omp"
-                            text: "Fork"
-                            font.pixelSize: Theme.px(11)
-                            padding: 3
-                            ToolTip.visible: hovered
-                            ToolTip.delay: 400
-                            ToolTip.text: "Copy the session up to this message into a new session"
-                            onClicked: root.forkRequested(userRow.index)
                         }
                     }
                     // Between turns: a hairline.
@@ -844,7 +825,7 @@ Item {
                     required property bool groupOpen
                     readonly property bool open: view.expanded[rowKey] === true
                     readonly property var agents: callId !== "" ? root.subagents.filter(a => a.parentToolCallId === callId) : []
-                    // omp waits for your approval to run this call.
+                    // The agent waits for your approval to run this call.
                     readonly property bool asking: root.session.hasRequest && root.session.requestIsApproval && root.session.approvalRow === rowKey
                     // (Over the rows after it: its buttons are never covered.)
                     z: asking ? 2 : 0
@@ -946,7 +927,7 @@ Item {
                                 }
                                 Label { text: toolRow.open ? "▾" : "▸"; color: Theme.muted; visible: toolRow.text !== "" }
                             }
-                            // The subagents this call started (omp's task tool), as a tree.
+                            // The subagents this call started (the task tool), as a tree.
                             RowLayout {
                                 Layout.fillWidth: true
                                 Layout.leftMargin: 22
@@ -968,7 +949,7 @@ Item {
                                     }
                                 }
                             }
-                            // The approval: omp's details (reason, command…) and the answer.
+                            // The approval: its details (reason, command…) and the answer.
                             Label {
                                 Layout.fillWidth: true
                                 visible: text !== ""
@@ -1061,7 +1042,7 @@ Item {
                     required property string rowKey
                     required property string text
                     required property string title
-                    // Startup notices can be huge (e.g. omp listing every MCP tool).
+                    // Startup notices can be huge (e.g. a list of every MCP tool).
                     readonly property bool long: text.length > 240 || text.split("\n").length > 3
                     readonly property bool open: !long || view.expanded[rowKey] === true
                     readonly property real gap: root.gapAbove("notice", ListView.previousSection)

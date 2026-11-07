@@ -1,8 +1,7 @@
-//! Harnesses (pi, omp, Claude Code, Harlo) and the translation of their
+//! Harnesses (Harlo and Claude Code) and the translation of their
 //! protocols into one normalized event vocabulary.
 
 mod demo;
-mod ask_bridge;
 pub mod branches;
 pub mod claude;
 mod claude_run;
@@ -10,7 +9,6 @@ pub mod event;
 pub mod file_blocks;
 pub mod framing;
 pub mod mirror;
-mod permission_bridge;
 pub mod process;
 pub mod protocol_log;
 pub mod store;

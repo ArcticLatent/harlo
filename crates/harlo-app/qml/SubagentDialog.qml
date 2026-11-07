@@ -3,7 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import harlo
 
-// One omp subagent: its transcript (read from its session file, refreshed
+// One subagent: its transcript (read from its session file, refreshed
 // while it runs) and a field to steer it.
 Popup {
     id: root
@@ -20,7 +20,7 @@ Popup {
     function show(a, steer) {
         agent = a
         open()
-        transcriptSession.bindFile(a.sessionFile || "", parentSession ? parentSession.harness : "omp", parentSession ? parentSession.cwd : "")
+        transcriptSession.bindFile(a.sessionFile || "", parentSession ? parentSession.harness : "harlo", parentSession ? parentSession.cwd : "")
         if (steer) steerField.forceActiveFocus()
     }
 
@@ -48,7 +48,7 @@ Popup {
             const now = Workspace.fileStamp(root.agent.sessionFile)
             if (now !== stamp) {
                 stamp = now
-                transcriptSession.bindFile(root.agent.sessionFile, root.parentSession ? root.parentSession.harness : "omp", root.parentSession ? root.parentSession.cwd : "")
+                transcriptSession.bindFile(root.agent.sessionFile, root.parentSession ? root.parentSession.harness : "harlo", root.parentSession ? root.parentSession.cwd : "")
             }
         }
     }

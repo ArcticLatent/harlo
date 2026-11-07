@@ -1,8 +1,8 @@
 //! What a finished tool call came to, in a word or two, as a phone shows it
 //! beside the call: lines added and removed by an edit (and the diff), lines
 //! written, tests passed, an exit code, lines read, matches found. Read from
-//! the call's arguments and output, whatever the agent (omp's patches,
-//! Claude's old and new strings, pi's edits).
+//! the call's arguments and output, whatever the agent (patches, Claude's
+//! old and new strings, Harlo's edits).
 
 use serde_json::Value;
 

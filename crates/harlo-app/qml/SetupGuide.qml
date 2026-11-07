@@ -188,9 +188,7 @@ Popup {
                     readonly property bool installed: modelData.state !== "missing"
                     readonly property bool usable: installed && modelData.canChat
                     readonly property var acct: Accounts.revision >= 0 ? JSON.parse(Accounts.status(id)) : ({ accounts: [] })
-                    readonly property string signedIn: id === "omp"
-                        ? (modelData.modelCount > 0 ? "models from " + [...new Set((modelData.modelIds || []).map(m => m.split("/")[0]))].length + " providers" : "")
-                        : (acct.accounts || []).map(a => a.label).join(", ")
+                    readonly property string signedIn: (acct.accounts || []).map(a => a.label).join(", ")
                     readonly property bool isDefault: agents.chosen === id
                     objectName: "setupAgent-" + id
                     Layout.fillWidth: true
@@ -202,7 +200,7 @@ Popup {
                     border.color: isDefault ? Theme.accent : Theme.hairline
                     border.width: isDefault ? 2 : 1
                     onInstChanged: if (inst && inst.state === "done") Workspace.refreshProviders()
-                    Component.onCompleted: if (installed && id !== "omp") Accounts.refresh(id)
+                    Component.onCompleted: if (installed) Accounts.refresh(id)
                     RowLayout {
                         id: agentRow
                         x: 14
@@ -226,7 +224,7 @@ Popup {
                                     : !agentCard.installed ? "Not installed"
                                     : "Installed" + (agentCard.modelData.version ? " · " + agentCard.modelData.version : "")
                                       + (agentCard.signedIn !== "" ? " · signed in: " + agentCard.signedIn
-                                         : agentCard.acct.state === "loading" && agentCard.id !== "omp" ? "" : " · not signed in yet")
+                                         : agentCard.acct.state === "loading" ? "" : " · not signed in yet")
                             }
                         }
                         BusyIndicator { visible: agentCard.installing; running: visible; implicitWidth: 18; implicitHeight: 18 }
