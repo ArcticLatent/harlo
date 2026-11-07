@@ -630,7 +630,7 @@ async fn command(shared: &Arc<Shared>, pending: &Pending, cmd: Value) {
                 true,
                 json!({ "model": current_model(&st), "thinkingLevel": thinking, "sessionId": st.session_id,
                         "sessionFile": file.map(|f| f.to_string_lossy().into_owned()), "isStreaming": st.running,
-                        "permissionMode": st.permission_mode }),
+                        "permissionMode": st.permission_mode, "todoPhases": todo_phases(&st.messages) }),
                 "",
             );
         }
@@ -1180,6 +1180,24 @@ fn subagent_update(shared: &Arc<Shared>, call: &str, patch: Value) {
     shared.emit(HarnessEvent::SubagentActivity(json!({ "type": "subagent_lifecycle", "payload": entry })));
 }
 
+/// Claude's to-do list (its last TodoWrite) as harlo's to-do card shows
+/// it: one phase without a name.
+fn todo_phases(messages: &[Value]) -> Value {
+    let last = messages
+        .iter()
+        .rev()
+        .filter(|m| m["role"] == "assistant")
+        .flat_map(|m| m["content"].as_array().into_iter().flatten().rev())
+        .find(|b| b["type"] == "toolCall" && b["name"] == "TodoWrite");
+    let tasks: Vec<Value> = last
+        .and_then(|b| b["arguments"]["todos"].as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|t| Some(json!({ "content": t["content"].as_str()?, "status": t["status"].as_str().unwrap_or("pending") })))
+        .collect();
+    if tasks.is_empty() { json!([]) } else { json!([{ "name": "", "tasks": tasks }]) }
+}
+
 /// Task / Agent calls in Claude's message: subagents starting.
 fn subagents_started(shared: &Arc<Shared>, message: &Value) {
     for b in message["content"].as_array().into_iter().flatten() {
@@ -1515,6 +1533,21 @@ mod tests {
             }
         }
         assert_eq!(counts, [1, 0]);
+    }
+
+    #[test]
+    fn its_last_todo_list_is_the_cards() {
+        let call = |todos: Value| json!({ "role": "assistant", "content": [{ "type": "text", "text": "ok" }, { "type": "toolCall", "id": "t", "name": "TodoWrite", "arguments": { "todos": todos } }] });
+        assert_eq!(todo_phases(&[]), json!([]));
+        let messages = vec![
+            call(json!([{ "content": "old", "status": "pending", "activeForm": "Doing old" }])),
+            json!({ "role": "user", "content": "next" }),
+            call(json!([{ "content": "Write it", "status": "completed", "activeForm": "Writing it" }, { "content": "Test it", "status": "in_progress", "activeForm": "Testing it" }])),
+            json!({ "role": "assistant", "content": [{ "type": "toolCall", "id": "r", "name": "Read", "arguments": {} }] }),
+        ];
+        assert_eq!(todo_phases(&messages), json!([{ "name": "", "tasks": [{ "content": "Write it", "status": "completed" }, { "content": "Test it", "status": "in_progress" }] }]));
+        // An emptied list: no card.
+        assert_eq!(todo_phases(&[call(json!([]))]), json!([]));
     }
 
     #[test]

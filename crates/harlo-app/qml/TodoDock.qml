@@ -86,7 +86,9 @@ Rectangle {
                 Layout.topMargin: 4
                 spacing: 2
                 Label {
-                    text: phaseBlock.modelData.name.toUpperCase()
+                    // (Claude's list has one phase, without a name.)
+                    visible: (phaseBlock.modelData.name || "") !== ""
+                    text: (phaseBlock.modelData.name || "").toUpperCase()
                     color: Theme.muted
                     font.pixelSize: Theme.px(10)
                     font.bold: true

@@ -927,7 +927,8 @@ fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<Sessi
                 }
             });
         }
-        HarnessEvent::ToolStart { call_id, name, .. } if name == "todo" => {
+        // (The demo's todo, Claude Code's TodoWrite.)
+        HarnessEvent::ToolStart { call_id, name, .. } if matches!(name.as_str(), "todo" | "TodoWrite") => {
             st.todo_calls.insert(call_id.clone());
         }
         // The plan changed: re-read the todo phases.
