@@ -148,7 +148,11 @@ impl Mcp {
         let servers: Vec<Value> = listing
             .servers
             .iter()
-            .map(|s| json!({ "name": s.form.name, "harnesses": s.harnesses.iter().map(|k| kind_name(*k)).collect::<Vec<_>>(), "differs": s.differs, "form": form_json(&s.form) }))
+            .map(|s| {
+                // (A project's server Harlo won't start yet: not saved here.)
+                let unapproved = s.harnesses.contains(&HarnessKind::Harlo) && mcp::harlo_approved(&scope, &s.form.name) == Some(false);
+                json!({ "name": s.form.name, "harnesses": s.harnesses.iter().map(|k| kind_name(*k)).collect::<Vec<_>>(), "differs": s.differs, "harloUnapproved": unapproved, "form": form_json(&s.form) })
+            })
             .collect();
         let files: serde_json::Map<String, Value> = mcp::HARNESSES.iter().map(|k| (kind_name(*k).to_owned(), json!(harlo_core::sidebar::tilde(&mcp::config_path(*k, &scope))))).collect();
         QString::from(&json!({ "servers": servers, "errors": listing.errors, "files": files }).to_string())

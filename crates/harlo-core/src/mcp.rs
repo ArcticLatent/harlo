@@ -8,6 +8,7 @@
 //! | Claude | `~/.claude.json` (`$CLAUDE_CONFIG_DIR`), changed with `claude mcp` | `<project>/.mcp.json` |
 //! | OpenCode | `~/.config/opencode/opencode.json[c]` | `<project>/opencode.json[c]` |
 //! | Hermes | `~/.hermes/config.yaml` (`$HERMES_HOME`), changed with `hermes config` | (none) |
+//! | Harlo | `~/.config/harlo-agent/mcp.json` (`$XDG_CONFIG_HOME`) | `<project>/.harlo/mcp.json` (approved entries) |
 //!
 //! harlo shows one list for all and edits each agent's file in its own
 //! dialect: omp's and OpenCode's timeouts are in milliseconds, pi's in
@@ -20,6 +21,12 @@
 //! (OpenCode's `.jsonc`) is read but not rewritten. Hermes' YAML has
 //! comments too: its servers are read and written with `hermes config
 //! get / set / unset`, which keep them.
+//!
+//! Harlo starts a project's server only when that entry, as it is, was
+//! approved for the project (a repository can bring a file that runs a
+//! command): saving or switching one here approves it, in
+//! `mcp-approved.json` beside Harlo's own `mcp.json` (on the project's
+//! machine), `{ project: { name: hash of the entry } }`. Harlo has no SSE.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -62,7 +69,7 @@ pub fn host_home(name: &str) -> PathBuf {
 }
 
 /// The harnesses harlo manages MCP servers for, in display order.
-pub const HARNESSES: [HarnessKind; 5] = [HarnessKind::Omp, HarnessKind::Pi, HarnessKind::Claude, HarnessKind::OpenCode, HarnessKind::Hermes];
+pub const HARNESSES: [HarnessKind; 6] = [HarnessKind::Omp, HarnessKind::Pi, HarnessKind::Claude, HarnessKind::OpenCode, HarnessKind::Hermes, HarnessKind::Harlo];
 
 /// The `claude` that changes Claude's global servers (Settings → Providers
 /// sets it; else the installed one).
@@ -89,6 +96,9 @@ pub fn config_path(kind: HarnessKind, scope: &Scope) -> PathBuf {
         // (Hermes has no project servers: a name nothing is read from.)
         (HarnessKind::Hermes, Scope::Project(p)) => p.join(".hermes-has-no-project-servers"),
         (HarnessKind::Pi, Scope::Host(h)) => host_home(h).join(".pi/agent/mcp.json"),
+        (HarnessKind::Harlo, Scope::Host(h)) => host_home(h).join(".config/harlo-agent/mcp.json"),
+        (HarnessKind::Harlo, Scope::Global) => harlo_dir().join("mcp.json"),
+        (HarnessKind::Harlo, Scope::Project(p)) => p.join(".harlo/mcp.json"),
         (_, Scope::Host(h)) => host_home(h).join(".omp/agent/mcp.json"),
         (HarnessKind::OpenCode, Scope::Global) => opencode_file(&std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| home().join(".config")).join("opencode")),
         (HarnessKind::OpenCode, Scope::Project(p)) => opencode_file(p),
@@ -114,6 +124,84 @@ fn servers_key(kind: HarnessKind) -> &'static str {
         HarnessKind::Hermes => "mcp_servers",
         _ => "mcpServers",
     }
+}
+
+/// Harlo's config folder here (a scratch one in tests).
+#[cfg(test)]
+fn harlo_dir() -> PathBuf {
+    std::env::temp_dir().join(format!("harlo-mcp-test-config-{}", std::process::id()))
+}
+
+#[cfg(not(test))]
+fn harlo_dir() -> PathBuf {
+    std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).unwrap_or_else(|| home().join(".config")).join("harlo-agent")
+}
+
+/// Where Harlo keeps its approvals of a project's servers, and the
+/// project's key there: on the project's machine.
+fn harlo_approvals(project: &Path) -> (PathBuf, String) {
+    match crate::remote::split(project) {
+        Some((name, p)) => (host_home(&name).join(".config/harlo-agent/mcp-approved.json"), p),
+        None => (harlo_dir().join("mcp-approved.json"), project.to_string_lossy().into_owned()),
+    }
+}
+
+/// What an entry's approval is kept by: its JSON, keys sorted, hashed
+/// (as Harlo reads it).
+pub fn entry_hash(entry: &Value) -> String {
+    fn canonical(v: &Value) -> Value {
+        match v {
+            Value::Object(m) => {
+                let mut keys: Vec<&String> = m.keys().collect();
+                keys.sort();
+                Value::Object(keys.into_iter().map(|k| (k.clone(), canonical(&m[k]))).collect::<Map<_, _>>())
+            }
+            Value::Array(a) => Value::Array(a.iter().map(canonical).collect()),
+            v => v.clone(),
+        }
+    }
+    use sha2::Digest;
+    sha2::Sha256::digest(canonical(entry).to_string().as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Records (Some) or forgets (None) Harlo's approval of a project's server.
+fn approve(scope: &Scope, name: &str, entry: Option<&Value>) -> Result<()> {
+    let Scope::Project(project) = scope else { return Ok(()) };
+    let (path, key) = harlo_approvals(project);
+    let mut all: Value = read_text(&path)?.and_then(|t| serde_json::from_str(&t).ok()).filter(Value::is_object).unwrap_or_else(|| json!({}));
+    let before = all.clone();
+    let projects = all.as_object_mut().expect("object");
+    match entry {
+        Some(e) => {
+            let mine = projects.entry(key).or_insert_with(|| json!({}));
+            if !mine.is_object() {
+                *mine = json!({});
+            }
+            mine[name] = json!(entry_hash(e));
+        }
+        None => {
+            if let Some(mine) = projects.get_mut(&key).and_then(Value::as_object_mut) {
+                mine.shift_remove(name);
+                if mine.is_empty() {
+                    projects.shift_remove(&key);
+                }
+            }
+        }
+    }
+    if all == before {
+        return Ok(());
+    }
+    write_config(&path, &all)
+}
+
+/// Whether Harlo would start a project's server as its file has it now
+/// (None: not a project's, or Harlo hasn't it).
+pub fn harlo_approved(scope: &Scope, name: &str) -> Option<bool> {
+    let Scope::Project(project) = scope else { return None };
+    let entry = entry(HarnessKind::Harlo, scope, name).ok().flatten()?;
+    let (path, key) = harlo_approvals(project);
+    let all: Value = read_text(&path).ok().flatten().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    Some(all[&key][name].as_str() == Some(entry_hash(&entry).as_str()))
 }
 
 fn hermes_home() -> PathBuf {
@@ -352,6 +440,9 @@ impl Form {
         }
         if self.transport == "sse" && kinds.contains(&HarnessKind::Pi) {
             return Some("pi doesn't support SSE servers; untick pi, or use http.".into());
+        }
+        if self.transport == "sse" && kinds.contains(&HarnessKind::Harlo) {
+            return Some("Harlo doesn't support SSE servers; untick Harlo, or use http.".into());
         }
         if !self.enabled && kinds == [HarnessKind::Claude] {
             return Some("Claude has no off switch for a server; remove it instead.".into());
@@ -627,6 +718,13 @@ pub fn save(scope: &Scope, old_name: &str, form: &Form, kinds: &[HarnessKind]) -
         if config[servers_key(kind)].as_object() != Some(&before) {
             write_back(kind, scope, &path, &config, plain, &before)?;
         }
+        // (Saved here: Harlo may start it, as it is now.)
+        if kind == HarnessKind::Harlo {
+            if form.name != old_name && !old_name.is_empty() {
+                approve(scope, old_name, None)?;
+            }
+            approve(scope, &form.name, config[servers_key(kind)].get(&form.name))?;
+        }
     }
     Ok(())
 }
@@ -648,6 +746,9 @@ pub fn set_enabled(scope: &Scope, name: &str, on: bool) -> Result<()> {
         entry.insert("enabled".into(), json!(on));
         found = true;
         write_back(kind, scope, &path, &config, plain, &before)?;
+        if kind == HarnessKind::Harlo {
+            approve(scope, name, config[servers_key(kind)].get(name))?;
+        }
     }
     if !found {
         if claude {
@@ -685,6 +786,9 @@ pub fn put_entry(kind: HarnessKind, scope: &Scope, form: Option<&Form>, name: &s
             servers.shift_remove(name);
         }
     }
+    if kind == HarnessKind::Harlo {
+        approve(scope, name, servers.get(name))?;
+    }
     if servers == before {
         return Ok(());
     }
@@ -701,6 +805,9 @@ pub fn remove(scope: &Scope, name: &str) -> Result<()> {
         let removed = config[servers_key(kind)].as_object_mut().is_some_and(|m| m.shift_remove(name).is_some());
         if removed {
             write_back(kind, scope, &path, &config, plain, &before)?;
+        }
+        if removed && kind == HarnessKind::Harlo {
+            approve(scope, name, None)?;
         }
     }
     Ok(())
@@ -814,6 +921,56 @@ mod tests {
         assert_eq!(remote.to_entry(HarnessKind::OpenCode, None), json!({"type":"remote","url":"https://h/mcp","enabled":true}));
         assert_eq!(Form::from_entry(HarnessKind::OpenCode, "r", &json!({"type":"remote","url":"https://h/mcp"})).transport, "http");
         assert!(Form { enabled: false, ..remote.clone() }.problem(&[HarnessKind::Claude]).is_some());
+    }
+
+    #[test]
+    fn harlos_project_servers_are_approved_as_saved() {
+        let dir = scratch();
+        let project = dir.join("proj");
+        std::fs::create_dir_all(project.join(".harlo")).unwrap();
+        let scope = Scope::Project(project.clone());
+        let approvals = harlo_dir().join("mcp-approved.json");
+        let read = || serde_json::from_str::<Value>(&std::fs::read_to_string(&approvals).unwrap_or_default()).unwrap_or_default();
+        let key = project.to_string_lossy().into_owned();
+        // One the repository brought: listed, not approved.
+        std::fs::write(project.join(".harlo/mcp.json"), r#"{"mcpServers": {"came": {"command": "touch", "args": ["x"]}}}"#).unwrap();
+        assert_eq!(harlo_approved(&scope, "came"), Some(false));
+        assert!(load(&scope).servers.iter().any(|s| s.form.name == "came" && s.harnesses == [HarnessKind::Harlo]));
+        // Saved here: written in Harlo's dialect, and approved as written.
+        let form = Form { name: "fs".into(), enabled: true, transport: "stdio".into(), command: vec!["srv".into(), "--x".into()], timeout_secs: Some(5.0), ..Default::default() };
+        save(&scope, "", &form, &[HarnessKind::Harlo]).unwrap();
+        let entry = entry(HarnessKind::Harlo, &scope, "fs").unwrap().unwrap();
+        assert_eq!(entry, json!({"command": "srv", "args": ["--x"], "timeout": 5, "enabled": true}));
+        assert_eq!(read()[&key]["fs"], json!(entry_hash(&entry)));
+        assert_eq!((harlo_approved(&scope, "fs"), harlo_approved(&scope, "came")), (Some(true), Some(false)));
+        // Switched: approved as it is now; renamed: the old name forgotten.
+        set_enabled(&scope, "came", true).unwrap();
+        assert_eq!(harlo_approved(&scope, "came"), Some(true));
+        save(&scope, "fs", &Form { name: "files".into(), ..form.clone() }, &[HarnessKind::Harlo]).unwrap();
+        assert!(read()[&key].get("fs").is_none() && harlo_approved(&scope, "files") == Some(true));
+        // Changed outside harlo: no longer approved.
+        let text = std::fs::read_to_string(project.join(".harlo/mcp.json")).unwrap().replace("--x", "--evil");
+        std::fs::write(project.join(".harlo/mcp.json"), text).unwrap();
+        assert_eq!(harlo_approved(&scope, "files"), Some(false));
+        // Removed: forgotten (the project too, once it has none).
+        remove(&scope, "files").unwrap();
+        remove(&scope, "came").unwrap();
+        assert!(read().get(&key).is_none(), "{}", read());
+        // No SSE for Harlo; this computer's and a host's files.
+        assert!(Form { transport: "sse".into(), url: "https://h/sse".into(), ..form.clone() }.problem(&[HarnessKind::Harlo]).unwrap().contains("Harlo"));
+        assert_eq!(config_path(HarnessKind::Harlo, &Scope::Global), harlo_dir().join("mcp.json"));
+        assert!(config_path(HarnessKind::Harlo, &Scope::Host("not-a-host".into())).to_string_lossy().ends_with("/.config/harlo-agent/mcp.json"));
+        let _ = std::fs::remove_dir_all(harlo_dir());
+    }
+
+    #[test]
+    fn hashes_as_harlo_does() {
+        // (The same as harlo-agent's: keys sorted, compact.)
+        let a = entry_hash(&json!({"command": "srv", "env": {"B": "2", "A": "1"}}));
+        assert_eq!(a, entry_hash(&json!({"env": {"A": "1", "B": "2"}, "command": "srv"})));
+        use sha2::Digest;
+        let want: String = sha2::Sha256::digest(br#"{"command":"srv","env":{"A":"1","B":"2"}}"#).iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(a, want);
     }
 
     #[test]

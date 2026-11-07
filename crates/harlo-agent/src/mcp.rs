@@ -72,15 +72,14 @@ pub fn load(project: &Path) -> (Vec<Config>, Vec<String>) {
     let global = std::env::var_os("HARLO_AGENT_MCP_CONFIG").map(PathBuf::from).unwrap_or_else(|| dir.join("mcp.json"));
     let mut entries: Vec<(String, Value)> = read_servers(&global, &mut notes);
     let project_file = project.join(".harlo/mcp.json");
-    let approved = read_json(&dir.join("mcp-approved.json")).unwrap_or(Value::Null);
-    let key = project.to_string_lossy();
+    let approved = approved_for(&read_json(&dir.join("mcp-approved.json")).unwrap_or(Value::Null), project);
     for (name, entry) in read_servers(&project_file, &mut notes) {
         if entry["enabled"] == false {
             entries.retain(|(n, _)| *n != name);
             continue;
         }
-        if approved[key.as_ref()][&name].as_str() != Some(&entry_hash(&entry)) {
-            notes.push(format!("The project's MCP server {name} wasn't started: it isn't one you approved for this project (it came in {}). Turn it on in harlo's Settings → MCP.", project_file.display()));
+        if approved[&name].as_str() != Some(&entry_hash(&entry)) {
+            notes.push(format!("The project's MCP server {name} wasn't started: it isn't one you approved for this project, as it is now (it's in {}). To let Harlo start it, open it in harlo's Settings → MCP for this project and save it.", project_file.display()));
             continue;
         }
         entries.retain(|(n, _)| *n != name);
@@ -97,6 +96,18 @@ pub fn load(project: &Path) -> (Vec<Config>, Vec<String>) {
         }
     }
     (configs, notes)
+}
+
+/// A project's approvals (`{ name: hash }`): the project's key as harlo
+/// wrote it, or the same folder by another path (a symlink).
+fn approved_for(all: &Value, project: &Path) -> Value {
+    let real = std::fs::canonicalize(project).ok();
+    all.as_object()
+        .into_iter()
+        .flatten()
+        .find(|(k, _)| Path::new(k) == project || (real.is_some() && std::fs::canonicalize(k).ok() == real))
+        .map(|(_, v)| v.clone())
+        .unwrap_or(Value::Null)
 }
 
 fn read_json(path: &Path) -> Option<Value> {
@@ -746,6 +757,9 @@ mod tests {
         assert_eq!(a, b);
         assert_ne!(a, entry_hash(&json!({ "command": "srv2", "env": { "A": "1", "B": "2" } })));
         assert_eq!(a.len(), 64);
+        // (As harlo writes it: keys sorted, compact.)
+        let want: String = Sha256::digest(br#"{"command":"srv","env":{"A":"1","B":"2"}}"#).iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(a, want);
     }
 
     #[test]

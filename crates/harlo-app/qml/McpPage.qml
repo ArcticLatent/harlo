@@ -3,8 +3,8 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import harlo
 
-// Settings → MCP: the tool servers your agents (omp, pi, Claude, OpenCode)
-// can call, globally or in a project. A grid of servers with their status
+// Settings → MCP: the tool servers your agents (omp, pi, Claude, OpenCode,
+// Hermes, Harlo) can call, globally or in a project. A grid of servers with their status
 // (harlo tests them: the agents don't report one), and a page per server
 // to edit it.
 ColumnLayout {
@@ -56,7 +56,7 @@ ColumnLayout {
         showSecrets = false
     }
     function openServer(s) {
-        editing = { oldName: s.name, form: JSON.parse(JSON.stringify(s.form)), harnesses: s.harnesses.slice(), isNew: false, differs: s.differs }
+        editing = { oldName: s.name, form: JSON.parse(JSON.stringify(s.form)), harnesses: s.harnesses.slice(), isNew: false, differs: s.differs, harloUnapproved: s.harloUnapproved === true }
         formError = ""
         showSecrets = false
         showAllTools = false
@@ -68,7 +68,7 @@ ColumnLayout {
         editing = e
     }
     /// The agents that are on (Settings → Providers) and have MCP servers.
-    readonly property var agents: (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.chatProvidersJson()) : []).filter(p => ["omp", "pi", "claude", "opencode", "hermes"].includes(p.id))
+    readonly property var agents: (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.chatProvidersJson()) : []).filter(p => ["omp", "pi", "claude", "opencode", "hermes", "harlo"].includes(p.id))
     /// A new server is for the installed ones (all of them if none is).
     function defaultAgents() {
         const ids = agents.map(a => a.id), installed = ids.filter(id => Mcp.installedOn(id, page.scope))
@@ -201,6 +201,7 @@ ColumnLayout {
         Layout.topMargin: 6
         text: "In " + page.agents.map(a => page.listing.files ? page.listing.files[a.id] : "").filter(x => x).join(", ") + ". Changes apply to new sessions."
               + (!page.scope.startsWith("host:") && page.scope !== "global" && page.agents.some(a => a.id === "pi") ? " pi reads a project's servers only in projects you trust (/trust)." : "")
+              + (!page.scope.startsWith("host:") && page.scope !== "global" && page.agents.some(a => a.id === "harlo") ? " Harlo starts a project's servers only as saved here." : "")
     }
     Repeater {
         model: page.listing.errors
@@ -289,6 +290,7 @@ ColumnLayout {
                         Label { text: card.local ? "Local server" : "Remote server"; color: Theme.muted; font.pixelSize: Theme.px(11) }
                         Repeater { model: card.modelData.harnesses; Badge_ { required property string modelData; text: Theme.harnessLabel(modelData) } }
                         Badge_ { visible: card.modelData.differs; text: "copies differ" }
+                        Badge_ { visible: card.modelData.harloUnapproved === true; text: "not allowed for Harlo" }
                         Item { Layout.fillWidth: true }
                         AppSwitch {
                             objectName: "mcpToggle-" + card.modelData.name
@@ -335,6 +337,11 @@ ColumnLayout {
             FlatButton { objectName: "mcpImport"; visible: page.editing !== null && page.editing.isNew; text: "Import JSON…"; font.pixelSize: Theme.px(12); onClicked: importDialog.open() }
         }
         Hint_ { visible: page.editing !== null && page.editing.differs === true; color: Theme.warning; text: "The agents' copies of this server differ; saving writes this version to each." }
+        Hint_ {
+            visible: page.editing !== null && page.editing.harloUnapproved === true
+            color: Theme.warning
+            text: "Harlo doesn't start this server yet: it's in the project's file, but wasn't saved here as it is now (a repository can bring one that runs a command). Check it, then save to let Harlo use it."
+        }
 
         SectionTitle_ { text: "Server" }
         RowLayout {
@@ -356,7 +363,7 @@ ColumnLayout {
                 model: page.agents
                 AppCheckBox {
                     required property var modelData
-                    objectName: "mcpFor" + ({ omp: "Omp", pi: "Pi", claude: "Claude", opencode: "OpenCode" })[modelData.id]
+                    objectName: "mcpFor" + ({ omp: "Omp", pi: "Pi", claude: "Claude", opencode: "OpenCode", hermes: "Hermes", harlo: "Harlo" })[modelData.id]
                     text: modelData.label
                     checked: page.editing !== null && page.editing.harnesses.includes(modelData.id)
                     onToggled: page.toggleHarness(modelData.id, checked)
@@ -373,7 +380,7 @@ ColumnLayout {
         RowLayout {
             spacing: 6
             Repeater {
-                model: [["stdio", "Command"], ["http", "Link"], ["sse", "Link (SSE, not pi)"]]
+                model: [["stdio", "Command"], ["http", "Link"], ["sse", "Link (SSE, not pi or Harlo)"]]
                 FlatButton {
                     required property var modelData
                     objectName: "mcpTransport-" + modelData[0]
@@ -422,7 +429,7 @@ ColumnLayout {
         SectionTitle_ { text: detail.local ? "Environment variables" : "Request headers" }
         RowLayout {
             Layout.fillWidth: true
-            Hint_ { text: detail.local ? "Values the server needs, such as an API key. ${VAR} reads one from your environment (OpenCode: {env:VAR}); omp and pi also run !command." : "Such as Authorization: Bearer …" }
+            Hint_ { text: detail.local ? "Values the server needs, such as an API key. ${VAR} reads one from your environment (OpenCode: {env:VAR}); omp, pi and Harlo also run !command." : "Such as Authorization: Bearer …" }
             FlatButton { text: page.showSecrets ? "Hide values" : "Show values"; outlined: false; font.pixelSize: Theme.px(12); onClicked: page.showSecrets = !page.showSecrets }
         }
         PairsEditor_ {
