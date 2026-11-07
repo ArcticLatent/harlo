@@ -1933,8 +1933,14 @@ mod tests {
         assert_eq!((with("running"), with("completed")), (2, 2), "{frames:?}");
         let replies: Vec<&str> = rows.iter().filter(|r| r.kind == crate::RowKind::Markdown).map(|r| r.html.as_str()).collect();
         assert!(replies.last().is_some_and(|r| r.contains("4417") && r.contains("9023")), "{replies:?}");
-        let saved = crate::subagents::from_session_file(&meta.session_file.expect("its file"));
+        let file = meta.session_file.expect("its file");
+        let saved = crate::subagents::from_session_file(&file);
         assert!(saved.len() == 2 && saved.iter().all(|s| s["status"] == "completed" && s["sessionFile"].is_string()), "{saved:?}");
+        // What it used counts its subagents' requests too.
+        let own = crate::context::spent(&harlo_harness::store::read_messages(&file).unwrap());
+        let all = crate::context::spent_in_file(&file).unwrap();
+        assert!(own.requests >= 2 && all.requests >= own.requests + 2 && all.input > own.input, "{own:?} {all:?}");
+        eprintln!("used: {}", all.line(&meta.model_id));
     }
 
     #[tokio::test]

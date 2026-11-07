@@ -304,8 +304,17 @@ pub fn worktree_note(branch: &str, root: &str) -> String {
 }
 
 /// What a parent is told when its helper `title` (`agent`, `key`) finished:
-/// its report, else its last reply (`reply`), or its error.
-pub fn finished_message(agent: &str, title: &str, key: &str, report: Option<&Report>, reply: Option<&str>, error: Option<&str>) -> String {
+/// its report, else its last reply (`reply`), or its error; and what it
+/// used (`used`: its model, requests and tokens, cost), when known.
+pub fn finished_message(agent: &str, title: &str, key: &str, report: Option<&Report>, reply: Option<&str>, error: Option<&str>, used: Option<&str>) -> String {
+    let text = finished_text(agent, title, key, report, reply, error);
+    match used.map(str::trim).filter(|u| !u.is_empty()) {
+        Some(u) => format!("{text}\n\nUsed: {u}"),
+        None => text,
+    }
+}
+
+fn finished_text(agent: &str, title: &str, key: &str, report: Option<&Report>, reply: Option<&str>, error: Option<&str>) -> String {
     let head = format!("[harlo] The {agent} session \"{title}\" ({key})");
     match report {
         Some(r) => {
@@ -733,11 +742,14 @@ mod tests {
         assert_eq!(r, Report { succeeded: false, summary: "Tried.".into(), files: vec!["a.rs".into(), "b.rs".into()] });
         assert!(Report::parse(&json!({ "outcome": "done", "summary": "x" })).is_err());
         assert!(Report::parse(&json!({ "outcome": "succeeded", "summary": "  " })).is_err());
-        let m = finished_message("Claude", "Fix", "k1", Some(&r), Some("ignored"), None);
+        let m = finished_message("Claude", "Fix", "k1", Some(&r), Some("ignored"), None, None);
         assert!(m.starts_with("[harlo] The Claude session \"Fix\" (k1) finished and reported: FAILED.") && m.ends_with("Files changed: a.rs, b.rs"));
         // None: its last reply, else its error.
-        assert!(finished_message("pi", "T", "k", None, Some("hi"), None).contains("without reporting (report_done). Its last reply:\n\nhi"));
-        assert!(finished_message("pi", "T", "k", None, Some(" "), Some("boom")).ends_with("without reporting: boom"));
+        assert!(finished_message("pi", "T", "k", None, Some("hi"), None, None).contains("without reporting (report_done). Its last reply:\n\nhi"));
+        assert!(finished_message("pi", "T", "k", None, Some(" "), Some("boom"), Some(" ")).ends_with("without reporting: boom"));
+        // What it used, last.
+        let m = finished_message("Harlo", "T", "k", Some(&r), None, None, Some("gpt-6.1-sol: 3 requests, 9.1k tokens in (70% cached), 400 out"));
+        assert!(m.ends_with("Files changed: a.rs, b.rs\n\nUsed: gpt-6.1-sol: 3 requests, 9.1k tokens in (70% cached), 400 out"), "{m}");
         // The brief: with the tools, or a report in words.
         let b = helper_brief("Lead", "Do X", true, "");
         assert!(b.contains("session (\"Lead\") started you") && b.contains("report_done") && b.ends_with("The task:\n\nDo X") && !b.contains("helper id"));

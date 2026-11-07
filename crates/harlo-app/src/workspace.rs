@@ -6956,22 +6956,32 @@ impl Workspace {
             return;
         }
         let Some(parent) = registry::get(&child.parent) else { return };
-        let message = harlo_core::orchestration::finished_message(agent_label(&child.agent), &child.title, key, child.report.as_ref(), reply.as_deref(), error.as_deref());
         let busy = self.live.get(&child.parent).is_some_and(|e| e.info.status == SessionStatus::Busy);
         let mode = if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal };
-        // In a worktree of this computer's: whether its base moved on (git,
-        // in the background), then the message.
+        // In a worktree of this computer's: whether its base moved on.
         let cwd = self.live.get(key).map(|e| e.info.cwd.clone());
         let tree = cwd.as_ref().and_then(|cwd| {
             self.worktrees.iter().filter(|w| !w.removed && !w.base.is_empty() && cwd.starts_with(&w.path) && !harlo_core::remote::is_remote(&w.path)).max_by_key(|w| w.path.components().count()).map(|w| (w.path.clone(), w.branch.clone(), w.base.clone()))
         });
-        let Some((path, branch, base)) = tree else {
-            parent.handle.prompt(&message, Vec::new(), mode);
-            return;
-        };
+        // What it used: from its file when its agent saves pi's form (and
+        // its subagents' beside it), else its cost as it said.
+        let model = self.live.get(key).map(|e| e.model_id.clone()).unwrap_or_default();
+        let meta_cost = self.spend.get(key).map_or(0.0, |s| s.cost);
+        let file = matches!(HarnessKind::parse(&child.agent), Some(HarnessKind::Pi | HarnessKind::Omp | HarnessKind::Harlo)).then(|| self.file_for_key(key)).flatten();
+        let (agent, title, key) = (agent_label(&child.agent).to_owned(), child.title.clone(), key.to_owned());
+        // (Files and git in the background, then the message.)
         crate::runtime().spawn_blocking(move || {
-            let behind = harlo_core::git::commits_behind(&path, &base).unwrap_or(0);
-            let _ = parent.handle.prompt(&format!("{message}{}", harlo_core::orchestration::drift_note(&branch, &base, behind)), Vec::new(), mode);
+            let used = match file.and_then(|f| harlo_core::context::spent_in_file(&f)).filter(|s| s.requests > 0) {
+                Some(s) => Some(s.line(&model)),
+                None if meta_cost > 0.0 => Some(if model.is_empty() { format!("${meta_cost:.2}") } else { format!("{model}: ${meta_cost:.2}") }),
+                None => None,
+            };
+            let mut message = harlo_core::orchestration::finished_message(&agent, &title, &key, child.report.as_ref(), reply.as_deref(), error.as_deref(), used.as_deref());
+            if let Some((path, branch, base)) = tree {
+                let behind = harlo_core::git::commits_behind(&path, &base).unwrap_or(0);
+                message.push_str(&harlo_core::orchestration::drift_note(&branch, &base, behind));
+            }
+            let _ = parent.handle.prompt(&message, Vec::new(), mode);
         });
     }
 

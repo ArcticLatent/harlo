@@ -177,6 +177,66 @@ pub fn report(messages: &[Value], live: Option<(u64, u64, f64)>) -> Value {
     })
 }
 
+/// What a session's requests used: how many, tokens in (cached among
+/// them) and out, and their cost (USD; 0 on a plan).
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct Spent {
+    pub requests: u64,
+    pub input: u64,
+    pub cached: u64,
+    pub output: u64,
+    pub cost: f64,
+}
+
+impl Spent {
+    /// "gpt-6.1-sol: 14 requests, 96.3k tokens in (72% cached), 3.4k out"
+    /// (and ", $0.42" when it cost something).
+    pub fn line(&self, model: &str) -> String {
+        let k = |n: u64| if n >= 1000 { format!("{:.1}k", n as f64 / 1000.0) } else { n.to_string() };
+        let cached = if self.input > 0 { format!(" ({}% cached)", self.cached * 100 / self.input) } else { String::new() };
+        let who = if model.trim().is_empty() { String::new() } else { format!("{}: ", model.trim()) };
+        let mut s = format!("{who}{} request{}, {} tokens in{cached}, {} out", self.requests, if self.requests == 1 { "" } else { "s" }, k(self.input), k(self.output));
+        if self.cost > 0.0 {
+            s.push_str(&format!(", ${:.2}", self.cost));
+        }
+        s
+    }
+}
+
+/// The requests in a session's messages (pi's form: each reply with its
+/// usage).
+pub fn spent(messages: &[Value]) -> Spent {
+    let mut s = Spent::default();
+    for m in messages.iter().filter(|m| m["role"] == "assistant") {
+        let Some(u) = usage_of(m) else { continue };
+        s.requests += 1;
+        s.input += u.input + u.cache_read + u.cache_write;
+        s.cached += u.cache_read;
+        s.output += u.output;
+        s.cost += m["usage"]["cost"]["total"].as_f64().unwrap_or(0.0);
+    }
+    s
+}
+
+/// What a saved session (pi's form) used, its subagents' too (their logs
+/// in a folder named after it). None: a remote file, or one not read.
+pub fn spent_in_file(path: &std::path::Path) -> Option<Spent> {
+    if crate::remote::is_remote(path) {
+        return None;
+    }
+    let mut total = spent(&harlo_harness::store::read_messages(path).ok()?);
+    let subs = std::fs::read_dir(path.with_extension("")).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "jsonl"));
+    for sub in subs {
+        let s = spent(&harlo_harness::store::read_messages(&sub).unwrap_or_default());
+        total.requests += s.requests;
+        total.input += s.input;
+        total.cached += s.cached;
+        total.output += s.output;
+        total.cost += s.cost;
+    }
+    Some(total)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -208,5 +268,34 @@ mod tests {
 
         let live = report(&messages, Some((5000, 272_000, 0.5)));
         assert_eq!((live["contextTokens"].as_u64(), live["contextWindow"].as_u64()), (Some(5000), Some(272_000)));
+    }
+
+    #[test]
+    fn what_a_session_used() {
+        let reply = |input: u64, read: u64, out: u64, cost: f64| json!({ "role": "assistant", "content": [], "usage": { "input": input, "output": out, "cacheRead": read, "cacheWrite": 0, "totalTokens": input + read + out, "cost": { "total": cost } } });
+        let msgs = vec![json!({ "role": "user", "content": "hi" }), reply(1000, 3000, 200, 0.0), json!({ "role": "assistant", "content": [] }), reply(500, 3500, 300, 0.0)];
+        let s = spent(&msgs);
+        assert_eq!(s, Spent { requests: 2, input: 8000, cached: 6500, output: 500, cost: 0.0 });
+        assert_eq!(s.line("gpt-6.1-sol"), "gpt-6.1-sol: 2 requests, 8.0k tokens in (81% cached), 500 out");
+        let paid = spent(&[reply(10, 0, 5, 0.4237)]);
+        assert_eq!(paid.line(""), "1 request, 10 tokens in (0% cached), 5 out, $0.42");
+
+        // A saved one, with a subagent's log beside it.
+        let dir = std::env::temp_dir().join(format!("harlo-spent-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("s")).unwrap();
+        let file = |msgs: &[Value]| {
+            let mut t = format!("{}\n", json!({ "type": "session", "version": 3, "id": "x", "timestamp": "2026-11-07T00:00:00Z", "cwd": "/tmp" }));
+            for (i, m) in msgs.iter().enumerate() {
+                t.push_str(&format!("{}\n", json!({ "type": "message", "id": format!("m{i}"), "parentId": if i == 0 { Value::Null } else { json!(format!("m{}", i - 1)) }, "timestamp": "2026-11-07T00:00:00Z", "message": m })));
+            }
+            t
+        };
+        std::fs::write(dir.join("s.jsonl"), file(&msgs)).unwrap();
+        std::fs::write(dir.join("s/task-1.jsonl"), file(&[json!({ "role": "user", "content": "sub" }), reply(100, 0, 10, 0.0)])).unwrap();
+        let all = spent_in_file(&dir.join("s.jsonl")).unwrap();
+        assert_eq!((all.requests, all.input, all.output), (3, 8100, 510));
+        assert!(spent_in_file(&dir.join("missing.jsonl")).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
