@@ -42,6 +42,8 @@ pub mod schedules;
 pub mod search;
 pub mod shelf;
 pub mod servers;
+#[cfg(test)]
+pub(crate) mod scratch;
 pub mod session;
 pub mod signin;
 pub mod sidebar;

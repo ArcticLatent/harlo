@@ -795,10 +795,8 @@ pub fn split_command(line: &str) -> Vec<String> {
 mod tests {
     use super::*;
 
-    fn scratch() -> PathBuf {
-        let d = std::env::temp_dir().join(format!("harlo-mcp-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
-        std::fs::create_dir_all(&d).unwrap();
-        d
+    fn scratch() -> crate::scratch::Scratch {
+        crate::scratch::Scratch::new(std::env::temp_dir().join(format!("harlo-mcp-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())))
     }
 
     #[test]
@@ -862,7 +860,8 @@ mod tests {
         assert_eq!(f.to_entry(HarnessKind::Hermes, Some(&v)), v);
         let web = Form { name: "w".into(), enabled: true, transport: "http".into(), url: "https://h/mcp".into(), ..Default::default() };
         assert_eq!(web.to_entry(HarnessKind::Hermes, None), json!({ "url": "https://h/mcp", "enabled": true }));
-        let scope = Scope::Project(scratch());
+        let dir = scratch();
+        let scope = Scope::Project(dir.to_path_buf());
         assert_eq!(read_config(HarnessKind::Hermes, &config_path(HarnessKind::Hermes, &scope)).unwrap().0, json!({}));
         assert!(save(&scope, "", &web, &[HarnessKind::Hermes]).is_err());
     }
@@ -870,7 +869,7 @@ mod tests {
     #[test]
     fn saves_lists_and_removes_per_harness() {
         let dir = scratch();
-        let scope = Scope::Project(dir.clone());
+        let scope = Scope::Project(dir.to_path_buf());
         // An existing omp file with another server and its own key order.
         std::fs::create_dir_all(dir.join(".omp")).unwrap();
         std::fs::write(dir.join(".omp/mcp.json"), "{\n  \"$schema\": \"x\",\n  \"mcpServers\": {\n    \"zed\": {\"command\": \"z\"},\n    \"alpha\": {\"command\": \"a\"}\n  }\n}\n").unwrap();

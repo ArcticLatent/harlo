@@ -351,12 +351,14 @@ pub fn report(files: &[Arc<FileStats>], days: u32, roots: &[PathBuf]) -> Value {
 mod tests {
     use super::*;
 
-    fn file(lines: &[&str]) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("harlo-stats-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+    /// A session file of `lines`, its folder removed when the test ends.
+    fn file(lines: &[&str]) -> crate::scratch::Scratch {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = crate::scratch::Scratch::new(std::env::temp_dir().join(format!("harlo-stats-{}-{n}", std::process::id())));
         let p = dir.join(format!("{}.jsonl", lines.len()));
         std::fs::write(&p, lines.join("\n")).unwrap();
-        p
+        dir.at(p)
     }
 
     #[test]

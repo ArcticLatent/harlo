@@ -463,10 +463,26 @@ mod tests {
         path
     }
 
-    fn tmp_dir(tag: &str) -> PathBuf {
+    /// A folder removed when the test ends (passed or failed).
+    struct TmpDir(PathBuf);
+
+    impl std::ops::Deref for TmpDir {
+        type Target = PathBuf;
+        fn deref(&self) -> &PathBuf {
+            &self.0
+        }
+    }
+
+    impl Drop for TmpDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn tmp_dir(tag: &str) -> TmpDir {
         let dir = std::env::temp_dir().join(format!("harlo-store-test-{tag}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        dir
+        TmpDir(dir)
     }
 
     #[test]

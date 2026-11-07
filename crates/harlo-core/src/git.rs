@@ -1482,10 +1482,9 @@ mod tests {
         assert!(ok, "git {args:?}");
     }
 
-    fn repo(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("harlo-git-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+    /// A repository with one commit, removed when the test ends.
+    fn repo(tag: &str) -> crate::scratch::Scratch {
+        let dir = crate::scratch::Scratch::new(std::env::temp_dir().join(format!("harlo-git-{tag}-{}", std::process::id())));
         sh(&dir, &["init", "-q", "-b", "main"]);
         sh(&dir, &["config", "user.name", "t"]);
         sh(&dir, &["config", "user.email", "t@t"]);
@@ -1553,8 +1552,7 @@ mod tests {
     fn switches_to_a_remote_branch() {
         let origin = repo("remote-origin");
         sh(&origin, &["branch", "feature"]);
-        let clone = std::env::temp_dir().join(format!("harlo-git-remote-clone-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&clone);
+        let clone = crate::scratch::Scratch::new(std::env::temp_dir().join(format!("harlo-git-remote-clone-{}", std::process::id())));
         sh(&std::env::temp_dir(), &["clone", "-q", origin.to_str().unwrap(), clone.to_str().unwrap()]);
         let b = branches(&clone).unwrap();
         let remote: Vec<&str> = b.remote.iter().map(|r| r.name.as_str()).collect();
@@ -1622,7 +1620,7 @@ mod tests {
         let dirs = [dir.clone(), dir.join("sub"), outside.clone(), dir.join("missing")];
         let none = HashSet::new();
         let counts = counter.count(&dirs, &none);
-        assert_eq!(counts.get(&dir), Some(&2));
+        assert_eq!(counts.get(&*dir), Some(&2));
         assert_eq!(counts.get(&dir.join("sub")), Some(&2), "a subfolder counts its whole repository");
         assert!(!counts.contains_key(&outside) && !counts.contains_key(&dir.join("missing")));
         let root = repo_root(&dir).unwrap();
@@ -1630,7 +1628,7 @@ mod tests {
         assert!(ignored.is_empty(), "an ignored repository is not counted, from any folder");
         sh(&dir, &["add", "."]);
         sh(&dir, &["commit", "-q", "-m", "all"]);
-        assert_eq!(counter.count(&dirs, &none).get(&dir), Some(&0));
+        assert_eq!(counter.count(&dirs, &none).get(&*dir), Some(&0));
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&outside);
     }
