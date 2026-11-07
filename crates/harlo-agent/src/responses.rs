@@ -22,9 +22,16 @@ pub enum Event {
     Completed { usage: Value, output: Vec<Value> },
 }
 
+/// One client for every request, so a session's requests reuse their
+/// connection.
+fn client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(reqwest::Client::new)
+}
+
 /// A model the signed-in account may use: (id, name to show).
 pub async fn models(token: &str) -> Result<Vec<(String, String)>> {
-    let resp = reqwest::Client::new().get(format!("{RESOURCE}/models")).bearer_auth(token).send().await?;
+    let resp = client().get(format!("{RESOURCE}/models")).bearer_auth(token).send().await?;
     let status = resp.status();
     let body: Value = resp.json().await.unwrap_or(Value::Null);
     if !status.is_success() {
@@ -197,7 +204,7 @@ pub fn input(messages: &[Value], model: &str) -> Vec<Value> {
 /// `session`: the session's id, sent as its affinity headers too, so its
 /// requests go where their shared start is cached.
 pub async fn stream(token: &str, session: &str, body: &Value, mut on: impl FnMut(Event)) -> Result<()> {
-    let resp = reqwest::Client::new()
+    let resp = client()
         .post(format!("{RESOURCE}/responses"))
         .bearer_auth(token)
         .header("session-id", session)
