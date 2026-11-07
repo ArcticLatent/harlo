@@ -6,18 +6,20 @@
 //! sends what a running one would. Tools that only look run at once; the
 //! rest one after another, in the order called.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::{Result, bail};
 use futures_util::future::{BoxFuture, join_all};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
-use crate::session::{Log, now_ms};
-use crate::tools::{self, Tools};
 use crate::providers::{self, Api};
-use crate::{chat, responses};
+use crate::session::{Log, Past, now_ms};
+use crate::tools::{self, Tools};
+use crate::{chat, compact, responses};
 
 /// Rounds of tool calls in one run, at most.
 const MAX_ROUNDS: usize = 200;
@@ -48,6 +50,21 @@ pub enum Shown<'a> {
     Usage { model: &'a str, usage: &'a Value },
     /// The messages waiting to be delivered changed.
     Queue { steering: &'a [String], follow_up: &'a [String] },
+    /// A compaction starting (`reason`: threshold, overflow or manual).
+    CompactionStart { reason: &'a str },
+    /// …and ending: its result, or why it failed (neither: stopped).
+    CompactionEnd { reason: &'a str, result: Option<&'a Value>, error: Option<&'a str>, will_retry: bool },
+}
+
+/// How a compaction went.
+pub enum Compacted {
+    /// The summary's entry: summary, firstKeptEntryId, tokensBefore,
+    /// estimatedTokensAfter.
+    Done(Value),
+    /// Too little to summarize yet.
+    Nothing,
+    Stopped,
+    Failed(String),
 }
 
 /// Decides whether a call that changes something may run: `Err` says why
@@ -67,9 +84,16 @@ pub struct Inbox {
 pub struct Agent {
     pub model: String,
     pub effort: Option<String>,
+    cwd: PathBuf,
     instructions: String,
     tools: Tools,
     history: Vec<Value>,
+    /// Each message's entry id in the log.
+    ids: Vec<String>,
+    /// The files read and changed, as the last compaction listed them.
+    files: (Vec<String>, Vec<String>),
+    /// Context windows of the models used (0: not known).
+    windows: HashMap<String, u64>,
     log: Log,
     /// The model and thinking level the log last recorded.
     logged: (Option<String>, Option<String>),
@@ -90,18 +114,21 @@ pub struct Totals {
 }
 
 impl Agent {
-    /// `history`, `logged`: what the log already holds (nothing for a new
-    /// session).
-    pub fn new(cwd: PathBuf, log: Log, history: Vec<Value>, logged: (Option<String>, Option<String>), model: String, effort: Option<String>) -> Self {
+    /// `past`: what the log already holds (nothing for a new session).
+    pub fn new(cwd: PathBuf, log: Log, past: Past, model: String, effort: Option<String>) -> Self {
         let spill = std::env::temp_dir().join("harlo-agent");
         Agent {
             instructions: instructions(&cwd),
-            tools: Tools::new(cwd, spill),
+            tools: Tools::new(cwd.clone(), spill),
+            cwd,
             model,
             effort,
-            history,
+            history: past.messages,
+            ids: past.ids,
+            files: past.files,
+            windows: HashMap::new(),
             log,
-            logged,
+            logged: (past.model, past.effort),
             totals: Totals::default(),
             last_usage: Value::Null,
             gate: None,
@@ -125,27 +152,38 @@ impl Agent {
     pub fn new_session(&mut self, log: Log) {
         self.log = log;
         self.history.clear();
+        self.ids.clear();
+        self.files = Default::default();
         self.logged = (None, None);
     }
 
     /// Goes on in another session (a fork): its log and history.
     pub fn switch(&mut self, loaded: crate::session::Loaded) {
-        self.log = loaded.log;
-        self.history = loaded.messages;
-        self.logged = (loaded.model, loaded.effort);
+        let (log, past, _) = loaded.into_parts();
+        self.log = log;
+        self.history = past.messages;
+        self.ids = past.ids;
+        self.files = past.files;
+        self.logged = (past.model, past.effort);
     }
 
     pub fn rename(&mut self, name: &str) -> Result<()> {
-        self.log.append(json!({ "type": "session_info", "name": name }))
+        self.log.append(json!({ "type": "session_info", "name": name })).map(|_| ())
+    }
+
+    /// Models' context windows already known (as listed elsewhere).
+    pub fn know_windows(&mut self, windows: impl IntoIterator<Item = (String, u64)>) {
+        self.windows.extend(windows.into_iter().filter(|(_, w)| *w > 0));
     }
 
     fn push(&mut self, message: Value, show: &mut (dyn FnMut(Shown) + Send)) -> Result<()> {
-        self.log.message(&message)?;
+        let id = self.log.message(&message)?;
         if message["role"] != "assistant" {
             show(Shown::MessageStart(&message));
         }
         show(Shown::MessageEnd(&message));
         self.history.push(message);
+        self.ids.push(id);
         Ok(())
     }
 
@@ -196,9 +234,17 @@ impl Agent {
             self.logged.1 = self.effort.clone();
         }
         self.push_user(prompt, show)?;
+        // (A request too long for the model: compacted and sent again, once.)
+        let mut retried = false;
         for round in 0..MAX_ROUNDS {
             if round > 0 {
                 self.take_steering(show)?;
+            }
+            // Near the end of the window: the older part summarized first
+            // (if that fails, the request goes as it is).
+            if self.full().await && matches!(self.compact("threshold", None, stop, show).await, Compacted::Stopped) {
+                self.stopped(show)?;
+                return Ok(Ended::Stopped);
             }
             // A reply cut off is dropped whole: its parts can't go back alone.
             let asked = tokio::select! {
@@ -210,7 +256,24 @@ impl Agent {
                 self.stopped(show)?;
                 return Ok(Ended::Stopped);
             };
-            let reply = reply?;
+            let reply = match reply {
+                Ok(r) => r,
+                Err(e) if !retried && compact::overflowed(&e) => {
+                    retried = true;
+                    // (The reply it started shows as nothing.)
+                    show(Shown::MessageEnd(&json!({ "role": "assistant", "content": [], "timestamp": now_ms() })));
+                    match self.compact("overflow", None, stop, show).await {
+                        Compacted::Done(_) => continue,
+                        Compacted::Stopped => {
+                            self.stopped(show)?;
+                            return Ok(Ended::Stopped);
+                        }
+                        Compacted::Nothing | Compacted::Failed(_) => return Err(e),
+                    }
+                }
+                Err(e) => return Err(e),
+            };
+            retried = false;
             let calls: Vec<Value> = reply["content"].as_array().into_iter().flatten().filter(|b| b["type"] == "toolCall").cloned().collect();
             self.push(reply, show)?;
             if calls.is_empty() {
@@ -262,70 +325,192 @@ impl Agent {
         self.push(m, show)
     }
 
-    /// One request: the reply, as pi's assistant message. A token the API
-    /// refuses is refreshed once and the request sent again.
+    /// One request with the history: the reply, as pi's assistant message.
     async fn ask(&mut self, show: &mut (dyn FnMut(Shown) + Send)) -> Result<Value> {
-        let (provider, model) = providers::resolve(&self.model)?;
-        let pid = provider.id.clone();
-        let api = if provider.api == Api::Chat { "openai-completions" } else { "openai-responses" };
-        show(Shown::MessageStart(&json!({ "role": "assistant", "content": [], "api": api, "provider": pid, "model": model, "timestamp": now_ms() })));
-        let effort = provider.effort(&model, self.effort.as_deref());
-        let totals = &mut self.totals;
-        let last_usage = &mut self.last_usage;
-        let mut counted = |usage: &Value, show: &mut (dyn FnMut(Shown) + Send)| {
-            totals.requests += 1;
-            totals.input += usage["input_tokens"].as_u64().unwrap_or(0);
-            totals.cached += usage["input_tokens_details"]["cached_tokens"].as_u64().unwrap_or(0);
-            totals.output += usage["output_tokens"].as_u64().unwrap_or(0);
-            show(Shown::Usage { model: &model, usage });
-            *last_usage = usage.clone();
-        };
-        if provider.api == Api::Chat {
-            let body = chat::request(&model, &self.instructions, &chat::messages(&self.history), &tools::specs(), effort.as_deref());
-            let token = provider.token(false).await?;
-            let (message, usage) = chat::stream(&provider.base_url, token.as_deref(), &body, &pid, &model, |e| show(Shown::Stream(e))).await?;
-            counted(&usage, show);
-            return Ok(message);
+        let asked = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &self.instructions, history: &self.history, session: &self.log.id, tools: true };
+        let (message, usage) = send(asked, show).await?;
+        self.count(&usage);
+        show(Shown::Usage { model: message["model"].as_str().unwrap_or_default(), usage: &usage });
+        self.last_usage = usage;
+        Ok(message)
+    }
+
+    fn count(&mut self, usage: &Value) {
+        self.totals.requests += 1;
+        self.totals.input += usage["input_tokens"].as_u64().unwrap_or(0);
+        self.totals.cached += usage["input_tokens_details"]["cached_tokens"].as_u64().unwrap_or(0);
+        self.totals.output += usage["output_tokens"].as_u64().unwrap_or(0);
+    }
+
+    /// The context's size: the last request's, with its reply.
+    pub fn context_tokens(&self) -> u64 {
+        self.last_usage["input_tokens"].as_u64().unwrap_or(0) + self.last_usage["output_tokens"].as_u64().unwrap_or(0)
+    }
+
+    /// The model's context window (0: not known), asked of its provider
+    /// once.
+    async fn window(&mut self) -> u64 {
+        if let Some(w) = self.windows.get(&self.model) {
+            return *w;
         }
-        let input = responses::input(&self.history, &pid, &model);
-        let body = responses::request(&model, &self.instructions, &input, tools::specs(), effort.as_deref(), &self.log.id);
-        // (The plan's affinity headers keep a session's requests where its cache is.)
-        let affinity = provider.is_plan().then_some(self.log.id.as_str());
-        let mut force = false;
-        loop {
-            let token = provider.token(force).await?;
-            let mut items = Vec::new();
-            let mut done: Option<(Value, Vec<Value>)> = None;
-            let mut blocks = Blocks::default();
-            let result = responses::stream(&provider.base_url, token.as_deref(), affinity, &body, |ev| match ev {
-                responses::Event::Item { index, item } => {
-                    if let Some(end) = blocks.end(index, &item, &pid, &model) {
-                        show(Shown::Stream(&end));
-                    }
-                    items.push(item);
-                }
-                responses::Event::Completed { usage, output } => {
-                    counted(&usage, show);
-                    done = Some((usage, output));
-                }
-                other => {
-                    for e in blocks.stream(other) {
-                        show(Shown::Stream(&e));
-                    }
-                }
-            })
-            .await;
-            match result {
-                Ok(()) => {
-                    let (usage, output) = done.unwrap_or_default();
-                    // The completed response's own list when it has one.
-                    let items = if output.is_empty() { items } else { output };
-                    return Ok(responses::assistant_message(&items, &pid, &model, &usage));
-                }
-                // The plan's token, refused: refreshed once.
-                Err(e) if provider.is_plan() && !force && e.downcast_ref::<responses::ApiError>().is_some_and(|a| a.status == 401) => force = true,
-                Err(e) => return Err(e),
+        let w = match providers::resolve(&self.model) {
+            Ok((p, id)) => match tokio::time::timeout(Duration::from_secs(10), p.models()).await {
+                Ok(Ok(list)) => list.iter().find(|m| m.id == id).map_or(0, |m| m.context_window),
+                _ => 0,
+            },
+            Err(_) => 0,
+        };
+        self.windows.insert(self.model.clone(), w);
+        w
+    }
+
+    /// Whether the context is past where it's compacted.
+    async fn full(&mut self) -> bool {
+        let tokens = self.context_tokens();
+        if tokens == 0 {
+            return false;
+        }
+        let at = compact::threshold(self.window().await);
+        at > 0 && tokens >= at
+    }
+
+    /// Replaces the older part of the history with a summary the model
+    /// writes (`focus`: what the user asked it to keep). Shown as it goes,
+    /// unless there's too little to summarize.
+    pub async fn compact(&mut self, reason: &str, focus: Option<&str>, stop: &CancellationToken, show: &mut (dyn FnMut(Shown) + Send)) -> Compacted {
+        let at = compact::threshold(self.window().await);
+        // (Too long even so: only the newest message kept.)
+        let cut = compact::cut(&self.history, compact::keep(at)).or_else(|| if reason == "overflow" { compact::cut(&self.history, 1) } else { None });
+        let Some(cut) = cut else { return Compacted::Nothing };
+        let Some(first_kept) = self.ids.get(cut).cloned() else { return Compacted::Nothing };
+        show(Shown::CompactionStart { reason });
+        // (The last request's count when there was one since the start.)
+        let tokens_before = match self.context_tokens() {
+            0 => compact::estimate(&json!(self.instructions)) + self.history.iter().map(compact::estimate).sum::<u64>(),
+            n => n,
+        };
+        let mut asked: Vec<Value> = self.history[..cut].to_vec();
+        asked.push(json!({ "role": "user", "content": [{ "type": "text", "text": compact::request(focus) }], "timestamp": now_ms() }));
+        let request = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &self.instructions, history: &asked, session: &self.log.id, tools: false };
+        // (The summary isn't shown as it's written.)
+        let mut quiet = |_: Shown| {};
+        let sent = tokio::select! {
+            biased;
+            _ = stop.cancelled() => None,
+            r = send(request, &mut quiet) => Some(r),
+        };
+        let failed = |show: &mut (dyn FnMut(Shown) + Send), why: String| {
+            show(Shown::CompactionEnd { reason, result: None, error: Some(&why), will_retry: false });
+            Compacted::Failed(why)
+        };
+        let (reply, usage) = match sent {
+            None => {
+                show(Shown::CompactionEnd { reason, result: None, error: None, will_retry: false });
+                return Compacted::Stopped;
             }
+            Some(Err(e)) => return failed(show, format!("{e:#}")),
+            Some(Ok(r)) => r,
+        };
+        self.count(&usage);
+        let text: String = reply["content"].as_array().into_iter().flatten().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join("");
+        if reply["stopReason"] == "length" {
+            return failed(show, "The summary was cut off".into());
+        }
+        if text.trim().is_empty() {
+            return failed(show, "The model wrote no summary".into());
+        }
+        let files = compact::files(&self.history[..cut], &self.files);
+        let summary = compact::with_files(&text, &files);
+        let entry = json!({
+            "type": "compaction", "summary": summary, "firstKeptEntryId": first_kept, "tokensBefore": tokens_before,
+            "details": { "readFiles": files.0, "modifiedFiles": files.1 },
+            // (What writing it cost: a request of its own.)
+            "usage": reply["usage"],
+        });
+        let id = match self.log.append(entry.clone()) {
+            Ok(id) => id,
+            Err(e) => return failed(show, format!("{e:#}")),
+        };
+        self.history.splice(..cut, [crate::session::summary_message(&entry)]);
+        self.ids.splice(..cut, [id]);
+        self.files = files;
+        // The project's instructions as they are now.
+        self.instructions = instructions(&self.cwd);
+        let after = compact::estimate(&json!(self.instructions)) + self.history.iter().map(compact::estimate).sum::<u64>();
+        self.last_usage = json!({ "input_tokens": after, "output_tokens": 0 });
+        let result = json!({ "summary": summary, "firstKeptEntryId": first_kept, "tokensBefore": tokens_before, "estimatedTokensAfter": after });
+        show(Shown::CompactionEnd { reason, result: Some(&result), error: None, will_retry: reason == "overflow" });
+        Compacted::Done(result)
+    }
+}
+
+/// A request: the session's model and settings, and the history to send.
+struct Asked<'a> {
+    /// `provider/model`.
+    model: &'a str,
+    effort: Option<&'a str>,
+    instructions: &'a str,
+    history: &'a [Value],
+    session: &'a str,
+    /// Whether the model may call tools (they're sent either way, so the
+    /// request starts as the session's others do and their cache serves it).
+    tools: bool,
+}
+
+/// Sends a request: the reply, as pi's assistant message, and its usage.
+/// A token the plan refuses is refreshed once and the request sent again.
+async fn send(a: Asked<'_>, show: &mut (dyn FnMut(Shown) + Send)) -> Result<(Value, Value)> {
+    let (provider, model) = providers::resolve(a.model)?;
+    let pid = provider.id.clone();
+    let api = if provider.api == Api::Chat { "openai-completions" } else { "openai-responses" };
+    show(Shown::MessageStart(&json!({ "role": "assistant", "content": [], "api": api, "provider": pid, "model": model, "timestamp": now_ms() })));
+    let effort = provider.effort(&model, a.effort);
+    if provider.api == Api::Chat {
+        let mut body = chat::request(&model, a.instructions, &chat::messages(a.history), &tools::specs(), effort.as_deref());
+        if !a.tools {
+            body["tool_choice"] = json!("none");
+        }
+        let token = provider.token(false).await?;
+        return chat::stream(&provider.base_url, token.as_deref(), &body, &pid, &model, |e| show(Shown::Stream(e))).await;
+    }
+    let input = responses::input(a.history, &pid, &model);
+    let mut body = responses::request(&model, a.instructions, &input, tools::specs(), effort.as_deref(), a.session);
+    if !a.tools {
+        body["tool_choice"] = json!("none");
+    }
+    // (The plan's affinity headers keep a session's requests where its cache is.)
+    let affinity = provider.is_plan().then_some(a.session);
+    let mut force = false;
+    loop {
+        let token = provider.token(force).await?;
+        let mut items = Vec::new();
+        let mut done: Option<(Value, Vec<Value>)> = None;
+        let mut blocks = Blocks::default();
+        let result = responses::stream(&provider.base_url, token.as_deref(), affinity, &body, |ev| match ev {
+            responses::Event::Item { index, item } => {
+                if let Some(end) = blocks.end(index, &item, &pid, &model) {
+                    show(Shown::Stream(&end));
+                }
+                items.push(item);
+            }
+            responses::Event::Completed { usage, output } => done = Some((usage, output)),
+            other => {
+                for e in blocks.stream(other) {
+                    show(Shown::Stream(&e));
+                }
+            }
+        })
+        .await;
+        match result {
+            Ok(()) => {
+                let (usage, output) = done.unwrap_or_default();
+                // The completed response's own list when it has one.
+                let items = if output.is_empty() { items } else { output };
+                return Ok((responses::assistant_message(&items, &pid, &model, &usage), usage));
+            }
+            // The plan's token, refused: refreshed once.
+            Err(e) if provider.is_plan() && !force && e.downcast_ref::<responses::ApiError>().is_some_and(|a| a.status == 401) => force = true,
+            Err(e) => return Err(e),
         }
     }
 }

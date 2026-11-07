@@ -60,11 +60,34 @@ pub struct Log {
 /// on its current branch, and the model and thinking level it last used.
 pub struct Loaded {
     pub log: Log,
+    /// What the model sees: after a compaction, its summary first, then
+    /// the messages it kept and those since.
     pub messages: Vec<Value>,
+    /// Each message's entry id.
+    pub ids: Vec<String>,
+    /// The files the last compaction listed (read, changed).
+    pub files: (Vec<String>, Vec<String>),
     pub model: Option<String>,
     pub effort: Option<String>,
     /// Its name (`session_info`), if it was given one.
     pub name: Option<String>,
+}
+
+/// What a session holds for the agent going on with it.
+#[derive(Default)]
+pub struct Past {
+    pub messages: Vec<Value>,
+    pub ids: Vec<String>,
+    pub files: (Vec<String>, Vec<String>),
+    pub model: Option<String>,
+    pub effort: Option<String>,
+}
+
+impl Loaded {
+    /// Its log, what the agent goes on from, and its name.
+    pub fn into_parts(self) -> (Log, Past, Option<String>) {
+        (self.log, Past { messages: self.messages, ids: self.ids, files: self.files, model: self.model, effort: self.effort }, self.name)
+    }
 }
 
 impl Log {
@@ -109,10 +132,31 @@ impl Log {
         branch.reverse();
         let (mut model, mut effort, mut name) = (None, None, None);
         let mut messages = Vec::new();
+        let mut ids: Vec<String> = Vec::new();
+        let mut files = (Vec::new(), Vec::new());
         for e in &branch {
+            let id = e["id"].as_str().unwrap_or_default().to_owned();
             match e["type"].as_str() {
-                Some("message") => messages.push(e["message"].clone()),
-                Some("custom_message") => messages.push(json!({ "role": "custom", "customType": e["customType"], "content": e["content"], "display": e["display"] })),
+                Some("message") => {
+                    messages.push(e["message"].clone());
+                    ids.push(id);
+                }
+                Some("custom_message") => {
+                    messages.push(json!({ "role": "custom", "customType": e["customType"], "content": e["content"], "display": e["display"] }));
+                    ids.push(id);
+                }
+                // The summary, then the messages from the first one it kept.
+                Some("compaction") => {
+                    let from = e["firstKeptEntryId"].as_str().and_then(|k| ids.iter().position(|i| i == k)).unwrap_or(ids.len());
+                    let kept_messages = messages.split_off(from);
+                    let kept_ids = ids.split_off(from);
+                    messages = vec![summary_message(e)];
+                    ids = vec![id];
+                    messages.extend(kept_messages);
+                    ids.extend(kept_ids);
+                    let list = |k: &str| e["details"][k].as_array().into_iter().flatten().filter_map(|f| f.as_str().map(str::to_owned)).collect();
+                    files = (list("readFiles"), list("modifiedFiles"));
+                }
                 // (`provider/model`; a bare one is the plan's.)
                 Some("model_change") => {
                     model = e["modelId"].as_str().map(|m| match e["provider"].as_str().filter(|p| !p.is_empty()) {
@@ -134,16 +178,16 @@ impl Log {
             off: false,
             parent: None,
         };
-        Ok(Loaded { log, messages, model, effort, name })
+        Ok(Loaded { log, messages, ids, model, effort, name, files })
     }
 
     /// Appends `entry` (its `type` and fields), giving it an id, its parent
-    /// and the time.
-    pub fn append(&mut self, mut entry: Value) -> Result<()> {
-        if self.off {
-            return Ok(());
-        }
+    /// and the time: the id.
+    pub fn append(&mut self, mut entry: Value) -> Result<String> {
         let id = short_id();
+        if self.off {
+            return Ok(id);
+        }
         entry["id"] = json!(id);
         entry["parentId"] = json!(self.last);
         entry["timestamp"] = json!(iso(SystemTime::now()));
@@ -162,8 +206,8 @@ impl Log {
         line.push('\n');
         let file = self.file.as_mut().expect("opened");
         file.write_all(line.as_bytes()).with_context(|| format!("Couldn't write the session {}", self.path.display()))?;
-        self.last = Some(id);
-        Ok(())
+        self.last = Some(id.clone());
+        Ok(id)
     }
 
     fn header(&self) -> Value {
@@ -212,7 +256,7 @@ impl Log {
         let new = dir.join(format!("{}_{id}.jsonl", iso(SystemTime::now()).replace([':', '.'], "-")));
         let mut log = Log { id, path: new.clone(), cwd, file: None, last: None, off: false, parent: Some(path.to_owned()) };
         if branch.is_empty() {
-            return Ok((Loaded { log, messages: Vec::new(), model: None, effort: None, name: None }, said));
+            return Ok((Loaded { log, messages: Vec::new(), ids: Vec::new(), model: None, effort: None, name: None, files: Default::default() }, said));
         }
         let mut out = log.header().to_string();
         out.push('\n');
@@ -229,7 +273,8 @@ impl Log {
         Ok((loaded, said))
     }
 
-    pub fn message(&mut self, message: &Value) -> Result<()> {
+    /// A message's entry: its id.
+    pub fn message(&mut self, message: &Value) -> Result<String> {
         if message["role"] == "custom" {
             return self.append(json!({ "type": "custom_message", "customType": message["customType"], "content": message["content"], "display": message["display"] }));
         }
@@ -252,6 +297,11 @@ impl Log {
         }
         Ok((file, len == 0, torn))
     }
+}
+
+/// A compaction entry as the message the model gets in its place.
+pub fn summary_message(e: &Value) -> Value {
+    json!({ "role": "compactionSummary", "summary": e["summary"], "tokensBefore": e["tokensBefore"], "timestamp": now_ms() })
 }
 
 /// A user message's text (its text blocks, one after another).
@@ -350,6 +400,35 @@ mod tests {
         let text = std::fs::read_to_string(&path).unwrap();
         let header: Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
         assert_eq!((header["type"].as_str(), header["version"].as_u64(), header["cwd"].as_str()), (Some("session"), Some(3), Some("/home/u/proj")));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_compaction_reads_back_as_its_summary_and_what_it_kept() {
+        let root = tmp("compaction");
+        let cwd = Path::new("/home/u/proj");
+        let mut log = Log::new(&root, cwd);
+        let msg = |role: &str, text: &str| json!({ "role": role, "content": [{ "type": "text", "text": text }] });
+        let first = log.message(&msg("user", "old task")).unwrap();
+        log.message(&msg("assistant", "old work")).unwrap();
+        let kept = log.message(&msg("user", "newer")).unwrap();
+        log.message(&msg("assistant", "newer work")).unwrap();
+        let c = log.append(json!({ "type": "compaction", "summary": "## Goal\nold task", "firstKeptEntryId": kept, "tokensBefore": 900, "details": { "readFiles": ["a.rs"], "modifiedFiles": ["b.rs"] } })).unwrap();
+        let after = log.message(&msg("user", "after")).unwrap();
+        let loaded = Log::open(&log.path).unwrap();
+        let roles: Vec<&str> = loaded.messages.iter().map(|m| m["role"].as_str().unwrap()).collect();
+        assert_eq!(roles, ["compactionSummary", "user", "assistant", "user"]);
+        assert_eq!((loaded.messages[0]["summary"].as_str(), loaded.messages[0]["tokensBefore"].as_u64()), (Some("## Goal\nold task"), Some(900)));
+        assert_eq!(loaded.messages[1]["content"][0]["text"], "newer");
+        assert_eq!(loaded.ids, [c.clone(), kept.clone(), loaded.ids[2].clone(), after.clone()]);
+        assert_eq!(loaded.files, (vec!["a.rs".to_owned()], vec!["b.rs".to_owned()]));
+        assert_ne!(loaded.ids[0], first);
+        // A fork after it keeps the summary; one before it doesn't.
+        let (f, _) = Log::fork(&log.path, &after).unwrap();
+        assert_eq!(f.messages.len(), 3);
+        assert_eq!(f.messages[0]["role"], "compactionSummary");
+        let (f, said) = Log::fork(&log.path, &kept).unwrap();
+        assert_eq!((f.messages.len(), said.as_str()), (2, "newer"));
         let _ = std::fs::remove_dir_all(root);
     }
 

@@ -151,6 +151,7 @@ pub fn input(messages: &[Value], provider: &str, model: &str) -> Vec<Value> {
                 }
             }
             Some("custom") => out.push(json!({ "role": "user", "content": [{ "type": "input_text", "text": text_of(&m["content"]) }] })),
+            Some("compactionSummary") => out.push(json!({ "role": "user", "content": [{ "type": "input_text", "text": crate::compact::replayed(m) }] })),
             Some("assistant") => {
                 let same = m["provider"] == provider && m["model"] == model && m["api"] == "openai-responses";
                 let mut texts = 0;

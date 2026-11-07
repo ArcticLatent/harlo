@@ -21,7 +21,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
-use crate::agent::{Agent, Gate, Inbox, Shown};
+use crate::agent::{Compacted, Agent, Gate, Inbox, Shown};
 use crate::{providers, session};
 
 /// The thinking levels offered when the model doesn't list its own (the
@@ -101,6 +101,19 @@ impl Shared {
             })),
             Shown::Usage { usage, .. } => self.view.lock().unwrap().last_usage = usage.clone(),
             Shown::Queue { steering, follow_up } => self.emit(json!({ "type": "queue_update", "steering": steering, "followUp": follow_up })),
+            Shown::CompactionStart { reason } => self.emit(json!({ "type": "compaction_start", "reason": reason })),
+            Shown::CompactionEnd { reason, result, error, will_retry } => {
+                if let Some(r) = result {
+                    let mut v = self.view.lock().unwrap();
+                    v.last_usage = json!({ "input_tokens": r["estimatedTokensAfter"], "output_tokens": 0 });
+                    v.messages.push(json!({ "role": "compactionSummary", "summary": r["summary"], "tokensBefore": r["tokensBefore"], "timestamp": crate::session::now_ms() }));
+                }
+                let mut e = json!({ "type": "compaction_end", "reason": reason, "result": result, "aborted": result.is_none() && error.is_none(), "willRetry": will_retry });
+                if let Some(err) = error {
+                    e["errorMessage"] = json!(err);
+                }
+                self.emit(e);
+            }
         }
     }
 
@@ -200,18 +213,15 @@ impl Gate for Approvals {
 pub async fn serve(keep: Keep, model: Option<String>, effort: Option<String>) -> Result<()> {
     let cwd = std::env::current_dir()?;
     let root = session::root().ok_or_else(|| anyhow::anyhow!("No home folder to keep sessions in"))?;
-    let (log, history, logged, name) = match keep {
-        Keep::Nowhere => (session::Log::ephemeral(&cwd), Vec::new(), (None, None), None),
-        Keep::New => (session::Log::new(&root, &cwd), Vec::new(), (None, None), None),
-        Keep::File(p) if !p.exists() => (session::Log::new(&root, &cwd), Vec::new(), (None, None), None),
-        Keep::File(p) => {
-            let l = session::Log::open(&p)?;
-            (l.log, l.messages, (l.model, l.effort), l.name)
-        }
+    let (log, past, name) = match keep {
+        Keep::Nowhere => (session::Log::ephemeral(&cwd), session::Past::default(), None),
+        Keep::New => (session::Log::new(&root, &cwd), session::Past::default(), None),
+        Keep::File(p) if !p.exists() => (session::Log::new(&root, &cwd), session::Past::default(), None),
+        Keep::File(p) => session::Log::open(&p)?.into_parts(),
     };
-    let effort = effort.or_else(|| logged.1.clone()).unwrap_or_else(|| DEFAULT_LEVEL.to_owned());
-    let model = model.or_else(|| logged.0.clone()).map(|m| providers::full(&m)).unwrap_or_default();
-    let mut agent = Agent::new(cwd.clone(), log, history, logged, model, Some(effort));
+    let effort = effort.or_else(|| past.effort.clone()).unwrap_or_else(|| DEFAULT_LEVEL.to_owned());
+    let model = model.or_else(|| past.model.clone()).map(|m| providers::full(&m)).unwrap_or_default();
+    let mut agent = Agent::new(cwd.clone(), log, past, model, Some(effort));
 
     let (out, mut out_rx) = mpsc::unbounded_channel::<Value>();
     let writer = tokio::spawn(async move {
@@ -302,6 +312,22 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
     let busy = sh.running.lock().unwrap().is_some();
     let text = || cmd["message"].as_str().unwrap_or_default().to_owned();
     match ty.as_str() {
+        // "/compact [what to keep]", typed: as the compact command.
+        "prompt" if text().trim() == "/compact" || text().trim_start().starts_with("/compact ") => {
+            if busy {
+                return reply(Err("A run is working: wait for it, or stop it first.".into()));
+            }
+            let focus = text().trim_start().strip_prefix("/compact").map(|f| f.trim().to_owned()).filter(|f| !f.is_empty());
+            reply(Ok(Value::Null));
+            compact_now(sh, agent, focus, None).await;
+        }
+        "compact" => {
+            if busy {
+                return reply(Err("A run is working: wait for it, or stop it first.".into()));
+            }
+            let focus = cmd["customInstructions"].as_str().map(str::to_owned);
+            compact_now(sh, agent, focus, Some(id.clone())).await;
+        }
         "prompt" => {
             let behavior = cmd["streamingBehavior"].as_str().unwrap_or_default();
             if busy && behavior.is_empty() {
@@ -469,13 +495,19 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
                 "sessionFile": v.session_file, "sessionId": v.session_id,
                 "userMessages": count("user"), "assistantMessages": count("assistant"), "toolCalls": calls, "toolResults": count("toolResult"),
                 "totalMessages": v.messages.len(),
-                "contextUsage": { "tokens": tokens, "contextWindow": window, "percent": if window > 0 { tokens as f64 * 100.0 / window as f64 } else { 0.0 } },
+                "contextUsage": {
+                    "tokens": tokens, "contextWindow": window, "compactAt": crate::compact::threshold(window),
+                    "percent": if window > 0 { tokens as f64 * 100.0 / window as f64 } else { 0.0 },
+                },
                 "cost": 0.0,
             });
             drop(v);
             reply(Ok(stats))
         }
-        "get_commands" | "get_available_commands" => reply(Ok(json!({ "commands": [] }))),
+        "get_commands" | "get_available_commands" => reply(Ok(json!({ "commands": [{
+            "name": "compact", "description": "Summarize the conversation so far to free up context",
+            "source": "builtin", "input": { "hint": "what to keep (optional)" },
+        }] }))),
         "get_subagents" => reply(Ok(json!({ "subagents": [] }))),
         "new_session" => {
             if busy {
@@ -556,9 +588,61 @@ async fn load_models(sh: &Shared) -> Result<(), String> {
     Ok(())
 }
 
+/// Summarizes the conversation so far (the agent is free), as a run:
+/// answered when done when `reply_to` is a command's id.
+async fn compact_now(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, focus: Option<String>, reply_to: Option<Value>) {
+    let mut a = agent.clone().lock_owned().await;
+    let _ = load_models(sh).await;
+    a.know_windows(windows(sh));
+    let stop = CancellationToken::new();
+    *sh.running.lock().unwrap() = Some(stop.clone());
+    let sh = sh.clone();
+    // (Typed, it's a run as a prompt's is; asked for, only the command's answer.)
+    let typed = reply_to.is_none();
+    tokio::spawn(async move {
+        if typed {
+            sh.emit(json!({ "type": "agent_start" }));
+        }
+        let shown = sh.clone();
+        let mut show = |s: Shown| shown.show(s);
+        let outcome = a.compact("manual", focus.as_deref(), &stop, &mut show).await;
+        let too_little = matches!(outcome, Compacted::Nothing);
+        let result = match outcome {
+            Compacted::Done(r) => Ok(r),
+            Compacted::Nothing => Err("There's too little to summarize yet.".to_owned()),
+            Compacted::Stopped => Err("Stopped.".to_owned()),
+            Compacted::Failed(e) => Err(e),
+        };
+        drop(a);
+        *sh.running.lock().unwrap() = None;
+        if let Some(id) = reply_to {
+            let mut r = json!({ "type": "response", "command": "compact", "id": id, "success": result.is_ok() });
+            match result {
+                Ok(data) => r["data"] = data,
+                Err(e) => r["error"] = json!(e),
+            }
+            sh.emit(r);
+        } else if too_little {
+            // (Typed, with nothing shown yet: a compaction's line says why.)
+            sh.emit(json!({ "type": "compaction_start", "reason": "manual" }));
+            sh.emit(json!({ "type": "compaction_end", "reason": "manual", "result": null, "aborted": false, "willRetry": false, "errorMessage": result.err() }));
+        }
+        if typed {
+            sh.emit(json!({ "type": "agent_end", "messages": [] }));
+            sh.emit(json!({ "type": "agent_settled" }));
+        }
+    });
+}
+
+/// The context windows of the models listed.
+fn windows(sh: &Shared) -> Vec<(String, u64)> {
+    sh.models.lock().unwrap().iter().map(|m| (m.key(), m.context_window)).collect()
+}
+
 /// Starts a run on `prompt` (the agent is free).
 async fn start(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, prompt: String) -> Result<(), String> {
     let mut a = agent.clone().lock_owned().await;
+    a.know_windows(windows(sh));
     if a.model.is_empty() {
         load_models(sh).await?;
         let m = sh.view.lock().unwrap().model.clone();

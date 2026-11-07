@@ -20,6 +20,7 @@
 mod agent;
 mod auth;
 mod chat;
+mod compact;
 mod providers;
 mod responses;
 mod rpc;
@@ -159,20 +160,23 @@ async fn ask(prompt: &str, model: Option<String>, effort: Option<String>, from: 
         },
         Resume::File(p) => Some(session::Log::open(&p)?),
     };
-    let (log, history, logged) = match loaded {
-        Some(l) => (l.log, l.messages, (l.model, l.effort)),
-        None => (session::Log::new(&root, &cwd), Vec::new(), (None, None)),
+    let (log, past) = match loaded {
+        Some(l) => {
+            let (log, past, _) = l.into_parts();
+            (log, past)
+        }
+        None => (session::Log::new(&root, &cwd), session::Past::default()),
     };
     // The model asked for, else the session's, else the plan's first.
-    let effort = effort.or_else(|| logged.1.clone());
-    let model = match model.or_else(|| logged.0.clone()) {
+    let effort = effort.or_else(|| past.effort.clone());
+    let model = match model.or_else(|| past.model.clone()) {
         Some(m) => providers::full(&m),
         None => {
             let (models, errors) = providers::every_model().await;
             models.first().map(|m| m.key()).ok_or_else(|| anyhow::anyhow!("No models: {}", if errors.is_empty() { "set up a provider".to_owned() } else { errors.join("; ") }))?
         }
     };
-    let mut agent = agent::Agent::new(cwd, log, history, logged, model, effort);
+    let mut agent = agent::Agent::new(cwd, log, past, model, effort);
     let mut out = std::io::stdout();
     let mut thinking = false;
     // Whether the last thing printed ended a line.
@@ -225,6 +229,16 @@ async fn ask(prompt: &str, model: Option<String>, effort: Option<String>, from: 
                 line(&mut fresh);
                 eprintln!("\x1b[2m[{model} · {} in ({} cached), {} out]\x1b[0m", usage["input_tokens"], usage["input_tokens_details"]["cached_tokens"], usage["output_tokens"]);
             }
+            agent::Shown::CompactionStart { .. } => {
+                end_thinking(&mut thinking);
+                line(&mut fresh);
+                eprintln!("\x1b[2mThe context is nearly full: summarizing the older part…\x1b[0m");
+            }
+            agent::Shown::CompactionEnd { result, error, .. } => match (result, error) {
+                (Some(r), _) => eprintln!("\x1b[2mSummarized: {} tokens → about {}\x1b[0m", r["tokensBefore"], r["estimatedTokensAfter"]),
+                (None, Some(e)) => eprintln!("\x1b[31mCouldn't summarize: {e}\x1b[0m"),
+                (None, None) => {}
+            },
             agent::Shown::MessageStart(_) | agent::Shown::MessageEnd(_) | agent::Shown::Queue { .. } => {}
         }
     };

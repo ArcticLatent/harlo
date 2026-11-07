@@ -256,7 +256,8 @@ impl Translator {
             "compaction_end" | "auto_compaction_end" => E::Compaction {
                 started: false,
                 reason: opt_str(&frame, "reason"),
-                error: opt_str(&frame, "errorMessage"),
+                // (Stopped: it didn't compact either.)
+                error: opt_str(&frame, "errorMessage").or_else(|| (frame["aborted"] == true).then(|| "stopped".to_owned())),
             },
             "auto_retry_start" => E::Retry {
                 started: true,

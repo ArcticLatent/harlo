@@ -1695,6 +1695,49 @@ mod tests {
         // Renamed (as the sidebar does): the sidebar reads the name back.
         again.request(json!({ "type": "set_session_name", "name": "Forked try" })).await.unwrap();
         assert_eq!(harlo_harness::store::read_session(HarnessKind::Harlo, &forked).unwrap().name, "Forked try");
+        drop(again);
+
+        // Compacted (early, to try it): harlo shows it, the model still
+        // knows what it was told, and the saved session shows the summary.
+        let mut early = cfg(SessionTarget::New);
+        early.env.push(("HARLO_AGENT_COMPACT_AT".to_owned(), "800".to_owned()));
+        let small = SessionHandle::spawn(early);
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        small.subscribe(ChannelSink(tx));
+        let mut rows = Vec::new();
+        assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::Status(SessionStatus::Idle))).await);
+        let mut meta = SessionMetaInfo::default();
+        for prompt in ["Remember this code word for later: tangerine. Then write a 150-word paragraph about how oranges are grown.", "Reply with just: two", "What was the code word? Reply with just the word."] {
+            small.prompt(prompt, Vec::new(), SendMode::Normal);
+            assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::Status(SessionStatus::Busy))).await);
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+            while let Ok(Some(u)) = tokio::time::timeout_at(deadline, rx.recv()).await {
+                match u {
+                    SessionUpdate::Rows(changes) => apply(&mut rows, changes),
+                    SessionUpdate::Meta(m) => meta = m,
+                    SessionUpdate::Status(SessionStatus::Idle) => break,
+                    _ => {}
+                }
+            }
+        }
+        // (Rows still on their way after it settled.)
+        while let Ok(Some(u)) = tokio::time::timeout(Duration::from_millis(1500), rx.recv()).await {
+            match u {
+                SessionUpdate::Rows(changes) => apply(&mut rows, changes),
+                SessionUpdate::Meta(m) => meta = m,
+                _ => {}
+            }
+        }
+        let notices: Vec<&str> = rows.iter().filter(|r| r.kind == crate::RowKind::Notice).map(|r| r.text.as_str()).collect();
+        assert!(notices.contains(&"Context compacted"), "{notices:?}");
+        let replies: Vec<&str> = rows.iter().filter(|r| r.kind == crate::RowKind::Markdown).map(|r| r.html.as_str()).collect();
+        assert!(replies.last().is_some_and(|r| r.to_lowercase().contains("tangerine")), "{:?}", replies.iter().map(|r| r.chars().take(40).collect::<String>()).collect::<Vec<_>>());
+        assert_eq!(meta.compact_at, 800, "{meta:?}");
+        let saved = meta.session_file.clone().expect("its file");
+        assert!(std::fs::read_to_string(&saved).unwrap().contains("\"type\":\"compaction\""));
+        let roles: Vec<String> = harlo_harness::store::read_messages(&saved).unwrap().iter().filter_map(|m| m["role"].as_str().map(str::to_owned)).collect();
+        assert!(roles.iter().any(|r| r == "compactionSummary"), "{roles:?}");
+        drop(small);
         // Everything harlo asked, it answered.
         harlo_harness::protocol_log::set_dir(None);
         let mut refused = Vec::new();

@@ -43,6 +43,7 @@ pub fn messages(history: &[Value]) -> Vec<Value> {
     let mut out = Vec::new();
     for m in history {
         match m["role"].as_str() {
+            Some("compactionSummary") => out.push(json!({ "role": "user", "content": crate::compact::replayed(m) })),
             Some("user") | Some("custom") => {
                 let text = text_of(&m["content"]);
                 if !text.is_empty() {
