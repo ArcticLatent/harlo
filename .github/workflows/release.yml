@@ -29,7 +29,8 @@ env:
 
 jobs:
   # The helper harlo puts on ARM (aarch64) machines to run model servers
-  # there, built on one (Ubuntu 22.04's glibc, as harlo's own).
+  # there, built on one (Ubuntu 22.04's glibc, as harlo's own), and Harlo's
+  # agent for them (static: musl).
   engines-arm64:
     runs-on: ubuntu-22.04-arm
     timeout-minutes: 45
@@ -40,6 +41,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends build-essential cmake pkg-config
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-musl
       - uses: Swatinem/rust-cache@v2
       - name: harlo-engines
         run: |
@@ -49,10 +52,18 @@ jobs:
           file helpers/harlo-engines-aarch64
           helpers/harlo-engines-aarch64 version
           helpers/harlo-engines-aarch64 catalog > /dev/null
+      - name: harlo-agent
+        run: |
+          CC_aarch64_unknown_linux_musl=gcc cargo build --profile agent --locked -p harlo-agent --target aarch64-unknown-linux-musl
+          strip -o helpers/harlo-agent-aarch64 target/aarch64-unknown-linux-musl/agent/harlo-agent
+          file helpers/harlo-agent-aarch64 | tee /dev/stderr | grep -q "static"
+          helpers/harlo-agent-aarch64 --version
       - uses: actions/upload-artifact@v6
         with:
           name: harlo-engines-aarch64
-          path: helpers/harlo-engines-aarch64
+          path: |
+            helpers/harlo-engines-aarch64
+            helpers/harlo-agent-aarch64
 
   linux:
     needs: engines-arm64
@@ -88,6 +99,8 @@ jobs:
           ls "$HOME/Qt/$QT_VERSION/gcc_64/plugins/platforms" "$HOME/Qt/$QT_VERSION/gcc_64/plugins"
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
 
       - uses: Swatinem/rust-cache@v2
 
@@ -114,6 +127,9 @@ jobs:
           # Harlo's agent, where harlo looks for it.
           test -x dist/opt/harlo/lib/harlo/harlo-agent
           dist/opt/harlo/lib/harlo/harlo-agent --version
+          # Its static copies for other machines.
+          for a in x86_64 aarch64; do test -x dist/opt/harlo/lib/harlo/harlo-agent-$a; file dist/opt/harlo/lib/harlo/harlo-agent-$a | grep -q static; done
+          dist/opt/harlo/lib/harlo/harlo-agent-x86_64 --version
           # It runs and its QML loads: --version prints and quits; a short
           # offscreen start must not report missing modules or libraries.
           QT_QPA_PLATFORM=offscreen dist/opt/harlo/bin/harlo --version

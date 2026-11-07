@@ -27,6 +27,10 @@ cargo build --release --locked -p harlo-app
 cargo build --release --locked -p harlo-core --bin harlo-engines --no-default-features
 # Harlo, harlo's own agent (one optimized unit: smaller, less memory).
 cargo build --profile agent --locked -p harlo-agent
+# And the copy harlo puts on other machines: static (musl), so it runs
+# whatever C library they have. (ring's bits of C: the system's gcc does.)
+rustup target add x86_64-unknown-linux-musl 2>/dev/null || true
+CC_x86_64_unknown_linux_musl=${CC_x86_64_unknown_linux_musl:-gcc} cargo build --profile agent --locked -p harlo-agent --target x86_64-unknown-linux-musl
 
 fetch() {
     [ -x "$TOOLS/$1" ] || { curl -fsSL -o "$TOOLS/$1" "$2"; chmod +x "$TOOLS/$1"; }
@@ -76,6 +80,11 @@ export PATH="$QTDIR/bin:$PATH"
 install -Dm755 -s "${CARGO_TARGET_DIR:-target}/release/harlo-engines" "$APPDIR/usr/lib/harlo/harlo-engines"
 # Harlo's agent, which harlo looks for in lib/harlo beside its own bin.
 install -Dm755 -s "${CARGO_TARGET_DIR:-target}/agent/harlo-agent" "$APPDIR/usr/lib/harlo/harlo-agent"
+# Its copy for other machines, x86_64 and (built on one) ARM.
+install -Dm755 -s "${CARGO_TARGET_DIR:-target}/x86_64-unknown-linux-musl/agent/harlo-agent" "$APPDIR/usr/lib/harlo/harlo-agent-x86_64"
+if [ -f "$OUT/helpers/harlo-agent-aarch64" ]; then
+    install -Dm755 "$OUT/helpers/harlo-agent-aarch64" "$APPDIR/usr/lib/harlo/harlo-agent-aarch64"
+fi
 # ARM machines' (built on one: the release's arm64 job puts it in dist/helpers).
 if [ -f "$OUT/helpers/harlo-engines-aarch64" ]; then
     install -Dm755 "$OUT/helpers/harlo-engines-aarch64" "$APPDIR/usr/lib/harlo/harlo-engines-aarch64"

@@ -29,6 +29,10 @@ prepare() {
     cd "harlo-$pkgver"
     export RUSTUP_TOOLCHAIN=stable
     cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+    # (The static copy for other machines, when Rust has musl here.)
+    if [ -d "$(rustc --print target-libdir --target x86_64-unknown-linux-musl 2>/dev/null)" ]; then
+        cargo fetch --locked --target x86_64-unknown-linux-musl
+    fi
 }
 
 build() {
@@ -37,6 +41,12 @@ build() {
     cargo build --frozen --release -p harlo-app
     cargo build --frozen --release -p harlo-core --bin harlo-engines --no-default-features
     cargo build --frozen --profile agent -p harlo-agent
+    # Its copy for other machines: static (musl), so it runs whatever C
+    # library they have. Without Rust's musl target here, Harlo isn't
+    # offered on other machines.
+    if [ -d "$(rustc --print target-libdir --target x86_64-unknown-linux-musl 2>/dev/null)" ]; then
+        CC_x86_64_unknown_linux_musl=gcc cargo build --frozen --profile agent -p harlo-agent --target x86_64-unknown-linux-musl
+    fi
 }
 
 check() {
@@ -52,6 +62,9 @@ package() {
     install -Dm755 target/release/harlo-engines "$pkgdir/usr/lib/harlo/harlo-engines"
     # (Harlo, harlo's own agent.)
     install -Dm755 target/agent/harlo-agent "$pkgdir/usr/lib/harlo/harlo-agent"
+    if [ -f target/x86_64-unknown-linux-musl/agent/harlo-agent ]; then
+        install -Dm755 target/x86_64-unknown-linux-musl/agent/harlo-agent "$pkgdir/usr/lib/harlo/harlo-agent-x86_64"
+    fi
     install -Dm644 packaging/harlo.desktop "$pkgdir/usr/share/applications/harlo.desktop"
     install -Dm644 crates/harlo-app/icons/app/harlo.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/harlo.svg"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
