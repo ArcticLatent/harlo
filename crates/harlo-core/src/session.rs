@@ -1812,6 +1812,71 @@ mod tests {
         assert!(rows.iter().any(|r| r.kind == crate::RowKind::Tool), "{rows:?}");
     }
 
+    /// harlo-agent as a helper, on the plan: briefed as harlo briefs one,
+    /// with the helper's tools, it does the task and reports (reminded
+    /// once if it ends without). The report is checked as harlo checks it.
+    #[tokio::test]
+    #[ignore]
+    async fn harlo_agent_reports_as_a_helper() {
+        let home = PathBuf::from(std::env::var("HARLO_TEST_HOME").expect("a scratch HARLO_TEST_HOME"));
+        assert!(home.starts_with("/tmp/"), "not a scratch folder: {home:?}");
+        let work = home.join("work-helper");
+        std::fs::create_dir_all(&work).unwrap();
+        let handle = SessionHandle::spawn(HarnessConfig {
+            kind: HarnessKind::Harlo,
+            program: Some(std::env::var("HARLO_TEST_HARLO_AGENT").expect("HARLO_TEST_HARLO_AGENT").into()),
+            cwd: work.clone(),
+            session: SessionTarget::New,
+            extra_args: vec!["--harlo-tools".into()],
+            env: vec![("XDG_DATA_HOME".to_owned(), home.join("data").to_string_lossy().into_owned())],
+            remote: None,
+        });
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        handle.subscribe(ChannelSink(tx));
+        let mut rows = Vec::new();
+        assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::Status(SessionStatus::Idle))).await);
+        handle.send_raw(json!({ "type": "harlo_set_modes", "approval": "yolo", "plan": false }));
+        handle.send_raw(json!({ "type": "set_thinking_level", "level": "low" }));
+        let brief = crate::orchestration::helper_brief("main", "Create add.py with a function add(a, b) that returns their sum.", true, "");
+        handle.prompt(&brief, Vec::new(), SendMode::Normal);
+        let mut reports: Vec<Result<crate::orchestration::Report, String>> = Vec::new();
+        let mut file = None;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(240);
+        while let Ok(Some(u)) = tokio::time::timeout_at(deadline, rx.recv()).await {
+            match u {
+                SessionUpdate::Rows(changes) => apply(&mut rows, changes),
+                SessionUpdate::Meta(m) => file = m.session_file.or(file),
+                SessionUpdate::HarloCall { id, tool, args } => {
+                    let answer = match tool.as_str() {
+                        "_tools" => Ok(crate::orchestration::helper_tools()),
+                        "_instructions" => Ok(json!(crate::orchestration::BASE_INSTRUCTIONS)),
+                        "report_done" => {
+                            let r = crate::orchestration::Report::parse(&args);
+                            reports.push(r.clone());
+                            r.map(|_| json!({ "reported": true, "next": "End your turn now: harlo sends your report when it ends." }))
+                        }
+                        other => Err(format!("harlo has no tool {other}.")),
+                    };
+                    let mut a = json!({ "type": "harlo_result", "call": id, "ok": answer.is_ok() });
+                    match answer {
+                        Ok(v) => a["result"] = v,
+                        Err(e) => a["error"] = json!(e),
+                    }
+                    handle.send_raw(a);
+                }
+                SessionUpdate::Status(SessionStatus::Idle) => break,
+                _ => {}
+            }
+        }
+        let text = std::fs::read_to_string(work.join("add.py")).unwrap_or_default();
+        assert!(text.contains("def add"), "{text:?}");
+        let good = reports.iter().filter_map(|r| r.as_ref().ok()).collect::<Vec<_>>();
+        assert!(good.len() == 1 && good[0].succeeded && good[0].files.iter().any(|f| f.ends_with("add.py")), "{reports:?}");
+        // (Whether it needed the reminder: in the log, for the record.)
+        let reminded = file.and_then(|f| std::fs::read_to_string(f).ok()).unwrap_or_default().contains("harlo_report_reminder");
+        eprintln!("reported {} time(s); reminded: {reminded}", reports.len());
+    }
+
     #[tokio::test]
     async fn demo_run_reaches_subscribers() {
         let handle = SessionHandle::spawn(cfg(HarnessKind::Demo, SessionTarget::New));

@@ -28,6 +28,11 @@ const MAX_ROUNDS: usize = 200;
 const STOPPED_NOTE: &str = "<turn_stopped>The user stopped this turn. A call marked interrupted was stopped partway and may have partly run: check its effects before relying on them.</turn_stopped>";
 const INTERRUPTED: &str = "Interrupted: the user stopped the turn while this call ran. It may have partly run.";
 const NOT_RUN: &str = "Not run: the user stopped the turn before this call started.";
+/// Told a helper (once a run) that would end its turn without reporting.
+const REPORT_REMINDER: &str = "[harlo] Before you end your turn: you're a helper, and the session that started you is waiting for your result. If you're done or can't go on, call report_done (outcome succeeded or failed, a three-sentence summary, the files you changed). If you're waiting on an answer, call ask_parent (your parent) or request_approval (the user) instead. Then end your turn.";
+/// harlo's tools a helper may end its turn with: it reported, or it waits
+/// for its parent or the user.
+const HAND_OVERS: [&str; 4] = ["report_done", "ask_parent", "request_approval", "propose_helpers"];
 
 /// How a run ended.
 #[derive(Debug, PartialEq)]
@@ -252,6 +257,10 @@ impl Agent {
         self.push_user(prompt, show)?;
         // (A request too long for the model: compacted and sent again, once.)
         let mut retried = false;
+        // A helper (harlo gave it report_done): whether it reported (or
+        // asked) in this run, and whether it was reminded to.
+        let helper = self.harlo_tools.iter().any(|t| t["name"] == "report_done");
+        let (mut handed_over, mut reminded) = (false, false);
         for round in 0..MAX_ROUNDS {
             if round > 0 {
                 self.take_steering(show)?;
@@ -296,6 +305,13 @@ impl Agent {
                 if self.take_steering(show)? || self.take_follow_up(show)? {
                     continue;
                 }
+                // A helper ending its turn with no result for its parent:
+                // reminded once (then it ends as it answers).
+                if helper && !handed_over && !reminded {
+                    reminded = true;
+                    self.push(json!({ "role": "custom", "customType": "harlo_report_reminder", "content": REPORT_REMINDER, "display": false, "timestamp": now_ms() }), show)?;
+                    continue;
+                }
                 return Ok(Ended::Done);
             }
             // Arguments that weren't JSON go as null: the call says so.
@@ -308,6 +324,7 @@ impl Agent {
             let pairs: Vec<(&str, &Value)> = names.iter().copied().zip(&args).collect();
             let harlo = self.harlo.as_deref().map(|h| (h, self.harlo_tools.as_slice()));
             let outcomes = run_calls(&self.tools, &pairs, self.gate.as_deref(), harlo, stop).await;
+            handed_over |= hands_over(&names, &outcomes);
             for ((c, name), o) in calls.iter().zip(&names).zip(outcomes) {
                 show(Shown::ToolEnd { call_id: c["id"].as_str().unwrap_or_default(), name, text: &o.text, failed: o.failed });
                 self.push(
@@ -687,6 +704,12 @@ async fn run_calls(tools: &Tools, calls: &[(&str, &Value)], gate: Option<&dyn Ga
     out
 }
 
+/// Whether a round's calls handed the turn over (a report, or a question
+/// for the parent or the user, that harlo took).
+fn hands_over(names: &[&str], outcomes: &[tools::Outcome]) -> bool {
+    names.iter().zip(outcomes).any(|(n, o)| HAND_OVERS.contains(n) && !o.failed)
+}
+
 /// What harlo is asked for its tools, and for what they're for.
 pub const HARLO_TOOLS: &str = "_tools";
 pub const HARLO_INSTRUCTIONS: &str = "_instructions";
@@ -879,5 +902,15 @@ mod tests {
         assert_eq!((out[2].text.as_str(), out[2].failed), ("no start_session", true));
         // (Not one of harlo's: ours, and there's no such tool.)
         assert!(out[3].failed && out[3].text.contains("no tool called nope"), "{}", out[3].text);
+    }
+
+    #[test]
+    fn what_hands_a_helpers_turn_over() {
+        let o = |failed: bool| tools::Outcome { text: String::new(), failed };
+        assert!(!hands_over(&["report_done"], &[o(true)]), "a refused report");
+        assert!(hands_over(&["read", "report_done"], &[o(false), o(false)]));
+        assert!(hands_over(&["ask_parent"], &[o(false)]));
+        assert!(hands_over(&["request_approval"], &[o(false)]));
+        assert!(!hands_over(&["list_sessions", "bash"], &[o(false), o(false)]));
     }
 }
