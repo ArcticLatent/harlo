@@ -127,6 +127,13 @@ impl Agent {
         self.logged = (None, None);
     }
 
+    /// Goes on in another session (a fork): its log and history.
+    pub fn switch(&mut self, loaded: crate::session::Loaded) {
+        self.log = loaded.log;
+        self.history = loaded.messages;
+        self.logged = (loaded.model, loaded.effort);
+    }
+
     pub fn rename(&mut self, name: &str) -> Result<()> {
         self.log.append(json!({ "type": "session_info", "name": name }))
     }

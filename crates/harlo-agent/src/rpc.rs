@@ -466,6 +466,34 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
             sh.always.lock().unwrap().clear();
             reply(Ok(json!({ "cancelled": false })))
         }
+        // A new session from what came before one of your messages; its
+        // text comes back to edit and send again.
+        "fork" => {
+            if busy {
+                return reply(Err("A run is working: stop it first.".into()));
+            }
+            let Some(entry) = cmd["entryId"].as_str().filter(|e| !e.is_empty()) else { return reply(Err("fork needs entryId".into())) };
+            let mut a = agent.lock().await;
+            let file = a.session_file().to_owned();
+            if file.as_os_str().is_empty() || !file.exists() {
+                return reply(Err("This session isn't saved yet, so it can't be forked.".into()));
+            }
+            let (loaded, text) = match session::Log::fork(&file, entry) {
+                Ok(f) => f,
+                Err(e) => return reply(Err(format!("{e:#}"))),
+            };
+            let name = loaded.name.clone();
+            a.switch(loaded);
+            let mut v = sh.view.lock().unwrap();
+            v.messages = a.messages().to_vec();
+            v.name = name;
+            v.last_usage = Value::Null;
+            v.session_id = a.session_id().to_owned();
+            v.session_file = Some(a.session_file().display().to_string());
+            drop(v);
+            sh.always.lock().unwrap().clear();
+            reply(Ok(json!({ "text": text, "cancelled": false })))
+        }
         "" => reply(Err("The command has no type".into())),
         other => reply(Err(format!("harlo-agent doesn't know the command {other}"))),
     }

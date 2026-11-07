@@ -677,7 +677,7 @@ Rectangle {
                     required property string modelData
                     required property int index
                     // Every agent's can be dropped, and a follow-up sent now.
-                    readonly property bool editable: ["omp", "claude", "pi", "opencode", "hermes", "demo"].includes(session.harness)
+                    readonly property bool editable: ["omp", "claude", "pi", "opencode", "hermes", "harlo", "demo"].includes(session.harness)
                     width: parent.width
                     implicitHeight: 22
                     HoverHandler { id: queuedHover }

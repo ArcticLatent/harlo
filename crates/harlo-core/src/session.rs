@@ -1657,6 +1657,44 @@ mod tests {
         assert!(text.contains("just the word: done"), "the resumed run went to the same file");
         let sessions = std::fs::read_dir(file.parent().unwrap()).unwrap().count();
         assert_eq!(sessions, 1, "no second session file");
+
+        // Edit & resend from the second message (as the app finds it): a
+        // new session with the first exchange, the old one left as it was.
+        let users = harlo_harness::branches::current_user_entries(&file).unwrap();
+        assert_eq!(users.len(), 3, "{users:?}");
+        let before = std::fs::read_to_string(&file).unwrap();
+        let fork = again.request(json!({ "type": "fork", "entryId": users[1] })).await.unwrap();
+        assert_eq!(fork["cancelled"], false);
+        assert!(fork["text"].as_str().unwrap().contains("sleep 60"), "{fork}");
+        again.reload();
+        let state = again.request(json!({ "type": "get_state" })).await.unwrap();
+        let forked = PathBuf::from(state["sessionFile"].as_str().unwrap());
+        assert_ne!(forked, file);
+        let messages = again.request(json!({ "type": "get_messages" })).await.unwrap();
+        let roles: Vec<&str> = messages["messages"].as_array().unwrap().iter().filter_map(|m| m["role"].as_str()).collect();
+        assert_eq!(roles.first(), Some(&"user"));
+        assert!(!messages.to_string().contains("sleep 60"), "the fork stops before that message");
+        again.prompt("Reply with just the word: forked", Vec::new(), SendMode::Normal);
+        assert!(collect_until(&mut rx, &mut back, |u| matches!(u, SessionUpdate::Status(SessionStatus::Busy))).await);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+        while let Ok(Some(u)) = tokio::time::timeout_at(deadline, rx.recv()).await {
+            match u {
+                SessionUpdate::Rows(changes) => apply(&mut back, changes),
+                SessionUpdate::Status(SessionStatus::Idle) => break,
+                _ => {}
+            }
+        }
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), before, "the old session is as it was");
+        let text = std::fs::read_to_string(&forked).unwrap();
+        assert!(text.contains("just the word: forked") && !text.contains("sleep 60"));
+        let header: Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+        assert_eq!(header["parentSession"].as_str(), file.to_str());
+        // The sidebar lists it as forked from the first.
+        let info = harlo_harness::store::read_session(HarnessKind::Harlo, &forked).unwrap();
+        assert_eq!(info.parent_session.as_deref(), file.to_str());
+        // Renamed (as the sidebar does): the sidebar reads the name back.
+        again.request(json!({ "type": "set_session_name", "name": "Forked try" })).await.unwrap();
+        assert_eq!(harlo_harness::store::read_session(HarnessKind::Harlo, &forked).unwrap().name, "Forked try");
         // Everything harlo asked, it answered.
         harlo_harness::protocol_log::set_dir(None);
         let mut refused = Vec::new();
