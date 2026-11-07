@@ -1,6 +1,11 @@
 //! Sign in with ChatGPT (OpenAI's flow for open-source apps): the user's
 //! ChatGPT plan pays for requests to the public Responses API.
 //!
+//! Or, opted into: the Codex CLI's sign-in (its client id), whose requests
+//! go to ChatGPT's Codex backend. Not OpenAI's documented way for other
+//! apps; it's what gives the plan's usage (percent used and resets). Kept
+//! apart (`codex.json`).
+//!
 //! The first sign-in registers this app (`dynamic_agent_client`); OpenAI
 //! answers with a client id that's kept and used from then on. Each machine
 //! has its own host id. Access tokens last an hour and refresh tokens rotate
@@ -28,6 +33,12 @@ const AGENT_NAME: &str = "harlo";
 const DIRECT_SCOPE: &str = "chatgpt.tokens.use.direct";
 const SCOPE: &str = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct";
 const CALLBACK_PORT: u16 = 1455;
+/// The Codex CLI's sign-in.
+const CODEX_ISSUER: &str = "https://auth.openai.com";
+pub const CODEX_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
+const CODEX_SCOPE: &str = "openid profile email offline_access";
+/// The claim the ChatGPT account's id is in.
+const AUTH_CLAIM: &str = "https://api.openai.com/auth";
 const CALLBACK_PATH: &str = "/auth/callback";
 /// Refreshed this long before it expires, so no request starts with a
 /// token about to run out.
@@ -45,6 +56,35 @@ pub struct Credentials {
     /// From the ID token, to show who's signed in.
     #[serde(default)]
     pub email: String,
+    /// The ChatGPT account (the Codex sign-in's requests name it).
+    #[serde(default)]
+    pub account_id: String,
+}
+
+/// Which sign-in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sign {
+    /// OpenAI's for open-source apps.
+    Plan,
+    /// The Codex CLI's (opted into).
+    Codex,
+}
+
+impl Sign {
+    fn file(self) -> &'static str {
+        match self {
+            Sign::Plan => "chatgpt",
+            Sign::Codex => "codex",
+        }
+    }
+
+    /// How `harlo-agent login` names it.
+    pub fn login(self) -> &'static str {
+        match self {
+            Sign::Plan => "harlo-agent login",
+            Sign::Codex => "harlo-agent login --codex",
+        }
+    }
 }
 
 /// Where harlo-agent keeps its settings and sign-in.
@@ -57,8 +97,8 @@ fn home() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
 }
 
-fn creds_path() -> PathBuf {
-    config_dir().join("chatgpt.json")
+fn creds_path(sign: Sign) -> PathBuf {
+    config_dir().join(format!("{}.json", sign.file()))
 }
 
 fn now() -> u64 {
@@ -121,13 +161,13 @@ fn host_id() -> Result<String> {
     Ok(id)
 }
 
-pub fn load() -> Option<Credentials> {
-    serde_json::from_str(&fs::read_to_string(creds_path()).ok()?).ok()
+pub fn load(sign: Sign) -> Option<Credentials> {
+    serde_json::from_str(&fs::read_to_string(creds_path(sign)).ok()?).ok()
 }
 
-fn save(c: &Credentials) -> Result<()> {
+fn save(sign: Sign, c: &Credentials) -> Result<()> {
     ensure_dir()?;
-    write_private(&creds_path(), &serde_json::to_string_pretty(c)?)
+    write_private(&creds_path(sign), &serde_json::to_string_pretty(c)?)
 }
 
 /// The client id OpenAI issued on an earlier sign-in (kept after sign-out).
@@ -138,8 +178,8 @@ fn saved_client_id() -> Option<String> {
 
 /// Forgets the tokens here (the registration's client id stays). The user
 /// can disconnect harlo in ChatGPT's settings too.
-pub fn sign_out() -> Result<bool> {
-    match fs::remove_file(creds_path()) {
+pub fn sign_out(sign: Sign) -> Result<bool> {
+    match fs::remove_file(creds_path(sign)) {
         Ok(()) => Ok(true),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(e) => Err(e.into()),
@@ -176,9 +216,9 @@ pub async fn sign_in(open: impl Fn(&str)) -> Result<Credentials> {
     }
     let url = reqwest::Url::parse_with_params(AUTHORIZE_URL, &params)?;
     open(url.as_str());
-    let (code, issued) = wait_for_callback(&listener, &state).await?;
+    let (code, issued) = wait_for_callback(&listener, &state, "harlo is connected to your ChatGPT plan. You can close this tab.").await?;
     let client_id = issued.or(saved).ok_or_else(|| anyhow!("OpenAI's answer didn't include this app's client id; try again"))?;
-    let token = token_request(&[
+    let token = token_request(TOKEN_URL, &[
         ("grant_type", "authorization_code"),
         ("client_id", &client_id),
         ("code", &code),
@@ -205,12 +245,69 @@ pub async fn sign_in(open: impl Fn(&str)) -> Result<Credentials> {
     }
     let creds = credentials(&token, &client_id, claims["email"].as_str().unwrap_or_default())?;
     write_private(&ensure_dir()?.join("client-id"), &client_id)?;
-    save(&creds)?;
+    save(Sign::Plan, &creds)?;
     Ok(creds)
 }
 
+/// Signs in as the Codex CLI does (its client id, PKCE, the same loopback
+/// callback), naming harlo as the originator.
+pub async fn codex_sign_in(open: impl Fn(&str)) -> Result<Credentials> {
+    let verifier = random_token();
+    let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
+    let state = random_token();
+    let redirect = format!("http://localhost:{CALLBACK_PORT}{CALLBACK_PATH}");
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", CALLBACK_PORT))
+        .await
+        .map_err(|e| anyhow!("Port {CALLBACK_PORT} is in use ({e}): another app's sign-in is probably waiting there. Finish or cancel it and try again."))?;
+    let params: Vec<(&str, &str)> = vec![
+        ("response_type", "code"),
+        ("client_id", CODEX_CLIENT_ID),
+        ("redirect_uri", &redirect),
+        ("scope", CODEX_SCOPE),
+        ("code_challenge", &challenge),
+        ("code_challenge_method", "S256"),
+        ("state", &state),
+        ("id_token_add_organizations", "true"),
+        ("codex_cli_simplified_flow", "true"),
+        ("originator", AGENT_NAME),
+    ];
+    let url = reqwest::Url::parse_with_params(&format!("{CODEX_ISSUER}/oauth/authorize"), &params)?;
+    open(url.as_str());
+    let (code, _) = wait_for_callback(&listener, &state, "harlo is signed in with your ChatGPT account (the Codex sign-in). You can close this tab.").await?;
+    let token = token_request(
+        &format!("{CODEX_ISSUER}/oauth/token"),
+        &[("grant_type", "authorization_code"), ("client_id", CODEX_CLIENT_ID), ("code", &code), ("code_verifier", &verifier), ("redirect_uri", &redirect)],
+    )
+    .await?;
+    let creds = codex_credentials(&token, None)?;
+    save(Sign::Codex, &creds)?;
+    Ok(creds)
+}
+
+/// The Codex sign-in's tokens: its expiry from `expires_in` (else the
+/// access token's own), its email and account from the ID token (else the
+/// access token, else what was known).
+fn codex_credentials(token: &Value, before: Option<&Credentials>) -> Result<Credentials> {
+    let s = |k: &str| token[k].as_str().filter(|v| !v.trim().is_empty()).map(str::to_owned);
+    let access = s("access_token").ok_or_else(|| anyhow!("OpenAI's answer has no access_token"))?;
+    // (A refresh may keep the refresh token.)
+    let refresh = s("refresh_token").or_else(|| before.map(|b| b.refresh_token.clone())).ok_or_else(|| anyhow!("OpenAI's answer has no refresh_token"))?;
+    let access_claims = jwt_claims(&access).unwrap_or(Value::Null);
+    let id_claims = s("id_token").and_then(|t| jwt_claims(&t).ok()).unwrap_or(Value::Null);
+    let expires_at = token["expires_in"].as_u64().map(|e| now() + e).or_else(|| access_claims["exp"].as_u64()).unwrap_or(now() + 3600);
+    let pick = |f: &dyn Fn(&Value) -> Option<String>| f(&id_claims).or_else(|| f(&access_claims));
+    let account_id = pick(&|c| c[AUTH_CLAIM]["chatgpt_account_id"].as_str().filter(|a| !a.is_empty()).map(str::to_owned))
+        .or_else(|| before.map(|b| b.account_id.clone()).filter(|a| !a.is_empty()))
+        .ok_or_else(|| anyhow!("The sign-in has no ChatGPT account (sign in with a ChatGPT account, not an API organization)"))?;
+    let email = pick(&|c| c["email"].as_str().map(str::to_owned).or_else(|| c["https://api.openai.com/profile"]["email"].as_str().map(str::to_owned)))
+        .or_else(|| before.map(|b| b.email.clone()))
+        .unwrap_or_default();
+    let scopes = s("scope").map(|x| x.split_whitespace().map(str::to_owned).collect()).unwrap_or_default();
+    Ok(Credentials { client_id: CODEX_CLIENT_ID.to_owned(), access_token: access, refresh_token: refresh, expires_at, scopes, email, account_id })
+}
+
 /// The browser's redirect: (code, the client id issued on registration).
-async fn wait_for_callback(listener: &tokio::net::TcpListener, state: &str) -> Result<(String, Option<String>)> {
+async fn wait_for_callback(listener: &tokio::net::TcpListener, state: &str, done: &str) -> Result<(String, Option<String>)> {
     loop {
         let (mut sock, _) = listener.accept().await?;
         let mut buf = vec![0u8; 8192];
@@ -236,13 +333,13 @@ async fn wait_for_callback(listener: &tokio::net::TcpListener, state: &str) -> R
             continue;
         }
         let Some(code) = q("code") else { continue };
-        let _ = sock.write_all(reply(true, "harlo is connected to your ChatGPT plan. You can close this tab.").as_bytes()).await;
+        let _ = sock.write_all(reply(true, done).as_bytes()).await;
         return Ok((code, q("client_id").filter(|c| !c.is_empty())));
     }
 }
 
-async fn token_request(form: &[(&str, &str)]) -> Result<Value> {
-    let resp = reqwest::Client::new().post(TOKEN_URL).header("accept", "application/json").form(form).send().await.context("reaching OpenAI's sign-in server")?;
+async fn token_request(url: &str, form: &[(&str, &str)]) -> Result<Value> {
+    let resp = reqwest::Client::new().post(url).header("accept", "application/json").form(form).send().await.context("reaching OpenAI's sign-in server")?;
     let status = resp.status();
     let body: Value = resp.json().await.unwrap_or(Value::Null);
     if !status.is_success() {
@@ -275,7 +372,7 @@ fn credentials(token: &Value, client_id: &str, email: &str) -> Result<Credential
         bail!("ChatGPT plan usage wasn't granted (sign in again and allow harlo to use your plan)");
     }
     let expires_in = token["expires_in"].as_u64().ok_or_else(|| anyhow!("OpenAI's answer has no expiry"))?;
-    Ok(Credentials { client_id: client_id.to_owned(), access_token: s("access_token")?, refresh_token: s("refresh_token")?, expires_at: now() + expires_in, scopes, email: email.to_owned() })
+    Ok(Credentials { client_id: client_id.to_owned(), access_token: s("access_token")?, refresh_token: s("refresh_token")?, expires_at: now() + expires_in, scopes, email: email.to_owned(), account_id: String::new() })
 }
 
 fn jwt_claims(jwt: &str) -> Result<Value> {
@@ -286,39 +383,76 @@ fn jwt_claims(jwt: &str) -> Result<Value> {
 /// A usable access token: the saved one, or refreshed (one process at a
 /// time; another may have refreshed while this one waited). `force`:
 /// refresh even if it looks valid (the API refused it).
-pub async fn access_token(force: bool) -> Result<String> {
-    let current = load().ok_or_else(|| anyhow!("Not signed in: run `harlo-agent login`"))?;
+pub async fn access_token(sign: Sign, force: bool) -> Result<String> {
+    Ok(credentials_now(sign, force).await?.access_token)
+}
+
+/// The sign-in, its access token usable (refreshed as `access_token`).
+pub async fn credentials_now(sign: Sign, force: bool) -> Result<Credentials> {
+    let not_in = || anyhow!("Not signed in: run `{}`", sign.login());
+    let current = load(sign).ok_or_else(not_in)?;
     if !force && current.expires_at > now() + MARGIN.as_secs() {
-        return Ok(current.access_token);
+        return Ok(current);
     }
-    let lock = tokio::task::spawn_blocking(|| -> Result<File> {
-        let f = OpenOptions::new().create(true).truncate(false).write(true).open(ensure_dir()?.join("chatgpt.lock"))?;
+    let lock_name = format!("{}.lock", sign.file());
+    let lock = tokio::task::spawn_blocking(move || -> Result<File> {
+        let f = OpenOptions::new().create(true).truncate(false).write(true).open(ensure_dir()?.join(lock_name))?;
         f.lock()?;
         Ok(f)
     })
     .await??;
-    let creds = load().ok_or_else(|| anyhow!("Not signed in: run `harlo-agent login`"))?;
+    let creds = load(sign).ok_or_else(not_in)?;
     // Refreshed by another process meanwhile.
     if creds.refresh_token != current.refresh_token && creds.expires_at > now() + MARGIN.as_secs() {
         drop(lock);
-        return Ok(creds.access_token);
+        return Ok(creds);
     }
-    let refreshed = token_request(&[("grant_type", "refresh_token"), ("client_id", &creds.client_id), ("refresh_token", &creds.refresh_token), ("resource", RESOURCE)]).await;
+    let refreshed = match sign {
+        Sign::Plan => token_request(TOKEN_URL, &[("grant_type", "refresh_token"), ("client_id", &creds.client_id), ("refresh_token", &creds.refresh_token), ("resource", RESOURCE)]).await,
+        Sign::Codex => token_request(&format!("{CODEX_ISSUER}/oauth/token"), &[("grant_type", "refresh_token"), ("client_id", CODEX_CLIENT_ID), ("refresh_token", &creds.refresh_token)]).await,
+    };
     let result = match refreshed {
         Ok(token) => {
-            let next = credentials(&token, &creds.client_id, &creds.email)?;
-            save(&next)?;
-            Ok(next.access_token)
+            let next = match sign {
+                Sign::Plan => credentials(&token, &creds.client_id, &creds.email)?,
+                Sign::Codex => codex_credentials(&token, Some(&creds))?,
+            };
+            save(sign, &next)?;
+            Ok(next)
         }
         Err(e) => match e.downcast_ref::<TokenError>() {
             // The sign-in is over: forget it.
             Some(t) if matches!(t.code.as_str(), "invalid_grant" | "invalid_refresh_token" | "token_expired" | "refresh_token_expired" | "refresh_token_invalidated" | "refresh_token_reused") => {
-                let _ = sign_out();
-                Err(anyhow!("Your ChatGPT sign-in has ended ({}): run `harlo-agent login` again", t.code))
+                let _ = sign_out(sign);
+                Err(anyhow!("Your ChatGPT sign-in has ended ({}): run `{}` again", t.code, sign.login()))
             }
             _ => Err(e),
         },
     };
     drop(lock);
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn jwt(claims: &Value) -> String {
+        format!("e30.{}.sig", URL_SAFE_NO_PAD.encode(claims.to_string()))
+    }
+
+    #[test]
+    fn codex_tokens() {
+        let id = jwt(&json!({ "email": "a@b", AUTH_CLAIM: { "chatgpt_account_id": "acct-1" } }));
+        let access = jwt(&json!({ "exp": 4_000_000_000_u64 }));
+        let c = codex_credentials(&json!({ "access_token": access, "refresh_token": "r1", "id_token": id }), None).unwrap();
+        assert_eq!((c.email.as_str(), c.account_id.as_str(), c.expires_at, c.client_id.as_str()), ("a@b", "acct-1", 4_000_000_000, CODEX_CLIENT_ID));
+        // A refresh without an ID token or a new refresh token keeps what was known.
+        let next = codex_credentials(&json!({ "access_token": jwt(&json!({})), "expires_in": 3600 }), Some(&c)).unwrap();
+        assert_eq!((next.refresh_token.as_str(), next.account_id.as_str(), next.email.as_str()), ("r1", "acct-1", "a@b"));
+        // No ChatGPT account at all: refused.
+        assert!(codex_credentials(&json!({ "access_token": jwt(&json!({})), "refresh_token": "r" }), None).is_err());
+        assert_eq!((creds_path(Sign::Plan).file_name().unwrap(), creds_path(Sign::Codex).file_name().unwrap()), ("chatgpt.json".as_ref(), "codex.json".as_ref()));
+    }
 }

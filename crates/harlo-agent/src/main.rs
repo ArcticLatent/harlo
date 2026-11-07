@@ -29,6 +29,7 @@ mod rpc;
 mod session;
 mod task;
 mod tools;
+mod usage;
 
 use std::io::Write as _;
 use std::process::ExitCode;
@@ -48,25 +49,49 @@ async fn main() -> ExitCode {
 
 async fn run(args: Vec<String>) -> Result<()> {
     match args.first().map(String::as_str) {
-        Some("login") => login().await,
+        Some("login") => login(sign_of(&args)).await,
         Some("logout") => {
-            if auth::sign_out()? {
-                println!("Signed out here. To disconnect harlo from your account too: ChatGPT → Settings → Connected apps.");
+            let sign = sign_of(&args);
+            if auth::sign_out(sign)? {
+                match sign {
+                    auth::Sign::Plan => println!("Signed out here. To disconnect harlo from your account too: ChatGPT → Settings → Connected apps."),
+                    auth::Sign::Codex => println!("Signed out of the Codex sign-in here."),
+                }
             } else {
                 println!("Not signed in.");
             }
             Ok(())
         }
         Some("status") => {
-            // For harlo: `{ "signedIn", "email" }`.
-            if args.get(1).is_some_and(|a| a == "--json") {
-                let c = auth::load();
-                println!("{}", serde_json::json!({ "signedIn": c.is_some(), "email": c.map(|c| c.email).unwrap_or_default() }));
+            // For harlo: `{ "signedIn", "email", "codex": { "signedIn", "email" } }`.
+            let (plan, codex) = (auth::load(auth::Sign::Plan), auth::load(auth::Sign::Codex));
+            if args.iter().any(|a| a == "--json") {
+                let one = |c: Option<auth::Credentials>| serde_json::json!({ "signedIn": c.is_some(), "email": c.map(|c| c.email).unwrap_or_default() });
+                let mut out = one(plan);
+                out["codex"] = one(codex);
+                println!("{out}");
                 return Ok(());
             }
-            match auth::load() {
-                Some(c) => println!("Signed in with ChatGPT{} (your ChatGPT plan pays for harlo-agent's requests).", if c.email.is_empty() { String::new() } else { format!(" as {}", c.email) }),
-                None => println!("Not signed in: run `harlo-agent login`."),
+            let who = |c: &auth::Credentials| if c.email.is_empty() { String::new() } else { format!(" as {}", c.email) };
+            match &plan {
+                Some(c) => println!("Signed in with ChatGPT{} (your ChatGPT plan pays for harlo-agent's requests).", who(c)),
+                None => println!("Not signed in with ChatGPT: run `harlo-agent login`."),
+            }
+            if let Some(c) = &codex {
+                println!("Signed in with the Codex sign-in{} (models codex/…, with the plan's usage).", who(c));
+            }
+            Ok(())
+        }
+        Some("usage") => {
+            // The plan's usage by the Codex sign-in (for harlo: --json).
+            let u = usage::fetch().await?;
+            if args.iter().any(|a| a == "--json") {
+                println!("{u}");
+                return Ok(());
+            }
+            for w in u["windows"].as_array().into_iter().flatten() {
+                let len = w["windowMinutes"].as_i64().map_or_else(|| "limit".to_owned(), |m| if m >= 1440 { format!("{} days", (m + 720) / 1440) } else { format!("{} hours", (m + 30) / 60) });
+                println!("{len}: {:.0}% used", w["usedPercent"].as_f64().unwrap_or(0.0));
             }
             Ok(())
         }
@@ -126,18 +151,31 @@ async fn run(args: Vec<String>) -> Result<()> {
             ask(&prompt, model, effort, from).await
         }
         _ => {
-            println!("harlo-agent login | logout | status | models | -p \"prompt\" [-m model] [--thinking low|medium|high] [--resume | --session file]");
+            println!("harlo-agent login [--codex] | logout [--codex] | status | usage | models | -p \"prompt\" [-m model] [--thinking low|medium|high] [--resume | --session file]");
             Ok(())
         }
     }
 }
 
-async fn login() -> Result<()> {
-    let creds = auth::sign_in(|url| {
+/// Which sign-in a command is for: `--codex`, else the plan's.
+fn sign_of(args: &[String]) -> auth::Sign {
+    if args.iter().any(|a| a == "--codex") { auth::Sign::Codex } else { auth::Sign::Plan }
+}
+
+async fn login(sign: auth::Sign) -> Result<()> {
+    let open = |url: &str| {
         println!("Continue with ChatGPT in your browser. If it doesn't open, visit:\n\n{url}\n");
         let _ = std::process::Command::new("xdg-open").arg(url).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
-    })
-    .await?;
+    };
+    if sign == auth::Sign::Codex {
+        let creds = auth::codex_sign_in(open).await?;
+        println!(
+            "Signed in with the Codex sign-in{}.\n\nModels codex/… use your ChatGPT plan through Codex's backend, and harlo shows the plan's usage.",
+            if creds.email.is_empty() { String::new() } else { format!(" as {}", creds.email) }
+        );
+        return Ok(());
+    }
+    let creds = auth::sign_in(open).await?;
     println!(
         "Signed in{}.\n\nYou're using your ChatGPT plan: harlo-agent's requests use your plan's usage, which you can manage in ChatGPT → Settings → Usage.",
         if creds.email.is_empty() { String::new() } else { format!(" as {}", creds.email) }
@@ -251,7 +289,7 @@ async fn ask(prompt: &str, model: Option<String>, effort: Option<String>, from: 
                 (None, Some(e)) => eprintln!("\x1b[31mCouldn't summarize: {e}\x1b[0m"),
                 (None, None) => {}
             },
-            agent::Shown::MessageStart(_) | agent::Shown::MessageEnd(_) | agent::Shown::Queue { .. } => {}
+            agent::Shown::MessageStart(_) | agent::Shown::MessageEnd(_) | agent::Shown::Queue { .. } | agent::Shown::Limits(_) => {}
         }
     };
     // Ctrl+C stops the turn; a second one quits at once.

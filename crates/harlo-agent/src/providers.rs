@@ -27,10 +27,20 @@ use std::time::Duration;
 use anyhow::{Context as _, Result, anyhow, bail};
 use serde_json::Value;
 
-use crate::auth;
+use crate::auth::{self, Sign};
 
 /// The plan's provider.
 pub const CHATGPT: &str = "chatgpt";
+/// The plan through the Codex CLI's sign-in (opted into).
+pub const CODEX: &str = "codex";
+/// ChatGPT's backend (`HARLO_AGENT_CHATGPT_BACKEND` sets another, to
+/// try it against a stand-in).
+pub fn chatgpt_backend() -> String {
+    std::env::var("HARLO_AGENT_CHATGPT_BACKEND").ok().map(|u| u.trim().trim_end_matches('/').to_owned()).filter(|u| !u.is_empty()).unwrap_or_else(|| "https://chatgpt.com/backend-api".to_owned())
+}
+/// The Codex version its models list is asked for as (it lists the models
+/// that version takes).
+const CODEX_CLIENT_VERSION: &str = "0.167.0";
 const OPENAI_URL: &str = "https://api.openai.com/v1";
 /// Thinking levels a model that reasons takes when it doesn't say.
 const REASONING_LEVELS: [&str; 4] = ["minimal", "low", "medium", "high"];
@@ -45,8 +55,8 @@ pub enum Api {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Key {
-    /// The ChatGPT sign-in.
-    Plan,
+    /// A ChatGPT sign-in.
+    Plan(Sign),
     None,
     Value(String),
     Env(String),
@@ -87,15 +97,40 @@ impl ModelInfo {
 }
 
 impl Provider {
+    /// A ChatGPT plan's (either sign-in).
     pub fn is_plan(&self) -> bool {
-        self.key == Key::Plan
+        matches!(self.key, Key::Plan(_))
+    }
+
+    /// Which sign-in, for a plan's.
+    pub fn sign(&self) -> Option<Sign> {
+        match self.key {
+            Key::Plan(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Headers its requests carry besides the token: the Codex backend's
+    /// (the account, and harlo as the originator). Read after `token`, which
+    /// refreshes the sign-in.
+    pub fn headers(&self) -> Vec<(&'static str, String)> {
+        if self.sign() != Some(Sign::Codex) {
+            return Vec::new();
+        }
+        let account = auth::load(Sign::Codex).map(|c| c.account_id).unwrap_or_default();
+        vec![("chatgpt-account-id", account), ("originator", "harlo".to_owned()), ("OpenAI-Beta", "responses=experimental".to_owned())]
+    }
+
+    /// Where its models are listed.
+    fn models_url(&self) -> String {
+        if self.sign() == Some(Sign::Codex) { format!("{}/models?client_version={CODEX_CLIENT_VERSION}", self.base_url) } else { format!("{}/models", self.base_url) }
     }
 
     /// The bearer token (none for a server without a key). `force`: the
     /// plan's token refreshed even if it looks valid.
     pub async fn token(&self, force: bool) -> Result<Option<String>> {
         match &self.key {
-            Key::Plan => Ok(Some(auth::access_token(force).await?)),
+            Key::Plan(sign) => Ok(Some(auth::access_token(*sign, force).await?)),
             Key::None => Ok(None),
             Key::Value(k) => Ok(Some(k.clone())),
             Key::Env(name) => std::env::var(name).map(Some).map_err(|_| anyhow!("{}'s key isn't set: ${name} is empty", self.name)),
@@ -135,7 +170,7 @@ impl Provider {
             return Ok(self.models.clone());
         }
         let token = self.token(false).await?;
-        let body = crate::responses::models_raw(&self.base_url, token.as_deref()).await.with_context(|| format!("{}'s models", self.name))?;
+        let body = crate::responses::models_raw(&self.models_url(), token.as_deref(), &self.headers()).await.with_context(|| format!("{}'s models", self.name))?;
         let models = parse_models(&self.id, &body);
         if models.is_empty() {
             bail!("{} lists no models", self.base_url);
@@ -150,7 +185,10 @@ fn config_file() -> PathBuf {
 
 /// The providers: the plan, an OpenAI key, then the file's.
 pub fn all() -> Result<Vec<Provider>> {
-    let mut out = vec![Provider { id: CHATGPT.into(), name: "ChatGPT".into(), base_url: auth::RESOURCE.into(), api: Api::Responses, key: Key::Plan, models: Vec::new() }];
+    let mut out = vec![
+        Provider { id: CHATGPT.into(), name: "ChatGPT".into(), base_url: auth::RESOURCE.into(), api: Api::Responses, key: Key::Plan(Sign::Plan), models: Vec::new() },
+        Provider { id: CODEX.into(), name: "ChatGPT (Codex sign-in)".into(), base_url: format!("{}/codex", chatgpt_backend()), api: Api::Responses, key: Key::Plan(Sign::Codex), models: Vec::new() },
+    ];
     if std::env::var("OPENAI_API_KEY").is_ok_and(|k| !k.trim().is_empty()) {
         out.push(Provider { id: "openai".into(), name: "OpenAI".into(), base_url: OPENAI_URL.into(), api: Api::Responses, key: Key::Env("OPENAI_API_KEY".into()), models: Vec::new() });
     }
@@ -300,8 +338,8 @@ pub async fn every_model() -> (Vec<ModelInfo>, Vec<String>) {
         Ok(p) => p,
         Err(e) => return (Vec::new(), vec![format!("{e:#}")]),
     };
-    let signed_in = auth::load().is_some();
-    let asks = providers.iter().filter(|p| !p.is_plan() || signed_in).map(|p| async move {
+    let signed_in = |s: Sign| auth::load(s).is_some();
+    let asks = providers.iter().filter(|p| p.sign().is_none_or(signed_in)).map(|p| async move {
         let r = tokio::time::timeout(Duration::from_secs(8), p.models()).await;
         (p, r.unwrap_or_else(|_| Err(anyhow!("{} didn't answer in time", p.name))))
     });
@@ -313,7 +351,7 @@ pub async fn every_model() -> (Vec<ModelInfo>, Vec<String>) {
             Err(e) => errors.push(format!("{}: {e:#}", p.name)),
         }
     }
-    if !signed_in && models.is_empty() {
+    if !signed_in(Sign::Plan) && !signed_in(Sign::Codex) && models.is_empty() {
         errors.insert(0, "Not signed in: run `harlo-agent login`".into());
     }
     (models, errors)

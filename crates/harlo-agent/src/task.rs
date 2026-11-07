@@ -173,11 +173,14 @@ async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaph
     } }));
     let mut calls = 0u64;
     let notify = ctx.notify.clone();
-    let mut show = |s: Shown| {
-        if let (Shown::ToolStart { name, .. }, Some(n)) = (s, &notify) {
+    let mut show = |s: Shown| match (s, &notify) {
+        (Shown::ToolStart { name, .. }, Some(n)) => {
             calls += 1;
             n(json!({ "type": "subagent_progress", "payload": { "id": id, "progress": { "id": id, "status": "running", "currentTool": name, "toolCount": calls } } }));
         }
+        // (A subagent's requests draw on the same plan: its limits are the session's.)
+        (Shown::Limits(l), Some(n)) => n(json!({ "type": "harlo_limits", "provider": l["provider"], "account": l["account"], "windows": l["windows"] })),
+        _ => {}
     };
     let ended = agent.run(&prompt, &token, &mut show).await;
     done.status = match &ended {

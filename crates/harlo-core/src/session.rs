@@ -138,7 +138,7 @@ pub enum SessionUpdate {
     Goal(Value),
     /// Worth a desktop notification (questions come as `UiRequest`).
     Notable(Notable),
-    /// Claude's plan limits, as it last said (see `HarnessEvent::Limits`).
+    /// Plan limits, as Claude or Harlo last said (see `HarnessEvent::Limits`).
     Limits(Value),
 }
 
@@ -1539,6 +1539,60 @@ mod tests {
         assert!(!shown.contains("SessionModelRestoreError"), "{shown}");
     }
 
+    /// A real harlo-agent signed in with the Codex sign-in
+    /// (`HARLO_TEST_HARLO_AGENT`, scratch `HARLO_TEST_HOME`): a reply on a
+    /// `codex/…` model, and the plan's limits with it as harlo takes them.
+    #[tokio::test]
+    #[ignore]
+    async fn harlo_agent_codex_limits() {
+        let home = PathBuf::from(std::env::var("HARLO_TEST_HOME").expect("a scratch HARLO_TEST_HOME"));
+        assert!(home.starts_with("/tmp/"), "not a scratch folder: {home:?}");
+        let work = home.join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        let agent = std::env::var("HARLO_TEST_HARLO_AGENT").expect("HARLO_TEST_HARLO_AGENT");
+        let out = std::process::Command::new(&agent).args(["models", "--json"]).output().unwrap();
+        let models: Value = serde_json::from_slice(&out.stdout).unwrap();
+        let model = models.as_array().unwrap().iter().find(|m| m["provider"] == "codex").map(|m| format!("codex/{}", m["id"].as_str().unwrap())).expect("a codex/… model: sign in with `harlo-agent login --codex`");
+        let handle = SessionHandle::spawn(HarnessConfig {
+            kind: HarnessKind::Harlo,
+            program: Some(agent.into()),
+            cwd: work.clone(),
+            session: SessionTarget::New,
+            extra_args: vec!["--model".into(), model.clone(), "--thinking".into(), "low".into()],
+            env: vec![("XDG_DATA_HOME".to_owned(), home.join("data").to_string_lossy().into_owned())],
+            remote: None,
+        });
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        handle.subscribe(ChannelSink(tx));
+        let mut rows = Vec::new();
+        assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::Status(SessionStatus::Idle))).await);
+        handle.prompt("Reply with just the word ok.", Vec::new(), SendMode::Normal);
+        let (mut limits, mut meta) = (Vec::new(), SessionMetaInfo::default());
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+        while let Ok(Some(u)) = tokio::time::timeout_at(deadline, rx.recv()).await {
+            match u {
+                SessionUpdate::Rows(changes) => apply(&mut rows, changes),
+                SessionUpdate::Meta(m) => meta = m,
+                SessionUpdate::Limits(l) => limits.push(l),
+                SessionUpdate::Status(SessionStatus::Idle) => break,
+                _ => {}
+            }
+        }
+        assert!(rows.iter().any(|r| r.kind == crate::RowKind::Markdown), "{rows:?}");
+        assert!(meta.model_id.starts_with("codex/"), "{meta:?}");
+        assert_eq!(crate::quota::session_provider("harlo", &meta.model_id), "openai-codex");
+        let l = limits.first().expect("the plan's limits with the reply");
+        assert_eq!(l["provider"], "openai-codex");
+        let w = l["windows"].as_array().expect("windows");
+        assert!(!w.is_empty() && w.iter().all(|w| w["usedPercent"].is_number() && w["windowMinutes"].as_i64().is_some_and(|m| m > 0)), "{l}");
+        let mut accounts = Vec::new();
+        crate::quota::apply_live(&mut accounts, l);
+        println!("{model}: {}", accounts[0]["windows"].as_array().unwrap().iter().map(|w| format!("{} {:.0}%", w["label"], w["usedFraction"].as_f64().unwrap() * 100.0)).collect::<Vec<_>>().join(", "));
+        // And the meter's own ask, between turns.
+        let usage = crate::quota::fetch_harlo(std::path::Path::new(&std::env::var("HARLO_TEST_HARLO_AGENT").unwrap())).unwrap().expect("signed in");
+        assert!(!usage["windows"].as_array().unwrap().is_empty(), "{usage}");
+    }
+
     /// A real harlo-agent (`HARLO_TEST_HARLO_AGENT`, signed in), its
     /// sessions in a scratch folder (`HARLO_TEST_HOME`): it asks before it
     /// writes, takes the answer, says its model, level and file, a run can be
@@ -1571,6 +1625,7 @@ mod tests {
 
         // Asked first, as an approval harlo shows with "Always allow".
         let mut asked = None;
+        let mut limits = Vec::new();
         let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
         while let Ok(Some(u)) = tokio::time::timeout_at(deadline, rx.recv()).await {
             match u {
@@ -1579,6 +1634,7 @@ mod tests {
                     asked = Some(r);
                     break;
                 }
+                SessionUpdate::Limits(l) => limits.push(l),
                 _ => {}
             }
         }
@@ -1594,6 +1650,7 @@ mod tests {
                 SessionUpdate::Rows(changes) => apply(&mut rows, changes),
                 SessionUpdate::Meta(m) => meta = m,
                 SessionUpdate::Status(SessionStatus::Idle) => break,
+                SessionUpdate::Limits(l) => limits.push(l),
                 _ => {}
             }
         }
@@ -1613,6 +1670,9 @@ mod tests {
         assert!(!meta.model.is_empty() && meta.model_id.starts_with("chatgpt/"), "{meta:?}");
         assert_eq!(meta.thinking, "low");
         assert!(meta.context_window > 0, "{meta:?}");
+        // The official sign-in says no usage (the Codex sign-in does: see
+        // harlo_agent_codex_limits). If this fails, OpenAI now sends some.
+        assert!(limits.is_empty(), "{limits:?}");
 
         // Stopped mid-command: it says so, and the command is gone.
         handle.send_raw(json!({ "type": "harlo_set_modes", "approval": "yolo", "plan": false }));

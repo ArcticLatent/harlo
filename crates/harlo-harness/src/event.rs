@@ -146,8 +146,10 @@ pub enum HarnessEvent {
     ModelChanged(Value),
     /// omp pushes its slash-command list when it changes.
     CommandsChanged(Value),
-    /// Claude: its plan limits after a request (`rate_limit_info`: each
-    /// window's `utilization`, `resetsAt` in seconds and `status`).
+    /// Plan limits after a request. Claude: `rate_limit_info` (each
+    /// window's `utilization`, `resetsAt` in seconds and `status`). Harlo:
+    /// `{ provider, account, windows: [{ windowMinutes, usedPercent,
+    /// resetsAt (s) }] }` (it has a `provider`).
     Limits(Value),
     /// The context's size or window became known outside a turn (ask
     /// `get_session_stats`).
@@ -276,6 +278,7 @@ impl Translator {
             },
             "subagent_lifecycle" | "subagent_progress" => E::SubagentActivity(frame),
             "btw_delta" | "btw_record" => E::Btw(frame),
+            "harlo_limits" => E::Limits(json!({ "provider": frame["provider"], "account": frame["account"], "windows": frame["windows"] })),
             "harlo_call" => E::HarloCall { id: str_of(&frame, "id"), tool: str_of(&frame, "tool"), args: frame["args"].clone() },
             "goal_updated" => E::Goal(frame["goal"].clone()),
             "queue_update" => E::QueueChanged {
@@ -471,6 +474,15 @@ mod tests {
         let ev = t.translate(json!({"type":"message_update","messageId":"msg-7","message":{"role":"assistant"},"assistantMessageEvent":{"type":"thinking_delta","contentIndex":1,"delta":"hmm"}}));
         let HarnessEvent::BlockDelta { id, index, kind, .. } = &ev[0] else { panic!() };
         assert_eq!((id.as_str(), *index, *kind), ("msg-7", 1, BlockKind::Thinking));
+    }
+
+    #[test]
+    fn harlo_agents_plan_limits() {
+        let mut t = Translator::new(HarnessKind::Harlo);
+        let w = json!([{ "windowMinutes": 300, "usedPercent": 12.5, "resetsAt": 1792300303 }]);
+        let ev = t.translate(json!({ "type": "harlo_limits", "provider": "openai-codex", "account": "a@b", "windows": w }));
+        let HarnessEvent::Limits(l) = &ev[0] else { panic!("{ev:?}") };
+        assert_eq!(l, &json!({ "provider": "openai-codex", "account": "a@b", "windows": w }));
     }
 
     #[test]

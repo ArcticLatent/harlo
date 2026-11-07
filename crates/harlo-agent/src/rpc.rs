@@ -115,6 +115,7 @@ impl Shared {
             Shown::Usage { usage, .. } => self.view.lock().unwrap().last_usage = usage.clone(),
             Shown::Queue { steering, follow_up } => self.emit(json!({ "type": "queue_update", "steering": steering, "followUp": follow_up })),
             Shown::CompactionStart { reason } => self.emit(json!({ "type": "compaction_start", "reason": reason })),
+            Shown::Limits(l) => self.emit(json!({ "type": "harlo_limits", "provider": l["provider"], "account": l["account"], "windows": l["windows"] })),
             Shown::CompactionEnd { reason, result, error, will_retry } => {
                 if let Some(r) = result {
                     let mut v = self.view.lock().unwrap();

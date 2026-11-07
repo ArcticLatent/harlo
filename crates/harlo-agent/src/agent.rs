@@ -59,6 +59,9 @@ pub enum Shown<'a> {
     CompactionStart { reason: &'a str },
     /// …and ending: its result, or why it failed (neither: stopped).
     CompactionEnd { reason: &'a str, result: Option<&'a Value>, error: Option<&'a str>, will_retry: bool },
+    /// The plan's limits, as a response gave them: `{ provider, account,
+    /// windows }`.
+    Limits(&'a Value),
 }
 
 /// How a compaction went.
@@ -596,10 +599,11 @@ async fn send(a: Asked<'_>, show: &mut (dyn FnMut(Shown) + Send)) -> Result<(Val
     let mut force = false;
     loop {
         let token = provider.token(force).await?;
+        let headers = provider.headers();
         let mut items = Vec::new();
         let mut done: Option<(Value, Vec<Value>)> = None;
         let mut blocks = Blocks::default();
-        let result = responses::stream(&provider.base_url, token.as_deref(), affinity, &body, |ev| match ev {
+        let result = responses::stream(&provider.base_url, token.as_deref(), affinity, &headers, &body, |ev| match ev {
             responses::Event::Item { index, item } => {
                 if let Some(end) = blocks.end(index, &item, &pid, &model) {
                     show(Shown::Stream(&end));
@@ -607,6 +611,14 @@ async fn send(a: Asked<'_>, show: &mut (dyn FnMut(Shown) + Send)) -> Result<(Val
                 items.push(item);
             }
             responses::Event::Completed { usage, output } => done = Some((usage, output)),
+            // The plan's limits (the Codex backend sends them; the account by
+            // its email).
+            responses::Event::Limits(windows) => {
+                if let Some(sign) = provider.sign() {
+                    let account = crate::auth::load(sign).map(|c| c.email).unwrap_or_default();
+                    show(Shown::Limits(&json!({ "provider": "openai-codex", "account": account, "windows": windows })));
+                }
+            }
             other => {
                 for e in blocks.stream(other) {
                     show(Shown::Stream(&e));
@@ -669,7 +681,7 @@ impl Blocks {
                 *last = part;
                 vec![json!({ "type": "thinking_delta", "contentIndex": *ci, "delta": format!("{sep}{delta}") })]
             }
-            E::Item { .. } | E::Completed { .. } => Vec::new(),
+            E::Item { .. } | E::Completed { .. } | E::Limits(_) => Vec::new(),
         }
     }
 

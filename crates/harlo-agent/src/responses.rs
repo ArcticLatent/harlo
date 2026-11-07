@@ -24,6 +24,28 @@ pub enum Event {
     /// output items (complete; some servers leave the reasoning's
     /// encrypted content out of the items as they come).
     Completed { usage: Value, output: Vec<Value> },
+    /// The plan's limits as the response's headers give them (the Codex
+    /// backend sends them), before the reply: `[{ windowMinutes,
+    /// usedPercent, resetsAt (unix s) }]`.
+    Limits(Vec<Value>),
+}
+
+/// The plan's limit windows in a response's headers
+/// (`x-codex-{primary,secondary}-{used-percent,window-minutes,reset-at}`):
+/// none when it sends none (API keys, other servers).
+pub fn limits(headers: &reqwest::header::HeaderMap) -> Vec<Value> {
+    let num = |k: String| headers.get(&k).and_then(|v| v.to_str().ok()).and_then(|v| v.trim().parse::<f64>().ok()).filter(|n| n.is_finite());
+    ["primary", "secondary"]
+        .into_iter()
+        .filter_map(|w| {
+            let used = num(format!("x-codex-{w}-used-percent"))?;
+            Some(json!({
+                "windowMinutes": num(format!("x-codex-{w}-window-minutes")).map(|m| m.round() as i64),
+                "usedPercent": used,
+                "resetsAt": num(format!("x-codex-{w}-reset-at")).map(|r| r.round() as i64),
+            }))
+        })
+        .collect()
 }
 
 /// One client for every request, so a session's requests reuse their
@@ -33,13 +55,17 @@ pub(crate) fn client() -> &'static reqwest::Client {
     CLIENT.get_or_init(reqwest::Client::new)
 }
 
-/// A server's models list as it sends it.
-pub async fn models_raw(base: &str, token: Option<&str>) -> Result<Value> {
-    let mut req = client().get(format!("{base}/models"));
+/// A server's models list as it sends it (`url`: its models address;
+/// `headers`: the provider's own).
+pub async fn models_raw(url: &str, token: Option<&str>, headers: &[(&'static str, String)]) -> Result<Value> {
+    let mut req = client().get(url);
     if let Some(t) = token {
         req = req.bearer_auth(t);
     }
-    let resp = req.send().await.map_err(|e| anyhow!("Couldn't reach {base}: {e}"))?;
+    for (k, v) in headers {
+        req = req.header(*k, v);
+    }
+    let resp = req.send().await.map_err(|e| anyhow!("Couldn't reach {url}: {e}"))?;
     let status = resp.status();
     let body: Value = resp.json().await.unwrap_or(Value::Null);
     if !status.is_success() {
@@ -198,17 +224,26 @@ pub fn input(messages: &[Value], provider: &str, model: &str) -> Vec<Value> {
 
 /// Sends one request and calls `on` with each event until it completes.
 /// `affinity`: the session's id, sent as the plan's affinity headers, so
-/// its requests go where their shared start is cached.
-pub async fn stream(base: &str, token: Option<&str>, affinity: Option<&str>, body: &Value, mut on: impl FnMut(Event)) -> Result<()> {
+/// its requests go where their shared start is cached. `headers`: the
+/// provider's own.
+pub async fn stream(base: &str, token: Option<&str>, affinity: Option<&str>, headers: &[(&'static str, String)], body: &Value, mut on: impl FnMut(Event)) -> Result<()> {
     let mut req = client().post(format!("{base}/responses")).json(body);
     if let Some(t) = token {
         req = req.bearer_auth(t);
+    }
+    for (k, v) in headers {
+        req = req.header(*k, v);
     }
     if let Some(session) = affinity {
         req = req.header("session-id", session).header("x-client-request-id", session);
     }
     let resp = req.send().await.map_err(|e| anyhow!("Couldn't reach {base}: {e}"))?;
     let status = resp.status();
+    // (Refused ones too: a used-up window says so.)
+    let windows = limits(resp.headers());
+    if !windows.is_empty() {
+        on(Event::Limits(windows));
+    }
     if !status.is_success() {
         let body: Value = resp.json().await.unwrap_or(Value::Null);
         return Err(ApiError { status: status.as_u16(), message: refusal(status.as_u16(), &body) }.into());
@@ -289,6 +324,21 @@ impl std::error::Error for ApiError {}
 
 fn refusal(status: u16, body: &Value) -> String {
     let err = &body["error"];
+    // The Codex backend's: the plan used up, and when it resets.
+    match err["type"].as_str() {
+        Some("usage_limit_reached") => {
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+            let when = err["resets_at"].as_i64().map(|at| (at - now).max(0)).or_else(|| err["resets_in_seconds"].as_i64());
+            let left = when.map(|s| match s / 60 {
+                m if m < 60 => format!(" It resets in {} min.", m.max(1)),
+                m if m < 48 * 60 => format!(" It resets in {} h {} min.", m / 60, m % 60),
+                m => format!(" It resets in {} days.", (m + 720) / 1440),
+            });
+            return format!("You've used your ChatGPT plan's usage for now.{}", left.unwrap_or_default());
+        }
+        Some("usage_not_included") => return "This ChatGPT plan doesn't include Codex usage, which the Codex sign-in uses.".into(),
+        _ => {}
+    }
     let code = err["code"].as_str().unwrap_or_default();
     let message = err["message"].as_str().or_else(|| body["detail"].as_str()).unwrap_or("no details");
     if !code.is_empty() {
@@ -318,6 +368,37 @@ fn explain(code: &str, message: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_plan_used_up() {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+        let r = refusal(429, &json!({ "error": { "type": "usage_limit_reached", "plan_type": "plus", "resets_at": now + 2 * 3600 + 5 * 60 + 30 } }));
+        assert!(r.starts_with("You've used your ChatGPT plan's usage for now. It resets in 2 h 5 min"), "{r}");
+        assert!(refusal(429, &json!({ "error": { "type": "usage_not_included" } })).contains("doesn't include Codex"));
+    }
+
+    #[test]
+    fn reads_the_plans_limits() {
+        let mut h = reqwest::header::HeaderMap::new();
+        for (k, v) in [
+            ("x-codex-primary-used-percent", "12.5"),
+            ("x-codex-primary-window-minutes", "300"),
+            ("x-codex-primary-reset-at", "1792300303"),
+            ("x-codex-secondary-used-percent", "40"),
+            ("x-codex-secondary-window-minutes", "10080"),
+            ("x-codex-other", "1"),
+        ] {
+            h.insert(k, v.parse().unwrap());
+        }
+        assert_eq!(
+            limits(&h),
+            vec![
+                json!({ "windowMinutes": 300, "usedPercent": 12.5, "resetsAt": 1792300303 }),
+                json!({ "windowMinutes": 10080, "usedPercent": 40.0, "resetsAt": null })
+            ]
+        );
+        assert!(limits(&reqwest::header::HeaderMap::new()).is_empty());
+    }
 
     #[test]
     fn a_reply_goes_back_as_it_came() {

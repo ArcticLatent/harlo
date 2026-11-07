@@ -1977,11 +1977,18 @@ fn providers_of(k: HarnessKind, host: Option<&Host>) -> Result<Vec<Value>, Strin
             Ok(list)
         }
         HarnessKind::Harlo if host.is_some() => Err("Harlo runs only on this computer, so far.".into()),
-        HarnessKind::Harlo => Ok(vec![json!({
-            "id": "chatgpt", "name": "ChatGPT",
-            "note": "Harlo's requests use your ChatGPT plan's usage.",
-            "methods": [{ "id": "chatgpt", "type": "login", "label": "Continue with ChatGPT" }],
-        })]),
+        HarnessKind::Harlo => Ok(vec![
+            json!({
+                "id": "chatgpt", "name": "ChatGPT",
+                "note": "Harlo's requests use your ChatGPT plan's usage.",
+                "methods": [{ "id": "chatgpt", "type": "login", "label": "Continue with ChatGPT" }],
+            }),
+            json!({
+                "id": "codex", "name": "ChatGPT (Codex sign-in)",
+                "note": "Signs in the way the Codex CLI does, so harlo can show your plan's usage: how much is used and when it resets. Unofficial: OpenAI doesn't document it for other apps. Its models are listed as codex/….",
+                "methods": [{ "id": "codex", "type": "login", "label": "Sign in" }],
+            }),
+        ]),
         HarnessKind::Demo => Ok(Vec::new()),
     }
 }
@@ -1989,11 +1996,15 @@ fn providers_of(k: HarnessKind, host: Option<&Host>) -> Result<Vec<Value>, Strin
 /// harlo-agent's account, from its `status --json`.
 fn harlo_accounts(status: &str) -> Result<Vec<Value>, String> {
     let v: Value = serde_json::from_str(status.trim()).map_err(|_| "harlo-agent didn't say whether it's signed in.".to_owned())?;
-    if v["signedIn"].as_bool() != Some(true) {
-        return Ok(Vec::new());
+    let mut out = Vec::new();
+    let label = |s: &Value| s["email"].as_str().filter(|e| !e.is_empty()).unwrap_or("ChatGPT").to_owned();
+    if v["signedIn"].as_bool() == Some(true) {
+        out.push(json!({ "id": "chatgpt", "label": label(&v), "detail": "ChatGPT plan", "signOut": true }));
     }
-    let label = v["email"].as_str().filter(|e| !e.is_empty()).unwrap_or("ChatGPT");
-    Ok(vec![json!({ "id": "chatgpt", "label": label, "detail": "ChatGPT plan", "signOut": true })])
+    if v["codex"]["signedIn"].as_bool() == Some(true) {
+        out.push(json!({ "id": "codex", "label": label(&v["codex"]), "detail": "ChatGPT plan · Codex sign-in", "signOut": true }));
+    }
+    Ok(out)
 }
 
 /// Signs an account out (blocking).
@@ -2016,7 +2027,10 @@ fn sign_out(k: HarnessKind, id: &str, host: Option<&Host>) -> Result<(), String>
             None => run(&program(k).ok_or("Hermes isn't installed.")?, &["auth", "logout", id], Duration::from_secs(30)).map(|_| ()),
         },
         HarnessKind::Harlo if host.is_some() => Err("Harlo runs only on this computer, so far.".into()),
-        HarnessKind::Harlo => run(&program(k).ok_or("harlo-agent isn't installed.")?, &["logout"], Duration::from_secs(15)).map(|_| ()),
+        HarnessKind::Harlo => {
+            let args: &[&str] = if id == "codex" { &["logout", "--codex"] } else { &["logout"] };
+            run(&program(k).ok_or("harlo-agent isn't installed.")?, args, Duration::from_secs(15)).map(|_| ())
+        }
         _ => Err("Sign out in omp itself (its /logout).".into()),
     }
 }
@@ -2413,6 +2427,10 @@ async fn sign_in(k: HarnessKind, provider: &str, method: &str, answers: &Value, 
             if report.host.is_some() {
                 return Err("Harlo runs only on this computer, so far.".into());
             }
+            if provider == "codex" {
+                command(agent_command(k, "harlo-agent", None, &["login", "--codex"])?, None, report, rx).await?;
+                return Ok("Harlo is signed in with the Codex sign-in. Its models are listed as codex/…, and harlo shows your plan's usage.".into());
+            }
             command(agent_command(k, "harlo-agent", None, &["login"])?, None, report, rx).await?;
             Ok("Harlo is signed in with ChatGPT.".into())
         }
@@ -2695,6 +2713,10 @@ mod tests {
         let a = harlo_accounts("{\"signedIn\":true,\"email\":\"me@example.com\"}\n").unwrap();
         assert_eq!(a, vec![json!({ "id": "chatgpt", "label": "me@example.com", "detail": "ChatGPT plan", "signOut": true })]);
         assert_eq!(harlo_accounts(r#"{"signedIn":true}"#).unwrap()[0]["label"], "ChatGPT");
+        // The Codex sign-in, its own account (signed out of on its own).
+        let both = harlo_accounts(r#"{"signedIn":true,"email":"a@b","codex":{"signedIn":true,"email":"c@d"}}"#).unwrap();
+        assert_eq!(both[1], json!({ "id": "codex", "label": "c@d", "detail": "ChatGPT plan · Codex sign-in", "signOut": true }));
+        assert_eq!(harlo_accounts(r#"{"signedIn":false,"codex":{"signedIn":true,"email":""}}"#).unwrap()[0]["id"], "codex");
         assert!(harlo_accounts("Signed in with ChatGPT").is_err());
     }
 

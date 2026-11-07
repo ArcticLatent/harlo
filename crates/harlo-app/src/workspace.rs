@@ -4058,7 +4058,13 @@ impl Workspace {
             .zip(harlo_harness::claude::config_dir());
         let keep_claude = !ask_claude && claude.is_some();
         let claude = claude.filter(|_| ask_claude);
-        if omp.is_none() && claude.is_none() && !keep_claude {
+        // Harlo: its Codex sign-in's usage (none without that sign-in).
+        let harlo = self
+            .provider_enabled(HarnessKind::Harlo)
+            .then(|| self.program_for(HarnessKind::Harlo).or_else(|| harlo_harness::resolve_program(HarnessKind::Harlo)))
+            .flatten()
+            .filter(|p| p.is_file());
+        if omp.is_none() && claude.is_none() && harlo.is_none() && !keep_claude {
             self.as_mut().set_quota_json(QString::from(&serde_json::json!({ "accounts": [], "error": "" }).to_string()));
             self.publish_phone_limits();
             return;
@@ -4073,6 +4079,7 @@ impl Workspace {
         crate::runtime().spawn_blocking(move || {
             let from_omp = omp.map(|p| harlo_core::quota::fetch(&p));
             let from_claude = claude.map(|(p, d)| harlo_core::quota::claude(&p, &d));
+            let from_harlo = harlo.map(|p| harlo_core::quota::fetch_harlo(&p));
             let _ = thread.queue(move |mut this| {
                 this.as_mut().rust_mut().quota_loading = false;
                 let previous: serde_json::Value = serde_json::from_str(&this.quota_json.to_string()).unwrap_or_default();
@@ -4096,6 +4103,14 @@ impl Workspace {
                         accounts.extend(kept(false));
                         errors.push(format!("{e:#}"));
                     }
+                }
+                // (Into omp's account when it's the same one.)
+                match from_harlo {
+                    Some(Ok(Some(usage))) => {
+                        harlo_core::quota::apply_live(&mut accounts, &usage);
+                    }
+                    Some(Ok(None)) | None => {}
+                    Some(Err(e)) => errors.push(format!("{e:#}")),
                 }
                 let updated = if errors.is_empty() { serde_json::json!(chrono::Local::now().timestamp_millis()) } else { previous["updatedAt"].clone() };
                 let json = serde_json::json!({ "accounts": accounts, "updatedAt": updated, "error": errors.join("\n") });
@@ -4263,6 +4278,22 @@ impl Workspace {
     /// What a running Claude session said of its limits, shown at once.
     fn apply_live_limits(mut self: Pin<&mut Self>, info: &serde_json::Value) {
         let mut ran_out = Vec::new();
+        // Harlo's (its plan's, from the response): the provider it names.
+        if let Some(provider) = info["provider"].as_str() {
+            self.as_mut().change_limits(true, |accounts| ran_out = harlo_core::quota::apply_live(accounts, info));
+            let windows = info["windows"].as_array().cloned().unwrap_or_default();
+            for label in ran_out {
+                let when = windows
+                    .iter()
+                    .filter(|w| w["windowMinutes"].as_i64().map(harlo_core::quota::window_label).as_deref() == Some(label.as_str()))
+                    .filter_map(|w| w["resetsAt"].as_i64())
+                    .max();
+                let name = harlo_core::quota::limit_name(provider, &label);
+                let body = when.map_or_else(|| "Its sessions stop until it resets.".to_owned(), |s| format!("It resets at {}.", harlo_core::quota::reset_time(s * 1000)));
+                self.as_mut().notify_limit(&format!("limit-{provider}-{label}"), &format!("{name} is used up"), &body, false);
+            }
+            return;
+        }
         self.as_mut().change_limits(true, |accounts| ran_out = harlo_core::quota::apply_claude_live(accounts, info));
         for label in ran_out {
             let when = info["unifiedWindows"].as_object().into_iter().flat_map(|w| w.values()).filter(|w| w["status"] == "rejected").filter_map(|w| w["resetsAt"].as_i64()).max();
@@ -5547,6 +5578,9 @@ impl Workspace {
         let limited_by = match entry.info.harness.as_str() {
             "claude" => Some("Claude".to_owned()),
             "omp" | "pi" | "opencode" => entry.model_id.split_once('/').map(|(p, _)| p.to_owned()).filter(|p| !p.is_empty()),
+            // Harlo: the plan's through the Codex sign-in ("codex/…"); the
+            // official sign-in, API keys and other servers say no limits.
+            "harlo" => (entry.model_id.split_once('/').map(|(p, _)| p) == Some("codex")).then(|| "openai-codex".to_owned()),
             // Hermes: its provider; one of its own servers by its name
             // ("custom/<server>:<model>"); none when it picks ("auto").
             "hermes" => match entry.model_id.split_once('/') {
@@ -5562,8 +5596,8 @@ impl Workspace {
         let pi_openai = entry.info.harness == "pi" && limited_by.as_deref() == Some("openai");
         let remote_file = entry.info.session_file.clone().filter(|f| harlo_core::remote::is_remote(f));
         let used = limited_by.clone().filter(|_| became_busy);
-        // A turn on a provider whose limits are asked for (Claude says its own).
-        let turn_on = limited_by.filter(|p| became_idle && p != "Claude");
+        // A turn on a provider whose limits are asked for (Claude and Harlo say their own).
+        let turn_on = limited_by.filter(|p| became_idle && p != "Claude" && entry.info.harness != "harlo");
         if became_idle && !active {
             entry.info.unread = true;
         }

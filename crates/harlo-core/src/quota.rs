@@ -74,6 +74,35 @@ pub fn fetch(omp: &Path) -> Result<Vec<Value>> {
     Ok(parse(&report))
 }
 
+/// Harlo's Codex sign-in's usage (`<harlo-agent> usage --json`, up to 20
+/// s), as `apply_live` takes it; None when that sign-in isn't there.
+pub fn fetch_harlo(agent: &Path) -> Result<Option<Value>> {
+    let mut child = Command::new(agent)
+        .args(["usage", "--json"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .with_context(|| format!("running {} usage", agent.display()))?;
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while child.try_wait()?.is_none() {
+        if Instant::now() > deadline {
+            let _ = child.kill();
+            bail!("Harlo's usage took too long");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let out = child.wait_with_output()?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        if err.contains("Not signed in") {
+            return Ok(None);
+        }
+        bail!("Harlo's usage: {}", err.lines().last().unwrap_or("").trim().trim_start_matches("harlo-agent: "));
+    }
+    Ok(Some(serde_json::from_slice(&out.stdout).context("reading Harlo's usage")?))
+}
+
 /// pi's "openai" sign-in, as its auth.json names it: a ChatGPT login
 /// ("oauth") uses the same plan as OpenAI Codex; an API key ("api_key") is
 /// paid per token and has no plan limits.
@@ -322,6 +351,80 @@ pub fn apply_claude_live(accounts: &mut Vec<Value>, info: &Value) -> Vec<String>
     ran_out
 }
 
+/// A limit window's name for its length, as omp names it ("5 hours",
+/// "7 days"), so the two agree on a window.
+pub fn window_label(minutes: i64) -> String {
+    let secs = minutes.max(0) * 60;
+    let (n, unit) = if secs >= 86_400 { ((secs as f64 / 86_400.0).round() as i64, "day") } else { (((secs as f64 / 3600.0).round() as i64).max(1), "hour") };
+    format!("{n} {unit}{}", if n == 1 { "" } else { "s" })
+}
+
+/// A Harlo session's word on its plan's limits (from the response's
+/// headers: `{ provider, account, windows: [{ windowMinutes, usedPercent,
+/// resetsAt (s) }] }`) into that account in `accounts`: the one omp lists
+/// for the same provider and email (or without either known), else a new
+/// one. Each window replaces the one of its name; the rest stay as they
+/// were. Returns the windows that have just run out.
+pub fn apply_live(accounts: &mut Vec<Value>, info: &Value) -> Vec<String> {
+    let provider = info["provider"].as_str().unwrap_or_default();
+    let email = info["account"].as_str().unwrap_or_default();
+    let seen: Vec<(String, Value)> = info["windows"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|w| {
+            let used = (w["usedPercent"].as_f64()? / 100.0).clamp(0.0, 1.0);
+            let label = w["windowMinutes"].as_i64().map_or_else(|| "limit".to_owned(), window_label);
+            // (Seconds, or milliseconds already.)
+            let reset = w["resetsAt"].as_i64().map(|r| if r > 1_000_000_000_000 { r } else { r * 1000 });
+            let out = used >= 1.0;
+            Some((label.clone(), json!({ "label": label, "usedFraction": used, "used": (used * 100.0).round(), "limit": 100, "unit": "percent",
+                                         "resetsAt": reset, "status": if out { "exhausted" } else { "ok" } })))
+        })
+        .collect();
+    if provider.is_empty() || seen.is_empty() {
+        return Vec::new();
+    }
+    let at = match accounts.iter().position(|a| a["provider"] == provider && (email.is_empty() || a["account"].as_str().is_none_or(|e| e.is_empty() || e == email))) {
+        Some(i) => i,
+        None => {
+            accounts.push(json!({ "provider": provider, "plan": "", "account": email, "limitReached": false, "windows": [] }));
+            accounts.len() - 1
+        }
+    };
+    let account = &mut accounts[at];
+    if let Some(plan) = info["plan"].as_str().filter(|p| !p.is_empty())
+        && account["plan"].as_str().is_none_or(str::is_empty)
+    {
+        account["plan"] = json!(plan);
+    }
+    if !account["windows"].is_array() {
+        account["windows"] = json!([]);
+    }
+    let windows = account["windows"].as_array_mut().expect("an array");
+    let mut ran_out = Vec::new();
+    for (label, window) in seen {
+        let out = window["status"] == "exhausted";
+        match windows.iter_mut().find(|x| x["label"] == label.as_str()) {
+            Some(x) => {
+                if out && x["status"] != "exhausted" {
+                    ran_out.push(label);
+                }
+                *x = window;
+            }
+            None => {
+                if out {
+                    ran_out.push(label);
+                }
+                windows.push(window);
+            }
+        }
+    }
+    let reached = windows.iter().any(|w| w["status"] == "exhausted" || w["usedFraction"].as_f64().unwrap_or(0.0) >= 1.0);
+    account["limitReached"] = json!(reached);
+    ran_out
+}
+
 /// The windows (provider, label, when) that were nearly or fully used and
 /// have reset by `now`, at a time after `since` (unix ms).
 pub fn resets_due(accounts: &[Value], since: i64, now: i64) -> Vec<(String, String, i64)> {
@@ -344,6 +447,11 @@ pub fn resets_due(accounts: &[Value], since: i64, now: i64) -> Vec<(String, Stri
 pub fn session_provider(harness: &str, model_id: &str) -> String {
     if harness == "claude" {
         return "Claude".to_owned();
+    }
+    // Harlo: the plan's through the Codex sign-in ("codex/…"), which says
+    // its usage; the official sign-in, API keys and other servers say none.
+    if harness == "harlo" {
+        return if model_id.split('/').next() == Some("codex") { "openai-codex".to_owned() } else { String::new() };
     }
     if !matches!(harness, "pi" | "omp" | "opencode") {
         return String::new();
@@ -406,8 +514,8 @@ pub fn limit_name(provider: &str, label: &str) -> String {
         p => p,
     };
     let what = match label {
-        "Session (5 h)" => "5-hour limit".to_owned(),
-        "Weekly" => "weekly limit".to_owned(),
+        "Session (5 h)" | "5 hours" => "5-hour limit".to_owned(),
+        "Weekly" | "7 days" => "weekly limit".to_owned(),
         l if l.starts_with("Weekly · ") => format!("weekly {} limit", &l["Weekly · ".len()..]),
         l => format!("{l} limit"),
     };
@@ -416,6 +524,44 @@ pub fn limit_name(provider: &str, label: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn harlos_live_limits() {
+        use super::*;
+        assert_eq!((window_label(300), window_label(10080), window_label(1440), window_label(30), window_label(60)), ("5 hours".into(), "7 days".into(), "1 day".into(), "1 hour".into(), "1 hour".into()));
+        // omp's account for the same email: its weekly window replaced, the 5-hour one added.
+        let mut accounts = vec![
+            json!({ "provider": "Claude", "account": "", "windows": [] }),
+            json!({ "provider": "openai-codex", "plan": "plus", "account": "a@b", "limitReached": false,
+                    "windows": [{ "label": "7 days", "usedFraction": 0.2, "status": "ok", "resetsAt": 5 }] }),
+        ];
+        let info = |p5: f64, p7: f64| json!({ "provider": "openai-codex", "account": "a@b", "windows": [
+            { "windowMinutes": 300, "usedPercent": p5, "resetsAt": 1792300303 },
+            { "windowMinutes": 10080, "usedPercent": p7, "resetsAt": null }] });
+        assert!(apply_live(&mut accounts, &info(12.5, 40.0)).is_empty());
+        assert_eq!(accounts.len(), 2);
+        let w = &accounts[1]["windows"];
+        assert_eq!((w[0]["label"].as_str(), w[0]["usedFraction"].as_f64(), w[1]["label"].as_str(), w[1]["resetsAt"].as_i64()), (Some("7 days"), Some(0.4), Some("5 hours"), Some(1792300303000)));
+        assert_eq!(accounts[1]["plan"], "plus");
+        // Running out is told once.
+        assert_eq!(apply_live(&mut accounts, &info(100.0, 40.0)), ["5 hours"]);
+        assert_eq!(accounts[1]["limitReached"], true);
+        assert!(apply_live(&mut accounts, &info(100.0, 40.0)).is_empty());
+        // Another account: its own entry.
+        let other = json!({ "provider": "openai-codex", "account": "c@d", "windows": [{ "windowMinutes": 300, "usedPercent": 1 }] });
+        apply_live(&mut accounts, &other);
+        assert_eq!((accounts.len(), accounts[2]["account"].as_str()), (3, Some("c@d")));
+        // None known yet: added, with its plan.
+        let mut none = Vec::new();
+        let mut with_plan = other.clone();
+        with_plan["plan"] = json!("pro");
+        apply_live(&mut none, &with_plan);
+        assert_eq!((none[0]["windows"][0]["label"].as_str(), none[0]["plan"].as_str()), (Some("5 hours"), Some("pro")));
+        assert!(apply_live(&mut none, &json!({ "provider": "openai-codex", "windows": [] })).is_empty());
+        assert_eq!((session_provider("harlo", "codex/gpt-6.1-sol"), session_provider("harlo", "chatgpt/gpt-6.1-sol"), session_provider("harlo", "llamacpp/x")), ("openai-codex".into(), String::new(), String::new()));
+        assert_eq!(limit_name("openai-codex", "5 hours"), "ChatGPT's 5-hour limit");
+        assert_eq!(limit_name("openai-codex", "7 days"), "ChatGPT's weekly limit");
+    }
+
     #[test]
     fn a_sessions_limit() {
         let accounts = vec![
@@ -483,7 +629,7 @@ mod tests {
         assert!(resets_due(&accounts, 0, at + 10).is_empty());
         // (A window hardly used resets without a word.)
         assert_eq!(limit_name("Claude", "Session (5 h)"), "Claude's 5-hour limit");
-        assert_eq!(limit_name("openai-codex", "7 days"), "ChatGPT's 7 days limit");
+        assert_eq!(limit_name("openai-codex", "7 days"), "ChatGPT's weekly limit");
         assert_eq!(limit_name("Claude", "Weekly · Opus"), "Claude's weekly Opus limit");
     }
 
