@@ -247,7 +247,7 @@ impl Tools {
             return fail("Give a pattern.");
         }
         let path = if p.trim().is_empty() { self.cwd.clone() } else { self.path(p) };
-        let mut args: Vec<String> = vec!["-n".into(), "--no-heading".into(), "--color".into(), "never".into(), "--max-columns".into(), "300".into()];
+        let mut args: Vec<String> = vec!["-n".into(), "--no-heading".into(), "--color".into(), "never".into(), "--max-columns".into(), "300".into(), "-g".into(), "!.git/".into()];
         if ignore_case {
             args.push("-i".into());
         }
@@ -293,7 +293,7 @@ impl Tools {
             return fail("Give a glob, e.g. **/*.rs");
         }
         let path = if p.trim().is_empty() { self.cwd.clone() } else { self.path(p) };
-        let out = tokio::process::Command::new("rg").args(["--files", "--color", "never", "-g", pattern, "--"]).arg(&path).current_dir(&self.cwd).stdin(std::process::Stdio::null()).output().await;
+        let out = tokio::process::Command::new("rg").args(["--files", "--color", "never", "-g", pattern, "-g", "!.git/", "--"]).arg(&path).current_dir(&self.cwd).stdin(std::process::Stdio::null()).output().await;
         let text = match out {
             Ok(o) => String::from_utf8_lossy(&o.stdout).into_owned(),
             Err(_) => {

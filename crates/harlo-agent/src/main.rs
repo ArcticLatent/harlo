@@ -102,7 +102,16 @@ async fn ask(prompt: &str, model: Option<String>, effort: Option<String>) -> Res
     let mut agent = agent::Agent::new(cwd, model, effort);
     let mut out = std::io::stdout();
     let mut thinking = false;
+    // Whether the last thing printed ended a line.
+    let mut fresh = true;
+    let started = std::time::Instant::now();
     let mut show = |s: agent::Shown| {
+        let line = |fresh: &mut bool| {
+            if !*fresh {
+                println!();
+                *fresh = true;
+            }
+        };
         let end_thinking = |thinking: &mut bool| {
             if *thinking {
                 eprintln!("\x1b[0m");
@@ -120,10 +129,12 @@ async fn ask(prompt: &str, model: Option<String>, effort: Option<String>) -> Res
             agent::Shown::Text(t) => {
                 end_thinking(&mut thinking);
                 print!("{t}");
+                fresh = t.ends_with('\n');
                 let _ = out.flush();
             }
             agent::Shown::ToolStart { name, args } => {
                 end_thinking(&mut thinking);
+                line(&mut fresh);
                 eprintln!("\x1b[36m→ {name}\x1b[0m \x1b[2m{}\x1b[0m", summary(name, args));
             }
             agent::Shown::ToolEnd { text, failed, .. } => {
@@ -134,13 +145,24 @@ async fn ask(prompt: &str, model: Option<String>, effort: Option<String>) -> Res
             }
             agent::Shown::Usage { model, usage } => {
                 end_thinking(&mut thinking);
+                line(&mut fresh);
                 eprintln!("\x1b[2m[{model} · {} in ({} cached), {} out]\x1b[0m", usage["input_tokens"], usage["input_tokens_details"]["cached_tokens"], usage["output_tokens"]);
             }
         }
     };
-    agent.run(prompt, &mut show).await?;
-    println!();
-    Ok(())
+    let result = agent.run(prompt, &mut show).await;
+    let t = &agent.totals;
+    eprintln!(
+        "\x1b[2m[{} request{} · {} in ({} cached, {}%) · {} out · {:.0}s]\x1b[0m",
+        t.requests,
+        if t.requests == 1 { "" } else { "s" },
+        t.input,
+        t.cached,
+        if t.input > 0 { t.cached * 100 / t.input } else { 0 },
+        t.output,
+        started.elapsed().as_secs_f64()
+    );
+    result
 }
 
 /// A call's arguments in one line.

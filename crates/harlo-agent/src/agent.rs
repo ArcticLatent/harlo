@@ -33,12 +33,27 @@ pub struct Agent {
     instructions: String,
     tools: Tools,
     history: Vec<Value>,
+    /// The session's id (the prompt cache key).
+    id: String,
+    /// Totals of this session's requests.
+    pub totals: Totals,
+}
+
+#[derive(Default)]
+pub struct Totals {
+    pub requests: u64,
+    pub input: u64,
+    pub cached: u64,
+    pub output: u64,
 }
 
 impl Agent {
     pub fn new(cwd: PathBuf, model: String, effort: Option<String>) -> Self {
         let spill = std::env::temp_dir().join("harlo-agent");
-        Agent { instructions: instructions(&cwd), tools: Tools::new(cwd, spill), model, effort, history: Vec::new() }
+        let mut b = [0u8; 16];
+        let _ = getrandom::fill(&mut b);
+        let id: String = b.iter().map(|x| format!("{x:02x}")).collect();
+        Agent { instructions: instructions(&cwd), tools: Tools::new(cwd, spill), model, effort, history: Vec::new(), id, totals: Totals::default() }
     }
 
     pub async fn run(&mut self, prompt: &str, show: &mut dyn FnMut(Shown)) -> Result<()> {
@@ -81,17 +96,24 @@ impl Agent {
     /// One request: its output items. A token the API refuses is refreshed
     /// once and the request sent again.
     async fn ask(&mut self, show: &mut dyn FnMut(Shown)) -> Result<Vec<Value>> {
-        let body = responses::request(&self.model, &self.instructions, &self.history, tools::specs(), self.effort.as_deref());
+        let body = responses::request(&self.model, &self.instructions, &self.history, tools::specs(), self.effort.as_deref(), &self.id);
         let model = self.model.clone();
         let mut force = false;
         loop {
             let token = auth::access_token(force).await?;
             let mut items = Vec::new();
+            let totals = &mut self.totals;
             let result = responses::stream(&token, &body, |ev| match ev {
                 responses::Event::Text(t) => show(Shown::Text(&t)),
                 responses::Event::Reasoning(t) => show(Shown::Reasoning(&t)),
                 responses::Event::Item(i) => items.push(i),
-                responses::Event::Completed { usage } => show(Shown::Usage { model: &model, usage: &usage }),
+                responses::Event::Completed { usage } => {
+                    totals.requests += 1;
+                    totals.input += usage["input_tokens"].as_u64().unwrap_or(0);
+                    totals.cached += usage["input_tokens_details"]["cached_tokens"].as_u64().unwrap_or(0);
+                    totals.output += usage["output_tokens"].as_u64().unwrap_or(0);
+                    show(Shown::Usage { model: &model, usage: &usage })
+                }
             })
             .await;
             match result {

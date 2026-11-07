@@ -45,10 +45,12 @@ pub async fn models(token: &str) -> Result<Vec<(String, String)>> {
 }
 
 /// A request's body: the model, its instructions, the history, tools.
-pub fn request(model: &str, instructions: &str, input: &[Value], tools: Value, effort: Option<&str>) -> Value {
+/// `cache_key`: the session's id, so its requests reach the cache that
+/// holds their shared start.
+pub fn request(model: &str, instructions: &str, input: &[Value], tools: Value, effort: Option<&str>, cache_key: &str) -> Value {
     let mut body = json!({
         "model": model, "instructions": instructions, "input": input, "store": false, "stream": true,
-        "include": ["reasoning.encrypted_content"],
+        "include": ["reasoning.encrypted_content"], "prompt_cache_key": cache_key,
     });
     if tools.as_array().is_some_and(|t| !t.is_empty()) {
         body["tools"] = tools;
