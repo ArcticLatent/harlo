@@ -294,6 +294,7 @@ const ROLE_CALL_ID: i32 = 0x107;
 const ROLE_GROUP: i32 = 0x108;
 const ROLE_SUMMARY: i32 = 0x109;
 const ROLE_GROUP_OPEN: i32 = 0x10a;
+const ROLE_MODEL: i32 = 0x10b;
 
 #[derive(Default)]
 pub struct ChatSessionRust {
@@ -1244,6 +1245,7 @@ impl ChatSession {
             ROLE_GROUP => s(&row.group),
             ROLE_SUMMARY => s(&row.summary),
             ROLE_GROUP_OPEN => QVariant::from(&row.group_open),
+            ROLE_MODEL => s(&row.model),
             _ => QVariant::default(),
         }
     }
@@ -1262,6 +1264,7 @@ impl ChatSession {
             (ROLE_GROUP, "group"),
             (ROLE_SUMMARY, "summary"),
             (ROLE_GROUP_OPEN, "groupOpen"),
+            (ROLE_MODEL, "rowModel"),
         ] {
             roles.insert(role, QByteArray::from(name));
         }

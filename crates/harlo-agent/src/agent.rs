@@ -525,10 +525,13 @@ impl Agent {
 
     /// The system prompt: the project's, then what harlo's tools are for.
     fn system(&self) -> String {
+        // (Asked which model it is, it can say: it changes when you switch.)
+        let (provider, id) = self.model.split_once('/').unwrap_or((providers::CHATGPT, &self.model));
+        let model = format!("\nYou run on the model {id} (from {provider}).\n");
         if self.harlo_text.is_empty() {
-            return self.instructions.clone();
+            return format!("{}{model}", self.instructions);
         }
-        format!("{}\n<harlo>\n{}\n</harlo>\n", self.instructions, self.harlo_text.trim())
+        format!("{}{model}\n<harlo>\n{}\n</harlo>\n", self.instructions, self.harlo_text.trim())
     }
 
     /// The tools the model gets: its own, then harlo's.

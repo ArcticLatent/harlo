@@ -57,8 +57,26 @@ Item {
     function isActivity(kind) { return kind === "tool" || kind === "thinking" }
     /// A turn's head: avatar and name, over its first row.
     readonly property real headHeight: Theme.px(30)
-    // The agent at the top of its reply: avatar, name and model.
+    /// A reply's model as the head shows it (its name when the agent
+    /// listed it; "" unknown: the session's).
+    function replyModelName(id) {
+        const current = session.modelId
+        if (id === "" || current === id || current.endsWith("/" + id))
+            return session.modelName
+        const known = session.models.map(m => m.split("\t")).find(p => p[1] === id || p[0] + "/" + p[1] === id)
+        return known && known[2] ? known[2] : id
+    }
+    // The agent at the top of its reply: avatar, name and model (the
+    // reply's own: the session may have switched since).
     component AgentHead: Item {
+        id: head
+        property string replyModel
+        readonly property string shownModel: root.replyModelName(replyModel)
+        // Another model than now: its name comes with the agent's list (read
+        // once, from a running agent).
+        Component.onCompleted: if (visible && replyModel !== "" && shownModel === replyModel && root.session.models.length === 0
+                                   && !root.session.modelsAnswered && (root.session.status === "idle" || root.session.status === "busy"))
+            root.session.loadModels()
         visible: false
         x: (view.width - view.contentWidthLimit) / 2
         width: view.contentWidthLimit
@@ -74,7 +92,7 @@ Item {
                 ring: Theme.canvas
             }
             Label { text: Theme.harnessLabel(root.session.harness); color: Theme.text; font.pixelSize: Theme.px(14.5); font.weight: Font.DemiBold }
-            Label { visible: root.session.modelName !== ""; text: "· " + Theme.modelLabel(root.session.modelName); color: Theme.textFaint; font.pixelSize: Theme.px(13); anchors.baseline: parent.children[1].baseline }
+            Label { visible: head.shownModel !== ""; text: "· " + Theme.modelLabel(head.shownModel); color: Theme.textFaint; font.pixelSize: Theme.px(13); anchors.baseline: parent.children[1].baseline }
         }
     }
     /// A run of tool calls and thoughts: folded or open as set by hand,
@@ -538,6 +556,7 @@ Item {
                 roleValue: "markdown"
                 Item {
                     id: mdRow
+                    required property string rowModel
                     ListView.onAdd: if (Theme.motion > 0) mdRowFade.start()
                     AddFade { id: mdRowFade; target: mdRow }
                     required property string html
@@ -547,7 +566,7 @@ Item {
                     // The code block (in a list) just copied: its link says "Copied" a moment.
                     property int copiedBlock: -1
                     Timer { id: blockCopiedTimer; interval: 1200; onTriggered: mdRow.copiedBlock = -1 }
-                    AgentHead { visible: mdRow.ListView.previousSection === "user"; y: mdRow.gap - height - 10 }
+                    AgentHead { replyModel: mdRow.rowModel; visible: mdRow.ListView.previousSection === "user"; y: mdRow.gap - height - 10 }
                     width: view.width
                     implicitHeight: md.implicitHeight + gap
                     TextEdit {
@@ -583,6 +602,7 @@ Item {
                 roleValue: "code"
                 Item {
                     id: codeRow
+                    required property string rowModel
                     ListView.onAdd: if (Theme.motion > 0) codeRowFade.start()
                     AddFade { id: codeRowFade; target: codeRow }
                     required property string html
@@ -597,7 +617,7 @@ Item {
                                                                                              muted: String(Theme.muted), accent: String(Theme.primary), font: Theme.uiFont })))
                         : null
                     readonly property bool drawn: diagram !== null && diagram.state === "ready" && !showCode
-                    AgentHead { visible: codeRow.ListView.previousSection === "user"; y: codeRow.gap - height - 10 }
+                    AgentHead { replyModel: codeRow.rowModel; visible: codeRow.ListView.previousSection === "user"; y: codeRow.gap - height - 10 }
                     width: view.width
                     implicitHeight: codeBox.height + gap
                     Rectangle {
@@ -720,6 +740,7 @@ Item {
                 roleValue: "thinking"
                 Item {
                     id: thinkRow
+                    required property string rowModel
                     ListView.onAdd: if (Theme.motion > 0) thinkRowFade.start()
                     AddFade { id: thinkRowFade; target: thinkRow }
                     required property string rowKey
@@ -730,7 +751,7 @@ Item {
                     required property bool groupOpen
                     readonly property bool open: view.expanded[rowKey] === true
                     readonly property real gap: root.gapAbove("thinking", ListView.previousSection)
-                    AgentHead { visible: thinkRow.ListView.previousSection === "user"; y: thinkRow.gap - height - 10 }
+                    AgentHead { replyModel: thinkRow.rowModel; visible: thinkRow.ListView.previousSection === "user"; y: thinkRow.gap - height - 10 }
                     // A run sits on one card: rounded where it starts and ends.
                     Rectangle {
                         readonly property bool first: !root.isActivity(thinkRow.ListView.previousSection)
@@ -813,6 +834,7 @@ Item {
                 roleValue: "tool"
                 Item {
                     id: toolRow
+                    required property string rowModel
                     ListView.onAdd: if (Theme.motion > 0) toolRowFade.start()
                     AddFade { id: toolRowFade; target: toolRow }
                     required property string rowKey
@@ -832,7 +854,7 @@ Item {
                     z: asking ? 2 : 0
                     readonly property var askLines: asking ? root.session.requestTitle.split("\n").slice(1) : []
                     readonly property real gap: root.gapAbove("tool", ListView.previousSection)
-                    AgentHead { visible: toolRow.ListView.previousSection === "user"; y: toolRow.gap - height - 10 }
+                    AgentHead { replyModel: toolRow.rowModel; visible: toolRow.ListView.previousSection === "user"; y: toolRow.gap - height - 10 }
                     // A run sits on one card: rounded where it starts and ends.
                     Rectangle {
                         readonly property bool first: !root.isActivity(toolRow.ListView.previousSection)
@@ -1038,6 +1060,7 @@ Item {
                 roleValue: "notice"
                 Item {
                     id: noticeRow
+                    required property string rowModel
                     ListView.onAdd: if (Theme.motion > 0) noticeRowFade.start()
                     AddFade { id: noticeRowFade; target: noticeRow }
                     required property string rowKey
@@ -1047,7 +1070,7 @@ Item {
                     readonly property bool long: text.length > 240 || text.split("\n").length > 3
                     readonly property bool open: !long || view.expanded[rowKey] === true
                     readonly property real gap: root.gapAbove("notice", ListView.previousSection)
-                    AgentHead { visible: noticeRow.ListView.previousSection === "user"; y: noticeRow.gap - height - 10 }
+                    AgentHead { replyModel: noticeRow.rowModel; visible: noticeRow.ListView.previousSection === "user"; y: noticeRow.gap - height - 10 }
                     width: view.width
                     implicitHeight: noticeText.implicitHeight + 4 + gap
                     Label {

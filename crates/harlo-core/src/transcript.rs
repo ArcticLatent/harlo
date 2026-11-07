@@ -76,6 +76,8 @@ pub struct Row {
     /// A finished run's first row: how long the run took (ms; 0 unknown or
     /// still going).
     pub run_ms: i64,
+    /// The model of the reply it's in ("" unknown, or not a reply).
+    pub model: String,
 }
 
 /// Now, in unix ms.
@@ -114,6 +116,8 @@ struct Item {
     rows: Option<(u64, Vec<Arc<Row>>)>,
     /// When it started (unix ms).
     time: i64,
+    /// A reply's model, as its message says ("" unknown).
+    model: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -351,6 +355,7 @@ impl Transcript {
             rev: 0,
             rows: None,
             time: now_ms(),
+            model: String::new(),
         });
         true
     }
@@ -379,6 +384,7 @@ impl Transcript {
             rev: 0,
             rows: None,
             time: message_time(message),
+            model: String::new(),
         });
         true
     }
@@ -424,6 +430,7 @@ impl Transcript {
                     rev: 0,
                     rows: None,
                     time: message_time(message),
+                    model: String::new(),
                 });
                 pos
             }
@@ -442,6 +449,10 @@ impl Transcript {
         item.role = role;
         item.done = done;
         item.error = error;
+        // (Claude's notes of its own say "<synthetic>".)
+        if let Some(model) = message["model"].as_str().filter(|m| !m.is_empty() && !m.starts_with('<')) {
+            item.model = model.to_owned();
+        }
         item.rev += 1;
         true
     }
@@ -500,7 +511,8 @@ impl Transcript {
         let state = if streaming { "streaming" } else { "done" };
         let mut rows = Vec::new();
         let time = item.time;
-        let row = |key: String, kind: RowKind| Row { key, kind, state: state.to_owned(), time, ..Row::default() };
+        let model = if item.role == Role::Assistant { item.model.clone() } else { String::new() };
+        let row = |key: String, kind: RowKind| Row { key, kind, state: state.to_owned(), time, model: model.clone(), ..Row::default() };
 
         match item.role {
             Role::User => {
@@ -1147,6 +1159,23 @@ mod tests {
         // Unchanged rows keep their Arc from one snapshot to the next.
         let again = t.rows();
         assert!(rows.iter().zip(&again).all(|(a, b)| Arc::ptr_eq(a, b)));
+    }
+
+    /// Each reply keeps its own model: switching models doesn't relabel
+    /// the replies before.
+    #[test]
+    fn replies_keep_their_model() {
+        let mut t = Transcript::new();
+        t.load_messages(&[
+            json!({"role":"user","content":"a"}),
+            json!({"role":"assistant","model":"gpt-6.1-sol","content":[{"type":"thinking","thinking":"hm"},{"type":"text","text":"one"}]}),
+            json!({"role":"user","content":"b"}),
+            json!({"role":"assistant","model":"gpt-5.6-sol","content":[{"type":"text","text":"two"}]}),
+            json!({"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"three"}]}),
+        ]);
+        let models: Vec<(String, String)> = t.rows().iter().map(|r| (r.kind.as_str().to_owned(), r.model.clone())).collect();
+        let want = |k: &str, m: &str| (k.to_owned(), m.to_owned());
+        assert_eq!(models, [want("user", ""), want("thinking", "gpt-6.1-sol"), want("markdown", "gpt-6.1-sol"), want("user", ""), want("markdown", "gpt-5.6-sol"), want("markdown", "")]);
     }
 
     /// History: a run's duration from the messages' own times, and each
