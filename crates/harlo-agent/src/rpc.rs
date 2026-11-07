@@ -621,7 +621,8 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
             sh.always.lock().unwrap().clear();
             reply(Ok(json!({ "cancelled": false })))
         }
-        // A new session from what came before one of your messages; its
+        // The session from just before one of your messages, in the same
+        // file (what you send next is a new branch; the old one stays): its
         // text comes back to edit and send again.
         "fork" => {
             if busy {
@@ -631,9 +632,9 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
             let mut a = agent.lock().await;
             let file = a.session_file().to_owned();
             if file.as_os_str().is_empty() || !file.exists() {
-                return reply(Err("This session isn't saved yet, so it can't be forked.".into()));
+                return reply(Err("This session isn't saved yet, so its messages can't be edited.".into()));
             }
-            let (loaded, text) = match session::Log::fork(&file, entry) {
+            let (loaded, text) = match session::Log::branch_before(&file, entry) {
                 Ok(f) => f,
                 Err(e) => return reply(Err(format!("{e:#}"))),
             };

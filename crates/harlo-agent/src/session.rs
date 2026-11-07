@@ -94,6 +94,24 @@ impl Loaded {
     }
 }
 
+/// A session file's header and entries.
+fn read_entries(path: &Path) -> Result<(Value, Vec<Value>)> {
+    let text = std::fs::read_to_string(path).with_context(|| format!("Couldn't read the session {}", path.display()))?;
+    let mut header: Option<Value> = None;
+    let mut entries: Vec<Value> = Vec::new();
+    for line in text.lines() {
+        // A line cut off by a crash isn't JSON: skipped.
+        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        if v["type"] == "session" {
+            header.get_or_insert(v);
+        } else if v["id"].is_string() {
+            entries.push(v);
+        }
+    }
+    let Some(header) = header else { bail!("{} isn't a session file", path.display()) };
+    Ok((header, entries))
+}
+
 impl Log {
     /// A new session; its file is made with the first entry.
     pub fn new(root: &Path, cwd: &Path) -> Log {
@@ -114,23 +132,32 @@ impl Log {
     }
 
     pub fn open(path: &Path) -> Result<Loaded> {
-        let text = std::fs::read_to_string(path).with_context(|| format!("Couldn't read the session {}", path.display()))?;
-        let mut header: Option<Value> = None;
-        let mut entries: Vec<Value> = Vec::new();
-        for line in text.lines() {
-            // A line cut off by a crash isn't JSON: skipped.
-            let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
-            if v["type"] == "session" {
-                header.get_or_insert(v);
-            } else if v["id"].is_string() {
-                entries.push(v);
-            }
-        }
-        let Some(header) = header else { bail!("{} isn't a session file", path.display()) };
+        let (header, entries) = read_entries(path)?;
         // The current branch: from the newest entry back to the root.
+        let leaf = entries.last().and_then(|e| e["id"].as_str()).map(str::to_owned);
+        Self::load_branch(path, &header, &entries, leaf)
+    }
+
+    /// The session at `path` going on from just before your message
+    /// `entry`, in the same file: what you send next starts a new branch
+    /// there (the old one stays, to browse). Nothing is written until then.
+    /// That message's text, and the session read back.
+    pub fn branch_before(path: &Path, entry: &str) -> Result<(Loaded, String)> {
+        let (header, entries) = read_entries(path)?;
+        let picked = entries
+            .iter()
+            .find(|e| e["id"] == entry && e["type"] == "message" && e["message"]["role"] == "user")
+            .with_context(|| format!("There's no message of yours with the id {entry} in this session"))?;
+        let said = user_text(&picked["message"]["content"]);
+        let leaf = picked["parentId"].as_str().map(str::to_owned);
+        Ok((Self::load_branch(path, &header, &entries, leaf)?, said))
+    }
+
+    /// The branch ending at `leaf` (None: none, a new root).
+    fn load_branch(path: &Path, header: &Value, entries: &[Value], leaf: Option<String>) -> Result<Loaded> {
         let by_id: std::collections::HashMap<&str, &Value> = entries.iter().filter_map(|e| Some((e["id"].as_str()?, e))).collect();
         let mut branch = Vec::new();
-        let mut at = entries.last().and_then(|e| e["id"].as_str());
+        let mut at = leaf.as_deref();
         while let Some(id) = at {
             let Some(e) = by_id.get(id) else { break };
             if branch.len() > entries.len() {
@@ -187,7 +214,7 @@ impl Log {
             path: path.to_owned(),
             cwd: header["cwd"].as_str().map(PathBuf::from).unwrap_or_default(),
             file: None,
-            last: entries.last().and_then(|e| e["id"].as_str()).map(str::to_owned),
+            last: leaf,
             off: false,
             parent: None,
         };
@@ -229,61 +256,6 @@ impl Log {
             h["parentSession"] = json!(p);
         }
         h
-    }
-
-    /// A new session (beside `path`'s) from what came before the user
-    /// message `entry` in it: that message's text, and the new session read
-    /// back. The new file is written at once when anything came before;
-    /// `path` is left as it was.
-    pub fn fork(path: &Path, entry: &str) -> Result<(Loaded, String)> {
-        let text = std::fs::read_to_string(path).with_context(|| format!("Couldn't read the session {}", path.display()))?;
-        let mut header: Option<Value> = None;
-        let mut entries: Vec<Value> = Vec::new();
-        for line in text.lines() {
-            let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
-            if v["type"] == "session" {
-                header.get_or_insert(v);
-            } else if v["id"].is_string() {
-                entries.push(v);
-            }
-        }
-        let header = header.with_context(|| format!("{} isn't a session file", path.display()))?;
-        let by_id: std::collections::HashMap<&str, &Value> = entries.iter().filter_map(|e| Some((e["id"].as_str()?, e))).collect();
-        let picked = by_id.get(entry).filter(|e| e["type"] == "message" && e["message"]["role"] == "user").with_context(|| format!("There's no message of yours with the id {entry} in this session"))?;
-        let said = user_text(&picked["message"]["content"]);
-        // What came before it: from its parent back to the root.
-        let mut branch = Vec::new();
-        let mut at = picked["parentId"].as_str();
-        while let Some(id) = at {
-            let Some(e) = by_id.get(id) else { break };
-            if branch.len() > entries.len() {
-                break; // a loop
-            }
-            branch.push(*e);
-            at = e["parentId"].as_str();
-        }
-        branch.reverse();
-        let cwd = header["cwd"].as_str().map(PathBuf::from).unwrap_or_default();
-        let id = uuid();
-        let dir = path.parent().map(Path::to_owned).unwrap_or_default();
-        let new = dir.join(format!("{}_{id}.jsonl", iso(SystemTime::now()).replace([':', '.'], "-")));
-        let mut log = Log { id, path: new.clone(), cwd, file: None, last: None, off: false, parent: Some(path.to_owned()) };
-        if branch.is_empty() {
-            return Ok((Loaded { log, messages: Vec::new(), ids: Vec::new(), model: None, effort: None, name: None, files: Default::default(), originals: Vec::new() }, said));
-        }
-        let mut out = log.header().to_string();
-        out.push('\n');
-        for e in &branch {
-            out.push_str(&e.to_string());
-            out.push('\n');
-        }
-        let tmp = new.with_extension("jsonl.tmp");
-        std::fs::write(&tmp, out).with_context(|| format!("Couldn't write {}", tmp.display()))?;
-        std::fs::rename(&tmp, &new).with_context(|| format!("Couldn't write {}", new.display()))?;
-        let mut loaded = Log::open(&new)?;
-        log.last = loaded.log.last.take();
-        loaded.log = log;
-        Ok((loaded, said))
     }
 
     /// A message's entry: its id.
@@ -436,18 +408,18 @@ mod tests {
         assert_eq!(loaded.ids, [c.clone(), kept.clone(), loaded.ids[2].clone(), after.clone()]);
         assert_eq!(loaded.files, (vec!["a.rs".to_owned()], vec!["b.rs".to_owned()]));
         assert_ne!(loaded.ids[0], first);
-        // A fork after it keeps the summary; one before it doesn't.
-        let (f, _) = Log::fork(&log.path, &after).unwrap();
+        // A branch after it keeps the summary; one before it doesn't.
+        let (f, _) = Log::branch_before(&log.path, &after).unwrap();
         assert_eq!(f.messages.len(), 3);
         assert_eq!(f.messages[0]["role"], "compactionSummary");
-        let (f, said) = Log::fork(&log.path, &kept).unwrap();
+        let (f, said) = Log::branch_before(&log.path, &kept).unwrap();
         assert_eq!((f.messages.len(), said.as_str()), (2, "newer"));
         let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
-    fn a_fork_starts_before_a_message_and_leaves_the_old_session() {
-        let root = tmp("fork");
+    fn a_branch_starts_before_a_message_in_the_same_file() {
+        let root = tmp("branch");
         let cwd = Path::new("/home/u/proj");
         let mut log = Log::new(&root, cwd);
         let msg = |role: &str, text: &str| json!({ "role": role, "content": [{ "type": "text", "text": text }] });
@@ -458,41 +430,37 @@ mod tests {
         log.message(&msg("user", "second")).unwrap();
         log.message(&msg("assistant", "two")).unwrap();
         let old = std::fs::read_to_string(&log.path).unwrap();
-        let users: Vec<String> = old.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter(|e| e["message"]["role"] == "user").map(|e| e["id"].as_str().unwrap().to_owned()).collect();
+        let entries = |text: &str| text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).collect::<Vec<_>>();
+        let users: Vec<String> = entries(&old).iter().filter(|e| e["message"]["role"] == "user").map(|e| e["id"].as_str().unwrap().to_owned()).collect();
 
-        // From the second message: the first exchange, its name and model.
-        let (mut f, said) = Log::fork(&log.path, &users[1]).unwrap();
+        // From the second message: the first exchange, its name and model;
+        // nothing written until you send.
+        let (mut b, said) = Log::branch_before(&log.path, &users[1]).unwrap();
         assert_eq!(said, "second");
-        assert_ne!(f.log.path, log.path);
-        assert_eq!(f.log.path.parent(), log.path.parent());
-        assert_eq!(f.messages, vec![msg("user", "first"), msg("assistant", "one")]);
-        assert_eq!((f.model.as_deref(), f.name.as_deref()), (Some("openai/m1"), Some("Named")));
-        f.log.message(&msg("user", "second, edited")).unwrap();
-        let again = Log::open(&f.log.path).unwrap();
-        assert_eq!(again.messages.len(), 3, "it continues where it was forked");
-        let header: Value = serde_json::from_str(std::fs::read_to_string(&f.log.path).unwrap().lines().next().unwrap()).unwrap();
-        assert_eq!(header["parentSession"].as_str(), Some(log.path.to_str().unwrap()));
-        assert_ne!(header["id"].as_str(), Some(log.id.as_str()));
-        assert_eq!(std::fs::read_to_string(&log.path).unwrap(), old, "the old session is as it was");
+        assert_eq!(b.log.path, log.path);
+        assert_eq!(b.messages, vec![msg("user", "first"), msg("assistant", "one")]);
+        assert_eq!((b.model.as_deref(), b.name.as_deref()), (Some("openai/m1"), Some("Named")));
+        assert_eq!(std::fs::read_to_string(&log.path).unwrap(), old, "nothing written yet");
+        assert_eq!(std::fs::read_dir(log.path.parent().unwrap()).unwrap().count(), 1, "no other session");
+        let edited = b.log.message(&msg("user", "second, edited")).unwrap();
+        // The file: the old branch kept, the new one beside it, from the
+        // entry before the edited message; it's the one that's reopened.
+        let now = entries(&std::fs::read_to_string(&log.path).unwrap());
+        assert_eq!(now.len(), entries(&old).len() + 1);
+        let new = now.iter().find(|e| e["id"] == edited).unwrap();
+        let second = now.iter().find(|e| e["id"] == users[1]).unwrap();
+        assert_eq!(new["parentId"], second["parentId"]);
+        let again = Log::open(&log.path).unwrap();
+        assert_eq!(again.messages.len(), 3, "it goes on from the new branch");
+        assert_eq!(again.messages[2], msg("user", "second, edited"));
 
         // From the first: no messages, the model kept.
-        let (mut f, said) = Log::fork(&log.path, &users[0]).unwrap();
-        assert_eq!((said.as_str(), f.messages.len(), f.model.as_deref()), ("first", 0, Some("openai/m1")));
-        f.log.message(&msg("user", "anew")).unwrap();
-        let header: Value = serde_json::from_str(std::fs::read_to_string(&f.log.path).unwrap().lines().next().unwrap()).unwrap();
-        assert_eq!(header["parentSession"].as_str(), Some(log.path.to_str().unwrap()));
+        let (b, said) = Log::branch_before(&log.path, &users[0]).unwrap();
+        assert_eq!((said.as_str(), b.messages.len(), b.model.as_deref()), ("first", 0, Some("openai/m1")));
         // Not a message of yours: refused.
-        let reply = old.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).find(|e| e["message"]["role"] == "assistant").unwrap();
-        assert!(Log::fork(&log.path, reply["id"].as_str().unwrap()).is_err());
-        assert!(Log::fork(&log.path, "nope").is_err());
-        // A session whose first entry is the message: an empty one, made
-        // with its first entry.
-        let mut bare = Log::new(&root, Path::new("/elsewhere"));
-        bare.message(&msg("user", "only")).unwrap();
-        let first = Log::open(&bare.path).unwrap().log.last.unwrap();
-        let (f, said) = Log::fork(&bare.path, &first).unwrap();
-        assert_eq!((said.as_str(), f.messages.len()), ("only", 0));
-        assert!(!f.log.path.exists());
+        let reply = entries(&old).into_iter().find(|e| e["message"]["role"] == "assistant").unwrap();
+        assert!(Log::branch_before(&log.path, reply["id"].as_str().unwrap()).is_err());
+        assert!(Log::branch_before(&log.path, "nope").is_err());
         let _ = std::fs::remove_dir_all(root);
     }
 }
