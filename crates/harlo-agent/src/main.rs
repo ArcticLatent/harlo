@@ -30,6 +30,7 @@ mod mcp;
 mod providers;
 mod responses;
 mod rpc;
+mod sandbox;
 mod session;
 mod stubs;
 mod task;
@@ -126,7 +127,7 @@ async fn run(args: Vec<String>) -> Result<()> {
             Ok(())
         }
         Some("--mode") if args.get(1).is_some_and(|m| m == "rpc") => {
-            let (mut keep, mut model, mut effort, mut harlo_tools) = (rpc::Keep::New, None, None, false);
+            let (mut keep, mut model, mut effort, mut harlo_tools, mut sandbox) = (rpc::Keep::New, None, None, false, None);
             let mut it = args.into_iter().skip(2);
             while let Some(a) = it.next() {
                 match a.as_str() {
@@ -135,9 +136,11 @@ async fn run(args: Vec<String>) -> Result<()> {
                     "-m" | "--model" => model = it.next(),
                     "--thinking" => effort = it.next(),
                     "--harlo-tools" => harlo_tools = true,
+                    "--sandbox" => sandbox = it.next(),
                     other => bail!("unknown option {other}"),
                 }
             }
+            sandbox::configure(sandbox.as_deref())?;
             rpc::serve(keep, model, effort, harlo_tools).await
         }
         Some("-p") => {
@@ -145,6 +148,7 @@ async fn run(args: Vec<String>) -> Result<()> {
             let mut effort = None;
             let mut from = Resume::New;
             let mut images = Vec::new();
+            let mut sandbox = None;
             let mut it = args.into_iter().skip(1);
             let prompt = it.next();
             while let Some(a) = it.next() {
@@ -154,14 +158,16 @@ async fn run(args: Vec<String>) -> Result<()> {
                     "--resume" | "-c" => from = Resume::Latest,
                     "--session" => from = Resume::File(it.next().ok_or_else(|| anyhow::anyhow!("--session needs the file"))?.into()),
                     "--image" => images.push(image_file(&it.next().ok_or_else(|| anyhow::anyhow!("--image needs the file"))?)?),
+                    "--sandbox" => sandbox = it.next(),
                     other => bail!("unknown option {other}"),
                 }
             }
+            sandbox::configure(sandbox.as_deref())?;
             let Some(prompt) = prompt else { bail!("-p needs the prompt") };
             ask(&prompt, &images, model, effort, from).await
         }
         _ => {
-            println!("harlo-agent login [--codex] | logout [--codex] | status | usage | models | -p \"prompt\" [--image file]… [-m model] [--thinking low|medium|high] [--resume | --session file]");
+            println!("harlo-agent login [--codex] | logout [--codex] | status | usage | models | -p \"prompt\" [--image file]… [-m model] [--thinking low|medium|high] [--resume | --session file] [--sandbox on|off|no-network]");
             Ok(())
         }
     }

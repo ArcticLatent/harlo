@@ -39,6 +39,7 @@ const PLAN_REFUSAL_MCP: &str = "Plan mode is on: this MCP tool may change things
 /// How long harlo has to answer one of its tools.
 const HARLO_WAIT: std::time::Duration = std::time::Duration::from_secs(90);
 const DENIED: &str = "The user denied this call. Don't try it another way: ask what they'd like instead, or carry on without it.";
+const DENIED_OUTSIDE: &str = "The user said no to running this outside the sandbox. Do it inside the sandbox another way, or ask what they would like instead.";
 
 /// Where the session is kept.
 pub enum Keep {
@@ -197,6 +198,19 @@ impl Gate for Approvals {
             let mcp = name.starts_with(crate::mcp::PREFIX);
             if plan && (mcp || matches!(name.as_str(), "write" | "edit")) {
                 return Err(if mcp { PLAN_REFUSAL_MCP.to_owned() } else { PLAN_REFUSAL.to_owned() });
+            }
+            // Outside the sandbox: asked every time, in every mode.
+            if name == "bash" && args["outside_sandbox"] == true && crate::sandbox::policy().on {
+                let id = format!("harlo_agent_ui_{}", sh.next_ui.fetch_add(1, Ordering::Relaxed) + 1);
+                let (tx, rx) = oneshot::channel();
+                sh.waiting.lock().unwrap().insert(id.clone(), tx);
+                sh.emit(json!({
+                    "type": "extension_ui_request", "id": id, "method": "select",
+                    "title": "Run outside the sandbox", "message": args["command"].as_str().unwrap_or_default(),
+                    "options": ["Approve", "Deny"],
+                }));
+                let answer = rx.await.unwrap_or(Value::Null);
+                return if answer["value"] == "Approve" { Ok(()) } else { Err(DENIED_OUTSIDE.to_owned()) };
             }
             let free = matches!(approval.as_str(), "yolo" | "auto");
             let ask = match approval.as_str() {

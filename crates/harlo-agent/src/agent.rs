@@ -153,6 +153,8 @@ pub struct Agent {
     pub known: Known,
     /// The model last told it isn't sent images (told once).
     told_no_images: Option<String>,
+    /// Whether the user's been told the sandbox can't start here.
+    told_sandbox: bool,
     log: Log,
     /// The model and thinking level the log last recorded.
     logged: (Option<String>, Option<String>),
@@ -190,11 +192,13 @@ impl Agent {
     /// `past`: what the log already holds (nothing for a new session).
     pub fn new(cwd: PathBuf, log: Log, past: Past, model: String, effort: Option<String>) -> Self {
         let spill = std::env::temp_dir().join("harlo-agent");
+        let sandbox = crate::sandbox::for_dir(&cwd);
         Agent {
-            instructions: instructions(&cwd),
+            instructions: instructions(&cwd, sandbox.as_deref()),
             tools: {
-                let t = Tools::new(cwd.clone(), spill);
+                let mut t = Tools::new(cwd.clone(), spill);
                 t.set_aside(past.originals, true);
+                t.sandbox = sandbox;
                 t
             },
             cwd,
@@ -205,6 +209,7 @@ impl Agent {
             files: past.files,
             known: Known::default(),
             told_no_images: None,
+            told_sandbox: false,
             log,
             logged: (past.model, past.effort),
             totals: Totals::default(),
@@ -469,6 +474,10 @@ impl Agent {
             show(Shown::Notice { level: "warning", text: &format!("{} doesn't take images: they aren't sent to it, and it's told there was one.", self.model) });
             self.told_no_images = Some(self.model.clone());
         }
+        if let Some(why) = self.tools.sandbox.as_ref().and_then(|sb| sb.broken.as_ref()).filter(|_| !self.told_sandbox) {
+            show(Shown::Notice { level: "warning", text: &format!("Harlo's commands can't run: its sandbox can't start here ({why}). Install bubblewrap, or turn the sandbox off in Settings → Providers → Harlo.") });
+            self.told_sandbox = true;
+        }
         let (system, specs) = (self.system(), self.specs());
         let key = self.cache_key.clone().unwrap_or_else(|| self.log.id.clone());
         let asked = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &self.history, session: &key, specs: &specs, tools: true, images };
@@ -711,7 +720,7 @@ impl Agent {
         self.ids.splice(..cut, [id]);
         self.files = files;
         // The project's instructions as they are now.
-        self.instructions = instructions(&self.cwd);
+        self.instructions = instructions(&self.cwd, self.tools.sandbox.as_deref());
         let after = compact::estimate(&json!(self.instructions)) + self.history.iter().map(compact::estimate).sum::<u64>();
         self.last_usage = json!({ "input_tokens": after, "output_tokens": 0 });
         let result = json!({ "summary": summary, "firstKeptEntryId": first_kept, "tokensBefore": tokens_before, "estimatedTokensAfter": after });
@@ -893,6 +902,8 @@ async fn call_tool(tools: &Tools, mcp: Option<&crate::mcp::Mcp>, name: &str, arg
     }
 }
 
+const NO_ONE_TO_ASK: &str = "Commands can't run outside the sandbox here: there's no one to ask. Do it another way inside the sandbox, or say what the user should run.";
+
 /// `calls`: (id, name, arguments).
 async fn run_calls(tools: &Tools, calls: &[(&str, &str, &Value)], extra: &Extra<'_>, stop: &CancellationToken) -> Vec<tools::Outcome> {
     let bad_args = || tools::Outcome::new("The arguments weren't valid JSON; call the tool again.", true);
@@ -943,6 +954,11 @@ async fn run_calls(tools: &Tools, calls: &[(&str, &str, &Value)], extra: &Extra<
             && let Some(ctx) = extra.task
         {
             out.push(crate::task::run(args, id, ctx, stop).await);
+            continue;
+        }
+        // Outside the sandbox: only with the user's yes.
+        if gate.is_none() && *name == "bash" && args["outside_sandbox"] == true && tools.sandbox.is_some() {
+            out.push(cut(NO_ONE_TO_ASK));
             continue;
         }
         // What changes something may need the user's yes first.
@@ -1000,7 +1016,7 @@ fn harlo_specs(listed: &Value) -> Vec<Value> {
 }
 
 /// The system prompt: short; the project's own instructions after it.
-fn instructions(cwd: &Path) -> String {
+fn instructions(cwd: &Path, sandbox: Option<&crate::sandbox::Sandbox>) -> String {
     let mut s = String::from(
         "You are harlo-agent, a coding agent. You work in the user's project with your tools, and finish the task you're given.\n\
          \n\
@@ -1014,6 +1030,9 @@ fn instructions(cwd: &Path) -> String {
         s.push_str(&format!("\n<project_instructions path=\"{}\">\n{}\n</project_instructions>\n", path.display(), text.trim()));
     }
     s.push_str(&format!("\nWorking directory: {}\n", cwd.display()));
+    if let Some(sb) = sandbox {
+        s.push_str(&format!("{}\n", sb.describe()));
+    }
     if let Some(listing) = listing(cwd) {
         s.push_str(&format!("\nIts files when the session started:\n{listing}\n"));
     }

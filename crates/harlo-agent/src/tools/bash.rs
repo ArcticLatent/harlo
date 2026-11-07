@@ -11,6 +11,8 @@ use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
+use crate::sandbox::Sandbox;
+
 /// Shown to the model at most: lines and bytes (start and end together).
 /// Small, because what's shown stays in every later request; the whole
 /// output is in a file to grep or read.
@@ -57,16 +59,30 @@ impl Drop for Group {
     }
 }
 
-pub async fn run(command: &str, cwd: &Path, timeout: Option<u64>, spill_dir: &Path) -> (String, bool) {
+/// `sandbox`: run it in that (None: as it is, with all of Harlo's
+/// variables).
+pub async fn run(command: &str, cwd: &Path, timeout: Option<u64>, spill_dir: &Path, sandbox: Option<&Sandbox>) -> (String, bool) {
     let secs = timeout.filter(|t| *t > 0).unwrap_or(DEFAULT_TIMEOUT);
-    let mut cmd = Command::new("bash");
-    cmd.arg("-c").arg(command).current_dir(cwd).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).process_group(0);
+    let mut cmd = match sandbox {
+        Some(sb) => {
+            let mut c = Command::new("bwrap");
+            c.args(sb.args(command, cwd)).env_clear().envs(sb.env());
+            c
+        }
+        None => {
+            let mut c = Command::new("bash");
+            c.arg("-c").arg(command);
+            c
+        }
+    };
+    // (The process group reaches bwrap; what it runs ends with it.)
+    cmd.current_dir(cwd).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).process_group(0);
     for (k, v) in ENV {
         cmd.env(k, v);
     }
     let mut child = match cmd.spawn() {
         Ok(c) => c,
-        Err(e) => return (format!("Couldn't start bash: {e}"), true),
+        Err(e) => return (format!("Couldn't start {}: {e}", if sandbox.is_some() { "the sandbox (bwrap)" } else { "bash" }), true),
     };
     let mut group = Group(child.id().map(|p| p as i32));
     let (mut out, mut err) = (child.stdout.take().expect("piped"), child.stderr.take().expect("piped"));
@@ -182,12 +198,12 @@ mod tests {
     #[tokio::test]
     async fn runs_without_waiting_for_input() {
         let dir = std::env::temp_dir();
-        let (out, failed) = run("echo hi; echo err >&2; echo \"$PAGER $GIT_EDITOR $GIT_TERMINAL_PROMPT\"", &dir, None, &dir).await;
+        let (out, failed) = run("echo hi; echo err >&2; echo \"$PAGER $GIT_EDITOR $GIT_TERMINAL_PROMPT\"", &dir, None, &dir, None).await;
         assert!(!failed && out.contains("hi") && out.contains("err") && out.contains("cat false 0"), "{out}");
         // Reading stdin gets end-of-input, not a hang.
-        let (out, _) = run("read x; echo \"got:$x\"", &dir, Some(5), &dir).await;
+        let (out, _) = run("read x; echo \"got:$x\"", &dir, Some(5), &dir, None).await;
         assert!(out.contains("got:"), "{out}");
-        let (out, failed) = run("exit 3", &dir, None, &dir).await;
+        let (out, failed) = run("exit 3", &dir, None, &dir, None).await;
         assert!(failed && out.contains("[exit code 3]"));
     }
 
@@ -196,7 +212,41 @@ mod tests {
         let dir = std::env::temp_dir();
         let marker = dir.join(format!("harlo-agent-bg-{}", std::process::id()));
         let cmd = format!("(sleep 3; touch {}) & sleep 30", marker.display());
-        let (out, failed) = run(&cmd, &dir, Some(1), &dir).await;
+        let (out, failed) = run(&cmd, &dir, Some(1), &dir, None).await;
+        assert!(failed && out.contains("stopped after 1 seconds"), "{out}");
+        tokio::time::sleep(Duration::from_secs(4)).await;
+        assert!(!marker.exists(), "the background child was left running");
+    }
+
+    /// In the sandbox (where bubblewrap works here): what it can change and
+    /// see, and a timeout still ends what it started.
+    #[tokio::test]
+    async fn in_the_sandbox() {
+        if crate::sandbox::unavailable().is_some() {
+            eprintln!("no sandbox here: skipped");
+            return;
+        }
+        let scratch = crate::sandbox::tests::home_outside_tmp("bash");
+        let root = scratch.0.clone();
+        let (home, proj) = (root.join("home"), root.join("home/proj"));
+        for d in [&proj, &home.join(".ssh"), &home.join("other")] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        std::fs::write(home.join(".ssh/id"), "secret-key").unwrap();
+        let p = crate::sandbox::Policy { on: true, network: false, writable: Vec::new(), hidden: Vec::new(), env: Vec::new() };
+        let sb = Sandbox::new(&p, &proj, &home, &home.join("none"), None);
+        let (out, failed) = run("echo a > made && cat made && echo t > /tmp/harlo-agent-sb-t && rm /tmp/harlo-agent-sb-t", &proj, None, &root, Some(&sb)).await;
+        assert!(!failed && out.contains('a'), "{out}");
+        let (out, failed) = run("echo x > ../other/f", &proj, None, &root, Some(&sb)).await;
+        assert!(failed && out.contains("Read-only"), "{out}");
+        let (out, _) = run("cat ../.ssh/id; ls -A ../.ssh | wc -l", &proj, None, &root, Some(&sb)).await;
+        assert!(!out.contains("secret-key") && out.ends_with('0'), "{out}");
+        // SAFETY: a variable for this test only (tests in this binary don't read it).
+        unsafe { std::env::set_var("HARLO_TEST_API_KEY", "k") };
+        let (out, _) = run("echo \"[$HARLO_TEST_API_KEY][$PAGER]\"", &proj, None, &root, Some(&sb)).await;
+        assert!(out.contains("[][cat]"), "{out}");
+        let marker = std::env::temp_dir().join(format!("harlo-agent-sb-bg-{}", std::process::id()));
+        let (out, failed) = run(&format!("(sleep 3; touch {}) & sleep 30", marker.display()), &proj, Some(1), &root, Some(&sb)).await;
         assert!(failed && out.contains("stopped after 1 seconds"), "{out}");
         tokio::time::sleep(Duration::from_secs(4)).await;
         assert!(!marker.exists(), "the background child was left running");

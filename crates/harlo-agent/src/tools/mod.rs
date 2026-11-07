@@ -9,10 +9,12 @@ pub mod edit;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use serde_json::{Value, json};
+
+use crate::sandbox::Sandbox;
 
 /// Lines `read` shows at most, and bytes.
 const READ_LINES: usize = 2000;
@@ -33,6 +35,9 @@ pub struct Tools {
     seen: Mutex<HashMap<PathBuf, (SystemTime, u64)>>,
     /// Outputs set aside (see `stubs`), by call id, for `recall`.
     originals: Mutex<HashMap<String, Original>>,
+    /// Where commands run, and what the file tools may touch (None: the
+    /// sandbox is off).
+    pub sandbox: Option<Arc<Sandbox>>,
 }
 
 /// An output set aside: the result as it was, and the file it read (to
@@ -100,7 +105,8 @@ pub fn specs() -> Value {
         f("edit", "Replace text in a file. Each edit's old_text must match exactly one place in the file as it is now (copy it from read, with enough lines around it to be unique); all edits apply together. Refused if the file changed since you last read it.",
           json!({ "path": { "type": "string" }, "edits": { "type": "array", "items": { "type": "object", "properties": { "old_text": { "type": "string" }, "new_text": { "type": "string" } }, "required": ["old_text", "new_text"], "additionalProperties": false } } }), &["path", "edits"]),
         f("bash", "Run a bash command in the working directory. It can't read input (stdin is closed; pagers and editors are off). Times out after 120 s unless `timeout` (seconds) says otherwise. Long output shows its start and end, with the whole of it saved to a file. Don't edit files with it: use edit or write.",
-          json!({ "command": { "type": "string" }, "timeout": { "type": "integer" } }), &["command"]),
+          json!({ "command": { "type": "string" }, "timeout": { "type": "integer" },
+                  "outside_sandbox": { "type": "boolean", "description": "Run it outside the sandbox. Only when it failed because of the sandbox and really needs what the sandbox hides or protects (e.g. git push over SSH); say why first. The user is asked every time." } }), &["command"]),
         f("grep", "Search file contents for a regular expression (ripgrep syntax; respects .gitignore). Shows file:line: text, up to 300 matches.",
           json!({ "pattern": { "type": "string" }, "path": { "type": "string" }, "glob": { "type": "string", "description": "Only files matching this, e.g. *.rs" }, "ignore_case": { "type": "boolean" } }), &["pattern"]),
         f("find", "Find files by name with a glob (e.g. **/*.toml), respecting .gitignore. Up to 500.",
@@ -114,7 +120,7 @@ pub fn specs() -> Value {
 
 impl Tools {
     pub fn new(cwd: PathBuf, spill_dir: PathBuf) -> Self {
-        Tools { cwd, spill_dir, seen: Mutex::new(HashMap::new()), originals: Mutex::new(HashMap::new()) }
+        Tools { cwd, spill_dir, seen: Mutex::new(HashMap::new()), originals: Mutex::new(HashMap::new()), sandbox: None }
     }
 
     /// Outputs set aside, kept for `recall` (`replace`: the session's
@@ -151,6 +157,32 @@ impl Tools {
             out.text.push_str(&format!("\n\n[{} has changed since this was read: read it again for what it is now.]", p.display()));
         }
         out
+    }
+
+    /// Why the sandbox keeps the file tools from looking at `path`.
+    fn hidden(&self, path: &Path) -> Option<Outcome> {
+        self.sandbox.as_ref().and_then(|sb| sb.may_read(path).err()).map(fail)
+    }
+
+    /// Why the sandbox keeps the file tools from changing `path`.
+    fn fenced(&self, path: &Path) -> Option<Outcome> {
+        self.sandbox.as_ref().and_then(|sb| sb.may_write(path).err()).map(fail)
+    }
+
+    /// grep's or find's lines, less those in hidden places under `root`.
+    fn unhidden(&self, root: &Path, lines: Vec<String>) -> Vec<String> {
+        let Some(sb) = &self.sandbox else { return lines };
+        let base = format!("{}/", self.cwd.display());
+        let under: Vec<String> = sb.hidden_under(root).iter().map(|h| h.to_string_lossy().into_owned()).collect();
+        if under.is_empty() {
+            return lines;
+        }
+        let shown = |h: &str| h.strip_prefix(&base).map(str::to_owned);
+        let under: Vec<String> = under.iter().flat_map(|h| [Some(h.clone()), shown(h)]).flatten().collect();
+        lines
+            .into_iter()
+            .filter(|l| !under.iter().any(|h| l.strip_prefix(h.as_str()).is_some_and(|rest| rest.is_empty() || rest.starts_with('/') || rest.starts_with(':'))))
+            .collect()
     }
 
     fn path(&self, p: &str) -> PathBuf {
@@ -191,7 +223,12 @@ impl Tools {
             "write" => self.write(s("path"), s("content")),
             "edit" => self.edit(s("path"), &args["edits"]),
             "bash" => {
-                let (text, failed) = bash::run(s("command"), &self.cwd, args["timeout"].as_u64(), &self.spill_dir).await;
+                let sandbox = self.sandbox.as_deref();
+                if let Some(why) = sandbox.and_then(|sb| sb.broken.as_ref()) {
+                    return fail(format!("Commands can't run: the sandbox can't start here ({why}). Install bubblewrap, or turn Harlo's sandbox off in Settings → Providers → Harlo."));
+                }
+                let inside = sandbox.filter(|_| args["outside_sandbox"] != true);
+                let (text, failed) = bash::run(s("command"), &self.cwd, args["timeout"].as_u64(), &self.spill_dir, inside).await;
                 Outcome::new(text, failed)
             }
             "grep" => self.grep(s("pattern"), s("path"), s("glob"), args["ignore_case"].as_bool() == Some(true)).await,
@@ -207,6 +244,9 @@ impl Tools {
             return fail("Give the file's path.");
         }
         let path = self.path(p);
+        if let Some(no) = self.hidden(&path) {
+            return no;
+        }
         let bytes = match std::fs::read(&path) {
             Ok(b) => b,
             Err(e) if path.is_dir() => return fail(format!("{} is a folder: use ls ({e}).", path.display())),
@@ -273,6 +313,9 @@ impl Tools {
             return fail("Give the file's path.");
         }
         let path = self.path(p);
+        if let Some(no) = self.fenced(&path) {
+            return no;
+        }
         if let Some(why) = self.stale(&path, true) {
             return fail(why);
         }
@@ -300,6 +343,9 @@ impl Tools {
         if list.is_empty() {
             return fail("Give at least one edit (old_text and new_text).");
         }
+        if let Some(no) = self.fenced(&path) {
+            return no;
+        }
         let content = match std::fs::read_to_string(&path) {
             Ok(c) => c,
             Err(e) => return fail(format!("Can't read {}: {e}", path.display())),
@@ -321,6 +367,9 @@ impl Tools {
 
     fn ls(&self, p: &str) -> Outcome {
         let path = if p.trim().is_empty() { self.cwd.clone() } else { self.path(p) };
+        if let Some(no) = self.hidden(&path) {
+            return no;
+        }
         let entries = match std::fs::read_dir(&path) {
             Ok(e) => e,
             Err(e) => return fail(format!("Can't list {}: {e}", path.display())),
@@ -344,6 +393,9 @@ impl Tools {
             return fail("Give a pattern.");
         }
         let path = if p.trim().is_empty() { self.cwd.clone() } else { self.path(p) };
+        if let Some(no) = self.hidden(&path) {
+            return no;
+        }
         let mut args: Vec<String> = vec!["-n".into(), "--no-heading".into(), "--color".into(), "never".into(), "--max-columns".into(), "300".into(), "-g".into(), "!.git/".into()];
         if ignore_case {
             args.push("-i".into());
@@ -377,6 +429,10 @@ impl Tools {
         let text = String::from_utf8_lossy(&out.stdout);
         let base = format!("{}/", self.cwd.display());
         let lines: Vec<String> = text.lines().map(|l| l.strip_prefix(&base).unwrap_or(l).to_owned()).collect();
+        let lines = self.unhidden(&path, lines);
+        if lines.is_empty() {
+            return ok("No matches.");
+        }
         let total = lines.len();
         let mut shown = lines.into_iter().take(GREP_MAX).collect::<Vec<_>>().join("\n");
         if total > GREP_MAX {
@@ -390,6 +446,9 @@ impl Tools {
             return fail("Give a glob, e.g. **/*.rs");
         }
         let path = if p.trim().is_empty() { self.cwd.clone() } else { self.path(p) };
+        if let Some(no) = self.hidden(&path) {
+            return no;
+        }
         let out = tokio::process::Command::new("rg").args(["--files", "--color", "never", "-g", pattern, "-g", "!.git/", "--"]).arg(&path).current_dir(&self.cwd).stdin(std::process::Stdio::null()).output().await;
         let text = match out {
             Ok(o) => String::from_utf8_lossy(&o.stdout).into_owned(),
@@ -402,7 +461,7 @@ impl Tools {
             }
         };
         let base = format!("{}/", self.cwd.display());
-        let mut files: Vec<String> = text.lines().map(|l| l.strip_prefix(&base).unwrap_or(l).to_owned()).collect();
+        let mut files: Vec<String> = self.unhidden(&path, text.lines().map(|l| l.strip_prefix(&base).unwrap_or(l).to_owned()).collect());
         files.sort();
         let total = files.len();
         files.truncate(LIST_MAX);
