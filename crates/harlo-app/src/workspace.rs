@@ -1580,13 +1580,20 @@ impl Workspace {
             return;
         }
         let harness = match &remote {
-            // What the host has (and Settings → Providers has on): omp, pi,
-            // Claude, OpenCode, in that order; omp when nothing's known.
-            Some(host) => harlo_core::remote::AGENTS
-                .iter()
-                .find(|a| harlo_core::remote::found_on(host, a) && HarnessKind::parse(a).is_some_and(|k| self.usable_harness(k)))
-                .map_or("omp", |a| *a)
-                .to_owned(),
+            // Harlo when it can run there (and Settings → Providers has it
+            // on), else what the host has; Harlo when nothing's known.
+            Some(host) => {
+                let harlo_there = harlo_core::remote::info_of(host).is_none_or(|i| harlo_core::agent_host::not_there(&i).is_none());
+                if harlo_there && self.usable_harness(HarnessKind::Harlo) {
+                    "harlo".to_owned()
+                } else {
+                    harlo_core::remote::AGENTS
+                        .iter()
+                        .find(|a| harlo_core::remote::found_on(host, a) && HarnessKind::parse(a).is_some_and(|k| self.usable_harness(k)))
+                        .map_or("harlo", |a| *a)
+                        .to_owned()
+                }
+            }
             None => self.default_harness(),
         };
         // Another machine's project: show that instance.
@@ -5277,7 +5284,7 @@ impl Workspace {
     }
 
     /// Harness for new sessions outside a project and for new projects:
-    /// the setting, else omp if installed, else pi.
+    /// the setting, else the first on and installed (Harlo when none is).
     fn default_harness(&self) -> String {
         let set = self.setting_str("default_harness");
         if let Some(kind) = HarnessKind::parse(&set)
@@ -5292,7 +5299,7 @@ impl Workspace {
             .iter()
             .find(|&&k| self.program_for(k).is_some() || harlo_harness::resolve_program(k).is_some())
             .or(usable.first())
-            .map_or("omp", |k| k.as_str())
+            .map_or("harlo", |k| k.as_str())
             .into()
     }
 

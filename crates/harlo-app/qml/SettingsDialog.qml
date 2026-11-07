@@ -1899,16 +1899,16 @@ Popup {
                 }
             }
             Rule { }
-            SectionHeader { title: "Commit messages"; subtitle: "The ✦ button in the Changes panel has the model write the message for the staged changes (or all changes). It uses the session's harness in one-shot mode: no tools, nothing saved." }
+            SectionHeader { title: "Commit messages"; subtitle: "The ✦ button in the Changes panel has a model write the message for the staged changes (or all changes): Harlo's, or Claude Code's when Harlo can't, with no tools and nothing saved." }
             Group {
                 SettingRow {
                     title: "Model"
-                    detail: "Empty uses the harness's default model. A small, fast model is plenty, e.g. a \"mini\" or \"flash\" one."
+                    detail: "One of Harlo's; empty uses its default. A small, fast model is plenty, e.g. a \"mini\" or \"flash\" one. Claude Code uses this when it's one of Claude's (sonnet, haiku…), else Haiku."
                     icon: "sparkling"
                     AppTextField {
                         width: 240
                         text: Workspace.setting("commit_model")
-                        placeholderText: "Harness default"
+                        placeholderText: "Harlo's default"
                         font.family: Theme.mono
                         font.pixelSize: Theme.px(12)
                         onEditingFinished: Workspace.setSetting("commit_model", text)

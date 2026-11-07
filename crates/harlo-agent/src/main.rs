@@ -149,6 +149,7 @@ async fn run(args: Vec<String>) -> Result<()> {
             let mut from = Resume::New;
             let mut images = Vec::new();
             let mut sandbox = None;
+            let mut bare = Bare::default();
             let mut it = args.into_iter().skip(1);
             let prompt = it.next();
             while let Some(a) = it.next() {
@@ -159,15 +160,27 @@ async fn run(args: Vec<String>) -> Result<()> {
                     "--session" => from = Resume::File(it.next().ok_or_else(|| anyhow::anyhow!("--session needs the file"))?.into()),
                     "--image" => images.push(image_file(&it.next().ok_or_else(|| anyhow::anyhow!("--image needs the file"))?)?),
                     "--sandbox" => sandbox = it.next(),
+                    "--no-tools" => bare.no_tools = true,
+                    "--no-session" => bare.no_session = true,
                     other => bail!("unknown option {other}"),
                 }
             }
             sandbox::configure(sandbox.as_deref())?;
-            let Some(prompt) = prompt else { bail!("-p needs the prompt") };
-            ask(&prompt, &images, model, effort, from).await
+            let Some(mut prompt) = prompt else { bail!("-p needs the prompt") };
+            // `-p -`: the prompt on stdin (one too long for an argument).
+            if prompt == "-" {
+                prompt = std::io::read_to_string(std::io::stdin()).map_err(|e| anyhow::anyhow!("Can't read the prompt from stdin: {e}"))?;
+                if prompt.trim().is_empty() {
+                    bail!("The prompt on stdin was empty");
+                }
+            }
+            if bare.no_session && !matches!(from, Resume::New) {
+                bail!("--no-session starts a new conversation: it can't resume one");
+            }
+            ask(&prompt, &images, model, effort, from, bare).await
         }
         _ => {
-            println!("harlo-agent login [--codex] | logout [--codex] | status | usage | models | -p \"prompt\" [--image file]… [-m model] [--thinking low|medium|high] [--resume | --session file] [--sandbox on|off|no-network]");
+            println!("harlo-agent login [--codex] | logout [--codex] | status | usage | models | -p \"prompt\"|- [--image file]… [-m model] [--thinking low|medium|high] [--resume | --session file | --no-session] [--no-tools] [--sandbox on|off|no-network]");
             Ok(())
         }
     }
@@ -206,6 +219,14 @@ async fn login(sign: auth::Sign, paste: bool) -> Result<()> {
 }
 
 /// Which session a run goes in.
+/// `-p` without the usual: no tools offered (`--no-tools`: a plain
+/// question, such as a commit message), nothing saved (`--no-session`).
+#[derive(Default)]
+struct Bare {
+    no_tools: bool,
+    no_session: bool,
+}
+
 enum Resume {
     New,
     /// This folder's newest.
@@ -213,9 +234,13 @@ enum Resume {
     File(std::path::PathBuf),
 }
 
-async fn ask(prompt: &str, images: &[serde_json::Value], model: Option<String>, effort: Option<String>, from: Resume) -> Result<()> {
+async fn ask(prompt: &str, images: &[serde_json::Value], model: Option<String>, effort: Option<String>, from: Resume, bare: Bare) -> Result<()> {
     let cwd = std::env::current_dir()?;
-    let root = session::root().ok_or_else(|| anyhow::anyhow!("No home folder to keep sessions in"))?;
+    let root = match session::root() {
+        Some(r) => r,
+        None if bare.no_session => std::path::PathBuf::new(),
+        None => bail!("No home folder to keep sessions in"),
+    };
     let loaded = match from {
         Resume::New => None,
         Resume::Latest => match session::latest(&root, &cwd) {
@@ -229,6 +254,7 @@ async fn ask(prompt: &str, images: &[serde_json::Value], model: Option<String>, 
             let (log, past, _) = l.into_parts();
             (log, past)
         }
+        None if bare.no_session => (session::Log::ephemeral(&cwd), session::Past::default()),
         None => (session::Log::new(&root, &cwd), session::Past::default()),
     };
     // The model asked for, else the session's, else the plan's first.
@@ -241,6 +267,9 @@ async fn ask(prompt: &str, images: &[serde_json::Value], model: Option<String>, 
         }
     };
     let mut agent = agent::Agent::new(cwd, log, past, model, effort);
+    if bare.no_tools {
+        agent.allowed = Some(&[]);
+    }
     // Subagents: a line as each starts and ends.
     agent.notify = Some(std::sync::Arc::new(|frame: serde_json::Value| {
         let p = &frame["payload"];

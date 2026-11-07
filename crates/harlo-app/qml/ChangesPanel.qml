@@ -657,9 +657,7 @@ Rectangle {
                     implicitHeight: 28
                     flat: true
                     enabled: !root.git.generating && root.git.stagedCount + root.git.unstagedCount > 0
-                    readonly property string harnessToUse: root.harness === "omp" || root.harness === "pi" ? root.harness
-                        : (Workspace.setting("default_harness") || "omp")
-                    onClicked: root.git.generateMessage(harnessToUse, Workspace.setting(harnessToUse + "_path"), Workspace.setting("commit_model"), root.git.stagedCount > 0)
+                    onClicked: root.git.generateMessage(Workspace.setting("harlo_path"), Workspace.setting("commit_model"), root.git.stagedCount > 0)
                     contentItem: Icon {
                         name: root.git.generating ? "loader-4" : "sparkling"
                         color: root.git.generating ? Theme.primary : writeButton.hovered ? Theme.primary : Theme.muted
@@ -671,7 +669,7 @@ Rectangle {
                     ToolTip.visible: hovered
                     ToolTip.delay: 300
                     ToolTip.text: root.git.generating ? "Writing a commit message…"
-                        : "Write a commit message for the " + (root.git.stagedCount > 0 ? "staged changes" : "changes") + " with " + harnessToUse
+                        : "Write a commit message for the " + (root.git.stagedCount > 0 ? "staged changes" : "changes") + " with Harlo"
                 }
                 Connections {
                     target: root.git

@@ -44,7 +44,7 @@ Rectangle {
     onAsGoalChanged: if (asGoal) parallel = false
     // Run in parallel: one prompt to several lanes (harness + model each).
     property bool parallel: false
-    property var lanes: [{ harness: "omp", model: "" }, { harness: "omp", model: "" }]
+    property var lanes: [{ harness: "harlo", model: "" }, { harness: "harlo", model: "" }]
     property bool laneWorktrees: true
     property var knownModels: []
     onParallelChanged: {

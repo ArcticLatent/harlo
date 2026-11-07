@@ -1,6 +1,7 @@
-//! Commit messages written by the agent's model: the diff goes to pi or omp
-//! in one-shot print mode (`-p --no-session --no-tools`, attached as an
-//! `@file`), and the printed answer is the message.
+//! Commit messages written by a model: the request and the diff go to
+//! Harlo in one-shot print mode on stdin (`-p - --no-session --no-tools`),
+//! or to Claude Code (`claude -p`, no tools, nothing saved) when Harlo
+//! can't, and the printed answer is the message.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -77,7 +78,7 @@ pub fn recent_subjects(root: &Path) -> Vec<String> {
 pub fn instructions(recent: &[String]) -> String {
     let recent = if recent.is_empty() { "(none yet)".to_owned() } else { recent.iter().map(|s| format!("- {s}")).collect::<Vec<_>>().join("\n") };
     format!(
-        "Write the git commit message for the changes in the attached diff.\n\
+        "Write the git commit message for the changes in the diff at the end.\n\
          \n\
          Reply with the commit message only: no preamble, no quotes, no markdown fences, no explanation.\n\
          \n\
@@ -88,6 +89,18 @@ pub fn instructions(recent: &[String]) -> String {
          \n\
          Recent commits (newest first):\n{recent}\n"
     )
+}
+
+/// What the model is sent: the request, then the diff.
+fn request(recent: &[String], diff: &str) -> String {
+    format!("{}\nThe diff:\n\n{diff}", instructions(recent))
+}
+
+/// The model Claude Code is asked for: the setting when it names one of
+/// Claude's, else a small one (a commit message needs no more).
+fn claude_model(model: &str) -> &str {
+    let m = model.trim();
+    if m.starts_with("claude-") || ["opus", "sonnet", "haiku", "fable"].contains(&m) { m } else { "haiku" }
 }
 
 /// Tidies the model's answer: trims, drops code fences and wrapping quotes.
@@ -107,28 +120,42 @@ pub fn clean(answer: &str) -> String {
     text.trim().to_owned()
 }
 
-/// Asks the harness's model for a commit message. `program` overrides the
-/// binary (Settings), `model` the model; both may be empty. Blocks for up
-/// to a few minutes; run it off the UI thread.
-pub fn generate(kind: HarnessKind, program: Option<PathBuf>, model: &str, root: &Path, staged_only: bool) -> Result<String> {
+/// Asks a model for a commit message: Harlo's (`harlo`: its program, from
+/// Settings; else the one shipped with harlo), else Claude Code's. `model`
+/// (may be empty) is Harlo's, and Claude's when it names one of Claude's.
+/// A remote repository's are asked on its machine. Blocks for up to a few
+/// minutes; run it off the UI thread.
+pub fn generate(harlo: Option<PathBuf>, model: &str, root: &Path, staged_only: bool) -> Result<String> {
     let diff = changes(root, staged_only);
     if diff.trim().is_empty() {
         bail!("There are no changes to describe.");
     }
-    let prompt = instructions(&recent_subjects(root));
-    let program = match program.or_else(|| harlo_harness::resolve_program(kind)) {
-        Some(p) => p,
-        // Not here, but the repository's machine may have it.
-        None => match crate::remote::split(root) {
-            Some((host, _)) => return finish(run_on(&host, kind, &diff, &prompt)),
-            None => bail!("could not find `{}`", kind.as_str()),
+    let text = request(&recent_subjects(root), &diff);
+    if let Some((host, _)) = crate::remote::split(root) {
+        return finish(run_on(&host, model, &text));
+    }
+    let tried = match harlo.or_else(|| harlo_harness::resolve_program(HarnessKind::Harlo)) {
+        Some(program) => match finish(run(Command::new(&program).args(harlo_args(model)).current_dir(root), &text)) {
+            Ok(message) => return Ok(message),
+            Err(e) => format!("Harlo: {e:#}"),
         },
+        None => "Harlo isn't installed".to_owned(),
     };
-    let file = std::env::temp_dir().join(format!("harlo-commit-{}-{}.diff", std::process::id(), unique()));
-    std::fs::write(&file, &diff).context("writing the diff")?;
-    let result = run(&program, model, root, &file, &prompt);
-    let _ = std::fs::remove_file(&file);
-    finish(result)
+    let Some(claude) = harlo_harness::resolve_program(HarnessKind::Claude) else { bail!("{tried}, and Claude Code isn't either.") };
+    finish(run(Command::new(claude).args(claude_args(model)).current_dir(root), &text)).map_err(|e| anyhow::anyhow!("{tried}; Claude: {e:#}"))
+}
+
+fn harlo_args(model: &str) -> Vec<String> {
+    let mut a: Vec<String> = ["-p", "-", "--no-session", "--no-tools", "--thinking", "off"].map(str::to_owned).to_vec();
+    if !model.trim().is_empty() {
+        a.extend(["--model".to_owned(), model.trim().to_owned()]);
+    }
+    a
+}
+
+/// (The request on stdin; `--tools ""` turns its tools off.)
+fn claude_args(model: &str) -> Vec<String> {
+    ["-p", "--no-session-persistence", "--tools", "", "--strict-mcp-config", "--model", claude_model(model)].map(str::to_owned).to_vec()
 }
 
 fn finish(answer: Result<String>) -> Result<String> {
@@ -139,46 +166,38 @@ fn finish(answer: Result<String>) -> Result<String> {
     Ok(message)
 }
 
-/// The same on the repository's machine, with its agent and default model
-/// (this PC's choice of model may not be there): the diff goes over on
-/// stdin into a file of its own there, removed after.
-fn run_on(host: &str, kind: HarnessKind, diff: &str, prompt: &str) -> Result<String> {
-    let host = crate::remote::host(host).with_context(|| format!("unknown remote host {host}"))?;
+/// The same on the repository's machine: Harlo's copy there (put there
+/// first when needed), else its Claude Code, with the request on stdin.
+fn run_on(host: &str, model: &str, text: &str) -> Result<String> {
     let q = crate::remote::quote;
-    let script = format!(
-        r#"command -v {agent} >/dev/null 2>&1 || {{ echo "{agent} isn't on {name} either" >&2; exit 127; }}
-f=$(mktemp "${{TMPDIR:-/tmp}}/harlo-commit-XXXXXX") || exit 1; cat > "$f"; cd "${{TMPDIR:-/tmp}}"; {agent} -p --no-session --no-tools --thinking off "@$f" {prompt} </dev/null; rc=$?; rm -f "$f"; exit $rc"#,
-        agent = kind.as_str(),
-        name = host.name,
-        prompt = q(prompt),
-    );
-    let out = crate::remote::run_with_input(&host, &script, Some(diff.as_bytes()), TIMEOUT)?;
+    let line = |program: &str, args: Vec<String>| format!("{} {}", q(program), args.iter().map(|a| q(a)).collect::<Vec<_>>().join(" "));
+    let harlo = crate::agent_host::program_on(host).ok();
+    let host = crate::remote::host(host).with_context(|| format!("unknown remote host {host}"))?;
+    let claude = line("claude", claude_args(model));
+    // (Harlo first; Claude Code when Harlo fails or isn't there.)
+    let script = match &harlo {
+        Some(p) => format!(r#"f=$(mktemp "${{TMPDIR:-/tmp}}/harlo-commit-XXXXXX") || exit 1; cat > "$f"; cd "${{TMPDIR:-/tmp}}"; {h} < "$f" 2>"$f.err"; rc=$?; if [ $rc -ne 0 ] && command -v claude >/dev/null 2>&1; then {claude} < "$f"; rc=$?; else cat "$f.err" >&2; fi; rm -f "$f" "$f.err"; exit $rc"#, h = line(p, harlo_args(model))),
+        None => format!(r#"command -v claude >/dev/null 2>&1 || {{ echo "Neither Harlo nor Claude Code can run on {name}" >&2; exit 127; }}; cd "${{TMPDIR:-/tmp}}"; {claude}"#, name = host.name),
+    };
+    let out = crate::remote::run_with_input(&host, &script, Some(text.as_bytes()), TIMEOUT)?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
         let tail = err.trim().lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("no error output").to_owned();
-        bail!("{} on {} failed: {tail}", kind.as_str(), host.name);
+        bail!("On {}: {tail}", host.name);
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-fn unique() -> u128 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or_default()
-}
-
-fn run(program: &Path, model: &str, root: &Path, diff_file: &Path, prompt: &str) -> Result<String> {
-    let mut cmd = Command::new(program);
-    cmd.args(["-p", "--no-session", "--no-tools", "--thinking", "off"]);
-    if !model.trim().is_empty() {
-        cmd.args(["--model", model.trim()]);
-    }
-    cmd.arg(format!("@{}", diff_file.display()))
-        .arg(prompt)
-        // (A remote repository's diff is already in the file.)
-        .current_dir(if crate::remote::is_remote(root) { std::env::temp_dir() } else { root.to_owned() })
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+/// Runs `cmd` with `input` on stdin; its stdout.
+fn run(cmd: &mut Command, input: &str) -> Result<String> {
+    let program = cmd.get_program().to_owned();
+    cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = cmd.spawn().with_context(|| format!("starting {}", program.display()))?;
+    let mut stdin = child.stdin.take().expect("piped stdin");
+    let input = input.to_owned();
+    let in_thread = std::thread::spawn(move || {
+        let _ = std::io::Write::write_all(&mut stdin, input.as_bytes());
+    });
     // Read both pipes on threads so a chatty stderr can't block the child.
     let mut stdout = child.stdout.take().expect("piped stdout");
     let mut stderr = child.stderr.take().expect("piped stderr");
@@ -204,11 +223,12 @@ fn run(program: &Path, model: &str, root: &Path, diff_file: &Path, prompt: &str)
         }
         std::thread::sleep(Duration::from_millis(100));
     };
+    let _ = in_thread.join();
     let out = out_thread.join().unwrap_or_default();
     let err = err_thread.join().unwrap_or_default();
     if !status.success() {
         let tail = err.trim().lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("no error output");
-        bail!("{} failed: {tail}", program.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+        bail!("{} failed: {tail}", Path::new(&program).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
     }
     Ok(out)
 }
@@ -226,7 +246,7 @@ mod tests {
     }
 
     #[test]
-    fn generates_with_a_stand_in_harness() {
+    fn generates_with_a_stand_in_harlo() {
         use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir().join(format!("harlo-commitmsg-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -245,14 +265,72 @@ mod tests {
         assert!(all.contains("+two") && all.contains("New file new.txt"), "{all}");
         assert!(changes(&dir, true).is_empty(), "nothing staged");
 
-        // A stand-in for pi: checks its arguments and prints a fenced answer.
-        let fake = dir.join("fake-pi");
-        std::fs::write(&fake, "#!/bin/sh\n[ \"$1\" = -p ] || exit 3\nfor a; do case $a in @*) grep -q '+two' \"${a#@}\" || exit 4;; esac; done\nprintf '```\\nAdd the second line\\n```\\n'\n").unwrap();
+        // A stand-in for Harlo: checks its arguments and stdin, prints a
+        // fenced answer.
+        let fake = dir.join("fake-harlo");
+        std::fs::write(&fake, "#!/bin/sh\n[ \"$*\" = '-p - --no-session --no-tools --thinking off --model m' ] || exit 3\ngrep -q '^+two' || exit 4\nprintf '```\\nAdd the second line\\n```\\n'\n").unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let msg = generate(HarnessKind::Pi, Some(fake.clone()), "", &dir, false).unwrap();
+        let msg = generate(Some(fake.clone()), "m", &dir, false).unwrap();
         assert_eq!(msg, "Add the second line");
-        assert!(generate(HarnessKind::Pi, Some(fake), "", &dir, true).is_err(), "no staged changes");
+        assert!(generate(Some(fake), "m", &dir, true).is_err(), "no staged changes");
+        assert_eq!(claude_args("")[..5], ["-p", "--no-session-persistence", "--tools", "", "--strict-mcp-config"]);
+        assert_eq!((claude_model("codex/gpt-6.1-sol"), claude_model("sonnet"), claude_model("claude-opus-5-5")), ("haiku", "sonnet", "claude-opus-5-5"));
         assert!(instructions(&recent_subjects(&dir)).contains("- Start the project"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Live (not run by default): a real repository's message by Harlo
+    /// (HARLO_AGENT_BIN, HARLO_LIVE_MODEL), then by Claude Code when Harlo
+    /// fails. Spends a little of both plans.
+    #[test]
+    #[ignore]
+    fn live_harlo_then_claude() {
+        let dir = std::env::temp_dir().join(format!("harlo-commitmsg-live-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let git = |args: &[&str]| assert!(Command::new("git").current_dir(&dir).args(["-c", "user.name=t", "-c", "user.email=t@t"]).args(args).output().unwrap().status.success());
+        git(&["init", "-q"]);
+        std::fs::write(dir.join("greet.py"), "def greet(name):\n    return 'hi ' + name\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "Add greet"]);
+        std::fs::write(dir.join("greet.py"), "def greet(name, loud=False):\n    text = 'hi ' + name\n    return text.upper() if loud else text\n").unwrap();
+        let harlo = std::env::var_os("HARLO_AGENT_BIN").map(PathBuf::from);
+        let model = std::env::var("HARLO_LIVE_MODEL").unwrap_or_default();
+        let by_harlo = generate(harlo, &model, &dir, false).unwrap();
+        eprintln!("Harlo: {by_harlo}");
+        let by_claude = generate(Some(PathBuf::from("/bin/false")), &model, &dir, false).unwrap();
+        eprintln!("Claude: {by_claude}");
+        assert!(!by_harlo.is_empty() && !by_claude.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Live on a machine over SSH (not run by default; the static agent
+    /// built first): `HARLO_TEST_SSH="$(scripts/test-sshd.sh start /tmp/x)"
+    /// HARLO_LIVE_MODEL=… cargo test -p harlo-core -- --ignored live_on_a_host`.
+    /// Harlo's copy there writes it; with a model it doesn't have, Claude
+    /// Code there does.
+    #[test]
+    #[ignore]
+    fn live_on_a_host() {
+        let dir = std::env::temp_dir().join(format!("harlo-commitmsg-host-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let git = |args: &[&str]| assert!(Command::new("git").current_dir(&dir).args(["-c", "user.name=t", "-c", "user.email=t@t"]).args(args).output().unwrap().status.success());
+        git(&["init", "-q"]);
+        std::fs::write(dir.join("a.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "Start"]);
+        std::fs::write(dir.join("a.txt"), "one\ntwo\n").unwrap();
+        let ssh = crate::remote::parse_ssh_command(&std::env::var("HARLO_TEST_SSH").expect("HARLO_TEST_SSH")).unwrap();
+        let host = crate::remote::Host { name: "t".into(), ssh };
+        crate::remote::set_hosts(vec![host.clone()]);
+        crate::remote::check(&host).unwrap();
+        let root = crate::remote::join("t", &dir.to_string_lossy());
+        let by_harlo = generate(None, &std::env::var("HARLO_LIVE_MODEL").unwrap_or_default(), &root, false).unwrap();
+        eprintln!("Harlo there: {by_harlo}");
+        let by_claude = generate(None, "nowhere/none", &root, false).unwrap();
+        eprintln!("Claude there: {by_claude}");
+        crate::remote::disconnect(&host);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

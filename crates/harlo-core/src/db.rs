@@ -11,7 +11,7 @@ pub struct Project {
     pub id: i64,
     pub path: PathBuf,
     pub name: String,
-    /// Default harness for new sessions: `pi` or `omp`.
+    /// The agent new sessions in it start with (`harlo`, `claude`…).
     pub harness: String,
     pub collapsed: bool,
     pub position: i64,
@@ -71,12 +71,17 @@ pub fn default_path() -> PathBuf {
     base.join("harlo").join("harlo.db")
 }
 
+/// Agents harlo no longer runs; what chose them chooses Harlo
+/// (`move_to_harlo`, once: marked by `MOVED_TO_HARLO`).
+pub const GONE_AGENTS: [&str; 4] = ["pi", "omp", "opencode", "hermes"];
+const MOVED_TO_HARLO: &str = "migrated.agents_to_harlo";
+
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS projects (
     id INTEGER PRIMARY KEY,
     path TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL,
-    harness TEXT NOT NULL DEFAULT 'omp',
+    harness TEXT NOT NULL DEFAULT 'harlo',
     collapsed INTEGER NOT NULL DEFAULT 0,
     position INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL DEFAULT (unixepoch())
@@ -193,7 +198,79 @@ impl Db {
         if !has_parent {
             conn.execute_batch("ALTER TABLE session_meta ADD COLUMN parent TEXT NOT NULL DEFAULT '';")?;
         }
-        Ok(Self { conn })
+        let db = Self { conn };
+        if db.get(MOVED_TO_HARLO)?.is_none() {
+            db.move_to_harlo()?;
+        }
+        Ok(db)
+    }
+
+    /// Once: what chose pi, omp, OpenCode or Hermes (no longer in harlo)
+    /// chooses Harlo, with its default model (theirs don't carry over);
+    /// what was set only for them goes. Past runs stay as they were.
+    fn move_to_harlo(&self) -> Result<()> {
+        use serde_json::Value;
+        let gone = |v: &Value| v.as_str().is_some_and(|a| GONE_AGENTS.contains(&a));
+        // An entry's agent (`key`) and model (`model`), in place.
+        let moved = |v: &mut Value, key: &str| -> bool {
+            if !gone(&v[key]) {
+                return false;
+            }
+            v[key] = "harlo".into();
+            if v.get("model").is_some() {
+                v["model"] = "".into();
+            }
+            if v.get("goal").is_some() {
+                v["goal"] = false.into();
+            }
+            true
+        };
+        let tx = self.conn.unchecked_transaction()?;
+        let list = GONE_AGENTS.map(|a| format!("'{a}'")).join(", ");
+        tx.execute_batch(&format!("UPDATE projects SET harness = 'harlo' WHERE harness IN ({list})"))?;
+        let schedules: Vec<(i64, String)> = tx.prepare("SELECT id, data FROM schedules")?.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<std::result::Result<_, _>>()?;
+        for (id, data) in schedules {
+            let Ok(mut v) = serde_json::from_str::<Value>(&data) else { continue };
+            if moved(&mut v, "harness") {
+                tx.execute("UPDATE schedules SET data = ?2 WHERE id = ?1", params![id, v.to_string()])?;
+            }
+        }
+        let settings: Vec<(String, String)> = tx.prepare("SELECT key, value FROM kv WHERE key LIKE 'settings.%'")?.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<std::result::Result<_, _>>()?;
+        for (key, value) in settings {
+            let name = &key["settings.".len()..];
+            // Theirs only: a program's path, on/off, a default model, a
+            // project's model for one of them.
+            let theirs = GONE_AGENTS.iter().any(|a| name == format!("{a}_path") || name == format!("provider_{a}") || name == format!("default_model_{a}") || (name.starts_with("project_model_") && name.ends_with(&format!("_{a}"))));
+            let new = if theirs {
+                None
+            } else if name == "default_harness" {
+                Some(if GONE_AGENTS.contains(&value.as_str()) { "harlo".to_owned() } else { value.clone() })
+            } else if name == "commit_model" {
+                // (Written for pi or omp: their names aren't Harlo's.)
+                Some(String::new())
+            } else if name == "templates" || name.starts_with("team_helpers_") {
+                let Ok(mut v) = serde_json::from_str::<Value>(&value) else { continue };
+                let changed = match v.as_array_mut() {
+                    Some(list) => list.iter_mut().fold(false, |any, t| moved(t, "harness") | any),
+                    None => moved(&mut v, "agent"),
+                };
+                Some(if changed { v.to_string() } else { value.clone() })
+            } else {
+                continue;
+            };
+            match new {
+                None => {
+                    tx.execute("DELETE FROM kv WHERE key = ?1", [&key])?;
+                }
+                Some(n) if n != value => {
+                    tx.execute("UPDATE kv SET value = ?2 WHERE key = ?1", params![key, n])?;
+                }
+                Some(_) => {}
+            }
+        }
+        tx.execute("INSERT INTO kv (key, value) VALUES (?1, '1') ON CONFLICT(key) DO NOTHING", [MOVED_TO_HARLO])?;
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn projects(&self) -> Result<Vec<Project>> {
@@ -534,6 +611,67 @@ mod tests {
         let db = Db::init(conn).unwrap();
         assert_eq!(db.projects().unwrap()[0].setup, "");
         assert_eq!(db.projects().unwrap()[0].icon, "");
+        assert_eq!(db.projects().unwrap()[0].harness, "harlo", "its default was omp's");
+    }
+
+    #[test]
+    fn what_chose_a_removed_agent_chooses_harlo_once() {
+        let file = std::env::temp_dir().join(format!("harlo-db-moved-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&file);
+        {
+            // As an older harlo left it (the move marked as not done).
+            let db = Db::open(&file).unwrap();
+            db.conn.execute("DELETE FROM kv", []).unwrap();
+            db.add_project(Path::new("/a"), "omp").unwrap();
+            db.add_project(Path::new("/b"), "claude").unwrap();
+            let schedule = |harness: &str, model: &str| crate::schedules::Schedule { id: 0, title: "Nightly".into(), prompt: "x".into(), project_id: -1, host: String::new(), harness: harness.into(), model: model.into(),
+                repeat: crate::schedules::Repeat::Every { minutes: 60 }, enabled: true, catch_up: false, last_run: None, next_run: None };
+            db.save_schedule(&mut schedule("hermes", "nous/x")).unwrap();
+            db.save_schedule(&mut schedule("claude", "opus")).unwrap();
+            for (k, v) in [
+                ("default_harness", "omp"),
+                ("omp_path", "/x/omp"),
+                ("claude_path", "/x/claude"),
+                ("provider_opencode", "0"),
+                ("default_model_pi", "anthropic/x"),
+                ("project_model_3_omp", "openai/y"),
+                ("project_model_3_claude", "sonnet"),
+                ("commit_model", "openai-codex/gpt-5-mini"),
+                ("team_helpers_3", r#"{"agent":"pi","model":"z","thinking":"high"}"#),
+                ("team_helpers_4", r#"{"agent":"claude","model":"haiku","thinking":""}"#),
+                ("templates", r#"[{"id":"t1","name":"A","harness":"omp","model":"m","goal":true,"text":"x"},{"id":"t2","name":"B","harness":"claude","model":"opus","goal":false,"text":"y"}]"#),
+            ] {
+                db.set(&format!("settings.{k}"), v).unwrap();
+            }
+        }
+        let db = Db::open(&file).unwrap();
+        let get = |k: &str| db.get(&format!("settings.{k}")).unwrap();
+        let projects = db.projects().unwrap();
+        assert_eq!(projects.iter().map(|p| p.harness.as_str()).collect::<Vec<_>>(), ["harlo", "claude"]);
+        let schedules = db.schedules().unwrap();
+        assert_eq!((schedules[0].harness.as_str(), schedules[0].model.as_str()), ("harlo", ""));
+        assert_eq!((schedules[1].harness.as_str(), schedules[1].model.as_str()), ("claude", "opus"));
+        assert_eq!(get("default_harness").as_deref(), Some("harlo"));
+        for gone in ["omp_path", "provider_opencode", "default_model_pi", "project_model_3_omp"] {
+            assert_eq!(get(gone), None, "{gone}");
+        }
+        assert_eq!(get("claude_path").as_deref(), Some("/x/claude"));
+        assert_eq!(get("project_model_3_claude").as_deref(), Some("sonnet"));
+        assert_eq!(get("commit_model").as_deref(), Some(""));
+        let team: serde_json::Value = serde_json::from_str(&get("team_helpers_3").unwrap()).unwrap();
+        assert_eq!((team["agent"].as_str(), team["model"].as_str(), team["thinking"].as_str()), (Some("harlo"), Some(""), Some("high")));
+        assert_eq!(get("team_helpers_4").as_deref(), Some(r#"{"agent":"claude","model":"haiku","thinking":""}"#));
+        let templates = crate::templates::parse(&get("templates").unwrap());
+        assert_eq!((templates[0].harness.as_str(), templates[0].model.as_str(), templates[0].goal), ("harlo", "", false));
+        assert_eq!((templates[1].harness.as_str(), templates[1].model.as_str()), ("claude", "opus"));
+        // Once: one chosen afterwards stays.
+        db.set_project_harness(projects[1].id, "omp").unwrap();
+        drop(db);
+        assert_eq!(Db::open(&file).unwrap().projects().unwrap()[1].harness, "omp");
+        let _ = std::fs::remove_file(&file);
+        for ext in ["-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{ext}", file.display()));
+        }
     }
 
     #[test]

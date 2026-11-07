@@ -117,11 +117,12 @@ pub mod qobject {
         fn stage_all(self: Pin<&mut GitPanel>);
         #[qinvokable]
         fn commit(self: Pin<&mut GitPanel>, message: &QString);
-        /// Has the harness's model write a commit message for the staged
-        /// changes (or all changes when `staged_only` is false). `program`
-        /// and `model` may be empty (found on PATH / the harness default).
+        /// Has Harlo (else Claude Code) write a commit message for the
+        /// staged changes (or all changes when `staged_only` is false).
+        /// `program` (Harlo's) and `model` may be empty (the one shipped
+        /// with harlo / Harlo's default).
         #[qinvokable]
-        fn generate_message(self: Pin<&mut GitPanel>, harness: &QString, program: &QString, model: &QString, staged_only: bool);
+        fn generate_message(self: Pin<&mut GitPanel>, program: &QString, model: &QString, staged_only: bool);
         /// Stages every change, then commits.
         #[qinvokable]
         fn commit_all(self: Pin<&mut GitPanel>, message: &QString);
@@ -200,7 +201,6 @@ use std::pin::Pin;
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{QByteArray, QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QStringList, QVariant};
 use harlo_core::git::{self, FileDiff, GitStatus, LineKind};
-use harlo_harness::HarnessKind;
 
 use qobject::GitPanel;
 
@@ -689,19 +689,18 @@ impl GitPanel {
         self.run(true, move || vec![Outcome::Done(git::commit(&root, &message).map_err(|e| format!("{e:#}")))]);
     }
 
-    pub fn generate_message(mut self: Pin<&mut Self>, harness: &QString, program: &QString, model: &QString, staged_only: bool) {
+    pub fn generate_message(mut self: Pin<&mut Self>, program: &QString, model: &QString, staged_only: bool) {
         if self.generating {
             return;
         }
         let Some(root) = self.root_path() else { return };
-        let kind = HarnessKind::parse(&harness.to_string()).filter(|k| *k != HarnessKind::Demo).unwrap_or(HarnessKind::Omp);
         let program = Some(program.to_string()).filter(|p| !p.trim().is_empty()).map(PathBuf::from);
         let model = model.to_string();
         let generation = self.generation;
         let thread = self.qt_thread();
         self.as_mut().set_generating(true);
         crate::runtime().spawn_blocking(move || {
-            let result = harlo_core::commitmsg::generate(kind, program, &model, &root, staged_only);
+            let result = harlo_core::commitmsg::generate(program, &model, &root, staged_only);
             let _ = thread.queue(move |mut this| {
                 this.as_mut().set_generating(false);
                 if this.generation != generation {

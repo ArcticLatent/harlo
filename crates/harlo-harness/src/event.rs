@@ -24,7 +24,7 @@ pub enum HarnessKind {
 
 impl HarnessKind {
     /// The providers, in Settings → Providers' order.
-    pub const PROVIDERS: [HarnessKind; 6] = [Self::Claude, Self::OpenCode, Self::Pi, Self::Omp, Self::Hermes, Self::Harlo];
+    pub const PROVIDERS: [HarnessKind; 6] = [Self::Harlo, Self::Claude, Self::OpenCode, Self::Pi, Self::Omp, Self::Hermes];
 
     pub fn parse(s: &str) -> Option<Self> {
         match s {
