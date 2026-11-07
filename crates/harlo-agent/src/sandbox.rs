@@ -124,7 +124,9 @@ pub struct Sandbox {
     pub project_writable: bool,
     /// Where commands may write (existing, resolved), the project first.
     pub writable: Vec<PathBuf>,
-    /// What's hidden (existing, resolved; none that holds the project).
+    /// What's hidden (existing, resolved). The deepest of these and
+    /// `writable` wins: a project inside a hidden folder (a worktree in
+    /// harlo's data) is shown and writable, the rest of that folder isn't.
     pub hidden: Vec<PathBuf>,
     env: Vec<String>,
     /// Why it can't start here (commands are refused).
@@ -221,8 +223,7 @@ impl Sandbox {
             hidden.push(s.parent().unwrap_or(s).to_path_buf());
         }
         hidden.extend(p.hidden.iter().cloned());
-        // (One that holds the project would hide it: left visible.)
-        let hidden = existing(hidden).into_iter().filter(|h| !project.starts_with(h)).collect();
+        let hidden = existing(hidden);
         Sandbox { network: p.network, project, project_writable, writable, hidden, env: p.env.clone(), broken: None }
     }
 
@@ -233,14 +234,17 @@ impl Sandbox {
             a.push("--share-net".into());
         }
         a.extend(["--die-with-parent", "--new-session", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"].map(OsString::from));
-        for w in &self.writable {
-            a.extend(["--bind".into(), w.clone().into_os_string(), w.clone().into_os_string()]);
-        }
-        for h in &self.hidden {
-            if h.is_dir() {
-                a.extend(["--tmpfs".into(), h.clone().into_os_string()]);
+        // Shallow to deep, so the deeper one wins: a cache's credentials
+        // hidden inside it, a project shown inside a hidden folder.
+        let mut mounts: Vec<(&PathBuf, bool)> = self.writable.iter().map(|w| (w, true)).chain(self.hidden.iter().map(|h| (h, false))).collect();
+        mounts.sort_by_key(|(p, _)| p.components().count());
+        for (p, writable) in mounts {
+            if writable {
+                a.extend(["--bind".into(), p.clone().into_os_string(), p.clone().into_os_string()]);
+            } else if p.is_dir() {
+                a.extend(["--tmpfs".into(), p.clone().into_os_string()]);
             } else {
-                a.extend(["--ro-bind".into(), "/dev/null".into(), h.clone().into_os_string()]);
+                a.extend(["--ro-bind".into(), "/dev/null".into(), p.clone().into_os_string()]);
             }
         }
         a.extend(["--chdir".into(), cwd.as_os_str().to_os_string()]);
@@ -261,11 +265,20 @@ impl Sandbox {
             // (Harlo's own variables, its keys among them.)
             return Some(Path::new("/proc/…/environ"));
         }
-        self.hidden.iter().find(|h| real.starts_with(h)).map(PathBuf::as_path)
+        // (The deepest of the hidden and writable places that hold it wins.)
+        fn deepest<'a>(list: &'a [PathBuf], real: &Path) -> Option<&'a PathBuf> {
+            list.iter().filter(|p| real.starts_with(p)).max_by_key(|p| p.components().count())
+        }
+        match (deepest(&self.hidden, real), deepest(&self.writable, real)) {
+            (Some(h), Some(w)) if w.starts_with(h) => None,
+            (h, _) => h.map(PathBuf::as_path),
+        }
     }
 
     /// Hidden places inside `root` (searched by grep or find), as paths
-    /// under `root` as given, to leave out of what they list.
+    /// under `root` as given, to leave out of what they list. (A writable
+    /// place inside one of them is left out too: a search from above it
+    /// doesn't go into the hidden folder at all.)
     pub fn hidden_under(&self, root: &Path) -> Vec<PathBuf> {
         let real = resolve(&clean(root));
         self.hidden.iter().filter_map(|h| h.strip_prefix(&real).ok()).filter(|rest| !rest.as_os_str().is_empty()).map(|rest| root.join(rest)).collect()
@@ -396,23 +409,40 @@ pub mod tests {
         let args: Vec<String> = sb.args("echo hi", &home.join("proj/src")).iter().map(|a| a.to_string_lossy().into_owned()).collect();
         let at = |s: &str| args.iter().position(|a| a == s).unwrap();
         assert_eq!(&args[..2], ["--unshare-all", "--share-net"]);
-        // Writable after the read-only root, hidden after those (a cache's
+        // The read-only root first, then shallow to deep (a cache's
         // credentials stay hidden inside it).
-        assert!(at("--ro-bind") < at("--bind") && at("--bind") < at("--tmpfs"));
+        assert!(at("--ro-bind") < at("--bind") && at("--ro-bind") < at("--tmpfs"));
         let creds = home.join(".cargo/credentials.toml").to_string_lossy().into_owned();
-        assert_eq!(args[args.iter().position(|a| *a == creds).unwrap() - 1], "/dev/null");
+        let cargo = home.join(".cargo").to_string_lossy().into_owned();
+        let creds_at = args.iter().position(|a| *a == creds).unwrap();
+        assert_eq!(args[creds_at - 1], "/dev/null");
+        assert!(at(&cargo) < creds_at, "the cache's bind before its credentials are hidden");
         assert_eq!(&args[args.len() - 3..], ["bash", "-c", "echo hi"]);
         let offline = Sandbox::new(&Policy { network: false, ..on() }, &home.join("proj"), &home, &home.join("none"), None);
         assert!(!offline.args("x", &home).iter().any(|a| a == "--share-net"));
     }
 
     #[test]
-    fn a_project_inside_a_hidden_folder_stays_visible() {
-        let s = scratch("inside");
+    fn a_project_inside_a_hidden_folder_is_shown_alone() {
+        // A worktree in harlo's data: the worktree is there, the rest
+        // (harlo's database, other worktrees) stays hidden.
+        let s = home_outside_tmp("inside");
         let home = s.0.join("home");
-        std::fs::create_dir_all(home.join(".config/harlo/work")).unwrap();
-        let sb = Sandbox::new(&on(), &home.join(".config/harlo/work"), &home, &home.join("none"), None);
-        assert!(!sb.hidden.contains(&home.join(".config/harlo")), "{:?}", sb.hidden);
+        let data = home.join(".local/share/harlo");
+        for d in ["worktrees/p/mine", "worktrees/p/other"] {
+            std::fs::create_dir_all(data.join(d)).unwrap();
+        }
+        std::fs::write(data.join("harlo.db"), "x").unwrap();
+        let sb = Sandbox::new(&on(), &data.join("worktrees/p/mine"), &home, &home.join("none"), None);
+        assert!(sb.hidden.contains(&data) && sb.project_writable, "{:?}", sb.hidden);
+        assert!(sb.may_read(&data.join("worktrees/p/mine/a.rs")).is_ok() && sb.may_write(&data.join("worktrees/p/mine/a.rs")).is_ok());
+        assert!(sb.may_read(&data.join("harlo.db")).unwrap_err().contains("hidden"));
+        assert!(sb.may_read(&data.join("worktrees/p/other/x")).is_err());
+        assert!(sb.may_read(&data.join("worktrees/p/mine/../other/x")).is_err(), "through ..");
+        let args: Vec<String> = sb.args("x", &data.join("worktrees/p/mine")).iter().map(|a| a.to_string_lossy().into_owned()).collect();
+        let tmpfs = args.iter().position(|a| *a == data.to_string_lossy()).unwrap();
+        let bind = args.iter().rposition(|a| *a == data.join("worktrees/p/mine").to_string_lossy()).unwrap();
+        assert!(args[tmpfs - 1] == "--tmpfs" && tmpfs < bind, "hidden first, the project shown on top");
     }
 
     #[test]
