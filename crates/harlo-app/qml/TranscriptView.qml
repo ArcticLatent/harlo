@@ -60,10 +60,19 @@ Item {
     // A reply's model has no name yet: the agent's list is read once, as
     // soon as the agent runs (not started just for that).
     property bool wantModelNames: false
-    readonly property bool readModelNames: wantModelNames && session.models.length === 0 && !session.modelsAnswered
-                                           && (session.status === "idle" || session.status === "busy")
-    onReadModelNamesChanged: if (readModelNames) { wantModelNames = false; session.loadModels() }
+    function readModelNames() {
+        if (wantModelNames && session.models.length === 0 && !session.modelsAnswered
+                && (session.status === "idle" || session.status === "busy")) {
+            wantModelNames = false
+            session.loadModels()
+        }
+    }
+    onWantModelNamesChanged: readModelNames()
     onSessionChanged: wantModelNames = false
+    Connections {
+        target: root.session
+        function onStatusChanged() { root.readModelNames() }
+    }
     /// A reply's model as the head shows it (its name when the agent
     /// listed it; "" unknown: the session's).
     function replyModelName(id) {
