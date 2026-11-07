@@ -150,7 +150,24 @@ async fn ask(prompt: &str, model: Option<String>, effort: Option<String>) -> Res
             }
         }
     };
-    let result = agent.run(prompt, &mut show).await;
+    // Ctrl+C stops the turn; a second one quits at once.
+    let stop = tokio_util::sync::CancellationToken::new();
+    let s = stop.clone();
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            // Over the terminal's "^C".
+            eprint!("\r");
+            s.cancel();
+            if tokio::signal::ctrl_c().await.is_ok() {
+                eprintln!("\x1b[0m");
+                std::process::exit(130);
+            }
+        }
+    });
+    let result = agent.run(prompt, &stop, &mut show).await;
+    if matches!(result, Ok(agent::Ended::Stopped)) {
+        eprintln!("\x1b[0m\x1b[33mStopped.\x1b[0m");
+    }
     let t = &agent.totals;
     eprintln!(
         "\x1b[2m[{} request{} · {} in ({} cached, {}%) · {} out · {:.0}s]\x1b[0m",
@@ -162,7 +179,10 @@ async fn ask(prompt: &str, model: Option<String>, effort: Option<String>) -> Res
         t.output,
         started.elapsed().as_secs_f64()
     );
-    result
+    if result? == agent::Ended::Stopped {
+        std::process::exit(130);
+    }
+    Ok(())
 }
 
 /// A call's arguments in one line.

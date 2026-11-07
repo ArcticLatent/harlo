@@ -11,12 +11,26 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, bail};
 use futures_util::future::join_all;
 use serde_json::{Value, json};
+use tokio_util::sync::CancellationToken;
 
 use crate::tools::{self, Tools};
 use crate::{auth, responses};
 
 /// Rounds of tool calls in one run, at most.
 const MAX_ROUNDS: usize = 200;
+
+/// Left in the history when the user stops a turn.
+const STOPPED_NOTE: &str = "<turn_stopped>The user stopped this turn. A call marked interrupted was stopped partway and may have partly run: check its effects before relying on them.</turn_stopped>";
+const INTERRUPTED: &str = "Interrupted: the user stopped the turn while this call ran. It may have partly run.";
+const NOT_RUN: &str = "Not run: the user stopped the turn before this call started.";
+
+/// How a run ended.
+#[derive(Debug, PartialEq)]
+pub enum Ended {
+    Done,
+    /// The user stopped it.
+    Stopped,
+}
 
 /// What the user sees of a run.
 pub enum Shown<'a> {
@@ -56,14 +70,27 @@ impl Agent {
         Agent { instructions: instructions(&cwd), tools: Tools::new(cwd, spill), model, effort, history: Vec::new(), id, totals: Totals::default() }
     }
 
-    pub async fn run(&mut self, prompt: &str, show: &mut dyn FnMut(Shown)) -> Result<()> {
+    /// Works on `prompt` until the model is done, or until `stop` is
+    /// cancelled: then what was running ends (commands with everything
+    /// they started), and the history says what was cut off.
+    pub async fn run(&mut self, prompt: &str, stop: &CancellationToken, show: &mut dyn FnMut(Shown)) -> Result<Ended> {
         self.history.push(json!({ "role": "user", "content": [{ "type": "input_text", "text": prompt }] }));
         for _ in 0..MAX_ROUNDS {
-            let items = self.ask(show).await?;
+            // A reply cut off is dropped whole: its parts can't go back alone.
+            let asked = tokio::select! {
+                biased;
+                _ = stop.cancelled() => None,
+                r = self.ask(show) => Some(r),
+            };
+            let Some(items) = asked else {
+                self.stopped();
+                return Ok(Ended::Stopped);
+            };
+            let items = items?;
             let calls: Vec<Value> = items.iter().filter(|i| i["type"] == "function_call").cloned().collect();
             self.history.extend(items);
             if calls.is_empty() {
-                return Ok(());
+                return Ok(Ended::Done);
             }
             let parsed: Vec<(String, String, Value)> = calls
                 .iter()
@@ -75,22 +102,23 @@ impl Agent {
             for (_, name, args) in &parsed {
                 show(Shown::ToolStart { name, args });
             }
-            let outcomes: Vec<tools::Outcome> = if parsed.iter().all(|(_, n, _)| tools::read_only(n)) {
-                join_all(parsed.iter().map(|(_, name, args)| self.tools.call(name, args))).await
-            } else {
-                let mut out = Vec::new();
-                for (_, name, args) in &parsed {
-                    out.push(self.tools.call(name, args).await);
-                }
-                out
-            };
-            for ((call_id, _, args), o) in parsed.iter().zip(outcomes) {
-                let text = if args.is_null() { "The arguments weren't valid JSON; call the tool again.".to_owned() } else { o.text };
-                show(Shown::ToolEnd { text: &text, failed: o.failed });
-                self.history.push(json!({ "type": "function_call_output", "call_id": call_id, "output": text }));
+            let calls: Vec<(&str, &Value)> = parsed.iter().map(|(_, n, a)| (n.as_str(), a)).collect();
+            let outcomes = run_calls(&self.tools, &calls, stop).await;
+            for ((call_id, _, _), o) in parsed.iter().zip(outcomes) {
+                show(Shown::ToolEnd { text: &o.text, failed: o.failed });
+                self.history.push(json!({ "type": "function_call_output", "call_id": call_id, "output": o.text }));
+            }
+            if stop.is_cancelled() {
+                self.stopped();
+                return Ok(Ended::Stopped);
             }
         }
         bail!("Stopped after {MAX_ROUNDS} rounds of tool calls")
+    }
+
+    /// The note a stopped turn leaves, for the model's next turn.
+    fn stopped(&mut self) {
+        self.history.push(json!({ "role": "user", "content": [{ "type": "input_text", "text": STOPPED_NOTE }] }));
     }
 
     /// One request: its output items. A token the API refuses is refreshed
@@ -123,6 +151,41 @@ impl Agent {
             }
         }
     }
+}
+
+/// Runs one round's calls: those that only look at once, otherwise one
+/// after another, in the order called. When `stop` is cancelled, the
+/// call running ends (dropping it ends its command) and what's left
+/// isn't started.
+async fn run_calls(tools: &Tools, calls: &[(&str, &Value)], stop: &CancellationToken) -> Vec<tools::Outcome> {
+    let bad_args = || tools::Outcome { text: "The arguments weren't valid JSON; call the tool again.".into(), failed: true };
+    let cut = |text: &str| tools::Outcome { text: text.into(), failed: true };
+    if calls.iter().all(|(n, _)| tools::read_only(n)) {
+        let all = join_all(calls.iter().map(|(name, args)| async move { if args.is_null() { bad_args() } else { tools.call(name, args).await } }));
+        return tokio::select! {
+            biased;
+            _ = stop.cancelled() => calls.iter().map(|_| cut(INTERRUPTED)).collect(),
+            o = all => o,
+        };
+    }
+    let mut out = Vec::new();
+    for (name, args) in calls {
+        if stop.is_cancelled() {
+            out.push(cut(NOT_RUN));
+            continue;
+        }
+        if args.is_null() {
+            out.push(bad_args());
+            continue;
+        }
+        let ran = tokio::select! {
+            biased;
+            _ = stop.cancelled() => None,
+            o = tools.call(name, args) => Some(o),
+        };
+        out.push(ran.unwrap_or_else(|| cut(INTERRUPTED)));
+    }
+    out
 }
 
 /// The system prompt: short; the project's own instructions after it.
@@ -158,4 +221,46 @@ fn project_instructions(cwd: &Path) -> Vec<(PathBuf, String)> {
     }
     found.reverse();
     found
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[tokio::test]
+    async fn stopping_ends_the_running_call_and_skips_the_rest() {
+        let dir = std::env::temp_dir().join(format!("harlo-agent-stop-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let tools = Tools::new(dir.clone(), dir.join("spill"));
+        let marker = dir.join("late");
+        let first = json!({ "command": "echo first" });
+        let slow = json!({ "command": format!("sleep 30; touch {}", marker.display()) });
+        let after = json!({ "command": format!("touch {}", marker.display()) });
+        let stop = CancellationToken::new();
+        let s2 = stop.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            s2.cancel();
+        });
+        let t = Instant::now();
+        let out = run_calls(&tools, &[("bash", &first), ("bash", &slow), ("bash", &after)], &stop).await;
+        assert!(t.elapsed() < Duration::from_secs(5), "the stop didn't end the command");
+        assert_eq!(out[0].text, "first");
+        assert_eq!(out[1].text, INTERRUPTED);
+        assert_eq!(out[2].text, NOT_RUN);
+        assert!(!marker.exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn stopping_reads_interrupts_them_all() {
+        let dir = std::env::temp_dir();
+        let tools = Tools::new(dir.clone(), dir.join("harlo-agent"));
+        let stop = CancellationToken::new();
+        stop.cancel();
+        let args = json!({ "path": "." });
+        let out = run_calls(&tools, &[("ls", &args), ("ls", &args)], &stop).await;
+        assert!(out.iter().all(|o| o.failed));
+    }
 }
