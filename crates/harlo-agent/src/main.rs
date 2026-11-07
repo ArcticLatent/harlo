@@ -7,11 +7,17 @@
 //! harlo-agent status           who's signed in
 //! harlo-agent models           the models your plan can use
 //! harlo-agent -p "…" [-m model] [--thinking low|medium|high]
+//!                              [--resume | --session <file>]
 //! ```
+//!
+//! Each run is saved as a session (in pi's format) under
+//! `~/.local/share/harlo-agent/sessions`; `--resume` continues this
+//! folder's newest one.
 
 mod agent;
 mod auth;
 mod responses;
+mod session;
 mod tools;
 
 use std::io::Write as _;
@@ -58,20 +64,23 @@ async fn run(args: Vec<String>) -> Result<()> {
         Some("-p") => {
             let mut model = None;
             let mut effort = None;
+            let mut from = Resume::New;
             let mut it = args.into_iter().skip(1);
             let prompt = it.next();
             while let Some(a) = it.next() {
                 match a.as_str() {
                     "-m" | "--model" => model = it.next(),
                     "--thinking" => effort = it.next(),
+                    "--resume" | "-c" => from = Resume::Latest,
+                    "--session" => from = Resume::File(it.next().ok_or_else(|| anyhow::anyhow!("--session needs the file"))?.into()),
                     other => bail!("unknown option {other}"),
                 }
             }
             let Some(prompt) = prompt else { bail!("-p needs the prompt") };
-            ask(&prompt, model, effort).await
+            ask(&prompt, model, effort, from).await
         }
         _ => {
-            println!("harlo-agent login | logout | status | models | -p \"prompt\" [-m model] [--thinking low|medium|high]");
+            println!("harlo-agent login | logout | status | models | -p \"prompt\" [-m model] [--thinking low|medium|high] [--resume | --session file]");
             Ok(())
         }
     }
@@ -90,16 +99,39 @@ async fn login() -> Result<()> {
     Ok(())
 }
 
-async fn ask(prompt: &str, model: Option<String>, effort: Option<String>) -> Result<()> {
-    let model = match model {
+/// Which session a run goes in.
+enum Resume {
+    New,
+    /// This folder's newest.
+    Latest,
+    File(std::path::PathBuf),
+}
+
+async fn ask(prompt: &str, model: Option<String>, effort: Option<String>, from: Resume) -> Result<()> {
+    let cwd = std::env::current_dir()?;
+    let root = session::root().ok_or_else(|| anyhow::anyhow!("No home folder to keep sessions in"))?;
+    let loaded = match from {
+        Resume::New => None,
+        Resume::Latest => match session::latest(&root, &cwd) {
+            Some(p) => Some(session::Log::open(&p)?),
+            None => bail!("There's no session in this folder to resume"),
+        },
+        Resume::File(p) => Some(session::Log::open(&p)?),
+    };
+    let (log, history, logged) = match loaded {
+        Some(l) => (l.log, l.messages, (l.model, l.effort)),
+        None => (session::Log::new(&root, &cwd), Vec::new(), (None, None)),
+    };
+    // The model asked for, else the session's, else the plan's first.
+    let effort = effort.or_else(|| logged.1.clone());
+    let model = match model.or_else(|| logged.0.clone()) {
         Some(m) => m,
         None => {
             let token = auth::access_token(false).await?;
             responses::models(&token).await?.into_iter().next().map(|(id, _)| id).ok_or_else(|| anyhow::anyhow!("Your plan lists no models"))?
         }
     };
-    let cwd = std::env::current_dir()?;
-    let mut agent = agent::Agent::new(cwd, model, effort);
+    let mut agent = agent::Agent::new(cwd, log, history, logged, model, effort);
     let mut out = std::io::stdout();
     let mut thinking = false;
     // Whether the last thing printed ended a line.
@@ -179,6 +211,9 @@ async fn ask(prompt: &str, model: Option<String>, effort: Option<String>) -> Res
         t.output,
         started.elapsed().as_secs_f64()
     );
+    if agent.session_file().exists() {
+        eprintln!("\x1b[2mSession: {} (continue it with --resume)\x1b[0m", agent.session_file().display());
+    }
     if result? == agent::Ended::Stopped {
         std::process::exit(130);
     }

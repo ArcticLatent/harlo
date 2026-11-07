@@ -1,10 +1,10 @@
 //! The loop: send the history, run the tools the model calls, send their
 //! results, until it answers without calling any.
 //!
-//! The model's output items go back as they came (reasoning with its
-//! encrypted content, messages, calls), each call answered by its
-//! `function_call_output`. Tools that only look run at once; the rest one
-//! after another, in the order called.
+//! The history is pi's messages, each written to the session log as it's
+//! made; every request's input is derived from them, so a resumed session
+//! sends what a running one would. Tools that only look run at once; the
+//! rest one after another, in the order called.
 
 use std::path::{Path, PathBuf};
 
@@ -13,6 +13,7 @@ use futures_util::future::join_all;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
+use crate::session::{Log, now_ms};
 use crate::tools::{self, Tools};
 use crate::{auth, responses};
 
@@ -47,9 +48,10 @@ pub struct Agent {
     instructions: String,
     tools: Tools,
     history: Vec<Value>,
-    /// The session's id (the prompt cache key).
-    id: String,
-    /// Totals of this session's requests.
+    log: Log,
+    /// The model and thinking level the log last recorded.
+    logged: (Option<String>, Option<String>),
+    /// Totals of this run's requests.
     pub totals: Totals,
 }
 
@@ -62,19 +64,36 @@ pub struct Totals {
 }
 
 impl Agent {
-    pub fn new(cwd: PathBuf, model: String, effort: Option<String>) -> Self {
+    /// `history`, `logged`: what the log already holds (nothing for a new
+    /// session).
+    pub fn new(cwd: PathBuf, log: Log, history: Vec<Value>, logged: (Option<String>, Option<String>), model: String, effort: Option<String>) -> Self {
         let spill = std::env::temp_dir().join("harlo-agent");
-        let mut b = [0u8; 16];
-        let _ = getrandom::fill(&mut b);
-        let id: String = b.iter().map(|x| format!("{x:02x}")).collect();
-        Agent { instructions: instructions(&cwd), tools: Tools::new(cwd, spill), model, effort, history: Vec::new(), id, totals: Totals::default() }
+        Agent { instructions: instructions(&cwd), tools: Tools::new(cwd, spill), model, effort, history, log, logged, totals: Totals::default() }
+    }
+
+    pub fn session_file(&self) -> &Path {
+        &self.log.path
+    }
+
+    fn push(&mut self, message: Value) -> Result<()> {
+        self.log.message(&message)?;
+        self.history.push(message);
+        Ok(())
     }
 
     /// Works on `prompt` until the model is done, or until `stop` is
     /// cancelled: then what was running ends (commands with everything
     /// they started), and the history says what was cut off.
     pub async fn run(&mut self, prompt: &str, stop: &CancellationToken, show: &mut dyn FnMut(Shown)) -> Result<Ended> {
-        self.history.push(json!({ "role": "user", "content": [{ "type": "input_text", "text": prompt }] }));
+        if self.logged.0.as_deref() != Some(&self.model) {
+            self.log.append(json!({ "type": "model_change", "provider": "openai", "modelId": self.model }))?;
+            self.logged.0 = Some(self.model.clone());
+        }
+        if self.logged.1 != self.effort {
+            self.log.append(json!({ "type": "thinking_level_change", "thinkingLevel": self.effort.as_deref().unwrap_or("off") }))?;
+            self.logged.1 = self.effort.clone();
+        }
+        self.push(json!({ "role": "user", "content": [{ "type": "text", "text": prompt }], "timestamp": now_ms() }))?;
         for _ in 0..MAX_ROUNDS {
             // A reply cut off is dropped whole: its parts can't go back alone.
             let asked = tokio::select! {
@@ -82,70 +101,77 @@ impl Agent {
                 _ = stop.cancelled() => None,
                 r = self.ask(show) => Some(r),
             };
-            let Some(items) = asked else {
-                self.stopped();
+            let Some(reply) = asked else {
+                self.stopped()?;
                 return Ok(Ended::Stopped);
             };
-            let items = items?;
-            let calls: Vec<Value> = items.iter().filter(|i| i["type"] == "function_call").cloned().collect();
-            self.history.extend(items);
+            let reply = reply?;
+            let calls: Vec<Value> = reply["content"].as_array().into_iter().flatten().filter(|b| b["type"] == "toolCall").cloned().collect();
+            self.push(reply)?;
             if calls.is_empty() {
                 return Ok(Ended::Done);
             }
-            let parsed: Vec<(String, String, Value)> = calls
-                .iter()
-                .map(|c| {
-                    let args = serde_json::from_str(c["arguments"].as_str().unwrap_or("{}")).unwrap_or(Value::Null);
-                    (c["call_id"].as_str().unwrap_or_default().to_owned(), c["name"].as_str().unwrap_or_default().to_owned(), args)
-                })
-                .collect();
-            for (_, name, args) in &parsed {
+            // Arguments that weren't JSON go as null: the call says so.
+            let args: Vec<Value> = calls.iter().map(|c| if c.get("argumentsError").is_some() { Value::Null } else { c["arguments"].clone() }).collect();
+            let names: Vec<&str> = calls.iter().map(|c| c["name"].as_str().unwrap_or_default()).collect();
+            for (name, args) in names.iter().zip(&args) {
                 show(Shown::ToolStart { name, args });
             }
-            let calls: Vec<(&str, &Value)> = parsed.iter().map(|(_, n, a)| (n.as_str(), a)).collect();
-            let outcomes = run_calls(&self.tools, &calls, stop).await;
-            for ((call_id, _, _), o) in parsed.iter().zip(outcomes) {
+            let pairs: Vec<(&str, &Value)> = names.iter().copied().zip(&args).collect();
+            let outcomes = run_calls(&self.tools, &pairs, stop).await;
+            for (c, o) in calls.iter().zip(outcomes) {
                 show(Shown::ToolEnd { text: &o.text, failed: o.failed });
-                self.history.push(json!({ "type": "function_call_output", "call_id": call_id, "output": o.text }));
+                self.push(json!({
+                    "role": "toolResult", "toolCallId": c["id"], "toolName": c["name"],
+                    "content": [{ "type": "text", "text": o.text }], "isError": o.failed, "timestamp": now_ms(),
+                }))?;
             }
             if stop.is_cancelled() {
-                self.stopped();
+                self.stopped()?;
                 return Ok(Ended::Stopped);
             }
         }
         bail!("Stopped after {MAX_ROUNDS} rounds of tool calls")
     }
 
-    /// The note a stopped turn leaves, for the model's next turn.
-    fn stopped(&mut self) {
-        self.history.push(json!({ "role": "user", "content": [{ "type": "input_text", "text": STOPPED_NOTE }] }));
+    /// The note a stopped turn leaves, for the model's next turn (not shown).
+    fn stopped(&mut self) -> Result<()> {
+        self.push(json!({ "role": "custom", "customType": "turn_stopped", "content": STOPPED_NOTE, "display": false }))
     }
 
-    /// One request: its output items. A token the API refuses is refreshed
-    /// once and the request sent again.
-    async fn ask(&mut self, show: &mut dyn FnMut(Shown)) -> Result<Vec<Value>> {
-        let body = responses::request(&self.model, &self.instructions, &self.history, tools::specs(), self.effort.as_deref(), &self.id);
+    /// One request: the reply, as pi's assistant message. A token the API
+    /// refuses is refreshed once and the request sent again.
+    async fn ask(&mut self, show: &mut dyn FnMut(Shown)) -> Result<Value> {
+        let input = responses::input(&self.history, &self.model);
+        let body = responses::request(&self.model, &self.instructions, &input, tools::specs(), self.effort.as_deref(), &self.log.id);
         let model = self.model.clone();
         let mut force = false;
         loop {
             let token = auth::access_token(force).await?;
             let mut items = Vec::new();
+            let mut done: Option<(Value, Vec<Value>)> = None;
             let totals = &mut self.totals;
-            let result = responses::stream(&token, &self.id, &body, |ev| match ev {
+            let result = responses::stream(&token, &self.log.id, &body, |ev| match ev {
                 responses::Event::Text(t) => show(Shown::Text(&t)),
                 responses::Event::Reasoning(t) => show(Shown::Reasoning(&t)),
                 responses::Event::Item(i) => items.push(i),
-                responses::Event::Completed { usage } => {
+                responses::Event::Completed { usage, output } => {
                     totals.requests += 1;
                     totals.input += usage["input_tokens"].as_u64().unwrap_or(0);
                     totals.cached += usage["input_tokens_details"]["cached_tokens"].as_u64().unwrap_or(0);
                     totals.output += usage["output_tokens"].as_u64().unwrap_or(0);
-                    show(Shown::Usage { model: &model, usage: &usage })
+                    show(Shown::Usage { model: &model, usage: &usage });
+                    done = Some((usage, output));
                 }
             })
             .await;
             match result {
-                Ok(()) => return Ok(items),
+                Ok(()) => {
+                    let (usage, output) = done.unwrap_or_default();
+                    // The completed response's own list when it has one.
+                    let items = if output.is_empty() { items } else { output };
+                    return Ok(responses::assistant_message(&items, &model, &usage));
+                }
                 Err(e) if !force && e.downcast_ref::<responses::ApiError>().is_some_and(|a| a.status == 401) => force = true,
                 Err(e) => return Err(e),
             }
