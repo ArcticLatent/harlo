@@ -52,6 +52,12 @@ async fn run(args: Vec<String>) -> Result<()> {
             Ok(())
         }
         Some("status") => {
+            // For harlo: `{ "signedIn", "email" }`.
+            if args.get(1).is_some_and(|a| a == "--json") {
+                let c = auth::load();
+                println!("{}", serde_json::json!({ "signedIn": c.is_some(), "email": c.map(|c| c.email).unwrap_or_default() }));
+                return Ok(());
+            }
             match auth::load() {
                 Some(c) => println!("Signed in with ChatGPT{} (your ChatGPT plan pays for harlo-agent's requests).", if c.email.is_empty() { String::new() } else { format!(" as {}", c.email) }),
                 None => println!("Not signed in: run `harlo-agent login`."),

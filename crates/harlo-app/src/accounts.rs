@@ -1844,6 +1844,10 @@ fn accounts_of(k: HarnessKind, host: Option<&Host>) -> Result<Vec<Value>, String
                 json!({ "id": id, "label": name, "detail": "Signed in", "signOut": true })
             })
             .collect()),
+        HarnessKind::Harlo if host.is_some() => Ok(Vec::new()),
+        HarnessKind::Harlo => {
+            harlo_accounts(&run(&program(k).ok_or("harlo-agent isn't installed.")?, &["status", "--json"], Duration::from_secs(15))?)
+        }
         // omp: from its models (Settings → Providers has them).
         _ => Ok(Vec::new()),
     }
@@ -1972,8 +1976,24 @@ fn providers_of(k: HarnessKind, host: Option<&Host>) -> Result<Vec<Value>, Strin
             }));
             Ok(list)
         }
-        HarnessKind::Harlo | HarnessKind::Demo => Ok(Vec::new()),
+        HarnessKind::Harlo if host.is_some() => Err("Harlo runs only on this computer, so far.".into()),
+        HarnessKind::Harlo => Ok(vec![json!({
+            "id": "chatgpt", "name": "ChatGPT",
+            "note": "Harlo's requests use your ChatGPT plan's usage.",
+            "methods": [{ "id": "chatgpt", "type": "login", "label": "Continue with ChatGPT" }],
+        })]),
+        HarnessKind::Demo => Ok(Vec::new()),
     }
+}
+
+/// harlo-agent's account, from its `status --json`.
+fn harlo_accounts(status: &str) -> Result<Vec<Value>, String> {
+    let v: Value = serde_json::from_str(status.trim()).map_err(|_| "harlo-agent didn't say whether it's signed in.".to_owned())?;
+    if v["signedIn"].as_bool() != Some(true) {
+        return Ok(Vec::new());
+    }
+    let label = v["email"].as_str().filter(|e| !e.is_empty()).unwrap_or("ChatGPT");
+    Ok(vec![json!({ "id": "chatgpt", "label": label, "detail": "ChatGPT plan", "signOut": true })])
 }
 
 /// Signs an account out (blocking).
@@ -1995,6 +2015,8 @@ fn sign_out(k: HarnessKind, id: &str, host: Option<&Host>) -> Result<(), String>
             Some(h) => run_there(h, "hermes", &["auth", "logout", id], Duration::from_secs(30)).map(|_| ()),
             None => run(&program(k).ok_or("Hermes isn't installed.")?, &["auth", "logout", id], Duration::from_secs(30)).map(|_| ()),
         },
+        HarnessKind::Harlo if host.is_some() => Err("Harlo runs only on this computer, so far.".into()),
+        HarnessKind::Harlo => run(&program(k).ok_or("harlo-agent isn't installed.")?, &["logout"], Duration::from_secs(15)).map(|_| ()),
         _ => Err("Sign out in omp itself (its /logout).".into()),
     }
 }
@@ -2387,7 +2409,14 @@ async fn sign_in(k: HarnessKind, provider: &str, method: &str, answers: &Value, 
             command(sign_in_command(k, "hermes", report.host.as_ref(), &["auth", "add", provider, "--type", "oauth", "--no-browser"])?, None, report, rx).await?;
             Ok(format!("Hermes is signed in to {name}. Pick one of its models in the model list."))
         }
-        HarnessKind::Harlo | HarnessKind::Demo => Err("harlo can't sign this agent in.".into()),
+        HarnessKind::Harlo => {
+            if report.host.is_some() {
+                return Err("Harlo runs only on this computer, so far.".into());
+            }
+            command(agent_command(k, "harlo-agent", None, &["login"])?, None, report, rx).await?;
+            Ok("Harlo is signed in with ChatGPT.".into())
+        }
+        HarnessKind::Demo => Err("harlo can't sign this agent in.".into()),
     }
 }
 
@@ -2658,6 +2687,17 @@ mod tests {
     }
 
     /// The server a session's model is on, among an agent's servers.
+    #[test]
+    fn harlo_agents_account() {
+        use super::harlo_accounts;
+        use serde_json::{Value, json};
+        assert_eq!(harlo_accounts(r#"{"signedIn":false,"email":""}"#).unwrap(), Vec::<Value>::new());
+        let a = harlo_accounts("{\"signedIn\":true,\"email\":\"me@example.com\"}\n").unwrap();
+        assert_eq!(a, vec![json!({ "id": "chatgpt", "label": "me@example.com", "detail": "ChatGPT plan", "signOut": true })]);
+        assert_eq!(harlo_accounts(r#"{"signedIn":true}"#).unwrap()[0]["label"], "ChatGPT");
+        assert!(harlo_accounts("Signed in with ChatGPT").is_err());
+    }
+
     #[test]
     fn finds_a_models_server() {
         use harlo_core::model_servers::Server;

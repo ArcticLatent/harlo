@@ -1396,7 +1396,7 @@ fn refused_by_limit(error: &str) -> bool {
 }
 
 fn asks_for_login(error: &str) -> bool {
-    ["/login", "No API key", "Failed to authenticate", "Not logged in", "Invalid API key"].iter().any(|said| error.contains(said))
+    ["/login", "No API key", "Failed to authenticate", "Not logged in", "Not signed in", "sign-in has ended", "refused the sign-in", "Invalid API key"].iter().any(|said| error.contains(said))
 }
 
 #[cfg(test)]
@@ -1413,6 +1413,7 @@ mod tests {
         assert!(super::asks_for_login("No API key found for openai.\n\nUse /login to log into a provider via OAuth or API key."));
         assert!(super::asks_for_login("No default model selected. Use /login, set an API key environment variable"));
         assert!(super::asks_for_login("Failed to authenticate: OAuth session expired and could not be refreshed"));
+        assert!(super::asks_for_login("Not signed in: run `harlo-agent login`"));
         assert!(!super::asks_for_login("Rate limit reached"));
     }
 
