@@ -532,7 +532,8 @@ pub mod qobject {
         /// Starts a session from the new-session page and sends its first
         /// message. `form` is JSON: `{ projectId (-1 = home), harness ("" =
         /// the project's), worktreeBranch ("" = current checkout), base,
-        /// starter (id or ""), text, attachments: [paths] }`.
+        /// starter (id or ""), text, attachments: [paths], approval ("" =
+        /// the agent's), model, plan (starts in Plan) }`.
         /// With a worktree, the session opens once it is ready and this
         /// returns ""; otherwise it returns the new session's key.
         #[qinvokable]
@@ -3163,6 +3164,8 @@ impl Workspace {
         let model = field("model");
         // The shield's mode to start in ("" the agent's own).
         let approval = Some(field("approval")).filter(|m| harlo_core::session::APPROVAL_MODES.contains(&m.as_str()));
+        // Started in Plan: a plan first, no files changed.
+        let plan = form["plan"] == true;
         let attachments: Vec<String> = form["attachments"].as_array().map(|a| a.iter().filter_map(|p| p.as_str().map(str::to_owned)).collect()).unwrap_or_default();
         let mut message = text.trim().to_owned();
         let harness_name = if harness.is_empty() {
@@ -3174,24 +3177,31 @@ impl Workspace {
             message = harlo_core::starters::wrap(s, &message);
         }
         let server = Some((harness_name.clone(), model.clone()));
-        let first = FirstPrompt { text: message, attachments: attachments.iter().map(|p| PathBuf::from(url_to_path(p))).collect(), server };
+        let mut first = FirstPrompt { text: message, attachments: attachments.iter().map(|p| PathBuf::from(url_to_path(p))).collect(), server };
         if first.text.trim().is_empty() && first.attachments.is_empty() {
             return QString::default();
         }
+        // (As the chat sends a message in Plan.)
+        if plan {
+            first.text.push_str(harlo_harness::file_blocks::PLAN_NOTE);
+        }
         if !worktree_branch.is_empty() {
-            self.create_worktree_session(project_id, &QString::from(&worktree_branch), &QString::from(&base), &QString::from(&harness_name), WorktreeStart { first: Some(first), approval, model, ..Default::default() });
+            self.create_worktree_session(project_id, &QString::from(&worktree_branch), &QString::from(&base), &QString::from(&harness_name), WorktreeStart { first: Some(first), approval, model, plan, ..Default::default() });
             return QString::default();
         }
         let key = self.as_mut().new_session_on(project_id, &harness_name, &model);
         if let Some(mode) = approval {
             self.as_mut().set_approval_mode(&QString::from(&key), &QString::from(&mode));
         }
+        if plan {
+            self.as_mut().set_plan_mode(&QString::from(&key), true);
+        }
         send_first_prompt(&key, first, Some(self.qt_thread()));
         QString::from(&key)
     }
 
     fn create_worktree_session(mut self: Pin<&mut Self>, project_id: i32, branch: &QString, base: &QString, harness: &QString, opts: WorktreeStart) {
-        let WorktreeStart { first, model, thinking, lane, parent, approval, plan_step } = opts;
+        let WorktreeStart { first, model, thinking, lane, parent, approval, plan, plan_step } = opts;
         let step_of = parent.as_ref().map(|(p, ..)| p.clone()).zip(plan_step);
         let Some((project, root)) = self.project_root(project_id) else {
             self.as_mut().set_notice_text("This project is not a git repository.", true);
@@ -3261,6 +3271,9 @@ impl Workspace {
                     }
                     if let Some(mode) = approval {
                         this.as_mut().set_approval_mode(&QString::from(&key), &QString::from(&mode));
+                    }
+                    if plan {
+                        this.as_mut().set_plan_mode(&QString::from(&key), true);
                     }
                     this.as_mut().apply_thinking(&key, &thinking);
                     if let Some(first) = first {
@@ -5873,6 +5886,8 @@ struct WorktreeStart {
     parent: Option<(String, String, bool)>,
     /// The shield's mode to start in.
     approval: Option<String>,
+    /// Starts in Plan.
+    plan: bool,
     /// The step of its parent's plan it does (a run with helpers).
     plan_step: Option<u32>,
 }
@@ -6265,7 +6280,7 @@ impl Workspace {
                         &QString::from(&branch),
                         &QString::default(),
                         &QString::from(kind.as_str()),
-                        WorktreeStart { first: Some(first), model, thinking: thinking.clone(), lane: None, parent: caller.as_ref().map(|_| (parent, title.clone(), notify)), approval, plan_step: None },
+                        WorktreeStart { first: Some(first), plan: false, model, thinking: thinking.clone(), lane: None, parent: caller.as_ref().map(|_| (parent, title.clone(), notify)), approval, plan_step: None },
                     );
                     return Ok(json!({ "status": "creating the worktree; the session starts in it shortly (see list_sessions)", "branch": branch, "title": title }));
                 }
@@ -6751,7 +6766,7 @@ impl Workspace {
                     &QString::from(&branch),
                     &QString::from(&base),
                     &QString::from(run.agent.as_str()),
-                    WorktreeStart { first: Some(first), model: run.model.clone(), thinking: run.thinking.clone(), lane: None, parent: Some((owner.to_owned(), title.clone(), true)), approval: approval.clone(), plan_step: Some(id) },
+                    WorktreeStart { first: Some(first), plan: false, model: run.model.clone(), thinking: run.thinking.clone(), lane: None, parent: Some((owner.to_owned(), title.clone(), true)), approval: approval.clone(), plan_step: Some(id) },
                 );
                 continue;
             }

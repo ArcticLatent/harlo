@@ -26,6 +26,8 @@ Rectangle {
         const modes = ["always-ask", "write", "yolo"]
         approval = modes[(modes.indexOf(shownApproval) + 1) % modes.length]
     }
+    // Build or Plan (Tab): the session starts planning, without changing files.
+    property bool planOn: false
     // Run in parallel: one prompt to several lanes (harness + model each).
     property bool parallel: false
     property var lanes: [{ harness: "harlo", model: "" }, { harness: "harlo", model: "" }]
@@ -208,6 +210,7 @@ Rectangle {
     }
     function reset() {
         input.text = ""
+        planOn = false
         starter = ""
         attachments = []
         useWorktree = false
@@ -234,7 +237,7 @@ Rectangle {
         const key = Workspace.startDraft(JSON.stringify({
             projectId: project ? projectId : -1, harness: effectiveHarness, worktreeBranch: useWorktree ? worktreeName.trim() : "",
             base: currentBranch, starter: starter, text: typeof instead === "string" ? instead : input.text, attachments: attachments,
-            approval: startApproval === "" ? "" : approval, model: activeModel
+            approval: startApproval === "" ? "" : approval, model: activeModel, plan: planOn
         }))
         reset()
         startedSession(key)
@@ -791,6 +794,7 @@ Rectangle {
                         placeholderTextColor: Theme.muted
                         placeholderText: root.starterInfo
                             ? root.starterInfo.prompt + "  Add details, or just send."
+                            : root.planOn ? "Plan: describe what to plan (no files change)…"
                             : "Plan, build, or ask."
                         background: null
                         padding: 4
@@ -805,6 +809,13 @@ Rectangle {
                             }
                             if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && !(event.modifiers & Qt.ShiftModifier)) {
                                 root.send()
+                                event.accepted = true
+                                return
+                            }
+                            // Tab / Shift+Tab: Build ↔ Plan, as in a chat.
+                            if (!root.parallel && (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)
+                                    && (event.modifiers & (Qt.ControlModifier | Qt.AltModifier)) === 0) {
+                                root.planOn = !root.planOn
                                 event.accepted = true
                             }
                         }
@@ -872,6 +883,18 @@ Rectangle {
                             tip: root.parallel ? "Run in parallel is on: the prompt goes to every lane above"
                                                : "Run in parallel: send the prompt to several models at once and compare"
                             onClicked: root.parallel = !root.parallel
+                        }
+                        // Build or Plan (Tab), as the chat's: the session starts in it.
+                        ComposerLabelButton {
+                            objectName: "draftModeButton"
+                            visible: !root.parallel
+                            iconName: "ai-agent"
+                            text: root.planOn ? "Plan" : "Build"
+                            tint: root.planOn ? Theme.warning : Theme.success
+                            tip: (root.planOn ? "Plan: the agent explores and proposes a plan; no files change"
+                                              : "Build: the agent makes changes")
+                                 + "\nClick or Tab to switch"
+                            onClicked: { root.planOn = !root.planOn; root.input.forceActiveFocus() }
                         }
                         // Fills the gap; shortens (then vanishes) before Send moves.
                         Label {
