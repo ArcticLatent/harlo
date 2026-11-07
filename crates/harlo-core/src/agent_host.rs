@@ -125,4 +125,58 @@ mod tests {
         assert_eq!(found.harness, HarnessKind::Harlo);
         remote::disconnect(&host);
     }
+
+    /// The same on a real machine (not run by default): `HARLO_TEST_HOST=<ssh
+    /// arguments, e.g. an alias> cargo test -p harlo-core -- --ignored harlo_agent_on_a_host`.
+    /// harlo-agent's settings, sign-in and sessions there are a scratch
+    /// folder's in its /tmp, removed after; harlo's cache there gets the copy.
+    #[test]
+    #[ignore]
+    fn harlo_agent_on_a_host() {
+        use std::time::Duration;
+        let ssh = remote::parse_ssh_command(&std::env::var("HARLO_TEST_HOST").expect("HARLO_TEST_HOST")).unwrap();
+        let host = remote::Host { name: "t".into(), ssh };
+        remote::set_hosts(vec![host.clone()]);
+        let info = remote::check(&host).unwrap();
+        println!("{} {}", info.os, info.arch);
+        assert_eq!(not_there(&info), None);
+        let started = std::time::Instant::now();
+        let path = program_on("t").unwrap();
+        println!("there in {:?}: {path}", started.elapsed());
+        let started = std::time::Instant::now();
+        assert_eq!(program_on("t").unwrap(), path);
+        println!("again in {:?}", started.elapsed());
+        let version = remote::run_ok(&host, &format!("{} --version", remote::quote(&path)), Duration::from_secs(30)).unwrap();
+        println!("{}", version.trim());
+        assert!(version.starts_with("harlo-agent "));
+
+        let scratch = remote::run_ok(&host, "mktemp -d /tmp/harlo-m5.XXXXXX", Duration::from_secs(30)).unwrap().trim().to_owned();
+        assert!(scratch.starts_with("/tmp/harlo-m5."), "{scratch}");
+        remote::run_ok(&host, &format!("mkdir {}", remote::quote(&format!("{scratch}/proj"))), Duration::from_secs(30)).unwrap();
+        harlo_harness::set_remote_program(remote_program);
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let outcome = runtime.block_on(async {
+            let cfg = harlo_harness::HarnessConfig {
+                kind: HarnessKind::Harlo,
+                program: None,
+                cwd: remote::join("t", &format!("{scratch}/proj")),
+                session: harlo_harness::SessionTarget::Ephemeral,
+                extra_args: vec![],
+                env: vec![("XDG_CONFIG_HOME".into(), format!("{scratch}/config")), ("XDG_DATA_HOME".into(), format!("{scratch}/data"))],
+                remote: Some(remote::launch(&host)),
+            };
+            let (harness, _events) = harlo_harness::Harness::spawn(cfg).unwrap();
+            let state = tokio::time::timeout(Duration::from_secs(30), harness.request(serde_json::json!({ "type": "get_state" }))).await;
+            let models = tokio::time::timeout(Duration::from_secs(30), harness.request(serde_json::json!({ "type": "get_available_models" }))).await;
+            harness.kill();
+            (state, models)
+        });
+        remote::run_ok(&host, &format!("rm -rf {}", remote::quote(&scratch)), Duration::from_secs(30)).unwrap();
+        let (state, models) = outcome;
+        let state = state.unwrap().unwrap();
+        println!("state: model {}, cwd {}", state["model"], state["cwd"]);
+        assert!(state.get("model").is_some(), "{state}");
+        assert!(models.unwrap().is_err_and(|e| e.to_string().contains("Not signed in")));
+        remote::disconnect(&host);
+    }
 }
