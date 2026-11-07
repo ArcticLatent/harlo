@@ -3966,7 +3966,9 @@ Popup {
                             icon: "harness-" + modelData
                             title: Theme.harnessLabel(modelData)
                             // (Harlo: harlo puts its agent there when it's needed.)
-                            detail: modelData === "harlo" ? (found ? "harlo puts its agent there as sessions start" : (h.harloWhy || "Not checked yet"))
+                            detail: modelData === "harlo" ? (found ? "harlo puts its agent there as sessions start"
+                                    + (Workspace.setting("harlo_sandbox") === "0" ? "" : h.bwrap === "no" ? " · Sandbox: needs bubblewrap" : h.bwrap === "blocked" ? " · Sandbox: bubblewrap can't run there" : "")
+                                : (h.harloWhy || "Not checked yet"))
                                 : install && install.state === "running" ? install.message
                                 : !found ? (install && install.state === "failed" ? install.message : "Not installed there")
                                 : (version !== "" ? "Version " + version : "Installed") + (h[modelData] ? " · " + h[modelData] : "")
@@ -4303,6 +4305,34 @@ Popup {
                 RowLayout {
                     Layout.topMargin: 8
                     FlatButton { objectName: "providersRefresh"; text: "Check again"; font.pixelSize: Theme.px(12); onClicked: Workspace.refreshProviders() }
+                }
+            }
+            Rule { }
+            SectionHeader { title: "Harlo" }
+            Group {
+                SettingRow {
+                    title: "Sandbox commands"
+                    detail: "Harlo's commands run with the system and your home folder read-only: they can change the project, /tmp and tool caches, and can't see SSH and GPG keys, credentials, sign-ins or browser profiles. Harlo's file tools keep to the same. A command that needs more asks you before it runs outside the sandbox. Needs bubblewrap (bwrap) on the machine the session runs on; MCP servers and harlo's tools aren't sandboxed. Applies to Harlo sessions started afterwards."
+                    icon: "shield-check"
+                    AppSwitch {
+                        id: harloSandboxSwitch
+                        objectName: "harloSandbox"
+                        checked: Workspace.setting("harlo_sandbox") !== "0"
+                        onToggled: Workspace.setSetting("harlo_sandbox", checked ? "1" : "0")
+                    }
+                }
+                SettingRow {
+                    divider: true
+                    enabled: harloSandboxSwitch.checked
+                    opacity: enabled ? 1 : 0.5
+                    title: "Sandboxed commands can use the network"
+                    detail: "Off: they can't reach the network, this machine's own servers included, so downloads by cargo, npm or git fetch fail."
+                    icon: "global"
+                    AppSwitch {
+                        objectName: "harloSandboxNet"
+                        checked: Workspace.setting("harlo_sandbox_net") !== "0"
+                        onToggled: Workspace.setSetting("harlo_sandbox_net", checked ? "1" : "0")
+                    }
                 }
             }
             Rule { }

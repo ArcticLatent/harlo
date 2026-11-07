@@ -168,6 +168,7 @@ impl Remotes {
                     "name": h.name, "ssh": ssh_text(h), "state": s.state, "message": s.message, "ping": s.ping,
                     "os": s.info.os, "home": s.info.home, "pi": s.info.pi, "omp": s.info.omp,
                     "claude": s.info.claude, "opencode": s.info.opencode, "hermes": s.info.hermes, "versions": s.info.versions, "claudeAuth": s.info.claude_auth,
+                    "bwrap": s.info.bwrap,
                     // (Harlo: harlo puts its agent there; or why it can't, once checked.)
                     "harlo": if !s.info.os.is_empty() && s.info.has("harlo") { "harlo's own" } else { "" },
                     "harloWhy": if s.info.os.is_empty() { None } else { harlo_core::agent_host::not_there(&s.info) },

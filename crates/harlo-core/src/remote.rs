@@ -488,6 +488,9 @@ pub struct HostInfo {
     /// Claude's sign-in there: "yes" (its credentials file), "keychain"
     /// (macOS keeps it where SSH can't look), "no".
     pub claude_auth: String,
+    /// bubblewrap there, for Harlo's sandbox: "yes", "no" (not installed),
+    /// "blocked" (it can't make a sandbox), "" (not checked).
+    pub bwrap: String,
 }
 
 /// How an agent starts on `host`: over its SSH connection, with its PATH
@@ -529,11 +532,22 @@ for p in pi omp claude opencode hermes; do
   if [ -n "$w" ]; then printf '%s_version=%s\n' "$p" "$(ver "$w" --version 2>/dev/null </dev/null | head -n 1)"; fi
 done
 c="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-if [ -s "$c/.credentials.json" ]; then echo claude_auth=yes; elif [ "$(uname -s)" = Darwin ]; then echo claude_auth=keychain; else echo claude_auth=no; fi"#;
+if [ -s "$c/.credentials.json" ]; then echo claude_auth=yes; elif [ "$(uname -s)" = Darwin ]; then echo claude_auth=keychain; else echo claude_auth=no; fi
+if command -v bwrap >/dev/null 2>&1; then if bwrap --unshare-all --die-with-parent --ro-bind / / --dev /dev --proc /proc true </dev/null >/dev/null 2>&1; then echo bwrap=yes; else echo bwrap=blocked; fi; else echo bwrap=no; fi"#;
 
 /// Connects (or reuses the connection) and looks around.
 pub fn check(host: &Host) -> Result<HostInfo> {
     let text = run_ok(host, CHECK_SCRIPT, Duration::from_secs(60))?;
+    let info = parse_check(&text);
+    if !info.home.is_empty() {
+        HOMES.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).insert(host.name.clone(), info.home.clone());
+    }
+    INFOS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).insert(host.name.clone(), info.clone());
+    Ok(info)
+}
+
+/// What CHECK_SCRIPT printed, read.
+fn parse_check(text: &str) -> HostInfo {
     let mut info = HostInfo::default();
     for line in text.lines() {
         if let Some((k, v)) = line.split_once('=') {
@@ -547,6 +561,7 @@ pub fn check(host: &Host) -> Result<HostInfo> {
                 "opencode" => info.opencode = v.to_owned(),
                 "hermes" => info.hermes = v.to_owned(),
                 "claude_auth" => info.claude_auth = v.to_owned(),
+                "bwrap" => info.bwrap = v.to_owned(),
                 k if k.ends_with("_version") => {
                     let number = crate::providers::version_number(v);
                     if !number.is_empty() {
@@ -557,11 +572,7 @@ pub fn check(host: &Host) -> Result<HostInfo> {
             }
         }
     }
-    if !info.home.is_empty() {
-        HOMES.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).insert(host.name.clone(), info.home.clone());
-    }
-    INFOS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).insert(host.name.clone(), info.clone());
-    Ok(info)
+    info
 }
 
 static INFOS: Mutex<Option<HashMap<String, HostInfo>>> = Mutex::new(None);
@@ -846,6 +857,17 @@ pub fn exists(path: &Path, dir: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_check_says_whether_bubblewrap_works() {
+        let line = CHECK_SCRIPT.lines().last().unwrap();
+        let run = |path: &str| String::from_utf8(std::process::Command::new("/bin/sh").arg("-c").arg(line).env("PATH", path).output().unwrap().stdout).unwrap();
+        assert_eq!(parse_check(&run("/nonexistent")).bwrap, "no");
+        let here = parse_check(&run(&std::env::var("PATH").unwrap_or_default())).bwrap;
+        assert!(["yes", "no", "blocked"].contains(&here.as_str()), "{here}");
+        let info = parse_check("os=Linux\narch=x86_64\nclaude_auth=no\nbwrap=blocked\n");
+        assert_eq!((info.os.as_str(), info.claude_auth.as_str(), info.bwrap.as_str()), ("Linux", "no", "blocked"));
+    }
 
     #[test]
     fn a_terminal_finds_the_agents_folders_that_are_there() {

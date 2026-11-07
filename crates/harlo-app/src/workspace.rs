@@ -1073,8 +1073,19 @@ fn due_resumes(resumes: &serde_json::Map<String, serde_json::Value>, now: i64) -
 /// not to: its session wouldn't be where it was started.
 /// harlo-agent: harlo's tools on its pipe (when orchestration is off,
 /// harlo says so and it has none).
-fn harlo_tools_arg(kind: HarnessKind) -> Option<String> {
-    (kind == HarnessKind::Harlo).then(|| "--harlo-tools".to_owned())
+/// Harlo's: harlo's tools, and its sandbox when it isn't the default
+/// (`sandbox`, `network`: Settings → Providers → Harlo).
+fn harlo_args(kind: HarnessKind, sandbox: bool, network: bool) -> Vec<String> {
+    if kind != HarnessKind::Harlo {
+        return Vec::new();
+    }
+    let mut args = vec!["--harlo-tools".to_owned()];
+    match (sandbox, network) {
+        (false, _) => args.extend(["--sandbox".into(), "off".into()]),
+        (true, false) => args.extend(["--sandbox".into(), "no-network".into()]),
+        (true, true) => {}
+    }
+    args
 }
 
 fn omp_home_arg(kind: HarnessKind, cwd: &Path) -> Option<String> {
@@ -1909,7 +1920,7 @@ impl Workspace {
                 program,
                 cwd: info.cwd.clone(),
                 session: SessionTarget::Resume(info.path.clone()),
-                extra_args: overlay.iter().map(|p| format!("--config={}", harlo_harness::on_host(p))).chain(omp_home_arg(info.harness, &info.cwd)).chain(harlo_tools_arg(info.harness)).collect(),
+                extra_args: overlay.iter().map(|p| format!("--config={}", harlo_harness::on_host(p))).chain(omp_home_arg(info.harness, &info.cwd)).chain(self.harlo_args(info.harness)).collect(),
                 // (Orchestration: the agent's harlo tools know who's calling.)
                 env: vec![("HARLO_SESSION".into(), token.clone())],
                 remote,
@@ -1968,7 +1979,7 @@ impl Workspace {
             // `--ephemeral` (testing): new sessions are not saved.
             session: if std::env::args().any(|a| a == "--ephemeral") { SessionTarget::Ephemeral } else { SessionTarget::New },
             extra_args: {
-                let mut args: Vec<String> = overlay.iter().map(|p| format!("--config={}", harlo_harness::on_host(p))).chain(omp_home_arg(kind, &cwd)).chain(harlo_tools_arg(kind)).collect();
+                let mut args: Vec<String> = overlay.iter().map(|p| format!("--config={}", harlo_harness::on_host(p))).chain(omp_home_arg(kind, &cwd)).chain(self.harlo_args(kind)).collect();
                 if !model.trim().is_empty() && kind != HarnessKind::Demo {
                     args.extend(["--model".into(), model.trim().to_owned()]);
                 }
@@ -3632,6 +3643,11 @@ impl Workspace {
     }
 
     /// A saved setting (`settings.<key>` in the database), or "".
+    /// Harlo's arguments, with its sandbox as set.
+    fn harlo_args(&self, kind: HarnessKind) -> Vec<String> {
+        harlo_args(kind, self.setting_str("harlo_sandbox") != "0", self.setting_str("harlo_sandbox_net") != "0")
+    }
+
     fn setting_str(&self, key: &str) -> String {
         self.db.as_ref().and_then(|db| db.get(&format!("settings.{key}")).ok().flatten()).unwrap_or_default()
     }
@@ -7737,6 +7753,15 @@ mod tests {
         assert!(super::is_home("/home/abra/", "/home/abra"));
         assert!(!super::is_home("/home/abra/project", "/home/abra"));
         assert!(!super::is_home("/", ""));
+    }
+
+    #[test]
+    fn harlos_sandbox_goes_on_its_command_line() {
+        use super::{HarnessKind, harlo_args};
+        assert_eq!(harlo_args(HarnessKind::Harlo, true, true), ["--harlo-tools"]);
+        assert_eq!(harlo_args(HarnessKind::Harlo, true, false), ["--harlo-tools", "--sandbox", "no-network"]);
+        assert_eq!(harlo_args(HarnessKind::Harlo, false, true), ["--harlo-tools", "--sandbox", "off"]);
+        assert!(harlo_args(HarnessKind::Pi, false, false).is_empty());
     }
 
     use super::url_to_path;

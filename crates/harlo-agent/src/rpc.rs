@@ -206,7 +206,7 @@ impl Gate for Approvals {
                 sh.waiting.lock().unwrap().insert(id.clone(), tx);
                 sh.emit(json!({
                     "type": "extension_ui_request", "id": id, "method": "select",
-                    "title": "Run outside the sandbox", "message": args["command"].as_str().unwrap_or_default(),
+                    "title": "Allow tool: bash\nOutside the sandbox", "message": args["command"].as_str().unwrap_or_default(),
                     "options": ["Approve", "Deny"],
                 }));
                 let answer = rx.await.unwrap_or(Value::Null);
