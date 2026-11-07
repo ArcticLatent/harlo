@@ -215,7 +215,7 @@ pub fn proposal_answer(started: Option<&[(String, Result<String, String>)]>) -> 
     let failed: Vec<String> = started.iter().filter_map(|(t, r)| r.as_ref().err().map(|e| format!("\"{t}\": {e}"))).collect();
     let mut text = String::from("[harlo] The user agreed to your split.");
     if !ok.is_empty() {
-        text.push_str(&format!(" harlo started your helpers: {}. Their reports come to you as they finish: end your turn now (don't poll), then check their work and combine it.", ok.join(", ")));
+        text.push_str(&format!(" harlo started your helpers: {}. Their reports come to you as they finish: end your turn now (don't poll), then check their work and combine it (a helper's in a worktree: bring its changes over with git, or by copying its files with cp; don't retype them).", ok.join(", ")));
     }
     if !failed.is_empty() {
         text.push_str(&format!(" These didn't start: {}. Do those parts yourself, or start them with start_session once the problem is fixed.", failed.join("; ")));
@@ -624,11 +624,14 @@ pub fn delegate_prompt(action: &str, members: &[Member], note: &str, worktree: b
         ),
         ("split", [m, ..]) => {
             let place = if worktree { ", each in its own new git worktree (pass a short branch name taken from its part as `worktree`)" } else { "" };
+            // (Their files are in their worktrees, which you can read: taken
+            // as they are, not written out again.)
+            let combine = if worktree { " (bring their changes over from their worktrees with git, or by copying their files with cp: don't retype them)" } else { "" };
             format!(
                 "Split this task into helpers that work at the same time. Find the parts that can be done independently (each one substantial, and not editing the same files; two to four is usually right), and start a helper for each with harlo's start_session tool: {}{place}, titled \"[Split] <the part>\". Keep for yourself what depends on the other parts, and do it once they've reported.\n\
                  Each helper has none of our context, so make its prompt a self-contained briefing: its part, why it exists, the relevant files (by path), what \"done\" looks like, and what not to touch (the other parts).\n\
                  If the task doesn't split well, tell me why and do it yourself.\n\
-                 Then end your turn. Their reports come back to you as [harlo] messages; don't poll. When they've all reported, check their work, combine it, and tell me what each did and what's left.\n\n\
+                 Then end your turn. Their reports come back to you as [harlo] messages; don't poll. When they've all reported, check their work, combine it{combine}, and tell me what each did and what's left.\n\n\
                  The task: {}",
                 m.describe(),
                 if note.is_empty() { "the current task." } else { note }
@@ -656,6 +659,7 @@ mod tests {
         let c = delegate_prompt("committee", &[m("Claude", "claude", ""), m("Harlo", "harlo", "google/gemini")], "flaky tests", false).unwrap();
         assert!(c.contains("- Claude (agent") && c.contains("- Harlo (agent \"harlo\", model \"google/gemini\")") && c.ends_with("The problem: flaky tests"));
         let s = delegate_prompt("split", &[m("Claude", "claude", "")], "", true).unwrap();
+        assert!(s.contains("don't retype them"), "{s}");
         assert!(s.contains("start a helper for each") && s.contains("each in its own new git worktree") && s.contains("[Split] <the part>") && s.ends_with("The task: the current task."));
         // A committee needs two.
         assert!(delegate_prompt("committee", &[m("Claude", "claude", "")], "", false).is_none());
