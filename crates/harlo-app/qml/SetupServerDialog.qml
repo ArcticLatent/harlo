@@ -22,7 +22,7 @@ AppDialog {
     readonly property string machine: host === "" ? "this computer" : host
     readonly property var hostAgents: Accounts.hostServers !== "" ? (JSON.parse(Accounts.hostServers)[host] || {}).agents || {} : ({})
     readonly property var agents: host !== ""
-        ? ["pi", "omp", "opencode", "hermes"].filter(id => hostAgents[id] !== undefined).map(id => ({ id: id, label: ({ pi: "pi", omp: "Oh My Pi", opencode: "OpenCode", hermes: "Hermes" })[id] }))
+        ? ["pi", "omp", "opencode", "hermes", "harlo"].filter(id => hostAgents[id] !== undefined).map(id => ({ id: id, label: ({ pi: "pi", omp: "Oh My Pi", opencode: "OpenCode", hermes: "Hermes", harlo: "Harlo" })[id] }))
         : (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()) : [])
             .filter(p => ["pi", "omp", "opencode", "hermes", "harlo"].includes(p.id) && p.state !== "missing")
     /// Opens it for `machine` ("" for this computer); while a setup runs,

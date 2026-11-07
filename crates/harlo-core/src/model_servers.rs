@@ -838,7 +838,7 @@ fn omp_with(text: &str, name: &str, base_url: &str, key: &str, models: &[Found])
 // starts there (a connection that ended took its forwards with it).
 
 /// The agents there whose files harlo writes servers to.
-pub const ON_HOST: [HarnessKind; 4] = [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::OpenCode, HarnessKind::Hermes];
+pub const ON_HOST: [HarnessKind; 5] = [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::OpenCode, HarnessKind::Hermes, HarnessKind::Harlo];
 
 /// An agent's server file on `host`, as an `ssh://` path (Hermes' is
 /// changed by Hermes there).
@@ -849,6 +849,8 @@ fn file_on(host: &str, kind: HarnessKind) -> Option<PathBuf> {
         HarnessKind::Omp => Some(home.join(".omp/agent/models.yml")),
         HarnessKind::OpenCode => Some(home.join(".config/opencode/opencode.json")),
         HarnessKind::Hermes => Some(crate::mcp::config_path(kind, &crate::mcp::Scope::Host(host.to_owned()))),
+        // (harlo's agent there, as it starts: no XDG_CONFIG_HOME set over SSH.)
+        HarnessKind::Harlo => Some(home.join(".config/harlo-agent/providers.json")),
         _ => None,
     }
 }
@@ -1188,6 +1190,14 @@ fn write(file: &Path, text: &str) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn harlos_servers_on_a_host() {
+        assert!(ON_HOST.contains(&HarnessKind::Harlo));
+        // (Where harlo-agent reads them there.)
+        let f = file_on("not-a-host", HarnessKind::Harlo).unwrap();
+        assert_eq!(f, crate::remote::join("not-a-host", "~/.config/harlo-agent/providers.json"));
+    }
 
     #[test]
     fn offers_thinking_levels() {
