@@ -153,8 +153,15 @@ pub fn assistant_message(items: &[Value], provider: &str, model: &str, usage: &V
 }
 
 /// pi's messages as the Responses API's `input`. Reasoning and call item
-/// ids go back only to the model (and provider) that made them.
-pub fn input(messages: &[Value], provider: &str, model: &str) -> Vec<Value> {
+/// ids go back only to the model (and provider) that made them. A tool's
+/// images follow its round's results, as the user's; `images` false (the
+/// model doesn't take them): a note in their place.
+pub fn input(messages: &[Value], provider: &str, model: &str, images: bool) -> Vec<Value> {
+    let image = |b: &Value| {
+        if images { json!({ "type": "input_image", "image_url": crate::images::data_url(b) }) } else { json!({ "type": "input_text", "text": crate::images::not_sent(model) }) }
+    };
+    // (A round's tool images, shown once its results are in.)
+    let mut shown: Vec<Value> = Vec::new();
     let text_of = |content: &Value| -> String {
         match content {
             Value::String(s) => s.clone(),
@@ -164,11 +171,20 @@ pub fn input(messages: &[Value], provider: &str, model: &str) -> Vec<Value> {
     };
     let mut out = Vec::new();
     for (i, m) in messages.iter().enumerate() {
+        if m["role"] != "toolResult" && !shown.is_empty() {
+            out.push(json!({ "role": "user", "content": std::mem::take(&mut shown) }));
+        }
         match m["role"].as_str() {
             Some("user") => {
                 let parts: Vec<Value> = match &m["content"] {
                     Value::String(s) => vec![json!({ "type": "input_text", "text": s })],
-                    Value::Array(blocks) => blocks.iter().filter_map(|b| b["text"].as_str()).map(|t| json!({ "type": "input_text", "text": t })).collect(),
+                    Value::Array(blocks) => blocks
+                        .iter()
+                        .filter_map(|b| match b["type"].as_str() {
+                            Some("image") => Some(image(b)),
+                            _ => b["text"].as_str().map(|t| json!({ "type": "input_text", "text": t })),
+                        })
+                        .collect(),
                     _ => Vec::new(),
                 };
                 if !parts.is_empty() {
@@ -213,10 +229,25 @@ pub fn input(messages: &[Value], provider: &str, model: &str) -> Vec<Value> {
             Some("toolResult") => {
                 let id = m["toolCallId"].as_str().unwrap_or_default();
                 let call_id = id.split_once('|').map_or(id, |(c, _)| c);
-                out.push(json!({ "type": "function_call_output", "call_id": call_id, "output": text_of(&m["content"]) }));
+                let pictures: Vec<&Value> = m["content"].as_array().into_iter().flatten().filter(|b| b["type"] == "image").collect();
+                let mut output = text_of(&m["content"]);
+                if !pictures.is_empty() {
+                    if images {
+                        let n = pictures.len();
+                        output.push_str(&format!("\n[{} shown after this round's results.]", if n == 1 { "Its image is".to_owned() } else { format!("Its {n} images are") }));
+                        shown.push(json!({ "type": "input_text", "text": format!("Images from {} (call {call_id}):", m["toolName"].as_str().unwrap_or("a tool")) }));
+                        shown.extend(pictures.into_iter().map(image));
+                    } else {
+                        output.push_str(&format!("\n{}", crate::images::not_sent(model)));
+                    }
+                }
+                out.push(json!({ "type": "function_call_output", "call_id": call_id, "output": output }));
             }
             _ => {}
         }
+    }
+    if !shown.is_empty() {
+        out.push(json!({ "role": "user", "content": shown }));
     }
     out
 }
@@ -407,6 +438,39 @@ mod tests {
     }
 
     #[test]
+    fn images_go_with_the_users_message_and_after_a_rounds_results() {
+        let img = json!({ "type": "image", "data": "QUJD", "mimeType": "image/png" });
+        let call = |id: &str| json!({ "type": "toolCall", "id": format!("{id}|fc_{id}"), "name": "read", "arguments": { "path": "a.png" } });
+        let result = |id: &str, with: bool| {
+            let mut c = vec![json!({ "type": "text", "text": "[Image: a.png]" })];
+            if with {
+                c.push(img.clone());
+            }
+            json!({ "role": "toolResult", "toolCallId": format!("{id}|fc_{id}"), "toolName": "read", "content": c, "isError": false })
+        };
+        let msgs = vec![
+            json!({ "role": "user", "content": [{ "type": "text", "text": "what's this" }, img.clone()] }),
+            json!({ "role": "assistant", "content": [call("c1"), call("c2")], "provider": "chatgpt", "model": "m1", "api": "openai-responses" }),
+            result("c1", true),
+            result("c2", false),
+            json!({ "role": "user", "content": [{ "type": "text", "text": "and?" }] }),
+        ];
+        let sent = input(&msgs, "chatgpt", "m1", true);
+        assert_eq!(sent[0]["content"], json!([{ "type": "input_text", "text": "what's this" }, { "type": "input_image", "image_url": "data:image/png;base64,QUJD" }]));
+        assert_eq!(sent[3]["output"], "[Image: a.png]\n[Its image is shown after this round's results.]");
+        assert_eq!(sent[4]["output"], "[Image: a.png]");
+        assert_eq!(sent[5], json!({ "role": "user", "content": [{ "type": "input_text", "text": "Images from read (call c1):" }, { "type": "input_image", "image_url": "data:image/png;base64,QUJD" }] }));
+        assert_eq!(sent[6]["content"][0]["text"], "and?");
+        // (At the end too.)
+        assert_eq!(input(&msgs[..3], "chatgpt", "m1", true).last().unwrap()["content"][1]["type"], "input_image");
+        // A model that doesn't take them: a note, and nothing after the results.
+        let plain = input(&msgs, "chatgpt", "m1", false);
+        assert_eq!(plain[0]["content"][1], json!({ "type": "input_text", "text": "[image: not sent, m1 doesn't take images]" }));
+        assert_eq!(plain[3]["output"], "[Image: a.png]\n[image: not sent, m1 doesn't take images]");
+        assert_eq!(plain.len(), 6);
+    }
+
+    #[test]
     fn a_reply_goes_back_as_it_came() {
         let items = vec![
             json!({ "type": "reasoning", "id": "rs_1", "summary": [{ "type": "summary_text", "text": "Look first." }], "encrypted_content": "enc" }),
@@ -422,16 +486,16 @@ mod tests {
         let result = json!({ "role": "toolResult", "toolCallId": "call_1|fc_1", "toolName": "read", "content": [{ "type": "text", "text": "fn a() {}" }], "isError": false });
         let msgs = vec![json!({ "role": "user", "content": [{ "type": "text", "text": "hi" }] }), reply, result];
 
-        let same = input(&msgs, "chatgpt", "m1");
+        let same = input(&msgs, "chatgpt", "m1", true);
         assert_eq!(same[1], items[0], "reasoning goes back whole");
         assert_eq!(same[2], json!({ "type": "message", "role": "assistant", "content": [{ "type": "output_text", "text": "Reading.", "annotations": [] }], "status": "completed", "id": "msg_1", "phase": "commentary" }));
         assert_eq!(same[3], json!({ "type": "function_call", "call_id": "call_1", "name": "read", "arguments": "{\"path\":\"a.rs\",\"limit\":5}", "id": "fc_1" }));
         assert_eq!(same[4], json!({ "type": "function_call_output", "call_id": "call_1", "output": "fn a() {}" }));
 
-        let other = input(&msgs, "chatgpt", "m2");
+        let other = input(&msgs, "chatgpt", "m2", true);
         assert_eq!(other.len(), 4, "another model gets no reasoning");
         assert!(other[2].get("id").is_none(), "nor the call's item id");
-        assert_eq!(input(&msgs, "openai", "m1").len(), 4, "nor the same model through another provider");
+        assert_eq!(input(&msgs, "openai", "m1", true).len(), 4, "nor the same model through another provider");
     }
 
     #[test]

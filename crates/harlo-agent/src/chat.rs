@@ -32,7 +32,10 @@ pub fn request(model: &str, instructions: &str, messages: &[Value], tools: &Valu
 
 /// pi's messages as chat messages. Thinking isn't sent back (servers
 /// differ on whether they take it).
-pub fn messages(history: &[Value]) -> Vec<Value> {
+/// pi's messages as Chat Completions'. A tool's images follow its round's
+/// results, as the user's; `images` false (`model` doesn't take them): a
+/// note in their place.
+pub fn messages(history: &[Value], model: &str, images: bool) -> Vec<Value> {
     let text_of = |content: &Value| -> String {
         match content {
             Value::String(s) => s.clone(),
@@ -40,10 +43,30 @@ pub fn messages(history: &[Value]) -> Vec<Value> {
             _ => String::new(),
         }
     };
+    let image = |b: &Value| {
+        if images { json!({ "type": "image_url", "image_url": { "url": crate::images::data_url(b) } }) } else { json!({ "type": "text", "text": crate::images::not_sent(model) }) }
+    };
+    // (A round's tool images, shown once its results are in.)
+    let mut shown: Vec<Value> = Vec::new();
     let mut out = Vec::new();
     for m in history {
+        if m["role"] != "toolResult" && !shown.is_empty() {
+            out.push(json!({ "role": "user", "content": std::mem::take(&mut shown) }));
+        }
         match m["role"].as_str() {
             Some("compactionSummary") => out.push(json!({ "role": "user", "content": crate::compact::replayed(m) })),
+            Some("user") | Some("custom") if crate::images::has_image(m) => {
+                let parts: Vec<Value> = m["content"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|b| match b["type"].as_str() {
+                        Some("image") => Some(image(b)),
+                        _ => b["text"].as_str().filter(|t| !t.is_empty()).map(|t| json!({ "type": "text", "text": t })),
+                    })
+                    .collect();
+                out.push(json!({ "role": "user", "content": parts }));
+            }
             Some("user") | Some("custom") => {
                 let text = text_of(&m["content"]);
                 if !text.is_empty() {
@@ -72,10 +95,26 @@ pub fn messages(history: &[Value]) -> Vec<Value> {
             }
             Some("toolResult") => {
                 let id = m["toolCallId"].as_str().unwrap_or_default();
-                out.push(json!({ "role": "tool", "tool_call_id": id.split_once('|').map_or(id, |(c, _)| c), "content": text_of(&m["content"]) }));
+                let call_id = id.split_once('|').map_or(id, |(c, _)| c);
+                let pictures: Vec<&Value> = m["content"].as_array().into_iter().flatten().filter(|b| b["type"] == "image").collect();
+                let mut content = text_of(&m["content"]);
+                if !pictures.is_empty() {
+                    if images {
+                        let n = pictures.len();
+                        content.push_str(&format!("\n[{} shown after this round's results.]", if n == 1 { "Its image is".to_owned() } else { format!("Its {n} images are") }));
+                        shown.push(json!({ "type": "text", "text": format!("Images from {} (call {call_id}):", m["toolName"].as_str().unwrap_or("a tool")) }));
+                        shown.extend(pictures.into_iter().map(image));
+                    } else {
+                        content.push_str(&format!("\n{}", crate::images::not_sent(model)));
+                    }
+                }
+                out.push(json!({ "role": "tool", "tool_call_id": call_id, "content": content }));
             }
             _ => {}
         }
+    }
+    if !shown.is_empty() {
+        out.push(json!({ "role": "user", "content": shown }));
     }
     out
 }
@@ -337,6 +376,25 @@ mod tests {
     }
 
     #[test]
+    fn images_as_chat_parts() {
+        let img = json!({ "type": "image", "data": "QUJD", "mimeType": "image/jpeg" });
+        let history = vec![
+            json!({ "role": "user", "content": [{ "type": "text", "text": "look" }, img.clone()] }),
+            json!({ "role": "assistant", "content": [{ "type": "toolCall", "id": "c1|x", "name": "mcp__s__shot", "arguments": {} }] }),
+            json!({ "role": "toolResult", "toolCallId": "c1|x", "toolName": "mcp__s__shot", "content": [{ "type": "text", "text": "[image 1: 2×2 JPEG, 1 KB]" }, img.clone(), img.clone()], "isError": false }),
+        ];
+        let sent = messages(&history, "m", true);
+        assert_eq!(sent[0]["content"], json!([{ "type": "text", "text": "look" }, { "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,QUJD" } }]));
+        assert_eq!(sent[2]["content"], "[image 1: 2×2 JPEG, 1 KB]\n[Its 2 images are shown after this round's results.]");
+        assert_eq!(sent[3]["role"], "user");
+        assert_eq!(sent[3]["content"].as_array().unwrap().len(), 3);
+        assert_eq!(sent[3]["content"][0]["text"], "Images from mcp__s__shot (call c1):");
+        let plain = messages(&history, "m", false);
+        assert_eq!(plain[0]["content"][1], json!({ "type": "text", "text": "[image: not sent, m doesn't take images]" }));
+        assert_eq!(plain.len(), 3);
+    }
+
+    #[test]
     fn history_as_chat_messages() {
         let history = vec![
             json!({ "role": "user", "content": [{ "type": "text", "text": "hi" }] }),
@@ -345,13 +403,13 @@ mod tests {
             json!({ "role": "custom", "customType": "turn_stopped", "content": "stopped", "display": false }),
             json!({ "role": "assistant", "content": [{ "type": "thinking", "thinking": "only thought" }] }),
         ];
-        assert_eq!(messages(&history), vec![
+        assert_eq!(messages(&history, "m", true), vec![
             json!({ "role": "user", "content": "hi" }),
             json!({ "role": "assistant", "content": "Reading.", "tool_calls": [{ "id": "call_1", "type": "function", "function": { "name": "read", "arguments": "{\"path\":\"a\"}" } }] }),
             json!({ "role": "tool", "tool_call_id": "call_1", "content": "A" }),
             json!({ "role": "user", "content": "stopped" }),
         ]);
-        let body = request("m", "be brief", &messages(&history[..1]), &json!([{ "name": "ls", "description": "list", "parameters": { "type": "object" } }]), None);
+        let body = request("m", "be brief", &messages(&history[..1], "m", true), &json!([{ "name": "ls", "description": "list", "parameters": { "type": "object" } }]), None);
         assert_eq!(body["messages"][0], json!({ "role": "system", "content": "be brief" }));
         assert_eq!(body["tools"][0]["function"]["name"], "ls");
         assert!(body.get("reasoning_effort").is_none());

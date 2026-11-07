@@ -42,7 +42,8 @@ pub fn keep(threshold: u64) -> u64 {
 }
 
 /// A message's size in tokens, roughly (4 characters a token): its text,
-/// thinking and calls, not the encrypted signatures kept beside them.
+/// thinking, calls and images, not the encrypted signatures kept beside
+/// them.
 pub fn estimate(m: &Value) -> u64 {
     let chars = match &m["content"] {
         Value::String(s) => s.len(),
@@ -52,6 +53,8 @@ pub fn estimate(m: &Value) -> u64 {
                 Some("text") => b["text"].as_str().map_or(0, str::len),
                 Some("thinking") => b["thinking"].as_str().map_or(0, str::len),
                 Some("toolCall") => b["name"].as_str().map_or(0, str::len) + b["arguments"].to_string().len(),
+                // (An image costs about the same whatever its bytes.)
+                Some("image") => crate::images::TOKENS as usize * 4,
                 _ => b.to_string().len(),
             })
             .sum(),
@@ -198,6 +201,13 @@ mod tests {
         assert_eq!(cut(&h, 100_000), None);
         let after_summary = vec![json!({ "role": "compactionSummary", "summary": "s" }), user(&big)];
         assert_eq!(cut(&after_summary, 10), None);
+    }
+
+    #[test]
+    fn an_image_counts_the_same_whatever_its_bytes() {
+        let img = |n: usize| json!({ "role": "user", "content": [{ "type": "image", "data": "A".repeat(n), "mimeType": "image/png" }] });
+        assert_eq!(estimate(&img(10)), estimate(&img(1_000_000)));
+        assert_eq!(estimate(&img(10)), crate::images::TOKENS + 4);
     }
 
     #[test]

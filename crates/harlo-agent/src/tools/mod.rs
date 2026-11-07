@@ -49,11 +49,14 @@ pub struct Outcome {
     pub text: String,
     pub failed: bool,
     pub details: Value,
+    /// Images it returns (pi's image blocks), shown to the model after the
+    /// text.
+    pub images: Vec<Value>,
 }
 
 impl Outcome {
     pub fn new(text: impl Into<String>, failed: bool) -> Outcome {
-        Outcome { text: text.into(), failed, details: Value::Null }
+        Outcome { text: text.into(), failed, details: Value::Null, images: Vec::new() }
     }
 }
 
@@ -143,6 +146,7 @@ impl Tools {
             matches!((when, modified), (Some(w), Some(m)) if m > w)
         });
         let mut out = Outcome::new(text, o.result["isError"] == true);
+        out.images = o.result["content"].as_array().into_iter().flatten().filter(|b| b["type"] == "image").cloned().collect();
         if let Some(p) = changed {
             out.text.push_str(&format!("\n\n[{} has changed since this was read: read it again for what it is now.]", p.display()));
         }
@@ -209,6 +213,16 @@ impl Tools {
             Err(e) => return fail(format!("Can't read {}: {e}", path.display())),
         };
         self.remember(&path);
+        if crate::images::mime_of(&bytes).is_some() {
+            return match crate::images::fit(&bytes) {
+                Ok(f) => {
+                    let mut out = ok(format!("[Image: {}, {}.]", path.display(), f.describe()));
+                    out.images.push(f.block());
+                    out
+                }
+                Err(why) => fail(format!("{} is an image, but it can't be shown: {why}.", path.display())),
+            };
+        }
         if bytes[..bytes.len().min(8192)].contains(&0) {
             return ok(format!("{} is a binary file ({} bytes).", path.display(), bytes.len()));
         }
@@ -419,6 +433,27 @@ mod tests {
         assert_eq!(ranged, "line 4000\nline 4001\nline 4002\n\n[Lines 4000-4002 of 5000. Read on with offset=4003.]");
         let small = t.call("read", &json!({ "path": "small.rs" })).await.text;
         assert!(small.ends_with("// 1500"), "a file that fits is read whole");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn an_image_read_is_shown_and_recalled() {
+        let dir = std::env::temp_dir().join(format!("harlo-agent-image-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dot = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==").unwrap();
+        std::fs::write(dir.join("dot.png"), &dot).unwrap();
+        std::fs::write(dir.join("fake.png"), b"\x89PNG not really").unwrap();
+        let t = Tools::new(dir.clone(), dir.join(".out"));
+        let o = t.call("read", &json!({ "path": "dot.png" })).await;
+        assert_eq!(o.text, format!("[Image: {}, 1×1 PNG, 1 KB.]", dir.join("dot.png").display()));
+        assert_eq!((o.images.len(), o.images[0]["mimeType"].as_str()), (1, Some("image/png")));
+        let bad = t.call("read", &json!({ "path": "fake.png" })).await;
+        assert!(bad.failed && bad.text.contains("is an image, but it can't be shown"), "{}", bad.text);
+        // Set aside, then recalled: the image comes back with it.
+        let result = json!({ "role": "toolResult", "toolCallId": "c1", "toolName": "read", "content": [{ "type": "text", "text": o.text }, o.images[0]], "timestamp": 0 });
+        t.set_aside([("c1".to_owned(), Original { result, read: None })], true);
+        let back = t.call("recall", &json!({ "id": "c1" })).await;
+        assert_eq!((back.images.len(), back.failed), (1, false));
         let _ = std::fs::remove_dir_all(dir);
     }
 

@@ -73,7 +73,7 @@ pub struct Ctx {
     pub parent_file: Option<PathBuf>,
     pub cache_key: String,
     pub notify: Option<Notify>,
-    pub windows: HashMap<String, u64>,
+    pub known: crate::agent::Known,
     /// Those running, by id: for cancelling one.
     pub running: Arc<Mutex<HashMap<String, CancellationToken>>>,
 }
@@ -134,6 +134,7 @@ async fn run_all(args: &Value, call_id: &str, ctx: &Ctx, stop: &CancellationToke
         text: text.trim_end().to_owned(),
         failed: done.iter().all(|d| d.status != "completed"),
         details: json!({ "progress": progress, "usage": { "requests": total.0, "input": total.1, "cached": total.2, "output": total.3 } }),
+        images: Vec::new(),
     }
 }
 
@@ -165,7 +166,7 @@ async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaph
     agent.gate = ctx.gate.clone();
     agent.allowed = Some(allowed);
     agent.cache_key = Some(format!("{}/task", ctx.cache_key));
-    agent.know_windows(ctx.windows.clone());
+    agent.known = ctx.known.clone();
     let _ = agent.rename(&description);
     ctx.tell(json!({ "type": "subagent_lifecycle", "payload": {
         "id": id, "agent": kind, "description": description, "assignment": prompt, "status": "running",
@@ -182,7 +183,7 @@ async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaph
         (Shown::Limits(l), Some(n)) => n(json!({ "type": "harlo_limits", "provider": l["provider"], "account": l["account"], "windows": l["windows"] })),
         _ => {}
     };
-    let ended = agent.run(&prompt, &token, &mut show).await;
+    let ended = agent.run(&prompt, &[], &token, &mut show).await;
     done.status = match &ended {
         Ok(Ended::Done) => "completed",
         Ok(Ended::Stopped) => "aborted",
@@ -255,7 +256,7 @@ mod tests {
     async fn bad_calls_are_refused() {
         let ctx = Ctx {
             model: "x/y".into(), effort: None, cwd: std::env::temp_dir(), gate: None, parent_file: None, cache_key: "k".into(),
-            notify: None, windows: HashMap::new(), running: Arc::default(),
+            notify: None, known: Default::default(), running: Arc::default(),
         };
         let stop = CancellationToken::new();
         assert!(run(&json!({}), "c", &ctx, &stop).await.failed);

@@ -136,8 +136,8 @@ impl Shared {
     }
 
     fn queue_update(&self) {
-        let inbox = self.inbox.lock().unwrap();
-        self.emit(json!({ "type": "queue_update", "steering": inbox.steering, "followUp": inbox.follow_up }));
+        let (steering, follow_up) = self.inbox.lock().unwrap().texts();
+        self.emit(json!({ "type": "queue_update", "steering": steering, "followUp": follow_up }));
     }
 
     /// Withdraws the approvals still shown (the run they were for ended).
@@ -155,7 +155,9 @@ impl Shared {
         let base = providers::resolve(key).map(|(p, _)| p.base_url).unwrap_or_default();
         json!({
             "provider": provider, "id": id, "name": m.as_ref().map_or(id, |m| m.name.as_str()),
-            "reasoning": reasoning, "baseUrl": base, "contextWindow": m.map_or(0, |m| m.context_window),
+            "reasoning": reasoning, "baseUrl": base, "contextWindow": m.as_ref().map_or(0, |m| m.context_window),
+            // (Not said: they're sent.)
+            "input": if m.and_then(|m| m.images) == Some(false) { json!(["text"]) } else { json!(["text", "image"]) },
         })
     }
 
@@ -370,6 +372,8 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
     };
     let busy = sh.running.lock().unwrap().is_some();
     let text = || cmd["message"].as_str().unwrap_or_default().to_owned();
+    // (Fitted to send; one that can't be sent says why in its place.)
+    let images = || crate::images::prompt_blocks(cmd["images"].as_array().map_or(&[][..], Vec::as_slice));
     match ty.as_str() {
         // "/compact [what to keep]", typed: as the compact command.
         "prompt" if text().trim() == "/compact" || text().trim_start().starts_with("/compact ") => {
@@ -393,20 +397,20 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
                 return reply(Err("A run is working: steer it or queue a follow-up.".into()));
             }
             if busy {
-                queue(sh, behavior == "steer", text());
+                queue(sh, behavior == "steer", text(), images());
                 return reply(Ok(Value::Null));
             }
-            match start(sh, agent, text()).await {
+            match start(sh, agent, text(), images()).await {
                 Ok(()) => reply(Ok(Value::Null)),
                 Err(e) => reply(Err(e)),
             }
         }
         "steer" | "follow_up" => {
             if busy {
-                queue(sh, ty == "steer", text());
+                queue(sh, ty == "steer", text(), images());
                 return reply(Ok(Value::Null));
             }
-            match start(sh, agent, text()).await {
+            match start(sh, agent, text(), images()).await {
                 Ok(()) => reply(Ok(Value::Null)),
                 Err(e) => reply(Err(e)),
             }
@@ -419,9 +423,9 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
             reply(Ok(Value::Null))
         }
         "clear_queue" => {
-            let taken = std::mem::take(&mut *sh.inbox.lock().unwrap());
+            let (steering, follow_up) = std::mem::take(&mut *sh.inbox.lock().unwrap()).texts();
             sh.queue_update();
-            reply(Ok(json!({ "steering": taken.steering, "followUp": taken.follow_up })))
+            reply(Ok(json!({ "steering": steering, "followUp": follow_up })))
         }
         "extension_ui_response" => {
             let ui = cmd["id"].as_str().unwrap_or_default();
@@ -636,10 +640,11 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
     }
 }
 
-fn queue(sh: &Shared, steer: bool, text: String) {
+fn queue(sh: &Shared, steer: bool, text: String, images: Vec<Value>) {
     {
         let mut inbox = sh.inbox.lock().unwrap();
-        if steer { inbox.steering.push(text) } else { inbox.follow_up.push(text) }
+        let m = crate::agent::Queued { text, images };
+        if steer { inbox.steering.push(m) } else { inbox.follow_up.push(m) }
     }
     sh.queue_update();
 }
@@ -670,7 +675,7 @@ async fn load_models(sh: &Shared) -> Result<(), String> {
 async fn compact_now(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, focus: Option<String>, reply_to: Option<Value>) {
     let mut a = agent.clone().lock_owned().await;
     let _ = load_models(sh).await;
-    a.know_windows(windows(sh));
+    a.known.add(sh.models.lock().unwrap().iter());
     let stop = CancellationToken::new();
     *sh.running.lock().unwrap() = Some(stop.clone());
     let sh = sh.clone();
@@ -711,15 +716,10 @@ async fn compact_now(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, f
     });
 }
 
-/// The context windows of the models listed.
-fn windows(sh: &Shared) -> Vec<(String, u64)> {
-    sh.models.lock().unwrap().iter().map(|m| (m.key(), m.context_window)).collect()
-}
-
-/// Starts a run on `prompt` (the agent is free).
-async fn start(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, prompt: String) -> Result<(), String> {
+/// Starts a run on `prompt` and its images (the agent is free).
+async fn start(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, prompt: String, images: Vec<Value>) -> Result<(), String> {
     let mut a = agent.clone().lock_owned().await;
-    a.know_windows(windows(sh));
+    a.known.add(sh.models.lock().unwrap().iter());
     if a.model.is_empty() {
         load_models(sh).await?;
         let m = sh.view.lock().unwrap().model.clone();
@@ -735,7 +735,7 @@ async fn start(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, prompt:
         sh.emit(json!({ "type": "agent_start" }));
         let shown = sh.clone();
         let mut show = |s: Shown| shown.show(s);
-        let result = a.run(&prompt, &stop, &mut show).await;
+        let result = a.run(&prompt, &images, &stop, &mut show).await;
         if let Err(e) = result {
             let _ = a.failed(&format!("{e:#}"), &mut show);
         }

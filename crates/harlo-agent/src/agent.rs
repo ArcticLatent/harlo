@@ -101,8 +101,42 @@ pub type Notify = Arc<dyn Fn(Value) + Send + Sync>;
 /// follow-ups when it would stop (one at a time).
 #[derive(Default)]
 pub struct Inbox {
-    pub steering: Vec<String>,
-    pub follow_up: Vec<String>,
+    pub steering: Vec<Queued>,
+    pub follow_up: Vec<Queued>,
+}
+
+/// A message waiting: its text, and the images with it (pi's blocks).
+pub struct Queued {
+    pub text: String,
+    pub images: Vec<Value>,
+}
+
+impl Inbox {
+    /// The texts waiting: steering, then follow-ups.
+    pub fn texts(&self) -> (Vec<String>, Vec<String>) {
+        let texts = |q: &[Queued]| q.iter().map(|m| m.text.clone()).collect();
+        (texts(&self.steering), texts(&self.follow_up))
+    }
+}
+
+/// What's known of the models used: their context windows (none or 0: not
+/// known), and whether they take images (see `ModelInfo::images`).
+#[derive(Clone, Default)]
+pub struct Known {
+    windows: HashMap<String, u64>,
+    images: HashMap<String, Option<bool>>,
+}
+
+impl Known {
+    /// Models as listed (a provider's, or harlo's list).
+    pub fn add<'a>(&mut self, models: impl IntoIterator<Item = &'a providers::ModelInfo>) {
+        for m in models {
+            if m.context_window > 0 {
+                self.windows.insert(m.key(), m.context_window);
+            }
+            self.images.insert(m.key(), m.images);
+        }
+    }
 }
 
 pub struct Agent {
@@ -116,8 +150,9 @@ pub struct Agent {
     ids: Vec<String>,
     /// The files read and changed, as the last compaction listed them.
     files: (Vec<String>, Vec<String>),
-    /// Context windows of the models used (0: not known).
-    windows: HashMap<String, u64>,
+    pub known: Known,
+    /// The model last told it isn't sent images (told once).
+    told_no_images: Option<String>,
     log: Log,
     /// The model and thinking level the log last recorded.
     logged: (Option<String>, Option<String>),
@@ -168,7 +203,8 @@ impl Agent {
             history: past.messages,
             ids: past.ids,
             files: past.files,
-            windows: HashMap::new(),
+            known: Known::default(),
+            told_no_images: None,
             log,
             logged: (past.model, past.effort),
             totals: Totals::default(),
@@ -223,10 +259,6 @@ impl Agent {
         self.log.append(json!({ "type": "session_info", "name": name })).map(|_| ())
     }
 
-    /// Models' context windows already known (as listed elsewhere).
-    pub fn know_windows(&mut self, windows: impl IntoIterator<Item = (String, u64)>) {
-        self.windows.extend(windows.into_iter().filter(|(_, w)| *w > 0));
-    }
 
     fn push(&mut self, message: Value, show: &mut (dyn FnMut(Shown) + Send)) -> Result<()> {
         let id = self.log.message(&message)?;
@@ -239,19 +271,25 @@ impl Agent {
         Ok(())
     }
 
-    fn push_user(&mut self, text: &str, show: &mut (dyn FnMut(Shown) + Send)) -> Result<()> {
-        self.push(json!({ "role": "user", "content": [{ "type": "text", "text": text }], "timestamp": now_ms() }), show)
+    /// `images`: pi's image blocks, after the text.
+    fn push_user(&mut self, text: &str, images: &[Value], show: &mut (dyn FnMut(Shown) + Send)) -> Result<()> {
+        let mut content = Vec::new();
+        if !text.is_empty() || images.is_empty() {
+            content.push(json!({ "type": "text", "text": text }));
+        }
+        content.extend(images.iter().cloned());
+        self.push(json!({ "role": "user", "content": content, "timestamp": now_ms() }), show)
     }
 
     /// Delivers the steering messages waiting (true if there were any).
     fn take_steering(&mut self, show: &mut (dyn FnMut(Shown) + Send)) -> Result<bool> {
-        let texts: Vec<String> = std::mem::take(&mut self.inbox.lock().unwrap().steering);
-        if texts.is_empty() {
+        let waiting: Vec<Queued> = std::mem::take(&mut self.inbox.lock().unwrap().steering);
+        if waiting.is_empty() {
             return Ok(false);
         }
         self.show_queue(show);
-        for t in texts {
-            self.push_user(&t, show)?;
+        for m in waiting {
+            self.push_user(&m.text, &m.images, show)?;
         }
         Ok(true)
     }
@@ -261,21 +299,22 @@ impl Agent {
             let mut inbox = self.inbox.lock().unwrap();
             (!inbox.follow_up.is_empty()).then(|| inbox.follow_up.remove(0))
         };
-        let Some(t) = next else { return Ok(false) };
+        let Some(m) = next else { return Ok(false) };
         self.show_queue(show);
-        self.push_user(&t, show)?;
+        self.push_user(&m.text, &m.images, show)?;
         Ok(true)
     }
 
     fn show_queue(&self, show: &mut (dyn FnMut(Shown) + Send)) {
-        let inbox = self.inbox.lock().unwrap();
-        show(Shown::Queue { steering: &inbox.steering, follow_up: &inbox.follow_up });
+        let (steering, follow_up) = self.inbox.lock().unwrap().texts();
+        show(Shown::Queue { steering: &steering, follow_up: &follow_up });
     }
 
-    /// Works on `prompt` until the model is done, or until `stop` is
-    /// cancelled: then what was running ends (commands with everything
-    /// they started), and the history says what was cut off.
-    pub async fn run(&mut self, prompt: &str, stop: &CancellationToken, show: &mut (dyn FnMut(Shown) + Send)) -> Result<Ended> {
+    /// Works on `prompt` (and `images` with it, pi's blocks) until the
+    /// model is done, or until `stop` is cancelled: then what was running
+    /// ends (commands with everything they started), and the history says
+    /// what was cut off.
+    pub async fn run(&mut self, prompt: &str, images: &[Value], stop: &CancellationToken, show: &mut (dyn FnMut(Shown) + Send)) -> Result<Ended> {
         if self.logged.0.as_deref() != Some(&self.model) {
             let (provider, id) = self.model.split_once('/').unwrap_or((providers::CHATGPT, &self.model));
             self.log.append(json!({ "type": "model_change", "provider": provider, "modelId": id }))?;
@@ -287,7 +326,7 @@ impl Agent {
         }
         self.ask_harlo().await;
         self.start_mcp(show).await;
-        self.push_user(prompt, show)?;
+        self.push_user(prompt, images, show)?;
         // A request too long for the model: sent again with old outputs set
         // aside, then (still too long) compacted: 0, 1, 2 steps taken.
         let mut overflow = 0;
@@ -382,9 +421,11 @@ impl Agent {
             handed_over |= hands_over(&names, &outcomes);
             for ((c, name), o) in calls.iter().zip(&names).zip(outcomes) {
                 show(Shown::ToolEnd { call_id: c["id"].as_str().unwrap_or_default(), name, text: &o.text, failed: o.failed });
+                let mut content = vec![json!({ "type": "text", "text": o.text })];
+                content.extend(o.images);
                 let mut result = json!({
                     "role": "toolResult", "toolCallId": c["id"], "toolName": c["name"],
-                    "content": [{ "type": "text", "text": o.text }], "isError": o.failed, "timestamp": now_ms(),
+                    "content": content, "isError": o.failed, "timestamp": now_ms(),
                 });
                 if !o.details.is_null() {
                     // (Subagents' requests count as this session's.)
@@ -423,9 +464,14 @@ impl Agent {
 
     /// One request with the history: the reply, as pi's assistant message.
     async fn ask(&mut self, show: &mut (dyn FnMut(Shown) + Send)) -> Result<Value> {
+        let images = self.takes_images().await;
+        if !images && self.told_no_images.as_ref() != Some(&self.model) && self.history.iter().any(crate::images::has_image) {
+            show(Shown::Notice { level: "warning", text: &format!("{} doesn't take images: they aren't sent to it, and it's told there was one.", self.model) });
+            self.told_no_images = Some(self.model.clone());
+        }
         let (system, specs) = (self.system(), self.specs());
         let key = self.cache_key.clone().unwrap_or_else(|| self.log.id.clone());
-        let asked = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &self.history, session: &key, specs: &specs, tools: true };
+        let asked = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &self.history, session: &key, specs: &specs, tools: true, images };
         let (message, usage) = send(asked, show).await?;
         self.count(&usage);
         show(Shown::Usage { model: message["model"].as_str().unwrap_or_default(), usage: &usage });
@@ -442,7 +488,7 @@ impl Agent {
             parent_file: (!self.log.path.as_os_str().is_empty()).then(|| self.log.path.clone()),
             cache_key: self.cache_key.clone().unwrap_or_else(|| self.log.id.clone()),
             notify: self.notify.clone(),
-            windows: self.windows.clone(),
+            known: self.known.clone(),
             running: self.subagents.clone(),
         }
     }
@@ -522,18 +568,36 @@ impl Agent {
     /// The model's context window (0: not known), asked of its provider
     /// once.
     async fn window(&mut self) -> u64 {
-        if let Some(w) = self.windows.get(&self.model) {
-            return *w;
+        if !self.known.windows.contains_key(&self.model) {
+            self.ask_models().await;
         }
-        let w = match providers::resolve(&self.model) {
-            Ok((p, id)) => match tokio::time::timeout(Duration::from_secs(10), p.models()).await {
-                Ok(Ok(list)) => list.iter().find(|m| m.id == id).map_or(0, |m| m.context_window),
-                _ => 0,
-            },
-            Err(_) => 0,
-        };
-        self.windows.insert(self.model.clone(), w);
-        w
+        *self.known.windows.entry(self.model.clone()).or_insert(0)
+    }
+
+    /// Whether the model takes images (when it doesn't say, it's taken to),
+    /// asked of its provider once.
+    async fn takes_images(&mut self) -> bool {
+        if !self.known.images.contains_key(&self.model) {
+            self.ask_models().await;
+        }
+        self.known.images.entry(self.model.clone()).or_insert(None).unwrap_or(true)
+    }
+
+    /// What the model's provider lists of it (and its others): asked once,
+    /// so what's not said stays unknown.
+    async fn ask_models(&mut self) {
+        if let Ok((p, id)) = providers::resolve(&self.model)
+            && let Ok(Ok(list)) = tokio::time::timeout(Duration::from_secs(10), p.models()).await
+        {
+            self.known.add(&list);
+            // (Under the name the session uses.)
+            if let Some(m) = list.iter().find(|m| m.id == id) {
+                self.known.windows.insert(self.model.clone(), m.context_window);
+                self.known.images.insert(self.model.clone(), m.images);
+            }
+        }
+        self.known.windows.entry(self.model.clone()).or_insert(0);
+        self.known.images.entry(self.model.clone()).or_insert(None);
     }
 
     /// Whether the context is past where old outputs are set aside: how
@@ -602,7 +666,8 @@ impl Agent {
         asked.push(json!({ "role": "user", "content": [{ "type": "text", "text": compact::request(focus) }], "timestamp": now_ms() }));
         let (system, specs) = (self.system(), self.specs());
         let key = self.cache_key.clone().unwrap_or_else(|| self.log.id.clone());
-        let request = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &asked, session: &key, specs: &specs, tools: false };
+        let images = self.takes_images().await;
+        let request = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &asked, session: &key, specs: &specs, tools: false, images };
         // (The summary isn't shown as it's written.)
         let mut quiet = |_: Shown| {};
         let sent = tokio::select! {
@@ -668,6 +733,8 @@ struct Asked<'a> {
     /// Whether the model may call tools (they're sent either way, so the
     /// request starts as the session's others do and their cache serves it).
     tools: bool,
+    /// Whether the model takes images (otherwise a note goes in their place).
+    images: bool,
 }
 
 /// Sends a request: the reply, as pi's assistant message, and its usage.
@@ -679,14 +746,14 @@ async fn send(a: Asked<'_>, show: &mut (dyn FnMut(Shown) + Send)) -> Result<(Val
     show(Shown::MessageStart(&json!({ "role": "assistant", "content": [], "api": api, "provider": pid, "model": model, "timestamp": now_ms() })));
     let effort = provider.effort(&model, a.effort);
     if provider.api == Api::Chat {
-        let mut body = chat::request(&model, a.instructions, &chat::messages(a.history), a.specs, effort.as_deref());
+        let mut body = chat::request(&model, a.instructions, &chat::messages(a.history, &model, a.images), a.specs, effort.as_deref());
         if !a.tools {
             body["tool_choice"] = json!("none");
         }
         let token = provider.token(false).await?;
         return chat::stream(&provider.base_url, token.as_deref(), &body, &pid, &model, |e| show(Shown::Stream(e))).await;
     }
-    let input = responses::input(a.history, &pid, &model);
+    let input = responses::input(a.history, &pid, &model, a.images);
     let mut body = responses::request(&model, a.instructions, &input, a.specs.clone(), effort.as_deref(), a.session);
     if !a.tools {
         body["tool_choice"] = json!("none");

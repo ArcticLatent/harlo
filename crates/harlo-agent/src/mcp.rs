@@ -225,22 +225,32 @@ pub fn tool_name(server: &str, tool: &str, taken: &HashSet<String>) -> String {
     format!("{}_{hash}", &name[..name.len().min(NAME_MAX - 9)])
 }
 
-/// A tool's result as text for the model, and whether it failed.
-pub fn result_text(result: &Value) -> (String, bool) {
+/// A tool's result as text for the model, whether it failed, and its
+/// images (pi's blocks, fitted; the text says where each was).
+pub fn result_text(result: &Value) -> (String, bool, Vec<Value>) {
     let mut parts = Vec::new();
+    let mut images = Vec::new();
+    let about = |data: &Value| data.as_str().map_or(0, |d| d.len() * 3 / 4).div_ceil(1024);
+    let mut image = |data: &Value, mime: &str, parts: &mut Vec<String>| match crate::images::from_block(&json!({ "data": data })) {
+        Ok(f) => {
+            parts.push(format!("[image {}: {}]", images.len() + 1, f.describe()));
+            images.push(f.block());
+        }
+        Err(why) => parts.push(format!("[image ({mime}, about {} KB): not shown, {why}]", about(data))),
+    };
     for c in result["content"].as_array().into_iter().flatten() {
         let mime = c["mimeType"].as_str().unwrap_or("unknown type");
         match c["type"].as_str().unwrap_or_default() {
             "text" => parts.push(c["text"].as_str().unwrap_or_default().to_owned()),
-            "image" | "audio" => {
-                let size = c["data"].as_str().map_or(0, |d| d.len() * 3 / 4);
-                parts.push(format!("[{} ({mime}, about {} KB): not shown, Harlo can't take images yet]", c["type"].as_str().unwrap_or_default(), size.div_ceil(1024)));
-            }
+            "image" => image(&c["data"], mime, &mut parts),
+            "audio" => parts.push(format!("[audio ({mime}, about {} KB): not shown, Harlo doesn't take audio]", about(&c["data"]))),
             "resource" => {
                 let r = &c["resource"];
+                let mime = r["mimeType"].as_str().unwrap_or("binary");
                 match r["text"].as_str() {
                     Some(t) => parts.push(t.to_owned()),
-                    None => parts.push(format!("[resource {} ({})]", r["uri"].as_str().unwrap_or_default(), r["mimeType"].as_str().unwrap_or("binary"))),
+                    None if mime.starts_with("image/") && r["blob"].is_string() => image(&r["blob"], mime, &mut parts),
+                    None => parts.push(format!("[resource {} ({mime})]", r["uri"].as_str().unwrap_or_default())),
                 }
             }
             "resource_link" => parts.push(format!("[link: {} {}]", c["uri"].as_str().unwrap_or_default(), c["name"].as_str().unwrap_or_default()).trim_end().to_owned()),
@@ -254,7 +264,7 @@ pub fn result_text(result: &Value) -> (String, bool) {
     }
     let failed = result["isError"] == true;
     let text = parts.join("\n");
-    (if text.trim().is_empty() { if failed { "The tool failed and said nothing more.".into() } else { "(no output)".into() } } else { text }, failed)
+    (if text.trim().is_empty() { if failed { "The tool failed and said nothing more.".into() } else { "(no output)".into() } } else { text }, failed, images)
 }
 
 // ------------------------------------------------------------ connections
@@ -708,8 +718,10 @@ impl Mcp {
         let args = if args.is_object() { args.clone() } else { json!({}) };
         match s.conn.request("tools/call", json!({ "name": tool, "arguments": args }), CALL_TIMEOUT).await {
             Ok(result) => {
-                let (text, failed) = result_text(&result);
-                Outcome::new(bash::shorten(&text, text.len(), spill_dir), failed)
+                let (text, failed, images) = result_text(&result);
+                let mut out = Outcome::new(bash::shorten(&text, text.len(), spill_dir), failed);
+                out.images = images;
+                out
             }
             Err(e) => Outcome::new(format!("MCP server {}: {e}", s.name), true),
         }
@@ -764,17 +776,23 @@ mod tests {
 
     #[test]
     fn turns_results_into_text() {
+        let dot = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
         let r = json!({ "content": [
             { "type": "text", "text": "hello" },
             { "type": "image", "mimeType": "image/png", "data": "A".repeat(4000) },
+            { "type": "image", "mimeType": "image/png", "data": dot },
+            { "type": "audio", "mimeType": "audio/wav", "data": "AAAA" },
             { "type": "resource", "resource": { "uri": "file:///a", "text": "inside" } },
             { "type": "resource", "resource": { "uri": "file:///b", "mimeType": "application/pdf", "blob": "AA" } },
+            { "type": "resource", "resource": { "uri": "file:///d.png", "mimeType": "image/png", "blob": dot } },
             { "type": "resource_link", "uri": "file:///c", "name": "c" },
         ] });
-        let (text, failed) = result_text(&r);
+        let (text, failed, images) = result_text(&r);
         assert!(!failed);
-        assert_eq!(text, "hello\n[image (image/png, about 3 KB): not shown, Harlo can't take images yet]\ninside\n[resource file:///b (application/pdf)]\n[link: file:///c c]");
-        assert_eq!(result_text(&json!({ "content": [], "structuredContent": { "n": 1 } })), ("{\"n\":1}".into(), false));
+        assert_eq!(text, "hello\n[image (image/png, about 3 KB): not shown, it isn't a PNG, JPEG, GIF or WebP image]\n[image 1: 1×1 PNG, 1 KB]\n[audio (audio/wav, about 1 KB): not shown, Harlo doesn't take audio]\ninside\n[resource file:///b (application/pdf)]\n[image 2: 1×1 PNG, 1 KB]\n[link: file:///c c]");
+        assert_eq!(images.len(), 2);
+        assert_eq!((images[0]["type"].as_str(), images[0]["mimeType"].as_str(), images[0]["data"].as_str()), (Some("image"), Some("image/png"), Some(dot)));
+        assert_eq!(result_text(&json!({ "content": [], "structuredContent": { "n": 1 } })), ("{\"n\":1}".into(), false, vec![]));
         assert_eq!(result_text(&json!({ "content": [], "isError": true })).1, true);
         assert_eq!(result_text(&json!({ "content": [] })).0, "(no output)");
     }

@@ -25,6 +25,7 @@ mod agent;
 mod auth;
 mod chat;
 mod compact;
+mod images;
 mod mcp;
 mod providers;
 mod responses;
@@ -108,7 +109,7 @@ async fn run(args: Vec<String>) -> Result<()> {
                 eprintln!("{e}");
             }
             if args.get(1).is_some_and(|a| a == "--json") {
-                let list: Vec<_> = models.iter().map(|m| serde_json::json!({ "provider": m.provider, "id": m.id, "name": m.name, "contextWindow": m.context_window, "levels": m.levels })).collect();
+                let list: Vec<_> = models.iter().map(|m| serde_json::json!({ "provider": m.provider, "id": m.id, "name": m.name, "contextWindow": m.context_window, "levels": m.levels, "images": m.images })).collect();
                 println!("{:#}", serde_json::Value::from(list));
                 return Ok(());
             }
@@ -143,6 +144,7 @@ async fn run(args: Vec<String>) -> Result<()> {
             let mut model = None;
             let mut effort = None;
             let mut from = Resume::New;
+            let mut images = Vec::new();
             let mut it = args.into_iter().skip(1);
             let prompt = it.next();
             while let Some(a) = it.next() {
@@ -151,17 +153,24 @@ async fn run(args: Vec<String>) -> Result<()> {
                     "--thinking" => effort = it.next(),
                     "--resume" | "-c" => from = Resume::Latest,
                     "--session" => from = Resume::File(it.next().ok_or_else(|| anyhow::anyhow!("--session needs the file"))?.into()),
+                    "--image" => images.push(image_file(&it.next().ok_or_else(|| anyhow::anyhow!("--image needs the file"))?)?),
                     other => bail!("unknown option {other}"),
                 }
             }
             let Some(prompt) = prompt else { bail!("-p needs the prompt") };
-            ask(&prompt, model, effort, from).await
+            ask(&prompt, &images, model, effort, from).await
         }
         _ => {
-            println!("harlo-agent login [--codex] | logout [--codex] | status | usage | models | -p \"prompt\" [-m model] [--thinking low|medium|high] [--resume | --session file]");
+            println!("harlo-agent login [--codex] | logout [--codex] | status | usage | models | -p \"prompt\" [--image file]… [-m model] [--thinking low|medium|high] [--resume | --session file]");
             Ok(())
         }
     }
+}
+
+/// An image given with `-p`, as it'll be sent.
+fn image_file(path: &str) -> Result<serde_json::Value> {
+    let bytes = std::fs::read(path).map_err(|e| anyhow::anyhow!("Can't read {path}: {e}"))?;
+    images::fit(&bytes).map(|f| f.block()).map_err(|why| anyhow::anyhow!("Can't send {path}: {why}"))
 }
 
 /// Which sign-in a command is for: `--codex`, else the plan's.
@@ -198,7 +207,7 @@ enum Resume {
     File(std::path::PathBuf),
 }
 
-async fn ask(prompt: &str, model: Option<String>, effort: Option<String>, from: Resume) -> Result<()> {
+async fn ask(prompt: &str, images: &[serde_json::Value], model: Option<String>, effort: Option<String>, from: Resume) -> Result<()> {
     let cwd = std::env::current_dir()?;
     let root = session::root().ok_or_else(|| anyhow::anyhow!("No home folder to keep sessions in"))?;
     let loaded = match from {
@@ -324,7 +333,7 @@ async fn ask(prompt: &str, model: Option<String>, effort: Option<String>, from: 
             }
         }
     });
-    let result = agent.run(prompt, &stop, &mut show).await;
+    let result = agent.run(prompt, images, &stop, &mut show).await;
     if matches!(result, Ok(agent::Ended::Stopped)) {
         eprintln!("\x1b[0m\x1b[33mStopped.\x1b[0m");
     }

@@ -87,6 +87,8 @@ pub struct ModelInfo {
     /// The effort each level sends, from a `thinkingLevelMap` ("off" may
     /// send "none"); empty: a level sends its name, and "off" nothing.
     pub efforts: Vec<(String, String)>,
+    /// Whether it takes images (None: not said; they're sent).
+    pub images: Option<bool>,
 }
 
 impl ModelInfo {
@@ -249,7 +251,8 @@ fn parse_provider(id: &str, p: &Value) -> Result<Provider> {
                 _ if m["reasoning"] == true => REASONING_LEVELS.iter().map(|l| l.to_string()).collect(),
                 _ => Vec::new(),
             };
-            Some(ModelInfo { provider: id.clone(), id: mid, name, context_window: m["contextWindow"].as_u64().unwrap_or(0), levels, efforts })
+            let images = m["input"].as_array().map(|i| i.iter().any(|t| t == "image"));
+            Some(ModelInfo { provider: id.clone(), id: mid, name, context_window: m["contextWindow"].as_u64().unwrap_or(0), levels, efforts, images })
         })
         .collect();
     Ok(Provider { name: p["name"].as_str().filter(|s| !s.is_empty()).unwrap_or(&id).to_owned(), id, base_url, api, key, models })
@@ -264,7 +267,20 @@ pub fn parse_models(provider: &str, body: &Value) -> Vec<ModelInfo> {
     let levels = |m: &Value| -> Vec<String> {
         m["supported_reasoning_levels"].as_array().into_iter().flatten().filter_map(|l| l["effort"].as_str().or_else(|| l.as_str()).map(str::to_owned)).collect()
     };
-    let info = |m: &Value, id: &str, name: &str| ModelInfo { provider: provider.to_owned(), id: id.to_owned(), name: name.to_owned(), context_window: window(m), levels: levels(m), efforts: Vec::new() };
+    // (The plan's `input_modalities`; an Ollama-style list's capabilities.)
+    let images = |m: &Value| -> Option<bool> {
+        let said = |v: &Value, words: &[&str]| v.as_array().map(|l| l.iter().any(|t| t.as_str().is_some_and(|t| words.contains(&t))));
+        said(&m["input_modalities"], &["image"]).or_else(|| said(&m["capabilities"], &["vision", "multimodal"]))
+    };
+    let info = |m: &Value, id: &str, name: &str| ModelInfo {
+        provider: provider.to_owned(),
+        id: id.to_owned(),
+        name: name.to_owned(),
+        context_window: window(m),
+        levels: levels(m),
+        efforts: Vec::new(),
+        images: images(m),
+    };
     // (The plan's list has slugs; llama.cpp sends an Ollama-style `models`
     // beside its `data`.)
     if let Some(list) = body["models"].as_array().filter(|l| body["data"].is_null() || l.iter().any(|m| m["slug"].is_string())) {
@@ -277,7 +293,14 @@ pub fn parse_models(provider: &str, body: &Value) -> Vec<ModelInfo> {
             })
             .collect();
     }
-    body["data"].as_array().into_iter().flatten().filter_map(|m| m["id"].as_str().map(|id| info(m, id, &short_name(id)))).collect()
+    // (llama.cpp's capabilities are in the other list.)
+    let beside = |id: &str| body["models"].as_array().into_iter().flatten().find(|m| m["model"] == id || m["name"] == id).and_then(images);
+    body["data"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|m| m["id"].as_str().map(|id| ModelInfo { images: images(m).or_else(|| beside(id)), ..info(m, id, &short_name(id)) }))
+        .collect()
 }
 
 /// A model's name when it has none but its id: a file's path (llama.cpp
@@ -366,7 +389,7 @@ mod tests {
     fn providers_from_the_file() {
         let p = parse_provider("llamacpp", &json!({ "name": "llama.cpp", "baseUrl": "http://127.0.0.1:8090/v1/", "apiKey": "none", "models": ["a", { "id": "b", "name": "Bee", "contextWindow": 8192, "reasoning": true }] })).unwrap();
         assert_eq!((p.base_url.as_str(), p.api, p.key.clone()), ("http://127.0.0.1:8090/v1", Api::Chat, Key::None));
-        assert_eq!(p.models[0], ModelInfo { provider: "llamacpp".into(), id: "a".into(), name: "a".into(), context_window: 0, levels: vec![], efforts: vec![] });
+        assert_eq!(p.models[0], ModelInfo { provider: "llamacpp".into(), id: "a".into(), name: "a".into(), context_window: 0, levels: vec![], efforts: vec![], images: None });
         assert_eq!((p.models[1].name.as_str(), p.models[1].context_window, p.models[1].levels.len()), ("Bee", 8192, 4));
         assert_eq!((p.effort("a", Some("high")), p.effort("b", Some("high")), p.effort("b", None)), (None, Some("high".into()), None));
         let p = parse_provider("x", &json!({ "baseUrl": "https://x/v1", "api": "openai-responses", "apiKey": "${X_KEY}" })).unwrap();
@@ -395,7 +418,7 @@ mod tests {
     #[test]
     fn models_lists_and_names() {
         let plan = parse_models(CHATGPT, &json!({ "models": [{ "slug": "m1", "display_name": "M1", "context_window": 500000, "supported_reasoning_levels": [{ "effort": "low" }] }, { "slug": "hidden", "visibility": "hide" }] }));
-        assert_eq!(plan, vec![ModelInfo { provider: CHATGPT.into(), id: "m1".into(), name: "M1".into(), context_window: 500000, levels: vec!["low".into()], efforts: vec![] }]);
+        assert_eq!(plan, vec![ModelInfo { provider: CHATGPT.into(), id: "m1".into(), name: "M1".into(), context_window: 500000, levels: vec!["low".into()], efforts: vec![], images: None }]);
         // llama.cpp: ids are the files' paths; named by the file.
         let paths = parse_models("llamacpp", &json!({ "models": [{ "name": "/m/Qwen3-4B-Q4_K_M.gguf" }], "data": [
             { "id": "/home/u/models/Qwen3-4B-Q4_K_M.gguf" },
@@ -416,6 +439,13 @@ mod tests {
         assert_eq!((short_name("a.gguf"), short_name(".gguf"), short_name("/")), ("a".into(), ".gguf".into(), "/".into()));
         let api = parse_models("llamacpp", &json!({ "models": [{ "name": "qwen", "model": "qwen" }], "data": [{ "id": "qwen", "meta": { "n_ctx": 32768 } }] }));
         assert_eq!((api[0].key(), api[0].context_window), ("llamacpp/qwen".into(), 32768));
+        assert_eq!(api[0].images, None);
+        let api = parse_models("llamacpp", &json!({ "models": [{ "name": "q", "model": "q", "capabilities": ["completion", "multimodal"] }, { "name": "t", "model": "t", "capabilities": ["completion"] }], "data": [{ "id": "q" }, { "id": "t" }, { "id": "u" }] }));
+        assert_eq!(api.iter().map(|m| m.images).collect::<Vec<_>>(), [Some(true), Some(false), None]);
+        let plan = parse_models(CODEX, &json!({ "models": [{ "slug": "a", "input_modalities": ["text", "image"] }, { "slug": "b", "input_modalities": ["text"] }] }));
+        assert_eq!((plan[0].images, plan[1].images), (Some(true), Some(false)));
+        let p = parse_provider("x", &json!({ "baseUrl": "u", "models": [{ "id": "v", "input": ["text", "image"] }, { "id": "t", "input": ["text"] }, "s"] })).unwrap();
+        assert_eq!(p.models.iter().map(|m| m.images).collect::<Vec<_>>(), [Some(true), Some(false), None]);
         assert_eq!(full("gpt-x"), "chatgpt/gpt-x");
         assert_eq!(full("chatgpt/gpt-x"), "chatgpt/gpt-x");
         // (Unless the machine running the test has an OpenAI key.)
