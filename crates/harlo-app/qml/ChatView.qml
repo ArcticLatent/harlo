@@ -520,7 +520,7 @@ Rectangle {
                     Label {
                         Layout.fillWidth: true
                         readonly property string tool: session.requestTitle.split("\n")[0].replace(/^Allow tool:\s*/, "")
-                        text: "Approval needed: " + tool
+                        text: "Approval needed: " + tool + (session.requestTitle.split("\n").indexOf("Outside the sandbox") > 0 ? ", outside the sandbox" : "")
                         color: Theme.foreground
                         font.bold: true
                         elide: Text.ElideRight

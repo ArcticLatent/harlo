@@ -124,9 +124,10 @@ Item {
         HoverHandler { id: runHover; cursorShape: Qt.PointingHandCursor }
         TapHandler { onTapped: view.toggleRun(runHead.group, runHead.dflt) }
     }
-    /// What an approval asks, in words.
-    function approvalQuestion(tool, args) {
-        return "Allow " + tool + " to run?"
+    /// What an approval asks, in words (Harlo's request to run a command
+    /// outside its sandbox says so).
+    function approvalQuestion(tool, askLines) {
+        return askLines.indexOf("Outside the sandbox") >= 0 ? "Run " + tool + " outside the sandbox?" : "Allow " + tool + " to run?"
     }
     /// Brings row `i` to the middle and flashes it (search results).
     /// Row `i`'s end is on screen (an approval's buttons are there), its
@@ -961,7 +962,7 @@ Item {
                             }
                             Rectangle {
                                 Layout.fillWidth: true
-                                readonly property string details: toolRow.askLines.filter(l => !l.startsWith("Reason:")).join("\n").trim()
+                                readonly property string details: toolRow.askLines.filter(l => !l.startsWith("Reason:") && l !== "Outside the sandbox").join("\n").trim()
                                 visible: toolRow.asking && details !== ""
                                 implicitHeight: askDetails.implicitHeight + 12
                                 radius: 4
@@ -987,7 +988,7 @@ Item {
                                 spacing: 6
                                 Label {
                                     Layout.fillWidth: true
-                                    text: root.approvalQuestion(toolRow.title, toolRow.subtitle)
+                                    text: root.approvalQuestion(toolRow.title, toolRow.askLines)
                                     color: Theme.foreground
                                     font.pixelSize: Theme.px(12)
                                     elide: Text.ElideRight
