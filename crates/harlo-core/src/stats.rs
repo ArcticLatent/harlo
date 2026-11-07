@@ -130,7 +130,7 @@ fn cache() -> &'static Mutex<HashMap<PathBuf, CacheEntry>> {
 pub fn all_sessions() -> Vec<Arc<FileStats>> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();
-    for kind in [HarnessKind::Pi, HarnessKind::Omp] {
+    for kind in [HarnessKind::Pi, HarnessKind::Omp, HarnessKind::Harlo] {
         for (path, modified, size) in store::list_files(kind) {
             seen.insert(path.clone());
             let cached = cache().lock().unwrap().get(&path).filter(|(m, s, _)| *m == modified && *s == size).map(|(_, _, f)| f.clone());

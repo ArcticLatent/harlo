@@ -1775,7 +1775,8 @@ impl Workspace {
         let mut out: Vec<&'static str> = HarnessKind::PROVIDERS
             .iter()
             .filter(|&&k| self.usable_harness(k))
-            .filter(|k| host.is_none() || info.as_ref().is_none_or(|i| i.has(k.as_str())))
+            // (harlo-agent runs only on this computer, so far.)
+            .filter(|&&k| host.is_none() || (k != HarnessKind::Harlo && info.as_ref().is_none_or(|i| i.has(k.as_str()))))
             .map(|k| k.as_str())
             .collect();
         // (Tests start demo sessions.)
@@ -4415,8 +4416,9 @@ impl Workspace {
     /// The shield's mode a session starts in, before it's switched.
     fn starting_approval(&self, harness: &str, cwd: &Path) -> QString {
         // Claude asks first unless told otherwise (its own settings may
-        // differ); for pi, OpenCode and Hermes the shield answers what they ask.
-        if matches!(harness, "pi" | "claude" | "opencode" | "hermes") {
+        // differ); for pi, OpenCode and Hermes the shield answers what they ask;
+        // harlo-agent asks as it's told.
+        if matches!(harness, "pi" | "claude" | "opencode" | "hermes" | "harlo") {
             return QString::from("always-ask");
         }
         // On a remote host: that machine's omp config (read with its overlay).
@@ -4545,8 +4547,9 @@ impl Workspace {
             self.as_mut().save_overlay(path, model, modes);
         }
         // Claude switches its permission mode, OpenCode its agent, Hermes its
-        // mode, on the spot; pi's permission prompts are answered by harlo.
-        if self.live.get(key).is_some_and(|e| matches!(e.info.harness.as_str(), "pi" | "claude" | "opencode" | "hermes"))
+        // mode, on the spot; pi's permission prompts are answered by harlo;
+        // harlo-agent takes the modes itself.
+        if self.live.get(key).is_some_and(|e| matches!(e.info.harness.as_str(), "pi" | "claude" | "opencode" | "hermes" | "harlo"))
             && let Some(live) = registry::get(key)
         {
             let modes = self.modes.get(key).cloned().unwrap_or_default();

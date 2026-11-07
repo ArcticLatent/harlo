@@ -1534,6 +1534,142 @@ mod tests {
         assert!(!shown.contains("SessionModelRestoreError"), "{shown}");
     }
 
+    /// A real harlo-agent (`HARLO_TEST_HARLO_AGENT`, signed in), its
+    /// sessions in a scratch folder (`HARLO_TEST_HOME`): it asks before it
+    /// writes, takes the answer, says its model, level and file, a run can be
+    /// stopped, and the session opens again with what it said.
+    #[tokio::test]
+    #[ignore]
+    async fn harlo_agent_session() {
+        let home = PathBuf::from(std::env::var("HARLO_TEST_HOME").expect("a scratch HARLO_TEST_HOME"));
+        assert!(home.starts_with("/tmp/"), "not a scratch folder: {home:?}");
+        let work = home.join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        harlo_harness::protocol_log::set_dir(Some(home.join("protocol")));
+        let cfg = |session| HarnessConfig {
+            kind: HarnessKind::Harlo,
+            program: Some(std::env::var("HARLO_TEST_HARLO_AGENT").expect("HARLO_TEST_HARLO_AGENT").into()),
+            cwd: work.clone(),
+            session,
+            extra_args: vec![],
+            env: vec![("XDG_DATA_HOME".to_owned(), home.join("data").to_string_lossy().into_owned())],
+            remote: None,
+        };
+        let handle = SessionHandle::spawn(cfg(SessionTarget::New));
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        handle.subscribe(ChannelSink(tx));
+        let mut rows = Vec::new();
+        assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::Status(SessionStatus::Idle))).await);
+        handle.send_raw(json!({ "type": "harlo_set_modes", "approval": "always-ask", "plan": false }));
+        handle.send_raw(json!({ "type": "set_thinking_level", "level": "low" }));
+        handle.prompt("Use the write tool to create hello.txt containing exactly: hi", Vec::new(), SendMode::Normal);
+
+        // Asked first, as an approval harlo shows with "Always allow".
+        let mut asked = None;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+        while let Ok(Some(u)) = tokio::time::timeout_at(deadline, rx.recv()).await {
+            match u {
+                SessionUpdate::Rows(changes) => apply(&mut rows, changes),
+                SessionUpdate::UiRequest(r) => {
+                    asked = Some(r);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let asked = asked.expect("an approval");
+        assert!(asked.is_approval && asked.title.starts_with("Allow tool: write"), "{asked:?}");
+        assert_eq!(asked.options, ["Approve", "Deny", "Always allow"]);
+        assert!(!work.join("hello.txt").exists(), "nothing written before the answer");
+        handle.answer_ui(&asked.id, json!({ "value": "Approve" }));
+        let mut meta = SessionMetaInfo::default();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(180);
+        while let Ok(Some(u)) = tokio::time::timeout_at(deadline, rx.recv()).await {
+            match u {
+                SessionUpdate::Rows(changes) => apply(&mut rows, changes),
+                SessionUpdate::Meta(m) => meta = m,
+                SessionUpdate::Status(SessionStatus::Idle) => break,
+                _ => {}
+            }
+        }
+        while let Ok(Some(u)) = tokio::time::timeout(Duration::from_millis(1500), rx.recv()).await {
+            match u {
+                SessionUpdate::Rows(changes) => apply(&mut rows, changes),
+                SessionUpdate::Meta(m) => meta = m,
+                _ => {}
+            }
+        }
+        assert_eq!(std::fs::read_to_string(work.join("hello.txt")).unwrap().trim(), "hi");
+        let kinds: Vec<_> = rows.iter().map(|r| r.kind).collect();
+        assert_eq!(kinds.first(), Some(&crate::RowKind::User));
+        assert!(kinds.contains(&crate::RowKind::Tool), "{rows:?}");
+        let file = meta.session_file.clone().expect("its file");
+        assert!(file.starts_with(home.join("data/harlo-agent/sessions")), "{file:?}");
+        assert!(!meta.model.is_empty() && meta.model_id.starts_with("openai/"), "{meta:?}");
+        assert_eq!(meta.thinking, "low");
+        assert!(meta.context_window > 0, "{meta:?}");
+
+        // Stopped mid-command: it says so, and the command is gone.
+        handle.send_raw(json!({ "type": "harlo_set_modes", "approval": "yolo", "plan": false }));
+        handle.prompt("Run this exact bash command and nothing else: sleep 60; touch slept.txt", Vec::new(), SendMode::Normal);
+        let mut running = false;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+        while let Ok(Some(u)) = tokio::time::timeout_at(deadline, rx.recv()).await {
+            if let SessionUpdate::Rows(changes) = u {
+                apply(&mut rows, changes);
+                if rows.iter().any(|r| r.kind == crate::RowKind::Tool && r.state == "running") {
+                    running = true;
+                    break;
+                }
+            }
+        }
+        assert!(running, "the command started");
+        handle.abort();
+        let mut stopped = false;
+        assert!(collect_until(&mut rx, &mut rows, |u| { stopped |= matches!(u, SessionUpdate::Stopped); matches!(u, SessionUpdate::Status(SessionStatus::Idle)) }).await);
+        assert!(stopped);
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        assert!(!work.join("slept.txt").exists());
+        drop(handle);
+
+        // Opened again: what it said, with no process.
+        let again = SessionHandle::open_saved(cfg(SessionTarget::Resume(file.clone())));
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        again.subscribe(ChannelSink(tx));
+        let mut back = Vec::new();
+        assert!(collect_until(&mut rx, &mut back, |u| matches!(u, SessionUpdate::Status(SessionStatus::Offline))).await);
+        collect_until(&mut rx, &mut back, |u| matches!(u, SessionUpdate::Rows(_))).await;
+        assert!(back.iter().any(|r| r.kind == crate::RowKind::User && r.text.contains("hello.txt")), "{back:?}");
+        assert!(back.iter().any(|r| r.kind == crate::RowKind::Tool), "{back:?}");
+        // And it carries on: the agent continues the same file.
+        again.prompt("Reply with just the word: done", Vec::new(), SendMode::Normal);
+        assert!(collect_until(&mut rx, &mut back, |u| matches!(u, SessionUpdate::Status(SessionStatus::Busy))).await);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+        while let Ok(Some(u)) = tokio::time::timeout_at(deadline, rx.recv()).await {
+            match u {
+                SessionUpdate::Rows(changes) => apply(&mut back, changes),
+                SessionUpdate::Status(SessionStatus::Idle) => break,
+                _ => {}
+            }
+        }
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(text.contains("just the word: done"), "the resumed run went to the same file");
+        let sessions = std::fs::read_dir(file.parent().unwrap()).unwrap().count();
+        assert_eq!(sessions, 1, "no second session file");
+        // Everything harlo asked, it answered.
+        harlo_harness::protocol_log::set_dir(None);
+        let mut refused = Vec::new();
+        for log in std::fs::read_dir(home.join("protocol")).unwrap().flatten() {
+            for line in std::fs::read_to_string(log.path()).unwrap().lines() {
+                let v: Value = serde_json::from_str(line).unwrap_or_default();
+                if v["dir"] == "in" && v["frame"]["type"] == "response" && v["frame"]["success"] == false {
+                    refused.push(format!("{}: {}", v["frame"]["command"], v["frame"]["error"]));
+                }
+            }
+        }
+        assert!(refused.is_empty(), "{refused:?}");
+    }
+
     #[tokio::test]
     async fn demo_run_reaches_subscribers() {
         let handle = SessionHandle::spawn(cfg(HarnessKind::Demo, SessionTarget::New));

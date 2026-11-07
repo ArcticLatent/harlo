@@ -15,13 +15,16 @@ pub enum HarnessKind {
     OpenCode,
     /// Hermes Agent (`hermes acp`: the Agent Client Protocol; see `acp.rs`).
     Hermes,
+    /// harlo's own agent (`harlo-agent --mode rpc`: pi's protocol, with
+    /// harlo's approvals and modes built in).
+    Harlo,
     /// Synthetic event source for UI development and benchmarks.
     Demo,
 }
 
 impl HarnessKind {
     /// The providers, in Settings → Providers' order.
-    pub const PROVIDERS: [HarnessKind; 5] = [Self::Claude, Self::OpenCode, Self::Pi, Self::Omp, Self::Hermes];
+    pub const PROVIDERS: [HarnessKind; 6] = [Self::Claude, Self::OpenCode, Self::Pi, Self::Omp, Self::Hermes, Self::Harlo];
 
     pub fn parse(s: &str) -> Option<Self> {
         match s {
@@ -30,6 +33,7 @@ impl HarnessKind {
             "claude" => Some(Self::Claude),
             "opencode" => Some(Self::OpenCode),
             "hermes" => Some(Self::Hermes),
+            "harlo" => Some(Self::Harlo),
             "demo" => Some(Self::Demo),
             _ => None,
         }
@@ -42,6 +46,7 @@ impl HarnessKind {
             Self::Claude => "claude",
             Self::OpenCode => "opencode",
             Self::Hermes => "hermes",
+            Self::Harlo => "harlo",
             Self::Demo => "demo",
         }
     }
@@ -54,6 +59,7 @@ impl HarnessKind {
             Self::Claude => "Claude",
             Self::OpenCode => "OpenCode",
             Self::Hermes => "Hermes",
+            Self::Harlo => "Harlo",
             Self::Demo => "Demo",
         }
     }
@@ -61,7 +67,15 @@ impl HarnessKind {
     /// harlo can run sessions with it (a provider it only lists is shown in
     /// Settings → Providers but not offered).
     pub fn can_chat(self) -> bool {
-        matches!(self, Self::Pi | Self::Omp | Self::Claude | Self::OpenCode | Self::Hermes | Self::Demo)
+        matches!(self, Self::Pi | Self::Omp | Self::Claude | Self::OpenCode | Self::Hermes | Self::Harlo | Self::Demo)
+    }
+
+    /// The program's name (on PATH, on another machine).
+    pub fn program_name(self) -> &'static str {
+        match self {
+            Self::Harlo => "harlo-agent",
+            other => other.as_str(),
+        }
     }
 }
 

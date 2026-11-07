@@ -1972,7 +1972,7 @@ fn providers_of(k: HarnessKind, host: Option<&Host>) -> Result<Vec<Value>, Strin
             }));
             Ok(list)
         }
-        HarnessKind::Demo => Ok(Vec::new()),
+        HarnessKind::Harlo | HarnessKind::Demo => Ok(Vec::new()),
     }
 }
 
@@ -2387,7 +2387,7 @@ async fn sign_in(k: HarnessKind, provider: &str, method: &str, answers: &Value, 
             command(sign_in_command(k, "hermes", report.host.as_ref(), &["auth", "add", provider, "--type", "oauth", "--no-browser"])?, None, report, rx).await?;
             Ok(format!("Hermes is signed in to {name}. Pick one of its models in the model list."))
         }
-        HarnessKind::Demo => Err("harlo can't sign this agent in.".into()),
+        HarnessKind::Harlo | HarnessKind::Demo => Err("harlo can't sign this agent in.".into()),
     }
 }
 

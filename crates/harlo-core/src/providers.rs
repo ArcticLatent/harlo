@@ -68,7 +68,7 @@ pub fn version(program: &Path) -> Option<String> {
 }
 
 /// Checks one provider (blocking; run it off the UI thread, inside the
-/// tokio runtime for pi and omp).
+/// tokio runtime for pi, omp and harlo-agent).
 pub fn check(kind: HarnessKind, configured: &str, runtime: &tokio::runtime::Handle) -> Status {
     let Some(program) = program(kind, configured) else {
         return Status { error: (!configured.trim().is_empty()).then(|| format!("{configured} isn't there")), ..Default::default() };
@@ -87,7 +87,7 @@ pub fn check(kind: HarnessKind, configured: &str, runtime: &tokio::runtime::Hand
                 .and_then(|server| harlo_harness::opencode::models(&server, &scratch))
                 .map_err(|e| format!("{e:#}")),
         },
-        HarnessKind::Pi | HarnessKind::Omp => runtime.block_on(rpc_models(kind, program.clone(), scratch)),
+        HarnessKind::Pi | HarnessKind::Omp | HarnessKind::Harlo => runtime.block_on(rpc_models(kind, program.clone(), scratch)),
         // An ACP agent: the models a session of its offers.
         HarnessKind::Hermes => harlo_harness::acp::models(kind, &program)
             .map(|m| {

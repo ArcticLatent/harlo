@@ -209,7 +209,7 @@ QtObject {
                       request_approval: "writing the question…", report_done: "writing the report…", ask_parent: "writing the question…" })[h[1]] || "" : ""
     }
     function harnessLabel(id) {
-        return ({ claude: "Claude", opencode: "OpenCode", pi: "Pi", omp: "Oh My Pi", hermes: "Hermes", demo: "Demo" })[id] || id
+        return ({ harlo: "Harlo", claude: "Claude", opencode: "OpenCode", pi: "Pi", omp: "Oh My Pi", hermes: "Hermes", demo: "Demo" })[id] || id
     }
     // Text on a primary-coloured fill (buttons, check marks).
     readonly property color textOnPrimary: luminance(primary) > 0.55 ? "#1a1a1a" : (isLight ? "#ffffff" : "#1a1310")

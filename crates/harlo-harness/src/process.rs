@@ -132,7 +132,7 @@ impl Harness {
             let program = match (&cfg.program, &cfg.remote) {
                 (Some(p), _) => p.clone(),
                 // There: its PATH finds it. (It needn't be on this PC too.)
-                (None, Some(_)) => PathBuf::from(cfg.kind.as_str()),
+                (None, Some(_)) => PathBuf::from(cfg.kind.program_name()),
                 (None, None) => resolve_program(cfg.kind).context("could not find the `claude` binary")?,
             };
             return crate::claude_run::spawn(cfg, program);
@@ -140,7 +140,7 @@ impl Harness {
         if cfg.kind == HarnessKind::OpenCode {
             let program = match (&cfg.program, &cfg.remote) {
                 (Some(p), _) => p.clone(),
-                (None, Some(_)) => PathBuf::from(cfg.kind.as_str()),
+                (None, Some(_)) => PathBuf::from(cfg.kind.program_name()),
                 (None, None) => resolve_program(cfg.kind).context("could not find the `opencode` binary")?,
             };
             return crate::opencode_run::spawn(cfg, program);
@@ -149,8 +149,8 @@ impl Harness {
             let program = match (&cfg.program, &cfg.remote) {
                 (Some(p), _) => p.clone(),
                 // There: its PATH finds it.
-                (None, Some(_)) => PathBuf::from(cfg.kind.as_str()),
-                (None, None) => resolve_program(cfg.kind).with_context(|| format!("could not find the `{}` binary", cfg.kind.as_str()))?,
+                (None, Some(_)) => PathBuf::from(cfg.kind.program_name()),
+                (None, None) => resolve_program(cfg.kind).with_context(|| format!("could not find the `{}` binary", cfg.kind.program_name()))?,
             };
             return crate::acp_run::spawn(cfg, program);
         }
@@ -158,7 +158,7 @@ impl Harness {
         let (program, mut cmd) = match &cfg.remote {
             // On the remote machine: its PATH finds the program.
             Some(remote) => {
-                let program = cfg.program.clone().unwrap_or_else(|| PathBuf::from(cfg.kind.as_str()));
+                let program = cfg.program.clone().unwrap_or_else(|| PathBuf::from(cfg.kind.program_name()));
                 // harlo's tools there (pi and omp take the bridge from their
                 // config on the host): the bridge and the forward in place.
                 if matches!(cfg.kind, HarnessKind::Pi | HarnessKind::Omp) {
@@ -173,7 +173,7 @@ impl Harness {
             None => {
                 let program = match &cfg.program {
                     Some(p) => p.clone(),
-                    None => resolve_program(cfg.kind).with_context(|| format!("could not find the `{}` binary", cfg.kind.as_str()))?,
+                    None => resolve_program(cfg.kind).with_context(|| format!("could not find the `{}` binary", cfg.kind.program_name()))?,
                 };
                 let mut cmd = Command::new(&program);
                 cmd.args(&args).current_dir(&cfg.cwd);
@@ -249,7 +249,7 @@ impl Harness {
         }
         // pi can only clear its whole queue: what's kept goes back in, in
         // order (as text: a queued message's images don't come back).
-        if self.kind == HarnessKind::Pi && matches!(cmd["type"].as_str(), Some("remove_queued_message" | "promote_queued_message")) {
+        if matches!(self.kind, HarnessKind::Pi | HarnessKind::Harlo) && matches!(cmd["type"].as_str(), Some("remove_queued_message" | "promote_queued_message")) {
             let promote = cmd["type"] == "promote_queued_message";
             let text = cmd["message"].as_str().unwrap_or_default();
             let queue = if promote { "followUp" } else { cmd["queue"].as_str().unwrap_or("followUp") };
@@ -361,7 +361,7 @@ pub fn image_from_file(path: &Path) -> Result<Value> {
 
 fn launch_args(cfg: &HarnessConfig) -> Vec<String> {
     let mut args: Vec<String> = match cfg.kind {
-        HarnessKind::Pi => vec!["--mode".into(), "rpc".into()],
+        HarnessKind::Pi | HarnessKind::Harlo => vec!["--mode".into(), "rpc".into()],
         // rpc-ui registers prompt-capable tools such as `ask`.
         HarnessKind::Omp => vec!["--mode".into(), "rpc-ui".into()],
         HarnessKind::Claude | HarnessKind::OpenCode | HarnessKind::Hermes | HarnessKind::Demo => vec![],
@@ -381,7 +381,14 @@ fn launch_args(cfg: &HarnessConfig) -> Vec<String> {
 /// Finds the harness binary on PATH, then in the default install locations
 /// (a desktop launch often has a minimal PATH).
 pub fn resolve_program(kind: HarnessKind) -> Option<PathBuf> {
-    let name = kind.as_str();
+    let name = kind.program_name();
+    // harlo's own agent: the one built and shipped with this harlo first.
+    if kind == HarnessKind::Harlo
+        && let Some(beside) = std::env::current_exe().ok().and_then(|exe| Some(exe.parent()?.join(name)))
+        && is_executable(&beside)
+    {
+        return Some(beside);
+    }
     if let Some(path) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&path) {
             let candidate = dir.join(name);
@@ -402,6 +409,7 @@ pub fn resolve_program(kind: HarnessKind) -> Option<PathBuf> {
             PathBuf::from("/usr/local/bin/opencode"),
             home.join("bin/opencode"),
         ],
+        HarnessKind::Harlo => vec![home.join(".local/bin/harlo-agent")],
         HarnessKind::Hermes => vec![home.join(".local/bin/hermes"), home.join(".hermes/hermes-agent/venv/bin/hermes"), home.join(".hermes/hermes-agent/.venv/bin/hermes")],
         HarnessKind::Demo => vec![],
     };
@@ -677,6 +685,8 @@ mod tests {
     fn launch_args_per_harness() {
         let cfg = |kind, session| HarnessConfig { kind, program: None, cwd: PathBuf::from("/"), session, extra_args: vec![], env: vec![], remote: None };
         assert_eq!(launch_args(&cfg(HarnessKind::Pi, SessionTarget::Resume("/s.jsonl".into()))), ["--mode", "rpc", "--session", "/s.jsonl"]);
+        assert_eq!(launch_args(&cfg(HarnessKind::Harlo, SessionTarget::Resume("/s.jsonl".into()))), ["--mode", "rpc", "--session", "/s.jsonl"]);
+        assert_eq!(launch_args(&cfg(HarnessKind::Harlo, SessionTarget::Ephemeral)), ["--mode", "rpc", "--no-session"]);
         assert_eq!(launch_args(&cfg(HarnessKind::Omp, SessionTarget::Resume("/s.jsonl".into()))), ["--mode", "rpc-ui", "--resume", "/s.jsonl"]);
         assert_eq!(launch_args(&cfg(HarnessKind::Omp, SessionTarget::Ephemeral)), ["--mode", "rpc-ui", "--no-session"]);
     }

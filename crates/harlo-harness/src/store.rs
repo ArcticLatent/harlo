@@ -64,6 +64,14 @@ pub fn sessions_root(kind: HarnessKind) -> Option<PathBuf> {
                 .join("sessions"),
         ),
         HarnessKind::Omp => Some(home.join(".omp/agent/sessions")),
+        // harlo-agent's, in pi's file layout.
+        HarnessKind::Harlo => Some(
+            std::env::var_os("XDG_DATA_HOME")
+                .map(PathBuf::from)
+                .filter(|p| p.is_absolute())
+                .unwrap_or_else(|| home.join(".local/share"))
+                .join("harlo-agent/sessions"),
+        ),
         // Their sessions are listed their own way (not pi's file layout).
         HarnessKind::Claude | HarnessKind::OpenCode | HarnessKind::Hermes | HarnessKind::Demo => None,
     }
