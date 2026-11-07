@@ -194,10 +194,10 @@ fn parse_provider(id: &str, p: &Value) -> Result<Provider> {
         .flatten()
         .filter_map(|m| {
             let (mid, name) = match m {
-                Value::String(s) => (s.clone(), s.clone()),
+                Value::String(s) => (s.clone(), short_name(s)),
                 _ => {
                     let mid = m["id"].as_str()?.to_owned();
-                    (mid.clone(), m["name"].as_str().unwrap_or(&mid).to_owned())
+                    (mid.clone(), m["name"].as_str().map_or_else(|| short_name(&mid), str::to_owned))
                 }
             };
             // (pi's level names, in their order: a JSON object's isn't kept.)
@@ -235,11 +235,33 @@ pub fn parse_models(provider: &str, body: &Value) -> Vec<ModelInfo> {
             .filter(|m| m["visibility"].as_str().is_none_or(|v| v == "list"))
             .filter_map(|m| {
                 let id = m["slug"].as_str().or_else(|| m["id"].as_str())?;
-                Some(info(m, id, m["display_name"].as_str().unwrap_or(id)))
+                Some(info(m, id, &m["display_name"].as_str().map_or_else(|| short_name(id), str::to_owned)))
             })
             .collect();
     }
-    body["data"].as_array().into_iter().flatten().filter_map(|m| m["id"].as_str().map(|id| info(m, id, id))).collect()
+    body["data"].as_array().into_iter().flatten().filter_map(|m| m["id"].as_str().map(|id| info(m, id, &short_name(id)))).collect()
+}
+
+/// A model's name when it has none but its id: a file's path (llama.cpp
+/// lists models by the path they were loaded from) is named by its file,
+/// without `.gguf` and a shard's `-00001-of-00003`; other ids as they are
+/// (`org/model` too).
+pub fn short_name(id: &str) -> String {
+    let gguf = id.len() > 5 && id[id.len() - 5..].eq_ignore_ascii_case(".gguf");
+    let path = gguf || id.starts_with('/') || id.starts_with("./") || id.starts_with("~/");
+    if !path {
+        return id.to_owned();
+    }
+    let file = id.rsplit(['/', '\\']).next().unwrap_or(id);
+    let stem = if file.len() > 5 && file[file.len() - 5..].eq_ignore_ascii_case(".gguf") { &file[..file.len() - 5] } else { file };
+    // (A shard: name-00001-of-00003.)
+    let b = stem.as_bytes();
+    let shard = b.len() > 15 && {
+        let t = &b[b.len() - 15..];
+        t[0] == b'-' && t[1..6].iter().all(u8::is_ascii_digit) && &t[6..10] == b"-of-" && t[10..].iter().all(u8::is_ascii_digit)
+    };
+    let name = if shard { &stem[..stem.len() - 15] } else { stem };
+    if name.is_empty() { id.to_owned() } else { name.to_owned() }
 }
 
 /// A model's provider and its id there. `model` is `provider/id`; a bare
@@ -336,6 +358,24 @@ mod tests {
     fn models_lists_and_names() {
         let plan = parse_models(CHATGPT, &json!({ "models": [{ "slug": "m1", "display_name": "M1", "context_window": 500000, "supported_reasoning_levels": [{ "effort": "low" }] }, { "slug": "hidden", "visibility": "hide" }] }));
         assert_eq!(plan, vec![ModelInfo { provider: CHATGPT.into(), id: "m1".into(), name: "M1".into(), context_window: 500000, levels: vec!["low".into()], efforts: vec![] }]);
+        // llama.cpp: ids are the files' paths; named by the file.
+        let paths = parse_models("llamacpp", &json!({ "models": [{ "name": "/m/Qwen3-4B-Q4_K_M.gguf" }], "data": [
+            { "id": "/home/u/models/Qwen3-4B-Q4_K_M.gguf" },
+            { "id": "/m/big/GLM-4.6-Q2_K-00001-of-00003.gguf" },
+            { "id": "models/llama.GGUF" },
+            { "id": "qwen-alias" },
+            { "id": "Qwen/Qwen3-8B" }] }));
+        let names: Vec<(&str, &str)> = paths.iter().map(|m| (m.id.as_str(), m.name.as_str())).collect();
+        assert_eq!(names, [
+            ("/home/u/models/Qwen3-4B-Q4_K_M.gguf", "Qwen3-4B-Q4_K_M"),
+            ("/m/big/GLM-4.6-Q2_K-00001-of-00003.gguf", "GLM-4.6-Q2_K"),
+            ("models/llama.GGUF", "llama"),
+            ("qwen-alias", "qwen-alias"),
+            ("Qwen/Qwen3-8B", "Qwen/Qwen3-8B"),
+        ]);
+        let p = parse_provider("llamacpp", &json!({ "baseUrl": "http://127.0.0.1:8090/v1", "models": ["/m/a.gguf", { "id": "/m/b.gguf" }, { "id": "/m/c.gguf", "name": "Cee" }] })).unwrap();
+        assert_eq!(p.models.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(), ["a", "b", "Cee"]);
+        assert_eq!((short_name("a.gguf"), short_name(".gguf"), short_name("/")), ("a".into(), ".gguf".into(), "/".into()));
         let api = parse_models("llamacpp", &json!({ "models": [{ "name": "qwen", "model": "qwen" }], "data": [{ "id": "qwen", "meta": { "n_ctx": 32768 } }] }));
         assert_eq!((api[0].key(), api[0].context_window), ("llamacpp/qwen".into(), 32768));
         assert_eq!(full("gpt-x"), "chatgpt/gpt-x");
