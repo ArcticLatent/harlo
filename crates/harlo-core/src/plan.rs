@@ -153,6 +153,27 @@ impl Plan {
         stages
     }
 
+    /// Where a finished run's work is, said to the session's agent: the
+    /// branch of its last step (each step merged the ones before), or the
+    /// branches of its last steps when they ran at the same time (they
+    /// didn't merge each other's). "" when no step ran in a worktree.
+    pub fn where_work_is(&self) -> String {
+        let on_branch = |id: &u32| self.step(*id).filter(|s| s.status == Status::Done && !s.branch.is_empty());
+        let Some(last) = self.stages().into_iter().rev().map(|stage| stage.iter().filter_map(on_branch).collect::<Vec<_>>()).find(|s| !s.is_empty()) else {
+            return String::new();
+        };
+        match last.as_slice() {
+            [one] => format!(
+                " The steps' work is together on branch {} (each step merged the ones before), not in your checkout yet: tell the user, and merge it only when they say so.",
+                one.branch
+            ),
+            many => format!(
+                " The last steps ran at the same time, so their work is on separate branches: {}. Each has the steps before it merged in, but not the others'. None of it is in your checkout yet: tell the user, and merge them only when they say so.",
+                many.iter().map(|s| format!("{} ({})", s.branch, s.title)).collect::<Vec<_>>().join(", ")
+            ),
+        }
+    }
+
     fn finished(&self, id: u32) -> bool {
         self.step(id).is_some_and(|s| matches!(s.status, Status::Done | Status::Skipped))
     }
@@ -491,6 +512,22 @@ mod tests {
 
     fn steps(p: &Plan) -> Vec<(u32, &str, Status)> {
         p.steps.iter().map(|s| (s.id, s.title.as_str(), s.status.clone())).collect()
+    }
+
+    #[test]
+    fn a_finished_run_says_where_its_work_is() {
+        let mut p = Plan::default();
+        p.set(&[("A".into(), String::new(), false), ("B".into(), String::new(), false), ("C".into(), String::new(), true)]).unwrap();
+        assert_eq!(p.where_work_is(), "");
+        for (id, branch) in [(1, "plan/a"), (2, "plan/b"), (3, "plan/c")] {
+            p.hand_out(id, "", branch).unwrap();
+            p.finish(id, "ok", false).unwrap();
+        }
+        // B and C ran at the same time: both named, not one as having all.
+        let said = p.where_work_is();
+        assert!(said.contains("separate branches: plan/b (B), plan/c (C)") && !said.contains("together"), "{said}");
+        p.steps[2].alongside = false;
+        assert!(p.where_work_is().contains("together on branch plan/c"));
     }
 
     #[test]

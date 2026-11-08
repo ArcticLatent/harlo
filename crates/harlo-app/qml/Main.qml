@@ -5963,6 +5963,49 @@ ApplicationWindow {
             win.summary(); Qt.quit() } }
     }
 
+    // A plan run with helpers on a real model (run by hand: it needs a
+    // sign-in): the session makes a two-step plan, the run hands each step
+    // to a helper and has each reviewed before the next.
+    SequentialAnimation {
+        id: livePlanSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "liveharloplan"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            Workspace.setProviderEnabled("claude", false)
+            Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            win.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo")
+            Workspace.setApprovalMode(win.harloKey, "yolo") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(livePlanSteps, () => chat.session.modelName !== "", 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const m = (win.argValue("--model=") || "codex/gpt-6.1-sol").split("/")
+            chat.session.setModel(m[0], m.slice(1).join("/")) } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: win.sendByKeys("Make the shared plan (plan_set) for this, with exactly two steps, and stop there: don't do the steps yourself. Step 1: bmi.py (bmi(weight_kg, height_m) rounded to one decimal, and category(value) giving underweight, normal, overweight or obese by the WHO cut-offs) with test_bmi.py. Step 2: roman.py (to_roman(n) and from_roman(text) for 1 to 3999, ValueError on anything else) with test_roman.py. Both use pytest.") }
+        PauseAnimation { duration: 2000 }
+        ScriptAction { script: win.waitUntil(livePlanSteps, () => (JSON.parse(Workspace.planJson(win.harloKey)).steps || []).length >= 2 && chat.session.status === "idle", 300000) }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            win.log("plan", Workspace.planJson(win.harloKey))
+            win.clickItem(win.findName("planRun"), "Run with helpers") } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: win.clickItem(win.findName("planRunTeam"), "Helpers: as this session") }
+        PauseAnimation { duration: 3000 }
+        ScriptAction { script: win.waitUntil(livePlanSteps, () => { const p = JSON.parse(Workspace.planJson(win.harloKey)); return !p.run || (p.run.paused || "") !== "" }, 1800000) }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            const p = JSON.parse(Workspace.planJson(win.harloKey))
+            win.log("plan", JSON.stringify(p))
+            win.log("helpers", Workspace.orchestratedJson(win.harloKey))
+            win.check(!p.run && (p.steps || []).every(s => s.status === "done"), "the plan ran to the end (" + (p.run ? p.run.paused : "") + ")")
+            win.check((p.steps || []).every(s => (s.summary || "").indexOf("Reviewed:") >= 0), "each step was reviewed")
+            win.shotWindow("live-plan-done")
+            win.summary(); Qt.quit() } }
+    }
+
     // A plan run reviews each step: Settings → Orchestration has it on; a
     // step whose review finds problems goes back to its helper, which fixes
     // it, and a second review lets the run go on; problems that stay pause

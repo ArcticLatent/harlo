@@ -6845,8 +6845,7 @@ impl Workspace {
             // when the steps ran in worktrees).
             if let Some(live) = registry::get(owner) {
                 let busy = self.live.get(owner).is_some_and(|e| e.info.status == SessionStatus::Busy);
-                let last = plan.steps.iter().rev().find(|s| s.status == harlo_core::plan::Status::Done).map(|s| s.branch.clone()).unwrap_or_default();
-                let branch = if last.is_empty() { String::new() } else { format!(" The steps' work is together on branch {last} (each step merged the ones before), not in your checkout yet: tell the user, and merge it only when they say so.") };
+                let branch = plan.where_work_is();
                 let text = format!("[harlo] Your plan ran with helpers and has finished: {said}.{branch} Read each step's summary with plan_read, check the work fits together, and tell the user what was done and what's still open.");
                 live.handle.prompt(&text, Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });
             }
