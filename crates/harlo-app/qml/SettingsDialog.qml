@@ -4278,6 +4278,51 @@ Popup {
                         onToggled: Workspace.setSetting("harlo_sandbox_net", checked ? "1" : "0")
                     }
                 }
+                SettingRow {
+                    divider: true
+                    title: "Subagents' model"
+                    detail: "What Harlo's subagents (its task tool) run on when the task doesn't name a model, as provider/model; empty: the session's own. A smaller model often does searches and simple edits as well, for less. Applies to Harlo sessions started afterwards."
+                    icon: "robot-2"
+                    AppTextField {
+                        objectName: "harloTaskModel"
+                        width: 240
+                        text: Workspace.setting("harlo_task_model")
+                        placeholderText: "The session's model"
+                        font.family: Theme.mono
+                        font.pixelSize: Theme.px(12)
+                        onEditingFinished: Workspace.setSetting("harlo_task_model", text)
+                    }
+                }
+                SettingRow {
+                    divider: true
+                    title: "When the plan's limit is reached"
+                    detail: "Harlo goes on with this model (provider/model) when the model's plan says its usage limit is reached, or the server stays busy after its retries, and tells you. It tries the plan's model again after the limit resets. Empty: it stops and says so. Applies to Harlo sessions started afterwards."
+                    icon: "refresh"
+                    AppTextField {
+                        objectName: "harloFallback"
+                        width: 240
+                        text: Workspace.setting("harlo_fallback")
+                        placeholderText: "Stop"
+                        font.family: Theme.mono
+                        font.pixelSize: Theme.px(12)
+                        onEditingFinished: Workspace.setSetting("harlo_fallback", text)
+                    }
+                }
+                SettingRow {
+                    divider: true
+                    title: "Token budget per helper"
+                    detail: "The most a Harlo helper session (one another session starts) may use, in tokens sent and received, its subagents' included, e.g. 400k or 2m. Past it, it makes no more requests and its parent is told. Empty: no limit."
+                    icon: "scales-3"
+                    AppTextField {
+                        objectName: "harloHelperBudget"
+                        width: 240
+                        text: Workspace.setting("harlo_helper_budget")
+                        placeholderText: "No limit"
+                        font.family: Theme.mono
+                        font.pixelSize: Theme.px(12)
+                        onEditingFinished: Workspace.setSetting("harlo_helper_budget", text)
+                    }
+                }
             }
             Rule { }
             SectionHeader { title: "Diagnostics"; subtitle: "For tracking down problems. harlo.log has this run's messages (the last run's is harlo.log.1); crashes leave a crash-….log with a backtrace." }

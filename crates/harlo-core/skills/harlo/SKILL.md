@@ -11,13 +11,14 @@ The tools exist only inside harlo. If they're missing, tell the user that harlo 
 
 **`list_agents`**: the agents harlo can start (`harlo`, `claude`) and whether each is installed.
 
-**`start_session`**: `{ agent, prompt, title?, model?, thinking?, folder?, worktree?, notify? }`. Starts a session and sends it `prompt`.
+**`start_session`**: `{ agent, prompt, title?, model?, thinking?, folder?, worktree?, notify?, budget? }`. Starts a session and sends it `prompt`.
 - `agent`: an id from `list_agents`.
 - `model`: `provider/model` (e.g. `anthropic/claude-sonnet-4-5`). Leave it out for the agent's default.
 - `thinking`: its thinking level (`low`, `medium`, `high`), if not the agent's default.
 - `folder`: defaults to your own folder.
 - `worktree`: a new branch name. The session then works in a new git worktree on that branch, isolated from your checkout. The worktree is made in the background, so the session id comes later (`list_sessions`).
 - `notify`: defaults to true. Its report, its questions for you, and when it waits for the user come back to you. `false`: it's on its own (a handoff).
+- `budget`: for a Harlo session, the most tokens it may use (sent and received, not counting those the cache served), as `400k` or `2m`. Past it, it stops and you're told. Without it, the user's budget per helper applies, if they set one.
 
 It returns `{ session, title, agent, folder }`. The session is your helper: it starts in your permission mode, and the user sees it under your session and can open it. harlo tells it it's a helper, and how to report back. Helpers can start helpers of their own, three deep at most. Once a helper has reported success, harlo moves it to its project's Settled shelf; it comes back if it works again.
 

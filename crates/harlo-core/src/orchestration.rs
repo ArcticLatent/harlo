@@ -86,7 +86,8 @@ pub fn tools(starting: Starting) -> Value {
                 "thinking": { "type": "string", "description": "Its thinking level (low, medium, high), if not the agent's default." },
                 "folder": { "type": "string", "description": "Where it works (default: your folder)." },
                 "worktree": { "type": "string", "description": "A new git worktree on this branch name to work in (isolated from your checkout)." },
-                "notify": { "type": "boolean", "description": "Send its report back to you when it finishes, and its questions (default true). False: it's on its own (a handoff)." }
+                "notify": { "type": "boolean", "description": "Send its report back to you when it finishes, and its questions (default true). False: it's on its own (a handoff)." },
+                "budget": { "type": "string", "description": "For a Harlo session: the most tokens it may use (sent and received, not counting those the cache served, its subagents' included), as 400k or 2m. Past it, it stops and you're told. Default: the user's budget per helper, if they set one." }
             }), &["agent", "prompt"]),
         },
         {
@@ -344,6 +345,21 @@ pub fn drift_note(branch: &str, base: &str, behind: u32) -> String {
             if n == 1 { "" } else { "s" }
         ),
     }
+}
+
+/// Tokens as people write them: `400k`, `2m`, `1.5m`, `400000` (None: not
+/// a count).
+pub fn parse_tokens(s: &str) -> Option<u64> {
+    let s = s.trim().to_lowercase().replace(['_', ','], "");
+    let (num, times) = if let Some(n) = s.strip_suffix('k') {
+        (n, 1e3)
+    } else if let Some(n) = s.strip_suffix('m') {
+        (n, 1e6)
+    } else {
+        (s.as_str(), 1.0)
+    };
+    let v: f64 = num.trim().parse().ok()?;
+    (v > 0.0).then(|| (v * times).round() as u64)
 }
 
 /// Added to a worktree helper's finished message: how its work comes over.
@@ -688,6 +704,11 @@ mod tests {
         // A committee needs two.
         assert!(delegate_prompt("committee", &[m("Claude", "claude", "")], "", false).is_none());
         assert!(delegate_prompt("nope", &[m("Claude", "claude", "")], "", false).is_none());
+    }
+
+    #[test]
+    fn token_counts() {
+        assert_eq!([parse_tokens("400k"), parse_tokens(" 2M "), parse_tokens("1.5m"), parse_tokens("400000"), parse_tokens("lots"), parse_tokens("-3")], [Some(400_000), Some(2_000_000), Some(1_500_000), Some(400_000), None, None]);
     }
 
     #[test]

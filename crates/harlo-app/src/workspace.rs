@@ -1070,6 +1070,18 @@ fn harlo_args(kind: HarnessKind, sandbox: bool, network: bool) -> Vec<String> {
     args
 }
 
+/// Harlo's subagents' model and the one it goes on with at the plan's
+/// limit, as its launch arguments (empty settings: none).
+fn model_args(task_model: &str, fallback: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    for (flag, value) in [("--task-model", task_model.trim()), ("--fallback", fallback.trim())] {
+        if !value.is_empty() && !value.contains(char::is_whitespace) {
+            args.extend([flag.to_owned(), value.to_owned()]);
+        }
+    }
+    args
+}
+
 /// Whether the agent's sessions have a shield (harlo's approval modes).
 fn has_shield(harness: &str, _cwd: &Path) -> bool {
     matches!(harness, "demo" | "claude" | "harlo")
@@ -1877,7 +1889,12 @@ impl Workspace {
 
     /// The same, at a thinking level ("" the agent's default): Claude's
     /// from its start (it restarts to change it), others' set as it opens.
-    fn start_session_thinking(mut self: Pin<&mut Self>, kind: HarnessKind, cwd: PathBuf, model: &str, thinking: &str, activate: bool) -> String {
+    fn start_session_thinking(self: Pin<&mut Self>, kind: HarnessKind, cwd: PathBuf, model: &str, thinking: &str, activate: bool) -> String {
+        self.start_session_budget(kind, cwd, model, thinking, activate, None)
+    }
+
+    /// The same, with a token budget (Harlo's: `--budget`).
+    fn start_session_budget(mut self: Pin<&mut Self>, kind: HarnessKind, cwd: PathBuf, model: &str, thinking: &str, activate: bool, budget: Option<u64>) -> String {
         let (program, remote) = self.launch_for(kind, &cwd);
         let token = orch_token();
         let cfg = HarnessConfig {
@@ -1888,6 +1905,9 @@ impl Workspace {
             session: if std::env::args().any(|a| a == "--ephemeral") { SessionTarget::Ephemeral } else { SessionTarget::New },
             extra_args: {
                 let mut args: Vec<String> = self.harlo_args(kind);
+                if let Some(b) = budget.filter(|_| kind == HarnessKind::Harlo) {
+                    args.extend(["--budget".into(), b.to_string()]);
+                }
                 if !model.trim().is_empty() && kind != HarnessKind::Demo {
                     args.extend(["--model".into(), model.trim().to_owned()]);
                 }
@@ -3201,7 +3221,7 @@ impl Workspace {
     }
 
     fn create_worktree_session(mut self: Pin<&mut Self>, project_id: i32, branch: &QString, base: &QString, harness: &QString, opts: WorktreeStart) {
-        let WorktreeStart { first, model, thinking, lane, parent, approval, plan, plan_step } = opts;
+        let WorktreeStart { first, model, thinking, lane, parent, approval, plan, plan_step, budget } = opts;
         let step_of = parent.as_ref().map(|(p, ..)| p.clone()).zip(plan_step);
         let Some((project, root)) = self.project_root(project_id) else {
             self.as_mut().set_notice_text("This project is not a git repository.", true);
@@ -3257,7 +3277,7 @@ impl Workspace {
                         return this.as_mut().set_notice_text(&format!("The helper on {branch} wasn't started: you stopped the session that asked for it."), false);
                     }
                     // Run lanes start in the background; the run's overview is the tab.
-                    let key = this.as_mut().start_session_thinking(kind, path.clone(), &model, &thinking, lane.is_none() && parent.is_none());
+                    let key = this.as_mut().start_session_budget(kind, path.clone(), &model, &thinking, lane.is_none() && parent.is_none(), budget);
                     // Started by an agent: its subagent.
                     if let Some((parent, title, notify)) = parent {
                         this.as_mut().adopt(&key, &parent, &title, kind.as_str(), notify, plan_step);
@@ -3527,7 +3547,11 @@ impl Workspace {
     /// A saved setting (`settings.<key>` in the database), or "".
     /// Harlo's arguments, with its sandbox as set.
     fn harlo_args(&self, kind: HarnessKind) -> Vec<String> {
-        harlo_args(kind, self.setting_str("harlo_sandbox") != "0", self.setting_str("harlo_sandbox_net") != "0")
+        let mut args = harlo_args(kind, self.setting_str("harlo_sandbox") != "0", self.setting_str("harlo_sandbox_net") != "0");
+        if kind == HarnessKind::Harlo {
+            args.extend(model_args(&self.setting_str("harlo_task_model"), &self.setting_str("harlo_fallback")));
+        }
+        args
     }
 
     fn setting_str(&self, key: &str) -> String {
@@ -5892,6 +5916,8 @@ struct WorktreeStart {
     plan: bool,
     /// The step of its parent's plan it does (a run with helpers).
     plan_step: Option<u32>,
+    /// A Harlo helper's token budget.
+    budget: Option<u64>,
 }
 
 /// Who helpers are (an agent's, or a plan's run): Settings → Projects → Team.
@@ -6254,6 +6280,16 @@ impl Workspace {
                 let notify = args["notify"].as_bool().unwrap_or(true) && caller.is_some();
                 let model = text("model");
                 let thinking = text("thinking");
+                // Its token budget: asked for, else a helper's from Settings.
+                let asked = match &args["budget"] {
+                    serde_json::Value::Number(n) => n.as_u64().filter(|n| *n > 0).map(Some).ok_or("Give the budget as a number of tokens, as 400k or 2m.")?,
+                    serde_json::Value::String(b) if !b.trim().is_empty() => Some(harlo_core::orchestration::parse_tokens(b).ok_or("Give the budget as a number of tokens, as 400k or 2m.")?),
+                    _ => None,
+                };
+                if asked.is_some() && kind != HarnessKind::Harlo {
+                    return Err("A token budget is for Harlo sessions only.".into());
+                }
+                let budget = asked.or_else(|| (kind == HarnessKind::Harlo && caller.is_some()).then(|| harlo_core::orchestration::parse_tokens(&self.setting_str("harlo_helper_budget"))).flatten());
                 let parent = caller.clone().unwrap_or_default();
                 // A helper works as its parent may: the same permission mode.
                 let approval = caller.as_deref().and_then(|c| self.approval_of(c)).filter(|_| has_shield(kind.as_str(), &cwd));
@@ -6284,11 +6320,11 @@ impl Workspace {
                         &QString::from(&branch),
                         &QString::default(),
                         &QString::from(kind.as_str()),
-                        WorktreeStart { first: Some(first), plan: false, model, thinking: thinking.clone(), lane: None, parent: caller.as_ref().map(|_| (parent, title.clone(), notify)), approval, plan_step: None },
+                        WorktreeStart { first: Some(first), plan: false, model, thinking: thinking.clone(), lane: None, parent: caller.as_ref().map(|_| (parent, title.clone(), notify)), approval, plan_step: None, budget },
                     );
                     return Ok(json!({ "status": "creating the worktree; the session starts in it shortly (see list_sessions)", "branch": branch, "title": title }));
                 }
-                let key = self.as_mut().start_session_thinking(kind, cwd.clone(), &model, &thinking, false);
+                let key = self.as_mut().start_session_budget(kind, cwd.clone(), &model, &thinking, false, budget);
                 // (Named in the background: renaming would open it.)
                 if let Some(live) = registry::get(&key) {
                     live.handle.send_raw(json!({ "type": "set_session_name", "name": title }));
@@ -6783,6 +6819,8 @@ impl Workspace {
                 tracing::warn!("plan run: {e}");
                 continue;
             }
+            // (Harlo's: the budget per helper, if set.)
+            let budget = (run.agent == HarnessKind::Harlo).then(|| harlo_core::orchestration::parse_tokens(&self.setting_str("harlo_helper_budget"))).flatten();
             if together && let Some(project) = &project {
                 let base = tree.as_ref().map(|t| t.branch.clone()).unwrap_or_default();
                 let first = FirstPrompt { text: prompt, ..Default::default() };
@@ -6791,11 +6829,11 @@ impl Workspace {
                     &QString::from(&branch),
                     &QString::from(&base),
                     &QString::from(run.agent.as_str()),
-                    WorktreeStart { first: Some(first), plan: false, model: run.model.clone(), thinking: run.thinking.clone(), lane: None, parent: Some((owner.to_owned(), title.clone(), true)), approval: approval.clone(), plan_step: Some(id) },
+                    WorktreeStart { first: Some(first), plan: false, model: run.model.clone(), thinking: run.thinking.clone(), lane: None, parent: Some((owner.to_owned(), title.clone(), true)), approval: approval.clone(), plan_step: Some(id), budget },
                 );
                 continue;
             }
-            let key = self.as_mut().start_session_thinking(run.agent, cwd.clone(), &run.model, &run.thinking, false);
+            let key = self.as_mut().start_session_budget(run.agent, cwd.clone(), &run.model, &run.thinking, false, budget);
             if let Some(live) = registry::get(&key) {
                 live.handle.send_raw(json!({ "type": "set_session_name", "name": title }));
             }
@@ -7258,6 +7296,9 @@ mod tests {
         assert_eq!(harlo_args(HarnessKind::Harlo, true, false), ["--harlo-tools", "--sandbox", "no-network"]);
         assert_eq!(harlo_args(HarnessKind::Harlo, false, true), ["--harlo-tools", "--sandbox", "off"]);
         assert!(harlo_args(HarnessKind::Claude, false, false).is_empty());
+        assert_eq!(model_args(" codex/gpt-6.1-mini ", ""), ["--task-model", "codex/gpt-6.1-mini"]);
+        assert_eq!(model_args("", "local/qwen"), ["--fallback", "local/qwen"]);
+        assert!(model_args("", "not a model").is_empty());
     }
 
     use super::url_to_path;
