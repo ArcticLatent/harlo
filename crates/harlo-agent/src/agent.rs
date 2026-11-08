@@ -573,6 +573,8 @@ impl Agent {
         // asked) in this run, and whether it was reminded to.
         let helper = self.harlo_tools.iter().any(|t| t["name"] == "report_done");
         let (mut handed_over, mut reminded) = (false, false);
+        // The same call getting the same result, again and again.
+        let mut repeats = crate::repeats::Repeats::default();
         let max = max_rounds();
         for round in 0..max {
             if round > 0 {
@@ -677,6 +679,17 @@ impl Agent {
             let outcomes = run_calls(&self.tools, &triples, &extra, stop).await;
             handed_over |= hands_over(&names, &outcomes);
             let changed = names.iter().zip(&outcomes).any(|(n, o)| matches!(*n, "edit" | "write") && !o.failed);
+            let (mut nudge, mut stuck) = (None, None);
+            if changed {
+                repeats.changed();
+            }
+            for ((name, args), o) in names.iter().zip(&args).zip(&outcomes) {
+                match repeats.see(name, args, &o.text, o.failed) {
+                    crate::repeats::Repeat::Nudge(n) => nudge = nudge.or(Some((name.to_string(), n))),
+                    crate::repeats::Repeat::Stop(n) => stuck = stuck.or(Some((name.to_string(), n))),
+                    crate::repeats::Repeat::No => {}
+                }
+            }
             for ((c, name), o) in calls.iter().zip(&names).zip(outcomes) {
                 show(Shown::ToolEnd { call_id: c["id"].as_str().unwrap_or_default(), name, text: &o.text, failed: o.failed });
                 let mut content = vec![json!({ "type": "text", "text": o.text })];
@@ -695,6 +708,12 @@ impl Agent {
                     result["details"] = o.details;
                 }
                 self.push(result, show)?;
+            }
+            if let Some((tool, n)) = stuck {
+                bail!("The turn was stopped: the same {tool} call kept getting the same result ({n} times), so it was going round in circles. Send a message to go on.")
+            }
+            if let Some((tool, n)) = nudge {
+                self.push(json!({ "role": "custom", "customType": "harlo_repeat_note", "content": crate::repeats::nudge(&tool, n), "display": false, "timestamp": now_ms() }), show)?;
             }
             if changed {
                 self.prewalk(show)?;

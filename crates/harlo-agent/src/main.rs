@@ -40,6 +40,7 @@ mod mcp;
 mod mcp_auth;
 mod profiles;
 mod providers;
+mod repeats;
 mod responses;
 mod retry;
 mod rpc;
