@@ -178,7 +178,7 @@ pub async fn aside(parts: &AsideParts, history: &[Value], question: &str, on_tex
             on_text(&text);
         }
     };
-    let a = Asked { model: &parts.model, effort: parts.effort.as_deref(), instructions: &parts.system, history: &asked, session: &parts.key, specs: &parts.specs, tools: false, images: parts.images };
+    let a = Asked { model: &parts.model, effort: parts.effort.as_deref(), instructions: &parts.system, history: &asked, session: &parts.key, specs: &parts.specs, tools: false, images: parts.images, trigger: false };
     let (reply, _) = send(a, &mut show).await?;
     let said: String = reply["content"].as_array().into_iter().flatten().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect();
     Ok(if said.trim().is_empty() { text } else { said })
@@ -761,7 +761,7 @@ impl Agent {
         }
         let (system, specs) = (self.system(), self.specs());
         let key = self.cache_key.clone().unwrap_or_else(|| self.log.id.clone());
-        let asked = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &self.history, session: &key, specs: &specs, tools: true, images };
+        let asked = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &self.history, session: &key, specs: &specs, tools: true, images, trigger: false };
         let (message, usage) = match send(asked, show).await {
             Err(e) if let Some(back) = self.falls_back(&e) => {
                 // Goes on with the fallback: said, and in the log.
@@ -776,7 +776,7 @@ impl Agent {
                 self.logged.0 = Some(self.model.clone());
                 show(Shown::ModelChanged(&self.model));
                 let images = self.takes_images().await;
-                let asked = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &self.history, session: &key, specs: &specs, tools: true, images };
+                let asked = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &self.history, session: &key, specs: &specs, tools: true, images, trigger: false };
                 send(asked, show).await?
             }
             r => r?,
@@ -1019,48 +1019,88 @@ impl Agent {
             0 => compact::estimate(&json!(self.instructions)) + self.history.iter().map(compact::estimate).sum::<u64>(),
             n => n,
         };
-        let mut asked: Vec<Value> = self.history[..cut].to_vec();
-        let turn = compact::turn_cut(&self.history, cut);
-        asked.push(json!({ "role": "user", "content": [{ "type": "text", "text": compact::request(focus, turn.as_deref()) }], "timestamp": now_ms() }));
         let (system, specs) = (self.system(), self.specs());
         let key = self.cache_key.clone().unwrap_or_else(|| self.log.id.clone());
         let images = self.takes_images().await;
-        let request = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &asked, session: &key, specs: &specs, tools: false, images };
-        // (The summary isn't shown as it's written.)
-        let mut quiet = |_: Shown| {};
-        let sent = tokio::select! {
-            biased;
-            _ = stop.cancelled() => None,
-            r = send(request, &mut quiet) => Some(r),
-        };
+        let files = compact::files(&self.history[..cut], &self.files);
+        // The server's own compaction, where asked for and the API has it
+        // (if it fails, summarized as usual).
+        let mut entry = None;
+        if let Some((pid, bare)) = compact::native().then(|| providers::resolve(&self.model).ok()).flatten().filter(|(p, _)| p.api == Api::Responses).map(|(p, m)| (p.id, m)) {
+            let request = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &self.history[..cut], session: &key, specs: &specs, tools: true, images, trigger: true };
+            let mut quiet = |_: Shown| {};
+            let sent = tokio::select! {
+                biased;
+                _ = stop.cancelled() => None,
+                r = send(request, &mut quiet) => Some(r),
+            };
+            match sent {
+                None => {
+                    show(Shown::CompactionEnd { reason, result: None, error: None, will_retry: false });
+                    return Compacted::Stopped;
+                }
+                Some(Ok((reply, usage))) => {
+                    self.count(&usage);
+                    match reply["content"].as_array().into_iter().flatten().find(|b| b["type"] == "compaction") {
+                        Some(b) => {
+                            let summary = compact::with_files(&compact::native_note(&self.history[..cut], &self.model), &files);
+                            entry = Some(json!({
+                                "type": "compaction", "summary": summary, "firstKeptEntryId": first_kept, "tokensBefore": tokens_before,
+                                "details": { "readFiles": files.0, "modifiedFiles": files.1 },
+                                "usage": reply["usage"],
+                                "native": { "provider": pid, "model": bare, "item": b["item"] },
+                            }));
+                        }
+                        None => show(Shown::Notice { level: "info", text: "The server's compaction sent nothing back: summarizing instead." }),
+                    }
+                }
+                Some(Err(e)) => show(Shown::Notice { level: "info", text: &format!("The server's compaction failed ({e:#}): summarizing instead.") }),
+            }
+        }
         let failed = |show: &mut (dyn FnMut(Shown) + Send), why: String| {
             show(Shown::CompactionEnd { reason, result: None, error: Some(&why), will_retry: false });
             Compacted::Failed(why)
         };
-        let (reply, usage) = match sent {
+        let entry = match entry {
+            Some(e) => e,
             None => {
-                show(Shown::CompactionEnd { reason, result: None, error: None, will_retry: false });
-                return Compacted::Stopped;
+                let mut asked: Vec<Value> = self.history[..cut].to_vec();
+                let turn = compact::turn_cut(&self.history, cut);
+                asked.push(json!({ "role": "user", "content": [{ "type": "text", "text": compact::request(focus, turn.as_deref()) }], "timestamp": now_ms() }));
+                let request = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &asked, session: &key, specs: &specs, tools: false, images, trigger: false };
+                // (The summary isn't shown as it's written.)
+                let mut quiet = |_: Shown| {};
+                let sent = tokio::select! {
+                    biased;
+                    _ = stop.cancelled() => None,
+                    r = send(request, &mut quiet) => Some(r),
+                };
+                let (reply, usage) = match sent {
+                    None => {
+                        show(Shown::CompactionEnd { reason, result: None, error: None, will_retry: false });
+                        return Compacted::Stopped;
+                    }
+                    Some(Err(e)) => return failed(show, format!("{e:#}")),
+                    Some(Ok(r)) => r,
+                };
+                self.count(&usage);
+                let text: String = reply["content"].as_array().into_iter().flatten().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join("");
+                if reply["stopReason"] == "length" {
+                    return failed(show, "The summary was cut off".into());
+                }
+                if text.trim().is_empty() {
+                    return failed(show, "The model wrote no summary".into());
+                }
+                let summary = compact::with_files(&text, &files);
+                json!({
+                    "type": "compaction", "summary": summary, "firstKeptEntryId": first_kept, "tokensBefore": tokens_before,
+                    "details": { "readFiles": files.0, "modifiedFiles": files.1 },
+                    // (What writing it cost: a request of its own.)
+                    "usage": reply["usage"],
+                })
             }
-            Some(Err(e)) => return failed(show, format!("{e:#}")),
-            Some(Ok(r)) => r,
         };
-        self.count(&usage);
-        let text: String = reply["content"].as_array().into_iter().flatten().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join("");
-        if reply["stopReason"] == "length" {
-            return failed(show, "The summary was cut off".into());
-        }
-        if text.trim().is_empty() {
-            return failed(show, "The model wrote no summary".into());
-        }
-        let files = compact::files(&self.history[..cut], &self.files);
-        let summary = compact::with_files(&text, &files);
-        let entry = json!({
-            "type": "compaction", "summary": summary, "firstKeptEntryId": first_kept, "tokensBefore": tokens_before,
-            "details": { "readFiles": files.0, "modifiedFiles": files.1 },
-            // (What writing it cost: a request of its own.)
-            "usage": reply["usage"],
-        });
+        let summary = entry["summary"].as_str().unwrap_or_default().to_owned();
         let id = match self.log.append(entry.clone()) {
             Ok(id) => id,
             Err(e) => return failed(show, format!("{e:#}")),
@@ -1094,6 +1134,9 @@ struct Asked<'a> {
     tools: bool,
     /// Whether the model takes images (otherwise a note goes in their place).
     images: bool,
+    /// The server's own compaction asked for (the Responses API): the reply
+    /// is a `compaction` block holding its opaque item.
+    trigger: bool,
 }
 
 /// Sends a request: the reply, as pi's assistant message, and its usage.
@@ -1133,7 +1176,10 @@ async fn send_once(a: Asked<'_>, show: &mut (dyn FnMut(Shown) + Send)) -> Result
         let token = provider.token(false).await?;
         return chat::stream(&provider.base_url, token.as_deref(), &body, &pid, &model, |e| show(Shown::Stream(e))).await;
     }
-    let input = responses::input(a.history, &pid, &model, a.images);
+    let mut input = responses::input(a.history, &pid, &model, a.images);
+    if a.trigger {
+        input.push(json!({ "type": "compaction_trigger" }));
+    }
     let mut body = responses::request(&model, a.instructions, &input, a.specs.clone(), effort.as_deref(), a.session);
     if !a.tools {
         body["tool_choice"] = json!("none");

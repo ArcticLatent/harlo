@@ -128,6 +128,8 @@ pub fn assistant_message(items: &[Value], provider: &str, model: &str, usage: &V
                 }
                 content.push(call);
             }
+            // (The server's own compaction, when asked for: opaque.)
+            Some("compaction") => content.push(json!({ "type": "compaction", "item": item })),
             _ => {}
         }
     }
@@ -192,6 +194,9 @@ pub fn input(messages: &[Value], provider: &str, model: &str, images: bool) -> V
                 }
             }
             Some("custom") => out.push(json!({ "role": "user", "content": [{ "type": "input_text", "text": text_of(&m["content"]) }] })),
+            // (The server's own compaction goes back as it came, to the
+            // model that made it; others get its note.)
+            Some("compactionSummary") if m["native"]["provider"] == provider && m["native"]["model"] == model && m["native"]["item"].is_object() => out.push(m["native"]["item"].clone()),
             Some("compactionSummary") => out.push(json!({ "role": "user", "content": [{ "type": "input_text", "text": crate::compact::replayed(m) }] })),
             Some("assistant") => {
                 let same = m["provider"] == provider && m["model"] == model && m["api"] == "openai-responses";
@@ -538,6 +543,19 @@ mod tests {
         assert_eq!(other.len(), 4, "another model gets no reasoning");
         assert!(other[2].get("id").is_none(), "nor the call's item id");
         assert_eq!(input(&msgs, "openai", "m1", true).len(), 4, "nor the same model through another provider");
+    }
+
+    #[test]
+    fn the_servers_compaction_goes_back_only_to_its_model() {
+        let item = json!({ "type": "compaction", "id": "cmp_1", "encrypted_content": "opaque" });
+        let summary = json!({ "role": "compactionSummary", "summary": "note", "native": { "provider": "codex", "model": "m", "item": item } });
+        assert_eq!(input(std::slice::from_ref(&summary), "codex", "m", true), [item.clone()]);
+        let other = input(std::slice::from_ref(&summary), "codex", "n", true);
+        assert_eq!(other[0]["role"], "user");
+        assert!(other[0]["content"][0]["text"].as_str().unwrap().contains("note"));
+        // Its reply: a block holding the item.
+        let reply = assistant_message(std::slice::from_ref(&item), "codex", "m", &json!({}));
+        assert_eq!(reply["content"], json!([{ "type": "compaction", "item": item }]));
     }
 
     #[test]

@@ -144,6 +144,49 @@ pub fn replayed(m: &Value) -> String {
     )
 }
 
+/// Whether the server's own compaction is used where the API has it
+/// (`HARLO_AGENT_COMPACT=native`, to measure): the conversation up to the
+/// cut goes to the model with a compaction trigger, and the opaque item it
+/// sends back stands in for it (the entry's `native`), for that model only.
+pub fn native() -> bool {
+    std::env::var("HARLO_AGENT_COMPACT").is_ok_and(|v| v == "native")
+}
+
+/// Of the user's requests, how many a native compaction's note keeps, and
+/// how much of each.
+const NOTE_REQUESTS: usize = 10;
+const NOTE_CHARS: usize = 600;
+
+/// A native compaction's summary, for any other model (and for reading):
+/// what the user asked in the part compacted.
+pub fn native_note(history: &[Value], model: &str) -> String {
+    let asked: Vec<String> = history
+        .iter()
+        .filter(|m| m["role"] == "user")
+        .filter_map(|m| {
+            let text = match &m["content"] {
+                Value::String(s) => s.clone(),
+                Value::Array(b) => b.iter().filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join("\n"),
+                _ => String::new(),
+            };
+            let text = text.trim();
+            (!text.is_empty()).then(|| {
+                let short: String = text.chars().take(NOTE_CHARS).collect();
+                if short.len() < text.len() { format!("{short}…") } else { short }
+            })
+        })
+        .collect();
+    let mut note = format!("The earlier conversation was compacted by {model}'s own compaction, which only that model can read.");
+    if !asked.is_empty() {
+        let from = asked.len().saturating_sub(NOTE_REQUESTS);
+        note.push_str("\n\nThe user's requests in it, the newest last:\n");
+        for a in &asked[from..] {
+            note.push_str(&format!("\n- {}", a.replace('\n', "\n  ")));
+        }
+    }
+    note
+}
+
 /// The files the calls in `history` read and changed, added to `known`.
 pub fn files(history: &[Value], known: &(Vec<String>, Vec<String>)) -> (Vec<String>, Vec<String>) {
     let mut read: BTreeSet<String> = known.0.iter().cloned().collect();
@@ -204,6 +247,18 @@ pub fn overflowed(error: &anyhow::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_native_compactions_note_names_the_requests() {
+        let u = |t: &str| serde_json::json!({ "role": "user", "content": [{ "type": "text", "text": t }] });
+        let mut h: Vec<Value> = (0..12).map(|i| u(&format!("ask {i}"))).collect();
+        h.push(u(&"y".repeat(NOTE_CHARS + 10)));
+        let note = native_note(&h, "codex/m");
+        assert!(note.starts_with("The earlier conversation was compacted by codex/m's own compaction"));
+        assert!(!note.contains("ask 2\n") && note.contains("- ask 3\n") && note.contains("- ask 11"), "{note}");
+        assert!(note.ends_with('…'));
+        assert!(!native_note(&[], "x").contains("requests"));
+    }
 
     #[test]
     fn a_cut_inside_a_turn_names_its_request() {

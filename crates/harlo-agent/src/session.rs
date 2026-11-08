@@ -305,7 +305,12 @@ impl Log {
 
 /// A compaction entry as the message the model gets in its place.
 pub fn summary_message(e: &Value) -> Value {
-    json!({ "role": "compactionSummary", "summary": e["summary"], "tokensBefore": e["tokensBefore"], "timestamp": now_ms() })
+    let mut m = json!({ "role": "compactionSummary", "summary": e["summary"], "tokensBefore": e["tokensBefore"], "timestamp": now_ms() });
+    // (The server's own compaction: its item, for the model that made it.)
+    if e["native"].is_object() {
+        m["native"] = e["native"].clone();
+    }
+    m
 }
 
 /// A user message's text (its text blocks, one after another).
