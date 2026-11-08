@@ -28,6 +28,10 @@ Rectangle {
     readonly property bool agentBusy: !!session && (session.status === "busy" || session.status === "starting")
     readonly property var run: plan.run || null
     readonly property bool paused: !!run && (run.paused || "") !== ""
+    // What the run's helpers (its steps' and their reviews') used, together.
+    readonly property string runUsed: !!session && session.key !== "" && Workspace.orchestrationRevision >= 0
+        ? Theme.usedLabel(Theme.usedTotal(JSON.parse(Workspace.orchestratedJson(session.key)).filter(h => (h.step !== null && h.step !== undefined) || (h.review !== null && h.review !== undefined)).map(h => h.used || null)))
+        : ""
     // The session is in Plan: the plan waits for you to build it.
     readonly property bool planning: !!session && session.key !== "" && Workspace.modesRevision >= 0 && Workspace.planMode(session.key)
     /// Build: out of Plan, and the agent works through the plan.
@@ -97,6 +101,17 @@ Rectangle {
                 readonly property color tint: root.paused ? Theme.warning : Theme.primary
                 color: Qt.rgba(tint.r, tint.g, tint.b, 0.15)
                 Label { id: runChip; anchors.centerIn: parent; text: root.paused ? "Paused" : "Running with helpers"; color: parent.tint; font.pixelSize: Theme.px(10.5); font.bold: true }
+            }
+            Label {
+                objectName: "planRunUsed"
+                visible: root.runUsed !== ""
+                text: root.runUsed
+                color: Theme.muted
+                font.pixelSize: Theme.px(11)
+                ToolTip.visible: usedHover.hovered
+                ToolTip.text: "What this plan's helpers and their reviews used, together."
+                ToolTip.delay: 500
+                HoverHandler { id: usedHover }
             }
             Label {
                 Layout.fillWidth: true

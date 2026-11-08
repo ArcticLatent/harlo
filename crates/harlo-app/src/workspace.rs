@@ -7240,17 +7240,46 @@ impl Workspace {
                         "text": harlo_core::orchestration::waiting_what(&r.title, &question_text(r), r.is_approval),
                     })
                 });
+                // Its model, and what it used so far.
+                let model = live.map(|e| e.model_id.clone()).unwrap_or_default();
+                let used = self.used_by(k, &c.agent);
                 serde_json::json!({
                     "asks": asks,
                     "id": k, "name": c.title, "agent": c.agent, "status": status, "openKey": k,
                     "canCancel": live.is_some(), "canSteer": false, "startedAt": live.map(|e| e.info.started_at.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())),
-                    "description": c.report.as_ref().map_or("", |r| r.summary.as_str()), "step": c.plan_step,
+                    "description": c.report.as_ref().map_or("", |r| r.summary.as_str()), "step": c.plan_step, "review": c.review_of,
+                    "model": model,
+                    "used": used.map_or(serde_json::Value::Null, |u| json!({ "tokens": u.input + u.output, "cost": u.cost, "requests": u.requests })),
                 })
             })
             .collect();
         let mut list = list;
         list.sort_by_key(|e| e["startedAt"].as_u64().unwrap_or(0));
         QString::from(&serde_json::Value::Array(list).to_string())
+    }
+
+    /// What a session an agent started has used so far: from its file when
+    /// it's Harlo's (its subagents' included; read again only when the
+    /// file changed), else its cost as its agent said.
+    fn used_by(&self, key: &str, agent: &str) -> Option<harlo_core::context::Spent> {
+        static READ: OnceLock<Mutex<HashMap<PathBuf, (u64, SystemTime, harlo_core::context::Spent)>>> = OnceLock::new();
+        if HarnessKind::parse(agent) == Some(HarnessKind::Harlo)
+            && let Some(file) = self.file_for_key(key)
+            && let Ok(meta) = std::fs::metadata(&file)
+        {
+            let stamp = (meta.len(), meta.modified().unwrap_or(UNIX_EPOCH));
+            let cache = READ.get_or_init(Default::default);
+            if let Some((len, at, spent)) = cache.lock().unwrap().get(&file)
+                && (*len, *at) == stamp
+            {
+                return Some(spent.clone()).filter(|s| s.requests > 0);
+            }
+            let spent = harlo_core::context::spent_in_file(&file).unwrap_or_default();
+            cache.lock().unwrap().insert(file, (stamp.0, stamp.1, spent.clone()));
+            return Some(spent).filter(|s| s.requests > 0);
+        }
+        let cost = self.spend.get(key).map_or(0.0, |s| s.cost);
+        (cost > 0.0).then(|| harlo_core::context::Spent { cost, ..Default::default() })
     }
 
     /// A helper that did its task goes on its project's Settled shelf

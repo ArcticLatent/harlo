@@ -75,7 +75,8 @@ Rectangle {
                     radius: 4
                     color: Theme.subtle
                     border.color: Theme.border
-                    Label { id: agentLabel; anchors.centerIn: parent; text: agentRow.a.agent || "task"; color: Theme.muted; font.pixelSize: Theme.px(10) }
+                    // (A harlo session: its model too.)
+                    Label { id: agentLabel; anchors.centerIn: parent; text: (agentRow.a.agent || "task") + (agentRow.a.model ? " · " + Theme.modelLabel(String(agentRow.a.model).split("/").pop()) : ""); color: Theme.muted; font.pixelSize: Theme.px(10) }
                 }
                 Label {
                     Layout.fillWidth: true
@@ -89,6 +90,14 @@ Rectangle {
                     elide: Text.ElideRight
                     maximumLineCount: 1
                     wrapMode: Text.NoWrap
+                }
+                // What it used so far.
+                Label {
+                    objectName: "subagentUsed"
+                    visible: text !== "" && agentRow.width >= 420
+                    text: Theme.usedLabel(agentRow.a.used)
+                    color: Theme.muted
+                    font.pixelSize: Theme.px(11)
                 }
                 Label {
                     visible: !agentRow.live

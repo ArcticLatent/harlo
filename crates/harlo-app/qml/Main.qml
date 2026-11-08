@@ -6063,6 +6063,12 @@ ApplicationWindow {
             win.check(reviewReqs.length > 0 && reviewReqs.every(r => first(r).indexOf("git diff ") >= 0), "the reviewer is told where the step's changes are")
             const fixes = reqs.filter(r => (r.messages || []).some(m => m.role === "user" && JSON.stringify(m.content).indexOf("A review of your step found problems") >= 0))
             win.check(fixes.length > 0 && fixes.some(r => JSON.stringify(r.messages).indexOf("helper.txt:1 needs a second line") >= 0), "the problems went back to the step's helper")
+            // Each helper's model and what it used; the run's total.
+            win.check(kids.length === 3 && kids.every(k => k.model === "fake/fake-coder" && k.used && k.used.tokens > 0), "each helper shows its model and what it used (" + JSON.stringify(kids.map(k => [k.model, k.used])) + ")")
+            const total = kids.reduce((t, k) => t + k.used.tokens, 0)
+            const used = win.findName("planRunUsed")
+            win.check(used !== null && used.visible && used.text === (total / 1000).toFixed(1) + "k tokens", "the plan card has the run's total (" + (used ? used.text : "none") + ", " + total + ")")
+            win.check(win.findContaining("Subagents · all done · " + (total / 1000).toFixed(1) + "k tokens") !== null, "and the Subagents box")
             win.shotWindow("clicks-review-done") } }
         // Problems that stay: the run pauses for you.
         PauseAnimation { duration: 300 }

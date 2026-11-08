@@ -14,6 +14,8 @@ Rectangle {
     // Its agent's own subagents, and the harlo sessions it started (orchestration).
     readonly property var agents: (session && session.subagentsJson !== "" ? JSON.parse(session.subagentsJson) : [])
         .concat(session && session.key !== "" && Workspace.orchestrationRevision >= 0 ? JSON.parse(Workspace.orchestratedJson(session.key)) : [])
+    // What the harlo sessions it started used, together.
+    readonly property string used: Theme.usedLabel(Theme.usedTotal(agents.map(a => a.used || null)))
     readonly property int running: agents.filter(a => a.status === "running" || a.status === "pending").length
     // harlo sessions waiting: on their parent's answer, or on you.
     readonly property int stalled: agents.filter(a => a.status === "asking" || a.status === "waiting").length
@@ -45,6 +47,7 @@ Rectangle {
                 text: "Subagents · " + (root.running > 0 ? root.running + " running" : root.stalled > 0 ? "" : root.agents.every(a => a.status === "stopped") ? "stopped" : "all done")
                     + (root.stalled > 0 ? (root.running > 0 ? " · " : "") + root.stalled + " waiting" : "")
                     + (finished > 0 && root.running + root.stalled > 0 ? " · " + finished + " finished" : "")
+                    + (root.used !== "" ? " · " + root.used : "")
                 color: Theme.foreground
                 font.pixelSize: Theme.px(12)
                 font.bold: true

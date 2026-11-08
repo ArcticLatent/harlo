@@ -136,6 +136,19 @@ QtObject {
     /// model, then its size (quantization). llama.cpp's file name
     /// "Qwen3-4B-UD-Q4_K_XL" and Ollama's "hf.co/unsloth/Qwen3-4B-GGUF:UD-Q4_K_XL"
     /// are both "Qwen3-4B · UD-Q4_K_XL".
+    // What a session used: "12.3k tokens", ", $0.04" when it cost
+    // something ("" for nothing). `u`: { tokens, cost }.
+    function usedLabel(u) {
+        if (!u) return ""
+        const t = Number(u.tokens || 0), c = Number(u.cost || 0)
+        const tokens = t >= 1000000 ? (t / 1000000).toFixed(1) + "M tokens" : t >= 1000 ? (t / 1000).toFixed(1) + "k tokens" : t > 0 ? t + " tokens" : ""
+        const cost = c > 0 ? "$" + (c < 0.01 ? "<0.01" : c.toFixed(2)) : ""
+        return [tokens, cost].filter(x => x !== "").join(" · ")
+    }
+    // Sums `usedLabel`'s inputs.
+    function usedTotal(list) {
+        return list.reduce((t, u) => u ? { tokens: t.tokens + Number(u.tokens || 0), cost: t.cost + Number(u.cost || 0) } : t, { tokens: 0, cost: 0 })
+    }
     function modelLabel(id) {
         let name = id
         let quant = ""
