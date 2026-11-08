@@ -1,8 +1,9 @@
 //! The tools the model can call, their descriptions, and running them.
 //!
-//! Files the session has read or written are remembered with their size
-//! and modification time: an edit or overwrite of a file that changed
-//! since then (another helper, the user) is refused until it's read again.
+//! Files the session has read or written are remembered as they were (their
+//! size, modification time and a hash of what was in them): an edit or
+//! overwrite of a file that changed since then (another helper, the user)
+//! is refused until it's read again.
 
 pub mod bash;
 pub mod edit;
@@ -31,8 +32,8 @@ pub struct Tools {
     pub cwd: PathBuf,
     /// Where long command output is saved.
     pub spill_dir: PathBuf,
-    /// Files as this session last saw them: (modified, size).
-    seen: Mutex<HashMap<PathBuf, (SystemTime, u64)>>,
+    /// Files as this session last saw them.
+    seen: Mutex<HashMap<PathBuf, Seen>>,
     /// Outputs set aside (see `stubs`), by call id, for `recall`.
     originals: Mutex<HashMap<String, Original>>,
     /// Where commands run, and what the file tools may touch (None: the
@@ -40,6 +41,29 @@ pub struct Tools {
     pub sandbox: Option<Arc<Sandbox>>,
     /// Commands running in the background (`bash` with `background`).
     pub jobs: Arc<crate::jobs::Jobs>,
+}
+
+/// A file as the session last saw it.
+#[derive(Clone, Copy, PartialEq, Debug)]
+struct Seen {
+    modified: SystemTime,
+    size: u64,
+    /// Of its bytes.
+    hash: u64,
+    /// When this was taken.
+    at: SystemTime,
+}
+
+/// A modification time this close to when it was taken may not move when
+/// the file is written again (some file systems' times are that coarse, and
+/// a write in the same tick keeps it): such a file's contents are compared.
+const RACY: std::time::Duration = std::time::Duration::from_secs(2);
+
+fn hash_of(bytes: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut h);
+    h.finish()
 }
 
 /// An output set aside: the result as it was, and the file it read (to
@@ -245,22 +269,43 @@ impl Tools {
         if p.is_absolute() { p } else { self.cwd.join(p) }
     }
 
-    fn stamp(path: &Path) -> Option<(SystemTime, u64)> {
-        let m = std::fs::metadata(path).ok()?;
-        Some((m.modified().ok()?, m.len()))
+    /// Remembers `path` as it is: `bytes`, what was just read from it or
+    /// written to it.
+    fn remember(&self, path: &Path, bytes: &[u8]) {
+        let Ok(m) = std::fs::metadata(path) else { return };
+        let Ok(modified) = m.modified() else { return };
+        let seen = Seen { modified, size: m.len(), hash: hash_of(bytes), at: SystemTime::now() };
+        self.seen.lock().unwrap().insert(path.to_path_buf(), seen);
     }
 
-    fn remember(&self, path: &Path) {
-        if let Some(s) = Self::stamp(path) {
-            self.seen.lock().unwrap().insert(path.to_path_buf(), s);
+    /// Whether `path` is still as the session last saw it: by its size and
+    /// time, or by what's in it when those can't tell (`now`: its contents,
+    /// when already read).
+    fn unchanged(&self, path: &Path, seen: &Seen, now: Option<&[u8]>) -> bool {
+        let Ok(m) = std::fs::metadata(path) else { return false };
+        if m.len() != seen.size {
+            return false;
+        }
+        let racy = seen.at.duration_since(seen.modified).map_or(true, |d| d < RACY);
+        if m.modified().ok() == Some(seen.modified) && !racy {
+            return true;
+        }
+        // (Touched, or rewritten as it was: still what was read.)
+        match now {
+            Some(bytes) => hash_of(bytes) == seen.hash,
+            None => std::fs::read(path).is_ok_and(|b| hash_of(&b) == seen.hash),
         }
     }
 
-    /// Why an edit or overwrite of `path` must wait, if it must.
-    fn stale(&self, path: &Path, must_have_read: bool) -> Option<String> {
-        let now = Self::stamp(path)?;
-        match self.seen.lock().unwrap().get(path) {
-            Some(seen) if *seen == now => None,
+    /// Why an edit or overwrite of `path` must wait, if it must (`now`:
+    /// what's in it, when already read).
+    fn stale(&self, path: &Path, must_have_read: bool, now: Option<&[u8]>) -> Option<String> {
+        if !path.exists() {
+            return None;
+        }
+        let seen = self.seen.lock().unwrap().get(path).copied();
+        match seen {
+            Some(seen) if self.unchanged(path, &seen, now) => None,
             Some(_) => Some(format!("{} changed since you last read it (someone else edited it). Read it again, then make your change.", path.display())),
             None if must_have_read => Some(format!("{} exists and you haven't read it in this session: read it first, then replace it (or change part of it with edit).", path.display())),
             None => None,
@@ -312,7 +357,7 @@ impl Tools {
             Err(e) if path.is_dir() => return fail(format!("{} is a folder: use ls ({e}).", path.display())),
             Err(e) => return fail(format!("Can't read {}: {e}", path.display())),
         };
-        self.remember(&path);
+        self.remember(&path, &bytes);
         if crate::images::mime_of(&bytes).is_some() {
             return match crate::images::fit(&bytes) {
                 Ok(f) => {
@@ -381,7 +426,7 @@ impl Tools {
         if let Some(no) = self.fenced(&path) {
             return no;
         }
-        if let Some(why) = self.stale(&path, true) {
+        if let Some(why) = self.stale(&path, true, None) {
             return fail(why);
         }
         if let Some(parent) = path.parent()
@@ -393,7 +438,7 @@ impl Tools {
         if let Err(e) = std::fs::write(&path, content) {
             return fail(format!("Can't write {}: {e}", path.display()));
         }
-        self.remember(&path);
+        self.remember(&path, content.as_bytes());
         ok(format!("{} {} ({} lines).", if existed { "Replaced" } else { "Created" }, path.display(), content.lines().count()))
     }
 
@@ -418,7 +463,7 @@ impl Tools {
             Ok(c) => c,
             Err(e) => return fail(format!("Can't read {}: {e}", path.display())),
         };
-        if let Some(why) = self.stale(&path, false) {
+        if let Some(why) = self.stale(&path, false, Some(content.as_bytes())) {
             return fail(why);
         }
         match edit::apply(&content, &list) {
@@ -426,7 +471,7 @@ impl Tools {
                 if let Err(e) = std::fs::write(&path, &new) {
                     return fail(format!("Can't write {}: {e}", path.display()));
                 }
-                self.remember(&path);
+                self.remember(&path, new.as_bytes());
                 ok(format!("Edited {} ({} change{}, from line {first}).", path.display(), list.len(), if list.len() == 1 { "" } else { "s" }))
             }
             Err(why) => fail(why),
@@ -450,7 +495,7 @@ impl Tools {
                 if let Err(e) = std::fs::write(&path, &new) {
                     return fail(format!("Can't write {}: {e}", path.display()));
                 }
-                self.remember(&path);
+                self.remember(&path, new.as_bytes());
                 ok(format!("Edited {}. Now:\n{view}", path.display()))
             }
             Err(why) => fail(why),
@@ -605,6 +650,32 @@ mod tests {
         t.set_aside([("c1".to_owned(), Original { result, read: None })], true);
         let back = t.call("recall", &json!({ "id": "c1" })).await;
         assert_eq!((back.images.len(), back.failed), (1, false));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn a_same_size_rewrite_in_the_same_tick_is_caught() {
+        let dir = std::env::temp_dir().join(format!("harlo-agent-racy-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let t = Tools::new(dir.clone(), dir.join(".out"));
+        let file = dir.join("a.txt");
+        std::fs::write(&file, "aaaa\n").unwrap();
+        assert!(!t.call("read", &json!({ "path": "a.txt" })).await.failed);
+        // Rewritten at the same size, its time as it was: only what's in it
+        // tells.
+        let modified = std::fs::metadata(&file).unwrap().modified().unwrap();
+        std::fs::write(&file, "bbbb\n").unwrap();
+        std::fs::File::options().write(true).open(&file).unwrap().set_modified(modified).unwrap();
+        let r = t.call("edit", &json!({ "path": "a.txt", "edits": [{ "old_text": "aaaa", "new_text": "x" }] })).await;
+        assert!(r.failed && r.text.contains("changed since you last read it"), "{}", r.text);
+        let w = t.call("write", &json!({ "path": "a.txt", "content": "y" })).await;
+        assert!(w.failed && w.text.contains("changed since you last read it"), "{}", w.text);
+        // Touched, the same inside: not a change.
+        t.call("read", &json!({ "path": "a.txt" })).await;
+        std::fs::File::options().write(true).open(&file).unwrap().set_modified(modified + std::time::Duration::from_secs(60)).unwrap();
+        let r = t.call("edit", &json!({ "path": "a.txt", "edits": [{ "old_text": "bbbb", "new_text": "c" }] })).await;
+        assert!(!r.failed, "{}", r.text);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "c\n");
         let _ = std::fs::remove_dir_all(dir);
     }
 
