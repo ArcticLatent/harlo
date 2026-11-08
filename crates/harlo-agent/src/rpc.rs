@@ -745,11 +745,19 @@ async fn load_models(sh: &Shared) -> Result<(), String> {
     }
     let first = list.first().map(|m| m.key());
     *sh.models.lock().unwrap() = list;
-    let mut v = sh.view.lock().unwrap();
-    if v.model.is_empty()
-        && let Some(m) = first
-    {
-        v.model = m;
+    let chosen = {
+        let mut v = sh.view.lock().unwrap();
+        match first {
+            Some(m) if v.model.is_empty() => {
+                v.model = m.clone();
+                Some(m)
+            }
+            _ => None,
+        }
+    };
+    // (Said at once, so harlo shows the model before the first prompt.)
+    if let Some(m) = chosen {
+        sh.emit(json!({ "type": "model_changed", "model": sh.model_json(&m) }));
     }
     Ok(())
 }
