@@ -5973,6 +5973,59 @@ ApplicationWindow {
             win.summary(); Qt.quit() } }
     }
 
+    // A benchmark task in harlo (scripts/bench's `app` agent, on a real
+    // model): a Harlo session in the task's repository is given the task
+    // (--prompt-file), a split it offers is accepted, and once it and its
+    // helpers have all been done for a while, what its helpers did goes to
+    // <selftest>/bench.json for the task's check.
+    property double benchQuiet: 0
+    SequentialAnimation {
+        id: benchSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "benchtask"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            Workspace.setProviderEnabled("claude", false)
+            Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            win.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo")
+            Workspace.setApprovalMode(win.harloKey, "yolo") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(benchSteps, () => chat.session.modelName !== "", 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const m = (win.argValue("--model=") || "codex/gpt-6.1-sol").split("/")
+            chat.session.setModel(m[0], m.slice(1).join("/"))
+            if (win.argValue("--thinking=")) chat.session.setThinkingLevel(win.argValue("--thinking=")) } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            const task = TestInput.readFile(win.argValue("--prompt-file=")).trim()
+            win.log("model", chat.session.modelName)
+            chat.session.send(task, "normal") } }
+        PauseAnimation { duration: 3000 }
+        ScriptAction { script: win.waitUntil(benchSteps, () => {
+            // (A split it offers: accepted, as the task asks for one.)
+            if (chat.session.hasRequest && win.findContaining("Split into helpers", chat.requestDock) !== null) {
+                win.clickText("Start helpers", chat.requestDock)
+                win.benchQuiet = 0
+                return false
+            }
+            const kids = JSON.parse(Workspace.orchestratedJson(win.harloKey))
+            const done = chat.session.status === "idle" && !chat.session.hasRequest && kids.every(k => ["completed", "failed", "ended"].includes(k.status))
+            if (!done) { win.benchQuiet = 0; return false }
+            if (!win.benchQuiet) win.benchQuiet = Date.now()
+            return Date.now() - win.benchQuiet > 15000
+        }, 3 * 3600 * 1000) }
+        // (A pause between: a wait followed at once by another action
+        // doesn't hold the animation.)
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            const kids = JSON.parse(Workspace.orchestratedJson(win.harloKey))
+            TestInput.writeFile(win.selftestDir + "/bench.json", JSON.stringify({ helpers: kids, status: chat.session.status, chat: win.chatText().slice(-4000) }, null, 1))
+            win.log("helpers", kids.length)
+            Qt.quit() } }
+    }
+
     // A plan run with helpers on a real model (run by hand: it needs a
     // sign-in): the session makes a two-step plan, the run hands each step
     // to a helper and has each reviewed before the next.
