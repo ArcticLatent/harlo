@@ -53,13 +53,6 @@ struct SessionContent: View {
         }
     }
 
-    /// Where the transcript's end starts (drawn all at once): your last
-    /// message, but at least the last 6 items and at most the last 40.
-    static func tailStart(_ items: [TranscriptItem]) -> Int {
-        let lastSent = items.lastIndex { isSent($0) } ?? 0
-        return max(items.count - 40, min(lastSent, items.count - 6), 0)
-    }
-
     /// The files the last turn edited (once it's done), for "View diff".
     var changedFiles: [String] {
         guard !session.busy else { return [] }
@@ -76,7 +69,12 @@ struct SessionContent: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
+                // Drawn all at once, not lazily (the phone has at most the
+                // last 300 rows, tool runs folded): a lazy stack guesses the
+                // heights of rows it hasn't drawn, so following the end, or
+                // rows changing height as a reply streams in, could land
+                // where nothing is drawn: a blank screen until you scrolled.
+                VStack(alignment: .leading, spacing: 14) {
                     if model.state != .connected {
                         ConnectionBanner()
                             .padding(12)
@@ -95,20 +93,8 @@ struct SessionContent: View {
                             .padding(.vertical, 6)
                     }
                     let items = session.items
-                    let cut = Self.tailStart(items)
-                    ForEach(Array(items.enumerated().prefix(cut)), id: \.element.id) { i, item in
+                    ForEach(Array(items.enumerated()), id: \.element.id) { i, item in
                         row(i, item, items)
-                    }
-                    // The end (the turn at hand) drawn all at once, not lazily:
-                    // a lazy stack whose rows change height as a reply streams
-                    // in can leave what's in sight undrawn (empty until you
-                    // scroll), and the end is what's followed.
-                    if cut < items.count {
-                        VStack(alignment: .leading, spacing: 14) {
-                            ForEach(Array(items.enumerated().dropFirst(cut)), id: \.element.id) { i, item in
-                                row(i, item, items)
-                            }
-                        }
                     }
                     // What the last turn changed: tap for the diff, or undo it
                     // (in a git repository: elsewhere there's no diff to show).
@@ -164,9 +150,7 @@ struct SessionContent: View {
             .overlay {
                 if session.loading && session.rows.isEmpty && session.error == nil { ProgressView() }
             }
-            // New rows: follow them while at the end. (Not animated: an
-            // animated scroll through rows not drawn yet lands on their
-            // guessed heights, past the end, showing nothing.)
+            // New rows: follow them while at the end (not animated).
             .onChange(of: session.rows.count) { _, _ in
                 if atBottom { proxy.scrollTo("bottom", anchor: .bottom) }
             }
