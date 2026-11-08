@@ -73,6 +73,9 @@ struct Shared {
     /// Starts a run for background commands that ended, when none is
     /// going (set once the agent is shared).
     wake: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    /// What side questions are asked with while a run has the agent (as
+    /// it started).
+    aside: Mutex<crate::agent::AsideParts>,
 }
 
 struct Modes {
@@ -344,6 +347,7 @@ pub async fn serve(keep: Keep, model: Option<String>, effort: Option<String>, ha
         models: Mutex::default(),
         subagents: agent.subagents.clone(),
         wake: Mutex::default(),
+        aside: Mutex::default(),
     });
     agent.gate = Some(Arc::new(Approvals(shared.clone())));
     if harlo_tools {
@@ -433,6 +437,12 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
     let text = || cmd["message"].as_str().unwrap_or_default().to_owned();
     // (Fitted to send; one that can't be sent says why in its place.)
     let images = || crate::images::prompt_blocks(cmd["images"].as_array().map_or(&[][..], Vec::as_slice));
+    // "/btw <question>": answered apart, while a run goes on too.
+    if matches!(ty.as_str(), "prompt" | "steer" | "follow_up") && let Some(q) = btw(&text()) {
+        reply(Ok(Value::Null));
+        side_question(sh, agent, q).await;
+        return;
+    }
     match ty.as_str() {
         // "/compact [what to keep]", typed: as the compact command.
         "prompt" if text().trim() == "/compact" || text().trim_start().starts_with("/compact ") => {
@@ -635,10 +645,16 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
             reply(Ok(stats))
         }
         "get_commands" | "get_available_commands" => {
-            let mut commands = vec![json!({
-                "name": "compact", "description": "Summarize the conversation so far to free up context",
-                "source": "builtin", "input": { "hint": "what to keep (optional)" },
-            })];
+            let mut commands = vec![
+                json!({
+                    "name": "compact", "description": "Summarize the conversation so far to free up context",
+                    "source": "builtin", "input": { "hint": "what to keep (optional)" },
+                }),
+                json!({
+                    "name": "btw", "description": "Ask a side question while the agent works: answered from the conversation, without tools, and not kept",
+                    "source": "builtin", "input": { "hint": "your question" },
+                }),
+            ];
             let cwd = std::env::current_dir().unwrap_or_default();
             let home = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default();
             for s in crate::skills::find(&cwd, &home, &crate::auth::config_dir()) {
@@ -787,6 +803,39 @@ async fn compact_now(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, f
 /// Starts a run on `prompt` and its images (the agent is free).
 /// Starts a run on `what` (a prompt and its images), or (None) on the
 /// background commands that ended, if any did.
+/// `/btw <question>`'s question.
+fn btw(text: &str) -> Option<String> {
+    let t = text.trim_start();
+    let q = t.strip_prefix("/btw")?;
+    (q.is_empty() || q.starts_with(char::is_whitespace)).then(|| q.trim().to_owned())
+}
+
+/// A side question: answered from the conversation, beside the task (no
+/// tools, nothing kept), as `harlo_aside` frames.
+async fn side_question(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, question: String) {
+    if question.is_empty() {
+        sh.emit(json!({ "type": "harlo_aside", "question": "", "text": "", "done": true, "error": "Ask something after /btw." }));
+        return;
+    }
+    // Idle: the agent's own; working: as the run started, and the
+    // messages so far.
+    let (parts, history) = match agent.clone().try_lock_owned() {
+        Ok(mut a) => (a.aside_parts().await, a.history().to_vec()),
+        Err(_) => (sh.aside.lock().unwrap().clone(), sh.view.lock().unwrap().messages.clone()),
+    };
+    let sh = sh.clone();
+    tokio::spawn(async move {
+        sh.emit(json!({ "type": "harlo_aside", "question": question, "text": "", "done": false }));
+        let shown = sh.clone();
+        let q = question.clone();
+        let mut on_text = move |t: &str| shown.emit(json!({ "type": "harlo_aside", "question": q, "text": t, "done": false }));
+        match crate::agent::aside(&parts, &history, &question, &mut on_text).await {
+            Ok(text) => sh.emit(json!({ "type": "harlo_aside", "question": question, "text": text, "done": true })),
+            Err(e) => sh.emit(json!({ "type": "harlo_aside", "question": question, "text": "", "done": true, "error": format!("{e:#}") })),
+        }
+    });
+}
+
 async fn start(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, what: Option<(String, Vec<Value>)>) -> Result<(), String> {
     let mut a = agent.clone().lock_owned().await;
     if what.is_none() && (!a.has_notices() || sh.running.lock().unwrap().is_some()) {
@@ -803,6 +852,7 @@ async fn start(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, what: O
     }
     let stop = CancellationToken::new();
     *sh.running.lock().unwrap() = Some(stop.clone());
+    *sh.aside.lock().unwrap() = a.aside_parts().await;
     let sh = sh.clone();
     tokio::spawn(async move {
         sh.emit(json!({ "type": "agent_start" }));

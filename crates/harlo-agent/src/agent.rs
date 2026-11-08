@@ -117,6 +117,73 @@ pub trait Gate: Send + Sync {
     fn ask(&self, questions: Value) -> BoxFuture<'static, Option<Value>>;
 }
 
+/// What a side question (`/btw`) is asked with: the session's model,
+/// instructions and tools as its own requests have them (so the cache
+/// serves them), though it may use none.
+#[derive(Clone, Default)]
+pub struct AsideParts {
+    model: String,
+    effort: Option<String>,
+    system: String,
+    specs: Value,
+    key: String,
+    images: bool,
+}
+
+/// Of the conversation, what a side question takes along (tokens, about).
+const ASIDE_KEEP: u64 = 20_000;
+/// What it's asked with: the question, and how to answer.
+const ASIDE_RULE: &str = "[A side question from the user, apart from the task: answer it briefly, from what you know and this conversation. You can't use tools for it, and the task goes on as it was.]";
+
+/// The messages up to where none waits for its tool results (a run in
+/// the middle of its calls).
+fn settled_prefix(history: &[Value]) -> usize {
+    let mut open: Vec<String> = Vec::new();
+    let mut end = 0;
+    for (i, m) in history.iter().enumerate() {
+        match m["role"].as_str() {
+            Some("assistant") => {
+                open = m["content"].as_array().into_iter().flatten().filter(|b| b["type"] == "toolCall").filter_map(|b| b["id"].as_str().map(str::to_owned)).collect();
+            }
+            Some("toolResult") => {
+                let id = m["toolCallId"].as_str().unwrap_or_default();
+                open.retain(|o| o != id);
+            }
+            _ => {}
+        }
+        if open.is_empty() {
+            end = i + 1;
+        }
+    }
+    end
+}
+
+/// A side question, answered apart: the newest part of `history` (about
+/// [`ASIDE_KEEP`] tokens, ending where no call waits for its result),
+/// then the question. `on_text`: the answer as it comes. Nothing is kept.
+pub async fn aside(parts: &AsideParts, history: &[Value], question: &str, on_text: &mut (dyn FnMut(&str) + Send)) -> Result<String> {
+    if parts.model.is_empty() {
+        bail!("No model yet: ask once the session has one");
+    }
+    let history = &history[..settled_prefix(history)];
+    let from = compact::cut(history, ASIDE_KEEP).unwrap_or(0);
+    let mut asked: Vec<Value> = history[from..].to_vec();
+    asked.push(json!({ "role": "user", "content": [{ "type": "text", "text": format!("{ASIDE_RULE}\n\n{question}") }], "timestamp": now_ms() }));
+    let mut text = String::new();
+    let mut show = |s: Shown| {
+        if let Shown::Stream(e) = s
+            && e["type"] == "text_delta"
+        {
+            text.push_str(e["delta"].as_str().unwrap_or_default());
+            on_text(&text);
+        }
+    };
+    let a = Asked { model: &parts.model, effort: parts.effort.as_deref(), instructions: &parts.system, history: &asked, session: &parts.key, specs: &parts.specs, tools: false, images: parts.images };
+    let (reply, _) = send(a, &mut show).await?;
+    let said: String = reply["content"].as_array().into_iter().flatten().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect();
+    Ok(if said.trim().is_empty() { text } else { said })
+}
+
 /// What a launch may set for a session (the same for `-p` and RPC).
 #[derive(Clone, Debug, Default)]
 pub struct Launch {
@@ -743,6 +810,24 @@ impl Agent {
         self.fallback = l.fallback.clone();
         // (What the session used before, when it goes on.)
         self.budget = l.budget.map(|limit| Arc::new(Budget { limit, spent: crate::session::spent(&self.log.path).into() }));
+    }
+
+    /// What a side question is asked with, as things are now.
+    pub async fn aside_parts(&mut self) -> AsideParts {
+        let images = self.takes_images().await;
+        AsideParts {
+            model: self.model.clone(),
+            effort: self.effort.clone(),
+            system: self.system(),
+            specs: self.specs(),
+            key: self.cache_key.clone().unwrap_or_else(|| self.log.id.clone()),
+            images,
+        }
+    }
+
+    /// The conversation as the model has it.
+    pub fn history(&self) -> &[Value] {
+        &self.history
     }
 
     /// Added to the instructions (an agent profile's, for a subagent).
@@ -1549,6 +1634,21 @@ fn other_rules(cwd: &Path) -> (Vec<(PathBuf, String)>, Vec<(PathBuf, String)>) {
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_side_question_leaves_out_calls_still_running() {
+        let h = vec![
+            json!({ "role": "user", "content": "go" }),
+            json!({ "role": "assistant", "content": [{ "type": "toolCall", "id": "a" }, { "type": "toolCall", "id": "b" }] }),
+            json!({ "role": "toolResult", "toolCallId": "a" }),
+            json!({ "role": "toolResult", "toolCallId": "b" }),
+            json!({ "role": "assistant", "content": [{ "type": "toolCall", "id": "c" }, { "type": "toolCall", "id": "d" }] }),
+            json!({ "role": "toolResult", "toolCallId": "c" }),
+        ];
+        assert_eq!(settled_prefix(&h), 4);
+        assert_eq!(settled_prefix(&h[..4]), 4);
+        assert_eq!(settled_prefix(&h[..2]), 1);
+    }
 
     #[test]
     fn token_counts() {
