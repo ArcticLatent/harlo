@@ -572,6 +572,61 @@ final class WidgetTests: XCTestCase {
     }
 }
 
+@MainActor
+final class LimitsWidgetTests: XCTestCase {
+    func testItShowsEachAccountOnce() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let ms = Int64(now.timeIntervalSince1970 * 1000)
+        let claude = LimitAccount(provider: "Claude", plan: "max", account: "a@x", windows: [
+            LimitWindow(label: "Session (5 h)", usedFraction: 0.92, resetsAt: ms + 3_600_000),
+            LimitWindow(label: "Weekly · Opus", usedFraction: 1, resetsAt: ms + 86_400_000, status: "exhausted"),
+        ])
+        let limits = PlanLimits(machines: [
+            PlanLimits.Machine(host: "", accounts: [claude, LimitAccount(provider: "openai-codex", plan: "plus", windows: [])], updatedAt: ms),
+            // The same account on a machine: once; another one: with its machine.
+            PlanLimits.Machine(host: "nas", accounts: [claude, LimitAccount(provider: "openai-codex", plan: "pro", account: "b@x", windows: [
+                LimitWindow(label: "Weekly", usedFraction: 0.2, resetsAt: ms + 2 * 86_400_000)])], updatedAt: ms),
+        ])
+        let snap = LimitsSnapshot.of(limits, now: now)
+        XCTAssertTrue(snap.paired)
+        XCTAssertEqual(snap.accounts.map(\.name), ["Claude", "ChatGPT"], "no windows: left out; the same account once")
+        XCTAssertEqual(snap.accounts[1].host, "nas")
+        XCTAssertEqual(snap.accounts[0].windows.map(\.label), ["5-hour", "Weekly Opus"])
+        XCTAssertEqual(snap.accounts[0].windows.map(\.percent), ["92%", "100%"])
+        XCTAssertTrue(snap.accounts[0].windows[1].usedUp)
+        XCTAssertEqual(snap.accounts[0].fullest?.label, "Weekly Opus")
+        XCTAssertTrue(snap.accounts[0].windows[0].nearly)
+        // Past a reset: that window is reset; the timeline has each reset.
+        XCTAssertEqual(snap.resets(after: now), [now.addingTimeInterval(3600), now.addingTimeInterval(86_400)])
+        let later = snap.at(now.addingTimeInterval(2 * 3600))
+        XCTAssertEqual(later.accounts[0].windows[0].usedFraction, 0)
+        XCTAssertEqual(later.accounts[0].windows[0].resetsAt, 0)
+        XCTAssertEqual(later.accounts[0].windows[1].usedFraction, 1, "not reset yet")
+        XCTAssertEqual(later.resets(after: now.addingTimeInterval(2 * 3600)), [now.addingTimeInterval(86_400)])
+    }
+
+    func testTheAppKeepsItAndNotForTheDemo() {
+        let store = MemoryStore()
+        let m = HarloModel(store: store, deviceName: "iPhone")
+        var reloads = 0
+        m.limitsWidgetChanged = { reloads += 1 }
+        m.host = PairedHarlo(key: "k", name: "box", endpoints: [])
+        let now = Date()
+        m.limits = HarloModel.sampleLimits(now: now)
+        XCTAssertEqual(LimitsSnapshot.load(store)?.accounts.count, 2)
+        XCTAssertEqual(reloads, 1)
+        m.limits = HarloModel.sampleLimits(now: now)
+        XCTAssertEqual(reloads, 1, "the same: not written again")
+        m.forget()
+        XCTAssertEqual(LimitsSnapshot.load(store)?.paired, false, "unpaired")
+        XCTAssertEqual(reloads, 2)
+        let demo = HarloModel(store: MemoryStore(), deviceName: "iPhone")
+        demo.startDemo()
+        XCTAssertNil(LimitsSnapshot.load(demo.store))
+        XCTAssertEqual(LimitsSnapshot.sample(now: now).accounts.first?.windows.first?.percent, "92%")
+    }
+}
+
 final class ReviewTests: XCTestCase {
     func testCommentsBecomeOneMessage() {
         let m = ReviewComment.message([

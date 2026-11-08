@@ -60,8 +60,14 @@ struct HarloApp: App {
             .onChange(of: delegate.model.sessions) { _, list in
                 if phase == .active, !Tour.enabled { LiveActivities.tidy(list) }
             }
-            // A Live Activity tapped: its session (harlo://session?key=…).
+            // A Live Activity tapped: its session (harlo://session?key=…);
+            // the plan limits widget: harlo://limits.
             .onOpenURL { url in
+                // The plan limits widget: the dashboard shows its card.
+                if url.scheme == "harlo", url.host == "limits" {
+                    UserDefaults.standard.set(true, forKey: DashboardView.showLimitsKey)
+                    return
+                }
                 guard url.scheme == "harlo", url.host == "session",
                       let key = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "key" })?.value
                 else { return }

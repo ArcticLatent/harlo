@@ -118,6 +118,12 @@ struct WidgetTour: View {
             VStack(spacing: 22) {
                 HStack(spacing: 22) {
                     box(snap, .systemSmall, width: 170, height: 170)
+                    // (The plan limits widget beside it.)
+                    LimitsWidgetView(snapshot: .sample(), family: .systemSmall)
+                        .padding(16)
+                        .frame(width: 170, height: 170, alignment: .topLeading)
+                        .background(SessionsTourBackground())
+                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                     Spacer(minLength: 0)
                 }
                 box(snap, .systemMedium, width: 364, height: 170)

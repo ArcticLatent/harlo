@@ -14,6 +14,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         let m = HarloModel(store: KeychainStore(), deviceName: UIDevice.current.name)
         // The home screen widget follows the session list.
         m.widgetChanged = { WidgetCenter.shared.reloadTimelines(ofKind: "HarloSessions") }
+        // The plan limits widget, harlo's plan limits.
+        m.limitsWidgetChanged = { WidgetCenter.shared.reloadTimelines(ofKind: "HarloLimits") }
         return m
     }()
 

@@ -40,7 +40,7 @@ extension HarloModel {
 
     /// Plan limits for the samples: a Claude plan nearly at its 5-hour limit,
     /// a ChatGPT plan with room.
-    static func sampleLimits(now: Date) -> PlanLimits {
+    nonisolated static func sampleLimits(now: Date) -> PlanLimits {
         let ms = Int64(now.timeIntervalSince1970 * 1000)
         return PlanLimits(machines: [PlanLimits.Machine(host: "", accounts: [
             LimitAccount(provider: "Claude", plan: "max", windows: [

@@ -232,6 +232,9 @@ public final class HarloModel {
     /// The home screen widget's sessions changed (the app reloads it).
     @ObservationIgnored public var widgetChanged: (() -> Void)?
     @ObservationIgnored var lastWidget: WidgetSnapshot?
+    /// The plan limits widget's accounts changed (the app reloads it).
+    @ObservationIgnored public var limitsWidgetChanged: (() -> Void)?
+    @ObservationIgnored var lastLimitsWidget: LimitsSnapshot?
     /// Requests answered from the list that harlo still lists (hidden).
     var answered: Set<String> = []
     public internal(set) var session: OpenSession?
@@ -249,7 +252,9 @@ public final class HarloModel {
     public internal(set) var features: Set<String> = []
     /// Plan limits on harlo's computer and each machine (empty until harlo
     /// says, or when it doesn't).
-    public internal(set) var limits = PlanLimits()
+    public internal(set) var limits = PlanLimits() {
+        didSet { writeLimitsWidget() }
+    }
     /// Answers without a harlo (screenshots of the app, the demo).
     @ObservationIgnored public var samples: Samples?
     /// The demo: sample sessions, no harlo (see Demo.swift).
@@ -288,6 +293,7 @@ public final class HarloModel {
         push = store.load("push").flatMap { try? JSONDecoder().decode(PushRegistration.self, from: $0) }
         unreadMarks = store.load("unread").flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) } ?? []
         lastWidget = WidgetSnapshot.load(store)
+        lastLimitsWidget = LimitsSnapshot.load(store)
         let saved = store.load("host").flatMap { try? JSONDecoder().decode(PairedHarlo.self, from: $0) }
         host = saved
         state = saved == nil ? .unpaired : .connecting

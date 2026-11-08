@@ -8,6 +8,7 @@ struct HarloWidgets: WidgetBundle {
     var body: some Widget {
         SessionLiveActivity()
         SessionsWidget()
+        LimitsWidget()
     }
 }
 
