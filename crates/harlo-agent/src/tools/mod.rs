@@ -160,6 +160,26 @@ impl Tools {
         out
     }
 
+    /// The project's folder: the sandbox's, or the repository's top
+    /// folder, or the working directory.
+    pub fn project(&self) -> PathBuf {
+        if let Some(sb) = &self.sandbox {
+            return sb.project.clone();
+        }
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(&self.cwd)
+            .args(["rev-parse", "--show-toplevel"])
+            .stdin(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()))
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| self.cwd.clone())
+    }
+
     /// Why the sandbox keeps the file tools from looking at `path`.
     fn hidden(&self, path: &Path) -> Option<Outcome> {
         self.sandbox.as_ref().and_then(|sb| sb.may_read(path).err()).map(fail)

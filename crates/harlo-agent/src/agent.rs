@@ -106,6 +106,9 @@ pub enum Compacted {
 /// not (the call's result).
 pub trait Gate: Send + Sync {
     fn check(&self, name: &str, args: &Value) -> BoxFuture<'static, Result<(), String>>;
+    /// Asks the user yes or no, in every approval mode (`title` as an
+    /// approval's: "Allow tool: …\n<why>"; `message`: the call).
+    fn confirm(&self, title: &str, message: &str) -> BoxFuture<'static, bool>;
 }
 
 /// harlo, when it started this agent (`--harlo-tools`): its tools (start
@@ -1021,13 +1024,40 @@ async fn run_calls(tools: &Tools, calls: &[(&str, &str, &Value)], extra: &Extra<
             out.push(crate::task::run(args, id, ctx, stop).await);
             continue;
         }
+        // A command that can't be undone: asked about in every mode (and
+        // then not asked again), refused with no one to ask.
+        let mut confirmed = false;
+        if *name == "bash"
+            && let Some(why) = crate::danger::check(args["command"].as_str().unwrap_or_default(), &tools.project(), &home())
+        {
+            let Some(g) = gate else {
+                out.push(cut(&format!("Not run: {why}, and there's no one here to ask. Do it another way, or say what the user should run.")));
+                continue;
+            };
+            let yes = tokio::select! {
+                biased;
+                _ = stop.cancelled() => None,
+                y = g.confirm(&format!("Allow tool: bash\nReason: this can't be undone: {why}"), args["command"].as_str().unwrap_or_default()) => Some(y),
+            };
+            match yes {
+                None => {
+                    out.push(cut(NOT_RUN));
+                    continue;
+                }
+                Some(false) => {
+                    out.push(cut(&format!("The user said no: {why}. Don't try it another way; ask what they'd like instead.")));
+                    continue;
+                }
+                Some(true) => confirmed = true,
+            }
+        }
         // Outside the sandbox: only with the user's yes.
         if gate.is_none() && *name == "bash" && args["outside_sandbox"] == true && tools.sandbox.is_some() {
             out.push(cut(NO_ONE_TO_ASK));
             continue;
         }
         // What changes something may need the user's yes first.
-        if let Some(gate) = gate.filter(|_| !extra.read_only(name)) {
+        if let Some(gate) = gate.filter(|_| !extra.read_only(name) && !(confirmed && args["outside_sandbox"] != true)) {
             let verdict = tokio::select! {
                 biased;
                 _ = stop.cancelled() => Err(NOT_RUN.to_owned()),
@@ -1046,6 +1076,10 @@ async fn run_calls(tools: &Tools, calls: &[(&str, &str, &Value)], extra: &Extra<
         out.push(ran.unwrap_or_else(|| cut(INTERRUPTED)));
     }
     out
+}
+
+fn home() -> PathBuf {
+    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
 }
 
 /// Whether a round's calls handed the turn over (a report, or a question

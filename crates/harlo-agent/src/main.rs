@@ -26,6 +26,7 @@ mod auth;
 mod chat;
 mod clock;
 mod compact;
+mod danger;
 mod images;
 mod mcp;
 mod providers;

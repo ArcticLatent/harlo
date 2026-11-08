@@ -202,16 +202,8 @@ impl Gate for Approvals {
             }
             // Outside the sandbox: asked every time, in every mode.
             if name == "bash" && args["outside_sandbox"] == true && crate::sandbox::policy().on {
-                let id = format!("harlo_agent_ui_{}", sh.next_ui.fetch_add(1, Ordering::Relaxed) + 1);
-                let (tx, rx) = oneshot::channel();
-                sh.waiting.lock().unwrap().insert(id.clone(), tx);
-                sh.emit(json!({
-                    "type": "extension_ui_request", "id": id, "method": "select",
-                    "title": "Allow tool: bash\nOutside the sandbox", "message": args["command"].as_str().unwrap_or_default(),
-                    "options": ["Approve", "Deny"],
-                }));
-                let answer = rx.await.unwrap_or(Value::Null);
-                return if answer["value"] == "Approve" { Ok(()) } else { Err(DENIED_OUTSIDE.to_owned()) };
+                let yes = yes_or_no(&sh, "Allow tool: bash\nOutside the sandbox", args["command"].as_str().unwrap_or_default()).await;
+                return if yes { Ok(()) } else { Err(DENIED_OUTSIDE.to_owned()) };
             }
             let free = matches!(approval.as_str(), "yolo" | "auto");
             let ask = match approval.as_str() {
@@ -250,6 +242,20 @@ impl Gate for Approvals {
             }
         })
     }
+
+    fn confirm(&self, title: &str, message: &str) -> BoxFuture<'static, bool> {
+        let (sh, title, message) = (self.0.clone(), title.to_owned(), message.to_owned());
+        Box::pin(async move { yes_or_no(&sh, &title, &message).await })
+    }
+}
+
+/// Approve or Deny, asked as an approval (no "Always allow").
+async fn yes_or_no(sh: &Shared, title: &str, message: &str) -> bool {
+    let id = format!("harlo_agent_ui_{}", sh.next_ui.fetch_add(1, Ordering::Relaxed) + 1);
+    let (tx, rx) = oneshot::channel();
+    sh.waiting.lock().unwrap().insert(id.clone(), tx);
+    sh.emit(json!({ "type": "extension_ui_request", "id": id, "method": "select", "title": title, "message": message, "options": ["Approve", "Deny"] }));
+    rx.await.unwrap_or(Value::Null)["value"] == "Approve"
 }
 
 /// harlo's tools, called on the pipe.
