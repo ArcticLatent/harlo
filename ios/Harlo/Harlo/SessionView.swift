@@ -39,6 +39,27 @@ struct SessionContent: View {
         return [Style.harnessLabel(session.harness), project].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
+    /// A transcript row: the reply opens with the agent's tile, name and
+    /// time (after your message, or harlo's to the agent); replies full
+    /// width under it.
+    func row(_ i: Int, _ item: TranscriptItem, _ items: [TranscriptItem]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if !Self.isSent(item), i == 0 || Self.isSent(items[i - 1]) {
+                AgentHead(session: session, time: Self.time(of: item))
+                    .padding(.top, 6)
+            }
+            ItemView(item: item, session: session)
+                .contextMenu { menu(for: item) }
+        }
+    }
+
+    /// Where the transcript's end starts (drawn all at once): your last
+    /// message, but at least the last 6 items and at most the last 40.
+    static func tailStart(_ items: [TranscriptItem]) -> Int {
+        let lastSent = items.lastIndex { isSent($0) } ?? 0
+        return max(items.count - 40, min(lastSent, items.count - 6), 0)
+    }
+
     /// The files the last turn edited (once it's done), for "View diff".
     var changedFiles: [String] {
         guard !session.busy else { return [] }
@@ -74,17 +95,19 @@ struct SessionContent: View {
                             .padding(.vertical, 6)
                     }
                     let items = session.items
-                    ForEach(Array(items.enumerated()), id: \.element.id) { i, item in
-                        VStack(alignment: .leading, spacing: 10) {
-                            // The reply opens with the agent's tile, name and time
-                            // (after your message, or harlo's to the agent).
-                            if !Self.isSent(item), i == 0 || Self.isSent(items[i - 1]) {
-                                AgentHead(session: session, time: Self.time(of: item))
-                                    .padding(.top, 6)
+                    let cut = Self.tailStart(items)
+                    ForEach(Array(items.enumerated().prefix(cut)), id: \.element.id) { i, item in
+                        row(i, item, items)
+                    }
+                    // The end (the turn at hand) drawn all at once, not lazily:
+                    // a lazy stack whose rows change height as a reply streams
+                    // in can leave what's in sight undrawn (empty until you
+                    // scroll), and the end is what's followed.
+                    if cut < items.count {
+                        VStack(alignment: .leading, spacing: 14) {
+                            ForEach(Array(items.enumerated().dropFirst(cut)), id: \.element.id) { i, item in
+                                row(i, item, items)
                             }
-                            // Replies full width under the agent's name.
-                            ItemView(item: item, session: session)
-                                .contextMenu { menu(for: item) }
                         }
                     }
                     // What the last turn changed: tap for the diff, or undo it
