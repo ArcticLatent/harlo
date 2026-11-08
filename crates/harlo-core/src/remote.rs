@@ -515,7 +515,8 @@ pub fn install_command(agent: &str) -> &'static str {
 /// The host check: the system, home, each agent (path and `--version`, 10 s
 /// at most each) and Claude's sign-in. (Run by the user's login shell, zsh
 /// included: no word splitting of variables.)
-// (HARLO_TEST_HOME: the click tests' scratch home on the test host.)
+// (HARLO_TEST_HOME: the click tests' scratch home on the test host;
+// HARLO_TEST_HIDE_AGENTS: agents, or bwrap, it doesn't have.)
 const CHECK_SCRIPT: &str = r#"printf 'os=%s\narch=%s\nhome=%s\n' "$(uname -s)" "$(uname -m)" "${HARLO_TEST_HOME:-$HOME}"
 ver() { if command -v timeout >/dev/null 2>&1; then timeout 10 "$@"; else "$@"; fi; }
 for p in claude; do
@@ -526,7 +527,9 @@ for p in claude; do
 done
 c="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 if [ -s "$c/.credentials.json" ]; then echo claude_auth=yes; elif [ "$(uname -s)" = Darwin ]; then echo claude_auth=keychain; else echo claude_auth=no; fi
-if command -v bwrap >/dev/null 2>&1; then if bwrap --unshare-all --die-with-parent --ro-bind / / --dev /dev --proc /proc true </dev/null >/dev/null 2>&1; then echo bwrap=yes; else echo bwrap=blocked; fi; else echo bwrap=no; fi"#;
+case ":${HARLO_TEST_HIDE_AGENTS:-}:" in *":bwrap:"*) echo bwrap=no;;
+*) if command -v bwrap >/dev/null 2>&1; then if bwrap --unshare-all --die-with-parent --ro-bind / / --dev /dev --proc /proc true </dev/null >/dev/null 2>&1; then echo bwrap=yes; else echo bwrap=blocked; fi; else echo bwrap=no; fi;;
+esac"#;
 
 /// Connects (or reuses the connection) and looks around.
 pub fn check(host: &Host) -> Result<HostInfo> {
@@ -845,11 +848,17 @@ mod tests {
 
     #[test]
     fn the_check_says_whether_bubblewrap_works() {
-        let line = CHECK_SCRIPT.lines().last().unwrap();
-        let run = |path: &str| String::from_utf8(std::process::Command::new("/bin/sh").arg("-c").arg(line).env("PATH", path).output().unwrap().stdout).unwrap();
-        assert_eq!(parse_check(&run("/nonexistent")).bwrap, "no");
-        let here = parse_check(&run(&std::env::var("PATH").unwrap_or_default())).bwrap;
+        let part = &CHECK_SCRIPT[CHECK_SCRIPT.find("case \":${HARLO_TEST_HIDE_AGENTS:-}:\" in *\":bwrap:\"").unwrap()..];
+        let run = |path: &str, hide: &str| {
+            let out = std::process::Command::new("/bin/sh").arg("-c").arg(part).env("PATH", path).env("HARLO_TEST_HIDE_AGENTS", hide).output().unwrap();
+            String::from_utf8(out.stdout).unwrap()
+        };
+        assert_eq!(parse_check(&run("/nonexistent", "")).bwrap, "no");
+        let path = std::env::var("PATH").unwrap_or_default();
+        let here = parse_check(&run(&path, "")).bwrap;
         assert!(["yes", "no", "blocked"].contains(&here.as_str()), "{here}");
+        // (The click tests' host without it.)
+        assert_eq!(parse_check(&run(&path, "opencode:bwrap")).bwrap, "no");
         let info = parse_check("os=Linux\narch=x86_64\nclaude_auth=no\nbwrap=blocked\n");
         assert_eq!((info.os.as_str(), info.claude_auth.as_str(), info.bwrap.as_str()), ("Linux", "no", "blocked"));
     }

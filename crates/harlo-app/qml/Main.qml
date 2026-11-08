@@ -2088,6 +2088,14 @@ ApplicationWindow {
             const walk = it => { for (const c of it.children) { if (c.visible && typeof c.text === "string" && c.text.indexOf("box") >= 0) texts.push(c.text); walk(c) } }
             walk(sidebar)
             win.check(texts.includes("box") && Remotes.displayPath("ssh://box" + win.argValue("--cwd=")) === "box:" + win.argValue("--cwd=").replace(Workspace.homeDir(), "~"), "the project shows its host (box)")
+            settingsDialog.openPage("providers") } }
+        PauseAnimation { duration: 600 }
+        // (click-tests.sh: the host's check says it has no bubblewrap.)
+        ScriptAction { script: {
+            const row = win.findName("hostProvider-harlo", settingsDialog.contentItem)
+            win.check(row !== null && row.detail.indexOf("Sandbox: needs bubblewrap") >= 0, "a host without bubblewrap: Harlo's row says the sandbox needs it (" + (row ? row.detail : "none") + ")")
+            win.shotPopup(settingsDialog, "clicks-remote-providers")
+            settingsDialog.close()
             Workspace.newSession(win.remoteProject, "") } }
         PauseAnimation { duration: 1000 }
         ScriptAction { script: win.waitUntil(remoteSteps, () => chat.session.modelName !== "", 20000) }
