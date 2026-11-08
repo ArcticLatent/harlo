@@ -831,6 +831,19 @@ final class PlanTests: XCTestCase {
         if case .plan(let key)? = Event(["ev": "plan", "key": "live:1"]) { XCTAssertEqual(key, "live:1") } else { XCTFail("a plan event") }
     }
 
+    func testHarlosMessagesAreHarlos() throws {
+        let v: JSON = ["key": "m3:u", "kind": "notice", "title": "harlo", "subtitle": "live:3",
+                       "text": "The Harlo session \"Helper\" (live:3) finished and reported: succeeded."]
+        let report = Row(v)
+        XCTAssertTrue(report.fromHarlo)
+        XCTAssertTrue(report.isSent, "it starts a turn")
+        XCTAssertEqual(report.subtitle, "live:3")
+        let warning = Row(key: "n1", kind: "notice", text: "Careful", title: "warning")
+        XCTAssertFalse(warning.fromHarlo)
+        XCTAssertFalse(warning.isSent)
+        XCTAssertTrue(Row(key: "u1", kind: "user", text: "hi").isSent)
+    }
+
     func testColoursAsHex() {
         XCTAssertEqual(RGBA(hex: "#5b9bf0")?.hex, "#5b9bf0")
     }

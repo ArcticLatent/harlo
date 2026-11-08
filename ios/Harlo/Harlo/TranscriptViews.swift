@@ -282,6 +282,8 @@ struct RowView: View {
             ThinkingRow(row: row)
         case "tool":
             ToolCard(row: row)
+        case "notice" where row.fromHarlo:
+            HarloMessage(row: row)
         default:
             Text(row.text)
                 .font(.footnote)
@@ -293,6 +295,52 @@ struct RowView: View {
     var codeSpans: [Span] {
         if case .code(let spans)? = RichCache.blocks(row.html).first { return spans }
         return [Span(row.text, code: true)]
+    }
+}
+
+/// harlo's message to the agent (a helper's report, the answer to a
+/// split): harlo's mark, folded to its first lines (tap for the rest), and
+/// the session it's about to open. Not yours: no bubble.
+struct HarloMessage: View {
+    @Environment(HarloModel.self) private var model
+    @Environment(\.palette) private var p
+    let row: Row
+    @State private var open = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image("Logo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: Transcript.tile, height: Transcript.tile)
+                Text("harlo")
+                    .font(.system(size: 16.5, weight: .semibold))
+                Text("to the agent")
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(Color(p.faint))
+            }
+            Button {
+                withAnimation(.easeOut(duration: 0.2)) { open.toggle() }
+            } label: {
+                Text(row.text)
+                    .font(.footnote)
+                    .foregroundStyle(Color(p.muted))
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(open ? nil : 2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            if !row.subtitle.isEmpty, let helper = model.sessions.first(where: { $0.key == row.subtitle }) {
+                Button("Open helper") {
+                    model.open(helper)
+                }
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Color(p.primary))
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.top, 4)
     }
 }
 

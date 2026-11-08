@@ -43,7 +43,7 @@ struct SessionContent: View {
     var changedFiles: [String] {
         guard !session.busy else { return [] }
         let rows = session.rows
-        let start = (rows.lastIndex { $0.kind == "user" } ?? -1) + 1
+        let start = (rows.lastIndex { $0.isSent } ?? -1) + 1
         guard start < rows.count else { return [] }
         var out: [String] = []
         for r in rows[start...] where r.kind == "tool" && !r.diff.isEmpty && !out.contains(r.subtitle) {
@@ -76,8 +76,9 @@ struct SessionContent: View {
                     let items = session.items
                     ForEach(Array(items.enumerated()), id: \.element.id) { i, item in
                         VStack(alignment: .leading, spacing: 10) {
-                            // The reply opens with the agent's tile, name and time.
-                            if !Self.isUser(item), i == 0 || Self.isUser(items[i - 1]) {
+                            // The reply opens with the agent's tile, name and time
+                            // (after your message, or harlo's to the agent).
+                            if !Self.isSent(item), i == 0 || Self.isSent(items[i - 1]) {
                                 AgentHead(session: session, time: Self.time(of: item))
                                     .padding(.top, 6)
                             }
@@ -350,14 +351,15 @@ extension SessionContent {
         }
     }
 
-    static func isUser(_ item: TranscriptItem) -> Bool {
-        if case .row(let r) = item { return r.kind == "user" }
+    /// A message sent to the agent: yours, or harlo's (a helper's report).
+    static func isSent(_ item: TranscriptItem) -> Bool {
+        if case .row(let r) = item { return r.isSent }
         return false
     }
 
-    /// Your last message's row key.
+    /// The last turn's start: your last message's row key (or harlo's).
     static func lastUser(_ rows: [Row]) -> String {
-        rows.last { $0.kind == "user" }?.key ?? ""
+        rows.last { $0.isSent }?.key ?? ""
     }
 
     /// When an item started (unix ms; 0: unknown).
@@ -430,10 +432,10 @@ extension SessionContent {
         }
     }
 
-    /// Your message that started the turn a row is in.
+    /// The message that started the turn a row is in (yours, or harlo's).
     static func turnStart(_ rows: [Row], _ key: String) -> String? {
         guard let i = rows.firstIndex(where: { $0.key == key }) else { return nil }
-        return rows[...i].last { $0.kind == "user" }?.key
+        return rows[...i].last { $0.isSent }?.key
     }
 }
 

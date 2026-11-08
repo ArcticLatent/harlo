@@ -129,6 +129,16 @@ public struct Row: Equatable, Sendable, Identifiable {
     }
 }
 
+extension Row {
+    /// A message harlo sent the agent (a helper's report, the answer to a
+    /// split, …): a notice titled "harlo", the session it's about in
+    /// `subtitle`.
+    public var fromHarlo: Bool { kind == "notice" && title == "harlo" }
+
+    /// A message sent to the agent, yours or harlo's: each starts a turn.
+    public var isSent: Bool { kind == "user" || fromHarlo }
+}
+
 /// A change to a transcript's rows.
 public enum RowChange: Equatable, Sendable {
     case update(at: Int, row: Row)

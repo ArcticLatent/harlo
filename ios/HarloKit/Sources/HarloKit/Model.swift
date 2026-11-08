@@ -132,7 +132,7 @@ public final class OpenSession {
         guard busy else { return nil }
         // This turn: since your latest message (a call left running from an
         // earlier one, such as a background subagent, isn't what it does now).
-        let turn = rows.lastIndex(where: { $0.kind == "user" }).map { rows.index(after: $0) } ?? rows.startIndex
+        let turn = rows.lastIndex(where: { $0.isSent }).map { rows.index(after: $0) } ?? rows.startIndex
         if let last = rows.last, last.state == "streaming", last.kind != "tool" {
             return Activity(text: last.kind == "thinking" ? "Thinking" : "Writing", since: last.time)
         }
