@@ -41,7 +41,7 @@ Popup {
         { id: "git", title: "Git", icon: "git-repository", group: "workspace", keywords: "undo snapshot turn revert rollback github gitlab forgejo codeberg gitea hosting sign in login token credentials changes count repository hidden sidebar uncommitted commit message model ai" },
         { id: "schedules", title: "Schedules", icon: "history", group: "workspace", keywords: "schedule scheduled prompt cron timer daily weekday every hour morning automatic run" },
         { id: "mcp", title: "MCP", icon: "node-tree", group: "agents", keywords: "mcp tool servers model context protocol tools stdio http oauth" },
-        { id: "orchestration", title: "Orchestration", icon: "ai-agent", group: "agents", keywords: "orchestration skills handoff advisor committee second opinion delegate subagent agents start sessions mcp bridge tools" },
+        { id: "orchestration", title: "Orchestration", icon: "ai-agent", group: "agents", keywords: "orchestration handoff advisor committee second opinion delegate subagent agents start sessions mcp tools" },
         { id: "remote", title: "Remote Instances", icon: "server", group: "agents", keywords: "remote ssh server host machine nas instance connect" },
         { id: "about", title: "About Harlo", icon: "information", group: "about", keywords: "about version release licence license mit website source code github changelog what's new report problem issue bug logs" },
         { id: "providers", title: "Providers", icon: "robot-2", group: "agents", keywords: "providers harnesses harlo claude binary path program agent models version enable disable debug log logs protocol crash diagnostics sandbox bubblewrap sign in login log in account accounts api key oauth credentials code intelligence language server lsp rust-analyzer pyright gopls clangd typescript" },
@@ -2573,36 +2573,21 @@ Popup {
         ColumnLayout {
             id: orch
             spacing: 0
-            // (On a host it's looked at over SSH, in the background.)
-            readonly property var info: (Workspace.orchestrationRevision, Workspace.instance, JSON.parse(Workspace.orchestrationJson()))
-            readonly property string where: info.host === "" ? "" : " on " + info.host
-            property string problem: ""
-            readonly property string shownProblem: problem !== "" ? problem : info.problem
-            readonly property bool allSkills: info.skills.every(s => s.installed)
-            Component.onCompleted: Workspace.loadOrchestration()
-            Connections { target: Workspace; function onInstanceChanged() { orch.problem = ""; Workspace.loadOrchestration() } }
-            function reload() { Workspace.loadOrchestration() }
-            function setSkills(names, on) {
-                let err = ""
-                for (const n of names) err = Workspace.setOrchestrationSkill(n, on) || err
-                problem = err
-                reload()
-            }
 
             SectionHeader {
                 title: "Agents drive harlo"
-                subtitle: "Agents in harlo can start sessions with other agents, send them messages, read their replies and stop them. The sessions an agent starts show under its own as its helpers: each one reports back to it when it finishes, can ask it questions, and it's told when one waits for you. Any agent can also ask you to approve a step; only you can answer."
+                subtitle: "Agents in harlo can start sessions with other agents, send them messages, read their replies and stop them. The sessions an agent starts show under its own as its helpers: each one reports back to it when it finishes, can ask it questions, and it's told when one waits for you. Any agent can also ask you to approve a step; only you can answer. harlo hands these tools to each session it starts (Claude Code's on a host need python3 there); outside harlo, agents don't have them."
             }
             Group {
                 SettingRow {
                     title: "Orchestration"
-                    detail: Workspace.orchestrationOn ? "On: agents get harlo's tools, and the composer has the Delegate button (hand off, second opinion, committee)."
-                                                      : "Off: agents get no harlo tools, there's no Delegate button, and harlo's skills are removed (turning it on puts them back)."
+                    detail: Workspace.orchestrationOn ? "On: agents get harlo's tools, and the composer has the Delegate button (hand off, second opinion, committee, split)."
+                                                      : "Off: agents get no harlo tools, and there's no Delegate button."
                     icon: "ai-agent"
                     AppSwitch {
                         objectName: "orchEnabled"
                         checked: Workspace.orchestrationOn
-                        onToggled: { orch.problem = Workspace.setOrchestrationEnabled(checked); orch.reload(); checked = Qt.binding(() => Workspace.orchestrationOn) }
+                        onToggled: { Workspace.setOrchestrationEnabled(checked); checked = Qt.binding(() => Workspace.orchestrationOn) }
                     }
                 }
                 SettingRow {
@@ -2610,7 +2595,7 @@ Popup {
                     visible: Workspace.orchestrationOn
                     divider: true
                     // "1" on their own, "asked" only when asked, else they offer.
-                    readonly property string mode: (Workspace.orchestrationRevision, Workspace.setting("orchestration_on_their_own"))
+                    property string mode: Workspace.setting("orchestration_on_their_own")
                     readonly property int choice: mode === "asked" ? 0 : mode === "1" ? 2 : 1
                     title: "Agents start helpers"
                     detail: ["Only when you ask: for another agent or session, or with the Delegate button. Otherwise they do the work themselves.",
@@ -2624,8 +2609,8 @@ Popup {
                         model: ["Only when I ask", "Ask me first", "On their own"]
                         currentIndex: selfStart.choice
                         onActivated: i => {
-                            Workspace.setSetting("orchestration_on_their_own", ["asked", "", "1"][i])
-                            Workspace.loadOrchestration()
+                            selfStart.mode = ["asked", "", "1"][i]
+                            Workspace.setSetting("orchestration_on_their_own", selfStart.mode)
                         }
                     }
                 }
@@ -2647,69 +2632,6 @@ Popup {
                 }
             }
 
-            SectionHeader {
-                visible: Workspace.orchestrationOn
-                Layout.topMargin: 22
-                title: "Skills" + orch.where
-                subtitle: orch.info.loading ? "Looking at " + orch.info.host + "…"
-                    : "Optional: orchestration works without them, since the tools explain themselves and the Delegate button sends its own instructions. "
-                      + "Turn on handoff, advisor or committee if you ask for those in your own words (\"get a second opinion from…\"), so agents follow the same recipe each time. "
-                      + "harlo installs them into " + orch.info.skillDirs.join(" and ") + ", where Claude Code and Harlo find them, also outside harlo" + (orch.info.host === "" ? "; it keeps them up to date." : ".") + (orch.info.busy ? " Working…" : "")
-            }
-            Group {
-                visible: Workspace.orchestrationOn
-                SettingRow {
-                    title: "All skills"
-                    icon: "sparkling"
-                    AppSwitch {
-                        objectName: "orchSkillsAll"
-                        checked: orch.allSkills
-                        // (What's installed decides: a refused one stays off.)
-                        onToggled: { orch.setSkills(orch.info.skills.map(s => s.name), checked); checked = Qt.binding(() => orch.allSkills) }
-                    }
-                }
-                Repeater {
-                    model: orch.info.skills
-                    SettingRow {
-                        id: skillRow
-                        required property var modelData
-                        divider: true
-                        title: modelData.name
-                        detail: modelData.summary
-                        icon: "book-open"
-                        AppSwitch {
-                            objectName: "orchSkill-" + skillRow.modelData.name
-                            checked: skillRow.modelData.installed
-                            onToggled: { orch.setSkills([skillRow.modelData.name], checked); checked = Qt.binding(() => skillRow.modelData.installed) }
-                        }
-                    }
-                }
-            }
-
-            SectionHeader {
-                visible: Workspace.orchestrationOn
-                Layout.topMargin: 22
-                title: "Tools in each agent" + orch.where
-                subtitle: orch.info.host === "" ? "harlo hands its tools to each session it starts: Harlo gets them over its own connection, Claude Code as an MCP server called harlo. Outside harlo they offer none."
-                    : "On " + orch.info.host + ", Harlo gets them over its own connection, and Claude Code through a small bridge there (it needs python3) and harlo's connection to it. Outside harlo they offer none."
-            }
-            Group {
-                visible: Workspace.orchestrationOn
-                Repeater {
-                    model: orch.info.agents
-                    SettingRow {
-                        id: agentRow
-                        required property var modelData
-                        required property int index
-                        divider: index > 0
-                        title: modelData.name
-                        icon: "harness-" + modelData.id
-                        detail: "Built in: harlo hands its tools to each session it starts."
-                        Label { text: "Always on"; color: Theme.muted; font.pixelSize: Theme.px(12) }
-                    }
-                }
-            }
-            Hint { visible: orch.shownProblem !== ""; Layout.topMargin: 10; color: Theme.warning; text: orch.shownProblem; objectName: "orchProblem" }
         }
     }
 

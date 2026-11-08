@@ -505,10 +505,6 @@ pub mod qobject {
         /// Checks the providers (their models) unless that's been done.
         #[qinvokable]
         fn ensure_providers(self: Pin<&mut Workspace>);
-        /// Settings → Orchestration: the skills (installed or not) and the
-        /// agents' bridges, JSON.
-        #[qinvokable]
-        fn orchestration_json(self: &Workspace) -> QString;
         /// The window has drawn once: the graphics choice works.
         #[qinvokable]
         fn graphics_drawn(self: &Workspace);
@@ -520,17 +516,9 @@ pub mod qobject {
         #[qinvokable]
         fn restart_app(self: &Workspace);
         /// Turns orchestration on or off: off, sessions don't get harlo's
-        /// tools, and the skills and bridges harlo installed are removed
-        /// (and put back when it's on again); the problem, if any.
+        /// tools.
         #[qinvokable]
-        fn set_orchestration_enabled(self: Pin<&mut Workspace>, on: bool) -> QString;
-        /// Installs or removes a skill; the problem, if any.
-        #[qinvokable]
-        fn set_orchestration_skill(self: Pin<&mut Workspace>, name: &QString, on: bool) -> QString;
-        /// Looks again at what's set up for orchestration on the instance
-        /// shown (a host: in the background, then `orchestrationRevision`).
-        #[qinvokable]
-        fn load_orchestration(self: Pin<&mut Workspace>);
+        fn set_orchestration_enabled(self: Pin<&mut Workspace>, on: bool);
         /// Conversation starters for the new-session page (JSON array of
         /// `{ id, label, icon, prompt }`).
         #[qinvokable]
@@ -957,8 +945,6 @@ pub struct WorkspaceRust {
     limit_resumes: QString,
     /// The other instances' tabs (and active tab), kept while away.
     instance_tabs: HashMap<String, (Vec<String>, String)>,
-    /// Orchestration on each host, as last looked at (Settings).
-    orch_hosts: HashMap<String, serde_json::Value>,
     /// Tab session files to reopen once the first scan has found them, and
     /// which of them was active.
     restore_tabs: Option<(Vec<PathBuf>, Option<PathBuf>)>,
@@ -1352,10 +1338,8 @@ impl cxx_qt::Initialize for Workspace {
         let on = self.setting_str("orchestration") != "0";
         self.as_mut().set_orchestration_on(on);
         harlo_harness::set_orchestration(on);
-        // Installed skills: brought up to this harlo.
-        if on {
-            harlo_core::orchestration::refresh_skills();
-        }
+        // The skills earlier versions installed.
+        harlo_core::orchestration::remove_old_skills();
 
         // Poll the session directories in the background.
         let thread = self.qt_thread();
@@ -7219,65 +7203,6 @@ impl Workspace {
         }
     }
 
-    pub fn orchestration_json(&self) -> QString {
-        use harlo_core::orchestration as orch;
-        let inst = self.instance.to_string();
-        let host = (!inst.is_empty()).then_some(inst.as_str());
-        // Here: read now. A host: what the last look found (`load_orchestration`).
-        let found = match host {
-            None => orch::overview(None).unwrap_or_default(),
-            Some(h) => self.orch_hosts.get(h).cloned().unwrap_or_else(|| serde_json::json!({ "loading": true })),
-        };
-        // (Each gets harlo's tools from harlo when it starts.)
-        let agents: Vec<serde_json::Value> = HarnessKind::PROVIDERS.iter().map(|k| serde_json::json!({ "id": k.as_str(), "name": k.label(), "bridge": "built-in" })).collect();
-        let skills = found.get("skills").cloned().unwrap_or_else(|| {
-            serde_json::json!(orch::SKILLS.iter().map(|s| serde_json::json!({ "name": s.name, "summary": s.summary, "installed": false })).collect::<Vec<_>>())
-        });
-        QString::from(
-            &serde_json::json!({
-                "host": inst, "skills": skills, "agents": agents, "skillDirs": found.get("skillDirs").cloned().unwrap_or_else(|| serde_json::json!([])),
-                "loading": found["loading"] == true, "problem": found["problem"].as_str().unwrap_or_default(), "busy": found["busy"] == true,
-            })
-            .to_string(),
-        )
-    }
-
-    pub fn load_orchestration(self: Pin<&mut Self>) {
-        let inst = self.instance.to_string();
-        if inst.is_empty() {
-            return self.bump_orchestration();
-        }
-        // A host: looked at in the background (over SSH).
-        let thread = self.qt_thread();
-        crate::runtime().spawn_blocking(move || {
-            let found = harlo_core::orchestration::overview(Some(&inst)).unwrap_or_else(|e| serde_json::json!({ "problem": format!("{e:#}") }));
-            let _ = thread.queue(move |mut this| {
-                this.as_mut().rust_mut().orch_hosts.insert(inst, found);
-                this.bump_orchestration();
-            });
-        });
-    }
-
-    /// A change on a host: made in the background, then looked at again.
-    fn orchestrate_on_host(mut self: Pin<&mut Self>, host: String, job: impl FnOnce(&str) -> anyhow::Result<()> + Send + 'static) {
-        if let Some(e) = self.as_mut().rust_mut().orch_hosts.get_mut(&host) {
-            e["busy"] = serde_json::json!(true);
-        }
-        self.as_mut().bump_orchestration();
-        let thread = self.qt_thread();
-        crate::runtime().spawn_blocking(move || {
-            let problem = job(&host).err().map(|e| format!("{e:#}")).unwrap_or_default();
-            let mut found = harlo_core::orchestration::overview(Some(&host)).unwrap_or_else(|e| serde_json::json!({ "problem": format!("{e:#}") }));
-            if !problem.is_empty() {
-                found["problem"] = serde_json::json!(problem);
-            }
-            let _ = thread.queue(move |mut this| {
-                this.as_mut().rust_mut().orch_hosts.insert(host, found);
-                this.bump_orchestration();
-            });
-        });
-    }
-
     pub fn graphics_drawn(&self) {
         crate::graphics::drawn();
     }
@@ -7290,48 +7215,14 @@ impl Workspace {
         crate::graphics::restart();
     }
 
-    pub fn set_orchestration_enabled(mut self: Pin<&mut Self>, on: bool) -> QString {
-        use harlo_core::orchestration as orch;
+    pub fn set_orchestration_enabled(mut self: Pin<&mut Self>, on: bool) {
         if on == self.orchestration_on {
-            return QString::default();
-        }
-        let mut problems: Vec<String> = Vec::new();
-        if on {
-            // What was installed when it was turned off.
-            let kept: serde_json::Value = serde_json::from_str(&self.setting_str("orchestration_kept")).unwrap_or_default();
-            for name in kept["skills"].as_array().into_iter().flatten().filter_map(|v| v.as_str()) {
-                if let Err(e) = orch::set_skill(name, true) {
-                    problems.push(format!("{e:#}"));
-                }
-            }
-            self.save_setting("orchestration_kept", "");
-        } else {
-            let skills = orch::installed_skills();
-            self.save_setting("orchestration_kept", &serde_json::json!({ "skills": skills }).to_string());
-            for name in &skills {
-                if let Err(e) = orch::set_skill(name, false) {
-                    problems.push(format!("{e:#}"));
-                }
-            }
+            return;
         }
         self.save_setting("orchestration", if on { "1" } else { "0" });
         harlo_harness::set_orchestration(on);
         self.as_mut().set_orchestration_on(on);
         self.as_mut().bump_orchestration();
-        QString::from(&problems.join("\n"))
-    }
-
-    pub fn set_orchestration_skill(self: Pin<&mut Self>, name: &QString, on: bool) -> QString {
-        let inst = self.instance.to_string();
-        if !inst.is_empty() {
-            let name = name.to_string();
-            self.orchestrate_on_host(inst, move |h| harlo_core::orchestration::set_skill_on(Some(h), &name, on));
-            return QString::default();
-        }
-        match harlo_core::orchestration::set_skill(&name.to_string(), on) {
-            Ok(()) => QString::default(),
-            Err(e) => QString::from(&format!("{e:#}")),
-        }
     }
 
     /// Answers a helper's request (a tool's approval: `value` Approve,

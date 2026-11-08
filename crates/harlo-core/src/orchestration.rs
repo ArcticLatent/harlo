@@ -91,7 +91,7 @@ pub fn tools(starting: Starting) -> Value {
         },
         {
             "name": "start_session",
-            "description": format!("Starts a new harlo session with a coding agent and sends it a first prompt. {} It becomes your helper, in your permission mode: the user sees it under your session, and harlo sends you its report when it finishes (unless notify is false), its questions for you, and when it waits for the user. Start every independent helper, then end your turn: harlo wakes you with what comes back; don't poll. The new agent has none of your context: make the prompt a self-contained briefing.", when_to_start(starting)),
+            "description": format!("Starts a new harlo session with a coding agent and sends it a first prompt. {} It becomes your helper, in your permission mode: the user sees it under your session, and harlo sends you its report when it finishes (unless notify is false), its questions for you, and when it waits for the user. Start every independent helper, then end your turn: harlo wakes you with what comes back; don't poll. The new agent has none of your context: make the prompt a self-contained briefing. A second opinion or a committee member only analyses: end its prompt, and each later message to it, with {NO_EDITS}. A committee's members get the same prompt; where they disagree, send each the other's arguments with send_message until they agree.", when_to_start(starting)),
             "inputSchema": s(json!({
                 "agent": { "type": "string", "description": "harlo or claude (see list_agents)." },
                 "prompt": { "type": "string", "description": "The first message: the task, its context, the relevant files, what's done and what's left." },
@@ -567,84 +567,28 @@ pub fn run_bridge() {
     }
 }
 
-// Settings → Orchestration: the skills that teach agents to use the tools.
-// (Claude and Harlo get the tools with each session harlo starts.)
-
-/// A skill harlo installs.
-pub struct Skill {
-    pub name: &'static str,
-    /// For the settings page.
-    pub summary: &'static str,
-    text: &'static str,
-}
-
-pub const SKILLS: [Skill; 4] = [
-    Skill { name: "harlo", summary: "The tools: start, prompt, read and stop other agents' sessions.", text: include_str!("../skills/harlo/SKILL.md") },
-    Skill { name: "harlo-handoff", summary: "Hand the task to another agent, with a full briefing.", text: include_str!("../skills/harlo-handoff/SKILL.md") },
-    Skill { name: "harlo-advisor", summary: "A second opinion from another agent (it doesn't edit).", text: include_str!("../skills/harlo-advisor/SKILL.md") },
-    Skill { name: "harlo-committee", summary: "Two agents from different families agree on a plan.", text: include_str!("../skills/harlo-committee/SKILL.md") },
-];
-
-/// In each folder harlo installed a skill to (and so may update or remove).
+// The skills earlier versions installed (Settings → Orchestration), each
+// folder marked as harlo's: removed, since the tools and the Delegate
+// button carry what they said.
+const OLD_SKILLS: [&str; 4] = ["harlo", "harlo-handoff", "harlo-advisor", "harlo-committee"];
 const SKILL_MARK: &str = ".harlo-skill";
 
 fn home() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
 }
 
-/// Where agents find skills: `~/.agents/skills` (many agents) and Claude's.
-pub fn skill_dirs() -> [PathBuf; 2] {
+fn skill_dirs() -> [PathBuf; 2] {
     let claude = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from).unwrap_or_else(|| home().join(".claude"));
     [home().join(".agents/skills"), claude.join("skills")]
 }
 
-fn ours(dir: &std::path::Path) -> bool {
-    dir.join(SKILL_MARK).is_file()
-}
-
-/// The skills harlo has installed.
-pub fn installed_skills() -> Vec<&'static str> {
-    SKILLS.iter().filter(|s| skill_dirs().iter().any(|d| ours(&d.join(s.name)))).map(|s| s.name).collect()
-}
-
-fn write_skill(dir: &std::path::Path, skill: &Skill) -> anyhow::Result<()> {
-    use anyhow::Context;
-    std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
-    let file = dir.join("SKILL.md");
-    if std::fs::read_to_string(&file).ok().as_deref() != Some(skill.text) {
-        std::fs::write(&file, skill.text).with_context(|| format!("writing {}", file.display()))?;
-    }
-    std::fs::write(dir.join(SKILL_MARK), "harlo installed this skill, and updates or removes this folder (Settings → Orchestration).\n")?;
-    Ok(())
-}
-
-/// Installs or removes a skill. A folder of that name that harlo didn't
-/// make is left alone.
-pub fn set_skill(name: &str, on: bool) -> anyhow::Result<()> {
-    let skill = SKILLS.iter().find(|s| s.name == name).ok_or_else(|| anyhow::anyhow!("There's no skill {name}."))?;
-    let dirs = skill_dirs().map(|d| d.join(name));
-    if on {
-        if let Some(theirs) = dirs.iter().find(|d| d.exists() && !ours(d)) {
-            anyhow::bail!("{} is another skill of the same name; harlo left it alone.", crate::sidebar::tilde(theirs));
-        }
-        for dir in &dirs {
-            write_skill(dir, skill)?;
-        }
-    } else {
-        for dir in dirs.iter().filter(|d| ours(d)) {
-            std::fs::remove_dir_all(dir).map_err(|e| anyhow::anyhow!("removing {}: {e}", dir.display()))?;
-        }
-    }
-    Ok(())
-}
-
-/// Brings the installed skills up to this harlo's version.
-pub fn refresh_skills() {
-    for skill in &SKILLS {
-        for dir in skill_dirs().map(|d| d.join(skill.name)).iter().filter(|d| ours(d)) {
-            if let Err(e) = write_skill(dir, skill) {
-                tracing::warn!("orchestration: updating {}: {e:#}", dir.display());
-            }
+/// Removes the skills harlo installed here; a folder of the same name
+/// that harlo didn't make (no mark) is left alone.
+pub fn remove_old_skills() {
+    for dir in skill_dirs().iter().flat_map(|d| OLD_SKILLS.map(|n| d.join(n))).filter(|d| d.join(SKILL_MARK).is_file()) {
+        match std::fs::remove_dir_all(&dir) {
+            Ok(()) => tracing::info!("orchestration: removed harlo's old skill {}", dir.display()),
+            Err(e) => tracing::warn!("orchestration: removing {}: {e}", dir.display()),
         }
     }
 }
@@ -914,10 +858,11 @@ pub fn remote_bridge(name: &str) -> anyhow::Result<Vec<String>> {
     // The bridge (always the current one), the folder private, an old
     // socket gone (or the forward can't bind), and Python there.
     let setup = format!(
-        "mkdir -p {d} && chmod 700 {d} && cat > {s}.tmp && mv -f {s}.tmp {s} && rm -f {k} && command -v python3",
+        "mkdir -p {d} && chmod 700 {d} && cat > {s}.tmp && mv -f {s}.tmp {s} && rm -f {k} && {{ {old}; }} && command -v python3",
         d = q(&dir),
         s = q(&script),
-        k = q(&sock)
+        k = q(&sock),
+        old = remove_old_skills_on(name)
     );
     let out = crate::remote::run_with_input(&host, &setup, Some(BRIDGE_PY.as_bytes()), std::time::Duration::from_secs(30))?;
     if !out.status.success() {
@@ -931,61 +876,11 @@ pub fn remote_bridge(name: &str) -> anyhow::Result<Vec<String>> {
     Ok(vec!["python3".into(), script, sock])
 }
 
-// The same on a remote host (Settings → Orchestration with a host as the
-// instance): its skill folders, over SSH.
-
-/// A host's skill folders, as it sees them.
-fn host_skill_dirs(name: &str) -> [String; 2] {
+/// Removes the skills harlo installed on a host: a shell command, run
+/// with the bridge's setup.
+fn remove_old_skills_on(name: &str) -> String {
     let home = harlo_harness::on_host(&crate::mcp::host_home(name));
     let home = home.trim_end_matches('/');
-    [format!("{home}/.agents/skills"), format!("{home}/.claude/skills")]
-}
-
-/// What's set up for orchestration here (`host` None) or on a host: the
-/// skills, which are installed, and the skill folders.
-pub fn overview(host: Option<&str>) -> anyhow::Result<Value> {
-    let (installed, dirs): (Vec<&str>, Vec<String>) = match host {
-        None => (installed_skills(), skill_dirs().iter().map(|d| crate::sidebar::tilde(d)).collect()),
-        Some(name) => {
-            let h = crate::remote::host(name).ok_or_else(|| anyhow::anyhow!("unknown remote host {name}"))?;
-            let dirs = host_skill_dirs(name);
-            let q = crate::remote::quote;
-            let script = SKILLS
-                .iter()
-                .map(|s| format!("{{ [ -f {}/{n}/{m} ] || [ -f {}/{n}/{m} ]; }} && echo {n}", q(&dirs[0]), q(&dirs[1]), n = s.name, m = SKILL_MARK))
-                .collect::<Vec<_>>()
-                .join("; ");
-            let out = crate::remote::run_ok(&h, &format!("{script}; true"), std::time::Duration::from_secs(20))?;
-            let found: Vec<&str> = SKILLS.iter().filter(|s| out.lines().any(|l| l.trim() == s.name)).map(|s| s.name).collect();
-            (found, dirs.iter().map(|d| crate::remote::display(&crate::remote::join(name, d))).collect())
-        }
-    };
-    let skills: Vec<Value> = SKILLS.iter().map(|s| json!({ "name": s.name, "summary": s.summary, "installed": installed.contains(&s.name) })).collect();
-    Ok(json!({ "skills": skills, "skillDirs": dirs }))
-}
-
-/// Installs or removes a skill here or on a host.
-pub fn set_skill_on(host: Option<&str>, name: &str, on: bool) -> anyhow::Result<()> {
-    let Some(host_name) = host else { return set_skill(name, on) };
-    let skill = SKILLS.iter().find(|s| s.name == name).ok_or_else(|| anyhow::anyhow!("There's no skill {name}."))?;
-    let h = crate::remote::host(host_name).ok_or_else(|| anyhow::anyhow!("unknown remote host {host_name}"))?;
-    let q = crate::remote::quote;
-    let dirs = host_skill_dirs(host_name).map(|d| format!("{d}/{name}"));
-    if on {
-        // A folder of that name that harlo didn't make stays as it is.
-        let check = dirs.iter().map(|d| format!("{{ [ -e {d} ] && [ ! -f {d}/{SKILL_MARK} ] && echo {d}; }}", d = q(d))).collect::<Vec<_>>().join("; ");
-        let theirs = crate::remote::run_ok(&h, &format!("{check}; true"), std::time::Duration::from_secs(20))?;
-        if let Some(d) = theirs.lines().map(str::trim).find(|l| !l.is_empty()) {
-            anyhow::bail!("{host_name}:{d} is another skill of the same name; harlo left it alone.");
-        }
-        for d in &dirs {
-            crate::remote::run_ok(&h, &format!("mkdir -p {}", q(d)), std::time::Duration::from_secs(20))?;
-            crate::remote::write(&crate::remote::join(host_name, &format!("{d}/SKILL.md")), skill.text.as_bytes())?;
-            crate::remote::write(&crate::remote::join(host_name, &format!("{d}/{SKILL_MARK}")), b"harlo installed this skill, and updates or removes this folder (Settings -> Orchestration).\n")?;
-        }
-    } else {
-        let script = dirs.iter().map(|d| format!("{{ [ -f {d}/{SKILL_MARK} ] && rm -rf {d}; }}", d = q(d))).collect::<Vec<_>>().join("; ");
-        crate::remote::run_ok(&h, &format!("{script}; true"), std::time::Duration::from_secs(20))?;
-    }
-    Ok(())
+    let dirs: Vec<String> = ["/.agents/skills/", "/.claude/skills/"].iter().flat_map(|d| OLD_SKILLS.map(|n| crate::remote::quote(&format!("{home}{d}{n}")))).collect();
+    format!("for d in {}; do [ -f \"$d/{SKILL_MARK}\" ] && rm -rf \"$d\"; done; true", dirs.join(" "))
 }

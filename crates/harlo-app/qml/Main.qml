@@ -3060,16 +3060,7 @@ ApplicationWindow {
             win.check(claude.boxtools !== undefined, "and box's Claude (claude mcp there)")
             const l = JSON.parse(Mcp.listJson("host:box"))
             win.check(l.servers.some(x => x.name === "boxtools" && x.harnesses.indexOf("claude") >= 0 && x.harnesses.indexOf("harlo") >= 0), "which the page lists for box")
-            // Orchestration on box: its skills, over SSH.
-            settingsDialog.openPage("orchestration") } }
-        PauseAnimation { duration: 2000 }
-        ScriptAction { script: win.clickItem(win.findName("orchSkill-harlo-advisor", settingsDialog.contentItem), "harlo-advisor on box") }
-        PauseAnimation { duration: 2500 }
-        ScriptAction { script: {
-            const home = win.selftestDir + "/claude-config"
-            win.check(TestInput.readFile(home + "/.agents/skills/harlo-advisor/SKILL.md").indexOf("name: harlo-advisor") >= 0 && TestInput.readFile(home + "/.claude/skills/harlo-advisor/.harlo-skill") !== "", "a skill installs on box (both folders, marked)")
-            win.check(win.findName("orchSkill-harlo-advisor", settingsDialog.contentItem).checked, "and shows as installed there")
-            win.shotWindow("clicks-remote-orchestration")
+            win.shotWindow("clicks-remote-mcp")
             settingsDialog.close() } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
@@ -3619,53 +3610,37 @@ ApplicationWindow {
             win.summary(); Qt.quit() } }
     }
 
-    // Settings → Orchestration: skills installed into both skill folders
-    // (and removed), a user's own skill of the same name left alone, and
-    // the page's switch.
+    // Settings → Orchestration: the skills earlier versions installed are
+    // gone (a user's own of the same name kept), and the page's switches.
     SequentialAnimation {
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksorchestration"
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            const h = win.selftestDir + "/home"
+            win.check(TestInput.readFile(h + "/.claude/skills/harlo-advisor/SKILL.md") === "" && TestInput.readFile(h + "/.agents/skills/harlo/SKILL.md") === "", "the skills harlo installed are removed at start")
+            win.check(TestInput.readFile(h + "/.agents/skills/harlo-handoff/SKILL.md") === "mine\n", "the user's own skill of the same name kept")
             settingsDialog.openPage("orchestration") } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
             const d = settingsDialog.contentItem
-            win.check(win.findName("orchSkill-harlo", d) !== null && !win.findName("orchSkill-harlo", d).checked, "the skills, none installed")
+            win.check(win.findName("orchSelfStart", d) !== null && win.findName("orchReviewSteps", d) !== null && win.findText("Skills", d) === null, "the page: the switch and how helpers start, no skills")
             win.shotWindow("clicks-orchestration")
-            win.clickItem(win.findName("orchSkill-harlo-advisor", d), "harlo-advisor's switch") } }
+            win.findName("orchSelfStart", d).activated(0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const d = settingsDialog.contentItem
+            win.check(Workspace.setting("orchestration_on_their_own") === "asked" && win.findName("orchSelfStart", d).currentIndex === 0, "Only when I ask is saved and shown")
+            win.clickItem(win.findName("orchEnabled", d), "Orchestration's switch, off") } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
-            const h = win.selftestDir + "/home", f = TestInput.readFile(h + "/.agents/skills/harlo-advisor/SKILL.md")
-            win.check(f.indexOf("name: harlo-advisor") >= 0 && TestInput.readFile(h + "/.claude/skills/harlo-advisor/SKILL.md") === f, "installed in both skill folders")
-            win.check(TestInput.readFile(h + "/.claude/skills/harlo-advisor/.harlo-skill") !== "", "marked as harlo's")
-            win.clickItem(win.findName("orchSkillsAll", settingsDialog.contentItem), "All skills") } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            const d = settingsDialog.contentItem, h = win.selftestDir + "/home", p = win.findName("orchProblem", d)
-            win.check(TestInput.readFile(h + "/.claude/skills/harlo-committee/SKILL.md").indexOf("name: harlo-committee") >= 0, "All skills: the others installed")
-            win.check(TestInput.readFile(h + "/.agents/skills/harlo-handoff/SKILL.md") === "mine\n" && TestInput.readFile(h + "/.claude/skills/harlo-handoff/SKILL.md") === "", "the user's own harlo-handoff left alone (and not half-installed)")
-            win.check(p && p.visible && p.text.indexOf("harlo-handoff") >= 0, "and said so (" + (p ? p.text : "") + ")")
-            win.check(!win.findName("orchSkillsAll", d).checked, "so not all skills are on")
-            win.clickItem(win.findName("orchSkill-harlo-advisor", d), "harlo-advisor's switch, off") } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            const h = win.selftestDir + "/home"
-            win.check(TestInput.readFile(h + "/.agents/skills/harlo-advisor/SKILL.md") === "" && TestInput.readFile(h + "/.claude/skills/harlo-advisor/SKILL.md") === "", "removed from both folders")
-            win.check(TestInput.readFile(h + "/.agents/skills/harlo-handoff/SKILL.md") === "mine\n", "the user's skill still there")
-            win.clickItem(win.findName("orchEnabled", settingsDialog.contentItem), "Orchestration's switch, off") } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            const h = win.selftestDir + "/home", d = settingsDialog.contentItem
-            win.check(TestInput.readFile(h + "/.claude/skills/harlo/SKILL.md") === "" && TestInput.readFile(h + "/.agents/skills/harlo-committee/SKILL.md") === "", "off: harlo's skills removed")
-            win.check(TestInput.readFile(h + "/.agents/skills/harlo-handoff/SKILL.md") === "mine\n", "the user's own skill kept")
-            win.check(win.findName("orchSkillsAll", d) === null, "and the page shows only the switch")
+            const d = settingsDialog.contentItem
+            win.check(!Workspace.orchestrationOn && Workspace.setting("orchestration") === "0" && !(win.findName("orchSelfStart", d) || {}).visible, "off: saved, and the page shows only the switch")
             win.shotWindow("clicks-orchestration-off")
             win.clickItem(win.findName("orchEnabled", d), "Orchestration's switch, on") } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
-            const h = win.selftestDir + "/home"
-            win.check(TestInput.readFile(h + "/.claude/skills/harlo/SKILL.md") !== "" && TestInput.readFile(h + "/.agents/skills/harlo-committee/SKILL.md") !== "" && TestInput.readFile(h + "/.claude/skills/harlo-advisor/SKILL.md") === "", "on again: the same skills back")
+            win.check(Workspace.orchestrationOn && Workspace.setting("orchestration") === "1", "on again")
             win.summary()
             Qt.quit() } }
     }
