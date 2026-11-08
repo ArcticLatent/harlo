@@ -2391,7 +2391,7 @@ Popup {
                     visible: proj.p !== null && Workspace.orchestrationOn
                     Layout.topMargin: 22
                     title: "Team"
-                    subtitle: "Who does the work when a plan runs with helpers or an agent splits a task, so you can plan with one model and have another do the steps. You can still choose others for one run."
+                    subtitle: "Who does the work when a plan runs with helpers or an agent splits a task, and who reviews a plan's steps, so you can plan with one model, have another do the steps and a third check them. You can still choose others for one run, or one step."
                 }
                 Group {
                     id: team
@@ -2408,8 +2408,41 @@ Popup {
                     readonly property var levels: ["", "low", "medium", "high"]
                     function save(v) { Workspace.setSetting("team_helpers_" + pid, v.agent ? JSON.stringify(v) : ""); rev++ }
                     function change(k, x) { const v = Object.assign({}, value); v[k] = x; save(v) }
+                    // Ready-made teams: one agent for the steps, or one doing
+                    // them and another reviewing them.
+                    readonly property var presets: {
+                        const list = [{ label: "Same as the session", v: {} }]
+                        for (const p of providers) list.push({ label: p.label, v: { agent: p.id } })
+                        for (const p of providers)
+                            for (const q of providers)
+                                if (p.id !== q.id) list.push({ label: p.label + ", reviewed by " + q.label, v: { agent: p.id, reviewer: { agent: q.id } } })
+                        return list
+                    }
+                    // The preset the team is (-1: one changed by hand).
+                    readonly property int preset: {
+                        const r = value.reviewer ? value.reviewer.agent || "" : ""
+                        if (value.model || value.thinking || (value.reviewer && value.reviewer.model)) return -1
+                        return presets.findIndex(x => (x.v.agent || "") === (value.agent || "") && (x.v.reviewer ? x.v.reviewer.agent : "") === r)
+                    }
+                    readonly property var reviewerProvider: value.reviewer ? providers.find(p => p.id === value.reviewer.agent) || null : null
                     onVisibleChanged: if (visible) Workspace.ensureProviders()
                     SettingRow {
+                        title: "Ready-made"
+                        detail: "Who does a plan's steps, and who reviews them (Settings → Orchestration → Review each step). Change any of it below."
+                        icon: "robot-2"
+                        ComboField {
+                            objectName: "teamPreset"
+                            width: 240
+                            model: team.presets.map(x => x.label).concat(team.preset < 0 ? ["Your own"] : [])
+                            currentIndex: team.preset < 0 ? team.presets.length : team.preset
+                            onActivated: i => {
+                                if (i < team.presets.length) team.save(team.presets[i].v)
+                                currentIndex = Qt.binding(() => team.preset < 0 ? team.presets.length : team.preset)
+                            }
+                        }
+                    }
+                    SettingRow {
+                        divider: true
                         title: "Helpers"
                         detail: team.provider ? "Helpers are " + team.provider.label + " sessions, with the model and thinking below."
                                               : "The same as the session that starts them: its agent, model and thinking."
@@ -2463,6 +2496,45 @@ Popup {
                             currentIndex: at()
                             onActivated: i => {
                                 team.change("thinking", team.levels[i])
+                                currentIndex = Qt.binding(() => at())
+                            }
+                        }
+                    }
+                    SettingRow {
+                        visible: team.provider !== null
+                        divider: true
+                        title: "Reviews by"
+                        detail: team.reviewerProvider ? "Each finished step is reviewed by a " + team.reviewerProvider.label + " session."
+                                                      : "Each finished step is reviewed by a session like its helper."
+                        icon: "eye"
+                        ComboField {
+                            objectName: "teamReviewer"
+                            width: 190
+                            model: ["The helpers' agent"].concat(team.providers.map(p => p.label))
+                            function at() { return team.reviewerProvider ? team.providers.indexOf(team.reviewerProvider) + 1 : 0 }
+                            currentIndex: at()
+                            onModelChanged: currentIndex = Qt.binding(() => at())
+                            onActivated: i => {
+                                team.change("reviewer", i === 0 ? undefined : { agent: team.providers[i - 1].id, model: "" })
+                                currentIndex = Qt.binding(() => at())
+                            }
+                        }
+                    }
+                    SettingRow {
+                        visible: team.provider !== null && team.reviewerProvider !== null
+                        divider: true
+                        title: "The reviewer's model"
+                        icon: "sparkling"
+                        ComboField {
+                            objectName: "teamReviewerModel"
+                            width: 190
+                            readonly property var ids: team.reviewerProvider ? team.reviewerProvider.modelIds || [] : []
+                            model: ["Default model"].concat(team.reviewerProvider ? (team.reviewerProvider.models || []).map(m => Theme.modelLabel(m)) : [])
+                            function at() { return !team.value.reviewer || !team.value.reviewer.model ? 0 : ids.indexOf(team.value.reviewer.model) + 1 }
+                            currentIndex: at()
+                            onModelChanged: currentIndex = Qt.binding(() => at())
+                            onActivated: i => {
+                                team.change("reviewer", { agent: team.value.reviewer.agent, model: i > 0 ? ids[i - 1] || "" : "" })
                                 currentIndex = Qt.binding(() => at())
                             }
                         }

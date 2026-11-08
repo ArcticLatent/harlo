@@ -2650,7 +2650,7 @@ impl Workspace {
             let e = self.live.get(key)?;
             let agent = HarnessKind::parse(&e.info.harness)?;
             let thinking = self.modes.get(key).and_then(|m| m.thinking.clone()).unwrap_or_else(|| e.thinking.clone());
-            Some(HelperSetup { agent, model: e.model_id.clone(), thinking, team: false })
+            Some(HelperSetup { agent, model: e.model_id.clone(), thinking, team: false, reviewer: None })
         })
     }
 
@@ -2659,14 +2659,18 @@ impl Workspace {
         let v: serde_json::Value = serde_json::from_str(&self.setting_str(&format!("team_helpers_{project}"))).ok()?;
         let agent = HarnessKind::parse(v["agent"].as_str()?).filter(|k| self.usable_harness(*k))?;
         let s = |k: &str| v[k].as_str().unwrap_or_default().trim().to_owned();
-        Some(HelperSetup { agent, model: s("model"), thinking: s("thinking"), team: true })
+        let reviewer = HarnessKind::parse(v["reviewer"]["agent"].as_str().unwrap_or_default())
+            .filter(|k| self.usable_harness(*k))
+            .map(|k| (k, v["reviewer"]["model"].as_str().unwrap_or_default().trim().to_owned()));
+        Some(HelperSetup { agent, model: s("model"), thinking: s("thinking"), team: true, reviewer })
     }
 
     /// A session's helpers (`helpers_for`), for the plan's run menu and the
     /// Delegate menu: `{ agent, agentName, model, thinking, team }`, or {}.
     pub fn helpers_json(&self, key: &QString) -> QString {
         let v = self.helpers_for(&key.to_string()).map_or(json!({}), |h| {
-            json!({ "agent": h.agent.as_str(), "agentName": h.agent.label(), "model": h.model, "thinking": h.thinking, "team": h.team })
+            json!({ "agent": h.agent.as_str(), "agentName": h.agent.label(), "model": h.model, "thinking": h.thinking, "team": h.team,
+                    "reviewer": h.reviewer.as_ref().map(|(k, m)| json!({ "agent": k.as_str(), "agentName": k.label(), "model": m })) })
         });
         QString::from(&v.to_string())
     }
@@ -5935,6 +5939,9 @@ struct HelperSetup {
     thinking: String,
     /// The project's team (else the same as the session).
     team: bool,
+    /// Who reviews a plan's steps, when the team says (else the helpers'
+    /// agent and model): an agent and its model ("" its default).
+    reviewer: Option<(HarnessKind, String)>,
 }
 
 /// A session's plan running with helpers: harlo hands each stage's steps
@@ -5962,6 +5969,8 @@ struct PlanRun {
     /// The commit a step in the session's own folder started from (for its
     /// review).
     bases: HashMap<u32, String>,
+    /// Who reviews the steps, when the team says (else the run's helpers).
+    reviewer: Option<(HarnessKind, String)>,
 }
 
 /// A plan's step under review: its helper and what it reported.
@@ -6786,6 +6795,8 @@ impl Workspace {
             },
             a => (HarnessKind::parse(a), model.to_string().trim().to_owned(), String::new()),
         };
+        // (The team's reviewer, for this run's helpers too.)
+        let reviewer = self.helpers_for(&key).and_then(|h| h.reviewer);
         let Some(kind) = kind.filter(|k| self.usable_harness(*k)) else { return QString::from("That agent isn't available.") };
         if !self.features_of(&key).is_some_and(|(_, _, plan, _)| plan) {
             return QString::from("The shared plan is off for this session's project (its settings).");
@@ -6817,6 +6828,7 @@ impl Workspace {
                 reviews: HashMap::new(),
                 fixes: HashSet::new(),
                 bases: HashMap::new(),
+                reviewer,
             });
         self.as_mut().plans_changed();
         self.as_mut().advance_plan(&key);
@@ -6985,22 +6997,27 @@ impl Workspace {
             r.reviews.insert(id, StepReview { worker: worker.to_owned(), summary: summary.to_owned(), reviewer: String::new() });
         }
         let title = format!("Review: Step {n}: {}", step.title);
-        let approval = self.approval_of(owner).filter(|_| has_shield(run.agent.as_str(), &cwd));
-        let key = self.as_mut().start_session_budget(run.agent, cwd, &run.model, &run.thinking, false, None);
+        // Who reviews: the team's reviewer, else the run's helpers.
+        let (agent, model, thinking) = match &run.reviewer {
+            Some((k, m)) => (*k, m.clone(), if *k == run.agent && *m == run.model { run.thinking.clone() } else { String::new() }),
+            None => (run.agent, run.model.clone(), run.thinking.clone()),
+        };
+        let approval = self.approval_of(owner).filter(|_| has_shield(agent.as_str(), &cwd));
+        let key = self.as_mut().start_session_budget(agent, cwd, &model, &thinking, false, None);
         if let Some(r) = self.as_mut().rust_mut().plan_runs.get_mut(owner).and_then(|r| r.reviews.get_mut(&id)) {
             r.reviewer = key.clone();
         }
         if let Some(live) = registry::get(&key) {
             live.handle.send_raw(json!({ "type": "set_session_name", "name": title }));
         }
-        self.as_mut().adopt(&key, owner, &title, run.agent.as_str(), true, None);
+        self.as_mut().adopt(&key, owner, &title, agent.as_str(), true, None);
         if let Some(c) = self.as_mut().rust_mut().orch_children.get_mut(&key) {
             c.review_of = Some(id);
         }
         if let Some(mode) = &approval {
             self.as_mut().set_approval_mode(&QString::from(&key), &QString::from(mode));
         }
-        self.as_mut().apply_thinking(&key, &run.thinking);
+        self.as_mut().apply_thinking(&key, &thinking);
         send_first_prompt(&key, FirstPrompt { text: brief, ..Default::default() }, Some(self.qt_thread()));
         self.as_mut().plans_changed();
     }

@@ -6095,6 +6095,41 @@ ApplicationWindow {
             win.check(used !== null && used.visible && used.text === (total / 1000).toFixed(1) + "k tokens", "the plan card has the run's total (" + (used ? used.text : "none") + ", " + total + ")")
             win.check(win.findContaining("Subagents · all done · " + (total / 1000).toFixed(1) + "k tokens") !== null, "and the Subagents box")
             win.shotWindow("clicks-review-done") } }
+        // The project's Team: ready-made ones, and its reviewer on another
+        // model (the next run's reviews use it).
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: settingsDialog.openProject(JSON.parse(Workspace.projectsJson())[0].id) }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: {
+            const box = win.findName("teamPreset", settingsDialog.contentItem)
+            win.check(box !== null && box.model[box.currentIndex] === "Same as the session", "Team: ready-made, the same as the session at first (" + (box ? box.model : "none") + ")")
+            const i = box ? box.model.indexOf("Harlo") : -1
+            win.check(i > 0, "Harlo is one of them")
+            if (i > 0) { box.currentIndex = i; box.activated(i) } } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const pid = JSON.parse(Workspace.projectsJson())[0].id
+            win.check(JSON.parse(Workspace.setting("team_helpers_" + pid)).agent === "harlo", "choosing it sets the team (" + Workspace.setting("team_helpers_" + pid) + ")")
+            const rev = win.findName("teamReviewer", settingsDialog.contentItem)
+            const i = rev ? rev.model.indexOf("Harlo") : -1
+            win.check(rev !== null && rev.model[rev.currentIndex] === "The helpers' agent" && i > 0, "Reviews by: the helpers' agent, or another (" + (rev ? rev.model : "none") + ")")
+            if (i > 0) { rev.currentIndex = i; rev.activated(i) } } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const m = win.findName("teamReviewerModel", settingsDialog.contentItem)
+            const i = m ? m.model.indexOf("Fake Helper") : -1
+            win.check(i > 0, "the reviewer's model is offered (" + (m ? m.model : "none") + ")")
+            if (i > 0) { m.currentIndex = i; m.activated(i) } } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const pid = JSON.parse(Workspace.projectsJson())[0].id
+            const v = JSON.parse(Workspace.setting("team_helpers_" + pid))
+            win.check(v.reviewer && v.reviewer.agent === "harlo" && v.reviewer.model === "fake/fake-helper", "the team's reviewer is saved (" + JSON.stringify(v) + ")")
+            const box = win.findName("teamPreset", settingsDialog.contentItem)
+            win.check(box.model[box.currentIndex] === "Your own", "changed by hand, it's your own team")
+            win.scrollIntoView(win.findName("teamReviewerModel", settingsDialog.contentItem))
+            win.shotWindow("clicks-review-team")
+            settingsDialog.close() } }
         // Problems that stay: the run pauses for you.
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
@@ -6118,6 +6153,10 @@ ApplicationWindow {
             win.check(p.run && p.run.paused.indexOf("its review still found problems after a round of fixes") >= 0 && p.run.paused.indexOf("helper.txt:1") >= 0, "problems after a round of fixes pause the run (" + (p.run ? p.run.paused : "no run") + ")")
             win.check(step.status === "pending" && step.summary.indexOf("Not done: its review found problems") === 0, "and the step waits again (" + step.status + ": " + step.summary + ")")
             win.check(win.findText("Paused") !== null && win.findText("Run again") !== null, "the plan card says Paused, with Run again")
+            const kids = JSON.parse(Workspace.orchestratedJson(win.harloKey))
+            const reviews = kids.filter(k => k.review !== null && k.review !== undefined)
+            win.check(reviews.length === 2 && reviews.every(k => k.model === "fake/fake-helper") && kids.filter(k => k.step === 1).every(k => k.model === "fake/fake-coder"),
+                      "the team's reviewer reviews, on its model; the helper is the team's (" + JSON.stringify(kids.map(k => [k.name, k.model])) + ")")
             win.shotWindow("clicks-review-paused")
             win.summary(); Qt.quit() } }
     }
