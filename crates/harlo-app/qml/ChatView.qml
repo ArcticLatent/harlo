@@ -469,6 +469,82 @@ Rectangle {
 
         }
 
+        // A side question (/btw) and its answer: apart from the
+        // conversation, until put away.
+        Rectangle {
+            id: asideCard
+            objectName: "asideCard"
+            readonly property var aside: session.asideJson !== "" ? JSON.parse(session.asideJson) : null
+            Layout.fillWidth: true
+            Layout.leftMargin: transcript.gutter
+            Layout.rightMargin: transcript.gutter
+            Layout.topMargin: 8
+            visible: aside !== null && !root.covered
+            implicitHeight: asideCol.implicitHeight + 20
+            radius: 8
+            color: Theme.elevated
+            border.color: Theme.border
+            ColumnLayout {
+                id: asideCol
+                x: 12
+                y: 10
+                width: parent.width - 24
+                spacing: 6
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+                    Icon { name: "chat-thread"; width: 14; height: 14; color: Theme.muted }
+                    Label {
+                        Layout.fillWidth: true
+                        text: asideCard.aside ? asideCard.aside.question : ""
+                        color: Theme.foreground
+                        font.bold: true
+                        wrapMode: Text.Wrap
+                        maximumLineCount: 3
+                        elide: Text.ElideRight
+                    }
+                    Label {
+                        visible: asideCard.aside !== null && !asideCard.aside.done
+                        text: "answering…"
+                        color: Theme.muted
+                        font.pixelSize: Theme.px(11)
+                    }
+                    FlatButton {
+                        objectName: "asideDismiss"
+                        text: "Dismiss"
+                        font.pixelSize: Theme.px(12)
+                        onClicked: session.dismissAside()
+                    }
+                }
+                ScrollView {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: Math.min(asideText.implicitHeight, Math.max(120, root.height * 0.35))
+                    visible: asideText.text !== ""
+                    clip: true
+                    contentWidth: availableWidth
+                    TextEdit {
+                        id: asideText
+                        width: parent.width
+                        readOnly: true
+                        selectByMouse: true
+                        text: !asideCard.aside ? "" : asideCard.aside.error ? asideCard.aside.error : asideCard.aside.text
+                        color: asideCard.aside && asideCard.aside.error ? Theme.error : Theme.foreground
+                        selectionColor: Theme.primary
+                        textFormat: asideCard.aside && asideCard.aside.error ? TextEdit.PlainText : TextEdit.MarkdownText
+                        wrapMode: TextEdit.Wrap
+                        font.pixelSize: Theme.px(13)
+                    }
+                }
+                Label {
+                    Layout.fillWidth: true
+                    visible: asideCard.aside !== null && asideCard.aside.done && !asideCard.aside.error
+                    text: "A side question: not part of the conversation, and not kept."
+                    color: Theme.muted
+                    font.pixelSize: Theme.px(11)
+                }
+            }
+        }
+
         // The agent's `ask`: all of one call's questions together.
         AskPanel {
             id: askPanel

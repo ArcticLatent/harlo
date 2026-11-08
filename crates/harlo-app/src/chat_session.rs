@@ -84,6 +84,9 @@ pub mod qobject {
         #[qproperty(QString, subagent_message, cxx_name = "subagentMessage")]
         /// Todo phases as JSON (`[{ name, tasks: [{ content, status }] }]`).
         #[qproperty(QString, todos_json, cxx_name = "todosJson")]
+        /// A side question (`/btw`) and its answer so far, as JSON
+        /// `{ question, text, done, error }`; "" for none.
+        #[qproperty(QString, aside_json, cxx_name = "asideJson")]
         /// Undo a turn: your messages with a snapshot from before them, as
         /// JSON `{ <row key>: { snapshot, next: <your next message's row
         /// key, "" for the latest turn>, files: <what the latest turn
@@ -130,6 +133,9 @@ pub mod qobject {
         /// `{ id, selectedOptions, customInput? }`, one per question.
         #[qinvokable]
         fn answer_ask(self: Pin<&mut ChatSession>, answers: &QString);
+        /// Puts the side question's card away.
+        #[qinvokable]
+        fn dismiss_aside(self: Pin<&mut ChatSession>);
         /// Re-reads the subagent list.
         #[qinvokable]
         fn refresh_subagents(self: Pin<&mut ChatSession>);
@@ -341,6 +347,7 @@ pub struct ChatSessionRust {
     /// A subagent list refresh is already scheduled.
     subagents_due: bool,
     todos_json: QString,
+    aside_json: QString,
     undo_json: QString,
     undo_plan: QString,
     /// The session's file, once the harness has reported it.
@@ -436,6 +443,7 @@ impl ChatSession {
         self.as_mut().rust_mut().subagents_listed.clear();
         self.as_mut().set_subagent_message(QString::default());
         self.as_mut().set_todos_json(QString::default());
+        self.as_mut().set_aside_json(QString::default());
         self.as_mut().rust_mut().queue_raw.clear();
         self.as_mut().rust_mut().session_file = None;
 
@@ -692,8 +700,8 @@ impl ChatSession {
         };
         let Some(h) = self.handle().cloned() else { return };
         let original = text.clone();
-        // Plan mode: a plan first, no changes.
-        let text = if self.plan_mode && mode == SendMode::Normal {
+        // Plan mode: a plan first, no changes. (Not for a side question.)
+        let text = if self.plan_mode && mode == SendMode::Normal && !text.trim_start().starts_with("/btw") {
             format!("{text}{}", harlo_harness::file_blocks::PLAN_NOTE)
         } else {
             text
@@ -880,6 +888,10 @@ impl ChatSession {
             Ok(list @ Value::Array(_)) => self.answer(json!({ "answers": list })),
             _ => tracing::warn!("ask answers are not a JSON array"),
         }
+    }
+
+    pub fn dismiss_aside(self: Pin<&mut Self>) {
+        self.set_aside_json(QString::default());
     }
 
     pub fn cancel_request(self: Pin<&mut Self>) {
@@ -1110,6 +1122,7 @@ impl ChatSession {
                     self.as_mut().schedule_subagents();
                 }
                 SessionUpdate::Todos(todos) => self.as_mut().set_todos_json(QString::from(&todos.to_string())),
+                SessionUpdate::Aside(a) => self.as_mut().set_aside_json(QString::from(&a.to_string())),
                 // (The workspace notifies.)
                 // (The workspace has these.)
                 SessionUpdate::Notable(_) | SessionUpdate::Limits(_) | SessionUpdate::GateAnswered { .. } | SessionUpdate::Stopped | SessionUpdate::HarloCall { .. } => {}

@@ -133,6 +133,9 @@ pub enum HarnessEvent {
     /// The context's size or window became known outside a turn (ask
     /// `get_session_stats`).
     ContextChanged,
+    /// A side question (`/btw`) and its answer as it comes: `{ question,
+    /// text, done, error? }` (Harlo's `harlo_aside`).
+    Aside(Value),
 
     /// `system` is true for the harness's own status notices (`notice`), as
     /// opposed to messages meant for the user.
@@ -243,6 +246,7 @@ impl Translator {
             },
             "subagent_lifecycle" | "subagent_progress" => E::SubagentActivity(frame),
             "harlo_limits" => E::Limits(json!({ "provider": frame["provider"], "account": frame["account"], "windows": frame["windows"] })),
+            "harlo_aside" => E::Aside(json!({ "question": frame["question"], "text": frame["text"], "done": frame["done"], "error": frame["error"] })),
             "harlo_call" => E::HarloCall { id: str_of(&frame, "id"), tool: str_of(&frame, "tool"), args: frame["args"].clone() },
             "queue_update" => E::QueueChanged {
                 steering: string_list(&frame["steering"]),
@@ -378,6 +382,8 @@ mod tests {
     #[test]
     fn harlo_agent_calls_harlos_tools() {
         let mut t = Translator::new(HarnessKind::Harlo);
+        let ev = t.translate(json!({"type":"harlo_aside","question":"why?","text":"Because.","done":true}));
+        assert!(matches!(&ev[..], [HarnessEvent::Aside(a)] if a["question"] == "why?" && a["text"] == "Because." && a["done"] == true && a["error"].is_null()), "{ev:?}");
         let ev = t.translate(json!({"type":"harlo_call","id":"hc-3","tool":"list_sessions","args":{"all":true}}));
         let HarnessEvent::HarloCall { id, tool, args } = &ev[0] else { panic!("{ev:?}") };
         assert_eq!((id.as_str(), tool.as_str(), args), ("hc-3", "list_sessions", &json!({"all":true})));

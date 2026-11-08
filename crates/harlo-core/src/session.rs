@@ -139,6 +139,8 @@ pub enum SessionUpdate {
     Notable(Notable),
     /// Plan limits, as Claude or Harlo last said (see `HarnessEvent::Limits`).
     Limits(Value),
+    /// A side question and its answer so far (see `HarnessEvent::Aside`).
+    Aside(Value),
 }
 
 /// The ids of harlo's own requests (approvals its tools asked for).
@@ -755,7 +757,8 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                 Some(Control::Prompt(text, images, mode)) => {
                     // A new turn (not steering or a queued one): the folder's
                     // files first, so the turn can be undone (git::snapshot_turn).
-                    if st.status != SessionStatus::Busy && turn_snapshots_on() {
+                    // (A side question, `/btw`, isn't a turn.)
+                    if st.status != SessionStatus::Busy && turn_snapshots_on() && !text.trim_start().starts_with("/btw") {
                         let dir = match &driver.cfg.remote {
                             Some(r) => crate::remote::join(&r.host, &driver.cfg.cwd.to_string_lossy()),
                             None => driver.cfg.cwd.clone(),
@@ -974,6 +977,7 @@ fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<Sessi
             let _ = aux.send(Aux::Commands(list.clone()));
         }
         HarnessEvent::Limits(info) => pending.push(SessionUpdate::Limits(info.clone())),
+        HarnessEvent::Aside(a) => pending.push(SessionUpdate::Aside(a.clone())),
         HarnessEvent::Exited { code, stderr_tail } => {
             // Mid-run, or with a failure code: worth knowing. (What it said,
             // not the end of a stack trace. Its host disconnected by hand:
