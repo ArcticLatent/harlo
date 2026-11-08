@@ -6259,7 +6259,26 @@ ApplicationWindow {
             Workspace.addProject(win.argValue("--cwd="))
             settingsDialog.openPage("providers") } }
         PauseAnimation { duration: 600 }
-        ScriptAction { script: { win.clickItem(win.findName("harloTaskModel", settingsDialog.contentItem), "Subagents' model"); TestInput.typeText("fake/fake-helper"); TestInput.key(Qt.Key_Tab, 0) } }
+        // Code intelligence: each language's server, found where it's
+        // usually installed too (a stand-in gopls in the home's go/bin).
+        ScriptAction { script: win.waitUntil(harloSettingsSteps, () => Accounts.languageServers !== "" && JSON.parse(Accounts.languageServers).state === "ready", 20000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const list = JSON.parse(Accounts.languageServers).list || []
+            const go = list.find(l => l.language === "Go") || {}
+            win.check(list.length === 5 && list.every(l => l.state === "ready" || l.install !== ""), "Code intelligence lists five languages, with how to install the missing (" + list.map(l => l.language + ":" + l.state).join(", ") + ")")
+            win.check(go.state === "ready" && go.path.endsWith("/home/go/bin/gopls"), "a server outside the PATH is found where it's usually installed (" + go.state + " " + go.path + ")")
+            const rows = win.findName("harloLanguageServers", settingsDialog.contentItem)
+            win.check(rows && rows.visible && rows.children.length >= 6, "and shown under it (" + (rows ? rows.children.length : "none") + ")")
+            win.clickItem(win.findName("harloLanguageServersCheck", settingsDialog.contentItem), "Check again") } }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: win.waitUntil(harloSettingsSteps, () => JSON.parse(Accounts.languageServers).state === "ready", 20000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            win.check((JSON.parse(Accounts.languageServers).list || []).length === 5, "Check again asks again")
+            win.scrollIntoView(win.findName("harloLanguageServers", settingsDialog.contentItem))
+            win.shotWindow("clicks-harlo-language-servers")
+            win.clickItem(win.findName("harloTaskModel", settingsDialog.contentItem), "Subagents' model"); TestInput.typeText("fake/fake-helper"); TestInput.key(Qt.Key_Tab, 0) } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: { win.clickItem(win.findName("harloFallback", settingsDialog.contentItem), "the model to go on with"); TestInput.typeText("fake/fake-helper"); TestInput.key(Qt.Key_Tab, 0) } }
         PauseAnimation { duration: 300 }

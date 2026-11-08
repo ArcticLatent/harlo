@@ -11,7 +11,9 @@
 //!   Files it asks about are sent to the server as they are on disk each
 //!   time, so its own edits are seen.
 //! - Offered when a server for one of the project's languages is
-//!   installed (`HARLO_AGENT_LSP=off`: never). Measured: finding a method's
+//!   installed and starts (looked for on the PATH and in the folders
+//!   servers are usually installed in; `HARLO_AGENT_LSP=off`: never).
+//!   harlo's settings show each language's (`status`). Measured: finding a method's
 //!   callers among same-named ones took 87% fewer tokens with it; Rust
 //!   tasks that didn't use it took about 2% more (its definition).
 
@@ -88,14 +90,155 @@ fn lang_of(path: &Path) -> Option<(usize, &'static str)> {
     LANGS.iter().position(|l| l.exts.contains(&ext)).map(|i| (i, language_id(ext)))
 }
 
-/// The installed server of each language (its command), looked up once.
-fn installed() -> &'static [Option<Vec<String>>] {
-    static FOUND: OnceLock<Vec<Option<Vec<String>>>> = OnceLock::new();
-    FOUND.get_or_init(|| {
-        let path: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
-        let on_path = |bin: &str| path.iter().any(|d| d.join(bin).is_file());
-        LANGS.iter().map(|l| l.servers.iter().find(|s| on_path(s[0])).map(|s| s.iter().map(|a| (*a).to_owned()).collect())).collect()
-    })
+/// Folders servers are installed in, besides the PATH (an app started
+/// from the desktop menu may not have the shell's).
+fn search_dirs() -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    if let Some(c) = std::env::var_os("CARGO_HOME") {
+        dirs.push(PathBuf::from(c).join("bin"));
+    }
+    if let Some(g) = std::env::var_os("GOPATH") {
+        dirs.extend(std::env::split_paths(&g).map(|g| g.join("bin")));
+    }
+    if let Some(n) = std::env::var_os("NPM_CONFIG_PREFIX").or_else(|| std::env::var_os("npm_config_prefix")) {
+        dirs.push(PathBuf::from(n).join("bin"));
+    }
+    if !home.as_os_str().is_empty() {
+        for d in [".cargo/bin", ".local/bin", "go/bin", ".npm-global/bin", ".local/share/npm/bin", ".bun/bin", ".volta/bin", ".local/share/pnpm"] {
+            dirs.push(home.join(d));
+        }
+    }
+    dirs.extend(["/usr/local/bin", "/usr/bin"].map(PathBuf::from));
+    let mut seen = HashSet::new();
+    dirs.retain(|d| d.is_absolute() && seen.insert(d.clone()));
+    dirs
+}
+
+/// What a language's server is here.
+#[derive(Clone, Debug, PartialEq)]
+enum Found {
+    /// Its command, the program by its whole path.
+    Ready(Vec<String>),
+    /// None of its servers is installed.
+    Missing,
+    /// One is there but doesn't start (its path, and what it said).
+    Broken(PathBuf, String),
+}
+
+/// Whether `program` starts, asked its version (by the program beside it
+/// that says it: Pyright's server only talks over its pipe). One still
+/// running after a few seconds started. rustup's stand-in for a component
+/// that isn't installed fails at once.
+fn starts(program: &Path) -> Result<(), String> {
+    let name = program.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+    let (check, args): (&str, &[&str]) = match name {
+        "basedpyright-langserver" => ("basedpyright", &["--version"]),
+        "pyright-langserver" => ("pyright", &["--version"]),
+        "gopls" => ("gopls", &["version"]),
+        n => (n, &["--version"]),
+    };
+    let check = program.with_file_name(check);
+    if !check.is_file() {
+        return Ok(());
+    }
+    let mut child = std::process::Command::new(&check)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("it can't be run ({e})"))?;
+    let end = Instant::now() + Duration::from_secs(5);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => return Ok(()),
+            Ok(Some(status)) => {
+                let mut said = String::new();
+                if let Some(mut err) = child.stderr.take() {
+                    let _ = std::io::Read::read_to_string(&mut err, &mut said);
+                }
+                let said = said.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default().trim_start_matches("error: ").to_owned();
+                return Err(if said.is_empty() { format!("it fails to start ({status})") } else { said });
+            }
+            Ok(None) if Instant::now() < end => std::thread::sleep(Duration::from_millis(50)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Ok(());
+            }
+        }
+    }
+}
+
+/// Looks for a language's servers: the first copy that's there and starts.
+fn look_for(li: usize, dirs: &[PathBuf]) -> Found {
+    let mut broken = None;
+    for server in LANGS[li].servers {
+        for program in dirs.iter().map(|d| d.join(server[0])).filter(|p| p.is_file()) {
+            match starts(&program) {
+                Ok(()) => {
+                    let mut command = vec![program.to_string_lossy().into_owned()];
+                    command.extend(server[1..].iter().map(|a| (*a).to_owned()));
+                    return Found::Ready(command);
+                }
+                Err(why) => {
+                    broken.get_or_insert((program, why));
+                }
+            }
+        }
+    }
+    broken.map_or(Found::Missing, |(p, why)| Found::Broken(p, why))
+}
+
+/// A language's server command, looked for once (when a project of it
+/// first asks).
+fn installed(li: usize) -> Option<&'static Vec<String>> {
+    static FOUND: [OnceLock<Found>; 5] = [const { OnceLock::new() }; 5];
+    const _: () = assert!(LANGS.len() == 5);
+    match FOUND[li].get_or_init(|| look_for(li, &search_dirs())) {
+        Found::Ready(command) => Some(command),
+        _ => None,
+    }
+}
+
+/// How to install a language's server (`manager`: the system's package
+/// manager, for the one that comes with it).
+fn install_hint(li: usize, manager: Option<&str>) -> String {
+    match LANGS[li].name {
+        "Rust" => "rustup component add rust-analyzer".into(),
+        "Python" => "pipx install basedpyright".into(),
+        "Go" => "go install golang.org/x/tools/gopls@latest".into(),
+        "TypeScript/JavaScript" => "npm install -g typescript-language-server typescript".into(),
+        _ => match manager {
+            Some("pacman") => "sudo pacman -S clang".into(),
+            Some("apt") => "sudo apt install clangd".into(),
+            Some("dnf") => "sudo dnf install clang-tools-extra".into(),
+            Some("zypper") => "sudo zypper install clang".into(),
+            Some("brew") => "brew install llvm".into(),
+            _ => "Install clangd with your package manager".into(),
+        },
+    }
+}
+
+/// Each language's server as it is here, for harlo's settings
+/// (`harlo-agent lsp-status`): `[{ language, servers, state: "ready" |
+/// "missing" | "broken", path, why, install }]`.
+pub fn status() -> Value {
+    let dirs = search_dirs();
+    let manager = ["pacman", "apt", "dnf", "zypper", "brew"].into_iter().find(|m| dirs.iter().any(|d| d.join(m).is_file()));
+    let list: Vec<Value> = (0..LANGS.len())
+        .map(|li| {
+            let (state, path, why) = match look_for(li, &dirs) {
+                Found::Ready(c) => ("ready", c[0].clone(), String::new()),
+                Found::Missing => ("missing", String::new(), String::new()),
+                Found::Broken(p, why) => ("broken", p.to_string_lossy().into_owned(), why),
+            };
+            let servers: Vec<&str> = LANGS[li].servers.iter().map(|s| s[0]).collect();
+            json!({ "language": LANGS[li].name, "servers": servers, "state": state, "path": path, "why": why, "install": install_hint(li, manager) })
+        })
+        .collect();
+    Value::Array(list)
 }
 
 /// Whether the tool is offered in `cwd`: a server installed for a language
@@ -106,7 +249,7 @@ pub fn offered(cwd: &Path) -> bool {
 
 /// The languages with a server installed that `cwd`'s project has.
 fn languages_here(cwd: &Path) -> Vec<&'static str> {
-    LANGS.iter().zip(installed()).filter(|(l, s)| s.is_some() && l.markers.iter().any(|m| cwd.join(m).exists())).map(|(l, _)| l.name).collect()
+    (0..LANGS.len()).filter(|&li| LANGS[li].markers.iter().any(|m| cwd.join(m).exists()) && installed(li).is_some()).map(|li| LANGS[li].name).collect()
 }
 
 pub fn spec() -> Value {
@@ -144,7 +287,7 @@ impl Servers {
         let Some((li, language)) = lang_of(&path) else {
             return fail(format!("No language server for {}: there are servers for {}.", path.display(), LANGS.iter().map(|l| l.name).collect::<Vec<_>>().join(", ")));
         };
-        let Some(command) = &installed()[li] else {
+        let Some(command) = installed(li) else {
             let names: Vec<&str> = LANGS[li].servers.iter().map(|s| s[0]).collect();
             return fail(format!("No {} language server is installed ({}): use grep and read.", LANGS[li].name, names.join(", ")));
         };
@@ -880,10 +1023,37 @@ mod tests {
         }
     }
 
+    /// A server is one that starts: rustup's stand-in for a component that
+    /// isn't installed doesn't count, and says why.
+    #[test]
+    fn finds_servers_that_start() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("harlo-lsp-find-{}", std::process::id()));
+        let (good, bad) = (dir.join("good"), dir.join("bad"));
+        std::fs::create_dir_all(&good).unwrap();
+        std::fs::create_dir_all(&bad).unwrap();
+        let script = |path: PathBuf, body: &str| {
+            std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        script(bad.join("rust-analyzer"), "echo \"error: Unknown binary 'rust-analyzer' in official toolchain 'stable'.\" >&2; exit 1");
+        script(good.join("rust-analyzer"), "echo rust-analyzer 1.0");
+        assert_eq!(look_for(0, std::slice::from_ref(&bad)), Found::Broken(bad.join("rust-analyzer"), "Unknown binary 'rust-analyzer' in official toolchain 'stable'.".into()));
+        // A working one further on wins.
+        assert_eq!(look_for(0, &[bad.clone(), good.clone()]), Found::Ready(vec![good.join("rust-analyzer").to_string_lossy().into_owned()]));
+        // Pyright's server is asked through the program beside it, if there is one.
+        script(good.join("pyright-langserver"), "exit 1");
+        assert_eq!(look_for(1, std::slice::from_ref(&good)), Found::Ready(vec![good.join("pyright-langserver").to_string_lossy().into_owned(), "--stdio".into()]));
+        script(good.join("pyright"), "exit 3");
+        assert!(matches!(look_for(1, std::slice::from_ref(&good)), Found::Broken(..)));
+        assert_eq!(look_for(2, &[good, bad]), Found::Missing);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     /// rust-analyzer on a small crate: two types' `post`, told apart.
     #[tokio::test]
     async fn rust_analyzer_tells_same_named_methods_apart() {
-        if installed()[0].is_none() {
+        if installed(0).is_none() {
             eprintln!("(no rust-analyzer: skipped)");
             return;
         }

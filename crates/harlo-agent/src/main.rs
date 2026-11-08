@@ -145,6 +145,11 @@ async fn run(args: Vec<String>) -> Result<()> {
             }
             Ok(())
         }
+        Some("lsp-status") => {
+            // For harlo's settings: each language's server here.
+            println!("{}", lsp::status());
+            Ok(())
+        }
         Some("--version" | "-V") => {
             println!("harlo-agent {} ({})", env!("CARGO_PKG_VERSION"), env!("HARLO_AGENT_COMMIT"));
             Ok(())

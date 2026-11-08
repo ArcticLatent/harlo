@@ -51,6 +51,11 @@ pub mod qobject {
         /// baseUrl, name, engine, models, running, log }], busy: { <url>:
         /// "starting" | "stopping" | "removing" }, note } }`.
         #[qproperty(QString, host_engines, cxx_name = "hostEngines")]
+        /// Harlo's language servers here (`load_language_servers`): `{
+        /// state: "loading" | "ready" | "failed", list: [{ language,
+        /// servers, state: "ready" | "missing" | "broken", path, why,
+        /// install }], error }`; "" before.
+        #[qproperty(QString, language_servers, cxx_name = "languageServers")]
         type Accounts = super::AccountsRust;
     }
 
@@ -100,6 +105,10 @@ pub mod qobject {
         /// (`revision` follows a change).
         #[qinvokable]
         fn load_servers(self: Pin<&mut Accounts>);
+        /// Asks Harlo which language servers it finds here, in the
+        /// background (`languageServers` follows).
+        #[qinvokable]
+        fn load_language_servers(self: Pin<&mut Accounts>);
         /// Asks the server at `url` what it serves (`serverSearch` follows;
         /// an empty `url` clears it).
         #[qinvokable]
@@ -216,6 +225,7 @@ pub struct AccountsRust {
     host_engines: QString,
     /// `host_engines`, as a value.
     engines_on: Value,
+    language_servers: QString,
     /// The sign-in going on: its id, and where its answers go (dropped:
     /// cancelled).
     current: Option<(u64, mpsc::UnboundedSender<String>)>,
@@ -548,6 +558,29 @@ impl Accounts {
     pub fn servers(&self, agent: &QString) -> QString {
         let list = self.rust().servers.get(&agent.to_string()).cloned().unwrap_or_else(|| json!([]));
         QString::from(&list.to_string())
+    }
+
+    pub fn load_language_servers(mut self: Pin<&mut Self>) {
+        // (The last list stays shown while it's asked again.)
+        let mut now: Value = serde_json::from_str(&self.language_servers.to_string()).unwrap_or_else(|_| json!({}));
+        now["state"] = json!("loading");
+        self.as_mut().set_language_servers(QString::from(&now.to_string()));
+        let thread = self.qt_thread();
+        crate::runtime().spawn_blocking(move || {
+            let read = || -> Result<Value, String> {
+                let program = program(HarnessKind::Harlo).ok_or("Harlo isn't installed.")?;
+                let out = std::process::Command::new(program).arg("lsp-status").stdin(std::process::Stdio::null()).output().map_err(|e| format!("Harlo didn't start: {e}"))?;
+                if !out.status.success() {
+                    return Err("This Harlo can't tell yet: update harlo.".into());
+                }
+                serde_json::from_slice(&out.stdout).map_err(|e| format!("Harlo's answer wasn't readable: {e}"))
+            };
+            let v = match read() {
+                Ok(list) => json!({ "state": "ready", "list": list }),
+                Err(e) => json!({ "state": "failed", "list": [], "error": e }),
+            };
+            let _ = thread.queue(move |this| this.set_language_servers(QString::from(&v.to_string())));
+        });
     }
 
     pub fn load_servers(self: Pin<&mut Self>) {
