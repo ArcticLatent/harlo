@@ -1323,9 +1323,10 @@ fn task_frame(shared: &Arc<Shared>, frame: &Value) {
 
 /// A task in the background (a shell, an agent sent there): its end is
 /// said as a notice (Claude tells the model too), as reading the
-/// transcript again shows it.
+/// transcript again shows it. (Claude reports a shell command that runs a
+/// while as a task too, in the foreground: its card says how it went.)
 fn background_task(shared: &Arc<Shared>, task: &str, frame: &Value) {
-    let started = frame["subtype"] == "task_started" && (frame["task_type"] == "local_bash" || frame["is_backgrounded"] == true);
+    let started = frame["subtype"] == "task_started" && frame["is_backgrounded"] == true;
     if started || frame["patch"]["is_backgrounded"] == true {
         shared.state.lock().unwrap().background.insert(task.to_owned());
         return;
@@ -1615,8 +1616,12 @@ mod tests {
         let system = |v: Value| { let mut v = v; v["type"] = json!("system"); v };
         for frame in [
             // A background shell: its end is a notice.
-            json!({ "subtype": "task_started", "task_id": "b1", "task_type": "local_bash", "description": "cargo test" }),
+            json!({ "subtype": "task_started", "task_id": "b1", "task_type": "local_bash", "description": "cargo test", "is_backgrounded": true }),
             json!({ "subtype": "task_notification", "task_id": "b1", "status": "completed", "summary": "Background command \"cargo test\" completed (exit code 0)" }),
+            // A shell command in the foreground that runs a while: its card
+            // says it, no notice (Claude's summary is just the command).
+            json!({ "subtype": "task_started", "task_id": "b0", "tool_use_id": "t0", "task_type": "local_bash", "description": "systemd-run cargo test", "is_backgrounded": false }),
+            json!({ "subtype": "task_notification", "task_id": "b0", "tool_use_id": "t0", "status": "completed", "output_file": "", "summary": "systemd-run cargo test" }),
             // A subagent in the foreground: its own row says it, no notice.
             json!({ "subtype": "task_started", "task_id": "a1", "tool_use_id": "t1", "task_type": "local_agent", "subagent_type": "Explore" }),
             json!({ "subtype": "task_notification", "task_id": "a1", "tool_use_id": "t1", "status": "completed", "summary": "Found it." }),
