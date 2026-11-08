@@ -144,12 +144,18 @@ pub fn replayed(m: &Value) -> String {
     )
 }
 
-/// Whether the server's own compaction is used where the API has it
-/// (`HARLO_AGENT_COMPACT=native`, to measure): the conversation up to the
-/// cut goes to the model with a compaction trigger, and the opaque item it
-/// sends back stands in for it (the entry's `native`), for that model only.
-pub fn native() -> bool {
-    std::env::var("HARLO_AGENT_COMPACT").is_ok_and(|v| v == "native")
+/// Whether the server's own compaction is used (on a Responses API): the
+/// conversation up to the cut goes to the model with a compaction trigger,
+/// and the opaque item it sends back stands in for it (the entry's
+/// `native`), for that model only. By default for the Codex sign-in, where
+/// it's known to work and measured better than summarizing (bench H20);
+/// `HARLO_AGENT_COMPACT=native` asks for it elsewhere, `=summary` turns it off.
+pub fn native(provider: &str) -> bool {
+    match std::env::var("HARLO_AGENT_COMPACT").as_deref() {
+        Ok("native") => true,
+        Ok("summary") => false,
+        _ => provider == crate::providers::CODEX,
+    }
 }
 
 /// Of the user's requests, how many a native compaction's note keeps, and

@@ -1050,10 +1050,10 @@ impl Agent {
         let key = self.cache_key.clone().unwrap_or_else(|| self.log.id.clone());
         let images = self.takes_images().await;
         let files = compact::files(&self.history[..cut], &self.files);
-        // The server's own compaction, where asked for and the API has it
+        // The server's own compaction, where it's used and the API has it
         // (if it fails, summarized as usual).
         let mut entry = None;
-        if let Some((pid, bare)) = compact::native().then(|| providers::resolve(&self.model).ok()).flatten().filter(|(p, _)| p.api == Api::Responses).map(|(p, m)| (p.id, m)) {
+        if let Some((pid, bare)) = providers::resolve(&self.model).ok().filter(|(p, _)| p.api == Api::Responses && compact::native(&p.id)).map(|(p, m)| (p.id, m)) {
             let request = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &self.history[..cut], session: &key, specs: &specs, tools: true, images, trigger: true };
             let mut quiet = |_: Shown| {};
             let sent = tokio::select! {
