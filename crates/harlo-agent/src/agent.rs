@@ -265,6 +265,8 @@ impl Agent {
 
     /// Starts over in a new session (same folder, model and level).
     pub fn new_session(&mut self, log: Log) {
+        // (Its background commands end with it.)
+        self.tools.jobs.end_all();
         self.log = log;
         self.history.clear();
         self.ids.clear();
@@ -356,6 +358,45 @@ impl Agent {
         self.ask_harlo().await;
         self.start_mcp(show).await;
         self.push_user(prompt, images, show)?;
+        self.turn(stop, show).await
+    }
+
+    /// Works on what the background commands that ended said (a run with
+    /// no message of the user's): Done at once when nothing ended.
+    pub async fn wake(&mut self, stop: &CancellationToken, show: &mut (dyn FnMut(Shown) + Send)) -> Result<Ended> {
+        if !self.take_notices(show)? {
+            return Ok(Ended::Done);
+        }
+        self.turn(stop, show).await
+    }
+
+    /// Whether background commands ended and the model hasn't been told.
+    pub fn has_notices(&self) -> bool {
+        !self.tools.jobs.notices.lock().unwrap().is_empty()
+    }
+
+    /// The jobs' hook for when one ends (RPC: a run of its own).
+    pub fn on_job_end(&self, f: Arc<dyn Fn() + Send + Sync>) {
+        self.tools.jobs.set_wake(f);
+    }
+
+    /// Background commands still running.
+    pub fn jobs_running(&self) -> usize {
+        self.tools.jobs.running()
+    }
+
+    /// Tells the model which background commands ended (true if any did):
+    /// a notice each, shown to the user too.
+    fn take_notices(&mut self, show: &mut (dyn FnMut(Shown) + Send)) -> Result<bool> {
+        let notices: Vec<String> = std::mem::take(&mut *self.tools.jobs.notices.lock().unwrap());
+        for n in &notices {
+            self.push(json!({ "role": "custom", "customType": "harlo_job", "content": n, "display": true, "timestamp": now_ms() }), show)?;
+        }
+        Ok(!notices.is_empty())
+    }
+
+    /// The model's work on what's in the history now, until it's done.
+    async fn turn(&mut self, stop: &CancellationToken, show: &mut (dyn FnMut(Shown) + Send)) -> Result<Ended> {
         // A request too long for the model: sent again with old outputs set
         // aside, then (still too long) compacted: 0, 1, 2 steps taken.
         let mut overflow = 0;
@@ -367,6 +408,7 @@ impl Agent {
         for round in 0..max {
             if round > 0 {
                 self.take_steering(show)?;
+                self.take_notices(show)?;
             }
             if Some(round) == wrap_up_round(max) {
                 self.push(json!({ "role": "custom", "customType": "harlo_rounds_note", "content": ROUNDS_NOTE, "display": false, "timestamp": now_ms() }), show)?;
@@ -434,7 +476,7 @@ impl Agent {
                 continue;
             }
             if calls.is_empty() {
-                if self.take_steering(show)? || self.take_follow_up(show)? {
+                if self.take_steering(show)? || self.take_notices(show)? || self.take_follow_up(show)? {
                     continue;
                 }
                 // A helper ending its turn with no result for its parent:
@@ -992,6 +1034,10 @@ async fn run_calls(tools: &Tools, calls: &[(&str, &str, &Value)], extra: &Extra<
     for (id, name, args) in calls {
         if not_here(name) {
             out.push(cut(&format!("You can't use {name} here: your tools are {}.", extra.allowed.unwrap_or_default().join(", "))));
+            continue;
+        }
+        if extra.allowed.is_some() && *name == "bash" && args["background"] == true {
+            out.push(cut("Subagents can't run commands in the background: run it in the foreground (with a longer timeout if it needs one)."));
             continue;
         }
         if stop.is_cancelled() {

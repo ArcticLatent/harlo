@@ -38,6 +38,8 @@ pub struct Tools {
     /// Where commands run, and what the file tools may touch (None: the
     /// sandbox is off).
     pub sandbox: Option<Arc<Sandbox>>,
+    /// Commands running in the background (`bash` with `background`).
+    pub jobs: Arc<crate::jobs::Jobs>,
 }
 
 /// An output set aside: the result as it was, and the file it read (to
@@ -75,7 +77,8 @@ fn fail(text: impl Into<String>) -> Outcome {
 
 /// Tools that only look: several run at once.
 pub fn read_only(name: &str) -> bool {
-    matches!(name, "read" | "grep" | "find" | "ls" | "recall" | "current_time")
+    // (`jobs` touches only this session's own background commands.)
+    matches!(name, "read" | "grep" | "find" | "ls" | "recall" | "current_time" | "jobs")
 }
 
 /// The tools' definitions for the Responses API: those in `only` (all
@@ -104,8 +107,9 @@ pub fn specs() -> Value {
           json!({ "path": { "type": "string" }, "content": { "type": "string" } }), &["path", "content"]),
         f("edit", "Replace text in a file. Each edit's old_text must match exactly one place in the file as it is now (copy it from read, with enough lines around it to be unique); all edits apply together. Refused if the file changed since you last read it.",
           json!({ "path": { "type": "string" }, "edits": { "type": "array", "items": { "type": "object", "properties": { "old_text": { "type": "string" }, "new_text": { "type": "string" } }, "required": ["old_text", "new_text"], "additionalProperties": false } } }), &["path", "edits"]),
-        f("bash", "Run a bash command in the working directory. It can't read input (stdin is closed; pagers and editors are off). Times out after 120 s unless `timeout` (seconds) says otherwise. Long output shows its start and end, with the whole of it saved to a file. Don't edit files with it: use edit or write.",
-          json!({ "command": { "type": "string" }, "timeout": { "type": "integer" },
+        f("bash", "Run a bash command in the working directory. It can't read input (stdin is closed; pagers and editors are off). Times out after 120 s unless `timeout` (seconds) says otherwise. Long output shows its start and end, with the whole of it saved to a file. Don't edit files with it: use edit or write. \
+                   With background: true it runs in the background (a server, a watcher, a long test run): you get its job id at once and are told when it ends (it times out after 30 min unless timeout says otherwise, up to 2 h); jobs shows its output, waits for it or stops it. Don't add & yourself.",
+          json!({ "command": { "type": "string" }, "timeout": { "type": "integer" }, "background": { "type": "boolean" },
                   "outside_sandbox": { "type": "boolean", "description": "Run it outside the sandbox. Only when it failed because of the sandbox and really needs what the sandbox hides or protects (e.g. git push over SSH); say why first. The user is asked every time." } }), &["command"]),
         f("grep", "Search file contents for a regular expression (ripgrep syntax; respects .gitignore). Shows file:line: text, up to 300 matches.",
           json!({ "pattern": { "type": "string" }, "path": { "type": "string" }, "glob": { "type": "string", "description": "Only files matching this, e.g. *.rs" }, "ignore_case": { "type": "boolean" } }), &["pattern"]),
@@ -113,6 +117,9 @@ pub fn specs() -> Value {
           json!({ "pattern": { "type": "string" }, "path": { "type": "string" } }), &["pattern"]),
         f("ls", "List a folder (folders end with /). Up to 500 entries.",
           json!({ "path": { "type": "string" } }), &[]),
+        f("jobs", "Background commands (started by bash with background: true): list them, see one's output (its last lines), wait for one to end (up to timeout seconds, 60 by default), or stop one with everything it started.",
+          json!({ "action": { "type": "string", "enum": ["list", "output", "wait", "stop"] }, "id": { "type": "string", "description": "The job's id (j1, j2…), for output, wait and stop" },
+                  "lines": { "type": "integer", "description": "How many of the last lines to show (50 by default)" }, "timeout": { "type": "integer" } }), &["action"]),
         f("current_time", "The date and time now: local (with the zone and its offset from UTC), UTC, and Unix seconds.", json!({}), &[]),
         f("recall", "Get back a tool's output that was set aside to save context (its place in the conversation says so, with the id to give). It comes back as it was then; to see a file as it is now, read it again.",
           json!({ "id": { "type": "string" } }), &["id"]),
@@ -121,7 +128,8 @@ pub fn specs() -> Value {
 
 impl Tools {
     pub fn new(cwd: PathBuf, spill_dir: PathBuf) -> Self {
-        Tools { cwd, spill_dir, seen: Mutex::new(HashMap::new()), originals: Mutex::new(HashMap::new()), sandbox: None }
+        let jobs = Arc::new(crate::jobs::Jobs::new(&spill_dir));
+        Tools { cwd, spill_dir, seen: Mutex::new(HashMap::new()), originals: Mutex::new(HashMap::new()), sandbox: None, jobs }
     }
 
     /// Outputs set aside, kept for `recall` (`replace`: the session's
@@ -249,6 +257,10 @@ impl Tools {
                     return fail(format!("Commands can't run: the sandbox can't start here ({why}). Install bubblewrap, or turn Harlo's sandbox off in Settings → Providers → Harlo."));
                 }
                 let inside = sandbox.filter(|_| args["outside_sandbox"] != true);
+                if args["background"] == true {
+                    let (text, failed) = self.jobs.start(s("command"), &self.cwd, args["timeout"].as_u64(), inside);
+                    return Outcome::new(text, failed);
+                }
                 let (text, failed) = bash::run(s("command"), &self.cwd, args["timeout"].as_u64(), &self.spill_dir, inside).await;
                 Outcome::new(text, failed)
             }
@@ -256,6 +268,10 @@ impl Tools {
             "find" => self.find(s("pattern"), s("path")).await,
             "ls" => self.ls(s("path")),
             "recall" => self.recall(s("id")),
+            "jobs" => {
+                let (text, failed) = self.jobs.call(args).await;
+                Outcome::new(text, failed)
+            }
             "current_time" => ok(crate::clock::describe(&crate::clock::now())),
             _ => fail(format!("There's no tool called {name}.")),
         }

@@ -59,10 +59,10 @@ impl Drop for Group {
     }
 }
 
-/// `sandbox`: run it in that (None: as it is, with all of Harlo's
-/// variables).
-pub async fn run(command: &str, cwd: &Path, timeout: Option<u64>, spill_dir: &Path, sandbox: Option<&Sandbox>) -> (String, bool) {
-    let secs = timeout.filter(|t| *t > 0).unwrap_or(DEFAULT_TIMEOUT);
+/// The command, ready to spawn: in the sandbox when there's one (None: as
+/// it is, with all of Harlo's variables), in its own process group, with
+/// no input and nothing that waits for a person.
+pub fn command(command: &str, cwd: &Path, sandbox: Option<&Sandbox>) -> Command {
     let mut cmd = match sandbox {
         Some(sb) => {
             let mut c = Command::new("bwrap");
@@ -80,6 +80,14 @@ pub async fn run(command: &str, cwd: &Path, timeout: Option<u64>, spill_dir: &Pa
     for (k, v) in ENV {
         cmd.env(k, v);
     }
+    cmd
+}
+
+/// `sandbox`: run it in that (None: as it is, with all of Harlo's
+/// variables).
+pub async fn run(command: &str, cwd: &Path, timeout: Option<u64>, spill_dir: &Path, sandbox: Option<&Sandbox>) -> (String, bool) {
+    let secs = timeout.filter(|t| *t > 0).unwrap_or(DEFAULT_TIMEOUT);
+    let mut cmd = self::command(command, cwd, sandbox);
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => return (format!("Couldn't start {}: {e}", if sandbox.is_some() { "the sandbox (bwrap)" } else { "bash" }), true),

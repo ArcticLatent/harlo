@@ -70,6 +70,9 @@ struct Shared {
     models: Mutex<Vec<providers::ModelInfo>>,
     /// The session's subagents running (`task`), by id.
     subagents: Arc<Mutex<HashMap<String, CancellationToken>>>,
+    /// Starts a run for background commands that ended, when none is
+    /// going (set once the agent is shared).
+    wake: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 struct Modes {
@@ -323,6 +326,7 @@ pub async fn serve(keep: Keep, model: Option<String>, effort: Option<String>, ha
         pending: Mutex::default(),
         models: Mutex::default(),
         subagents: agent.subagents.clone(),
+        wake: Mutex::default(),
     });
     agent.gate = Some(Arc::new(Approvals(shared.clone())));
     if harlo_tools {
@@ -343,6 +347,23 @@ pub async fn serve(keep: Keep, model: Option<String>, effort: Option<String>, ha
         v.messages = agent.messages().to_vec();
     }
     let agent = Arc::new(tokio::sync::Mutex::new(agent));
+    // A background command that ends while nothing runs starts a run.
+    {
+        let (sh, weak) = (shared.clone(), Arc::downgrade(&agent));
+        let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+            let (sh, weak) = (sh.clone(), weak.clone());
+            tokio::spawn(async move {
+                if sh.running.lock().unwrap().is_some() {
+                    return;
+                }
+                if let Some(agent) = weak.upgrade() {
+                    let _ = start(&sh, &agent, None).await;
+                }
+            });
+        });
+        *shared.wake.lock().unwrap() = Some(wake.clone());
+        agent.lock().await.on_job_end(wake);
+    }
     // The models (and a new session's model) in the background.
     {
         let sh = shared.clone();
@@ -421,7 +442,7 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
                 queue(sh, behavior == "steer", text(), images());
                 return reply(Ok(Value::Null));
             }
-            match start(sh, agent, text(), images()).await {
+            match start(sh, agent, Some((text(), images()))).await {
                 Ok(()) => reply(Ok(Value::Null)),
                 Err(e) => reply(Err(e)),
             }
@@ -431,7 +452,7 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
                 queue(sh, ty == "steer", text(), images());
                 return reply(Ok(Value::Null));
             }
-            match start(sh, agent, text(), images()).await {
+            match start(sh, agent, Some((text(), images()))).await {
                 Ok(()) => reply(Ok(Value::Null)),
                 Err(e) => reply(Err(e)),
             }
@@ -739,8 +760,13 @@ async fn compact_now(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, f
 }
 
 /// Starts a run on `prompt` and its images (the agent is free).
-async fn start(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, prompt: String, images: Vec<Value>) -> Result<(), String> {
+/// Starts a run on `what` (a prompt and its images), or (None) on the
+/// background commands that ended, if any did.
+async fn start(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, what: Option<(String, Vec<Value>)>) -> Result<(), String> {
     let mut a = agent.clone().lock_owned().await;
+    if what.is_none() && (!a.has_notices() || sh.running.lock().unwrap().is_some()) {
+        return Ok(());
+    }
     a.known.add(sh.models.lock().unwrap().iter());
     if a.model.is_empty() {
         load_models(sh).await?;
@@ -757,7 +783,10 @@ async fn start(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, prompt:
         sh.emit(json!({ "type": "agent_start" }));
         let shown = sh.clone();
         let mut show = |s: Shown| shown.show(s);
-        let result = a.run(&prompt, &images, &stop, &mut show).await;
+        let result = match &what {
+            Some((prompt, images)) => a.run(prompt, images, &stop, &mut show).await,
+            None => a.wake(&stop, &mut show).await,
+        };
         if let Err(e) = result {
             let _ = a.failed(&format!("{e:#}"), &mut show);
         }
@@ -773,11 +802,16 @@ async fn start(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, prompt:
         if let Some(n) = p.name {
             let _ = a.rename(&n);
         }
+        let ended_since = a.has_notices();
         drop(a);
         sh.withdraw();
         *sh.running.lock().unwrap() = None;
         sh.emit(json!({ "type": "agent_end", "messages": [] }));
         sh.emit(json!({ "type": "agent_settled" }));
+        // (A command that ended as the run finished: told now.)
+        if ended_since && let Some(w) = sh.wake.lock().unwrap().clone() {
+            w();
+        }
     });
     Ok(())
 }

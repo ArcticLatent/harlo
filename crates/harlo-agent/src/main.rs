@@ -28,6 +28,7 @@ mod clock;
 mod compact;
 mod danger;
 mod images;
+mod jobs;
 mod mcp;
 mod providers;
 mod responses;
@@ -48,8 +49,9 @@ use anyhow::{Result, bail};
 #[tokio::main]
 async fn main() -> ExitCode {
     let result = run(std::env::args().skip(1).collect()).await;
-    // (MCP servers end with it.)
+    // (MCP servers and background commands end with it.)
     mcp::stop_all();
+    jobs::stop_all();
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
@@ -367,11 +369,17 @@ async fn ask(prompt: &str, images: &[serde_json::Value], model: Option<String>, 
             if tokio::signal::ctrl_c().await.is_ok() {
                 eprintln!("\x1b[0m");
                 mcp::stop_all();
+                jobs::stop_all();
                 std::process::exit(130);
             }
         }
     });
     let result = agent.run(prompt, images, &stop, &mut show).await;
+    match agent.jobs_running() {
+        0 => {}
+        1 => eprintln!("\x1b[33mA background command was still running: it ends with harlo-agent.\x1b[0m"),
+        n => eprintln!("\x1b[33m{n} background commands were still running: they end with harlo-agent.\x1b[0m"),
+    }
     if matches!(result, Ok(agent::Ended::Stopped)) {
         eprintln!("\x1b[0m\x1b[33mStopped.\x1b[0m");
     }
@@ -391,6 +399,7 @@ async fn ask(prompt: &str, images: &[serde_json::Value], model: Option<String>, 
     }
     if result? == agent::Ended::Stopped {
         mcp::stop_all();
+        jobs::stop_all();
         std::process::exit(130);
     }
     Ok(())
