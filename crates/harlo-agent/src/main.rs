@@ -28,6 +28,7 @@ mod clock;
 mod compact;
 mod danger;
 mod images;
+mod isolate;
 mod jobs;
 mod mcp;
 mod providers;

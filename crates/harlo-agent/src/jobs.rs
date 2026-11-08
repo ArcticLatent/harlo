@@ -398,7 +398,8 @@ mod tests {
         let (list, _) = jobs.call(&serde_json::json!({ "action": "list" })).await;
         assert!(list.contains("j1: echo one") && list.contains("j2: echo three"), "{list}");
         jobs.end_all();
-        assert!(!dir.join(format!("jobs-{}", std::process::id())).exists());
+        assert!(std::fs::read_dir(&dir).unwrap().next().is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

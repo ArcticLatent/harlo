@@ -46,7 +46,8 @@ pub fn spec() -> Value {
                         the goal, paths, what to report), works with its own tools, and its final message comes back to you. Several run at the same time. \
                         Use it for independent parts worth doing in parallel, or a search through much of the code that would fill your context; \
                         not for a quick look you can do yourself. kind explore (default) reads, searches and runs commands but changes no files; \
-                        general may also edit and write files (give parallel ones separate files).",
+                        general may also edit and write files; in a git project, two or more general tasks in one call each work in their own copy of the files, \
+                        and their changes are brought back here when they finish (any that clash with another's are kept aside, and the result says where).",
         "parameters": {
             "type": "object",
             "properties": { "tasks": { "type": "array", "maxItems": MAX_TASKS, "items": {
@@ -95,6 +96,8 @@ struct Done {
     status: &'static str,
     text: String,
     usage: Value,
+    /// Where it worked, when not in the session's folder.
+    worktree: Option<crate::isolate::Worktree>,
 }
 
 /// Runs the call's tasks: their answers, in order. (Boxed: a run inside
@@ -114,8 +117,34 @@ async fn run_all(args: &Value, call_id: &str, ctx: &Ctx, stop: &CancellationToke
     if let Some(i) = tasks.iter().position(|t| t["prompt"].as_str().is_none_or(|p| p.trim().is_empty())) {
         return Outcome::new(format!("Task {} has no prompt.", i + 1), true);
     }
+    // Two or more that edit: each in a worktree, when the project allows.
+    let writers = tasks.iter().filter(|t| t["kind"] == "general").count();
+    let base = if writers >= 2 {
+        let cwd = ctx.cwd.clone();
+        tokio::task::spawn_blocking(move || crate::isolate::Baseline::take(&cwd)).await.ok().and_then(Result::ok).map(Arc::new)
+    } else {
+        None
+    };
     let slots = tokio::sync::Semaphore::new(AT_ONCE);
-    let done: Vec<Done> = join_all(tasks.iter().map(|t| one(t, call_id, ctx, &slots, stop))).await;
+    let mut done: Vec<Done> = join_all(tasks.iter().map(|t| one(t, call_id, ctx, &slots, stop, base.clone()))).await;
+    // Their changes, brought back in the order asked.
+    if let Some(base) = &base {
+        for d in &mut done {
+            let Some(w) = d.worktree.take() else { continue };
+            let b = base.clone();
+            let applied = tokio::task::spawn_blocking(move || b.apply(&w)).await;
+            match applied {
+                Ok(crate::isolate::Applied::Nothing) | Err(_) => {}
+                Ok(crate::isolate::Applied::Done(files)) => d.text.push_str(&format!("\n\n(It worked in its own copy; its changes were brought back: {}.)", files.join(", "))),
+                Ok(crate::isolate::Applied::Kept { why, dir, patch, files }) => d.text.push_str(&format!(
+                    "\n\n(It worked in its own copy. Its changes to {} weren't brought back: they clash with an earlier task's ({why}). They're in {}{}; look at them and bring over what's wanted.)",
+                    if files.is_empty() { "the files".to_owned() } else { files.join(", ") },
+                    dir.display(),
+                    if patch.as_os_str().is_empty() { String::new() } else { format!(", as a patch in {}", patch.display()) },
+                )),
+            }
+        }
+    }
     let mut text = String::new();
     let mut total = (0, 0, 0, 0);
     for d in &done {
@@ -138,12 +167,12 @@ async fn run_all(args: &Value, call_id: &str, ctx: &Ctx, stop: &CancellationToke
     }
 }
 
-async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaphore, stop: &CancellationToken) -> Done {
+async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaphore, stop: &CancellationToken, base: Option<Arc<crate::isolate::Baseline>>) -> Done {
     let description = task["description"].as_str().map(str::trim).filter(|d| !d.is_empty()).unwrap_or("task").to_owned();
     let prompt = task["prompt"].as_str().unwrap_or_default().to_owned();
     let (kind, allowed) = if task["kind"] == "general" { ("general", GENERAL) } else { ("explore", EXPLORE) };
     let id = format!("task-{}", hex_id());
-    let mut done = Done { id: id.clone(), description: description.clone(), kind, prompt: prompt.clone(), status: "aborted", text: String::new(), usage: json!({}) };
+    let mut done = Done { id: id.clone(), description: description.clone(), kind, prompt: prompt.clone(), status: "aborted", text: String::new(), usage: json!({}), worktree: None };
     let token = stop.child_token();
     ctx.running.lock().unwrap().insert(id.clone(), token.clone());
     // (Waiting for a free place; stopped while it waits: never started.)
@@ -157,12 +186,21 @@ async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaph
         done.text = "Stopped before it started.".into();
         return done;
     }
+    // (A writer beside others: in its own worktree; none made, in place.)
+    let mut cwd = ctx.cwd.clone();
+    if let Some(b) = base.filter(|_| kind == "general") {
+        let name = id.clone();
+        if let Ok(Ok(w)) = tokio::task::spawn_blocking(move || b.worktree(&name)).await {
+            cwd = w.cwd.clone();
+            done.worktree = Some(w);
+        }
+    }
     let file = ctx.parent_file.as_ref().map(|p| p.with_extension("").join(format!("{id}.jsonl")));
     let log = match (&file, &ctx.parent_file) {
-        (Some(f), Some(p)) => Log::at(f.clone(), &ctx.cwd, p),
-        _ => Log::ephemeral(&ctx.cwd),
+        (Some(f), Some(p)) => Log::at(f.clone(), &cwd, p),
+        _ => Log::ephemeral(&cwd),
     };
-    let mut agent = Agent::new(ctx.cwd.clone(), log, Past::default(), ctx.model.clone(), ctx.effort.clone());
+    let mut agent = Agent::new(cwd, log, Past::default(), ctx.model.clone(), ctx.effort.clone());
     agent.gate = ctx.gate.clone();
     agent.allowed = Some(allowed);
     agent.cache_key = Some(format!("{}/task", ctx.cache_key));
