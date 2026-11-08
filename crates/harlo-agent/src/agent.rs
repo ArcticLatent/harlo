@@ -848,6 +848,7 @@ impl Agent {
             task_model: self.task_model.clone(),
             budget: self.budget.clone(),
             fallback: self.fallback.clone(),
+            lsp: self.tools.lsp.clone(),
         }
     }
 
@@ -877,6 +878,11 @@ impl Agent {
     }
 
     /// Added to the instructions (an agent profile's, for a subagent).
+    /// Uses these language servers (a subagent: its parent's).
+    pub fn share_lsp(&mut self, servers: Arc<crate::lsp::Servers>) {
+        self.tools.lsp = servers;
+    }
+
     pub fn add_instructions(&mut self, text: &str) {
         self.instructions.push_str(text);
     }
@@ -925,6 +931,11 @@ impl Agent {
             // (Questions for the user: only where someone can answer.)
             if self.gate.is_none() {
                 list.retain(|t| t["name"] != "ask");
+            }
+            // (A language server's answers, when one is installed for the
+            // project's language.)
+            if self.allowed.is_none_or(|a| a.contains(&"lsp")) && crate::lsp::offered(&self.cwd) {
+                list.push(crate::lsp::spec());
             }
             if let Some(m) = self.mcp.as_ref().filter(|_| self.allowed.is_none()) {
                 list.extend(m.specs().iter().cloned());
@@ -1378,6 +1389,9 @@ impl Extra<'_> {
 async fn call_tool(tools: &Tools, mcp: Option<&crate::mcp::Mcp>, name: &str, args: &Value) -> tools::Outcome {
     if name == "run_code" {
         let mut specs: Vec<Value> = tools::specs().as_array().cloned().unwrap_or_default();
+        if crate::lsp::offered(&tools.cwd) {
+            specs.push(crate::lsp::spec());
+        }
         specs.extend(mcp.map(|m| m.specs().to_vec()).unwrap_or_default());
         return crate::program::run(args, tools, mcp, &crate::program::callable(&specs, mcp)).await;
     }

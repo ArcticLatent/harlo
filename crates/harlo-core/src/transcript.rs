@@ -813,6 +813,10 @@ fn md_rows(blocks: &[Arc<crate::markdown::MdBlock>]) -> Vec<(usize, RowKind, Str
 }
 
 fn summarize_args(args: &Value) -> String {
+    // (A language server's question: what, about which symbol, where.)
+    if let (Some(op), Some(symbol), Some(path)) = (args["operation"].as_str(), args["symbol"].as_str(), args["path"].as_str()) {
+        return first_line(&format!("{op} {symbol} · {path}:{}", args["line"]), 200);
+    }
     for key in ["command", "path", "file_path", "filePath", "pattern", "query", "url", "description"] {
         if let Some(s) = args[key].as_str() {
             return first_line(s, 200);
@@ -1208,6 +1212,7 @@ mod tests {
     #[test]
     fn summarizes_tool_arguments() {
         assert_eq!(summarize_args(&json!({"command":"ls -la\nrm x"})), "ls -la…");
+        assert_eq!(summarize_args(&json!({"operation":"callers","path":"src/ledger.rs","line":21,"symbol":"post"})), "callers post · src/ledger.rs:21");
         assert_eq!(
             summarize_args(&json!({"tool":"set_node_flags","args":{"node_path":"/obj/a","display":true}})),
             // In the order the model wrote them.

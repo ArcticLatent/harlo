@@ -45,7 +45,13 @@ pub fn stop_all() {
     }
 }
 
-fn forget(pgid: i32) {
+/// A process group of another long-running process (a language server)
+/// to end at exit too; [`forget`] it once it's ended.
+pub(crate) fn end_at_exit(pgid: i32) {
+    GROUPS.lock().unwrap().push(pgid);
+}
+
+pub(crate) fn forget(pgid: i32) {
     GROUPS.lock().unwrap().retain(|g| *g != pgid);
 }
 

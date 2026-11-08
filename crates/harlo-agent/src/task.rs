@@ -31,8 +31,8 @@ pub const AT_ONCE: usize = 4;
 const RESULT_SHOWN: usize = 2000;
 
 /// What each kind may use.
-pub const EXPLORE: &[&str] = &["read", "grep", "find", "ls", "bash", "fetch", "recall", "current_time"];
-pub const GENERAL: &[&str] = &["read", "write", "edit", "bash", "grep", "find", "ls", "fetch", "recall", "current_time"];
+pub const EXPLORE: &[&str] = &["read", "grep", "find", "ls", "bash", "fetch", "recall", "current_time", "lsp"];
+pub const GENERAL: &[&str] = &["read", "write", "edit", "bash", "grep", "find", "ls", "fetch", "recall", "current_time", "lsp"];
 
 /// Whether sessions get `task` (`HARLO_AGENT_NO_TASK` set: not, to compare).
 pub fn enabled() -> bool {
@@ -99,6 +99,8 @@ pub struct Ctx {
     pub budget: Option<Arc<crate::agent::Budget>>,
     /// What they go on with when their model's plan is used up.
     pub fallback: Option<String>,
+    /// The session's language servers (shared, not started again).
+    pub lsp: Arc<crate::lsp::Servers>,
 }
 
 impl Ctx {
@@ -260,6 +262,7 @@ async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaph
     agent.gate = ctx.gate.clone();
     agent.budget = ctx.budget.clone();
     agent.fallback = ctx.fallback.clone();
+    agent.share_lsp(ctx.lsp.clone());
     agent.allowed = Some(allowed);
     if let Some(p) = profile.filter(|p| !p.body.is_empty()) {
         agent.add_instructions(&format!("\n<agent_profile name=\"{}\">\n{}\n</agent_profile>\n", p.name, p.body));

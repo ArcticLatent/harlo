@@ -45,6 +45,8 @@ pub struct Tools {
     pub sandbox: Option<Arc<Sandbox>>,
     /// Commands running in the background (`bash` with `background`).
     pub jobs: Arc<crate::jobs::Jobs>,
+    /// Language servers started for `lsp`.
+    pub lsp: Arc<crate::lsp::Servers>,
 }
 
 /// A file as the session last saw it.
@@ -107,7 +109,8 @@ fn fail(text: impl Into<String>) -> Outcome {
 pub fn read_only(name: &str) -> bool {
     // (`jobs` touches only this session's own background commands.)
     // (`todo` only keeps the model's own list.)
-    matches!(name, "read" | "grep" | "find" | "ls" | "recall" | "current_time" | "jobs" | "todo")
+    // (`lsp` asks a language server, which runs none of the project's code.)
+    matches!(name, "read" | "grep" | "find" | "ls" | "recall" | "current_time" | "jobs" | "todo" | "lsp")
 }
 
 /// The tools' definitions for the Responses API: those in `only` (all
@@ -191,7 +194,7 @@ pub fn specs() -> Value {
 impl Tools {
     pub fn new(cwd: PathBuf, spill_dir: PathBuf) -> Self {
         let jobs = Arc::new(crate::jobs::Jobs::new(&spill_dir));
-        Tools { cwd, spill_dir, seen: Mutex::new(HashMap::new()), told_generated: Mutex::new(HashSet::new()), originals: Mutex::new(HashMap::new()), sandbox: None, jobs }
+        Tools { cwd, spill_dir, seen: Mutex::new(HashMap::new()), told_generated: Mutex::new(HashSet::new()), originals: Mutex::new(HashMap::new()), sandbox: None, jobs, lsp: Arc::default() }
     }
 
     /// Outputs set aside, kept for `recall` (`replace`: the session's
@@ -360,6 +363,13 @@ impl Tools {
             "recall" => self.recall(s("id")),
             "fetch" => crate::fetch::run(s("url"), &self.spill_dir).await,
             "todo" => crate::todo::run(args),
+            "lsp" => {
+                let path = self.path(s("path"));
+                if let Some(no) = self.hidden(&path) {
+                    return no;
+                }
+                self.lsp.call(args, path, &self.cwd, self.sandbox.as_deref()).await
+            }
             "jobs" => {
                 let (text, failed) = self.jobs.call(args).await;
                 Outcome::new(text, failed)

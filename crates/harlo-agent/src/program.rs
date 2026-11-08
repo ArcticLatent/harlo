@@ -27,7 +27,7 @@ const MAX_TIMEOUT: u64 = 600;
 /// Calls one program may make.
 const MAX_CALLS: usize = 300;
 /// Our tools a program may call (all only look).
-const OURS: &[&str] = &["read", "grep", "find", "ls", "current_time"];
+const OURS: &[&str] = &["read", "grep", "find", "ls", "current_time", "lsp"];
 
 /// Whether the tool is offered (with a python3 to run it): when an MCP
 /// server has tools that only look, since that's where it pays (measured:

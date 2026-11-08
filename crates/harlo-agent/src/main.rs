@@ -38,6 +38,7 @@ mod hashline;
 mod images;
 mod isolate;
 mod jobs;
+mod lsp;
 mod mcp;
 mod mcp_auth;
 mod profiles;
