@@ -929,9 +929,9 @@ impl Agent {
             if let Some(m) = self.mcp.as_ref().filter(|_| self.allowed.is_none()) {
                 list.extend(m.specs().iter().cloned());
             }
-            // (Programs that call tools, when they're being measured: the
-            // tools they may call named in it.)
-            if self.allowed.is_none() && crate::program::on() {
+            // (Programs that call tools, with an MCP server's that only
+            // look: the tools they may call named in it.)
+            if self.allowed.is_none() && crate::program::offered(self.mcp.as_ref()) {
                 let spec = crate::program::spec(&crate::program::callable(list, self.mcp.as_ref()));
                 list.push(spec);
             }

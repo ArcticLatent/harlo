@@ -45,6 +45,8 @@ const PROTOCOL: &str = "2025-06-18";
 const START_TIMEOUT: Duration = Duration::from_secs(30);
 /// A tool call at most (Stop ends one sooner).
 const CALL_TIMEOUT: Duration = Duration::from_secs(600);
+/// The most of a result a program gets.
+const WHOLE_MAX: usize = 4 << 20;
 /// What tool names may be (OpenAI's limit).
 const NAME_MAX: usize = 64;
 pub const PREFIX: &str = "mcp__";
@@ -945,6 +947,11 @@ impl Mcp {
     }
 
     /// Whether its server says the tool only looks.
+    /// Whether any server's tools only look.
+    pub fn has_read_only(&self) -> bool {
+        !self.read_only.is_empty()
+    }
+
     pub fn read_only(&self, name: &str) -> bool {
         self.read_only.contains(name)
     }
@@ -972,6 +979,16 @@ impl Mcp {
     }
 
     pub async fn call(&self, name: &str, args: &Value, spill_dir: &Path) -> Outcome {
+        self.call_as(name, args, Some(spill_dir)).await
+    }
+
+    /// A call for a program (`run_code`): the whole text, up to
+    /// [`WHOLE_MAX`] bytes, since the program reads it rather than the model.
+    pub async fn call_whole(&self, name: &str, args: &Value) -> Outcome {
+        self.call_as(name, args, None).await
+    }
+
+    async fn call_as(&self, name: &str, args: &Value, spill_dir: Option<&Path>) -> Outcome {
         let Some((i, tool)) = self.by_name.get(name) else {
             return Outcome::new(format!("No MCP tool {name}."), true);
         };
@@ -980,7 +997,12 @@ impl Mcp {
         match s.conn.request("tools/call", json!({ "name": tool, "arguments": args }), CALL_TIMEOUT).await {
             Ok(result) => {
                 let (text, failed, images) = result_text(&result);
-                let mut out = Outcome::new(bash::shorten(&text, text.len(), spill_dir), failed);
+                let text = match spill_dir {
+                    Some(dir) => bash::shorten(&text, text.len(), dir),
+                    None if text.len() > WHOLE_MAX => format!("{}\n[Cut at {} MB of {} bytes]", &text[..text.floor_char_boundary(WHOLE_MAX)], WHOLE_MAX >> 20, text.len()),
+                    None => text,
+                };
+                let mut out = Outcome::new(text, failed);
                 out.images = images;
                 out
             }

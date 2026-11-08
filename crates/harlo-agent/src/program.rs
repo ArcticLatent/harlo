@@ -11,8 +11,8 @@
 //!   (its own prints are captured beside them) and are answered on its
 //!   stdin. Every frame is checked: only tools that only look (ours and an
 //!   MCP server's read-only ones) can be called, at most [`MAX_CALLS`].
-//! - Offered when `HARLO_AGENT_CODE=on` (being measured) and there's a
-//!   python3.
+//! - Offered when an MCP server has read-only tools (see [`offered`])
+//!   and there's a python3.
 
 use std::process::Stdio;
 use std::time::Duration;
@@ -29,9 +29,18 @@ const MAX_CALLS: usize = 300;
 /// Our tools a program may call (all only look).
 const OURS: &[&str] = &["read", "grep", "find", "ls", "current_time"];
 
-/// Whether the tool is offered: turned on, with a python3 to run it.
-pub fn on() -> bool {
-    std::env::var("HARLO_AGENT_CODE").is_ok_and(|v| v.trim() == "on") && python()
+/// Whether the tool is offered (with a python3 to run it): when an MCP
+/// server has tools that only look, since that's where it pays (measured:
+/// a scene's inventory over MCP took 74% fewer tokens with it, while
+/// coding tasks hardly used it and took 12% more with it offered).
+/// `HARLO_AGENT_CODE=on` offers it always, `off` never.
+pub fn offered(mcp: Option<&crate::mcp::Mcp>) -> bool {
+    let wanted = match std::env::var("HARLO_AGENT_CODE").as_deref().map(str::trim) {
+        Ok("on") => true,
+        Ok("off") => false,
+        _ => mcp.is_some_and(crate::mcp::Mcp::has_read_only),
+    };
+    wanted && python()
 }
 
 fn python() -> bool {
@@ -190,7 +199,7 @@ pub async fn run(args: &Value, tools: &Tools, mcp: Option<&crate::mcp::Mcp>, cal
                             Some(spec) => match arguments(spec, &frame) {
                                 Err(why) => Outcome::new(why, true),
                                 Ok(a) => match mcp.filter(|m| m.has(&name)) {
-                                    Some(m) => m.call(&name, &a, &tools.spill_dir).await,
+                                    Some(m) => m.call_whole(&name, &a).await,
                                     None => tools.call(&name, &a).await,
                                 },
                             },
