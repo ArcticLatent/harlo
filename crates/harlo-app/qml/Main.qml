@@ -1122,18 +1122,19 @@ ApplicationWindow {
             win.check(chat.session.requestIsApproval, "the prompt asks for approval")
             win.check(win.findText("Allow bash to run?", chat.transcript) !== null, "the bash row asks 'Allow bash to run?'")
             win.check(win.findText("Waiting for your approval", chat.transcript) !== null, "footer says 'Waiting for your approval'")
-            win.check(win.findText("Approval needed: bash", chat.requestDock) !== null, "the bar names the tool")
+            // (The bar only when the row is out of view.)
+            win.check(!win.shown(chat.requestDock), "with its row in view, no bar besides")
             win.clickText("Approve", chat.transcript) } }
         PauseAnimation { duration: 2500 }
         ScriptAction { script: { win.check(!chat.session.hasRequest && win.findText("Waiting for your approval", chat.transcript) === null, "Approve on the row runs it"); win.sendByKeys("fast: approve again") } }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
-            win.check(win.findText("Approval needed: bash", chat.requestDock) !== null, "the next one asks again")
-            win.shot("clicks-approval-bar") } }
+            win.check(chat.session.requestIsApproval && win.findText("Allow bash to run?", chat.transcript) !== null, "the next one asks again")
+            win.shotWindow("clicks-approval-again") } }
         PauseAnimation { duration: 400 }
-        ScriptAction { script: win.clickText("Deny", chat.requestDock) }
+        ScriptAction { script: win.clickText("Deny", chat.transcript) }
         PauseAnimation { duration: 1500 }
-        ScriptAction { script: { win.check(!chat.session.hasRequest && win.findText("✗", chat.transcript) !== null, "Deny in the bar fails the call"); win.summary(); Qt.quit() } }
+        ScriptAction { script: { win.check(!chat.session.hasRequest && win.findText("✗", chat.transcript) !== null, "Deny fails the call"); win.summary(); Qt.quit() } }
     }
 
     // Motion: the sidebar and the side panel slide open and shut (caught
@@ -1998,6 +1999,7 @@ ApplicationWindow {
     // Remote instances against a throwaway local SSH server (--ssh= its
     // arguments; click-tests.sh starts it): add a host, connect, disconnect.
     SequentialAnimation {
+        id: remoteSteps
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksremote"
         PauseAnimation { duration: 1200 }
         ScriptAction { script: { if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth=")); settingsDialog.openPage("remote") } }
@@ -2057,9 +2059,12 @@ ApplicationWindow {
             win.check(Workspace.instance === "box" && win.findName("instanceLabel").text === "box", "switched: the window shows box")
             win.check(JSON.parse(Workspace.projectsJson()).length === 0, "with box's projects (none yet)")
             win.clickItem(win.findName("addProjectButton"), "+ Project") } }
+        PauseAnimation { duration: 600 }
+        // (Add a project: its folder from the host's listing.)
+        ScriptAction { script: win.clickItem(win.findName("addProjectChoose"), "Choose…") }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
-            const l = JSON.parse(Remotes.foldersJson)
+            const l = JSON.parse(Remotes.foldersJson || "{}")
             win.check(sidebar.remoteFolderDialog.visible && !l.loading && l.error === "" && l.dirs.length > 0 && l.display === "box:~", "it browses the host's home (" + l.display + ", " + l.dirs.length + " folders " + l.error + ")")
             // Straight to the test repository (same machine, over SSH).
             Remotes.requestFolders("ssh://box" + win.argValue("--cwd=").replace(/\/repo$/, "")) } }
@@ -2072,6 +2077,8 @@ ApplicationWindow {
         ScriptAction { script: {
             win.shotPopup(sidebar.remoteFolderDialog, "clicks-remote-folders")
             win.clickItem(win.findName("remoteFolderAdd", sidebar.remoteFolderDialog.contentItem), "Add repo") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: win.clickItem(win.findName("addProjectAdd"), "Add project") }
         PauseAnimation { duration: 800 }
         ScriptAction { script: {
             const p = Workspace.projectList().map(l => l.split("\t")).find(p => p[1] === "repo")
@@ -2082,7 +2089,9 @@ ApplicationWindow {
             walk(sidebar)
             win.check(texts.includes("box") && Remotes.displayPath("ssh://box" + win.argValue("--cwd=")) === "box:" + win.argValue("--cwd=").replace(Workspace.homeDir(), "~"), "the project shows its host (box)")
             Workspace.newSession(win.remoteProject, "") } }
-        PauseAnimation { duration: 6000 }
+        PauseAnimation { duration: 1000 }
+        ScriptAction { script: win.waitUntil(remoteSteps, () => chat.session.modelName !== "", 20000) }
+        PauseAnimation { duration: 50 }
         ScriptAction { script: {
             win.log("remote session:", chat.session.harness, chat.session.status, chat.session.cwd, chat.session.modelName, Workspace.approvalMode(chat.session.key))
             win.check(chat.session.harness === "harlo" && chat.session.cwd === "ssh://box" + win.argValue("--cwd="), "a new session there runs Harlo in the remote folder")
@@ -2541,8 +2550,9 @@ ApplicationWindow {
             win.sendByKeys("please approve writing a file") } }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
-            win.check(chat.session.requestIsApproval && win.findText("Approval needed: Write", chat.requestDock) !== null, "a Write asks for approval")
-            win.shot("clicks-claude-approval")
+            // (On its tool row when that's in view; the bar otherwise.)
+            win.check(chat.session.requestIsApproval && (win.findText("Allow Write to run?", chat.transcript) !== null || win.findText("Approval needed: Write", chat.requestDock) !== null), "a Write asks for approval")
+            win.shotWindow("clicks-claude-approval")
             win.clickText("Approve", chat.transcript) } }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
@@ -2920,6 +2930,7 @@ ApplicationWindow {
             win.check(win.findName("hostSignIn-box-claude", d) !== null && h.claudeAuth === "no", "Claude not signed in there: Sign in")
             win.check(win.findName("hostInstall-box-claude", d) === null && win.findName("hostRecheck-box", d) !== null, "and Check again")
             win.shotWindow("clicks-remote-agents")
+            settingsDialog.close()
             Workspace.addProject("ssh://box" + win.argValue("--cwd=")) } }
         PauseAnimation { duration: 2500 }
         ScriptAction { script: {
@@ -2937,6 +2948,7 @@ ApplicationWindow {
         PauseAnimation { duration: 2500 }
         ScriptAction { script: {
             const file = Workspace.sessionFile(Workspace.activeKey)
+            win.shotWindow("clicks-remote-claude-chat")
             win.check(chat.session.harness === "claude" && win.chatText().indexOf("Hello from fake claude") >= 0, "Claude answers over SSH (" + win.chatText().slice(-80) + ")")
             win.check(file.indexOf("ssh://box" + win.selftestDir + "/claude-config/projects/") === 0, "its transcript is the host's (" + file + ")")
             // Orchestration there: the bridge on the host, harlo's socket
@@ -2945,7 +2957,7 @@ ApplicationWindow {
         PauseAnimation { duration: 6000 }
         ScriptAction { script: {
             const t = win.chatText(), kids = JSON.parse(Workspace.orchestratedJson(win.remoteClaudeKey))
-            win.check(t.indexOf("Started a helper with harlo (7 tools): live:") >= 0, "on the host, the agent finds harlo's tools (" + t.slice(-110) + ")")
+            win.check(/Started a helper with harlo \([1-9][0-9]* tools\): live:/.test(t), "on the host, the agent finds harlo's tools (" + t.slice(-110) + ")")
             win.check(kids.length === 1 && Workspace.instanceOf(kids[0].id) === "box", "and its helper runs on box (" + JSON.stringify(kids) + ")")
             win.check(t.indexOf("[harlo] The Claude session") >= 0, "whose reply comes back to it")
             win.check(Workspace.sessionFile(win.remoteClaudeKey) !== "", "(still the host's session)")
@@ -3076,7 +3088,7 @@ ApplicationWindow {
         PauseAnimation { duration: 3000 }
         ScriptAction { script: {
             const t = win.chatText()
-            win.check(t.indexOf("Started a helper with harlo (7 tools): live:") >= 0, "the agent finds harlo's tools and starts a session (" + t.slice(-90) + ")")
+            win.check(/Started a helper with harlo \([1-9][0-9]* tools\): live:/.test(t), "the agent finds harlo's tools and starts a session (" + t.slice(-90) + ")")
             const kids = JSON.parse(Workspace.orchestratedJson(win.orchestrator))
             win.check(kids.length === 1 && kids[0].name === "Helper" && kids[0].agent === "claude", "it's the agent's subagent (" + JSON.stringify(kids) + ")")
             win.check(win.findText("Helper", chat.subagentDock) !== null, "and shows in its dock") } }
@@ -3512,7 +3524,7 @@ ApplicationWindow {
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
             const t = win.chatText()
-            win.check(/- Claude \(agent "claude", model "[^"]+"\)/.test(t) && t.indexOf("- Harlo (agent \"harlo\"") >= 0 && t.indexOf("The problem: flaky tests") >= 0, "both members, with the chosen model, go to the agent")
+            win.check(/- Claude \(agent "claude", model "[^"]+"\)/.test(t) && t.indexOf("- Harlo (agent \"harlo\"") >= 0 && t.indexOf("The problem: flaky tests") >= 0, "both members, with the chosen model, go to the agent (" + t.slice(-300) + ")")
             win.summary(); Qt.quit() } }
     }
 
@@ -5701,5 +5713,379 @@ ApplicationWindow {
         ScriptAction { script: win.shot("saved-session") }
         PauseAnimation { duration: 300 }
         ScriptAction { script: Qt.quit() }
+    }
+
+    // ---- Harlo with a scripted model (scripts/fake-harlo-model.py, set up
+    // by click-tests.sh: Harlo's providers.json in the test's config) ----
+    /// The first shown item under `root` whose text contains `part`.
+    function findContaining(part, root) {
+        for (const r of searchRoots(root)) {
+            const f = findContainingIn(part, r)
+            if (f) return f
+        }
+        return null
+    }
+    function findContainingIn(part, root) {
+        for (const c of root.children) {
+            if (!c.visible || c.opacity <= 0) continue
+            if (typeof c.text === "string" && c.text.indexOf(part) >= 0 && shown(c)) return c
+            const f = findContainingIn(part, c)
+            if (f) return f
+        }
+        return null
+    }
+    /// The scripted model's requests so far (its log, one JSON per line).
+    function modelRequests() {
+        return (TestInput.readFile(win.selftestDir + "/model-log.jsonl") || "").split("\n").filter(l => l !== "").map(l => JSON.parse(l).body)
+    }
+    property string harloKey: ""
+
+    // Harlo's question card, a side question (/btw), a background job whose
+    // end starts a run by itself, and a destructive command asking in yolo.
+    SequentialAnimation {
+        id: harloSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlo"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            win.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo")
+            // (Background commands run without asking in yolo.)
+            Workspace.setApprovalMode(win.harloKey, "yolo") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloSteps, () => chat.session.modelName !== "", 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            win.check(chat.session.harness === "harlo" && chat.session.modelName === "Fake Coder", "a Harlo session on the scripted model (" + chat.session.modelName + ")")
+            win.sendByKeys("please ask me something") } }
+        PauseAnimation { duration: 300 }
+        // The ask card.
+        ScriptAction { script: win.waitUntil(harloSteps, () => chat.session.hasRequest, 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(chat.session.requestMethod === "ask" && win.findText("Which colour should the button be?", chat.askPanel) !== null, "Harlo's question shows in the question card")
+            win.shotWindow("clicks-harlo-ask")
+            win.clickText("Blue", chat.askPanel) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.clickText("Send answers", chat.askPanel) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloSteps, () => win.chatText().indexOf("Done:") >= 0, 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            const asked = win.modelRequests().filter(b => (b.messages || []).some(m => m.role === "tool" && JSON.stringify(m.content).indexOf("Blue") >= 0))
+            win.check(!chat.session.hasRequest && asked.length > 0, "the answer goes back to the model (" + win.chatText().slice(-120) + ")")
+            win.sendByKeys("/btw which colour did I pick?") } }
+        PauseAnimation { duration: 300 }
+        // The side question: a card above the composer, not in the conversation.
+        ScriptAction { script: win.waitUntil(harloSteps, () => chat.session.asideJson !== "" && JSON.parse(chat.session.asideJson).done, 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const card = win.findName("asideCard")
+            const a = chat.session.asideJson !== "" ? JSON.parse(chat.session.asideJson) : {}
+            win.check(card !== null && (a.text || "").indexOf("Aside: which colour did I pick?") === 0, "/btw answers in the card above the composer (" + JSON.stringify(a).slice(0, 160) + ")")
+            win.check(win.chatText().indexOf("Aside:") < 0, "and not in the conversation")
+            win.shotWindow("clicks-harlo-btw")
+            win.clickItem(win.findName("asideDismiss"), "dismiss the aside") } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            win.check(win.findName("asideCard") === null, "dismissing it hides the card")
+            win.sendByKeys("run the build in the background") } }
+        PauseAnimation { duration: 300 }
+        // A background job: the turn ends at once; its end starts a run.
+        ScriptAction { script: win.waitUntil(harloSteps, () => win.chatText().indexOf("The background job ended") >= 0, 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const t = win.chatText()
+            win.check(t.indexOf("Started in the background as j1") >= 0, "the command starts as a job (" + t.slice(-300) + ")")
+            win.check(t.indexOf("The background job ended: built-ok") >= 0, "its end comes as a notice, with its output, and starts a run by itself")
+            win.check(win.findContaining("Background job j1", chat.transcript) !== null, "the notice shows in the conversation")
+            win.shotWindow("clicks-harlo-job")
+            win.sendByKeys("now reset hard") } }
+        PauseAnimation { duration: 300 }
+        // A destructive command asks, even in yolo, without Always allow.
+        ScriptAction { script: win.waitUntil(harloSteps, () => chat.session.hasRequest, 10000) }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            win.check(Workspace.approvalMode(win.harloKey) === "yolo" && chat.session.requestIsApproval, "git reset --hard asks in yolo")
+            win.check(win.findContaining("can't be undone", chat.transcript) !== null, "and says why")
+            win.check(win.findName("alwaysAllowInline", chat.transcript) === null && win.findText("Always allow") === null, "with no Always allow")
+            win.shotWindow("clicks-harlo-destructive")
+            win.clickText("Deny", chat.transcript) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloSteps, () => !chat.session.hasRequest && chat.session.status === "idle", 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(win.findText("✗", chat.transcript) !== null, "Deny: it isn't run (" + win.chatText().slice(-160) + ")")
+            win.summary(); Qt.quit() } }
+    }
+
+    // A split: Harlo offers a helper in a worktree, Start helpers starts it,
+    // it writes a file and reports, and Harlo brings its work over
+    // (bring_over) to the project as an uncommitted change.
+    SequentialAnimation {
+        id: splitSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlosplit"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            win.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo")
+            // (The helper works in its parent's mode: writes without asking.)
+            Workspace.setApprovalMode(win.harloKey, "yolo") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(splitSteps, () => chat.session.modelName !== "", 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: win.sendByKeys("split it please") }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(splitSteps, () => chat.session.hasRequest, 10000) }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            win.check(win.findText("Split into helpers?") !== null || win.findContaining("Split into helpers", chat.requestDock) !== null, "Harlo offers the split")
+            win.shotWindow("clicks-split-offer")
+            win.clickText("Start helpers", chat.requestDock) } }
+        PauseAnimation { duration: 300 }
+        // The helper starts in its worktree, writes, reports; the parent
+        // gets its report and brings the work over.
+        ScriptAction { script: win.waitUntil(splitSteps, () => TestInput.readFile(win.argValue("--cwd=") + "/helper.txt") !== "", 40000) }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            const kids = JSON.parse(Workspace.orchestratedJson(win.harloKey))
+            win.check(kids.length === 1, "one helper started (" + JSON.stringify(kids) + ")")
+            const t = win.chatText()
+            win.check(t.indexOf("finished and reported: succeeded") >= 0, "its report comes back to Harlo")
+            win.check(TestInput.readFile(win.argValue("--cwd=") + "/helper.txt") === "from the helper\n", "bring_over brings helper.txt to the project")
+            win.check(git.unstagedCount + git.stagedCount > 0 || t.indexOf("helper.txt") >= 0, "as a change, nothing committed (" + t.slice(-200) + ")")
+            win.shotWindow("clicks-split-brought") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: { win.summary(); Qt.quit() } }
+    }
+
+    // Settings → Providers → Harlo: the subagents' model and the model to go
+    // on with, typed in; a new session's subagent runs on the first, and a
+    // server that stays busy hands the turn to the second.
+    SequentialAnimation {
+        id: harloSettingsSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlosettings"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            Workspace.addProject(win.argValue("--cwd="))
+            settingsDialog.openPage("providers") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: { win.clickItem(win.findName("harloTaskModel", settingsDialog.contentItem), "Subagents' model"); TestInput.typeText("fake/fake-helper"); TestInput.key(Qt.Key_Tab, 0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: { win.clickItem(win.findName("harloFallback", settingsDialog.contentItem), "the model to go on with"); TestInput.typeText("fake/fake-helper"); TestInput.key(Qt.Key_Tab, 0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: { win.clickItem(win.findName("harloHelperBudget", settingsDialog.contentItem), "Token budget per helper"); TestInput.typeText("400k"); TestInput.key(Qt.Key_Tab, 0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(Workspace.setting("harlo_task_model") === "fake/fake-helper" && Workspace.setting("harlo_fallback") === "fake/fake-helper" && Workspace.setting("harlo_helper_budget") === "400k",
+                      "the three are saved as typed (" + [Workspace.setting("harlo_task_model"), Workspace.setting("harlo_fallback"), Workspace.setting("harlo_helper_budget")].join(", ") + ")")
+            win.shotWindow("clicks-harlo-settings")
+            settingsDialog.close() } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: { win.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo"); Workspace.setApprovalMode(win.harloKey, "yolo") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloSettingsSteps, () => chat.session.modelName !== "", 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: win.sendByKeys("use a subagent please") }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloSettingsSteps, () => win.chatText().indexOf("Done:") >= 0, 15000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            // (A subagent's: its first message is the task.)
+            const first = b => JSON.stringify(((b.messages || []).find(m => m.role === "user") || {}).content || "")
+            const sub = win.modelRequests().filter(b => first(b).indexOf("SUBTASK") >= 0)
+            win.check(sub.length > 0 && sub.every(b => b.model === "fake-helper"), "the subagent runs on the subagents' model (" + sub.map(b => b.model).join() + ")")
+            win.check(win.modelRequests().filter(b => first(b).indexOf("use a subagent") >= 0).every(b => b.model === "fake-coder"), "the session stays on its own")
+            win.sendByKeys("be busy now") } }
+        PauseAnimation { duration: 300 }
+        // (Retries take 1 + 2 + 4 s.)
+        ScriptAction { script: win.waitUntil(harloSettingsSteps, () => win.chatText().indexOf("[fake-helper]") >= 0 && chat.session.status === "idle", 30000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const t = win.chatText()
+            win.check(t.indexOf("ok: be busy now [fake-helper]") >= 0, "a server that stays busy: it goes on with the model set (" + t.slice(-200) + ")")
+            win.check(chat.session.modelName === "Fake Helper", "and says so: the session's model is now that one (" + chat.session.modelName + ")")
+            win.shotWindow("clicks-harlo-fallback")
+            win.summary(); Qt.quit() } }
+    }
+
+    // MCP for Harlo: a server that wants a sign-in (click-tests.sh: the
+    // stand-in server in Harlo's mcp.json, and a stand-in browser that
+    // follows the link) signs in from its page; a project's own server is
+    // not allowed for Harlo until it's saved here; a session uses both.
+    SequentialAnimation {
+        id: harloMcpSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlomcp"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            Workspace.setProviderEnabled("claude", false)
+            Workspace.addProject(win.argValue("--cwd="))
+            settingsDialog.openPage("mcp") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloMcpSteps, () => (JSON.parse(Mcp.statusJson("global")).locked || {}).state === "needs_auth", 15000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const pill = win.findName("mcpStatus-locked", settingsDialog.contentItem)
+            win.check(pill !== null && pill.text === "Needs sign-in", "a server that wants a sign-in says so (" + (pill ? pill.text : "none") + ")")
+            win.clickItem(win.findName("mcpServer-locked", settingsDialog.contentItem), "locked") } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const b = win.findName("mcpSignIn", settingsDialog.contentItem)
+            win.check(b !== null, "its page has Sign in (for Harlo)")
+            win.shotPopup(settingsDialog, "clicks-mcp-signin")
+            win.clickItem(b, "Sign in") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloMcpSteps, () => signInDialog.flow !== null && signInDialog.flow.state !== "running", 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(signInDialog.flow !== null && signInDialog.flow.state === "done", "the sign-in finishes in the browser (" + (signInDialog.flow ? signInDialog.flow.state + " " + signInDialog.flow.message : "none") + ")")
+            win.shotWindow("clicks-mcp-signed-in")
+            signInDialog.close() } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloMcpSteps, () => (JSON.parse(Mcp.statusJson("global")).locked || {}).state === "connected", 15000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const st = JSON.parse(Mcp.statusJson("global")).locked || {}
+            win.check(st.state === "connected" && (st.tools || []).length === 1, "then it's tested again: connected, its tool listed (" + JSON.stringify(st) + ")")
+            win.check(TestInput.readFile(win.selftestDir + "/config/harlo-agent/mcp-auth.json").indexOf("/mcp") >= 0, "the sign-in is kept in Harlo's mcp-auth.json")
+            win.clickItem(win.findName("mcpBack", settingsDialog.contentItem), "All servers") } }
+        PauseAnimation { duration: 400 }
+        // The project's own server (the repo's .harlo/mcp.json).
+        ScriptAction { script: win.clickItem(win.findName("mcpScope", settingsDialog.contentItem), "scope") }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: win.clickText("repo") }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: {
+            const d = settingsDialog.contentItem
+            win.check(win.findName("mcpServer-dice", d) !== null && win.findText("not allowed for Harlo", d) !== null, "a project's own server: not allowed for Harlo")
+            win.shotPopup(settingsDialog, "clicks-mcp-project")
+            win.clickItem(win.findName("mcpServer-dice", d), "dice") } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: win.clickItem(win.findName("mcpSave", settingsDialog.contentItem), "Save") }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            win.check(win.findText("not allowed for Harlo", settingsDialog.contentItem) === null, "saved here, it's allowed")
+            settingsDialog.close() } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: { win.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo"); Workspace.setApprovalMode(win.harloKey, "yolo") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloMcpSteps, () => chat.session.modelName !== "", 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: win.sendByKeys("what time is it? mcp clock") }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloMcpSteps, () => win.chatText().indexOf("Done:") >= 0, 30000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(win.chatText().indexOf("Done: It's 3 pm in Tokyo") >= 0, "Harlo calls the signed-in server's tool (" + win.chatText().slice(-160) + ")")
+            win.sendByKeys("roll one: mcp roll") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloMcpSteps, () => win.chatText().indexOf("You rolled") >= 0 || chat.session.status === "idle" && win.chatText().split("Done:").length > 2, 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(win.chatText().indexOf("Done: You rolled 4") >= 0, "and the project's server, now allowed (" + win.chatText().slice(-160) + ")")
+            win.shotWindow("clicks-mcp-harlo")
+            win.summary(); Qt.quit() } }
+    }
+
+    // Claude Code's skills and agent profiles in a Harlo session (the test's
+    // ~/.claude/skills/greet and the repo's .claude/agents/reviewer, from
+    // click-tests.sh), and the commit message Harlo writes.
+    SequentialAnimation {
+        id: harloSkillSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloskills"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: { win.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo"); Workspace.setApprovalMode(win.harloKey, "yolo") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloSkillSteps, () => chat.session.modelName !== "" && chat.session.commands.length > 0, 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            win.check(chat.session.commands.some(c => c.indexOf("skill:greet") >= 0), "the command list offers skill:greet (" + chat.session.commands.filter(c => c.indexOf("skill") >= 0).join() + ")")
+            win.clickItem(win.findName("composerInput"), "composer")
+            TestInput.typeText("/skill:gr") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            win.check(chat.composerItem.completionVisible && chat.composerItem.completionItems.some(c => JSON.stringify(c).indexOf("skill:greet") >= 0), "typing / suggests it")
+            win.shotWindow("clicks-harlo-skill-completion")
+            // (The rest typed out: the suggestion isn't picked.)
+            TestInput.key(Qt.Key_A, Qt.ControlModifier)
+            TestInput.typeText("/skill:greet the team")
+            TestInput.key(Qt.Key_Escape, 0)
+            TestInput.key(Qt.Key_Return, 0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloSkillSteps, () => win.modelRequests().length > 0 && chat.session.status === "idle", 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const b = win.modelRequests()[0] || {}
+            const sys = JSON.stringify((b.messages || []).filter(m => m.role === "system")), user = JSON.stringify((b.messages || []).filter(m => m.role === "user").slice(-1))
+            win.check(sys.indexOf("greet") >= 0 && sys.indexOf("Greets the user warmly.") >= 0, "Harlo's instructions list the skill with its description")
+            win.check(user.indexOf("<skill name=\\\"greet\\\"") >= 0 && user.indexOf("Say hello in three languages.") >= 0 && user.indexOf("the team") >= 0, "/skill:greet sends the skill with the prompt (" + user.slice(0, 200) + ")")
+            win.sendByKeys("use the reviewer please") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloSkillSteps, () => win.chatText().split("Done:").length > 1 && chat.session.status === "idle", 15000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const first = b => JSON.stringify(((b.messages || []).find(m => m.role === "user") || {}).content || "")
+            const sub = win.modelRequests().find(b => first(b).indexOf("SUBTASK review it") >= 0)
+            const tools = sub ? (sub.tools || []).map(t => t.function.name) : []
+            win.check(sub !== undefined && JSON.stringify(sub.messages).indexOf("REVIEWER-PROFILE") >= 0, "a task names Claude's agent profile: its instructions are the subagent's")
+            win.check(tools.includes("read") && tools.includes("grep") && !tools.includes("write") && !tools.includes("bash"), "with its tools only (" + tools.join() + ")")
+            // A change to commit, and the message Harlo writes for it.
+            TestInput.writeFile(win.argValue("--cwd=") + "/README.md", "hello\nmore\n")
+            windowSettings.rightMode = "changes" } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: win.clickItem(win.findName("commitWrite"), "Write the message") }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloSkillSteps, () => !git.generating, 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(changes.commitText.indexOf("[fake-coder]") >= 0 && !git.error, "Harlo writes the commit message (" + JSON.stringify(changes.commitText).slice(0, 120) + " " + git.message + ")")
+            win.shotWindow("clicks-harlo-commit")
+            win.summary(); Qt.quit() } }
+    }
+
+    // Plan limits from a Harlo session on the Codex sign-in (click-tests.sh:
+    // a stand-in ChatGPT backend whose replies carry the plan's usage): the
+    // meter shows them, under ChatGPT's logo.
+    SequentialAnimation {
+        id: codexLimitSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clickscodexlimits"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: { win.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(codexLimitSteps, () => chat.session.modelName !== "", 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            win.check(chat.session.modelName === "Fake Codex" && win.findName("planMeter") === null, "a Harlo session on the Codex sign-in; no meter yet (" + chat.session.modelName + ")")
+            win.sendByKeys("hello") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(codexLimitSteps, () => win.chatText().indexOf("hi from codex") >= 0 && win.findName("planMeter") !== null, 15000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const m = win.findName("planMeter"), q = Workspace.quotaJson
+            win.check(win.chatText().indexOf("hi from codex") >= 0, "it answers")
+            win.check(m !== null && win.findText("41%", m) !== null && win.findName("planMeterLogo", m).provider === "openai-codex", "the meter shows the plan's fullest window from the reply (41%) under ChatGPT's logo")
+            win.check(q.indexOf("tester@example.com") >= 0 && q.indexOf("13") >= 0, "both windows, for the signed-in account")
+            win.shotWindow("clicks-codex-meter")
+            win.clickItem(m, "plan meter") } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const o = win.findName("meterPick-openai-codex")
+            win.check(o !== null && o.hint === "41%", "its menu lists ChatGPT (41%)")
+            win.summary(); Qt.quit() } }
     }
 }

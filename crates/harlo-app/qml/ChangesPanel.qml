@@ -650,6 +650,7 @@ Rectangle {
                 // Write the message with the model.
                 Button {
                     id: writeButton
+                    objectName: "commitWrite"
                     anchors.top: parent.top
                     anchors.right: parent.right
                     anchors.margins: 7
