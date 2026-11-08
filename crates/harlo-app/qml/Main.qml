@@ -5906,6 +5906,63 @@ ApplicationWindow {
         ScriptAction { script: { win.summary(); Qt.quit() } }
     }
 
+    // A split on a real model (run by hand, not in the click tests: it
+    // needs a sign-in): Harlo main offers helpers for two independent
+    // modules, they're started, report back, and the work comes over.
+    // --model=provider/model picks the model.
+    SequentialAnimation {
+        id: liveSplitSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "liveharlosplit"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            Workspace.setProviderEnabled("claude", false)
+            Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            win.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo")
+            Workspace.setApprovalMode(win.harloKey, "yolo") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(liveSplitSteps, () => chat.session.modelName !== "", 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const m = (win.argValue("--model=") || "codex/gpt-6.1-sol").split("/")
+            chat.session.setModel(m[0], m.slice(1).join("/")) } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            win.log("model", chat.session.modelName)
+            win.sendByKeys("Create two independent Python modules with tests: bmi.py (bmi(weight_kg, height_m) rounded to one decimal, and category(value) giving underweight, normal, overweight or obese by the WHO cut-offs) and roman.py (to_roman(n) and from_roman(text) for 1 to 3999, ValueError on anything else). Each gets its own pytest file." + (win.argValue("--split=") ? " Split it into two helpers, one per module." : "")) } }
+        PauseAnimation { duration: 2000 }
+        ScriptAction { script: win.waitUntil(liveSplitSteps, () => chat.session.hasRequest || chat.session.status === "idle", 600000) }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            // (Asked for helpers, it starts them itself; otherwise it offers.)
+            const offered = chat.session.hasRequest && win.findContaining("Split into helpers", chat.requestDock) !== null
+            const started = JSON.parse(Workspace.orchestratedJson(win.harloKey)).length > 0
+            win.check(offered || started, "Harlo offers the split, or starts the helpers asked for")
+            win.shotWindow("live-split-offer")
+            if (offered) win.clickText("Start helpers", chat.requestDock)
+            if (offered || started) return
+            win.log("chat", win.chatText().slice(-3000))
+            win.summary(); Qt.quit() } }
+        PauseAnimation { duration: 5000 }
+        // Both helpers report, and the main session is done with them.
+        ScriptAction { script: win.waitUntil(liveSplitSteps, () => {
+            const kids = JSON.parse(Workspace.orchestratedJson(win.harloKey))
+            const reports = win.chatText().split("finished and reported").length - 1
+            return kids.length > 0 && reports >= kids.length && chat.session.status === "idle" && !chat.session.hasRequest
+        }, 1500000) }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            const cwd = win.argValue("--cwd=")
+            const kids = JSON.parse(Workspace.orchestratedJson(win.harloKey))
+            win.log("helpers", JSON.stringify(kids))
+            win.check(kids.length >= 2, "two helpers (" + kids.length + ")")
+            win.check(TestInput.readFile(cwd + "/bmi.py") !== "" && TestInput.readFile(cwd + "/roman.py") !== "", "both modules are in the project")
+            win.log("chat", win.chatText().slice(-3000))
+            win.shotWindow("live-split-done")
+            win.summary(); Qt.quit() } }
+    }
+
     // Settings → Providers → Harlo: the subagents' model and the model to go
     // on with, typed in; a new session's subagent runs on the first, and a
     // server that stays busy hands the turn to the second.
