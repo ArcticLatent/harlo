@@ -86,8 +86,26 @@ pub fn cut(history: &[Value], keep: u64) -> Option<usize> {
     (!before.is_empty() && !(before.len() == 1 && before[0]["role"] == "compactionSummary")).then_some(i)
 }
 
-/// What the model is asked, at the end of the conversation it summarizes.
-pub fn request(focus: Option<&str>) -> String {
+/// The user's request that the cut falls inside of (its text), when the
+/// kept messages carry on a turn whose request is summarized away.
+pub fn turn_cut(history: &[Value], cut: usize) -> Option<String> {
+    let last_user = history.iter().rposition(|m| m["role"] == "user")?;
+    (last_user < cut).then(|| {
+        let m = &history[last_user];
+        match &m["content"] {
+            Value::String(s) => s.clone(),
+            c => c.as_array().into_iter().flatten().filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join("\n"),
+        }
+    })
+}
+
+/// The longest request quoted when the cut falls inside its turn.
+const QUOTED: usize = 4000;
+
+/// What the model is asked, at the end of the conversation it summarizes
+/// (`turn`: the request the kept messages carry on, when the cut falls
+/// inside its turn).
+pub fn request(focus: Option<&str>, turn: Option<&str>) -> String {
     let mut s = String::from(
         "Your context is nearly full. The conversation above is about to be replaced by a summary that you write now; \
          the newest messages after it are kept as they are, and you will carry on the task from the summary and them. \
@@ -104,6 +122,14 @@ pub fn request(focus: Option<&str>) -> String {
          \n\
          If the conversation starts with an earlier summary, fold it in: keep what still matters. Be specific and brief.",
     );
+    if let Some(t) = turn.map(str::trim).filter(|t| !t.is_empty()) {
+        let quoted: String = t.chars().take(QUOTED).collect();
+        let more = if quoted.len() < t.len() { " (cut short here)" } else { "" };
+        s.push_str(&format!(
+            "\n\nThis is the middle of a turn: the messages kept after the summary continue your work on the user's latest request, which is in the part summarized. \
+             Under Goal, quote that request word for word, and under In progress say exactly where the work stands, so the kept messages make sense after it. The request:\n<request>\n{quoted}{more}\n</request>"
+        ));
+    }
     if let Some(f) = focus.map(str::trim).filter(|f| !f.is_empty()) {
         s.push_str(&format!("\n\nThe user asks you to focus on: {f}"));
     }
@@ -178,6 +204,18 @@ pub fn overflowed(error: &anyhow::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_cut_inside_a_turn_names_its_request() {
+        let u = |t: &str| serde_json::json!({ "role": "user", "content": [{ "type": "text", "text": t }] });
+        let a = serde_json::json!({ "role": "assistant", "content": [] });
+        let history = vec![u("first"), a.clone(), u("the latest"), a.clone(), a.clone(), a];
+        assert_eq!(turn_cut(&history, 4).as_deref(), Some("the latest"));
+        assert_eq!(turn_cut(&history, 2), None);
+        let asked = request(None, Some("the latest"));
+        assert!(asked.contains("middle of a turn") && asked.contains("<request>\nthe latest\n</request>"), "{asked}");
+        assert!(!request(None, None).contains("middle of a turn"));
+    }
     use serde_json::json;
 
     fn user(t: &str) -> Value {

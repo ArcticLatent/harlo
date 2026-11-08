@@ -714,7 +714,8 @@ impl Agent {
             n => n,
         };
         let mut asked: Vec<Value> = self.history[..cut].to_vec();
-        asked.push(json!({ "role": "user", "content": [{ "type": "text", "text": compact::request(focus) }], "timestamp": now_ms() }));
+        let turn = compact::turn_cut(&self.history, cut);
+        asked.push(json!({ "role": "user", "content": [{ "type": "text", "text": compact::request(focus, turn.as_deref()) }], "timestamp": now_ms() }));
         let (system, specs) = (self.system(), self.specs());
         let key = self.cache_key.clone().unwrap_or_else(|| self.log.id.clone());
         let images = self.takes_images().await;
