@@ -172,7 +172,7 @@ async fn run_all(args: &Value, call_id: &str, ctx: &Ctx, stop: &CancellationToke
                 Ok(crate::isolate::Applied::Nothing) | Err(_) => {}
                 Ok(crate::isolate::Applied::Done(files)) => d.text.push_str(&format!("\n\n(It worked in its own copy; its changes were brought back: {}.)", files.join(", "))),
                 Ok(crate::isolate::Applied::Kept { why, dir, patch, files }) => d.text.push_str(&format!(
-                    "\n\n(It worked in its own copy. Its changes to {} weren't brought back: they clash with an earlier task's ({why}). They're in {}{}; look at them and bring over what's wanted.)",
+                    "\n\n(It worked in its own copy. Its changes to {} are NOT in the project: they clash with an earlier task's ({why}). They're in {}{}. Bring them over yourself (read them and make the same changes) before you say the work is done.)",
                     if files.is_empty() { "the files".to_owned() } else { files.join(", ") },
                     dir.display(),
                     if patch.as_os_str().is_empty() { String::new() } else { format!(", as a patch in {}", patch.display()) },

@@ -8,9 +8,11 @@
 //! - Each subagent works in a worktree of that commit, under harlo-agent's
 //!   cache folder (writable inside the sandbox), in the same subfolder.
 //! - Its changes are its worktree's files against the start, as a patch.
-//!   They're applied to the project in the order the tasks were given;
-//!   one that doesn't apply cleanly (another changed the same lines) is
-//!   left in its worktree, with its patch, for the model to look at.
+//!   They're applied to the project in the order the tasks were given; one
+//!   that doesn't apply cleanly is merged file by file with what's there
+//!   (lines both added at the same place are kept, the earlier task's
+//!   first); one that still clashes (another changed the same lines) is
+//!   left in its worktree, with its patch, for the model to bring over.
 //!   Nothing is forced.
 //! - Not done (the tasks share the folder, as before): a repository with
 //!   submodules, a sparse checkout, a folder that isn't in a repository.
@@ -36,6 +38,70 @@ fn git(dir: &Path, args: &[&str], index: Option<&Path>) -> Result<String, String
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_owned());
     }
     Ok(String::from_utf8_lossy(&out.stdout).trim_end().to_owned())
+}
+
+/// A file's content at `spec` (`commit:path`), as it is.
+fn show(dir: &Path, spec: &str) -> Option<Vec<u8>> {
+    let out = Command::new("git").arg("-C").arg(dir).args(["show", spec]).stdin(Stdio::null()).output().ok()?;
+    out.status.success().then_some(out.stdout)
+}
+
+/// `ours` and `theirs`, both from `base`, merged: clean, or with clashes
+/// that are only lines both added at the same place (ours first). None
+/// otherwise (or for binary content).
+fn merge_insertions(ours: &[u8], base: &[u8], theirs: &[u8], scratch: &Path) -> Option<Vec<u8>> {
+    let tag = rand();
+    let names = ["ours", "base", "theirs"].map(|n| scratch.join(format!("merge-{tag}-{n}")));
+    let cleanup = || names.iter().for_each(|p| drop(std::fs::remove_file(p)));
+    for (p, c) in names.iter().zip([ours, base, theirs]) {
+        if c.contains(&0) || std::fs::write(p, c).is_err() {
+            cleanup();
+            return None;
+        }
+    }
+    // (Markers no file has: what's between them is read back.)
+    let out = Command::new("git")
+        .arg("merge-file")
+        .args(["-p", "--diff3", "-L", "ours", "-L", "base", "-L", "theirs"])
+        .args(&names)
+        .stdin(Stdio::null())
+        .output();
+    cleanup();
+    let out = out.ok()?;
+    let code = out.status.code()?;
+    if code == 0 {
+        return Some(out.stdout);
+    }
+    if code < 0 || code > 127 {
+        return None;
+    }
+    let text = String::from_utf8(out.stdout).ok()?;
+    let mut done = String::new();
+    // In a clash: 0 ours, 1 base, 2 theirs.
+    let mut part: Option<usize> = None;
+    let (mut o, mut b, mut t) = (String::new(), String::new(), String::new());
+    for line in text.split_inclusive('\n') {
+        let bare = line.trim_end_matches(['\n', '\r']);
+        match (part, bare) {
+            (None, "<<<<<<< ours") => part = Some(0),
+            (Some(0), "||||||| base") => part = Some(1),
+            (Some(1), "=======") => part = Some(2),
+            (Some(2), ">>>>>>> theirs") => {
+                if !b.is_empty() {
+                    return None;
+                }
+                done.push_str(&o);
+                done.push_str(&t);
+                (o, t) = (String::new(), String::new());
+                part = None;
+            }
+            (None, _) => done.push_str(line),
+            (Some(0), _) => o.push_str(line),
+            (Some(1), _) => b.push_str(line),
+            (Some(_), _) => t.push_str(line),
+        }
+    }
+    part.is_none().then(|| done.into_bytes())
 }
 
 /// The folder worktrees go in.
@@ -159,8 +225,44 @@ impl Baseline {
                 let _ = std::fs::remove_file(&file);
                 Applied::Done(files)
             }
-            Err(why) => Applied::Kept { why: why.lines().next().unwrap_or("it conflicts").trim_start_matches("error: ").to_owned(), dir: w.dir.clone(), patch: file, files },
+            Err(why) => match self.merge(w, &files) {
+                Ok(()) => {
+                    self.remove(w);
+                    let _ = std::fs::remove_file(&file);
+                    Applied::Done(files)
+                }
+                Err(clash) => Applied::Kept { why: clash.unwrap_or_else(|| why.lines().next().unwrap_or("it conflicts").trim_start_matches("error: ").to_owned()), dir: w.dir.clone(), patch: file, files },
+            },
         }
+    }
+
+    /// A patch that didn't apply, merged file by file with what's there now
+    /// (all of them, or none): a clean three-way merge, or one whose clashes
+    /// are only lines both added at the same place (both kept, what's there
+    /// first). Err(why), None when there's no better reason than the patch's.
+    fn merge(&self, w: &Worktree, files: &[String]) -> Result<(), Option<String>> {
+        let mut merged: Vec<(PathBuf, Option<Vec<u8>>)> = Vec::new();
+        for f in files {
+            let (here, theirs) = (self.root.join(f), w.dir.join(f));
+            let base = show(&self.root, &format!("{}:{f}", self.commit));
+            let (ours, them) = (std::fs::read(&here).ok(), std::fs::read(&theirs).ok());
+            let result = match (base, ours, them) {
+                // Deleted there: fine if it's as it was here.
+                (Some(b), Some(o), None) if b == o => None,
+                // Made there, not here.
+                (None, None, Some(t)) => Some(t),
+                (Some(b), Some(o), Some(t)) => Some(merge_insertions(&o, &b, &t, &self.folder).ok_or_else(|| Some(format!("{f} was changed in the same lines")))?),
+                _ => return Err(None),
+            };
+            merged.push((here, result));
+        }
+        for (path, content) in merged {
+            match content {
+                Some(c) => std::fs::write(&path, c).map_err(|e| Some(e.to_string()))?,
+                None => std::fs::remove_file(&path).map_err(|e| Some(e.to_string()))?,
+            }
+        }
+        Ok(())
     }
 
     fn remove(&self, w: &Worktree) {
@@ -232,6 +334,28 @@ mod tests {
         // The project's own index is untouched (nothing staged).
         let staged = git(&dir, &["diff", "--cached", "--name-only"], None).unwrap();
         assert!(staged.is_empty(), "{staged}");
+        drop(base);
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&unix);
+    }
+
+    #[test]
+    fn additions_at_the_same_place_are_both_kept() {
+        let dir = repo();
+        let unix = std::env::temp_dir().join(format!("harlo-agent-iso-cache-add-{}", std::process::id()));
+        let base = Baseline::take_in(&dir, &unix).unwrap();
+        let (a, b, c) = (base.worktree("a").unwrap(), base.worktree("b").unwrap(), base.worktree("c").unwrap());
+        // Both add a block after the last line; c then changes a line a changed too.
+        std::fs::write(a.cwd.join("src/a.txt"), "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nadd()\n").unwrap();
+        std::fs::write(b.cwd.join("src/a.txt"), "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nsub()\nsub2()\n").unwrap();
+        std::fs::write(c.cwd.join("src/a.txt"), "one\ntwo\nthree\nfour\nfive\nsix\nseven\nacht\n").unwrap();
+        assert!(matches!(base.apply(&a), Applied::Done(_)));
+        assert!(matches!(base.apply(&b), Applied::Done(f) if f == ["src/a.txt"]));
+        assert_eq!(std::fs::read_to_string(dir.join("src/a.txt")).unwrap(), "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nadd()\nsub()\nsub2()\n");
+        assert!(!b.dir.exists());
+        assert!(matches!(base.apply(&c), Applied::Kept { .. }));
+        assert!(std::fs::read_to_string(dir.join("src/a.txt")).unwrap().contains("eight\nadd()"));
+        assert_eq!(merge_insertions(b"x\n", b"x\n", b"x\0\n", &unix), None);
         drop(base);
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&unix);
