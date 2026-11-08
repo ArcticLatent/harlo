@@ -1254,6 +1254,17 @@ fn instructions(cwd: &Path, sandbox: Option<&crate::sandbox::Sandbox>) -> String
     for (path, text) in project_instructions(cwd) {
         s.push_str(&format!("\n<project_instructions path=\"{}\">\n{}\n</project_instructions>\n", path.display(), text.trim()));
     }
+    let (rules, scoped) = other_rules(cwd);
+    for (path, text) in rules {
+        s.push_str(&format!("\n<project_instructions path=\"{}\">\n{}\n</project_instructions>\n", path.display(), text.trim()));
+    }
+    if !scoped.is_empty() {
+        s.push_str("\n<project_rules>\nRules for some of the project's files: read one before you work on the files it's for.\n");
+        for (path, about) in scoped {
+            s.push_str(&format!("- {} ({about})\n", path.display()));
+        }
+        s.push_str("</project_rules>\n");
+    }
     s.push_str(&crate::skills::listing(&crate::skills::find(cwd, &home(), &crate::auth::config_dir())));
     s.push_str(&format!("\nWorking directory: {}\n", cwd.display()));
     // (The day only, so the instructions stay the same all day; the time
@@ -1313,10 +1324,90 @@ fn project_instructions(cwd: &Path) -> Vec<(PathBuf, String)> {
     found
 }
 
+/// Of another agent's rule file, what goes in the instructions.
+const RULES_KEPT: usize = 20_000;
+
+/// Other agents' rules in the project's top folder (the repository's, else
+/// the working directory): Copilot's, Cursor's, Cline's and Windsurf's.
+/// Cursor's rules for some files only are listed (path, and what they're
+/// for), not sent.
+fn other_rules(cwd: &Path) -> (Vec<(PathBuf, String)>, Vec<(PathBuf, String)>) {
+    let top = cwd.ancestors().find(|d| d.join(".git").exists()).unwrap_or(cwd);
+    let keep = |t: String| -> Option<String> { (!t.trim().is_empty()).then(|| t.chars().take(RULES_KEPT).collect()) };
+    let mut sent = Vec::new();
+    for name in [".github/copilot-instructions.md", ".cursorrules", ".windsurfrules"] {
+        let p = top.join(name);
+        if let Some(t) = std::fs::read_to_string(&p).ok().and_then(keep) {
+            sent.push((p, t));
+        }
+    }
+    // Cline's: a file, or a folder of them.
+    let cline = top.join(".clinerules");
+    if cline.is_dir() {
+        let mut files: Vec<PathBuf> = std::fs::read_dir(&cline).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "md" || e == "txt")).collect();
+        files.sort();
+        sent.extend(files.into_iter().filter_map(|p| std::fs::read_to_string(&p).ok().and_then(keep).map(|t| (p, t))));
+    } else if let Some(t) = std::fs::read_to_string(&cline).ok().and_then(keep) {
+        sent.push((cline, t));
+    }
+    // Cursor's: always applied, sent; for some files, or asked for by
+    // description, listed.
+    let mut scoped = Vec::new();
+    let mut mdc: Vec<PathBuf> = std::fs::read_dir(top.join(".cursor/rules")).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "mdc" || e == "md")).collect();
+    mdc.sort();
+    for p in mdc {
+        let Ok(text) = std::fs::read_to_string(&p) else { continue };
+        let (head, body) = match text.strip_prefix("---\n").and_then(|r| r.split_once("\n---")) {
+            Some((h, b)) => (h, b.split_once('\n').map_or("", |(_, b)| b)),
+            None => ("", text.as_str()),
+        };
+        let field = |k: &str| head.lines().find_map(|l| l.split_once(':').filter(|(key, _)| key.trim() == k).map(|(_, v)| v.trim().trim_matches('"').to_owned())).filter(|v| !v.is_empty());
+        if field("alwaysApply").as_deref() == Some("true") || head.is_empty() {
+            if let Some(t) = keep(body.to_owned()) {
+                sent.push((p, t));
+            }
+        } else {
+            let about = match (field("globs"), field("description")) {
+                (Some(g), Some(d)) => format!("for {g}: {d}"),
+                (Some(g), None) => format!("for {g}"),
+                (None, Some(d)) => d,
+                (None, None) => continue,
+            };
+            scoped.push((p, about));
+        }
+    }
+    (sent, scoped)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn other_agents_rules() {
+        let top = std::env::temp_dir().join(format!("harlo-agent-rules-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&top);
+        for d in [".git", ".github", ".clinerules", ".cursor/rules", "sub"] {
+            std::fs::create_dir_all(top.join(d)).unwrap();
+        }
+        let w = |p: &str, t: &str| std::fs::write(top.join(p), t).unwrap();
+        w(".github/copilot-instructions.md", "Use tabs.");
+        w(".cursorrules", "  ");
+        w(".clinerules/b.md", "Cline two.");
+        w(".clinerules/a.md", "Cline one.");
+        w(".cursor/rules/always.mdc", "---\ndescription: everywhere\nalwaysApply: true\n---\nAlways this.\n");
+        w(".cursor/rules/ts.mdc", "---\ndescription: TypeScript style\nglobs: src/**/*.ts\nalwaysApply: false\n---\nTS only.\n");
+        w(".cursor/rules/plain.mdc", "No frontmatter.\n");
+        let (sent, scoped) = other_rules(&top.join("sub"));
+        let names: Vec<String> = sent.iter().map(|(p, _)| p.strip_prefix(&top).unwrap().display().to_string()).collect();
+        assert_eq!(names, [".github/copilot-instructions.md", ".clinerules/a.md", ".clinerules/b.md", ".cursor/rules/always.mdc", ".cursor/rules/plain.mdc"]);
+        assert_eq!(sent[3].1.trim(), "Always this.");
+        assert_eq!(scoped, [(top.join(".cursor/rules/ts.mdc"), "for src/**/*.ts: TypeScript style".to_owned())]);
+        let text = instructions(&top.join("sub"), None);
+        assert!(text.contains("Use tabs.") && text.contains("<project_rules>") && text.contains("ts.mdc (for src/**/*.ts: TypeScript style)") && !text.contains("TS only."), "{text}");
+        let _ = std::fs::remove_dir_all(&top);
+    }
 
     #[tokio::test]
     async fn stopping_ends_the_running_call_and_skips_the_rest() {
