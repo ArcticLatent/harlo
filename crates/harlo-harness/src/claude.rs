@@ -147,9 +147,10 @@ pub fn list_files() -> Vec<(PathBuf, SystemTime, u64)> {
 }
 
 /// A user message's text, or None for the lines that aren't the user typing
-/// (tool results, meta, interruptions, command output).
+/// (tool results, meta, interruptions, command output, Claude Code's own
+/// notices).
 fn user_text(entry: &Value) -> Option<String> {
-    if entry["isMeta"] == true || entry["isCompactSummary"] == true {
+    if entry["isMeta"] == true || entry["isCompactSummary"] == true || task_notice(entry).is_some() {
         return None;
     }
     let content = &entry["message"]["content"];
@@ -173,6 +174,26 @@ fn user_text(entry: &Value) -> Option<String> {
         return Some(format!("{cmd} {args}").trim().to_owned());
     }
     Some(t.to_owned())
+}
+
+/// Claude Code's word that a background task ended (a command, a
+/// subagent), written as a user message: its summary, said as a notice.
+fn task_notice(entry: &Value) -> Option<String> {
+    let content = &entry["message"]["content"];
+    let text = match content {
+        Value::String(s) => s.as_str(),
+        Value::Array(parts) => parts.iter().find(|p| p["type"] == "text").and_then(|p| p["text"].as_str())?,
+        _ => return None,
+    };
+    let t = text.trim();
+    if entry["origin"]["kind"] != "task-notification" && !t.starts_with("<task-notification>") {
+        return None;
+    }
+    let summary = tag(t, "summary").filter(|s| !s.is_empty()).map(str::to_owned);
+    Some(summary.unwrap_or_else(|| match tag(t, "status") {
+        Some(status) if !status.is_empty() => format!("A background task {status}."),
+        _ => "A background task ended.".to_owned(),
+    }))
 }
 
 fn tag<'a>(text: &'a str, name: &str) -> Option<&'a str> {
@@ -399,6 +420,8 @@ impl HistoryReader {
                     for p in parts.iter().filter(|p| p["type"] == "tool_result") {
                         self.out.push(json!({ "role": "toolResult", "toolCallId": p["tool_use_id"], "content": [{ "type": "text", "text": result_text(&p["content"]) }], "isError": p["is_error"].as_bool().unwrap_or(false) }));
                     }
+                } else if let Some(text) = task_notice(&e) {
+                    self.out.push(json!({ "role": "custom", "customType": "task-notification", "display": true, "content": text }));
                 } else if let Some(text) = user_text(&e) {
                     self.out.push(json!({ "role": "user", "content": [{ "type": "text", "text": text }] }));
                 }
@@ -1092,10 +1115,14 @@ mod tests {
             r#"{"type":"user","isMeta":true,"message":{"role":"user","content":"<local-command-caveat>…"}}"#,
             r#"{"type":"assistant","isSidechain":false,"message":{"id":"m2","model":"claude-haiku-4-5","role":"assistant","content":[{"type":"text","text":"hello"}]}}"#,
             r#"{"type":"ai-title","aiTitle":"Read the notes","sessionId":"s1"}"#,
+            r#"{"type":"user","uuid":"n1","isSidechain":false,"origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification>\n<task-id>b1</task-id>\n<status>stopped</status>\n<summary>Background shell command didn't finish before the previous session ended</summary>\n</task-notification>"}}"#,
         ]
         .join("\n");
         let h = history(&text);
-        assert_eq!(h.len(), 4, "{h:#?}");
+        assert_eq!(h.len(), 5, "{h:#?}");
+        // Claude Code's notice that a background task ended isn't the user's.
+        assert_eq!(h[4], json!({"role":"custom","customType":"task-notification","display":true,"content":"Background shell command didn't finish before the previous session ended"}));
+        assert!(!user_entries_text(&text).contains(&"n1".to_owned()), "and not one of their prompts");
         assert_eq!(h[0], json!({"role":"user","content":[{"type":"text","text":"Run cat notes.txt"}]}));
         assert_eq!(h[1]["content"].as_array().unwrap().len(), 2, "thinking and the tool call joined");
         assert_eq!(h[1]["content"][1]["type"], "toolCall");
