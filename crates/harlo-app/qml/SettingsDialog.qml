@@ -4369,49 +4369,76 @@ Popup {
                         onToggled: Workspace.setSetting("harlo_sandbox_net", checked ? "1" : "0")
                     }
                 }
+                // Harlo's models (provider/model), for the two pickers below.
+                QtObject {
+                    id: harloModels
+                    readonly property var prov: Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()).find(p => p.id === "harlo") || null : null
+                    readonly property var ids: prov ? prov.modelIds || [] : []
+                    readonly property string none: ids.length === 0 ? " Harlo lists its models once it's signed in." : ""
+                    // The ids to offer: Harlo's, and the saved one if it no longer lists it.
+                    function choices(saved) { return saved === "" || ids.indexOf(saved) >= 0 ? ids : ids.concat([saved]) }
+                    // Names as the model picker shows them, with the provider where two share one.
+                    function labels(list) {
+                        const names = list.map(id => { const i = ids.indexOf(id); return i >= 0 ? Theme.modelLabel((prov.models || [])[i] || id) : id })
+                        return names.map((n, i) => names.indexOf(n) !== names.lastIndexOf(n) ? n + " · " + list[i].split("/")[0] : n)
+                    }
+                }
                 SettingRow {
+                    id: taskModelRow
                     divider: true
+                    property string saved: Workspace.setting("harlo_task_model")
+                    readonly property var choices: harloModels.choices(saved)
                     title: "Subagents' model"
-                    detail: "What Harlo's subagents (its task tool) run on when the task doesn't name a model, as provider/model; empty: the session's own. A smaller model often does searches and simple edits as well, for less. Applies to Harlo sessions started afterwards."
+                    detail: "What Harlo's subagents (its task tool) run on when the task doesn't name a model. A smaller model often does searches and simple edits as well, for less. Applies to Harlo sessions started afterwards." + harloModels.none
                     icon: "robot-2"
-                    AppTextField {
+                    ComboField {
                         objectName: "harloTaskModel"
                         width: 240
-                        text: Workspace.setting("harlo_task_model")
-                        placeholderText: "The session's model"
-                        font.family: Theme.mono
-                        font.pixelSize: Theme.px(12)
-                        onEditingFinished: Workspace.setSetting("harlo_task_model", text)
+                        model: ["The session's model"].concat(harloModels.labels(taskModelRow.choices))
+                        currentIndex: taskModelRow.choices.indexOf(taskModelRow.saved) + 1
+                        onActivated: i => {
+                            taskModelRow.saved = i === 0 ? "" : taskModelRow.choices[i - 1]
+                            Workspace.setSetting("harlo_task_model", taskModelRow.saved)
+                        }
                     }
                 }
                 SettingRow {
+                    id: fallbackRow
                     divider: true
+                    property string saved: Workspace.setting("harlo_fallback")
+                    readonly property var choices: harloModels.choices(saved)
                     title: "When the plan's limit is reached"
-                    detail: "Harlo goes on with this model (provider/model) when the model's plan says its usage limit is reached, or the server stays busy after its retries, and tells you. It tries the plan's model again after the limit resets. Empty: it stops and says so. Applies to Harlo sessions started afterwards."
+                    detail: "Stop, or go on with another model when the model's plan says its usage limit is reached (or the server stays busy after its retries), and say so. Harlo tries the plan's model again after the limit resets. Applies to Harlo sessions started afterwards." + harloModels.none
                     icon: "refresh"
-                    AppTextField {
+                    ComboField {
                         objectName: "harloFallback"
                         width: 240
-                        text: Workspace.setting("harlo_fallback")
-                        placeholderText: "Stop"
-                        font.family: Theme.mono
-                        font.pixelSize: Theme.px(12)
-                        onEditingFinished: Workspace.setSetting("harlo_fallback", text)
+                        model: ["Stop"].concat(harloModels.labels(fallbackRow.choices).map(n => "Go on with " + n))
+                        currentIndex: fallbackRow.choices.indexOf(fallbackRow.saved) + 1
+                        onActivated: i => {
+                            fallbackRow.saved = i === 0 ? "" : fallbackRow.choices[i - 1]
+                            Workspace.setSetting("harlo_fallback", fallbackRow.saved)
+                        }
                     }
                 }
                 SettingRow {
+                    id: budgetRow
                     divider: true
+                    property string saved: Workspace.setting("harlo_helper_budget")
+                    // (A value set some other way is kept as a choice.)
+                    readonly property var choices: ["", "500k", "1m", "2m", "5m", "10m"].concat(["", "500k", "1m", "2m", "5m", "10m"].indexOf(saved) >= 0 ? [] : [saved])
                     title: "Token budget per helper"
-                    detail: "The most a Harlo helper session (one another session starts) may use, in tokens sent and received, its subagents' included, e.g. 400k or 2m. Past it, it makes no more requests and its parent is told. Empty: no limit."
+                    detail: "The most a Harlo helper session (one another session starts) may use, in tokens sent and received, its subagents' included; a helper's coding task often takes a few hundred thousand. Past it, it makes no more requests and its parent is told."
                     icon: "scales-3"
-                    AppTextField {
+                    ComboField {
                         objectName: "harloHelperBudget"
                         width: 240
-                        text: Workspace.setting("harlo_helper_budget")
-                        placeholderText: "No limit"
-                        font.family: Theme.mono
-                        font.pixelSize: Theme.px(12)
-                        onEditingFinished: Workspace.setSetting("harlo_helper_budget", text)
+                        model: budgetRow.choices.map(v => v === "" ? "No limit" : v.replace(/m$/, "M") + " tokens")
+                        currentIndex: budgetRow.choices.indexOf(budgetRow.saved)
+                        onActivated: i => {
+                            budgetRow.saved = budgetRow.choices[i]
+                            Workspace.setSetting("harlo_helper_budget", budgetRow.saved)
+                        }
                     }
                 }
                 // The language servers Harlo finds here (it doesn't install them).
@@ -4472,8 +4499,10 @@ Popup {
                                     font.pixelSize: Theme.px(12.5)
                                     elide: Text.ElideRight
                                 }
+                                // (Hidden, not removed, so every row is as tall.)
                                 FlatButton {
-                                    visible: lsRow.command
+                                    opacity: lsRow.command ? 1 : 0
+                                    enabled: lsRow.command
                                     text: "Copy"
                                     font.pixelSize: Theme.px(11.5)
                                     onClicked: lspCopier.copyText(lsRow.modelData.install)

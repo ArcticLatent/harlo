@@ -6278,15 +6278,20 @@ ApplicationWindow {
             win.check((JSON.parse(Accounts.languageServers).list || []).length === 5, "Check again asks again")
             win.scrollIntoView(win.findName("harloLanguageServers", settingsDialog.contentItem))
             win.shotWindow("clicks-harlo-language-servers")
-            win.clickItem(win.findName("harloTaskModel", settingsDialog.contentItem), "Subagents' model"); TestInput.typeText("fake/fake-helper"); TestInput.key(Qt.Key_Tab, 0) } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: { win.clickItem(win.findName("harloFallback", settingsDialog.contentItem), "the model to go on with"); TestInput.typeText("fake/fake-helper"); TestInput.key(Qt.Key_Tab, 0) } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: { win.clickItem(win.findName("harloHelperBudget", settingsDialog.contentItem), "Token budget per helper"); TestInput.typeText("400k"); TestInput.key(Qt.Key_Tab, 0) } }
+            // Picked from Harlo's models and the budget's choices.
+            const pick = (name, text) => {
+                const box = win.findName(name, settingsDialog.contentItem)
+                const i = box ? box.model.findIndex(t => t.indexOf(text) >= 0) : -1
+                win.check(i > 0, name + " offers " + text + " (" + (box ? box.model.join(", ") : "none") + ")")
+                if (i > 0) { box.currentIndex = i; box.activated(i) }
+            }
+            pick("harloTaskModel", "Fake Helper")
+            pick("harloFallback", "Go on with Fake Helper")
+            pick("harloHelperBudget", "500k tokens") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
-            win.check(Workspace.setting("harlo_task_model") === "fake/fake-helper" && Workspace.setting("harlo_fallback") === "fake/fake-helper" && Workspace.setting("harlo_helper_budget") === "400k",
-                      "the three are saved as typed (" + [Workspace.setting("harlo_task_model"), Workspace.setting("harlo_fallback"), Workspace.setting("harlo_helper_budget")].join(", ") + ")")
+            win.check(Workspace.setting("harlo_task_model") === "fake/fake-helper" && Workspace.setting("harlo_fallback") === "fake/fake-helper" && Workspace.setting("harlo_helper_budget") === "500k",
+                      "the three are saved as picked (" + [Workspace.setting("harlo_task_model"), Workspace.setting("harlo_fallback"), Workspace.setting("harlo_helper_budget")].join(", ") + ")")
             win.shotWindow("clicks-harlo-settings")
             settingsDialog.close() } }
         PauseAnimation { duration: 400 }
