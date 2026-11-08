@@ -204,20 +204,20 @@ public actor HarloClient {
         return (r["key"].text, r["harness"].text)
     }
 
-    /// Takes back a message waiting in omp's queue (`queue`: "steering" or
+    /// Takes back a message waiting in the agent's queue (`queue`: "steering" or
     /// "followUp").
     public func unqueue(_ key: String, queue: String, text: String) async throws {
         try check(await call("unqueue", ["key": .string(key), "queue": .string(queue), "text": .string(text)]))
     }
 
-    /// Sends a waiting follow-up now, as steering (omp).
+    /// Sends a waiting follow-up now, as steering.
     public func promote(_ key: String, text: String) async throws {
         try check(await call("promote", ["key": .string(key), "text": .string(text)]))
     }
 
     /// Branches the session at one of the user's messages (its row key) and
-    /// returns that message's text to edit; `fork` copies the session up to
-    /// it into a new one instead (omp). nil: cancelled.
+    /// returns that message's text to edit (`fork`, a copy up to it in a
+    /// new session, no agent does now). nil: cancelled.
     public func branch(_ key: String, row: String, fork: Bool) async throws -> String? {
         let r = try check(await call("branch", ["key": .string(key), "row": .string(row), "fork": .bool(fork)]))
         return r["cancelled"].bool == true ? nil : r["text"].text

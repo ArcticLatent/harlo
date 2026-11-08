@@ -2,6 +2,61 @@ import HarloKit
 import SwiftUI
 import UIKit
 
+/// A side question (`/btw …`) and its answer as it comes, above the
+/// composer: not part of the conversation, and not kept.
+struct AsideCard: View {
+    @Environment(\.palette) private var p
+    let aside: Aside
+    let dismiss: () -> Void
+
+    var answer: AttributedString {
+        (try? AttributedString(markdown: aside.text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(aside.text)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label(aside.question, systemImage: "text.bubble")
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(2)
+                Spacer(minLength: 6)
+                if !aside.done {
+                    Text("answering…")
+                        .font(.caption)
+                        .foregroundStyle(Color(p.muted))
+                }
+                Button("Dismiss", action: dismiss)
+                    .font(.subheadline)
+                    .foregroundStyle(Color(p.primary))
+                    .buttonStyle(.plain)
+            }
+            if !aside.error.isEmpty {
+                Text(aside.error)
+                    .font(.subheadline)
+                    .foregroundStyle(Color(p.error))
+            } else if !aside.text.isEmpty {
+                ScrollView {
+                    Text(answer)
+                        .font(.system(size: 15))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+                .frame(maxHeight: 220)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            if aside.done && aside.error.isEmpty {
+                Text("A side question: not part of the conversation, and not kept.")
+                    .font(.caption)
+                    .foregroundStyle(Color(p.muted))
+            }
+        }
+        .padding(14)
+        .card(p, radius: 18)
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+    }
+}
+
 /// A question or approval the agent waits on: above the composer, or in
 /// "Needs you" (`key`: the session it's in, answered from there).
 struct RequestCard: View {
@@ -50,6 +105,13 @@ struct RequestCard: View {
             Label(heading, systemImage: request.approval ? "hand.raised" : "questionmark.bubble")
                 .font(key == nil ? .headline : .subheadline.weight(.semibold))
                 .foregroundStyle(Color(request.approval ? p.warning : p.primary))
+            // Why it asks (Harlo's: a destructive command, one outside the
+            // sandbox).
+            if request.approval && !request.note.isEmpty {
+                Text(request.note)
+                    .font(.subheadline)
+                    .foregroundStyle(Color(p.warning))
+            }
             if !request.message.isEmpty {
                 if key == nil {
                     ScrollView {

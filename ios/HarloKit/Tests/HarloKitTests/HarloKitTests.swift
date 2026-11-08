@@ -207,9 +207,9 @@ final class ModelPartsTests: XCTestCase {
     }
 
     func testApprovalAnswers() {
-        let omp = UIRequest(["id": "1", "method": "select", "approval": true, "options": ["Approve", "Deny"]])
-        XCTAssertEqual(omp.approval(true), ["value": "Approve"])
-        XCTAssertEqual(omp.approval(false), ["value": "Deny"])
+        let options = UIRequest(["id": "1", "method": "select", "approval": true, "options": ["Approve", "Deny"]])
+        XCTAssertEqual(options.approval(true), ["value": "Approve"])
+        XCTAssertEqual(options.approval(false), ["value": "Deny"])
         let plain = UIRequest(["id": "2", "method": "confirm"])
         XCTAssertEqual(plain.approval(true), ["confirmed": true])
         XCTAssertEqual(UIRequest.role(of: "Allow tool"), .allow)
@@ -277,24 +277,24 @@ final class ModelPartsTests: XCTestCase {
     }
 
     func testNewSessionChoices() {
-        let c = NewSessionChoices(["projects": [["id": 3, "name": "harlo", "where": "~/harlo", "agent": "omp", "approvals": ["claude": "write", "pi": ""]]],
-                                   "agents": [["id": "claude", "label": "Claude"], ["id": "pi", "label": "Pi"]], "defaultAgent": "pi",
-                                   "approvals": ["claude": "always-ask", "pi": ""],
-                                   "models": [["harness": "claude", "model": "a/x"], ["harness": "pi", "model": "b/y"], ["harness": "claude", "model": "a/x"]]])
-        // omp isn't offered: the first agent that is.
+        let c = NewSessionChoices(["projects": [["id": 3, "name": "harlo", "where": "~/harlo", "agent": "other", "approvals": ["claude": "write", "harlo": ""]]],
+                                   "agents": [["id": "claude", "label": "Claude"], ["id": "harlo", "label": "Harlo"]], "defaultAgent": "harlo",
+                                   "approvals": ["claude": "always-ask", "harlo": ""],
+                                   "models": [["harness": "claude", "model": "a/x"], ["harness": "harlo", "model": "b/y"], ["harness": "claude", "model": "a/x"]]])
+        // other isn't offered: the first agent that is.
         XCTAssertEqual(c.agent(for: c.projects.first), "claude")
-        XCTAssertEqual(c.agent(for: nil), "pi")
+        XCTAssertEqual(c.agent(for: nil), "harlo")
         XCTAssertEqual(c.models(for: "claude"), ["a/x"])
         XCTAssertEqual(c.approval(for: "claude", in: nil), "always-ask")
         XCTAssertEqual(c.approval(for: "claude", in: c.projects.first), "write")
-        XCTAssertEqual(c.approval(for: "pi", in: nil), "")
+        XCTAssertEqual(c.approval(for: "harlo", in: nil), "")
         XCTAssertTrue(c.templates.isEmpty)
         // Another machine's project: its agents only.
-        let m = NewSessionChoices(["projects": [["id": 1, "name": "web", "agent": "claude"], ["id": 2, "name": "pipeline", "host": "nas", "agent": "claude", "agents": ["pi", "omp"]],
+        let m = NewSessionChoices(["projects": [["id": 1, "name": "web", "agent": "claude"], ["id": 2, "name": "pipeline", "host": "nas", "agent": "claude", "agents": ["harlo", "other"]],
                                                 ["id": 3, "name": "tools", "host": "box"]],
-                                   "agents": [["id": "claude", "label": "Claude"], ["id": "pi", "label": "Pi"], ["id": "omp", "label": "Oh My Pi"]], "defaultAgent": "claude"])
-        XCTAssertEqual(m.agents(for: m.projects[1]).map(\.id), ["pi", "omp"])
-        XCTAssertEqual(m.agent(for: m.projects[1]), "pi", "claude isn't on nas: its first agent")
+                                   "agents": [["id": "claude", "label": "Claude"], ["id": "harlo", "label": "Harlo"], ["id": "other", "label": "Other"]], "defaultAgent": "claude"])
+        XCTAssertEqual(m.agents(for: m.projects[1]).map(\.id), ["harlo", "other"])
+        XCTAssertEqual(m.agent(for: m.projects[1]), "harlo", "claude isn't on nas: its first agent")
         XCTAssertEqual(m.agents(for: m.projects[2]).count, 3, "not checked yet: all")
         XCTAssertEqual(m.machines.map(\.host), ["", "box", "nas"], "this computer first")
         let t = NewSessionChoices(["templates": [["id": "t1", "name": "Review", "harness": "claude", "model": "a/x", "approval": "write", "text": "Review it"],
@@ -335,7 +335,7 @@ final class ModelPartsTests: XCTestCase {
         let m = HarloModel.sample()
         let later: JSON = ["id": "q2", "method": "ask", "questions": [["id": "a", "question": "Which?", "options": ["x", "y"]]], "asked": 9_000_000_000_000]
         var list = m.sessions
-        list[0] = SessionSummary(["key": "live:1", "title": "One", "harness": "omp", "requests": [later]])
+        list[0] = SessionSummary(["key": "live:1", "title": "One", "harness": "other", "requests": [later]])
         m.sessions = list
         XCTAssertEqual(m.waiting.map(\.request.id), ["r1", "q2"], "oldest first")
         XCTAssertEqual(m.waiting.first?.session.key, "live:2")
@@ -409,11 +409,11 @@ final class ModelPartsTests: XCTestCase {
     }
 
     func testNewSessionModelsUsedFirstThenAll() {
-        let c = NewSessionChoices(["models": [["harness": "omp", "model": "openai/gpt-5"]],
-                                   "agentModels": ["omp": [["id": "anthropic/claude-sonnet-4-5", "name": "Claude Sonnet 4.5"], ["id": "openai/gpt-5", "name": "GPT-5"]]]])
-        XCTAssertEqual(c.modelChoices(for: "omp").map(\.id), ["openai/gpt-5", "anthropic/claude-sonnet-4-5"])
-        XCTAssertEqual(c.modelChoices(for: "omp").first?.name, "GPT-5")
-        XCTAssertTrue(c.modelChoices(for: "pi").isEmpty)
+        let c = NewSessionChoices(["models": [["harness": "other", "model": "openai/gpt-5"]],
+                                   "agentModels": ["other": [["id": "anthropic/claude-sonnet-4-5", "name": "Claude Sonnet 4.5"], ["id": "openai/gpt-5", "name": "GPT-5"]]]])
+        XCTAssertEqual(c.modelChoices(for: "other").map(\.id), ["openai/gpt-5", "anthropic/claude-sonnet-4-5"])
+        XCTAssertEqual(c.modelChoices(for: "other").first?.name, "GPT-5")
+        XCTAssertTrue(c.modelChoices(for: "harlo").isEmpty)
     }
 
     func testMentions() {
@@ -670,9 +670,9 @@ final class MachinesTests: XCTestCase {
     }
 
     func testPlacesOnOtherMachines() {
-        var c = NewSessionChoices(["projects": [["id": 1, "name": "web", "agent": "claude"], ["id": 2, "name": "pipeline", "host": "nas", "agent": "claude", "agents": ["pi"]]],
-                                   "agents": [["id": "claude", "label": "Claude"], ["id": "pi", "label": "Pi"], ["id": "omp", "label": "Oh My Pi"]], "defaultAgent": "claude",
-                                   "machines": [["host": "nas", "connected": true, "home": "/home/r", "agents": ["pi", "omp"]], ["host": "box", "connected": false]]])
+        var c = NewSessionChoices(["projects": [["id": 1, "name": "web", "agent": "claude"], ["id": 2, "name": "pipeline", "host": "nas", "agent": "claude", "agents": ["harlo"]]],
+                                   "agents": [["id": "claude", "label": "Claude"], ["id": "harlo", "label": "Harlo"], ["id": "other", "label": "Other"]], "defaultAgent": "claude",
+                                   "machines": [["host": "nas", "connected": true, "home": "/home/r", "agents": ["harlo", "other"]], ["host": "box", "connected": false]]])
         XCTAssertEqual(c.machines.map(\.host), ["", "box", "nas"], "machines without projects too, this computer first")
         XCTAssertEqual(c.host(.home("box")), "box")
         XCTAssertEqual(c.host(.project(2)), "nas")
@@ -680,14 +680,14 @@ final class MachinesTests: XCTestCase {
         XCTAssertTrue(c.needsConnecting(.home("box")))
         XCTAssertFalse(c.needsConnecting(.project(2)))
         XCTAssertFalse(c.needsConnecting(.home("")))
-        XCTAssertEqual(c.agents(for: .home("nas")).map(\.id), ["pi", "omp"], "that machine's agents")
-        XCTAssertEqual(c.agent(for: .home("nas")), "pi", "claude isn't there: its first")
+        XCTAssertEqual(c.agents(for: .home("nas")).map(\.id), ["harlo", "other"], "that machine's agents")
+        XCTAssertEqual(c.agent(for: .home("nas")), "harlo", "claude isn't there: its first")
         XCTAssertEqual(c.agent(for: .home("")), "claude")
-        XCTAssertEqual(c.agent(for: .project(2)), "pi")
+        XCTAssertEqual(c.agent(for: .project(2)), "harlo")
         XCTAssertTrue(c.agents(for: .home("box")).isEmpty, "not connected: nothing known")
-        c.connected(RemoteMachine(host: "box", connected: true, home: "/root", agents: ["omp"]))
+        c.connected(RemoteMachine(host: "box", connected: true, home: "/root", agents: ["other"]))
         XCTAssertFalse(c.needsConnecting(.home("box")))
-        XCTAssertEqual(c.agent(for: .home("box")), "omp")
+        XCTAssertEqual(c.agent(for: .home("box")), "other")
         // An older harlo: no machines, only those with projects.
         let old = NewSessionChoices(["projects": [["id": 2, "name": "pipeline", "host": "nas"]]])
         XCTAssertTrue(old.hosts.isEmpty)
@@ -729,7 +729,7 @@ final class MachinesTests: XCTestCase {
 final class PlanTests: XCTestCase {
     func testPlanFromHarlo() {
         let v = try! JSON.parse(#"""
-        { "enabled": true, "commits": true, "reviewers": [{ "id": "claude", "label": "Claude" }, { "id": "omp", "label": "Oh My Pi" }],
+        { "enabled": true, "commits": true, "reviewers": [{ "id": "claude", "label": "Claude" }, { "id": "other", "label": "Other" }],
           "steps": [{ "id": 1, "title": "One", "status": "done", "commit": "abc123", "summary": "did it" },
                     { "id": 2, "title": "Two", "status": "active", "detail": "how" },
                     { "id": 3, "title": "Three", "status": "skipped", "editedByUser": true },
@@ -742,7 +742,7 @@ final class PlanTests: XCTestCase {
         XCTAssertEqual(plan.steps[3].status, "pending")
         XCTAssertTrue(plan.steps[3].open)
         XCTAssertFalse(plan.steps[0].open)
-        XCTAssertEqual(plan.reviewers(for: "claude").map(\.id), ["omp", "claude"], "another agent first")
+        XCTAssertEqual(plan.reviewers(for: "claude").map(\.id), ["other", "claude"], "another agent first")
         XCTAssertFalse(Plan(["enabled": false, "steps": []]).shows)
     }
 
@@ -756,7 +756,7 @@ final class PlanTests: XCTestCase {
 
     func testPlanRunWithHelpers() {
         let v = try! JSON.parse(#"""
-        { "enabled": true, "reviewers": [{ "id": "omp", "label": "Oh My Pi" }, { "id": "claude", "label": "Claude" }],
+        { "enabled": true, "reviewers": [{ "id": "other", "label": "Other" }, { "id": "claude", "label": "Claude" }],
           "run": { "agent": "claude", "agentName": "Claude", "model": "", "paused": "" },
           "steps": [{ "id": 1, "title": "One", "status": "active", "helper": "live:4" },
                     { "id": 2, "title": "Two", "status": "active", "alongside": true, "helper": "live:5", "branch": "plan/two-2" },
@@ -769,7 +769,7 @@ final class PlanTests: XCTestCase {
         XCTAssertTrue(plan.steps[1].alongside)
         XCTAssertEqual(plan.steps[1].branch, "plan/two-2")
         XCTAssertFalse(plan.steps[2].alongside)
-        XCTAssertEqual(plan.helperAgents(for: "claude").map(\.id), ["claude", "omp"], "the session's own first")
+        XCTAssertEqual(plan.helperAgents(for: "claude").map(\.id), ["claude", "other"], "the session's own first")
         plan.run?.paused = "Step 2 (Two) failed: tests"
         XCTAssertTrue(plan.canRun, "a paused run goes on")
         plan.run = nil
@@ -842,6 +842,32 @@ final class PlanTests: XCTestCase {
         XCTAssertFalse(warning.fromHarlo)
         XCTAssertFalse(warning.isSent)
         XCTAssertTrue(Row(key: "u1", kind: "user", text: "hi").isSent)
+    }
+
+    func testHarlosApprovalSaysWhy() {
+        let danger = UIRequest(["id": "1", "method": "select", "title": "Allow tool: bash\nReason: this can't be undone: it resets the branch", "approval": true])
+        XCTAssertEqual(danger.tool, "bash")
+        XCTAssertEqual(danger.note, "This can't be undone: it resets the branch")
+        let details = UIRequest(["id": "5", "method": "select", "title": "Allow tool: bash\nReason: demo approval\nCommand: ls -la", "approval": true])
+        XCTAssertEqual(details.note, "Demo approval", "a command line is a detail, not why")
+        let outside = UIRequest(["id": "2", "method": "select", "title": "Allow tool: bash\nOutside the sandbox", "approval": true])
+        XCTAssertEqual(outside.note, "Outside the sandbox")
+        let plain = UIRequest(["id": "3", "method": "select", "title": "Allow tool: write", "approval": true])
+        XCTAssertEqual(plain.tool, "write")
+        XCTAssertEqual(plain.note, "")
+        XCTAssertEqual(UIRequest(["id": "4", "method": "select", "title": "Split into helpers?"]).tool, "")
+    }
+
+    @MainActor func testSideQuestionsCome() {
+        let ev = Event(["ev": "aside", "key": "live:1", "aside": ["question": "why?", "text": "Because **so**.", "done": true]])
+        guard case .aside(let k, let a)? = ev else { return XCTFail("\(String(describing: ev))") }
+        XCTAssertEqual(k, "live:1")
+        XCTAssertEqual(a, Aside(["question": "why?", "text": "Because **so**.", "done": true]))
+        XCTAssertEqual(a.error, "")
+        let s = OpenSession(key: "live:1")
+        s.opened(liveKey: "live:1", harness: "harlo")
+        s.take(ev!)
+        XCTAssertEqual(s.aside?.text, "Because **so**.")
     }
 
     func testColoursAsHex() {

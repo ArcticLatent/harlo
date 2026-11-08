@@ -70,6 +70,8 @@ public final class OpenSession {
     public internal(set) var followUp: [String] = []
     public internal(set) var todos: [TodoPhase] = []
     public internal(set) var subagents: [Subagent] = []
+    /// A side question (/btw) and its answer, until dismissed.
+    public var aside: Aside?
     /// "busy", "idle", "input", …
     public internal(set) var status = ""
     public internal(set) var rows: [Row] = []
@@ -148,13 +150,11 @@ public final class OpenSession {
         steering.map { ("steering", $0) } + followUp.map { ("followUp", $0) }
     }
 
-    /// The agent lets a waiting message be taken back (omp).
-    public var canUnqueue: Bool { harness == "omp" || harness == "demo" }
+    /// The agent lets a waiting message be taken back (the demo's).
+    public var canUnqueue: Bool { harness == "demo" }
 
-    /// The agent can branch at one of the user's messages (edit & resend),
-    /// and fork from one (omp).
-    public var canBranch: Bool { ["pi", "omp", "claude", "opencode", "hermes"].contains(harness) }
-    public var canFork: Bool { harness == "omp" }
+    /// The agent can branch at one of the user's messages (edit & resend).
+    public var canBranch: Bool { ["harlo", "claude"].contains(harness) }
     public var items: [TranscriptItem] { TranscriptItem.build(rows, opened: opened) }
 
     /// Opens a folded run, or folds an open one (`open`: how it shows now).
@@ -207,6 +207,8 @@ public final class OpenSession {
             todos = t
         case .subagents(_, let list):
             subagents = list
+        case .aside(_, let a):
+            aside = a
         default:
             break
         }
@@ -883,12 +885,6 @@ public final class HarloModel {
         if let text = await editMessage(row) { session?.draft = text }
     }
 
-    /// omp: a new session with everything up to one of your messages.
-    @discardableResult
-    public func forkFrom(_ row: String) async -> Bool {
-        await with { c, k in try await c.branch(k, row: row, fork: true) } != nil
-    }
-
     /// Asks again with another model: back to before the message, then the
     /// same message to `model`.
     @discardableResult
@@ -1096,7 +1092,7 @@ public final class HarloModel {
     public func connect(_ host: String) async -> RemoteMachine? {
         if demo || samples != nil {
             try? await Task.sleep(for: .milliseconds(600))
-            return RemoteMachine(host: host, connected: true, home: "/home/robin", agents: ["claude", "pi"])
+            return RemoteMachine(host: host, connected: true, home: "/home/robin", agents: ["claude", "harlo"])
         }
         return await with(session: false) { c, _ in try await c.connect(host) }
     }
@@ -1192,13 +1188,34 @@ extension Event {
     public var sessionKey: String? {
         switch self {
         case .reset(let k, _, _), .rows(let k, _), .status(let k, _), .meta(let k, _), .request(let k, _), .cleared(let k, _),
-             .commands(let k, _), .queue(let k, _, _), .todos(let k, _), .subagents(let k, _), .plan(let k): return k
+             .commands(let k, _), .queue(let k, _, _), .todos(let k, _), .subagents(let k, _), .aside(let k, _), .plan(let k): return k
         case .sessions, .limits, .revoked: return nil
         }
     }
 }
 
 extension UIRequest {
+    /// An approval's tool: "Allow tool: bash" → "bash" ("" not one).
+    public var tool: String {
+        let first = title.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? ""
+        return first.hasPrefix("Allow tool: ") ? String(first.dropFirst("Allow tool: ".count)).trimmingCharacters(in: .whitespaces) : ""
+    }
+
+    /// Why an approval asks, from the lines after its tool's: a `Reason:`
+    /// ("This can't be undone: …"), or "Outside the sandbox" ("" none;
+    /// other lines, such as `Command:`, are its details).
+    public var note: String {
+        guard !tool.isEmpty else { return "" }
+        let lines = title.split(separator: "\n").dropFirst().map { $0.trimmingCharacters(in: .whitespaces) }
+        let notes: [String] = lines.compactMap { line in
+            if line == "Outside the sandbox" { return line }
+            guard line.hasPrefix("Reason:") else { return nil }
+            let why = line.dropFirst("Reason:".count).trimmingCharacters(in: .whitespaces)
+            return why.isEmpty ? nil : why.prefix(1).uppercased() + why.dropFirst()
+        }
+        return notes.joined(separator: " · ")
+    }
+
     /// How an option button looks: the go-ahead, the refusal, or neither.
     public enum OptionRole: Sendable { case allow, deny, plain }
 
@@ -1210,7 +1227,7 @@ extension UIRequest {
     }
 
     /// The answer for Allow / Deny: the matching option when it has them
-    /// (omp's Approve / Deny), else a confirmation.
+    /// (Approve / Deny), else a confirmation.
     public func approval(_ allow: Bool) -> JSON {
         if let o = options.first(where: { Self.role(of: $0) == (allow ? .allow : .deny) }) { return ["value": .string(o)] }
         return ["confirmed": .bool(allow)]

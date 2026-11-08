@@ -6,7 +6,7 @@ public struct SessionSummary: Equatable, Sendable, Identifiable {
     public var title: String
     /// The project (or "Other sessions") it's grouped under.
     public var project: String
-    /// "pi", "omp", "claude", "opencode", "hermes", "demo".
+    /// "harlo", "claude", "demo".
     public var harness: String
     /// "busy", "input", "live", "idle", "exited", "unread", …
     public var status: String
@@ -175,6 +175,24 @@ extension Array where Element == Row {
 }
 
 /// A question or approval the agent is waiting on.
+/// A side question (`/btw …`) and its answer as it comes: not part of the
+/// conversation, and not kept.
+public struct Aside: Equatable, Sendable {
+    public var question: String
+    /// The answer so far (Markdown).
+    public var text: String
+    public var done: Bool
+    /// Why there's no answer ("" none).
+    public var error: String
+
+    public init(_ v: JSON) {
+        question = v["question"].text
+        text = v["text"].text
+        done = v["done"].bool ?? false
+        error = v["error"].text
+    }
+}
+
 public struct UIRequest: Equatable, Sendable, Identifiable {
     public var id: String
     /// "confirm", "select", "input", "editor", "ask", …
@@ -246,6 +264,8 @@ public enum Event: Equatable, Sendable {
     case queue(key: String, steering: [String], followUp: [String])
     case todos(key: String, phases: [TodoPhase])
     case subagents(key: String, subagents: [Subagent])
+    /// A side question (/btw) and its answer so far.
+    case aside(key: String, aside: Aside)
     /// Plan limits changed (this computer's or a machine's).
     case limits(PlanLimits)
     /// The open session's shared plan changed: ask for it again.
@@ -270,6 +290,7 @@ public enum Event: Equatable, Sendable {
         case "queue": self = .queue(key: key, steering: (v["steering"].array ?? []).compactMap(\.string), followUp: (v["followUp"].array ?? []).compactMap(\.string))
         case "todos": self = .todos(key: key, phases: TodoPhase.list(v["phases"]))
         case "subagents": self = .subagents(key: key, subagents: (v["subagents"].array ?? []).map(Subagent.init))
+        case "aside": self = .aside(key: key, aside: Aside(v["aside"]))
         case "limits": self = .limits(PlanLimits(v))
         case "plan": self = .plan(key: key)
         case "revoked": self = .revoked

@@ -85,7 +85,18 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .round.danger { border: 1.5px solid var(--error); color: var(--error); font-size: 13px; }
 .round:disabled { opacity: .4; }
 
+/* A side question (/btw) and its answer */
+#aside { background: var(--elevated); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px;
+  max-height: 40vh; overflow-y: auto; }
+#aside .head { display: flex; gap: 8px; align-items: baseline; }
+#aside .q { font-weight: 600; flex: 1; min-width: 0; }
+#aside .busy, #aside .note { color: var(--muted); font-size: 12px; }
+#aside .a { white-space: pre-wrap; margin: 6px 0; font-size: 14px; }
+#aside .a.error { color: var(--error); }
+#aside button { background: none; border: 0; color: var(--primary); font: inherit; font-size: 13px; padding: 0; cursor: pointer; }
+
 /* Questions and approvals */
+#request .why { color: var(--warning); font-size: 13px; margin-bottom: 6px; }
 #request { background: var(--elevated); border: 1px solid var(--warning); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px;
   max-height: 45vh; overflow-y: auto; }
 #request .q { font-weight: 600; margin-bottom: 6px; }

@@ -184,7 +184,7 @@ struct AgentMark: View {
             .fill(Color(.sRGB, red: t.fill.r, green: t.fill.g, blue: t.fill.b, opacity: t.fill.a))
             .frame(width: size, height: size)
             .overlay(
-                Image(["claude", "opencode", "pi", "omp"].contains(harness) ? "Mark-" + harness : "Mark-demo")
+                Image(["harlo", "claude"].contains(harness) ? "Mark-" + harness : "Mark-demo")
                     .resizable()
                     .renderingMode(.template)
                     .scaledToFit()

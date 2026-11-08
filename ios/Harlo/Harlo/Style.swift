@@ -80,11 +80,11 @@ enum Style {
 
     /// An agent's letters, for its avatar.
     static func initials(_ id: String) -> String {
-        ["claude": "CL", "opencode": "OC", "pi": "PI", "omp": "OM", "hermes": "HE", "demo": "DE"][id] ?? String(id.prefix(2)).uppercased()
+        ["harlo": "HA", "claude": "CL", "demo": "DE"][id] ?? String(id.prefix(2)).uppercased()
     }
 
     static func harnessLabel(_ id: String) -> String {
-        ["claude": "Claude", "opencode": "OpenCode", "pi": "Pi", "omp": "Oh My Pi", "hermes": "Hermes", "demo": "Demo"][id] ?? id
+        ["harlo": "Harlo", "claude": "Claude", "demo": "Demo"][id] ?? id
     }
 
     /// "now", "3m", "2h", "5d", "4mo" from unix seconds.
@@ -289,7 +289,7 @@ struct AgentTile: View {
             .accessibilityLabel(Style.harnessLabel(harness))
     }
 
-    static let known = ["claude", "opencode", "pi", "omp", "hermes", "demo"]
+    static let known = ["harlo", "claude", "demo"]
 }
 
 /// You: the penguin picked in harlo on the computer (its left rail).

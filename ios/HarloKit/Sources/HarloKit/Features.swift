@@ -222,7 +222,7 @@ public struct NewSessionChoices: Equatable, Sendable {
         agentModels = (v["agentModels"].object ?? [:]).mapValues { list in (list.array ?? []).map { (id: $0["id"].text, name: $0["name"].text) } }
     }
 
-    /// The shield's mode `agent` starts in, in `project` ("" none: pi).
+    /// The shield's mode `agent` starts in, in `project` ("" none).
     public func approval(for agent: String, in project: Project?) -> String {
         (project?.approvals ?? approvals)[agent] ?? ""
     }
@@ -341,7 +341,7 @@ public struct ModelChoice: Equatable, Sendable, Identifiable {
 
 /// A session's approval mode and Plan.
 public struct Modes: Equatable, Sendable {
-    /// `always-ask`, `write`, `yolo`; "" when the agent has none (pi).
+    /// `always-ask`, `write`, `yolo`; "" when the agent has none.
     public var approval: String
     public var approvals: [String]
     public var plan: Bool
@@ -431,7 +431,7 @@ public struct SlashCommand: Equatable, Sendable, Identifiable {
     }
 }
 
-/// omp's todo list: phases of tasks.
+/// The agent's todo list: phases of tasks.
 public struct TodoPhase: Equatable, Sendable, Identifiable {
     public struct Task: Equatable, Sendable, Identifiable {
         public var content: String
@@ -725,10 +725,6 @@ public struct Palette: Codable, Equatable, Sendable {
         let base: RGBA
         switch id {
         case "claude": base = RGBA(0.898, 0.537, 0.353)
-        case "omp": base = RGBA(0.608, 0.541, 0.984)
-        case "pi": base = RGBA(0.31, 0.757, 0.682)
-        case "opencode": base = RGBA(0.357, 0.608, 0.941)
-        case "hermes": base = RGBA(0.882, 0.722, 0.29)
         default: base = RGBA(0.655, 0.667, 0.698)
         }
         return (RGBA(base.r, base.g, base.b, isLight ? 0.16 : 0.2),
@@ -741,10 +737,6 @@ public struct Palette: Codable, Equatable, Sendable {
         let base: RGBA
         switch id {
         case "claude": base = RGBA(0.969, 0.639, 0.471)
-        case "omp": base = RGBA(0.706, 0.643, 0.988)
-        case "pi": base = RGBA(0.502, 0.82, 0.769)
-        case "opencode": base = RGBA(0.502, 0.71, 0.984)
-        case "hermes": base = RGBA(0.941, 0.792, 0.42)
         default: base = RGBA(0.733, 0.745, 0.776)
         }
         return (isLight ? base.mix(RGBA(1, 1, 1), 0.2) : base, RGBA(0.09, 0.075, 0.11))

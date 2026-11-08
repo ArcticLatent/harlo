@@ -12,7 +12,7 @@
 //! the app's notifications, and `activity`, a Live Activity's); harlo → phone:
 //! `{ id, … }` replies and `{ ev, … }` events (`sessions`, `reset`, `rows`,
 //! `status`, `meta`, `request`, `cleared`, `commands`, `queue`, `todos`,
-//! `subagents`).
+//! `subagents`, `aside`).
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -301,6 +301,8 @@ fn event(key: &str, u: &SessionUpdate) -> Option<Value> {
         SessionUpdate::Todos(phases) => json!({ "ev": "todos", "key": key, "phases": phases }),
         SessionUpdate::UiRequest(r) => json!({ "ev": "request", "key": key, "request": request_json(r) }),
         SessionUpdate::UiCleared(id) => json!({ "ev": "cleared", "key": key, "id": id }),
+        // A side question (/btw) and its answer so far: shown, not kept.
+        SessionUpdate::Aside(a) => json!({ "ev": "aside", "key": key, "aside": a }),
         _ => return None,
     })
 }
@@ -1125,6 +1127,14 @@ fn undo_op(op: &str, cwd: &std::path::Path, prompts: &[(String, i64)], row: &str
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    /// A side question's answer goes to phones as it comes.
+    #[test]
+    fn side_questions_reach_phones() {
+        let a = json!({ "question": "why?", "text": "Because.", "done": true, "error": null });
+        let ev = event("live:1", &SessionUpdate::Aside(a.clone())).unwrap();
+        assert_eq!(ev, json!({ "ev": "aside", "key": "live:1", "aside": a }));
+    }
 
     /// The phone's part follows the whole list through every kind of change
     /// (before it, across its start, inside it).

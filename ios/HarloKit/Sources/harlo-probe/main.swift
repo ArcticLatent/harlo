@@ -76,7 +76,7 @@ func run(_ link: String) async {
     check((drawn.picture?.width ?? 0) > 50 && UInt8(drawn.picture?.png.dropFirst().first ?? 0) == UInt8(ascii: "P"), "harlo draws a Mermaid diagram for the phone (\(drawn.picture.map { "\(Int($0.width))x\(Int($0.height)), \($0.png.count) bytes" } ?? drawn.why))")
     let bad = await model.diagram("not a diagram at all", light: false, colors: [:])
     check(bad.picture == nil && !bad.why.isEmpty, "one it can't draw says why (\(bad.why))")
-    let stopped = await model.stoppedModels(agent: "pi", models: ["nowhere/nothing"])
+    let stopped = await model.stoppedModels(agent: "harlo", models: ["nowhere/nothing"])
     check(model.features.contains("stoppedModels") && stopped.isEmpty, "a model on no server of harlo's isn't marked stopped (\(stopped))")
 
     await model.send("fast: hello from the phone")
@@ -93,16 +93,25 @@ func run(_ link: String) async {
     let paragraphs = s.rows.filter { $0.kind == "markdown" }.flatMap { RichText.parse($0.html) }
     check(!paragraphs.isEmpty, "the reply's rich text reads as blocks (\(paragraphs.count))")
 
+    // A side question: answered in its card, not added to the conversation.
+    let rowsBefore = s.rows.count
+    await model.send("/btw why the demo?")
+    let aside = await waitFor(6) { s.aside?.done == true }
+    check(aside && s.aside?.question == "why the demo?" && s.aside?.text == "Because the demo says so.", "a side question's answer comes to the phone (\(String(describing: s.aside)))")
+    check(s.rows.count == rowsBefore && !s.rows.contains { $0.text.contains("/btw") }, "and stays out of the conversation (\(s.rows.count) rows, \(rowsBefore) before)")
+    s.aside = nil
+
     await model.send("approve please")
     let asked = await waitFor(6) { s.requests.first?.approval == true }
     check(asked, "an approval request arrives (\(s.requests.first.map { "\($0.method) \($0.options)" } ?? "none"))")
+    check(s.requests.first?.tool == "bash" && s.requests.first?.note == "Demo approval", "with its tool and why it asks (\(s.requests.first.map { "\($0.tool): \($0.note)" } ?? "none"))")
     if let req = s.requests.first {
         await model.answer(req, req.approval(true))
         let ran = await waitFor(8) { s.requests.isEmpty && s.status != "busy" && s.rows.last?.kind == "markdown" }
         check(ran, "Allow answers it, and the run finishes (\(s.status))")
     }
 
-    // A question with options (omp's `ask`): picked and typed answers.
+    // A question with options (an agent's `ask`): picked and typed answers.
     await model.send("ask me")
     let questioned = await waitFor(6) { s.requests.first?.method == "ask" }
     if let ask = s.requests.first, questioned {

@@ -65,12 +65,11 @@ public struct LimitAccount: Equatable, Sendable, Identifiable {
         windows = (v["windows"].array ?? []).map(LimitWindow.init)
     }
 
-    /// Who it is, as people say it: "Claude", "ChatGPT", "Gemini".
+    /// Who it is, as people say it: "Claude", "ChatGPT".
     public var name: String {
         switch provider {
         case "Claude", "anthropic": return "Claude"
         case "openai-codex": return "ChatGPT"
-        case "google-gemini-cli", "google-antigravity": return "Gemini"
         default: return provider
         }
     }

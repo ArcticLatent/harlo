@@ -17,6 +17,7 @@
 //! - A prompt containing `todos` runs a pretend `todo` tool call (the phases
 //!   come back from `get_state`); `queue demo` fills the message queue
 //!   (`remove_queued_message` / `promote_queued_message` work on it).
+//! - `/btw <question>` answers on the side (`Aside` events), as Harlo does.
 //! - A prompt containing `approve` asks for approval before its tool call,
 //!   as in `always-ask` mode (`Allow tool: bash` with Approve/Deny).
 //! - `get_available_models` / `set_model`, `get_available_thinking_levels` /
@@ -68,6 +69,18 @@ pub(crate) fn spawn() -> (Harness, mpsc::UnboundedReceiver<HarnessEvent>) {
             let respond = |data: Value| reply(json!({"type":"response","id":id,"command":ty,"success":true,"data":data}));
             let fail = |error: &str| reply(json!({"type":"response","id":id,"command":ty,"success":false,"error":error}));
             match ty.as_str() {
+                // A side question: answered beside the conversation (as
+                // Harlo's), not added to it.
+                "prompt" if cmd["message"].as_str().is_some_and(|m| m.starts_with("/btw ")) => {
+                    respond(json!({}));
+                    let question = cmd["message"].as_str().unwrap_or_default()[5..].trim().to_owned();
+                    let events = events.clone();
+                    tokio::spawn(async move {
+                        let _ = events.send(HarnessEvent::Aside(json!({ "question": question, "text": "Because the demo", "done": false, "error": null })));
+                        tokio::time::sleep(Duration::from_millis(300)).await;
+                        let _ = events.send(HarnessEvent::Aside(json!({ "question": question, "text": "Because the demo says so.", "done": true, "error": null })));
+                    });
+                }
                 "prompt" if cmd["message"].as_str().is_some_and(|m| m.contains("ask") || m.contains("choose")) => {
                     respond(json!({"disposition":"started"}));
                     let text = cmd["message"].as_str().unwrap_or_default();

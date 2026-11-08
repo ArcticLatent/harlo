@@ -49,7 +49,7 @@ extension HarloModel {
             s.model = "Claude Sonnet 4.5"
             s.info.model = s.model
             s.info.thinking = "medium"
-            s.modes = summary.harness == "pi" ? nil : Modes(approval: "always-ask", approvals: ["always-ask", "write", "yolo"], plan: false)
+            s.modes = Modes(approval: "always-ask", approvals: ["always-ask", "write", "yolo"], plan: false)
             let t = summary.modified * 1000
             s.rows = [
                 Row(key: summary.key + "-u", kind: "user", text: summary.title, time: t - 60_000),
@@ -66,6 +66,17 @@ extension HarloModel {
     /// canned reply says what would happen with harlo.
     func demoSend(_ text: String) -> Bool {
         guard let s = session else { return false }
+        // A side question: answered beside the conversation, not in it.
+        if text.hasPrefix("/btw ") {
+            let question = String(text.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+            s.aside = Aside(["question": .string(question), "text": "", "done": false])
+            Task { @MainActor [weak s] in
+                try? await Task.sleep(nanoseconds: 900_000_000)
+                s?.aside = Aside(["question": .string(question), "done": true,
+                                  "text": "In the demo, no agent answers. Paired with harlo, Harlo answers a side question from the conversation so far, without adding it to the conversation."])
+            }
+            return true
+        }
         demoCount += 1
         let n = demoCount, ms = Int64(Date().timeIntervalSince1970 * 1000)
         s.rows.append(Row(key: "demo-u\(n)", kind: "user", text: text, time: ms))
@@ -160,7 +171,7 @@ extension HarloModel {
             PlanStep(["id": 3, "title": "A test for reordering", "status": "pending", "alongside": true]),
         ])
         plan.commits = true
-        plan.reviewers = [Agent(id: "claude", label: "Claude"), Agent(id: "opencode", label: "OpenCode")]
+        plan.reviewers = [Agent(id: "claude", label: "Claude"), Agent(id: "harlo", label: "Harlo")]
         return plan
     }
 }

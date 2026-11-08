@@ -87,9 +87,7 @@ struct ApprovalCard: View {
     @State private var now = Date()
 
     /// "Allow tool: bash" → "bash".
-    var tool: String {
-        request.title.hasPrefix("Allow tool: ") ? String(request.title.dropFirst("Allow tool: ".count)) : ""
-    }
+    var tool: String { request.tool }
 
     /// What it would run or change ("bash: npm test" → "npm test").
     var command: String {
@@ -135,6 +133,13 @@ struct ApprovalCard: View {
                     Text(what)
                         .font(.system(size: 15))
                         .foregroundStyle(Color(p.muted))
+                    // Why it asks (Harlo's: a destructive command, one
+                    // outside the sandbox).
+                    if request.approval && !request.note.isEmpty {
+                        Label(request.note, systemImage: "exclamationmark.triangle")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(Color(p.warning))
+                    }
                 }
                 .contentShape(Rectangle())
             }

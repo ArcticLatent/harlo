@@ -161,7 +161,7 @@ const text = t => { const d = document.createElement("div"); d.textContent = t; 
 
 // ---- views -------------------------------------------------------------
 let view = "list", sessions = [], current = null;
-let rows = [], requests = [], status = "", earlier = 0;
+let rows = [], requests = [], status = "", earlier = 0, aside = null;
 
 function header(title, subtitle, back) {
   $("title").textContent = title;
@@ -205,6 +205,7 @@ function onEvent(m) {
   else if (m.ev === "meta") { current.model = m.model; if (m.title) current.title = m.title; updateHeader(); }
   else if (m.ev === "request") { requests.push(m.request); renderRequest(); }
   else if (m.ev === "cleared") { requests = requests.filter(r => r.id !== m.id); renderRequest(); }
+  else if (m.ev === "aside") { aside = m.aside; renderAside(); }
 }
 
 function renderList() {
@@ -242,7 +243,7 @@ function updateHeader() {
 
 function openSession(key, again) {
   view = "session";
-  if (!again) { rows = []; requests = []; status = ""; current = { key, title: "", harness: "", model: "" }; }
+  if (!again) { rows = []; requests = []; status = ""; aside = null; renderAside(); current = { key, title: "", harness: "", model: "" }; }
   $("view").replaceChildren(Object.assign(text("Loading…"), { className: "center" }));
   $("composer").hidden = false;
   updateHeader();
@@ -315,6 +316,26 @@ function updateComposer() {
   $("input").placeholder = busy ? "Queue a follow-up…" : "Message…";
 }
 
+// ---- a side question (/btw) ---------------------------------------------
+// Its answer as it comes: not part of the conversation, and not kept.
+function renderAside() {
+  const box = $("aside");
+  box.hidden = !aside;
+  box.replaceChildren();
+  if (!aside) return;
+  const head = document.createElement("div"); head.className = "head";
+  const q = document.createElement("div"); q.className = "q"; q.textContent = aside.question;
+  head.append(q);
+  if (!aside.done) head.append(Object.assign(document.createElement("span"), { className: "busy", textContent: "answering…" }));
+  const close = Object.assign(document.createElement("button"), { textContent: "Dismiss" });
+  close.onclick = () => { aside = null; renderAside(); };
+  head.append(close);
+  box.append(head);
+  const said = aside.error || aside.text;
+  if (said) box.append(Object.assign(document.createElement("div"), { className: "a" + (aside.error ? " error" : ""), textContent: said }));
+  if (aside.done && !aside.error) box.append(Object.assign(document.createElement("div"), { className: "note", textContent: "A side question: not part of the conversation, and not kept." }));
+}
+
 // ---- questions and approvals ------------------------------------------
 function answer(req, value) {
   call("answer", { key: current.key, requestId: req.id, answer: value });
@@ -328,6 +349,13 @@ function renderRequest() {
   if (!req) return;
   const q = document.createElement("div"); q.className = "q"; q.textContent = req.approval ? "Approve this?" : (req.title || "The agent asks");
   box.append(q);
+  // Why an approval asks: a "Reason:" line (Harlo's "this can't be
+  // undone: …"), or "Outside the sandbox". (Other lines are details.)
+  const lines = (req.title || "").split("\n").map(l => l.trim());
+  const why = /^Allow tool:/.test(lines[0]) ? lines.slice(1).map(l => l === "Outside the sandbox" ? l : /^Reason:/.test(l) ? l.slice(7).trim() : "").filter(l => l) : [];
+  if (req.approval && why.length) {
+    box.append(Object.assign(document.createElement("div"), { className: "why", textContent: why.map(w => w[0].toUpperCase() + w.slice(1)).join(" · ") }));
+  }
   if (req.message) { const m = document.createElement("div"); m.className = "msg"; m.textContent = req.message; box.append(m); }
   const actions = document.createElement("div"); actions.className = "actions";
   const button = (label, cls, fn) => { const b = document.createElement("button"); b.className = "btn " + (cls || ""); b.textContent = label; b.onclick = fn; return b; };

@@ -154,6 +154,9 @@ struct SessionContent: View {
                     LimitLine(session: session)
                     CompactLine(session: session)
                     ActivityBar(session: session) { sheet = $0 }
+                    if let aside = session.aside {
+                        AsideCard(aside: aside) { session.aside = nil }
+                    }
                     if let req = session.requests.first {
                         RequestCard(request: req)
                             .id(req.id)
@@ -370,8 +373,8 @@ extension SessionContent {
         }
     }
 
-    /// A long press on a message: copy it; yours also edit & resend, fork,
-    /// or ask again with another model.
+    /// A long press on a message: copy it; yours also edit & resend, or ask
+    /// again with another model.
     @ViewBuilder func menu(for item: TranscriptItem) -> some View {
         if case .row(let r) = item {
             if r.kind == "user" {
@@ -391,13 +394,6 @@ extension SessionContent {
                         sheet = .retry(r.key)
                     } label: {
                         Label("Retry with another model", systemImage: "arrow.triangle.2.circlepath")
-                    }
-                }
-                if session.canFork {
-                    Button {
-                        Task { await model.forkFrom(r.key) }
-                    } label: {
-                        Label("Fork from here", systemImage: "arrow.triangle.branch")
                     }
                 }
             } else if r.kind == "markdown" || r.kind == "code" {
