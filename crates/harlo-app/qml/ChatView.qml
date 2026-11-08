@@ -694,6 +694,7 @@ Rectangle {
             session: root.session
             maxStepsHeight: Math.max(160, root.height * 0.4)
             onChooseHelpers: composer.delegatePopover.show("run")
+            onChooseStepHelper: (id, agent, model) => composer.delegatePopover.showStep(id, agent, model)
             visible: plan.enabled && steps.length > 0 && !root.covered
         }
 

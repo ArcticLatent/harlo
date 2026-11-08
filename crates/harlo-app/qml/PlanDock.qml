@@ -14,6 +14,8 @@ Rectangle {
     property ChatSession session
     /// Run with helpers, but other ones than the team's (this run only).
     signal chooseHelpers()
+    /// Who does one step in a run with helpers (its agent and model).
+    signal chooseStepHelper(int id, string agent, string model)
     // Who the helpers are (read as the menu opens): the team's, else as
     // the session.
     property var helpers: ({})
@@ -53,6 +55,13 @@ Rectangle {
     color: Theme.elevated
     border.color: Theme.border
 
+    function agentName(id) { return ({ harlo: "Harlo", claude: "Claude Code" })[id] || id }
+    // A model's name as its agent lists it (else its id, shortened).
+    function modelName(agent, model) {
+        const p = Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()).find(x => x.id === agent) : null
+        const i = p ? (p.modelIds || []).indexOf(model) : -1
+        return i >= 0 && p.models[i] ? Theme.modelLabel(p.models[i]) : Theme.modelLabel(String(model).split("/").pop())
+    }
     function edit(op) { Workspace.planEdit(session.key, JSON.stringify(op)) }
     function mark(status) {
         switch (status) {
@@ -253,6 +262,29 @@ Rectangle {
                                         onClicked: Workspace.open(stepRow.reviewer)
                                     }
                                 }
+                                // Who you chose to do it (a run with helpers).
+                                RowLayout {
+                                    visible: (stepRow.modelData.agent || "") !== "" && stepRow.modelData.status === "pending"
+                                    Layout.fillWidth: true
+                                    spacing: 6
+                                    Icon { name: "robot-2"; color: Theme.muted; implicitWidth: 12; implicitHeight: 12 }
+                                    Label {
+                                        objectName: "planStepWho-" + stepRow.modelData.id
+                                        Layout.fillWidth: true
+                                        text: "Done by " + root.agentName(stepRow.modelData.agent || "") + (stepRow.modelData.model ? " · " + root.modelName(stepRow.modelData.agent, stepRow.modelData.model) : "")
+                                        color: Theme.muted
+                                        font.pixelSize: Theme.px(11)
+                                        elide: Text.ElideRight
+                                    }
+                                    StepButton {
+                                        objectName: "planStepWhoClear-" + stepRow.modelData.id
+                                        implicitWidth: 18
+                                        implicitHeight: 18
+                                        iconName: "close"
+                                        tip: "Back to the run's helpers"
+                                        onClicked: root.edit({ op: "helper", id: stepRow.modelData.id, agent: "", model: "" })
+                                    }
+                                }
                                 // Its commit, or why there isn't one.
                                 RowLayout {
                                     visible: (stepRow.modelData.commit || "") !== "" || (stepRow.modelData.commitNote || "") !== ""
@@ -292,9 +324,11 @@ Rectangle {
                                 }
                             }
                             // Your edits (on hover; their room is kept, so the text
-                            // doesn't rewrap when they show).
+                            // doesn't rewrap when they show; on a narrow card the
+                            // step's text has it until then).
                             Row {
                                 Layout.alignment: Qt.AlignTop
+                                visible: root.width >= 560 || stepHover.hovered
                                 opacity: stepHover.hovered ? 1 : 0
                                 enabled: stepHover.hovered
                                 spacing: 0
@@ -305,6 +339,13 @@ Rectangle {
                                     iconName: "layout-column"
                                     tip: stepRow.modelData.alongside ? "Run it after the step before" : "Run it at the same time as the step before (with helpers)"
                                     onClicked: root.edit({ op: "alongside", id: stepRow.modelData.id, alongside: !stepRow.modelData.alongside })
+                                }
+                                StepButton {
+                                    objectName: "planStepHelper-" + stepRow.modelData.id
+                                    visible: stepRow.modelData.status === "pending" && Workspace.orchestrationOn
+                                    iconName: "robot-2"
+                                    tip: "Who does it, when the plan runs with helpers"
+                                    onClicked: root.chooseStepHelper(stepRow.modelData.id, stepRow.modelData.agent || "", stepRow.modelData.model || "")
                                 }
                                 StepButton { visible: stepRow.open; iconName: "edit"; tip: "Change it"; onClicked: { root.editing = stepRow.modelData.id; editTitle.text = stepRow.modelData.title; editDetail.text = stepRow.modelData.detail || "" } }
                                 StepButton {

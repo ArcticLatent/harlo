@@ -167,7 +167,8 @@ pub mod qobject {
         /// Your edit of a session's plan: `{ op: "add", title, detail,
         /// after }`, `{ op: "edit", id, title, detail }`, `{ op: "remove",
         /// id }`, `{ op: "shift", id, by }`, `{ op: "skip", id, skipped }`,
-        /// `{ op: "clear" }`.
+        /// `{ op: "helper", id, agent, model }` (who does it in a run;
+        /// agent "" the run's), `{ op: "clear" }`.
         #[qinvokable]
         fn plan_edit(self: Pin<&mut Workspace>, key: &QString, op: &QString);
         /// Runs a session's plan with helpers (`agent` "": its team's, else as
@@ -2802,6 +2803,9 @@ impl Workspace {
             }
             "alongside" => {
                 let _ = p.set_alongside(id, op["alongside"].as_bool().unwrap_or(true));
+            }
+            "helper" => {
+                let _ = p.set_helper(id, &text("agent"), &text("model"));
             }
             "clear" => p.steps.clear(),
             _ => {}
@@ -6874,11 +6878,17 @@ impl Workspace {
             return;
         }
         let owner_title = self.title_of(owner);
-        let approval = self.approval_of(owner).filter(|_| has_shield(run.agent.as_str(), &cwd));
         let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() % 100_000);
         for id in ready {
             let Some(step) = plan.step(id).cloned() else { continue };
             let n = plan.steps.iter().position(|s| s.id == id).map_or(0, |i| i + 1);
+            // Who does it: the agent and model you chose for the step, else
+            // the run's (the run's thinking only with the run's agent).
+            let (agent, model, thinking) = match HarnessKind::parse(&step.agent).filter(|k| self.usable_harness(*k)) {
+                Some(k) => (k, step.model.clone(), if k == run.agent { run.thinking.clone() } else { String::new() }),
+                None => (run.agent, run.model.clone(), run.thinking.clone()),
+            };
+            let approval = self.approval_of(owner).filter(|_| has_shield(agent.as_str(), &cwd));
             let title = format!("Step {n}: {}", step.title);
             let branch = if together { format!("plan/{}-{id}-{stamp}", git::branch_slug(&step.title).chars().take(30).collect::<String>().trim_matches('-')) } else { String::new() };
             let task = harlo_core::plan::step_prompt(&plan, id, &merge, commits, together);
@@ -6888,7 +6898,7 @@ impl Workspace {
                 continue;
             }
             // (Harlo's: the budget per helper, if set.)
-            let budget = (run.agent == HarnessKind::Harlo).then(|| harlo_core::orchestration::parse_tokens(&self.setting_str("harlo_helper_budget"))).flatten();
+            let budget = (agent == HarnessKind::Harlo).then(|| harlo_core::orchestration::parse_tokens(&self.setting_str("harlo_helper_budget"))).flatten();
             if together && let Some(project) = &project {
                 let base = tree.as_ref().map(|t| t.branch.clone()).unwrap_or_default();
                 let first = FirstPrompt { text: prompt, ..Default::default() };
@@ -6896,8 +6906,8 @@ impl Workspace {
                     project.id as i32,
                     &QString::from(&branch),
                     &QString::from(&base),
-                    &QString::from(run.agent.as_str()),
-                    WorktreeStart { first: Some(first), plan: false, model: run.model.clone(), thinking: run.thinking.clone(), lane: None, parent: Some((owner.to_owned(), title.clone(), true)), approval: approval.clone(), plan_step: Some(id), budget },
+                    &QString::from(agent.as_str()),
+                    WorktreeStart { first: Some(first), plan: false, model: model.clone(), thinking: thinking.clone(), lane: None, parent: Some((owner.to_owned(), title.clone(), true)), approval: approval.clone(), plan_step: Some(id), budget },
                 );
                 continue;
             }
@@ -6908,15 +6918,15 @@ impl Workspace {
             {
                 r.bases.insert(id, head);
             }
-            let key = self.as_mut().start_session_budget(run.agent, cwd.clone(), &run.model, &run.thinking, false, budget);
+            let key = self.as_mut().start_session_budget(agent, cwd.clone(), &model, &thinking, false, budget);
             if let Some(live) = registry::get(&key) {
                 live.handle.send_raw(json!({ "type": "set_session_name", "name": title }));
             }
-            self.as_mut().adopt(&key, owner, &title, run.agent.as_str(), true, Some(id));
+            self.as_mut().adopt(&key, owner, &title, agent.as_str(), true, Some(id));
             if let Some(mode) = &approval {
                 self.as_mut().set_approval_mode(&QString::from(&key), &QString::from(mode));
             }
-            self.as_mut().apply_thinking(&key, &run.thinking);
+            self.as_mut().apply_thinking(&key, &thinking);
             send_first_prompt(&key, FirstPrompt { text: prompt, ..Default::default() }, Some(self.qt_thread()));
         }
         self.as_mut().plans_changed();

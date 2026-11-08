@@ -6035,6 +6035,28 @@ ApplicationWindow {
         PauseAnimation { duration: 300 }
         ScriptAction { script: win.waitUntil(planReviewSteps, () => (JSON.parse(Workspace.planJson(win.harloKey)).steps || []).length === 1 && chat.session.status === "idle", 15000) }
         PauseAnimation { duration: 600 }
+        // The step to another model: chosen on the plan card.
+        // (Its buttons show on hover.)
+        ScriptAction { script: { const t = win.findText("Write helper.txt", chat), p = t.mapToItem(null, t.width / 2, t.height / 2); TestInput.moveTo(p.x, p.y) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.clickItem(win.findName("planStepHelper-1"), "Who does it") }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            win.check(win.findText("Who does this step") !== null, "the step's helper is chosen in a popover")
+            const box = win.findName("delegateModelHelper")
+            const i = box ? box.model.indexOf("Fake Helper") : -1
+            win.check(i > 0, "its models are offered (" + (box ? box.model : "none") + ")")
+            if (i > 0) { box.currentIndex = i; box.activated(i) } } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: win.clickItem(win.findName("delegateStart"), "Choose") }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const step = JSON.parse(Workspace.planJson(win.harloKey)).steps[0]
+            win.check(step.agent === "harlo" && step.model === "fake/fake-helper", "the step keeps who does it (" + step.agent + ", " + step.model + ")")
+            const who = win.findName("planStepWho-1")
+            win.check(who !== null && who.visible && who.text === "Done by Harlo · Fake Helper", "the card says so (" + (who ? who.text : "none") + ")")
+            win.shotWindow("clicks-review-step-helper") } }
+        PauseAnimation { duration: 200 }
         ScriptAction { script: win.clickItem(win.findName("planRun"), "Run with helpers") }
         PauseAnimation { duration: 400 }
         ScriptAction { script: win.clickItem(win.findName("planRunTeam"), "Helpers: as this session") }
@@ -6064,7 +6086,10 @@ ApplicationWindow {
             const fixes = reqs.filter(r => (r.messages || []).some(m => m.role === "user" && JSON.stringify(m.content).indexOf("A review of your step found problems") >= 0))
             win.check(fixes.length > 0 && fixes.some(r => JSON.stringify(r.messages).indexOf("helper.txt:1 needs a second line") >= 0), "the problems went back to the step's helper")
             // Each helper's model and what it used; the run's total.
-            win.check(kids.length === 3 && kids.every(k => k.model === "fake/fake-coder" && k.used && k.used.tokens > 0), "each helper shows its model and what it used (" + JSON.stringify(kids.map(k => [k.model, k.used])) + ")")
+            // (The step's helper on the model chosen for it; its reviews on the run's.)
+            const stepKid = kids.find(k => k.step === 1)
+            win.check(stepKid && stepKid.model === "fake/fake-helper" && reviews.every(k => k.model === "fake/fake-coder"), "the step's helper ran on the model chosen for it, its reviews on the run's (" + JSON.stringify(kids.map(k => [k.name, k.model])) + ")")
+            win.check(kids.length === 3 && kids.every(k => k.used && k.used.tokens > 0), "each helper shows what it used (" + JSON.stringify(kids.map(k => k.used)) + ")")
             const total = kids.reduce((t, k) => t + k.used.tokens, 0)
             const used = win.findName("planRunUsed")
             win.check(used !== null && used.visible && used.text === (total / 1000).toFixed(1) + "k tokens", "the plan card has the run's total (" + (used ? used.text : "none") + ", " + total + ")")

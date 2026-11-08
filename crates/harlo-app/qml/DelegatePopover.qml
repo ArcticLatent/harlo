@@ -27,6 +27,8 @@ Popup {
     signal sent()
 
     property string action: "advisor"
+    // The plan's step being given to someone (action "step").
+    property int stepId: -1
     readonly property var actions: ({
         handoff: { title: "Hand off", icon: "send-plane", button: "Hand off",
                    about: "A new session takes over the task, with a full briefing from this one." },
@@ -38,6 +40,8 @@ Popup {
                  about: "The agent splits the task into parts that can be done at the same time, starts a helper for each, then checks and combines their work." },
         run: { title: "Run the plan with helpers", icon: "node-tree", button: "Run",
                about: "Each step goes to a helper session with this agent and model, for this run only (the project's Team settings choose the usual ones)." },
+        step: { title: "Who does this step", icon: "robot-2", button: "Choose",
+                about: "When the plan runs with helpers, this step goes to a helper with this agent and model; the other steps keep the run's helpers." },
     })
     readonly property var current: actions[action]
 
@@ -99,7 +103,24 @@ Popup {
         open()
     }
 
+    // Who does one of the plan's steps: as chosen before, else the run's.
+    function showStep(id, agent, model) {
+        stepId = id
+        show("run")
+        action = "step"
+        if (agent !== "" && agentIds.indexOf(agent) >= 0) {
+            memberA.pick(agent)
+            memberA.model = model || ""
+            memberA.sync()
+        }
+    }
+
     function start() {
+        if (action === "step") {
+            Workspace.planEdit(session.key, JSON.stringify({ op: "helper", id: stepId, agent: memberA.agent, model: memberA.model }))
+            close()
+            return
+        }
         if (action === "run") {
             const err = Workspace.runPlan(session.key, memberA.agent, memberA.model)
             if (err !== "") Workspace.showNotice(err, true)
@@ -182,7 +203,7 @@ Popup {
             font.pixelSize: Theme.px(12)
             wrapMode: Text.Wrap
         }
-        MemberRow { id: memberA; label: root.action === "committee" ? "Member 1" : root.action === "handoff" ? "To" : root.action === "split" || root.action === "run" ? "Helpers" : "Ask" }
+        MemberRow { id: memberA; label: root.action === "committee" ? "Member 1" : root.action === "handoff" ? "To" : root.action === "split" || root.action === "run" ? "Helpers" : root.action === "step" ? "Helper" : "Ask" }
         MemberRow { id: memberB; label: "Member 2"; visible: root.action === "committee" }
         Label {
             visible: root.action === "committee" && memberA.agent === memberB.agent && root.agentIds.length > 1
@@ -194,7 +215,7 @@ Popup {
             id: note
             objectName: "delegateNote"
             // (A new session's task is in its message box already.)
-            visible: root.action !== "run" && !!root.session
+            visible: root.action !== "run" && root.action !== "step" && !!root.session
             Layout.fillWidth: true
             Layout.preferredHeight: Math.min(Math.max(implicitHeight, 60), 140)
             placeholderText: root.action === "handoff" ? "Anything to add for the new agent (optional)"
@@ -225,7 +246,7 @@ Popup {
             spacing: 8
             Label {
                 Layout.fillWidth: true
-                text: root.action === "run" || !root.session ? "" : "Ctrl+Enter"
+                text: root.action === "run" || root.action === "step" || !root.session ? "" : "Ctrl+Enter"
                 color: Theme.muted
                 font.pixelSize: Theme.px(11)
             }

@@ -63,6 +63,12 @@ pub struct Step {
     pub branch: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start: Option<Snapshot>,
+    /// In a run with helpers: who does this step, when you chose another
+    /// than the run's (an agent, and its model: "" its default).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub agent: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub model: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -112,7 +118,7 @@ impl Plan {
                 if s.alongside {
                     v["alongside"] = json!(true);
                 }
-                for (k, val) in [("helper", &s.helper), ("branch", &s.branch)] {
+                for (k, val) in [("helper", &s.helper), ("branch", &s.branch), ("agent", &s.agent), ("model", &s.model)] {
                     if !val.is_empty() {
                         v[k] = json!(val);
                     }
@@ -279,6 +285,15 @@ impl Plan {
         let step = self.step_mut(id)?;
         step.alongside = alongside;
         step.yours = true;
+        Ok(())
+    }
+
+    /// You choose who does a step in a run with helpers (`agent` "": the
+    /// run's helpers).
+    pub fn set_helper(&mut self, id: u32, agent: &str, model: &str) -> Result<(), String> {
+        let step = self.step_mut(id)?;
+        step.agent = agent.trim().to_owned();
+        step.model = if step.agent.is_empty() { String::new() } else { model.trim().to_owned() };
         Ok(())
     }
 
@@ -512,6 +527,18 @@ mod tests {
 
     fn steps(p: &Plan) -> Vec<(u32, &str, Status)> {
         p.steps.iter().map(|s| (s.id, s.title.as_str(), s.status.clone())).collect()
+    }
+
+    #[test]
+    fn a_step_can_name_its_helper() {
+        let mut p = Plan::default();
+        p.set(&[("A".into(), String::new(), false)]).unwrap();
+        p.set_helper(1, "claude", "sonnet").unwrap();
+        let v = p.json();
+        assert_eq!((v["steps"][0]["agent"].as_str(), v["steps"][0]["model"].as_str()), (Some("claude"), Some("sonnet")));
+        p.set_helper(1, "", "sonnet").unwrap();
+        assert!(p.json()["steps"][0].get("agent").is_none() && p.step(1).unwrap().model.is_empty());
+        assert!(p.set_helper(9, "harlo", "").is_err());
     }
 
     #[test]
