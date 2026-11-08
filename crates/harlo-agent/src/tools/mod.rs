@@ -119,6 +119,10 @@ pub fn specs_of(only: Option<&[&str]>, task: Option<&[crate::profiles::Profile]>
             *t = crate::hashline::spec();
         }
     }
+    // (No network in the sandbox: nothing to fetch.)
+    if !crate::fetch::possible() {
+        all.retain(|t| t["name"] != "fetch");
+    }
     if let Some(only) = only {
         all.retain(|t| t["name"].as_str().is_some_and(|n| only.contains(&n)));
     }
@@ -151,6 +155,9 @@ pub fn specs() -> Value {
           json!({ "pattern": { "type": "string" }, "path": { "type": "string" } }), &["pattern"]),
         f("ls", "List a folder (folders end with /). Up to 500 entries.",
           json!({ "path": { "type": "string" } }), &[]),
+        f("fetch", "Read a web page or file at a URL (http or https): a page comes back as Markdown (its main part, without menus), text and JSON as they are, an image is shown, another kind of file is saved for you to open with a command. Up to 50 KB is shown; all of a longer page is saved to a file to read on. \
+                    For documentation, an API's reference, an issue or a changelog: what the project doesn't have.",
+          json!({ "url": { "type": "string" } }), &["url"]),
         f("jobs", "Background commands (started by bash with background: true): list them, see one's output (its last lines), wait for one to end (up to timeout seconds, 60 by default), or stop one with everything it started.",
           json!({ "action": { "type": "string", "enum": ["list", "output", "wait", "stop"] }, "id": { "type": "string", "description": "The job's id (j1, j2…), for output, wait and stop" },
                   "lines": { "type": "integer", "description": "How many of the last lines to show (50 by default)" }, "timeout": { "type": "integer" } }), &["action"]),
@@ -346,6 +353,7 @@ impl Tools {
             "find" => self.find(s("pattern"), s("path")).await,
             "ls" => self.ls(s("path")),
             "recall" => self.recall(s("id")),
+            "fetch" => crate::fetch::run(s("url"), &self.spill_dir).await,
             "jobs" => {
                 let (text, failed) = self.jobs.call(args).await;
                 Outcome::new(text, failed)

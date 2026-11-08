@@ -5,8 +5,8 @@
 //!
 //! One run at a time: a prompt while one works is refused (steer and
 //! follow_up queue instead). Calls that change something ask first, as
-//! harlo's approval modes say: `always-ask` before write, edit and bash,
-//! `write` before bash, `yolo`/`auto` never; in plan mode files can't be
+//! harlo's approval modes say: `always-ask` before write, edit, bash and
+//! fetch, `write` before bash and fetch, `yolo`/`auto` never; in plan mode files can't be
 //! changed and commands ask. Reading never asks.
 //!
 //! Started by harlo with `--harlo-tools`: harlo's own tools (other
@@ -218,7 +218,8 @@ impl Gate for Approvals {
             let free = matches!(approval.as_str(), "yolo" | "auto");
             let ask = match approval.as_str() {
                 _ if free => false,
-                "write" => name == "bash" || mcp,
+                // (What's fetched can carry what's in the project away.)
+                "write" => name == "bash" || name == "fetch" || mcp,
                 _ => true,
             };
             if !ask || sh.always.lock().unwrap().contains(&name) {
@@ -229,6 +230,7 @@ impl Gate for Approvals {
             sh.waiting.lock().unwrap().insert(id.clone(), tx);
             let detail = match name.as_str() {
                 "bash" => args["command"].as_str().unwrap_or_default().to_owned(),
+                "fetch" => args["url"].as_str().unwrap_or_default().to_owned(),
                 _ if mcp => {
                     let a = args.to_string();
                     if a.chars().count() > 300 { format!("{}…", a.chars().take(299).collect::<String>()) } else { a }

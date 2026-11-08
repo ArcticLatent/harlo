@@ -100,6 +100,7 @@ fn ours(name: &str) -> Option<&'static str> {
         "Bash" => "bash",
         "Edit" | "MultiEdit" | "NotebookEdit" => "edit",
         "Write" => "write",
+        "WebFetch" | "WebSearch" => "fetch",
         other => other,
     };
     crate::task::GENERAL.iter().copied().find(|g| *g == n)
@@ -150,9 +151,9 @@ mod tests {
         assert_eq!(reviewer.tools, ["bash", "current_time", "read", "recall", "write"]);
         assert!(reviewer.writes() && reviewer.model.is_empty());
         // Unknown tools dropped, the same list kept once.
-        let a = parse("---\nname: a\ntools: Read, WebFetch\n---\n", PathBuf::from("a.md")).unwrap();
-        let b = parse("---\nname: b\ntools: [\"Read\"]\n---\n", PathBuf::from("b.md")).unwrap();
-        assert_eq!(a.tools, ["current_time", "read", "recall"]);
+        let a = parse("---\nname: a\ntools: Read, WebFetch, TodoWrite\n---\n", PathBuf::from("a.md")).unwrap();
+        let b = parse("---\nname: b\ntools: [\"Read\", \"WebFetch\"]\n---\n", PathBuf::from("b.md")).unwrap();
+        assert_eq!(a.tools, ["current_time", "fetch", "read", "recall"]);
         assert!(std::ptr::eq(a.tools, b.tools) && !a.writes());
         let _ = std::fs::remove_dir_all(&root);
     }

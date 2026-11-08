@@ -32,6 +32,7 @@ mod chat;
 mod clock;
 mod compact;
 mod danger;
+mod fetch;
 mod generated;
 mod hashline;
 mod images;
