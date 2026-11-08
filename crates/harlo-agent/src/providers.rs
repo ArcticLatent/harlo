@@ -104,6 +104,15 @@ impl Provider {
         matches!(self.key, Key::Plan(_))
     }
 
+    /// Whether its server searches the web itself (OpenAI's Responses
+    /// API's `web_search` tool: the plan's and OpenAI's own;
+    /// `HARLO_AGENT_WEB_SEARCH=off` leaves it out).
+    pub fn searches_web(&self) -> bool {
+        self.api == Api::Responses
+            && (self.is_plan() || self.id == "openai")
+            && std::env::var("HARLO_AGENT_WEB_SEARCH").map_or(true, |v| v.trim() != "off")
+    }
+
     /// Which sign-in, for a plan's.
     pub fn sign(&self) -> Option<Sign> {
         match self.key {

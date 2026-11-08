@@ -130,6 +130,8 @@ pub fn assistant_message(items: &[Value], provider: &str, model: &str, usage: &V
             }
             // (The server's own compaction, when asked for: opaque.)
             Some("compaction") => content.push(json!({ "type": "compaction", "item": item })),
+            // (A web search the server ran itself: what it looked for.)
+            Some("web_search_call") => content.push(json!({ "type": "webSearch", "query": search_query(item), "item": item })),
             _ => {}
         }
     }
@@ -152,6 +154,18 @@ pub fn assistant_message(items: &[Value], provider: &str, model: &str, usage: &V
         "stopReason": if calls { "toolUse" } else { "stop" },
         "timestamp": crate::session::now_ms(),
     })
+}
+
+/// What a web search looked for ("" when the server didn't say).
+fn search_query(item: &Value) -> String {
+    let a = &item["action"];
+    match a["query"].as_str().filter(|q| !q.is_empty()) {
+        Some(q) => q.to_owned(),
+        None => a["queries"].as_array().into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>().join("; "),
+    }
+    .chars()
+    .take(300)
+    .collect()
 }
 
 /// pi's messages as the Responses API's `input`. Reasoning and call item
@@ -203,6 +217,9 @@ pub fn input(messages: &[Value], provider: &str, model: &str, images: bool) -> V
                 let mut texts = 0;
                 for b in m["content"].as_array().into_iter().flatten() {
                     match b["type"].as_str() {
+                        // (The server's web searches go back to the model
+                        // that ran them.)
+                        Some("webSearch") if same && b["item"].is_object() => out.push(b["item"].clone()),
                         Some("thinking") if same => {
                             if let Some(item) = b["thinkingSignature"].as_str().and_then(|s| serde_json::from_str::<Value>(s).ok()) {
                                 out.push(item);
@@ -543,6 +560,21 @@ mod tests {
         assert_eq!(other.len(), 4, "another model gets no reasoning");
         assert!(other[2].get("id").is_none(), "nor the call's item id");
         assert_eq!(input(&msgs, "openai", "m1", true).len(), 4, "nor the same model through another provider");
+    }
+
+    #[test]
+    fn a_web_search_goes_back_only_to_its_model() {
+        let item = json!({ "id": "ws_1", "type": "web_search_call", "status": "completed", "action": { "type": "search", "queries": ["rust latest"], "query": "rust latest" } });
+        let text = json!({ "type": "message", "id": "msg_1", "role": "assistant", "content": [{ "type": "output_text", "text": "1.99.1", "annotations": [] }] });
+        let reply = assistant_message(&[item.clone(), text], "codex", "m1", &Value::Null);
+        assert_eq!(reply["content"][0], json!({ "type": "webSearch", "query": "rust latest", "item": item }));
+        assert_eq!(reply["stopReason"], "stop", "a search isn't a call of ours");
+        let msgs = vec![json!({ "role": "user", "content": "latest rust?" }), reply];
+        assert_eq!(input(&msgs, "codex", "m1", true)[1], item);
+        let other = input(&msgs, "codex", "m2", true);
+        assert!(other.iter().all(|i| i["type"] != "web_search_call") && other[1]["type"] == "message");
+        let only_queries = json!({ "type": "web_search_call", "action": { "queries": ["a", "b"] } });
+        assert_eq!(search_query(&only_queries), "a; b");
     }
 
     #[test]

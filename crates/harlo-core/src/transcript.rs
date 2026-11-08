@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use harlo_harness::{BlockKind, HarnessEvent, NoticeLevel};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::listdiff::{ListChange, diff_by};
 use crate::markdown::{MarkdownRenderer, MdBlockKind, committed_prefix, escape_into};
@@ -651,7 +651,7 @@ impl Transcript {
                                 "running"
                             } else if run.is_error {
                                 "error"
-                            } else if self.tools.contains_key(call_id) {
+                            } else if self.tools.contains_key(call_id) || call_id.starts_with(SEARCH) {
                                 "done"
                             } else {
                                 "pending"
@@ -702,6 +702,9 @@ fn ensure_block(item: &mut Item, index: usize, kind: BlockKind) {
     }
 }
 
+/// The call id of a web search the server ran (it has no result of ours).
+const SEARCH: &str = "search:";
+
 fn tool_block(v: &Value) -> Block {
     Block::Tool {
         call_id: v["id"].as_str().unwrap_or_default().to_owned(),
@@ -723,6 +726,12 @@ fn parse_blocks(message: &Value) -> Vec<Block> {
                     Some("text") => Block::Text(b["text"].as_str().unwrap_or_default().to_owned()),
                     Some("thinking") => Block::Thinking(b["thinking"].as_str().unwrap_or_default().to_owned()),
                     Some("toolCall") => tool_block(b),
+                    // A web search the model's server ran: a call that's done.
+                    Some("webSearch") => Block::Tool {
+                        call_id: format!("{SEARCH}{}", b["item"]["id"].as_str().unwrap_or_default()),
+                        name: "web_search".into(),
+                        args: json!({ "query": b["query"] }),
+                    },
                     Some("image") => Block::Image,
                     _ => Block::Text(String::new()),
                 })
@@ -1238,6 +1247,21 @@ mod tests {
 
     /// Each reply keeps its own model: switching models doesn't relabel
     /// the replies before.
+    #[test]
+    fn a_web_search_is_a_call_thats_done() {
+        let mut t = Transcript::new();
+        t.load_messages(&[
+            json!({"role":"user","content":"latest rust?"}),
+            json!({"role":"assistant","model":"m","content":[
+                {"type":"webSearch","query":"rust latest release","item":{"id":"ws_1","type":"web_search_call"}},
+                {"type":"text","text":"1.99.1"}]}),
+        ]);
+        let rows = t.rows();
+        let search = rows.iter().find(|r| r.kind == RowKind::Tool).expect("a row for the search");
+        assert_eq!((search.title.as_str(), search.subtitle.as_str(), search.state.as_str()), ("web_search", "rust latest release", "done"));
+        assert_eq!(crate::actions::kind("web_search"), "web");
+    }
+
     #[test]
     fn replies_keep_their_model() {
         let mut t = Transcript::new();

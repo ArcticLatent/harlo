@@ -1226,7 +1226,15 @@ async fn send_once(a: Asked<'_>, show: &mut (dyn FnMut(Shown) + Send)) -> Result
     if a.trigger {
         input.push(json!({ "type": "compaction_trigger" }));
     }
-    let mut body = responses::request(&model, a.instructions, &input, a.specs.clone(), effort.as_deref(), a.session);
+    let mut specs = a.specs.clone();
+    // (The server's own web search, beside fetch: where there's network.)
+    if provider.searches_web()
+        && let Some(list) = specs.as_array_mut()
+        && list.iter().any(|t| t["name"] == "fetch")
+    {
+        list.push(json!({ "type": "web_search" }));
+    }
+    let mut body = responses::request(&model, a.instructions, &input, specs, effort.as_deref(), a.session);
     if !a.tools {
         body["tool_choice"] = json!("none");
     }
@@ -1301,6 +1309,9 @@ impl Blocks {
                         "id": format!("{}|{}", item["call_id"].as_str().unwrap_or_default(), item["id"].as_str().unwrap_or_default()),
                         "toolName": item["name"],
                     })],
+                    // (Blocks of the reply that don't stream: their place
+                    // kept, so the ones after have the index they'll have.)
+                    Some("web_search_call" | "compaction") => Vec::new(),
                     _ => {
                         self.next -= 1;
                         self.at.remove(&index);
