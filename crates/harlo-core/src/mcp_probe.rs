@@ -548,7 +548,7 @@ done"#;
         assert_eq!(harlo_token("https://h/mcp").as_deref(), Some("t1"));
         assert_eq!(harlo_token("https://o/mcp").as_deref(), Some("t2"));
         assert_eq!(harlo_token("https://none/mcp"), None);
-        let _ = std::fs::remove_file(dir.join("mcp-auth.json"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
