@@ -648,11 +648,11 @@ pub fn split_command(line: &str) -> Vec<String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// Harlo's config folder is one for the process: one test at a time.
-    static HARLO_DIR: Mutex<()> = Mutex::new(());
+    pub(crate) static HARLO_DIR: Mutex<()> = Mutex::new(());
 
     fn scratch() -> crate::scratch::Scratch {
         crate::scratch::Scratch::new(std::env::temp_dir().join(format!("harlo-mcp-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())))

@@ -540,6 +540,7 @@ done"#;
 
     #[test]
     fn uses_harlos_sign_in() {
+        let _one = crate::mcp::tests::HARLO_DIR.lock().unwrap_or_else(|e| e.into_inner());
         let dir = crate::mcp::harlo_dir();
         std::fs::create_dir_all(&dir).unwrap();
         let later = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 3600;
