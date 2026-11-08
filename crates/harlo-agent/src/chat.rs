@@ -306,9 +306,11 @@ pub async fn stream(base: &str, token: Option<&str>, body: &Value, provider: &st
     let input = usage["input_tokens"].as_u64().unwrap_or(0);
     let cached = usage["input_tokens_details"]["cached_tokens"].as_u64().unwrap_or(0);
     let output = usage["output_tokens"].as_u64().unwrap_or(0);
+    // (Cut off at the length limit, calls or not: its calls may be
+    // incomplete, and aren't run.)
     let stop = match reply.finish.as_deref() {
-        _ if calls => "toolUse",
         Some("length") => "length",
+        _ if calls => "toolUse",
         _ => "stop",
     };
     let message = json!({

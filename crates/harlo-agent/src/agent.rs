@@ -22,7 +22,25 @@ use crate::tools::{self, Tools};
 use crate::{chat, compact, responses, stubs};
 
 /// Rounds of tool calls in one run, at most.
-pub const MAX_ROUNDS: usize = 200;
+const MAX_ROUNDS: usize = 200;
+
+/// Rounds of tool calls a run may take (`HARLO_AGENT_MAX_ROUNDS` sets it,
+/// to try it).
+fn max_rounds() -> usize {
+    std::env::var("HARLO_AGENT_MAX_ROUNDS").ok().and_then(|v| v.trim().parse().ok()).filter(|n| *n > 0).unwrap_or(MAX_ROUNDS)
+}
+
+/// The round a run is told to wrap up at: four fifths of the way, when
+/// the cap isn't tiny.
+fn wrap_up_round(max: usize) -> Option<usize> {
+    (max >= 5).then(|| max * 4 / 5)
+}
+
+/// Told (hidden) when a run nears its last round.
+const ROUNDS_NOTE: &str = "[harlo] You're near the most rounds of tool calls one turn may take: a few are left. Finish what you can now; if the task isn't done, end your turn with what you did and what's left, so it can go on from there.";
+
+/// In place of each call in a reply cut off at the length limit.
+const CUT_OFF: &str = "Not run: your reply was cut off at the length limit before this call was complete. Make the call again, smaller (write a big file in parts, or change it with edit).";
 
 /// Left in the history when the user stops a turn.
 const STOPPED_NOTE: &str = "<turn_stopped>The user stopped this turn. A call marked interrupted was stopped partway and may have partly run: check its effects before relying on them.</turn_stopped>";
@@ -342,9 +360,13 @@ impl Agent {
         // asked) in this run, and whether it was reminded to.
         let helper = self.harlo_tools.iter().any(|t| t["name"] == "report_done");
         let (mut handed_over, mut reminded) = (false, false);
-        for round in 0..MAX_ROUNDS {
+        let max = max_rounds();
+        for round in 0..max {
             if round > 0 {
                 self.take_steering(show)?;
+            }
+            if Some(round) == wrap_up_round(max) {
+                self.push(json!({ "role": "custom", "customType": "harlo_rounds_note", "content": ROUNDS_NOTE, "display": false, "timestamp": now_ms() }), show)?;
             }
             // Getting full: old tool outputs set aside first, when that's
             // turned on (cheap, and `recall` gets them back).
@@ -394,7 +416,20 @@ impl Agent {
             };
             overflow = 0;
             let calls: Vec<Value> = reply["content"].as_array().into_iter().flatten().filter(|b| b["type"] == "toolCall").cloned().collect();
+            let cut_off = reply["stopReason"] == "length";
             self.push(reply, show)?;
+            // A reply cut off at the length limit: its calls may be
+            // incomplete (a file's content cut short), so none run.
+            if cut_off && !calls.is_empty() {
+                for c in &calls {
+                    let (id, name) = (c["id"].as_str().unwrap_or_default(), c["name"].as_str().unwrap_or_default());
+                    show(Shown::ToolStart { call_id: id, name, args: &c["arguments"] });
+                    show(Shown::ToolEnd { call_id: id, name, text: CUT_OFF, failed: true });
+                    let result = json!({ "role": "toolResult", "toolCallId": c["id"], "toolName": c["name"], "content": [{ "type": "text", "text": CUT_OFF }], "isError": true, "timestamp": now_ms() });
+                    self.push(result, show)?;
+                }
+                continue;
+            }
             if calls.is_empty() {
                 if self.take_steering(show)? || self.take_follow_up(show)? {
                     continue;
@@ -451,7 +486,7 @@ impl Agent {
                 return Ok(Ended::Stopped);
             }
         }
-        bail!("Stopped after {MAX_ROUNDS} rounds of tool calls")
+        bail!("The turn ended after {max} rounds of tool calls, the most one turn may take. Send a message to go on.")
     }
 
     /// The note a stopped turn leaves, for the model's next turn (not shown).
@@ -1214,6 +1249,13 @@ mod tests {
         assert_eq!((out[2].text.as_str(), out[2].failed), ("no start_session", true));
         // (Not one of harlo's: ours, and there's no such tool.)
         assert!(out[3].failed && out[3].text.contains("no tool called nope"), "{}", out[3].text);
+    }
+
+    #[test]
+    fn a_run_is_told_to_wrap_up_near_the_cap() {
+        assert_eq!(wrap_up_round(200), Some(160));
+        assert_eq!(wrap_up_round(10), Some(8));
+        assert_eq!(wrap_up_round(4), None);
     }
 
     #[test]
