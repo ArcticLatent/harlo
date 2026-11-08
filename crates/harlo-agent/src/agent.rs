@@ -1094,6 +1094,9 @@ fn instructions(cwd: &Path, sandbox: Option<&crate::sandbox::Sandbox>) -> String
         s.push_str(&format!("\n<project_instructions path=\"{}\">\n{}\n</project_instructions>\n", path.display(), text.trim()));
     }
     s.push_str(&format!("\nWorking directory: {}\n", cwd.display()));
+    // (The day only, so the instructions stay the same all day; the time
+    // is a tool.)
+    s.push_str(&format!("The session started on {}; current_time gives the time now.\n", crate::clock::now().date()));
     if let Some(sb) = sandbox {
         s.push_str(&format!("{}\n", sb.describe()));
     }

@@ -75,7 +75,7 @@ fn fail(text: impl Into<String>) -> Outcome {
 
 /// Tools that only look: several run at once.
 pub fn read_only(name: &str) -> bool {
-    matches!(name, "read" | "grep" | "find" | "ls" | "recall")
+    matches!(name, "read" | "grep" | "find" | "ls" | "recall" | "current_time")
 }
 
 /// The tools' definitions for the Responses API: those in `only` (all
@@ -113,6 +113,7 @@ pub fn specs() -> Value {
           json!({ "pattern": { "type": "string" }, "path": { "type": "string" } }), &["pattern"]),
         f("ls", "List a folder (folders end with /). Up to 500 entries.",
           json!({ "path": { "type": "string" } }), &[]),
+        f("current_time", "The date and time now: local (with the zone and its offset from UTC), UTC, and Unix seconds.", json!({}), &[]),
         f("recall", "Get back a tool's output that was set aside to save context (its place in the conversation says so, with the id to give). It comes back as it was then; to see a file as it is now, read it again.",
           json!({ "id": { "type": "string" } }), &["id"]),
     ])
@@ -235,6 +236,7 @@ impl Tools {
             "find" => self.find(s("pattern"), s("path")).await,
             "ls" => self.ls(s("path")),
             "recall" => self.recall(s("id")),
+            "current_time" => ok(crate::clock::describe(&crate::clock::now())),
             _ => fail(format!("There's no tool called {name}.")),
         }
     }

@@ -24,6 +24,7 @@
 mod agent;
 mod auth;
 mod chat;
+mod clock;
 mod compact;
 mod images;
 mod mcp;
