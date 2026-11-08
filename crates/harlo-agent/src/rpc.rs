@@ -109,6 +109,7 @@ impl Shared {
                 self.view.lock().unwrap().messages.push(m.clone());
                 self.emit(json!({ "type": "message_end", "message": m }));
             }
+            Shown::Withdrawn => self.emit(json!({ "type": "message_end", "message": { "role": "assistant", "content": [], "timestamp": crate::session::now_ms() } })),
             Shown::ToolStart { call_id, name, args } => self.emit(json!({ "type": "tool_execution_start", "toolCallId": call_id, "toolName": name, "args": args })),
             Shown::ToolEnd { call_id, name, text, failed } => self.emit(json!({
                 "type": "tool_execution_end", "toolCallId": call_id, "toolName": name,

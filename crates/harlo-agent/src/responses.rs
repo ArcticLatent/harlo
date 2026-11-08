@@ -267,8 +267,9 @@ pub async fn stream(base: &str, token: Option<&str>, affinity: Option<&str>, hea
     if let Some(session) = affinity {
         req = req.header("session-id", session).header("x-client-request-id", session);
     }
-    let resp = req.send().await.map_err(|e| anyhow!("Couldn't reach {base}: {e}"))?;
+    let resp = req.send().await.map_err(|e| Dropped(format!("Couldn't reach {base}: {e}")))?;
     let status = resp.status();
+    let retry_after = crate::retry::retry_after(resp.headers());
     // (Refused ones too: a used-up window says so.)
     let windows = limits(resp.headers());
     if !windows.is_empty() {
@@ -276,12 +277,13 @@ pub async fn stream(base: &str, token: Option<&str>, affinity: Option<&str>, hea
     }
     if !status.is_success() {
         let body: Value = resp.json().await.unwrap_or(Value::Null);
-        return Err(ApiError { status: status.as_u16(), message: refusal(status.as_u16(), &body) }.into());
+        let code = body["error"]["type"].as_str().or_else(|| body["error"]["code"].as_str()).unwrap_or_default().to_owned();
+        return Err(ApiError { status: status.as_u16(), message: refusal(status.as_u16(), &body), code, retry_after }.into());
     }
     let mut bytes = resp.bytes_stream();
     let mut buf: Vec<u8> = Vec::new();
     while let Some(chunk) = bytes.next().await {
-        buf.extend_from_slice(&chunk?);
+        buf.extend_from_slice(&chunk.map_err(|e| Dropped(format!("The connection broke during the reply: {e}")))?);
         // Events end with a blank line.
         while let Some(end) = find_event_end(&buf) {
             let raw: Vec<u8> = buf.drain(..end.1).collect();
@@ -306,17 +308,22 @@ pub async fn stream(base: &str, token: Option<&str>, affinity: Option<&str>, hea
                 }
                 "response.failed" => {
                     let err = &ev["response"]["error"];
-                    bail!("{}", explain(err["code"].as_str().unwrap_or_default(), err["message"].as_str().unwrap_or("the request failed")));
+                    let code = err["code"].as_str().unwrap_or_default();
+                    return Err(Failed { code: code.to_owned(), message: explain(code, err["message"].as_str().unwrap_or("the request failed")) }.into());
                 }
                 "response.incomplete" => {
                     bail!("The reply was cut off ({})", ev["response"]["incomplete_details"]["reason"].as_str().unwrap_or("no reason given"));
                 }
-                "error" => bail!("{}", explain(ev["code"].as_str().unwrap_or_default(), ev["message"].as_str().unwrap_or("the request failed"))),
+                "error" => {
+                    let code = ev["code"].as_str().or_else(|| ev["error"]["code"].as_str()).unwrap_or_default();
+                    let message = ev["message"].as_str().or_else(|| ev["error"]["message"].as_str()).unwrap_or("the request failed");
+                    return Err(Failed { code: code.to_owned(), message: explain(code, message) }.into());
+                }
                 _ => {}
             }
         }
     }
-    Err(anyhow!("The connection closed before the reply finished"))
+    Err(Dropped("The connection closed before the reply finished".into()).into())
 }
 
 fn index(ev: &Value) -> usize {
@@ -342,7 +349,38 @@ pub(crate) fn find_event_end(buf: &[u8]) -> Option<(usize, usize)> {
 pub struct ApiError {
     pub status: u16,
     pub message: String,
+    /// The error's type or code, as the body gave it (may be empty).
+    pub code: String,
+    /// Seconds the server asked to wait (`Retry-After`).
+    pub retry_after: Option<u64>,
 }
+
+/// The request didn't reach the server, or the reply's stream broke.
+#[derive(Debug)]
+pub struct Dropped(pub String);
+
+impl std::fmt::Display for Dropped {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Dropped {}
+
+/// The reply's stream ended with an error (`response.failed`, `error`).
+#[derive(Debug)]
+pub struct Failed {
+    pub code: String,
+    pub message: String,
+}
+
+impl std::fmt::Display for Failed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for Failed {}
 
 impl std::fmt::Display for ApiError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

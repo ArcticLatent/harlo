@@ -3,11 +3,11 @@
 //! pi's stream events and is kept as pi's assistant message, like the
 //! Responses API's.
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::Result;
 use futures_util::StreamExt as _;
 use serde_json::{Value, json};
 
-use crate::responses::{ApiError, client, find_event_end};
+use crate::responses::{ApiError, Dropped, Failed, client, find_event_end};
 
 /// A request's body.
 pub fn request(model: &str, instructions: &str, messages: &[Value], tools: &Value, effort: Option<&str>) -> Value {
@@ -257,13 +257,15 @@ pub async fn stream(base: &str, token: Option<&str>, body: &Value, provider: &st
     if let Some(t) = token {
         req = req.bearer_auth(t);
     }
-    let resp = req.send().await.map_err(|e| anyhow!("Couldn't reach {base}: {e}"))?;
+    let resp = req.send().await.map_err(|e| Dropped(format!("Couldn't reach {base}: {e}")))?;
     let status = resp.status();
+    let retry_after = crate::retry::retry_after(resp.headers());
     if !status.is_success() {
         let text = resp.text().await.unwrap_or_default();
         let body: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
         let said = body["error"]["message"].as_str().or_else(|| body["error"].as_str()).or_else(|| body["message"].as_str()).map(str::to_owned).unwrap_or_else(|| text.chars().take(300).collect());
-        return Err(ApiError { status: status.as_u16(), message: format!("{provider} refused the request ({status}): {said}") }.into());
+        let code = body["error"]["type"].as_str().or_else(|| body["error"]["code"].as_str()).unwrap_or_default().to_owned();
+        return Err(ApiError { status: status.as_u16(), message: format!("{provider} refused the request ({status}): {said}"), code, retry_after }.into());
     }
     let mut reply = Reply::default();
     let mut bytes = resp.bytes_stream();
@@ -271,7 +273,7 @@ pub async fn stream(base: &str, token: Option<&str>, body: &Value, provider: &st
     let mut events = Vec::new();
     let mut done = false;
     while !done && let Some(chunk) = bytes.next().await {
-        buf.extend_from_slice(&chunk?);
+        buf.extend_from_slice(&chunk.map_err(|e| Dropped(format!("The connection broke during the reply: {e}")))?);
         while let Some(end) = find_event_end(&buf) {
             let raw: Vec<u8> = buf.drain(..end.1).collect();
             let text = String::from_utf8_lossy(&raw[..end.0]);
@@ -283,7 +285,8 @@ pub async fn stream(base: &str, token: Option<&str>, body: &Value, provider: &st
             let Ok(chunk) = serde_json::from_str::<Value>(&data) else { continue };
             if chunk["error"].is_object() || chunk["error"].is_string() {
                 let e = &chunk["error"];
-                bail!("{provider}: {}", e["message"].as_str().or_else(|| e.as_str()).unwrap_or("the request failed"));
+                let code = e["type"].as_str().or_else(|| e["code"].as_str()).unwrap_or_default().to_owned();
+                return Err(Failed { code, message: format!("{provider}: {}", e["message"].as_str().or_else(|| e.as_str()).unwrap_or("the request failed")) }.into());
             }
             reply.take(&chunk, &mut events);
             for e in events.drain(..) {
@@ -292,7 +295,7 @@ pub async fn stream(base: &str, token: Option<&str>, body: &Value, provider: &st
         }
     }
     if !done && reply.finish.is_none() {
-        bail!("The connection closed before the reply finished");
+        return Err(Dropped("The connection closed before the reply finished".into()).into());
     }
     let content = reply.finish(&mut events);
     for e in events.drain(..) {

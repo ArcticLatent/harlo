@@ -29,6 +29,7 @@ mod images;
 mod mcp;
 mod providers;
 mod responses;
+mod retry;
 mod rpc;
 mod sandbox;
 mod session;
@@ -350,7 +351,7 @@ async fn ask(prompt: &str, images: &[serde_json::Value], model: Option<String>, 
                 line(&mut fresh);
                 eprintln!("\x1b[33m{text}\x1b[0m");
             }
-            agent::Shown::MessageStart(_) | agent::Shown::MessageEnd(_) | agent::Shown::Queue { .. } | agent::Shown::Limits(_) => {}
+            agent::Shown::MessageStart(_) | agent::Shown::MessageEnd(_) | agent::Shown::Withdrawn | agent::Shown::Queue { .. } | agent::Shown::Limits(_) => {}
         }
     };
     // Ctrl+C stops the turn; a second one quits at once.

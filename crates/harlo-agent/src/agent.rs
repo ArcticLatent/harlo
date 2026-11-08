@@ -22,7 +22,7 @@ use crate::tools::{self, Tools};
 use crate::{chat, compact, responses, stubs};
 
 /// Rounds of tool calls in one run, at most.
-const MAX_ROUNDS: usize = 200;
+pub const MAX_ROUNDS: usize = 200;
 
 /// Left in the history when the user stops a turn.
 const STOPPED_NOTE: &str = "<turn_stopped>The user stopped this turn. A call marked interrupted was stopped partway and may have partly run: check its effects before relying on them.</turn_stopped>";
@@ -50,6 +50,9 @@ pub enum Shown<'a> {
     Stream(&'a Value),
     /// A message, complete (the reply's final form).
     MessageEnd(&'a Value),
+    /// The reply that started streaming is dropped (it's sent again, or
+    /// it failed): it ends as nothing, and isn't kept.
+    Withdrawn,
     ToolStart { call_id: &'a str, name: &'a str, args: &'a Value },
     ToolEnd { call_id: &'a str, name: &'a str, text: &'a str, failed: bool },
     Usage { model: &'a str, usage: &'a Value },
@@ -368,7 +371,7 @@ impl Agent {
                 Ok(r) => r,
                 Err(e) if overflow < 2 && compact::overflowed(&e) => {
                     // (The reply it started shows as nothing.)
-                    show(Shown::MessageEnd(&json!({ "role": "assistant", "content": [], "timestamp": now_ms() })));
+                    show(Shown::Withdrawn);
                     // (All but the newest message's, for a context that's
                     // already too long.)
                     if overflow == 0 {
@@ -734,6 +737,7 @@ impl Agent {
 }
 
 /// A request: the session's model and settings, and the history to send.
+#[derive(Clone, Copy)]
 struct Asked<'a> {
     /// `provider/model`.
     model: &'a str,
@@ -751,8 +755,29 @@ struct Asked<'a> {
 }
 
 /// Sends a request: the reply, as pi's assistant message, and its usage.
-/// A token the plan refuses is refreshed once and the request sent again.
+/// One that failed for a passing reason (see `retry`) is sent again, the
+/// reply it had started dropped, with a notice.
 async fn send(a: Asked<'_>, show: &mut (dyn FnMut(Shown) + Send)) -> Result<(Value, Value)> {
+    let mut tried = 0;
+    loop {
+        let e = match send_once(a, show).await {
+            Ok(r) => return Ok(r),
+            Err(e) => e,
+        };
+        let Some((why, asked)) = crate::retry::transient(&e).filter(|_| tried < crate::retry::TRIES) else { return Err(e) };
+        tried += 1;
+        let wait = crate::retry::delay(tried, asked);
+        show(Shown::Withdrawn);
+        let secs = wait.as_secs_f64();
+        let when = if secs < 1.5 { "in a second".to_owned() } else { format!("in {} s", secs.round() as u64) };
+        show(Shown::Notice { level: "info", text: &format!("Retrying {when} ({why}: {e:#}).") });
+        tokio::time::sleep(wait).await;
+    }
+}
+
+/// One try. A token the plan refuses is refreshed once and the request
+/// sent again.
+async fn send_once(a: Asked<'_>, show: &mut (dyn FnMut(Shown) + Send)) -> Result<(Value, Value)> {
     let (provider, model) = providers::resolve(a.model)?;
     let pid = provider.id.clone();
     let api = if provider.api == Api::Chat { "openai-completions" } else { "openai-responses" };
