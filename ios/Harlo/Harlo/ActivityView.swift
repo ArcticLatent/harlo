@@ -60,33 +60,67 @@ struct ActivityView: View {
                 if !session.helpers.isEmpty {
                     Section {
                         ForEach(session.helpers) { h in
-                            Button {
-                                dismiss()
-                                model.openHelper(h.id)
-                            } label: {
-                                HStack(alignment: .top, spacing: 10) {
-                                    StatusDot(status: h.needsSomeone ? "input" : h.status == "running" ? "busy" : h.status == "completed" ? "idle" : "exited")
-                                        .padding(.top, 6)
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(h.name.isEmpty ? Style.harnessLabel(h.agent) : h.name).font(.system(size: 15, weight: .medium))
-                                        Text(h.summary.isEmpty ? Style.harnessLabel(h.agent) : h.summary)
-                                            .font(.system(size: 13.5))
-                                            .foregroundStyle(Color(p.muted))
-                                            .lineLimit(3)
+                            VStack(alignment: .leading, spacing: 6) {
+                                Button {
+                                    dismiss()
+                                    model.openHelper(h.id)
+                                } label: {
+                                    HStack(alignment: .top, spacing: 10) {
+                                        StatusDot(status: h.needsSomeone ? "input" : h.status == "running" ? "busy" : h.status == "completed" ? "idle" : "exited")
+                                            .padding(.top, 6)
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(h.name.isEmpty ? Style.harnessLabel(h.agent) : h.name).font(.system(size: 15, weight: .medium))
+                                            Text(h.summary.isEmpty ? Style.harnessLabel(h.agent) : h.summary)
+                                                .font(.system(size: 13.5))
+                                                .foregroundStyle(Color(p.muted))
+                                                .lineLimit(3)
+                                            // Its agent and model, and what it used.
+                                            Text(([Style.harnessLabel(h.agent), h.modelLabel, h.used?.label ?? ""].filter { !$0.isEmpty }).joined(separator: " · "))
+                                                .font(Style.mono(11))
+                                                .foregroundStyle(Color(p.muted))
+                                                .lineLimit(1)
+                                            if let ask = h.asks {
+                                                Text(ask.text)
+                                                    .font(.system(size: 13.5))
+                                                    .foregroundStyle(Color(p.warning))
+                                                    .lineLimit(4)
+                                            }
+                                        }
+                                        Spacer(minLength: 0)
+                                        Text(helperState(h.status))
+                                            .font(.system(size: 12))
+                                            .foregroundStyle(Color(h.needsSomeone ? p.warning : h.status == "failed" ? p.error : p.muted))
                                     }
-                                    Spacer(minLength: 0)
-                                    Text(helperState(h.status))
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(Color(h.needsSomeone ? p.warning : h.status == "failed" ? p.error : p.muted))
+                                    .contentShape(Rectangle())
                                 }
-                                .contentShape(Rectangle())
+                                .buttonStyle(.plain)
+                                .disabled(!model.sessions.contains { $0.key == h.id })
+                                // A tool's approval, answered right here.
+                                if let ask = h.asks, ask.approval, model.answersHelpers {
+                                    HStack(spacing: 8) {
+                                        ForEach(ask.options.isEmpty ? ["Approve", "Deny"] : ask.options, id: \.self) { o in
+                                            Button(o) {
+                                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                                Task { await model.answerHelper(h, value: o) }
+                                            }
+                                            .buttonStyle(.bordered)
+                                            .tint(o == "Deny" ? Color(p.error) : Color(p.primary))
+                                            .controlSize(.small)
+                                        }
+                                    }
+                                    .padding(.leading, 20)
+                                }
                             }
-                            .buttonStyle(.plain)
-                            .disabled(!model.sessions.contains { $0.key == h.id })
                             .listRowBackground(Color(p.elevated))
                         }
                     } header: {
-                        Text("Helpers").font(Style.mono(11.5, .semibold)).foregroundStyle(Color(p.muted)).textCase(nil)
+                        HStack {
+                            Text("Helpers")
+                            Spacer()
+                            // All of them together.
+                            Text(Helper.Used.total(session.helpers.map(\.used)).label)
+                        }
+                        .font(Style.mono(11.5, .semibold)).foregroundStyle(Color(p.muted)).textCase(nil)
                     } footer: {
                         Text("Sessions this one started in harlo. Tap one to open it.")
                     }

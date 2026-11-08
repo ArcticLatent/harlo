@@ -312,7 +312,7 @@ fn event(key: &str, u: &SessionUpdate) -> Option<Value> {
 /// (sessions say their machine), `settled` (settled sessions, for a phone
 /// that says it shows them), `limits` (plan limits: the `limits` call and
 /// event), `compaction` (a session's meta says where it compacts).
-const FEATURES: &[&str] = &["serverStart", "machines", "settled", "limits", "compaction", "connect", "modelServers", "putBack", "stoppedModels", "plan", "diagrams", "planRun", "helpers"];
+const FEATURES: &[&str] = &["serverStart", "machines", "settled", "limits", "compaction", "connect", "modelServers", "putBack", "stoppedModels", "plan", "diagrams", "planRun", "helpers", "answerHelper", "team"];
 
 /// The session list for one phone: settled sessions only for one that
 /// shows them.
@@ -971,7 +971,7 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
                         Value::Null
                     }
                     "projects" | "limitOf" | "resumeAtReset" | "cancelResume" | "modes" | "setModes" | "rename" | "archive" | "pin" | "putBack" | "reviewStep" | "specs" | "theme" | "setAvatar" => crate::phone_bridge::call(msg.clone()).await,
-                    "plan" | "planEdit" | "planRun" | "planStop" | "helpers" => {
+                    "plan" | "planEdit" | "planRun" | "planStop" | "helpers" | "answerHelper" => {
                         wants_plans = true;
                         crate::phone_bridge::call(msg.clone()).await
                     }

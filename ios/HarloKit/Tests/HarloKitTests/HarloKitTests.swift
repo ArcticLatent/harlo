@@ -791,6 +791,53 @@ final class PlanTests: XCTestCase {
         XCTAssertEqual(SessionSummary(["key": "live:1"]).nest, 0)
     }
 
+    func testHelperModelUseAndRequest() {
+        let v = try! JSON.parse(#"""
+        { "id": "live:7", "openKey": "live:7", "name": "Step 2: Two", "agent": "harlo", "status": "waiting", "step": 2, "review": null,
+          "model": "codex/gpt-6.1-sol", "used": { "tokens": 12400, "cost": 0.031, "requests": 3 },
+          "asks": { "id": "r1", "approval": true, "options": ["Approve", "Deny"], "text": "Run cargo test?" } }
+        """#)
+        let h = Helper(v)
+        XCTAssertEqual(h.modelLabel, "gpt-6.1-sol")
+        XCTAssertEqual(h.used?.label, "12.4k tokens · $0.03")
+        XCTAssertEqual(h.asks?.id, "r1")
+        XCTAssertEqual(h.asks?.options, ["Approve", "Deny"])
+        XCTAssertTrue(h.asks?.approval == true)
+        XCTAssertNil(h.reviews)
+        let reviewer = Helper(["id": "live:8", "status": "running", "review": 2, "asks": nil])
+        XCTAssertEqual(reviewer.reviews, 2)
+        XCTAssertNil(reviewer.asks)
+        XCTAssertNil(reviewer.used)
+        XCTAssertEqual(reviewer.modelLabel, "")
+        let total = Helper.Used.total([h.used, nil, Helper.Used(tokens: 600, cost: 0.005, requests: 1)])
+        XCTAssertEqual(total.label, "13.0k tokens · $0.04")
+        XCTAssertEqual(Helper.Used(cost: 0.004).label, "<$0.01")
+        XCTAssertEqual(Helper.Used().label, "")
+    }
+
+    func testPlanTeamAndReviews() {
+        let v = try! JSON.parse(#"""
+        { "enabled": true, "reviewers": [{ "id": "harlo", "label": "Harlo" }],
+          "team": { "agent": "harlo", "agentName": "Harlo", "model": "codex/gpt-6.1-sol", "team": true,
+                    "reviewer": { "agent": "claude", "agentName": "Claude Code", "model": "claude-opus-5-5" } },
+          "run": { "agent": "harlo", "agentName": "Harlo", "paused": "", "review": true, "reviewing": { "2": "live:9" } },
+          "steps": [{ "id": 1, "title": "One", "status": "done" },
+                    { "id": 2, "title": "Two", "status": "active", "helper": "live:5" },
+                    { "id": 3, "title": "Three", "agent": "claude", "model": "claude-sonnet-5-5" }] }
+        """#)
+        let plan = Plan(v)
+        XCTAssertEqual(plan.team?.label, "Harlo · gpt-6.1-sol, reviewed by Claude Code · claude-opus-5-5")
+        XCTAssertTrue(plan.team?.custom == true)
+        XCTAssertEqual(plan.run?.reviewing[2], "live:9")
+        XCTAssertEqual(plan.steps[2].agent, "claude")
+        XCTAssertEqual(plan.steps[2].model, "claude-sonnet-5-5")
+        // The session's own agent, without a Team.
+        let own = Plan(try! JSON.parse(#"{ "team": { "agent": "claude", "agentName": "Claude Code", "model": "", "team": false } }"#))
+        XCTAssertEqual(own.team?.label, "Claude Code")
+        XCTAssertFalse(own.team?.custom == true)
+        XCTAssertNil(Plan(try! JSON.parse(#"{ "team": {} }"#)).team)
+    }
+
     func testHelpersFoldUnderTheirSession() {
         let list = SessionSummary.list([
             ["key": "a", "status": "idle"],

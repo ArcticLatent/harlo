@@ -5629,6 +5629,23 @@ impl Workspace {
             // A session's helpers (the sessions its agent, or its plan's run,
             // started), as its Subagents box shows them.
             "helpers" => json!({ "helpers": serde_json::from_str::<serde_json::Value>(&self.orchestrated_json(&QString::from(&key)).to_string()).unwrap_or_default() }),
+            // A helper's request (a tool's approval) answered from the
+            // phone, as from the Subagents box: the helpers after it.
+            "answerHelper" => {
+                let helper = text("helper");
+                if !self.orchestrated(&key, &helper) {
+                    return fail("That isn't one of this session's helpers.");
+                }
+                let id = text("id");
+                self.as_mut().answer_helper(&QString::from(&helper), &QString::from(&id), &QString::from(&text("value")));
+                // (Without the request just answered: it's gone once the
+                // helper hears.)
+                let mut list: serde_json::Value = serde_json::from_str(&self.orchestrated_json(&QString::from(&key)).to_string()).unwrap_or_default();
+                for h in list.as_array_mut().into_iter().flatten().filter(|h| h["id"] == helper.as_str() && h["asks"]["id"] == id.as_str()) {
+                    h["asks"] = serde_json::Value::Null;
+                }
+                json!({ "helpers": list })
+            }
             "plan" | "planEdit" | "planRun" | "planStop" => {
                 if msg["op"] == "planEdit" {
                     self.as_mut().plan_edit(&QString::from(&key), &QString::from(&msg["edit"].to_string()));
@@ -5644,6 +5661,9 @@ impl Workspace {
                 }
                 let mut plan: serde_json::Value = serde_json::from_str(&self.plan_json(&QString::from(&key)).to_string()).unwrap_or_default();
                 plan["reviewers"] = HarnessKind::PROVIDERS.iter().filter(|&&k| self.usable_harness(k)).map(|k| json!({ "id": k.as_str(), "label": k.label() })).collect();
+                // Who "the team's helpers" are (its project's Team, else the
+                // session's agent).
+                plan["team"] = serde_json::from_str(&self.helpers_json(&QString::from(&key)).to_string()).unwrap_or_default();
                 plan
             }
             "reviewStep" => {
@@ -7248,6 +7268,11 @@ impl Workspace {
             live.handle.answer_ui(&request_id.to_string(), json!({ "value": value.to_string() }));
         }
         self.as_mut().bump_orchestration();
+    }
+
+    /// Whether `helper` is a helper `parent` started (or its plan's run).
+    fn orchestrated(&self, parent: &str, helper: &str) -> bool {
+        self.orch_children.get(helper).is_some_and(|c| c.parent == parent)
     }
 
     pub fn orchestrated_json(&self, key: &QString) -> QString {

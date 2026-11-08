@@ -768,12 +768,16 @@ public final class HarloModel {
     /// harlo runs plans with helpers, and lists a session's helpers.
     public var runsPlans: Bool { demo || samples != nil || features.contains("planRun") }
 
-    /// Runs the open session's plan with helpers of an agent, or goes on
-    /// with a paused run.
+    /// Runs the open session's plan with helpers of an agent ("" the
+    /// team's), or goes on with a paused run.
     public func runPlan(agent: String) async {
         guard let s = session else { return }
         if demo || samples != nil {
-            if var plan = s.plan { plan.run = PlanRun(agent: agent, agentName: plan.reviewers.first { $0.id == agent }?.label ?? agent); s.plan = plan }
+            if var plan = s.plan {
+                let id = agent.isEmpty ? plan.team?.agent ?? s.harness : agent
+                plan.run = PlanRun(agent: id, agentName: plan.reviewers.first { $0.id == id }?.label ?? id)
+                s.plan = plan
+            }
             return
         }
         if let plan = await with({ c, k in try await c.runPlan(k, agent: agent) }) { s.plan = plan }
@@ -792,6 +796,25 @@ public final class HarloModel {
               let list = try? await c.helpers(s.liveKey), session === s, list != s.helpers else { return }
         s.helpers = list
     }
+
+    /// Answers a helper's request (a tool's approval) with one of its
+    /// options: Approve, Deny, …
+    public func answerHelper(_ h: Helper, value: String) async {
+        guard let s = session, let ask = h.asks else { return }
+        if demo || samples != nil {
+            if let i = s.helpers.firstIndex(where: { $0.id == h.id }) {
+                s.helpers[i].asks = nil
+                s.helpers[i].status = "running"
+            }
+            return
+        }
+        if let list = await with({ c, k in try await c.answerHelper(k, helper: h.id, request: ask.id, value: value) }), session === s {
+            s.helpers = list
+        }
+    }
+
+    /// harlo answers a helper's requests from the phone.
+    public var answersHelpers: Bool { demo || samples != nil || features.contains("answerHelper") }
 
     /// Opens a helper's session (false: it isn't in the list).
     @discardableResult

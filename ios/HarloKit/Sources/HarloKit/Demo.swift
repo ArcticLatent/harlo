@@ -172,6 +172,7 @@ extension HarloModel {
         ])
         plan.commits = true
         plan.reviewers = [Agent(id: "claude", label: "Claude"), Agent(id: "harlo", label: "Harlo")]
+        plan.team = Plan.Team(agent: "harlo", agentName: "Harlo", model: "codex/gpt-6.1-sol", custom: true, reviewerName: "Claude", reviewerModel: "claude-opus-5-5")
         return plan
     }
 }

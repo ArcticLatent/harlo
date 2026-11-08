@@ -125,10 +125,24 @@ struct PlanSheet: View {
             }
             if plan.canRun && !plan.reviewers.isEmpty {
                 Menu {
-                    ForEach(plan.helperAgents(for: session.harness)) { a in
-                        Button(a.id == session.harness ? "\(a.label) (this session's)" : a.label) {
-                            UISelectionFeedbackGenerator().selectionChanged()
-                            Task { await model.runPlan(agent: a.id) }
+                    // The project's Team (its agent and model, and who
+                    // reviews), or another agent for this run.
+                    if let team = plan.team {
+                        Section(team.custom ? "The project's team" : "This session's agent") {
+                            Button {
+                                UISelectionFeedbackGenerator().selectionChanged()
+                                Task { await model.runPlan(agent: "") }
+                            } label: {
+                                Label(team.label, systemImage: "person.2")
+                            }
+                        }
+                    }
+                    Section(plan.team == nil ? "" : "Or this run's helpers") {
+                        ForEach(plan.helperAgents(for: session.harness)) { a in
+                            Button(a.id == session.harness ? "\(a.label) (this session's)" : a.label) {
+                                UISelectionFeedbackGenerator().selectionChanged()
+                                Task { await model.runPlan(agent: a.id) }
+                            }
                         }
                     }
                 } label: {
@@ -216,8 +230,20 @@ struct PlanSheet: View {
                         .font(.system(size: 12))
                         .foregroundStyle(Color(p.info))
                 }
-                if !step.helper.isEmpty {
+                if plan.run?.reviewing[step.id] != nil {
+                    Label("Done, being reviewed", systemImage: "checkmark.seal")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color(p.info))
+                        .lineLimit(1)
+                } else if !step.helper.isEmpty {
                     Label((step.status == "active" ? "A helper is on it" : "Done by a helper") + (step.branch.isEmpty ? "" : " · \(step.branch)"), systemImage: "person.2")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color(p.muted))
+                        .lineLimit(1)
+                }
+                // Its own helper (chosen on the desktop's plan card).
+                if !step.agent.isEmpty, step.open {
+                    Label("Done by \(Style.harnessLabel(step.agent))" + (step.model.isEmpty ? "" : " · \(step.model.split(separator: "/").last ?? "")"), systemImage: "person.crop.circle")
                         .font(.system(size: 12))
                         .foregroundStyle(Color(p.muted))
                         .lineLimit(1)
@@ -252,7 +278,9 @@ struct PlanSheet: View {
                 Button { editing = StepDraft(step: step.id, title: step.title, detail: step.detail) } label: { Label("Change it", systemImage: "pencil") }
                 Button { editing = StepDraft(after: step.id) } label: { Label("Add a step after it", systemImage: "plus") }
             }
-            if !step.helper.isEmpty, step.status == "active", model.sessions.contains(where: { $0.key == step.helper }) {
+            if let reviewer = plan.run?.reviewing[step.id], model.sessions.contains(where: { $0.key == reviewer }) {
+                Button { dismiss(); model.openHelper(reviewer) } label: { Label("Open its review", systemImage: "checkmark.seal") }
+            } else if !step.helper.isEmpty, step.status == "active", model.sessions.contains(where: { $0.key == step.helper }) {
                 Button { dismiss(); model.openHelper(step.helper) } label: { Label("Open its helper", systemImage: "arrow.up.forward.app") }
             }
             if index > 0 && step.status == "pending" && model.runsPlans {

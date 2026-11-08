@@ -21,6 +21,10 @@ public struct PlanStep: Equatable, Sendable, Identifiable {
     public var helper: String
     /// The worktree branch it's done on (a step run alongside), "" none.
     public var branch: String
+    /// The agent (and model) that does it in a run with helpers, "" the
+    /// run's.
+    public var agent: String
+    public var model: String
 
     public init(_ v: JSON) {
         id = v["id"].int ?? -1
@@ -34,6 +38,8 @@ public struct PlanStep: Equatable, Sendable, Identifiable {
         alongside = v["alongside"].bool ?? false
         helper = v["helper"].text
         branch = v["branch"].text
+        agent = v["agent"].text
+        model = v["model"].text
     }
 
     /// It's still to do (it can be changed, or a step added after it).
@@ -48,11 +54,16 @@ public struct PlanRun: Equatable, Sendable {
     public var agentName: String
     /// Why it stopped and waits for you ("" it's running).
     public var paused: String
+    /// Steps being reviewed: the session reviewing each.
+    public var reviewing: [Int64: String] = [:]
 
     public init(_ v: JSON) {
         agent = v["agent"].text
         agentName = v["agentName"].text
         paused = v["paused"].text
+        for (id, key) in v["reviewing"].object ?? [:] {
+            if let id = Int64(id) { reviewing[id] = key.text }
+        }
     }
 
     public init(agent: String, agentName: String, paused: String = "") {
@@ -74,6 +85,38 @@ public struct Plan: Equatable, Sendable {
     public var reviewers: [Agent]
     /// Its run with helpers (nil: none).
     public var run: PlanRun?
+    /// Who "the team's helpers" are: its project's Team, else the
+    /// session's agent (nil: harlo doesn't say).
+    public var team: Team?
+
+    /// A project's helpers (harlo's Settings → Projects → Team).
+    public struct Team: Equatable, Sendable {
+        public var agent: String
+        public var agentName: String
+        /// Its model's id ("" the agent's default).
+        public var model: String
+        /// Set in the project's Team (not just the session's agent).
+        public var custom: Bool
+        /// Who reviews each step ("" the helpers' agent), and its model.
+        public var reviewerName: String
+        public var reviewerModel: String
+
+        public init(agent: String, agentName: String, model: String = "", custom: Bool = false, reviewerName: String = "", reviewerModel: String = "") {
+            self.agent = agent
+            self.agentName = agentName
+            self.model = model
+            self.custom = custom
+            self.reviewerName = reviewerName
+            self.reviewerModel = reviewerModel
+        }
+
+        /// "Claude Code · sonnet-5.5, reviewed by Harlo · gpt-6.1-sol"
+        public var label: String {
+            func short(_ m: String) -> String { m.split(separator: "/").last.map { " · " + $0 } ?? "" }
+            let who = agentName + short(model)
+            return reviewerName.isEmpty ? who : "\(who), reviewed by \(reviewerName)\(short(reviewerModel))"
+        }
+    }
 
     public init(_ v: JSON) {
         enabled = v["enabled"].bool ?? false
@@ -81,6 +124,10 @@ public struct Plan: Equatable, Sendable {
         steps = (v["steps"].array ?? []).map(PlanStep.init)
         reviewers = (v["reviewers"].array ?? []).map { Agent(id: $0["id"].text, label: $0["label"].text) }
         run = v["run"].object == nil ? nil : PlanRun(v["run"])
+        let t = v["team"]
+        team = t["agent"].text.isEmpty ? nil : Team(agent: t["agent"].text, agentName: t["agentName"].text, model: t["model"].text,
+                                                    custom: t["team"].bool ?? false, reviewerName: t["reviewer"]["agentName"].text,
+                                                    reviewerModel: t["reviewer"]["model"].text)
     }
 
     public init(steps: [PlanStep] = [], enabled: Bool = true) {

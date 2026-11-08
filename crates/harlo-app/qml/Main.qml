@@ -5747,6 +5747,7 @@ ApplicationWindow {
         return (TestInput.readFile(win.selftestDir + "/model-log.jsonl") || "").split("\n").filter(l => l !== "").map(l => JSON.parse(l).body)
     }
     property string harloKey: ""
+    property string approvedHelper: ""
 
     // Harlo's question card, a side question (/btw), a background job whose
     // end starts a run by itself, and a destructive command asking in yolo.
@@ -6142,9 +6143,32 @@ ApplicationWindow {
         PauseAnimation { duration: 300 }
         ScriptAction { script: win.waitUntil(planReviewSteps, () => (JSON.parse(Workspace.planJson(win.harloKey)).steps || []).length === 1 && chat.session.status === "idle", 15000) }
         PauseAnimation { duration: 600 }
-        ScriptAction { script: win.clickItem(win.findName("planRun"), "Run with helpers") }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: win.clickItem(win.findName("planRunTeam"), "Helpers: as this session") }
+        // This run from the phone, with the team's helpers; its helper asks
+        // before writing (the session asks first: its helpers start so),
+        // and the phone approves.
+        ScriptAction { script: {
+            const call = m => JSON.parse(Workspace.phoneTestCall(JSON.stringify(m)))
+            const plan = call({ op: "plan", key: win.harloKey })
+            win.check(plan.team && plan.team.agent === "harlo" && plan.team.team === true && plan.team.reviewer && plan.team.reviewer.model === "fake/fake-helper",
+                      "the phone's plan says who the team's helpers are (" + JSON.stringify(plan.team) + ")")
+            Workspace.setApprovalMode(win.harloKey, "always-ask")
+            const run = call({ op: "planRun", key: win.harloKey, agent: "" })
+            win.check(run.run && run.run.agent === "harlo" && !run.error, "the phone runs it with the team's helpers (" + JSON.stringify(run.run || run) + ")") } }
+        ScriptAction { script: win.waitUntil(planReviewSteps, () => JSON.parse(Workspace.phoneTestCall(JSON.stringify({ op: "helpers", key: win.harloKey }))).helpers.some(h => h.asks && h.asks.approval), 30000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const call = m => JSON.parse(Workspace.phoneTestCall(JSON.stringify(m)))
+            const h = call({ op: "helpers", key: win.harloKey }).helpers.find(h => h.asks && h.asks.approval)
+            win.check(h.step === 1 && h.model === "fake/fake-coder" && h.asks.options.indexOf("Approve") >= 0, "the phone sees the helper's model and its request (" + JSON.stringify([h.model, h.asks]) + ")")
+            win.check(!!call({ op: "answerHelper", key: win.harloKey, helper: "live:none", id: h.asks.id, value: "Approve" }).error, "a session that isn't its helper can't be answered")
+            const after = call({ op: "answerHelper", key: win.harloKey, helper: h.id, id: h.asks.id, value: "Approve" })
+            win.check(Array.isArray(after.helpers) && !after.helpers.some(x => x.id === h.id && x.asks && x.asks.id === h.asks.id), "the phone approves it (" + JSON.stringify((after.helpers || []).map(x => x.asks)) + ")")
+            win.approvedHelper = h.id
+            Workspace.setApprovalMode(win.harloKey, "yolo") } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            const h = JSON.parse(Workspace.phoneTestCall(JSON.stringify({ op: "helpers", key: win.harloKey }))).helpers.find(x => x.id === win.approvedHelper)
+            win.check(h && !h.asks && h.status !== "waiting", "the helper went on (" + (h ? h.status : "gone") + ")") } }
         ScriptAction { script: win.waitUntil(planReviewSteps, () => { const r = JSON.parse(Workspace.planJson(win.harloKey)).run; return !!r && (r.paused || "") !== "" }, 60000) }
         PauseAnimation { duration: 600 }
         ScriptAction { script: {

@@ -288,6 +288,12 @@ public actor HarloClient {
         (try check(await call("helpers", ["key": .string(key)]))["helpers"].array ?? []).map(Helper.init)
     }
 
+    /// Answers a helper's request (a tool's approval: Approve, Deny, …):
+    /// the session's helpers after it.
+    public func answerHelper(_ key: String, helper: String, request: String, value: String) async throws -> [Helper] {
+        (try check(await call("answerHelper", ["key": .string(key), "helper": .string(helper), "id": .string(request), "value": .string(value)]))["helpers"].array ?? []).map(Helper.init)
+    }
+
     /// Has another agent review a finished step's commit (its review comes
     /// back to the session).
     public func reviewStep(_ key: String, step: Int64, agent: String) async throws {

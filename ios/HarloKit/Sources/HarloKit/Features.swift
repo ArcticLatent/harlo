@@ -484,6 +484,66 @@ public struct Helper: Equatable, Sendable, Identifiable {
     public var summary: String
     /// The plan step it does (a run with helpers), nil none.
     public var step: Int64?
+    /// The plan step it reviews (a run's review of a step), nil none.
+    public var reviews: Int64?
+    /// Its model's id ("" not known).
+    public var model: String
+    /// What it used so far (nil: not known).
+    public var used: Used?
+    /// What it waits for you to answer (the oldest), nil nothing.
+    public var asks: Ask?
+
+    /// Tokens and cost a helper used.
+    public struct Used: Equatable, Sendable {
+        public var tokens: Int64
+        public var cost: Double
+        public var requests: Int64
+
+        public init(tokens: Int64 = 0, cost: Double = 0, requests: Int64 = 0) {
+            self.tokens = tokens
+            self.cost = cost
+            self.requests = requests
+        }
+
+        /// "12.4k tokens · $0.03", "$0.12", "" nothing.
+        public var label: String {
+            var parts: [String] = []
+            if tokens > 0 { parts.append("\(Used.tokens(tokens)) tokens") }
+            if cost > 0 { parts.append(Used.cost(cost)) }
+            return parts.joined(separator: " · ")
+        }
+
+        static func tokens(_ n: Int64) -> String {
+            if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
+            if n >= 1000 { return String(format: "%.1fk", Double(n) / 1000) }
+            return "\(n)"
+        }
+
+        static func cost(_ c: Double) -> String {
+            c < 0.01 ? "<$0.01" : String(format: "$%.2f", c)
+        }
+
+        /// Several helpers' together.
+        public static func total(_ list: [Used?]) -> Used {
+            list.compactMap { $0 }.reduce(Used()) { Used(tokens: $0.tokens + $1.tokens, cost: $0.cost + $1.cost, requests: $0.requests + $1.requests) }
+        }
+    }
+
+    /// A helper's request for you: a tool's approval is answered right
+    /// here (Approve, Deny, …); anything else in its session.
+    public struct Ask: Equatable, Sendable {
+        public var id: String
+        public var text: String
+        public var approval: Bool
+        public var options: [String]
+
+        public init(id: String, text: String, approval: Bool, options: [String]) {
+            self.id = id
+            self.text = text
+            self.approval = approval
+            self.options = options
+        }
+    }
 
     public init(_ v: JSON) {
         id = v["openKey"].string ?? v["id"].text
@@ -492,7 +552,30 @@ public struct Helper: Equatable, Sendable, Identifiable {
         status = v["status"].text
         summary = v["description"].text
         step = v["step"].int
+        reviews = v["review"].int
+        model = v["model"].text
+        let u = v["used"]
+        used = u.object == nil ? nil : Used(tokens: u["tokens"].int ?? 0, cost: u["cost"].double ?? 0, requests: u["requests"].int ?? 0)
+        let a = v["asks"]
+        asks = a.object == nil ? nil : Ask(id: a["id"].text, text: a["text"].text, approval: a["approval"].bool ?? false,
+                                         options: (a["options"].array ?? []).map(\.text))
     }
+
+    public init(id: String, name: String, agent: String, status: String, summary: String = "", step: Int64? = nil,
+                model: String = "", used: Used? = nil, asks: Ask? = nil) {
+        self.id = id
+        self.name = name
+        self.agent = agent
+        self.status = status
+        self.summary = summary
+        self.step = step
+        self.model = model
+        self.used = used
+        self.asks = asks
+    }
+
+    /// Its model, short ("gpt-6.1-sol" of "codex/gpt-6.1-sol"); "" none.
+    public var modelLabel: String { model.split(separator: "/").last.map(String.init) ?? "" }
 
     /// It waits on its parent or on you.
     public var needsSomeone: Bool { status == "asking" || status == "waiting" }
