@@ -51,6 +51,7 @@ mod session;
 mod skills;
 mod stubs;
 mod task;
+mod todo;
 mod tools;
 mod usage;
 

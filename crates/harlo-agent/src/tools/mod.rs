@@ -106,7 +106,8 @@ fn fail(text: impl Into<String>) -> Outcome {
 /// Tools that only look: several run at once.
 pub fn read_only(name: &str) -> bool {
     // (`jobs` touches only this session's own background commands.)
-    matches!(name, "read" | "grep" | "find" | "ls" | "recall" | "current_time" | "jobs")
+    // (`todo` only keeps the model's own list.)
+    matches!(name, "read" | "grep" | "find" | "ls" | "recall" | "current_time" | "jobs" | "todo")
 }
 
 /// The tools' definitions for the Responses API: those in `only` (all
@@ -118,6 +119,10 @@ pub fn specs_of(only: Option<&[&str]>, task: Option<&[crate::profiles::Profile]>
         for t in all.iter_mut().filter(|t| t["name"] == "edit") {
             *t = crate::hashline::spec();
         }
+    }
+    // (The model's list of steps, when it's being measured.)
+    if crate::todo::on() {
+        all.push(crate::todo::spec());
     }
     // (No network in the sandbox: nothing to fetch.)
     if !crate::fetch::possible() {
@@ -354,6 +359,7 @@ impl Tools {
             "ls" => self.ls(s("path")),
             "recall" => self.recall(s("id")),
             "fetch" => crate::fetch::run(s("url"), &self.spill_dir).await,
+            "todo" => crate::todo::run(args),
             "jobs" => {
                 let (text, failed) = self.jobs.call(args).await;
                 Outcome::new(text, failed)

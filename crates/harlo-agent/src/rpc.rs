@@ -539,6 +539,7 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
                 "steeringMode": "all",
                 "followUpMode": "one-at-a-time",
                 "autoCompactionEnabled": false,
+                "todoPhases": crate::todo::phases(&v.messages),
             });
             drop((v, inbox));
             reply(Ok(state))
