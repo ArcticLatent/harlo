@@ -3040,7 +3040,7 @@ impl Workspace {
                 }
                 for wt in list {
                     if !wt.is_main && !wt.prunable {
-                        found.push(WorktreeRecord { path: wt.path, project_id: id, branch: wt.branch, base: String::new(), removed: false });
+                        found.push(WorktreeRecord { path: wt.path, project_id: id, branch: wt.branch, base: String::new(), base_commit: String::new(), removed: false });
                     }
                 }
             }
@@ -3239,12 +3239,14 @@ impl Workspace {
                 // that isn't in a worktree): the branch checked out now.
                 let bs = if bs.trim().is_empty() { git::head_branch(&root) } else { bs };
                 git::create_worktree(&root, &path, &b, &bs)?;
+                // (Where it starts: what bring_over takes its changes from.)
+                let start = git::output_in(&path, &["rev-parse", "--verify", "-q", "HEAD"]).trim().to_owned();
                 // git reports canonical paths; match them.
-                Ok::<_, anyhow::Error>((if host.is_some() { path } else { path.canonicalize().unwrap_or(path) }, bs))
+                Ok::<_, anyhow::Error>((if host.is_some() { path } else { path.canonicalize().unwrap_or(path) }, bs, start))
             },
             move |mut this, result| match result {
-                Ok((path, base)) => {
-                    let rec = WorktreeRecord { path: path.clone(), project_id: project.id, branch: branch.clone(), base, removed: false };
+                Ok((path, base, base_commit)) => {
+                    let rec = WorktreeRecord { path: path.clone(), project_id: project.id, branch: branch.clone(), base, base_commit, removed: false };
                     if let Some(db) = this.db() {
                         let _ = db.upsert_worktree(&rec);
                     }
@@ -6340,6 +6342,22 @@ impl Workspace {
                 let title = if !e.info.name.is_empty() { e.info.name.clone() } else { e.info.first_message.chars().take(80).collect() };
                 Ok(json!({ "session": key, "title": title, "agent": e.info.harness, "status": if e.info.needs_input { "waiting for input" } else { e.info.status.as_str() } }))
             }
+            "bring_over" => {
+                let key = session(&self)?;
+                let me = caller.clone().unwrap_or_default();
+                if self.orch_children.get(&key).is_none_or(|c| c.parent != me) {
+                    return Err(format!("{key} isn't your helper: you can bring over only what a helper you started did."));
+                }
+                let (Some(helper), Some(here)) = (self.live.get(&key).map(|e| e.info.cwd.clone()), caller_cwd.clone()) else {
+                    return Err("Its folder or yours isn't known.".into());
+                };
+                // Its worktree: where it started.
+                let tree = self.worktrees.iter().filter(|w| helper.starts_with(&w.path)).max_by_key(|w| w.path.components().count());
+                let Some(tree) = tree else {
+                    return Err("That helper doesn't work in a worktree harlo made: its changes are in its folder already.".into());
+                };
+                Ok(json!({ "_defer": true, "helper": tree.path.to_string_lossy(), "here": here.to_string_lossy(), "start": tree.base_commit, "base": tree.base }))
+            }
             "stop_session" => {
                 let key = session(&self)?;
                 self.stop_session(&QString::from(&key));
@@ -6553,6 +6571,8 @@ impl Workspace {
         let tree = cwd.as_ref().and_then(|cwd| {
             self.worktrees.iter().filter(|w| !w.removed && !w.base.is_empty() && cwd.starts_with(&w.path) && !harlo_core::remote::is_remote(&w.path)).max_by_key(|w| w.path.components().count()).map(|w| (w.path.clone(), w.branch.clone(), w.base.clone()))
         });
+        // (In any worktree: how its work comes over.)
+        let in_tree = cwd.as_ref().and_then(|cwd| self.worktrees.iter().filter(|w| !w.removed && cwd.starts_with(&w.path)).max_by_key(|w| w.path.components().count()).map(|w| w.branch.clone()));
         // What it used: from its file when its agent is Harlo (and
         // its subagents' beside it), else its cost as it said.
         let model = self.live.get(key).map(|e| e.model_id.clone()).unwrap_or_default();
@@ -6570,6 +6590,9 @@ impl Workspace {
             if let Some((path, branch, base)) = tree {
                 let behind = harlo_core::git::commits_behind(&path, &base).unwrap_or(0);
                 message.push_str(&harlo_core::orchestration::drift_note(&branch, &base, behind));
+            }
+            if let Some(branch) = in_tree {
+                message.push_str(&harlo_core::orchestration::bring_over_note(&branch, &key));
             }
             let _ = parent.handle.prompt(&message, Vec::new(), mode);
         });

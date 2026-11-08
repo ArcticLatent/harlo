@@ -1396,6 +1396,76 @@ pub fn merge_branch(main: &Path, branch: &str) -> Result<String> {
     bail!("Merging {branch} hit conflicts, so it was aborted.\n{}", detail.trim());
 }
 
+/// What [`bring_over`] did with a helper's work.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct Brought {
+    /// Files changed here, as the helper changed them.
+    pub applied: Vec<String>,
+    /// Files whose changes don't fit what's here now (left alone).
+    pub clashed: Vec<String>,
+}
+
+/// Brings a helper's work in its worktree (`helper`: its commits and its
+/// uncommitted and untracked files) over to the checkout at `here`, as
+/// uncommitted changes: what changed since the worktree started
+/// (`start`, else where it left `base`, else where it left `here`).
+/// Files whose changes don't apply cleanly are left alone and named.
+/// Nothing is staged or committed, in either.
+pub fn bring_over(helper: &Path, here: &Path, start: &str, base: &str) -> Result<Brought> {
+    let from = repo_root(helper).context("the helper's folder isn't in a git repository")?;
+    let to = repo_root(here).context("your folder isn't in a git repository")?;
+    let common = |d: &Path| output_in(d, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).trim().to_owned();
+    if from == to {
+        bail!("the helper works in your folder: its changes are already there");
+    }
+    if common(&from) != common(&to) {
+        bail!("the helper's worktree isn't of your repository");
+    }
+    let commit = |r: &str| (!r.is_empty()).then(|| output_in(&from, &["rev-parse", "--verify", "-q", &format!("{r}^{{commit}}")]).trim().to_owned()).filter(|c| !c.is_empty());
+    let fork = |other: &str| (!other.is_empty()).then(|| output_in(&from, &["merge-base", "HEAD", other]).trim().to_owned()).filter(|c| !c.is_empty());
+    let here_head = output_in(&to, &["rev-parse", "--verify", "-q", "HEAD"]).trim().to_owned();
+    let start = commit(start).or_else(|| fork(base)).or_else(|| fork(&here_head)).context("where the helper's worktree started isn't known")?;
+    let (tree, _) = worktree_tree(&from)?;
+    let mut cmd = git(&from);
+    cmd.args(["diff", "--binary", "--full-index", "--no-renames", &start, &tree]);
+    let patch = run_ok(cmd)?;
+    if patch.trim().is_empty() {
+        return Ok(Brought::default());
+    }
+    let files: Vec<String> = output_in(&from, &["diff", "--name-only", "--no-renames", "-z", &start, &tree]).split('\0').filter(|f| !f.is_empty()).map(str::to_owned).collect();
+    if apply_patch(&to, &patch, &["--check"]).is_ok() {
+        apply_patch(&to, &patch, &[])?;
+        return Ok(Brought { applied: files, clashed: Vec::new() });
+    }
+    // Some don't fit: the others, file by file.
+    let mut out = Brought::default();
+    for f in files {
+        let only = format!("--include={}", glob_quote(&f));
+        if apply_patch(&to, &patch, &["--check", &only]).is_ok() {
+            out.applied.push(f);
+        } else {
+            out.clashed.push(f);
+        }
+    }
+    if !out.applied.is_empty() {
+        let only: Vec<String> = out.applied.iter().map(|f| format!("--include={}", glob_quote(f))).collect();
+        let args: Vec<&str> = only.iter().map(String::as_str).collect();
+        apply_patch(&to, &patch, &args)?;
+    }
+    Ok(out)
+}
+
+/// A path as a pattern matching only itself (`git apply --include`).
+fn glob_quote(path: &str) -> String {
+    path.chars().fold(String::new(), |mut s, c| {
+        if matches!(c, '*' | '?' | '[' | ']' | '\\') {
+            s.push('\\');
+        }
+        s.push(c);
+        s
+    })
+}
+
 /// A folder name for a branch: `feature/login fix` → `feature-login-fix`.
 pub fn branch_slug(branch: &str) -> String {
     let slug: String = branch
@@ -1725,6 +1795,47 @@ mod tests {
         assert!(commit(&dir, "two changes").unwrap().contains("two changes"));
         assert!(status(&dir).unwrap().files.is_empty());
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_helpers_work_is_brought_over() {
+        let dir = repo("bring");
+        let wt = dir.with_file_name(format!("harlo-git-bring-wt-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&wt);
+        create_worktree(&dir, &wt, "helper", "main").unwrap();
+        let start = output_in(&wt, &["rev-parse", "HEAD"]).trim().to_owned();
+        // The helper commits one change, leaves one uncommitted and adds a file.
+        let mut lines: Vec<String> = (1..=30).map(|i| format!("line {i}")).collect();
+        lines[0] = "LINE 1 (helper)".into();
+        std::fs::write(wt.join("a.txt"), lines.join("\n") + "\n").unwrap();
+        sh(&wt, &["commit", "-q", "-am", "helper's"]);
+        lines[29] = "LINE 30 (helper, uncommitted)".into();
+        std::fs::write(wt.join("a.txt"), lines.join("\n") + "\n").unwrap();
+        std::fs::write(wt.join("new.txt"), "new\n").unwrap();
+        std::fs::write(wt.join("b.txt"), "helper's b\n").unwrap();
+        // Meanwhile, here: line 15 changed (no clash), and b.txt made (a clash).
+        let mut mine: Vec<String> = (1..=30).map(|i| format!("line {i}")).collect();
+        mine[14] = "line 15 (mine)".into();
+        std::fs::write(dir.join("a.txt"), mine.join("\n") + "\n").unwrap();
+        std::fs::write(dir.join("b.txt"), "my b\n").unwrap();
+        let got = bring_over(&wt, &dir, &start, "main").unwrap();
+        assert_eq!(got.applied, ["a.txt", "new.txt"]);
+        assert_eq!(got.clashed, ["b.txt"]);
+        let a = std::fs::read_to_string(dir.join("a.txt")).unwrap();
+        assert!(a.starts_with("LINE 1 (helper)\n") && a.contains("line 15 (mine)") && a.ends_with("LINE 30 (helper, uncommitted)\n"), "{a}");
+        assert_eq!(std::fs::read_to_string(dir.join("b.txt")).unwrap(), "my b\n");
+        assert_eq!(std::fs::read_to_string(dir.join("new.txt")).unwrap(), "new\n");
+        // Nothing staged, nothing committed, here or there.
+        assert!(output_in(&dir, &["diff", "--cached", "--name-only"]).trim().is_empty());
+        assert_eq!(output_in(&dir, &["rev-list", "--count", "HEAD"]).trim(), "1");
+        assert!(output_in(&wt, &["diff", "--cached", "--name-only"]).trim().is_empty());
+        // Without the start commit: where it left main.
+        sh(&dir, &["checkout", "-q", "--", "a.txt"]);
+        let _ = std::fs::remove_file(dir.join("new.txt"));
+        let got = bring_over(&wt, &dir, "", "main").unwrap();
+        assert!(got.applied.contains(&"a.txt".to_owned()));
+        assert!(bring_over(&dir, &dir, "", "main").is_err());
+        let _ = std::fs::remove_dir_all(&wt);
     }
 
     #[test]

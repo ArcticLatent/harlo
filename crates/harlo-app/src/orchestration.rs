@@ -92,6 +92,14 @@ pub fn answer_pipe(thread: CxxQtThread<Workspace>, key: String, call: String, to
 fn finish(thread: &CxxQtThread<Workspace>, tool: &str, args: &Value, result: Value) -> Result<Value, String> {
     // Specs and the plan: their work here, with what the UI thread gave.
     if result["_defer"] == true {
+        if tool == "bring_over" {
+            let path = |k: &str| std::path::PathBuf::from(result[k].as_str().unwrap_or_default());
+            let text = |k: &str| result[k].as_str().unwrap_or_default().to_owned();
+            let helper = path("helper");
+            let brought = harlo_core::git::bring_over(&helper, &path("here"), &text("start"), &text("base")).map_err(|e| format!("Not brought over: {e:#}."))?;
+            let shown = harlo_core::remote::display(&helper);
+            return Ok(json!({ "applied": brought.applied, "clashed": brought.clashed, "text": harlo_core::orchestration::brought_text(&brought.applied, &brought.clashed, &shown) }));
+        }
         if tool.starts_with("spec_") {
             let cwd = std::path::PathBuf::from(result["cwd"].as_str().unwrap_or_default());
             return harlo_core::specs::call(&harlo_core::specs::root_of(&cwd), tool, args);

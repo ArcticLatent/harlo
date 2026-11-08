@@ -33,6 +33,9 @@ pub struct WorktreeRecord {
     pub branch: String,
     /// Branch it was created from; empty if unknown (found, not created).
     pub base: String,
+    /// The commit it started at (where `bring_over` diffs from); empty if
+    /// unknown.
+    pub base_commit: String,
     pub removed: bool,
 }
 
@@ -98,7 +101,8 @@ CREATE TABLE IF NOT EXISTS worktrees (
     branch TEXT NOT NULL,
     base TEXT NOT NULL DEFAULT '',
     removed INTEGER NOT NULL DEFAULT 0,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    base_commit TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS runs (
     id TEXT PRIMARY KEY,
@@ -193,6 +197,10 @@ impl Db {
         let has_modes: bool = conn.prepare("SELECT 1 FROM pragma_table_info('session_meta') WHERE name = 'approval'")?.exists([])?;
         if !has_modes {
             conn.execute_batch("ALTER TABLE session_meta ADD COLUMN approval TEXT NOT NULL DEFAULT ''; ALTER TABLE session_meta ADD COLUMN thinking TEXT NOT NULL DEFAULT '';")?;
+        }
+        let has_base_commit: bool = conn.prepare("SELECT 1 FROM pragma_table_info('worktrees') WHERE name = 'base_commit'")?.exists([])?;
+        if !has_base_commit {
+            conn.execute_batch("ALTER TABLE worktrees ADD COLUMN base_commit TEXT NOT NULL DEFAULT '';")?;
         }
         let has_parent: bool = conn.prepare("SELECT 1 FROM pragma_table_info('session_meta') WHERE name = 'parent'")?.exists([])?;
         if !has_parent {
@@ -342,7 +350,7 @@ impl Db {
     }
 
     pub fn worktrees(&self) -> Result<Vec<WorktreeRecord>> {
-        let mut stmt = self.conn.prepare("SELECT path, project_id, branch, base, removed FROM worktrees ORDER BY created_at")?;
+        let mut stmt = self.conn.prepare("SELECT path, project_id, branch, base, removed, base_commit FROM worktrees ORDER BY created_at")?;
         let rows = stmt.query_map([], |r| {
             Ok(WorktreeRecord {
                 path: PathBuf::from(r.get::<_, String>(0)?),
@@ -350,19 +358,21 @@ impl Db {
                 branch: r.get(2)?,
                 base: r.get(3)?,
                 removed: r.get(4)?,
+                base_commit: r.get(5)?,
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
     /// Records a worktree, or refreshes its branch and clears `removed`.
-    /// A known base is kept when the new record has none.
+    /// A known base (and start commit) is kept when the new record has none.
     pub fn upsert_worktree(&self, w: &WorktreeRecord) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO worktrees (path, project_id, branch, base, removed) VALUES (?1, ?2, ?3, ?4, ?5)
+            "INSERT INTO worktrees (path, project_id, branch, base, removed, base_commit) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(path) DO UPDATE SET project_id = ?2, branch = ?3,
-                 base = CASE WHEN ?4 = '' THEN base ELSE ?4 END, removed = ?5",
-            params![w.path.to_string_lossy(), w.project_id, w.branch, w.base, w.removed],
+                 base = CASE WHEN ?4 = '' THEN base ELSE ?4 END, removed = ?5,
+                 base_commit = CASE WHEN ?6 = '' THEN base_commit ELSE ?6 END",
+            params![w.path.to_string_lossy(), w.project_id, w.branch, w.base, w.removed, w.base_commit],
         )?;
         Ok(())
     }
@@ -577,13 +587,13 @@ mod tests {
         db.set_project_name(p.id, "Rocket").unwrap();
         let p2 = &db.projects().unwrap()[0];
         assert_eq!((p2.icon.as_str(), p2.color.as_str(), p2.name.as_str()), ("rocket", "keyword", "Rocket"));
-        let rec = WorktreeRecord { path: "/t/x".into(), project_id: p.id, branch: "x".into(), base: "main".into(), removed: false };
+        let rec = WorktreeRecord { path: "/t/x".into(), project_id: p.id, branch: "x".into(), base: "main".into(), base_commit: "abc123".into(), removed: false };
         db.upsert_worktree(&rec).unwrap();
-        // Rediscovery without a base keeps the recorded base.
-        db.upsert_worktree(&WorktreeRecord { base: String::new(), ..rec.clone() }).unwrap();
+        // Rediscovery without a base keeps the recorded base and commit.
+        db.upsert_worktree(&WorktreeRecord { base: String::new(), base_commit: String::new(), ..rec.clone() }).unwrap();
         db.mark_worktree_removed(Path::new("/t/x")).unwrap();
         let all = db.worktrees().unwrap();
-        assert_eq!((all.len(), all[0].base.as_str(), all[0].removed), (1, "main", true));
+        assert_eq!((all.len(), all[0].base.as_str(), all[0].base_commit.as_str(), all[0].removed), (1, "main", "abc123", true));
     }
 
     #[test]

@@ -106,6 +106,11 @@ pub fn tools(starting: Starting) -> Value {
             }), &["session"]),
         },
         {
+            "name": "bring_over",
+            "description": "Brings your helper's work over from its worktree to your folder: what it changed since its worktree started (its commits, and its uncommitted and new files), as uncommitted changes here. Nothing is committed. Files that don't fit your current version (you, or another helper, changed the same lines) are left alone and named: merge those by hand from the helper's worktree. Look over its work first; for a helper working in your own folder there's nothing to bring.",
+            "inputSchema": s(json!({ "session": { "type": "string", "description": "Your helper's session id." } }), &["session"]),
+        },
+        {
             "name": "stop_session",
             "description": "Stops what a harlo session is doing (it stays open; send_message continues it).",
             "inputSchema": s(json!({ "session": { "type": "string" } }), &["session"]),
@@ -215,7 +220,7 @@ pub fn proposal_answer(started: Option<&[(String, Result<String, String>)]>) -> 
     let failed: Vec<String> = started.iter().filter_map(|(t, r)| r.as_ref().err().map(|e| format!("\"{t}\": {e}"))).collect();
     let mut text = String::from("[harlo] The user agreed to your split.");
     if !ok.is_empty() {
-        text.push_str(&format!(" harlo started your helpers: {}. Their reports come to you as they finish: end your turn now (don't poll), then check their work and combine it (a helper's in a worktree: bring its changes over with git, or by copying its files with cp; don't retype them).", ok.join(", ")));
+        text.push_str(&format!(" harlo started your helpers: {}. Their reports come to you as they finish: end your turn now (don't poll), then check their work and combine it (a helper's in a worktree: bring its changes over with bring_over; don't retype them).", ok.join(", ")));
     }
     if !failed.is_empty() {
         text.push_str(&format!(" These didn't start: {}. Do those parts yourself, or start them with start_session once the problem is fixed.", failed.join("; ")));
@@ -337,6 +342,25 @@ pub fn drift_note(branch: &str, base: &str, behind: u32) -> String {
         n => format!(
             "\n\nIt worked on {branch}, in a worktree; {base} has moved on by {n} commit{} since it started, so merging it may conflict: merge {base} into it (or rebase) and check first.",
             if n == 1 { "" } else { "s" }
+        ),
+    }
+}
+
+/// Added to a worktree helper's finished message: how its work comes over.
+pub fn bring_over_note(branch: &str, key: &str) -> String {
+    format!("\n\nIts work is in its worktree (branch {branch}): once you've looked it over, bring it to your folder with bring_over (session {key}).")
+}
+
+/// What a parent is told of `bring_over` (`brought`: the files applied and
+/// those left alone; `helper`: its worktree).
+pub fn brought_text(applied: &[String], clashed: &[String], helper: &str) -> String {
+    match (applied.is_empty(), clashed.is_empty()) {
+        (true, true) => "The helper changed nothing since its worktree started: there's nothing to bring over.".into(),
+        (false, true) => format!("Brought over, uncommitted: {}.", applied.join(", ")),
+        (applied_none, false) => format!(
+            "{}Not brought over, because they don't fit your version (the same lines changed here): {}. Merge those by hand from the helper's worktree ({helper}).",
+            if applied_none { String::new() } else { format!("Brought over, uncommitted: {}. ", applied.join(", ")) },
+            clashed.join(", ")
         ),
     }
 }
@@ -626,7 +650,7 @@ pub fn delegate_prompt(action: &str, members: &[Member], note: &str, worktree: b
             let place = if worktree { ", each in its own new git worktree (pass a short branch name taken from its part as `worktree`)" } else { "" };
             // (Their files are in their worktrees, which you can read: taken
             // as they are, not written out again.)
-            let combine = if worktree { " (bring their changes over from their worktrees with git, or by copying their files with cp: don't retype them)" } else { "" };
+            let combine = if worktree { " (bring their changes over from their worktrees with harlo's bring_over tool: don't retype them)" } else { "" };
             format!(
                 "Split this task into helpers that work at the same time. Find the parts that can be done independently (each one substantial, and not editing the same files; two to four is usually right), and start a helper for each with harlo's start_session tool: {}{place}, titled \"[Split] <the part>\". Keep for yourself what depends on the other parts, and do it once they've reported.\n\
                  Each helper has none of our context, so make its prompt a self-contained briefing: its part, why it exists, the relevant files (by path), what \"done\" looks like, and what not to touch (the other parts).\n\
@@ -664,6 +688,17 @@ mod tests {
         // A committee needs two.
         assert!(delegate_prompt("committee", &[m("Claude", "claude", "")], "", false).is_none());
         assert!(delegate_prompt("nope", &[m("Claude", "claude", "")], "", false).is_none());
+    }
+
+    #[test]
+    fn what_bring_over_says() {
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert!(brought_text(&[], &[], "/w").contains("nothing to bring over"));
+        assert_eq!(brought_text(&s(&["a.rs", "b.rs"]), &[], "/w"), "Brought over, uncommitted: a.rs, b.rs.");
+        let both = brought_text(&s(&["a.rs"]), &s(&["c.rs"]), "/w");
+        assert!(both.starts_with("Brought over, uncommitted: a.rs. Not brought over") && both.contains("c.rs") && both.contains("(/w)"), "{both}");
+        assert!(tools(Starting::Offer).as_array().unwrap().iter().any(|t| t["name"] == "bring_over"));
+        assert!(bring_over_note("feat", "k1").contains("bring_over (session k1)"));
     }
 
     #[test]

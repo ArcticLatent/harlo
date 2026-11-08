@@ -27,6 +27,8 @@ It returns `{ session, title, agent, folder }`. The session is your helper: it s
 
 **`list_sessions`**: harlo's open sessions: id, title, agent, status, folder, the session that started each one (`startedBy`), and which one is you (`you`).
 
+**`bring_over`**: `{ session }`. Brings a helper's work from its worktree to your folder: everything it changed since its worktree started (its commits, and its uncommitted and new files), as uncommitted changes. Nothing is committed. Files whose changes don't fit your version (you or another helper changed the same lines) are left alone and named; merge those by hand from the helper's worktree. Look over its work first. Use it instead of copying files or retyping its changes.
+
 **`stop_session`**: `{ session }`. Stops what it's doing. The session stays open, and `send_message` continues it.
 
 **`request_approval`**: `{ question, options? }`. Asks the user to decide something only they may decide: going ahead with a risky or irreversible step, or a choice that's theirs. harlo shows it in your session and on their phone, and notifies them. No agent can answer it. End your turn after asking; their answer comes back as a `[harlo]` message.
@@ -58,7 +60,7 @@ Keep the user's intent exactly. If they asked only for an investigation, say "Do
 
 Agents take a while; 10–30 minutes is normal. Start every independent helper, then end your turn. harlo sends you a message by itself, which starts your next turn:
 
-- when a helper finishes: `[harlo] The <Agent> session "<title>" (<session>) finished and reported: succeeded.` and its summary (or, if it didn't report, its last reply). If it worked in a worktree and the branch it started from has moved on since, harlo says by how many commits, so you know merging may conflict;
+- when a helper finishes: `[harlo] The <Agent> session "<title>" (<session>) finished and reported: succeeded.` and its summary (or, if it didn't report, its last reply). If it worked in a worktree, harlo says so (bring its work over with `bring_over`), and if the branch it started from has moved on since, by how many commits;
 - when it asks you something: `… asks you:` and the question. Answer with `send_message` when the answer follows from the task or the user's instructions; otherwise ask the user first;
 - when it waits for the user (an approval, or a question that's theirs): `… is waiting for the user`. Only the user can answer it. Tell them if they should know, or go on with other work.
 

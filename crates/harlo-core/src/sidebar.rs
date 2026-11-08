@@ -583,7 +583,7 @@ mod tests {
     #[test]
     fn finds_all_a_projects_sessions() {
         let projects = [project(1, "/w"), project(2, "/w/app")];
-        let worktrees = [WorktreeRecord { path: PathBuf::from("/data/trees/w/feat"), project_id: 1, branch: "feat".into(), base: "main".into(), removed: false }];
+        let worktrees = [WorktreeRecord { path: PathBuf::from("/data/trees/w/feat"), project_id: 1, branch: "feat".into(), base: "main".into(), base_commit: String::new(), removed: false }];
         let sessions = [
             session("/s/plain", "/w/src", "plain", 10),
             session("/s/archived", "/w", "archived", 20),
@@ -666,7 +666,7 @@ mod tests {
     #[test]
     fn worktree_sessions_join_their_project() {
         let projects = [project(1, "/w")];
-        let worktrees = [WorktreeRecord { path: PathBuf::from("/data/trees/w/feat"), project_id: 1, branch: "feat".into(), base: "main".into(), removed: false }];
+        let worktrees = [WorktreeRecord { path: PathBuf::from("/data/trees/w/feat"), project_id: 1, branch: "feat".into(), base: "main".into(), base_commit: String::new(), removed: false }];
         let sessions = [session("/s/a", "/data/trees/w/feat/src", "in worktree", 1), session("/s/b", "/w", "in main", 2)];
         let meta = HashMap::new();
         let rows = build(&SidebarInput { projects: &projects, worktrees: &worktrees, sessions: &sessions, live: &[], meta: &meta, filter: "", show_archived: false, other_collapsed: false, expanded: &[], shelves_open: &[] });
