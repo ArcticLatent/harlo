@@ -109,6 +109,9 @@ pub trait Gate: Send + Sync {
     /// Asks the user yes or no, in every approval mode (`title` as an
     /// approval's: "Allow tool: …\n<why>"; `message`: the call).
     fn confirm(&self, title: &str, message: &str) -> BoxFuture<'static, bool>;
+    /// Puts questions to the user (`ask`'s, as harlo's card takes them):
+    /// their answers, or None when they dismissed them.
+    fn ask(&self, questions: Value) -> BoxFuture<'static, Option<Value>>;
 }
 
 /// harlo, when it started this agent (`--harlo-tools`): its tools (start
@@ -626,6 +629,10 @@ impl Agent {
             if !self.tools.has_originals() {
                 list.retain(|t| t["name"] != "recall");
             }
+            // (Questions for the user: only where someone can answer.)
+            if self.gate.is_none() {
+                list.retain(|t| t["name"] != "ask");
+            }
             if let Some(m) = self.mcp.as_ref().filter(|_| self.allowed.is_none()) {
                 list.extend(m.specs().iter().cloned());
             }
@@ -1063,6 +1070,33 @@ async fn run_calls(tools: &Tools, calls: &[(&str, &str, &Value)], extra: &Extra<
             });
             continue;
         }
+        // Questions for the user, on harlo's card.
+        if *name == "ask" {
+            let Some(g) = gate.filter(|_| extra.allowed.is_none()) else {
+                out.push(cut("No one is here to answer questions: decide yourself, and say what you assumed."));
+                continue;
+            };
+            let questions = match ask_questions(args) {
+                Ok(q) => q,
+                Err(e) => {
+                    out.push(cut(&e));
+                    continue;
+                }
+            };
+            let answered = tokio::select! {
+                biased;
+                _ = stop.cancelled() => {
+                    out.push(cut(INTERRUPTED));
+                    continue;
+                }
+                a = g.ask(questions.clone()) => a,
+            };
+            out.push(match answered {
+                Some(a) => tools::Outcome::new(ask_answers(&questions, &a), false),
+                None => tools::Outcome::new("The user dismissed the questions without answering. Don't ask them again: go on as you think best and say what you assumed, or end your turn and ask in your reply.", false),
+            });
+            continue;
+        }
         // Subagents: their own calls ask where they should.
         if *name == "task"
             && let Some(ctx) = extra.task
@@ -1122,6 +1156,49 @@ async fn run_calls(tools: &Tools, calls: &[(&str, &str, &Value)], extra: &Extra<
         out.push(ran.unwrap_or_else(|| cut(INTERRUPTED)));
     }
     out
+}
+
+/// `ask`'s questions as harlo's card takes them (`q0`, `q1`… as ids), or
+/// what's wrong with them.
+fn ask_questions(args: &Value) -> Result<Value, String> {
+    let list = args["questions"].as_array().filter(|l| !l.is_empty()).ok_or("Give questions: one to four, each with a question and its options.")?;
+    if list.len() > 4 {
+        return Err("At most four questions at a time.".into());
+    }
+    let mut out = Vec::new();
+    for (i, q) in list.iter().enumerate() {
+        let question = q["question"].as_str().map(str::trim).filter(|t| !t.is_empty()).ok_or(format!("Question {} has no text.", i + 1))?;
+        let options: Vec<Value> = q["options"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|o| {
+                let label = o["label"].as_str().or(o.as_str()).map(str::trim).filter(|l| !l.is_empty())?;
+                Some(json!({ "label": label, "description": o["description"].as_str().unwrap_or_default() }))
+            })
+            .collect();
+        if options.len() < 2 {
+            return Err(format!("Question {} needs at least two options (they can also write their own answer).", i + 1));
+        }
+        let header = q["header"].as_str().map(str::trim).filter(|h| !h.is_empty()).map_or_else(|| format!("Question {}", i + 1), str::to_owned);
+        out.push(json!({ "id": format!("q{i}"), "header": header, "question": question, "multi": q["multiple"] == true, "options": options }));
+    }
+    Ok(Value::Array(out))
+}
+
+/// The user's answers (`[{id, selectedOptions, customInput?}]`), for the model.
+fn ask_answers(questions: &Value, answers: &Value) -> String {
+    let mut text = String::from("The user answered:");
+    for q in questions.as_array().into_iter().flatten() {
+        let a = answers.as_array().into_iter().flatten().find(|a| a["id"] == q["id"]);
+        let mut said: Vec<String> = a.map(|a| a["selectedOptions"].as_array().into_iter().flatten().filter_map(|s| s.as_str().map(str::to_owned)).collect()).unwrap_or_default();
+        if let Some(own) = a.and_then(|a| a["customInput"].as_str()).map(str::trim).filter(|c| !c.is_empty()) {
+            said.push(format!("(in their words) {own}"));
+        }
+        let said = if said.is_empty() { "(nothing picked)".to_owned() } else { said.join("; ") };
+        text.push_str(&format!("\n- {}\n  {said}", q["question"].as_str().unwrap_or_default()));
+    }
+    text
 }
 
 fn home() -> PathBuf {
@@ -1260,6 +1337,21 @@ mod tests {
         assert_eq!(out[2].text, NOT_RUN);
         assert!(!marker.exists());
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn questions_and_their_answers() {
+        assert!(ask_questions(&json!({ "questions": [] })).is_err());
+        assert!(ask_questions(&json!({ "questions": [{ "question": "Which?", "options": [{ "label": "one" }] }] })).unwrap_err().contains("two options"));
+        let q = ask_questions(&json!({ "questions": [
+            { "question": "Which cache?", "header": "Cache", "options": [{ "label": "Redis", "description": "fast" }, { "label": "None" }] },
+            { "question": "Which parts?", "multiple": true, "options": [{ "label": "api" }, { "label": "ui" }] },
+        ] }))
+        .unwrap();
+        assert_eq!(q[0], json!({ "id": "q0", "header": "Cache", "question": "Which cache?", "multi": false, "options": [{ "label": "Redis", "description": "fast" }, { "label": "None", "description": "" }] }));
+        assert_eq!((q[1]["id"].as_str(), q[1]["header"].as_str(), q[1]["multi"].as_bool()), (Some("q1"), Some("Question 2"), Some(true)));
+        let text = ask_answers(&q, &json!([{ "id": "q0", "selectedOptions": ["Redis"] }, { "id": "q1", "selectedOptions": [], "customInput": "only the api, for now" }]));
+        assert_eq!(text, "The user answered:\n- Which cache?\n  Redis\n- Which parts?\n  (in their words) only the api, for now");
     }
 
     #[test]

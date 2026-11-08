@@ -250,6 +250,18 @@ impl Gate for Approvals {
         let (sh, title, message) = (self.0.clone(), title.to_owned(), message.to_owned());
         Box::pin(async move { yes_or_no(&sh, &title, &message).await })
     }
+
+    fn ask(&self, questions: Value) -> BoxFuture<'static, Option<Value>> {
+        let sh = self.0.clone();
+        Box::pin(async move {
+            let id = format!("harlo_agent_ui_{}", sh.next_ui.fetch_add(1, Ordering::Relaxed) + 1);
+            let (tx, rx) = oneshot::channel();
+            sh.waiting.lock().unwrap().insert(id.clone(), tx);
+            sh.emit(json!({ "type": "extension_ui_request", "id": id, "method": "ask", "questions": questions }));
+            let answer = rx.await.unwrap_or(Value::Null);
+            (answer["cancelled"] != true && answer["answers"].is_array()).then(|| answer["answers"].clone())
+        })
+    }
 }
 
 /// Approve or Deny, asked as an approval (no "Always allow").

@@ -120,6 +120,22 @@ pub fn specs() -> Value {
         f("jobs", "Background commands (started by bash with background: true): list them, see one's output (its last lines), wait for one to end (up to timeout seconds, 60 by default), or stop one with everything it started.",
           json!({ "action": { "type": "string", "enum": ["list", "output", "wait", "stop"] }, "id": { "type": "string", "description": "The job's id (j1, j2…), for output, wait and stop" },
                   "lines": { "type": "integer", "description": "How many of the last lines to show (50 by default)" }, "timeout": { "type": "integer" } }), &["action"]),
+        f("ask", "Ask the user questions and wait for their answers: harlo shows them as a card with your options to pick from, and a field for their own answer. \
+               For a decision that's theirs, or one the task leaves open and that changes what you'd do (which approach, what to keep, what they meant); not for what you can find out yourself, or to ask leave for what they already asked for. \
+               One to four questions, each with two to six options (put the one you recommend first). The answer comes back as text.",
+          json!({ "questions": { "type": "array", "minItems": 1, "maxItems": 4, "items": {
+              "type": "object",
+              "properties": {
+                  "question": { "type": "string", "description": "The whole question, ending with a question mark" },
+                  "header": { "type": "string", "description": "A label of a word or two" },
+                  "options": { "type": "array", "minItems": 2, "maxItems": 6, "items": { "type": "object", "properties": {
+                      "label": { "type": "string", "description": "A few words" },
+                      "description": { "type": "string", "description": "What it means, or what follows from it" },
+                  }, "required": ["label"], "additionalProperties": false } },
+                  "multiple": { "type": "boolean", "description": "Whether they may pick more than one (default false)" },
+              },
+              "required": ["question", "options"], "additionalProperties": false,
+          } } }), &["questions"]),
         f("current_time", "The date and time now: local (with the zone and its offset from UTC), UTC, and Unix seconds.", json!({}), &[]),
         f("recall", "Get back a tool's output that was set aside to save context (its place in the conversation says so, with the id to give). It comes back as it was then; to see a file as it is now, read it again.",
           json!({ "id": { "type": "string" } }), &["id"]),
