@@ -41,6 +41,7 @@ mod jobs;
 mod mcp;
 mod mcp_auth;
 mod profiles;
+mod program;
 mod providers;
 mod repeats;
 mod responses;

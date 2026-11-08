@@ -929,6 +929,12 @@ impl Agent {
             if let Some(m) = self.mcp.as_ref().filter(|_| self.allowed.is_none()) {
                 list.extend(m.specs().iter().cloned());
             }
+            // (Programs that call tools, when they're being measured: the
+            // tools they may call named in it.)
+            if self.allowed.is_none() && crate::program::on() {
+                let spec = crate::program::spec(&crate::program::callable(list, self.mcp.as_ref()));
+                list.push(spec);
+            }
             list.extend(self.harlo_tools.iter().cloned());
         }
         all
@@ -1370,6 +1376,11 @@ impl Extra<'_> {
 
 /// A call of ours or of an MCP server's.
 async fn call_tool(tools: &Tools, mcp: Option<&crate::mcp::Mcp>, name: &str, args: &Value) -> tools::Outcome {
+    if name == "run_code" {
+        let mut specs: Vec<Value> = tools::specs().as_array().cloned().unwrap_or_default();
+        specs.extend(mcp.map(|m| m.specs().to_vec()).unwrap_or_default());
+        return crate::program::run(args, tools, mcp, &crate::program::callable(&specs, mcp)).await;
+    }
     match mcp.filter(|m| m.has(name)) {
         Some(m) => m.call(name, args, &tools.spill_dir).await,
         None => tools.call(name, args).await,

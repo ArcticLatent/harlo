@@ -40,9 +40,14 @@ const ENV: &[(&str, &str)] = &[
 ];
 
 /// Ends the process group when dropped (a stopped turn drops the future).
-struct Group(Option<i32>);
+pub struct Group(Option<i32>);
 
 impl Group {
+    /// The group a spawned command leads (it was started in its own).
+    pub fn of(child: &tokio::process::Child) -> Group {
+        Group(child.id().map(|p| p as i32))
+    }
+
     fn kill(&mut self, signal: i32) {
         if let Some(pgid) = self.0 {
             // SAFETY: kill(2) on a process group this command created.

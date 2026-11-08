@@ -219,7 +219,7 @@ impl Gate for Approvals {
             let ask = match approval.as_str() {
                 _ if free => false,
                 // (What's fetched can carry what's in the project away.)
-                "write" => name == "bash" || name == "fetch" || mcp,
+                "write" => matches!(name.as_str(), "bash" | "fetch" | "run_code") || mcp,
                 _ => true,
             };
             if !ask || sh.always.lock().unwrap().contains(&name) {
@@ -231,6 +231,10 @@ impl Gate for Approvals {
             let detail = match name.as_str() {
                 "bash" => args["command"].as_str().unwrap_or_default().to_owned(),
                 "fetch" => args["url"].as_str().unwrap_or_default().to_owned(),
+                "run_code" => {
+                    let code: String = args["code"].as_str().unwrap_or_default().chars().take(600).collect();
+                    format!("{}\n\n{code}", args["description"].as_str().unwrap_or_default())
+                }
                 _ if mcp => {
                     let a = args.to_string();
                     if a.chars().count() > 300 { format!("{}…", a.chars().take(299).collect::<String>()) } else { a }

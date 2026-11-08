@@ -813,7 +813,7 @@ fn md_rows(blocks: &[Arc<crate::markdown::MdBlock>]) -> Vec<(usize, RowKind, Str
 }
 
 fn summarize_args(args: &Value) -> String {
-    for key in ["command", "path", "file_path", "filePath", "pattern", "query", "url"] {
+    for key in ["command", "path", "file_path", "filePath", "pattern", "query", "url", "description"] {
         if let Some(s) = args[key].as_str() {
             return first_line(s, 200);
         }
