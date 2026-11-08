@@ -496,7 +496,7 @@ ColumnLayout {
                 objectName: "mcpSignIn"
                 visible: detail.st !== undefined && detail.st !== null && detail.st.state === "needs_auth" && page.editing.harnesses.includes("harlo")
                 text: "Sign in"
-                accent: true
+                accent: Theme.primary
                 font.pixelSize: Theme.px(12)
                 onClicked: page.signInRequested(page.scope, page.editing.oldName)
             }
