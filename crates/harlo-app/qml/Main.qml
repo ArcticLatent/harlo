@@ -2598,6 +2598,14 @@ ApplicationWindow {
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
             win.check(win.chatText().indexOf("mode acceptEdits)") >= 0, "the shield's edits mode reaches Claude (" + win.chatText().slice(-80) + ")")
+            win.sendByKeys("run a build in the background") } }
+        // A background command's end: a notice as it comes (and the same
+        // one read back from the file, below).
+        PauseAnimation { duration: 1800 }
+        ScriptAction { script: {
+            const said = 'Background command "sleep 1; echo built" completed (exit code 0)'
+            win.check(win.chatText().split(said).length === 2 && win.chatText().indexOf("It finished: built.") >= 0, "a background command's end is a notice as it comes (" + win.chatText().slice(-160) + ")")
+            win.check(win.findContaining("<task-notification>", chat.transcript) === null, "not a message of yours")
             win.sendByKeys("go slow please") } }
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
@@ -2622,6 +2630,7 @@ ApplicationWindow {
         ScriptAction { script: {
             win.check(win.chatText().indexOf("hello there") >= 0 && win.chatText().indexOf("You picked Postgres.") >= 0, "reopened, it shows its history")
             win.check(chat.session.title === "My Claude chat", "and its name (" + chat.session.title + ")")
+            win.check(win.chatText().split('Background command "sleep 1; echo built" completed (exit code 0)').length === 2 && win.findContaining("<task-notification>", chat.transcript) === null, "the background command's notice, once, read back")
             if (chat.session.harness !== "claude") { win.check(false, "the reopened session is the Claude one"); win.summary(); Qt.quit() }
             else win.sendByKeys("one more") } }
         PauseAnimation { duration: 2000 }

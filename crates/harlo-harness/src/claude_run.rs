@@ -4,7 +4,7 @@
 //! Claude's stream goes out as harlo events (messages, blocks, tools,
 //! approvals and questions as UI requests).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
@@ -84,6 +84,9 @@ struct State {
     /// harlo's dock shows them), and Claude's task ids → those call ids.
     subagents: HashMap<String, Value>,
     tasks: HashMap<String, String>,
+    /// Claude's tasks in the background (shells, and agents sent there):
+    /// their end is a notice, as the transcript keeps it.
+    background: HashSet<String>,
     /// A name given before the transcript exists (written once it does).
     pending_title: Option<String>,
 }
@@ -1259,6 +1262,7 @@ fn subagents_started(shared: &Arc<Shared>, message: &Value) {
 /// `system/task_*`: a subagent announced, its state, its progress.
 fn task_frame(shared: &Arc<Shared>, frame: &Value) {
     let task = frame["task_id"].as_str().unwrap_or_default();
+    background_task(shared, task, frame);
     let call = match frame["subtype"].as_str() {
         Some("task_started") => {
             // Subagents only (not background shells), with a transcript.
@@ -1315,6 +1319,36 @@ fn task_frame(shared: &Arc<Shared>, frame: &Value) {
         patch["progress"] = progress;
     }
     subagent_update(shared, &call, patch);
+}
+
+/// A task in the background (a shell, an agent sent there): its end is
+/// said as a notice (Claude tells the model too), as reading the
+/// transcript again shows it.
+fn background_task(shared: &Arc<Shared>, task: &str, frame: &Value) {
+    let started = frame["subtype"] == "task_started" && (frame["task_type"] == "local_bash" || frame["is_backgrounded"] == true);
+    if started || frame["patch"]["is_backgrounded"] == true {
+        shared.state.lock().unwrap().background.insert(task.to_owned());
+        return;
+    }
+    if frame["subtype"] != "task_notification" {
+        return;
+    }
+    let detached = {
+        let mut st = shared.state.lock().unwrap();
+        let call = st.tasks.get(task).cloned().unwrap_or_default();
+        st.background.remove(task) || st.subagents.get(&call).is_some_and(|e| e["detached"] == true)
+    };
+    if !detached {
+        return;
+    }
+    let text = match (frame["summary"].as_str().map(str::trim).filter(|s| !s.is_empty()), frame["status"].as_str().filter(|s| !s.is_empty())) {
+        (Some(summary), _) => summary.to_owned(),
+        (None, Some(status)) => format!("A background task {status}."),
+        (None, None) => "A background task ended.".to_owned(),
+    };
+    let message = json!({ "role": "custom", "customType": "task-notification", "display": true, "content": text });
+    shared.state.lock().unwrap().messages.push(message.clone());
+    shared.emit(HarnessEvent::MessageEnd { id: shared.next_id("n"), message });
 }
 
 /// Claude's task states → the dock's.
@@ -1573,6 +1607,39 @@ mod tests {
             }
         }
         assert_eq!(counts, [1, 0]);
+    }
+
+    #[tokio::test]
+    async fn a_background_task_ending_is_a_notice() {
+        let (s, mut rx) = shared();
+        let system = |v: Value| { let mut v = v; v["type"] = json!("system"); v };
+        for frame in [
+            // A background shell: its end is a notice.
+            json!({ "subtype": "task_started", "task_id": "b1", "task_type": "local_bash", "description": "cargo test" }),
+            json!({ "subtype": "task_notification", "task_id": "b1", "status": "completed", "summary": "Background command \"cargo test\" completed (exit code 0)" }),
+            // A subagent in the foreground: its own row says it, no notice.
+            json!({ "subtype": "task_started", "task_id": "a1", "tool_use_id": "t1", "task_type": "local_agent", "subagent_type": "Explore" }),
+            json!({ "subtype": "task_notification", "task_id": "a1", "tool_use_id": "t1", "status": "completed", "summary": "Found it." }),
+            // One sent to the background later: a notice, its status when it
+            // has no summary.
+            json!({ "subtype": "task_started", "task_id": "a2", "tool_use_id": "t2", "task_type": "local_agent", "subagent_type": "Explore" }),
+            json!({ "subtype": "task_updated", "task_id": "a2", "patch": { "is_backgrounded": true } }),
+            json!({ "subtype": "task_notification", "task_id": "a2", "tool_use_id": "t2", "status": "failed" }),
+        ] {
+            incoming(&s, system(frame)).await;
+        }
+        let mut notices = Vec::new();
+        while let Ok(e) = rx.try_recv() {
+            if let HarnessEvent::MessageEnd { message, .. } = e
+                && message["role"] == "custom"
+            {
+                assert_eq!(message["customType"], "task-notification");
+                notices.push(message["content"].as_str().unwrap_or_default().to_owned());
+            }
+        }
+        assert_eq!(notices, ["Background command \"cargo test\" completed (exit code 0)", "A background task failed."]);
+        assert_eq!(s.state.lock().unwrap().messages.iter().filter(|m| m["role"] == "custom").count(), 2, "kept with the messages");
+        assert!(s.state.lock().unwrap().background.is_empty(), "ended ones are forgotten");
     }
 
     #[test]
