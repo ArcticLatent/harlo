@@ -265,7 +265,9 @@ pub async fn stream(base: &str, token: Option<&str>, body: &Value, provider: &st
         let body: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
         let said = body["error"]["message"].as_str().or_else(|| body["error"].as_str()).or_else(|| body["message"].as_str()).map(str::to_owned).unwrap_or_else(|| text.chars().take(300).collect());
         let code = body["error"]["type"].as_str().or_else(|| body["error"]["code"].as_str()).unwrap_or_default().to_owned();
-        return Err(ApiError { status: status.as_u16(), message: format!("{provider} refused the request ({status}): {said}"), code, retry_after }.into());
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+        let resets_at = body["error"]["resets_at"].as_i64().or_else(|| body["error"]["resets_in_seconds"].as_i64().map(|s| now + s));
+        return Err(ApiError { status: status.as_u16(), message: format!("{provider} refused the request ({status}): {said}"), code, retry_after, resets_at }.into());
     }
     let mut reply = Reply::default();
     let mut bytes = resp.bytes_stream();

@@ -12,7 +12,8 @@
 //!                              [--resume | --session <file>]
 //! harlo-agent --version        and the commit it was built from
 //! harlo-agent --mode rpc [--session <file> | --no-session] [-m model] [--thinking level]
-//!                         [--harlo-tools] [--task-model provider/model]
+//!                         [--harlo-tools] [--task-model provider/model] [--budget tokens]
+//!                         [--fallback provider/model]
 //!                              pi's RPC protocol on stdin/stdout (for harlo;
 //!                              with harlo's own tools on the same pipe)
 //! ```
@@ -196,7 +197,7 @@ async fn run(args: Vec<String>) -> Result<()> {
             ask(&prompt, &images, model, effort, from, bare, launch).await
         }
         _ => {
-            println!("harlo-agent login [--codex] | logout [--codex] | status | usage | models | -p \"prompt\"|- [--image file]… [-m model] [--thinking low|medium|high] [--resume | --session file | --no-session] [--no-tools] [--sandbox on|off|no-network] [--task-model provider/model]");
+            println!("harlo-agent login [--codex] | logout [--codex] | status | usage | models | -p \"prompt\"|- [--image file]… [-m model] [--thinking low|medium|high] [--resume | --session file | --no-session] [--no-tools] [--sandbox on|off|no-network] [--task-model provider/model] [--budget tokens] [--fallback provider/model]");
             Ok(())
         }
     }
@@ -367,7 +368,7 @@ async fn ask(prompt: &str, images: &[serde_json::Value], model: Option<String>, 
                 line(&mut fresh);
                 eprintln!("\x1b[33m{text}\x1b[0m");
             }
-            agent::Shown::MessageStart(_) | agent::Shown::MessageEnd(_) | agent::Shown::Withdrawn | agent::Shown::Queue { .. } | agent::Shown::Limits(_) => {}
+            agent::Shown::MessageStart(_) | agent::Shown::MessageEnd(_) | agent::Shown::Withdrawn | agent::Shown::Queue { .. } | agent::Shown::Limits(_) | agent::Shown::ModelChanged(_) => {}
         }
     };
     // Ctrl+C stops the turn; a second one quits at once.

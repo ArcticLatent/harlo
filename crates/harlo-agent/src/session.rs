@@ -75,6 +75,25 @@ pub struct Loaded {
     pub originals: Vec<(String, crate::tools::Original)>,
 }
 
+/// What a session's log (and its subagents', beside it) says it used:
+/// tokens sent and received, not counting those the cache served.
+pub fn spent(path: &Path) -> u64 {
+    if path.as_os_str().is_empty() {
+        return 0;
+    }
+    let of = |p: &Path| -> u64 {
+        std::fs::read_to_string(p)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter(|e| e["type"] == "message" && e["message"]["role"] == "assistant")
+            .map(|e| e["message"]["usage"]["input"].as_u64().unwrap_or(0) + e["message"]["usage"]["output"].as_u64().unwrap_or(0))
+            .sum()
+    };
+    let subs: u64 = std::fs::read_dir(path.with_extension("")).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "jsonl")).map(|p| of(&p)).sum();
+    of(path) + subs
+}
+
 /// What a session holds for the agent going on with it.
 #[derive(Default)]
 pub struct Past {

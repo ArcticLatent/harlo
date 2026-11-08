@@ -71,6 +71,9 @@ pub enum Shown<'a> {
     /// The reply that started streaming is dropped (it's sent again, or
     /// it failed): it ends as nothing, and isn't kept.
     Withdrawn,
+    /// The session's model changed by itself (`provider/model`): it went
+    /// on with the fallback, or back to the plan's.
+    ModelChanged(&'a str),
     ToolStart { call_id: &'a str, name: &'a str, args: &'a Value },
     ToolEnd { call_id: &'a str, name: &'a str, text: &'a str, failed: bool },
     Usage { model: &'a str, usage: &'a Value },
@@ -119,6 +122,54 @@ pub trait Gate: Send + Sync {
 pub struct Launch {
     /// `--task-model`: what subagents run on when a task doesn't say.
     pub task_model: Option<String>,
+    /// `--budget`: the most tokens the session may use.
+    pub budget: Option<u64>,
+    /// `--fallback`: what it goes on with when the plan's used up.
+    pub fallback: Option<String>,
+}
+
+/// A session's token budget: tokens sent and received, not counting those
+/// the cache served, its subagents' included (they share it).
+pub struct Budget {
+    pub limit: u64,
+    pub spent: std::sync::atomic::AtomicU64,
+}
+
+impl Budget {
+    /// Why no more requests may go, once it's used.
+    fn used(&self) -> Option<String> {
+        let spent = self.spent.load(std::sync::atomic::Ordering::Relaxed);
+        (spent >= self.limit).then(|| {
+            format!(
+                "This session used its token budget of {} ({} tokens sent and received, not counting those the cache served), so it makes no more requests.",
+                tokens(self.limit),
+                tokens(spent)
+            )
+        })
+    }
+}
+
+/// `412k`, `1.2m`.
+pub fn tokens(n: u64) -> String {
+    match n {
+        0..1_000 => n.to_string(),
+        1_000..1_000_000 => format!("{}k", n / 1_000),
+        _ => format!("{:.1}m", n as f64 / 1e6).replace(".0m", "m"),
+    }
+}
+
+/// `400k`, `2m`, `1.5m`, `400000`.
+pub fn parse_tokens(s: &str) -> Option<u64> {
+    let s = s.trim().to_lowercase().replace(['_', ','], "");
+    let (num, times) = match s.strip_suffix('k') {
+        Some(n) => (n.to_owned(), 1e3),
+        None => match s.strip_suffix('m') {
+            Some(n) => (n.to_owned(), 1e6),
+            None => (s.clone(), 1.0),
+        },
+    };
+    let v: f64 = num.trim().parse().ok()?;
+    (v > 0.0).then(|| (v * times).round() as u64)
 }
 
 impl Launch {
@@ -127,6 +178,11 @@ impl Launch {
         let mut value = |name: &str| rest.next().filter(|v| !v.is_empty()).ok_or_else(|| anyhow::anyhow!("{name} needs a value"));
         match arg {
             "--task-model" => self.task_model = Some(crate::providers::full(&value(arg)?)),
+            "--fallback" => self.fallback = Some(crate::providers::full(&value(arg)?)),
+            "--budget" => {
+                let v = value(arg)?;
+                self.budget = Some(parse_tokens(&v).ok_or_else(|| anyhow::anyhow!("--budget takes tokens, as 400k or 2m (not {v})"))?);
+            }
             _ => return Ok(false),
         }
         Ok(true)
@@ -216,6 +272,12 @@ pub struct Agent {
     profiles: Vec<crate::profiles::Profile>,
     /// What subagents run on when a task doesn't say (`--task-model`).
     pub task_model: Option<String>,
+    /// Its token budget (`--budget`), shared with its subagents.
+    pub budget: Option<Arc<Budget>>,
+    /// What it goes on with when its model's plan is used up (`--fallback`).
+    pub fallback: Option<String>,
+    /// On the fallback: the model it left, and when to try it again (unix s).
+    fell_back: Option<(String, i64)>,
     /// What its requests share a cache by (None: its session's id).
     pub cache_key: Option<String>,
     pub notify: Option<Notify>,
@@ -270,6 +332,9 @@ impl Agent {
             allowed: None,
             profiles,
             task_model: None,
+            budget: None,
+            fallback: None,
+            fell_back: None,
             cache_key: None,
             notify: None,
             subagents: Arc::default(),
@@ -378,6 +443,7 @@ impl Agent {
     /// ends (commands with everything they started), and the history says
     /// what was cut off.
     pub async fn run(&mut self, prompt: &str, images: &[Value], stop: &CancellationToken, show: &mut (dyn FnMut(Shown) + Send)) -> Result<Ended> {
+        self.back_from_fallback(show);
         if self.logged.0.as_deref() != Some(&self.model) {
             let (provider, id) = self.model.split_once('/').unwrap_or((providers::CHATGPT, &self.model));
             self.log.append(json!({ "type": "model_change", "provider": provider, "modelId": id }))?;
@@ -582,6 +648,36 @@ impl Agent {
         self.push(m, show)
     }
 
+    /// On the fallback since the plan's model was used up: back to it once
+    /// it has reset (or, after a server that kept failing, the next prompt).
+    /// A model chosen meanwhile stays.
+    fn back_from_fallback(&mut self, show: &mut (dyn FnMut(Shown) + Send)) {
+        let Some((plan, at)) = self.fell_back.clone() else { return };
+        if self.fallback.as_deref() != Some(self.model.as_str()) {
+            self.fell_back = None;
+            return;
+        }
+        if crate::clock::now().unix < at {
+            return;
+        }
+        self.fell_back = None;
+        self.model = plan;
+        show(Shown::Notice { level: "info", text: &format!("Back on {}.", self.model) });
+        show(Shown::ModelChanged(&self.model));
+    }
+
+    /// Whether `e` moves the session to its fallback: the plan used up, or
+    /// a server that kept failing through the retries (when it reset, if
+    /// it said). Never for a refusal that names the request or the sign-in.
+    fn falls_back(&self, e: &anyhow::Error) -> Option<i64> {
+        self.fallback.as_deref().filter(|f| *f != self.model)?;
+        let now = crate::clock::now().unix;
+        match crate::retry::used_up(e) {
+            Some(at) => Some(at.unwrap_or(now + 3600)),
+            None => crate::retry::transient(e).map(|_| now),
+        }
+    }
+
     /// One request with the history: the reply, as pi's assistant message.
     async fn ask(&mut self, show: &mut (dyn FnMut(Shown) + Send)) -> Result<Value> {
         let images = self.takes_images().await;
@@ -593,10 +689,31 @@ impl Agent {
             show(Shown::Notice { level: "warning", text: &format!("Harlo's commands can't run: its sandbox can't start here ({why}). Install bubblewrap, or turn the sandbox off in Settings → Providers → Harlo.") });
             self.told_sandbox = true;
         }
+        if let Some(why) = self.budget.as_ref().and_then(|b| b.used()) {
+            bail!("{why}");
+        }
         let (system, specs) = (self.system(), self.specs());
         let key = self.cache_key.clone().unwrap_or_else(|| self.log.id.clone());
         let asked = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &self.history, session: &key, specs: &specs, tools: true, images };
-        let (message, usage) = send(asked, show).await?;
+        let (message, usage) = match send(asked, show).await {
+            Err(e) if let Some(back) = self.falls_back(&e) => {
+                // Goes on with the fallback: said, and in the log.
+                let (plan, fb) = (self.model.clone(), self.fallback.clone().unwrap_or_default());
+                show(Shown::Withdrawn);
+                let when = if back > crate::clock::now().unix + 60 { "once its limit resets" } else { "with the next prompt" };
+                show(Shown::Notice { level: "warning", text: &format!("{plan}: {e:#} Going on with {fb}; {plan} is tried again {when}.") });
+                self.fell_back = Some((plan, back));
+                self.model = fb;
+                let (provider, id) = self.model.split_once('/').unwrap_or((providers::CHATGPT, &self.model));
+                self.log.append(json!({ "type": "model_change", "provider": provider, "modelId": id }))?;
+                self.logged.0 = Some(self.model.clone());
+                show(Shown::ModelChanged(&self.model));
+                let images = self.takes_images().await;
+                let asked = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &self.history, session: &key, specs: &specs, tools: true, images };
+                send(asked, show).await?
+            }
+            r => r?,
+        };
         self.count(&usage);
         show(Shown::Usage { model: message["model"].as_str().unwrap_or_default(), usage: &usage });
         self.last_usage = usage;
@@ -616,11 +733,16 @@ impl Agent {
             running: self.subagents.clone(),
             profiles: self.profiles.clone(),
             task_model: self.task_model.clone(),
+            budget: self.budget.clone(),
+            fallback: self.fallback.clone(),
         }
     }
 
     pub fn launch(&mut self, l: &Launch) {
         self.task_model = l.task_model.clone();
+        self.fallback = l.fallback.clone();
+        // (What the session used before, when it goes on.)
+        self.budget = l.budget.map(|limit| Arc::new(Budget { limit, spent: crate::session::spent(&self.log.path).into() }));
     }
 
     /// Added to the instructions (an agent profile's, for a subagent).
@@ -696,10 +818,14 @@ impl Agent {
     }
 
     fn count(&mut self, usage: &Value) {
+        let (input, cached, output) = (usage["input_tokens"].as_u64().unwrap_or(0), usage["input_tokens_details"]["cached_tokens"].as_u64().unwrap_or(0), usage["output_tokens"].as_u64().unwrap_or(0));
         self.totals.requests += 1;
-        self.totals.input += usage["input_tokens"].as_u64().unwrap_or(0);
-        self.totals.cached += usage["input_tokens_details"]["cached_tokens"].as_u64().unwrap_or(0);
-        self.totals.output += usage["output_tokens"].as_u64().unwrap_or(0);
+        self.totals.input += input;
+        self.totals.cached += cached;
+        self.totals.output += output;
+        if let Some(b) = &self.budget {
+            b.spent.fetch_add(input.saturating_sub(cached) + output, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 
     /// The context's size: the last request's, with its reply.
@@ -798,6 +924,9 @@ impl Agent {
         let keep = if reason == "manual" { compact::keep(at).min(compact::ASKED_KEEP) } else { compact::keep(at) };
         let cut = compact::cut(&self.history, keep).or_else(|| if reason == "overflow" { compact::cut(&self.history, 1) } else { None });
         let Some(cut) = cut else { return Compacted::Nothing };
+        if let Some(why) = self.budget.as_ref().and_then(|b| b.used()) {
+            return Compacted::Failed(why);
+        }
         let Some(first_kept) = self.ids.get(cut).cloned() else { return Compacted::Nothing };
         show(Shown::CompactionStart { reason });
         // (The last request's count when there was one since the start.)
@@ -1420,6 +1549,16 @@ fn other_rules(cwd: &Path) -> (Vec<(PathBuf, String)>, Vec<(PathBuf, String)>) {
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn token_counts() {
+        assert_eq!([parse_tokens("400k"), parse_tokens("2M"), parse_tokens("1.5m"), parse_tokens("400_000"), parse_tokens("x"), parse_tokens("0")], [Some(400_000), Some(2_000_000), Some(1_500_000), Some(400_000), None, None]);
+        assert_eq!([tokens(950), tokens(412_345), tokens(2_000_000), tokens(1_250_000)], ["950", "412k", "2m", "1.2m"]);
+        let b = Budget { limit: 1000, spent: 999.into() };
+        assert!(b.used().is_none());
+        b.spent.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        assert!(b.used().unwrap().starts_with("This session used its token budget of 1k (1k tokens"));
+    }
 
     #[test]
     fn other_agents_rules() {

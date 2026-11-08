@@ -278,7 +278,9 @@ pub async fn stream(base: &str, token: Option<&str>, affinity: Option<&str>, hea
     if !status.is_success() {
         let body: Value = resp.json().await.unwrap_or(Value::Null);
         let code = body["error"]["type"].as_str().or_else(|| body["error"]["code"].as_str()).unwrap_or_default().to_owned();
-        return Err(ApiError { status: status.as_u16(), message: refusal(status.as_u16(), &body), code, retry_after }.into());
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+        let resets_at = body["error"]["resets_at"].as_i64().or_else(|| body["error"]["resets_in_seconds"].as_i64().map(|s| now + s));
+        return Err(ApiError { status: status.as_u16(), message: refusal(status.as_u16(), &body), code, retry_after, resets_at }.into());
     }
     let mut bytes = resp.bytes_stream();
     let mut buf: Vec<u8> = Vec::new();
@@ -353,6 +355,8 @@ pub struct ApiError {
     pub code: String,
     /// Seconds the server asked to wait (`Retry-After`).
     pub retry_after: Option<u64>,
+    /// When a used-up plan resets (unix seconds), if it said.
+    pub resets_at: Option<i64>,
 }
 
 /// The request didn't reach the server, or the reply's stream broke.

@@ -95,6 +95,10 @@ pub struct Ctx {
     pub profiles: Vec<crate::profiles::Profile>,
     /// What subagents run on when a task doesn't say (None: the session's model).
     pub task_model: Option<String>,
+    /// The session's token budget, which they share.
+    pub budget: Option<Arc<crate::agent::Budget>>,
+    /// What they go on with when their model's plan is used up.
+    pub fallback: Option<String>,
 }
 
 impl Ctx {
@@ -254,6 +258,8 @@ async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaph
     };
     let mut agent = Agent::new(cwd, log, Past::default(), model, effort);
     agent.gate = ctx.gate.clone();
+    agent.budget = ctx.budget.clone();
+    agent.fallback = ctx.fallback.clone();
     agent.allowed = Some(allowed);
     if let Some(p) = profile.filter(|p| !p.body.is_empty()) {
         agent.add_instructions(&format!("\n<agent_profile name=\"{}\">\n{}\n</agent_profile>\n", p.name, p.body));
@@ -357,7 +363,7 @@ mod tests {
     async fn bad_calls_are_refused() {
         let ctx = Ctx {
             model: "x/y".into(), effort: None, cwd: std::env::temp_dir(), gate: None, parent_file: None, cache_key: "k".into(),
-            notify: None, known: Default::default(), running: Arc::default(), profiles: Vec::new(), task_model: None,
+            notify: None, known: Default::default(), running: Arc::default(), profiles: Vec::new(), task_model: None, budget: None, fallback: None,
         };
         let stop = CancellationToken::new();
         assert!(run(&json!({}), "c", &ctx, &stop).await.failed);

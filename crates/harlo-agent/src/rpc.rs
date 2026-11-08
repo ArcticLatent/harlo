@@ -123,6 +123,10 @@ impl Shared {
             Shown::CompactionStart { reason } => self.emit(json!({ "type": "compaction_start", "reason": reason })),
             Shown::Limits(l) => self.emit(json!({ "type": "harlo_limits", "provider": l["provider"], "account": l["account"], "windows": l["windows"] })),
             Shown::Notice { level, text } => self.emit(json!({ "type": "notice", "level": level, "message": text })),
+            Shown::ModelChanged(model) => {
+                self.view.lock().unwrap().model = model.to_owned();
+                self.emit(json!({ "type": "model_changed", "model": self.model_json(model) }));
+            }
             // (The context's size drops: harlo's meter follows it.)
             Shown::SetAside { after, .. } => self.view.lock().unwrap().last_usage = json!({ "input_tokens": after, "output_tokens": 0 }),
             Shown::CompactionEnd { reason, result, error, will_retry } => {

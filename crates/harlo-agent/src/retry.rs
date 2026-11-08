@@ -67,6 +67,15 @@ pub fn transient(e: &anyhow::Error) -> Option<(&'static str, Option<u64>)> {
     None
 }
 
+/// Whether `e` says the plan (or the account's quota) is used up, and
+/// when it resets (unix seconds), if it said.
+pub fn used_up(e: &anyhow::Error) -> Option<Option<i64>> {
+    if let Some(a) = e.downcast_ref::<ApiError>() {
+        return USED_UP.contains(&a.code.as_str()).then_some(a.resets_at);
+    }
+    e.downcast_ref::<Failed>().filter(|f| USED_UP.contains(&f.code.as_str())).map(|_| None)
+}
+
 /// How long to wait before retry `n` (1-based). `HARLO_AGENT_RETRY_MS`
 /// sets the first wait instead (tests).
 pub fn delay(n: u32, asked: Option<u64>) -> Duration {
@@ -82,7 +91,7 @@ mod tests {
     use super::*;
 
     fn api(status: u16, code: &str, after: Option<u64>) -> anyhow::Error {
-        ApiError { status, message: "refused".into(), code: code.into(), retry_after: after }.into()
+        ApiError { status, message: "refused".into(), code: code.into(), retry_after: after, resets_at: None }.into()
     }
 
     #[test]
@@ -103,7 +112,7 @@ mod tests {
         assert!(transient(&api(400, "", None)).is_none());
         assert!(transient(&api(401, "", None)).is_none());
         assert!(transient(&api(403, "", None)).is_none());
-        let long: anyhow::Error = ApiError { status: 400, message: "context_length_exceeded".into(), code: "context_length_exceeded".into(), retry_after: None }.into();
+        let long: anyhow::Error = ApiError { status: 400, message: "context_length_exceeded".into(), code: "context_length_exceeded".into(), retry_after: None, resets_at: None }.into();
         assert!(transient(&long).is_none());
         assert!(transient(&Failed { code: "invalid_prompt".into(), message: "no".into() }.into()).is_none());
         assert!(transient(&anyhow::anyhow!("something else")).is_none());
