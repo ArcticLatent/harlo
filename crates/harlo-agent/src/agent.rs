@@ -114,6 +114,25 @@ pub trait Gate: Send + Sync {
     fn ask(&self, questions: Value) -> BoxFuture<'static, Option<Value>>;
 }
 
+/// What a launch may set for a session (the same for `-p` and RPC).
+#[derive(Clone, Debug, Default)]
+pub struct Launch {
+    /// `--task-model`: what subagents run on when a task doesn't say.
+    pub task_model: Option<String>,
+}
+
+impl Launch {
+    /// Takes `arg` (and its value, from `rest`) if it's one of these.
+    pub fn take(&mut self, arg: &str, rest: &mut impl Iterator<Item = String>) -> anyhow::Result<bool> {
+        let mut value = |name: &str| rest.next().filter(|v| !v.is_empty()).ok_or_else(|| anyhow::anyhow!("{name} needs a value"));
+        match arg {
+            "--task-model" => self.task_model = Some(crate::providers::full(&value(arg)?)),
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
+}
+
 /// harlo, when it started this agent (`--harlo-tools`): its tools (start
 /// other sessions, report to a parent, the project's plan and specs)
 /// called through it. `_tools` and `_instructions` say what they are.
@@ -193,6 +212,10 @@ pub struct Agent {
     pub harlo: Option<Arc<dyn Harlo>>,
     /// A subagent's tools (None: all of them, and `task`).
     pub allowed: Option<&'static [&'static str]>,
+    /// The agent profiles `task` may name (found when it starts).
+    profiles: Vec<crate::profiles::Profile>,
+    /// What subagents run on when a task doesn't say (`--task-model`).
+    pub task_model: Option<String>,
     /// What its requests share a cache by (None: its session's id).
     pub cache_key: Option<String>,
     pub notify: Option<Notify>,
@@ -220,6 +243,7 @@ impl Agent {
     pub fn new(cwd: PathBuf, log: Log, past: Past, model: String, effort: Option<String>) -> Self {
         let spill = std::env::temp_dir().join("harlo-agent");
         let sandbox = crate::sandbox::for_dir(&cwd);
+        let profiles = crate::profiles::find(&cwd, &home(), &crate::auth::config_dir());
         Agent {
             instructions: instructions(&cwd, sandbox.as_deref()),
             tools: {
@@ -244,6 +268,8 @@ impl Agent {
             gate: None,
             harlo: None,
             allowed: None,
+            profiles,
+            task_model: None,
             cache_key: None,
             notify: None,
             subagents: Arc::default(),
@@ -588,7 +614,18 @@ impl Agent {
             notify: self.notify.clone(),
             known: self.known.clone(),
             running: self.subagents.clone(),
+            profiles: self.profiles.clone(),
+            task_model: self.task_model.clone(),
         }
+    }
+
+    pub fn launch(&mut self, l: &Launch) {
+        self.task_model = l.task_model.clone();
+    }
+
+    /// Added to the instructions (an agent profile's, for a subagent).
+    pub fn add_instructions(&mut self, text: &str) {
+        self.instructions.push_str(text);
     }
 
     /// Starts the MCP servers configured (once; not for a subagent), or
@@ -625,7 +662,7 @@ impl Agent {
 
     /// The tools the model gets: its own, then harlo's.
     fn specs(&self) -> Value {
-        let mut all = tools::specs_of(self.allowed, self.allowed.is_none() && crate::task::enabled());
+        let mut all = tools::specs_of(self.allowed, (self.allowed.is_none() && crate::task::enabled()).then_some(self.profiles.as_slice()));
         if let Some(list) = all.as_array_mut() {
             // (`recall` once there's something to recall: the request that
             // first has a stub breaks the cache anyway.)

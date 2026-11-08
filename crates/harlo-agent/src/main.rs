@@ -12,7 +12,7 @@
 //!                              [--resume | --session <file>]
 //! harlo-agent --version        and the commit it was built from
 //! harlo-agent --mode rpc [--session <file> | --no-session] [-m model] [--thinking level]
-//!                         [--harlo-tools]
+//!                         [--harlo-tools] [--task-model provider/model]
 //!                              pi's RPC protocol on stdin/stdout (for harlo;
 //!                              with harlo's own tools on the same pipe)
 //! ```
@@ -31,6 +31,7 @@ mod images;
 mod isolate;
 mod jobs;
 mod mcp;
+mod profiles;
 mod providers;
 mod responses;
 mod retry;
@@ -135,8 +136,12 @@ async fn run(args: Vec<String>) -> Result<()> {
         }
         Some("--mode") if args.get(1).is_some_and(|m| m == "rpc") => {
             let (mut keep, mut model, mut effort, mut harlo_tools, mut sandbox) = (rpc::Keep::New, None, None, false, None);
+            let mut launch = agent::Launch::default();
             let mut it = args.into_iter().skip(2);
             while let Some(a) = it.next() {
+                if launch.take(&a, &mut it)? {
+                    continue;
+                }
                 match a.as_str() {
                     "--session" => keep = rpc::Keep::File(it.next().ok_or_else(|| anyhow::anyhow!("--session needs the file"))?.into()),
                     "--no-session" => keep = rpc::Keep::Nowhere,
@@ -148,7 +153,7 @@ async fn run(args: Vec<String>) -> Result<()> {
                 }
             }
             sandbox::configure(sandbox.as_deref())?;
-            rpc::serve(keep, model, effort, harlo_tools).await
+            rpc::serve(keep, model, effort, harlo_tools, launch).await
         }
         Some("-p") => {
             let mut model = None;
@@ -157,9 +162,13 @@ async fn run(args: Vec<String>) -> Result<()> {
             let mut images = Vec::new();
             let mut sandbox = None;
             let mut bare = Bare::default();
+            let mut launch = agent::Launch::default();
             let mut it = args.into_iter().skip(1);
             let prompt = it.next();
             while let Some(a) = it.next() {
+                if launch.take(&a, &mut it)? {
+                    continue;
+                }
                 match a.as_str() {
                     "-m" | "--model" => model = it.next(),
                     "--thinking" => effort = it.next(),
@@ -184,10 +193,10 @@ async fn run(args: Vec<String>) -> Result<()> {
             if bare.no_session && !matches!(from, Resume::New) {
                 bail!("--no-session starts a new conversation: it can't resume one");
             }
-            ask(&prompt, &images, model, effort, from, bare).await
+            ask(&prompt, &images, model, effort, from, bare, launch).await
         }
         _ => {
-            println!("harlo-agent login [--codex] | logout [--codex] | status | usage | models | -p \"prompt\"|- [--image file]… [-m model] [--thinking low|medium|high] [--resume | --session file | --no-session] [--no-tools] [--sandbox on|off|no-network]");
+            println!("harlo-agent login [--codex] | logout [--codex] | status | usage | models | -p \"prompt\"|- [--image file]… [-m model] [--thinking low|medium|high] [--resume | --session file | --no-session] [--no-tools] [--sandbox on|off|no-network] [--task-model provider/model]");
             Ok(())
         }
     }
@@ -241,7 +250,7 @@ enum Resume {
     File(std::path::PathBuf),
 }
 
-async fn ask(prompt: &str, images: &[serde_json::Value], model: Option<String>, effort: Option<String>, from: Resume, bare: Bare) -> Result<()> {
+async fn ask(prompt: &str, images: &[serde_json::Value], model: Option<String>, effort: Option<String>, from: Resume, bare: Bare, launch: agent::Launch) -> Result<()> {
     let cwd = std::env::current_dir()?;
     let root = match session::root() {
         Some(r) => r,
@@ -274,6 +283,7 @@ async fn ask(prompt: &str, images: &[serde_json::Value], model: Option<String>, 
         }
     };
     let mut agent = agent::Agent::new(cwd, log, past, model, effort);
+    agent.launch(&launch);
     if bare.no_tools {
         agent.allowed = Some(&[]);
     }

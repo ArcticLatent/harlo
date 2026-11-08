@@ -296,7 +296,7 @@ impl Harlo for Pipe {
     }
 }
 
-pub async fn serve(keep: Keep, model: Option<String>, effort: Option<String>, harlo_tools: bool) -> Result<()> {
+pub async fn serve(keep: Keep, model: Option<String>, effort: Option<String>, harlo_tools: bool, launch: crate::agent::Launch) -> Result<()> {
     let cwd = std::env::current_dir()?;
     let root = session::root().ok_or_else(|| anyhow::anyhow!("No home folder to keep sessions in"))?;
     let (log, past, name) = match keep {
@@ -308,6 +308,7 @@ pub async fn serve(keep: Keep, model: Option<String>, effort: Option<String>, ha
     let effort = effort.or_else(|| past.effort.clone()).unwrap_or_else(|| DEFAULT_LEVEL.to_owned());
     let model = model.or_else(|| past.model.clone()).map(|m| providers::full(&m)).unwrap_or_default();
     let mut agent = Agent::new(cwd.clone(), log, past, model, Some(effort));
+    agent.launch(&launch);
 
     let (out, mut out_rx) = mpsc::unbounded_channel::<Value>();
     let writer = tokio::spawn(async move {

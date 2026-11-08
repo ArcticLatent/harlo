@@ -82,14 +82,14 @@ pub fn read_only(name: &str) -> bool {
 }
 
 /// The tools' definitions for the Responses API: those in `only` (all
-/// when None), and `task` with them when `task`.
-pub fn specs_of(only: Option<&[&str]>, task: bool) -> Value {
+/// when None), and `task` with them when `task` (the profiles it may name).
+pub fn specs_of(only: Option<&[&str]>, task: Option<&[crate::profiles::Profile]>) -> Value {
     let mut all: Vec<Value> = specs().as_array().cloned().unwrap_or_default();
     if let Some(only) = only {
         all.retain(|t| t["name"].as_str().is_some_and(|n| only.contains(&n)));
     }
-    if task {
-        all.push(crate::task::spec());
+    if let Some(profiles) = task {
+        all.push(crate::task::spec(profiles));
     }
     Value::Array(all)
 }
