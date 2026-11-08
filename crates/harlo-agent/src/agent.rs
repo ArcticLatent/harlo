@@ -795,7 +795,7 @@ impl Agent {
                 let (plan, fb) = (self.model.clone(), self.fallback.clone().unwrap_or_default());
                 show(Shown::Withdrawn);
                 let when = if back > crate::clock::now().unix + 60 { "once its limit resets" } else { "with the next prompt" };
-                show(Shown::Notice { level: "warning", text: &format!("{plan}: {e:#} Going on with {fb}; {plan} is tried again {when}.") });
+                show(Shown::Notice { level: "warning", text: &format!("{plan}: {} Going on with {fb}; {plan} is tried again {when}.", sentence(&format!("{e:#}"))) });
                 self.fell_back = Some((plan, back));
                 self.model = fb;
                 let (provider, id) = self.model.split_once('/').unwrap_or((providers::CHATGPT, &self.model));
@@ -1887,4 +1887,10 @@ mod tests {
         assert!(hands_over(&["request_approval"], &[o(false)]));
         assert!(!hands_over(&["list_sessions", "bash"], &[o(false), o(false)]));
     }
+}
+
+/// `text` ending as a sentence does (a full stop added when it has none).
+fn sentence(text: &str) -> String {
+    let t = text.trim_end();
+    if t.ends_with(['.', '!', '?']) { t.to_owned() } else { format!("{t}.") }
 }

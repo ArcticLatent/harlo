@@ -110,12 +110,18 @@ impl Job {
 /// Why a stopped job's group was signalled (read by its watcher).
 static STOPPED: Mutex<Vec<(i32, &'static str)>> = Mutex::new(Vec::new());
 
+/// A duration as people say it: "45 s", "2 min 10 s", "30 min", "1 h",
+/// "1 h 5 min" (no zero parts).
 fn took(d: Duration) -> String {
     let s = d.as_secs();
-    match s {
-        0..=59 => format!("{s} s"),
-        60..=3599 => format!("{} min {} s", s / 60, s % 60),
-        _ => format!("{} h {} min", s / 3600, (s % 3600) / 60),
+    let (big, small) = match s {
+        0..=59 => return format!("{s} s"),
+        60..=3599 => ((s / 60, "min"), (s % 60, "s")),
+        _ => ((s / 3600, "h"), ((s % 3600) / 60, "min")),
+    };
+    match small.0 {
+        0 => format!("{} {}", big.0, big.1),
+        n => format!("{} {} {n} {}", big.0, big.1, small.1),
     }
 }
 
@@ -366,6 +372,12 @@ fn notice(j: &Job, e: &End, s: &State) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn durations_read_as_said() {
+        let t = |s| took(Duration::from_secs(s));
+        assert_eq!([t(45), t(60), t(130), t(1800), t(3600), t(3900), t(7200)], ["45 s", "1 min", "2 min 10 s", "30 min", "1 h", "1 h 5 min", "2 h"]);
+    }
 
     #[tokio::test]
     async fn a_job_runs_on_and_says_when_it_ends() {
