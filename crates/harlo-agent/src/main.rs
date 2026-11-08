@@ -41,6 +41,7 @@ mod jobs;
 mod lsp;
 mod mcp;
 mod mcp_auth;
+mod patch;
 mod profiles;
 mod program;
 mod providers;
@@ -488,6 +489,7 @@ fn summary(name: &str, args: &serde_json::Value) -> String {
     let text = match name {
         "bash" => s("command"),
         "read" | "write" | "ls" => s("path"),
+        "apply_patch" => crate::patch::parse(&s("input")).map(|ops| ops.iter().map(crate::patch::Op::path).collect::<Vec<_>>().join(", ")).unwrap_or_default(),
         "edit" => format!("{} ({} edit{})", s("path"), args["edits"].as_array().map_or(0, Vec::len), if args["edits"].as_array().map_or(0, Vec::len) == 1 { "" } else { "s" }),
         "grep" => format!("{} {}", s("pattern"), s("path")),
         "find" => format!("{} {}", s("pattern"), s("path")),

@@ -115,7 +115,8 @@ pub fn read_only(name: &str) -> bool {
 
 /// The tools' definitions for the Responses API: those in `only` (all
 /// when None), and `task` with them when `task` (the profiles it may name).
-pub fn specs_of(only: Option<&[&str]>, task: Option<&[crate::profiles::Profile]>) -> Value {
+/// `patch`: apply_patch where edit would be.
+pub fn specs_of(only: Option<&[&str]>, task: Option<&[crate::profiles::Profile]>, patch: bool) -> Value {
     let mut all: Vec<Value> = specs().as_array().cloned().unwrap_or_default();
     // (Anchored edits, when measured.)
     if crate::hashline::on() {
@@ -133,6 +134,15 @@ pub fn specs_of(only: Option<&[&str]>, task: Option<&[crate::profiles::Profile]>
     }
     if let Some(only) = only {
         all.retain(|t| t["name"].as_str().is_some_and(|n| only.contains(&n)));
+    }
+    if patch {
+        for t in all.iter_mut() {
+            if t["name"] == "edit" {
+                *t = crate::patch::spec();
+            } else if let Some(d) = t["description"].as_str() {
+                t["description"] = json!(crate::patch::reworded(d));
+            }
+        }
     }
     if let Some(profiles) = task {
         all.push(crate::task::spec(profiles));
@@ -344,6 +354,7 @@ impl Tools {
             "read" => self.read(s("path"), args["offset"].as_u64(), args["limit"].as_u64()),
             "write" => self.write(s("path"), s("content")),
             "edit" => self.edit(s("path"), &args["edits"]),
+            "apply_patch" => self.patch(s("input")),
             "bash" => {
                 let sandbox = self.sandbox.as_deref();
                 if let Some(why) = sandbox.and_then(|sb| sb.broken.as_ref()) {
@@ -546,6 +557,109 @@ impl Tools {
         }
     }
 
+    /// `apply_patch` (`HARLO_AGENT_EDIT=patch`): every file's change is
+    /// worked out and checked first, then all are written.
+    fn patch(&self, input: &str) -> Outcome {
+        use crate::patch::Op;
+        let ops = match crate::patch::parse(input) {
+            Ok(ops) => ops,
+            Err(why) => return fail(why),
+        };
+        // What each file becomes (None: removed), and what's said of it.
+        let mut plan: Vec<(PathBuf, Option<String>)> = Vec::new();
+        let mut said: Vec<String> = Vec::new();
+        for op in &ops {
+            let path = self.path(op.path());
+            if plan.iter().any(|(p, _)| *p == path) {
+                return fail(format!("{} is in the patch twice: give all of a file's hunks under one `*** Update File:`.", op.path()));
+            }
+            if let Some(no) = self.fenced(&path) {
+                return no;
+            }
+            match op {
+                Op::Add { content, .. } => {
+                    if let Some(why) = self.stale(&path, true, None) {
+                        return fail(why);
+                    }
+                    if let Some(no) = std::fs::read(&path).ok().and_then(|head| self.generated(&path, &head)) {
+                        return no;
+                    }
+                    let n = content.lines().count();
+                    said.push(format!("{} {} ({n} line{})", if path.exists() { "replaced" } else { "created" }, op.path(), if n == 1 { "" } else { "s" }));
+                    plan.push((path, Some(content.clone())));
+                }
+                Op::Delete { .. } => {
+                    if !path.is_file() {
+                        return fail(format!("Can't delete {}: there's no such file.", op.path()));
+                    }
+                    if let Some(why) = self.stale(&path, false, None) {
+                        return fail(why);
+                    }
+                    said.push(format!("deleted {}", op.path()));
+                    plan.push((path, None));
+                }
+                Op::Update { move_to, hunks, .. } => {
+                    let content = match std::fs::read_to_string(&path) {
+                        Ok(c) => c,
+                        Err(e) => return fail(format!("Can't read {}: {e}", op.path())),
+                    };
+                    if let Some(why) = self.stale(&path, false, Some(content.as_bytes())) {
+                        return fail(why);
+                    }
+                    if let Some(no) = self.generated(&path, content.as_bytes()) {
+                        return no;
+                    }
+                    let (new, first) = if hunks.is_empty() { (content, 1) } else {
+                        match crate::patch::apply(&content, hunks, op.path()) {
+                            Ok(r) => r,
+                            Err(why) => return fail(why),
+                        }
+                    };
+                    let n = hunks.len();
+                    let changes = if n == 0 { String::new() } else { format!(" ({n} hunk{}, from line {first})", if n == 1 { "" } else { "s" }) };
+                    match move_to {
+                        Some(to) => {
+                            let dest = self.path(to);
+                            if let Some(no) = self.fenced(&dest) {
+                                return no;
+                            }
+                            if let Some(why) = self.stale(&dest, true, None) {
+                                return fail(why);
+                            }
+                            said.push(format!("edited {} and moved it to {to}{changes}", op.path()));
+                            plan.push((path, None));
+                            plan.push((dest, Some(new)));
+                        }
+                        None => {
+                            said.push(format!("edited {}{changes}", op.path()));
+                            plan.push((path, Some(new)));
+                        }
+                    }
+                }
+            }
+        }
+        for (path, content) in &plan {
+            let done = match content {
+                Some(c) => path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| std::fs::write(path, c)),
+                None => std::fs::remove_file(path),
+            };
+            if let Err(e) = done {
+                return fail(format!("Can't change {}: {e} (the files before it in the patch were changed).", path.display()));
+            }
+            match content {
+                Some(c) => self.remember(path, c.as_bytes()),
+                None => {
+                    self.seen.lock().unwrap().remove(path);
+                }
+            }
+        }
+        let mut text = said.join("; ");
+        if let Some(c) = text.get(..1) {
+            text = format!("{}{}.", c.to_uppercase(), &text[1..]);
+        }
+        ok(text)
+    }
+
     fn ls(&self, p: &str) -> Outcome {
         let path = if p.trim().is_empty() { self.cwd.clone() } else { self.path(p) };
         if let Some(no) = self.hidden(&path) {
@@ -720,6 +834,32 @@ mod tests {
         let r = t.call("edit", &json!({ "path": "a.txt", "edits": [{ "old_text": "bbbb", "new_text": "c" }] })).await;
         assert!(!r.failed, "{}", r.text);
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "c\n");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn a_patch_applies_whole_or_not_at_all() {
+        let dir = std::env::temp_dir().join(format!("harlo-agent-patch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let t = Tools::new(dir.clone(), dir.join(".out"));
+        std::fs::write(dir.join("a.txt"), "one\ntwo\nthree\n").unwrap();
+        std::fs::write(dir.join("old.txt"), "gone\n").unwrap();
+        let patch = |body: &str| json!({ "input": format!("*** Begin Patch\n{body}\n*** End Patch") });
+        // A hunk that doesn't match: nothing written, the new file included.
+        let r = t.call("apply_patch", &patch("*** Add File: sub/new.txt\n+hi\n*** Update File: a.txt\n-four\n+4")).await;
+        assert!(r.failed && r.text.contains("a.txt"), "{}", r.text);
+        assert!(!dir.join("sub/new.txt").exists());
+        let r = t
+            .call("apply_patch", &patch("*** Add File: sub/new.txt\n+hi\n*** Update File: a.txt\n*** Move to: b.txt\n@@\n one\n-two\n+2\n*** Delete File: old.txt"))
+            .await;
+        assert!(!r.failed, "{}", r.text);
+        assert_eq!(r.text, "Created sub/new.txt (1 line); edited a.txt and moved it to b.txt (1 hunk, from line 1); deleted old.txt.");
+        assert_eq!(std::fs::read_to_string(dir.join("b.txt")).unwrap(), "one\n2\nthree\n");
+        assert!(!dir.join("a.txt").exists() && !dir.join("old.txt").exists());
+        // Changed elsewhere since: refused until read again.
+        std::fs::write(dir.join("b.txt"), "one\n2\nthree\nfour\n").unwrap();
+        let r = t.call("apply_patch", &patch("*** Update File: b.txt\n-2\n+two")).await;
+        assert!(r.failed && r.text.contains("changed since you last read it"), "{}", r.text);
         let _ = std::fs::remove_dir_all(dir);
     }
 

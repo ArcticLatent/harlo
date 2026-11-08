@@ -51,7 +51,7 @@ fn text_arg<'a>(args: &'a Value, keys: &[&str]) -> Option<&'a str> {
 /// An edit's lines added and removed, and its diff: from old and new
 /// strings (one pair, or a list of edits), or from a patch in its arguments.
 fn edit_diff(args: &Value) -> Option<(usize, usize, String)> {
-    const PAIRS: [(&str, &str); 4] = [("old_string", "new_string"), ("oldText", "newText"), ("oldString", "newString"), ("old_str", "new_str")];
+    const PAIRS: [(&str, &str); 5] = [("old_string", "new_string"), ("old_text", "new_text"), ("oldText", "newText"), ("oldString", "newString"), ("old_str", "new_str")];
     let pair = |v: &Value| PAIRS.iter().find_map(|(o, n)| Some((v[*o].as_str()?.to_owned(), v[*n].as_str()?.to_owned())));
     let mut pairs: Vec<(String, String)> = pair(args).into_iter().collect();
     if let Some(edits) = args["edits"].as_array() {
@@ -161,6 +161,10 @@ mod tests {
         assert_eq!(facts("edit", &pi, "", false).0, "+1 −2");
         let omp = json!({ "input": "*** Begin Patch\n[notes.md#EB6D]\nPUT 3.=3:\n+- a new line\n-old\n*** End Patch\n" });
         assert_eq!(facts("edit", &omp, "", false).0, "+1 −1");
+        let harlo = json!({ "path": "a", "edits": [{ "old_text": "x\ny", "new_text": "x\nz" }] });
+        assert_eq!(facts("edit", &harlo, "", false), ("+1 −1".into(), " x\n-y\n+z".into()));
+        let patch = json!({ "input": "*** Begin Patch\n*** Update File: a.rs\n@@ fn main() {\n     let x = 1;\n-    old();\n+    new();\n+    more();\n*** End Patch" });
+        assert_eq!(facts("apply_patch", &patch, "", false), ("+2 −1".into(), "     let x = 1;\n-    old();\n+    new();\n+    more();".into()));
         let write = json!({ "filePath": "n.txt", "content": "one\ntwo\n" });
         assert_eq!(facts("write", &write, "", false), ("+2".into(), "+one\n+two".into()));
     }

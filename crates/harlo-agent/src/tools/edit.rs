@@ -116,7 +116,7 @@ impl Level {
 }
 
 /// Typographic characters as the plain ones a model types.
-fn plain(s: &str) -> String {
+pub(crate) fn plain(s: &str) -> String {
     s.chars()
         .map(|c| match c {
             '\u{2018}' | '\u{2019}' | '\u{201a}' | '\u{201b}' | '\u{2032}' => '\'',
@@ -153,7 +153,7 @@ fn not_unique(text: &str, at: &[usize]) -> String {
 
 /// Not found: where it's closest (so the model can copy the real text), or
 /// that the new text is already there.
-fn not_found(text: &str, lines: &[&str], want: &[&str], new: &str) -> String {
+pub(crate) fn not_found(text: &str, lines: &[&str], want: &[&str], new: &str) -> String {
     if !new.trim().is_empty() && text.contains(new.trim()) {
         return format!("The old text isn't in the file, but the new text already is (line {}): the edit may have been made already. Read the file to check.", line_of(text, text.find(new.trim()).unwrap_or(0)));
     }

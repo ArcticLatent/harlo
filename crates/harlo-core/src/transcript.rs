@@ -817,6 +817,15 @@ fn summarize_args(args: &Value) -> String {
     if let (Some(op), Some(symbol), Some(path)) = (args["operation"].as_str(), args["symbol"].as_str(), args["path"].as_str()) {
         return first_line(&format!("{op} {symbol} · {path}:{}", args["line"]), 200);
     }
+    // (A patch: the files it changes.)
+    if let Some(patch) = args["input"].as_str().filter(|p| p.contains("*** Begin Patch")) {
+        let files: Vec<&str> = patch
+            .lines()
+            .filter_map(|l| ["*** Update File: ", "*** Add File: ", "*** Delete File: "].iter().find_map(|h| l.strip_prefix(h)))
+            .map(str::trim)
+            .collect();
+        return first_line(&files.join(", "), 200);
+    }
     for key in ["command", "path", "file_path", "filePath", "pattern", "query", "url", "description"] {
         if let Some(s) = args[key].as_str() {
             return first_line(s, 200);
@@ -1213,6 +1222,7 @@ mod tests {
     fn summarizes_tool_arguments() {
         assert_eq!(summarize_args(&json!({"command":"ls -la\nrm x"})), "ls -la…");
         assert_eq!(summarize_args(&json!({"operation":"callers","path":"src/ledger.rs","line":21,"symbol":"post"})), "callers post · src/ledger.rs:21");
+        assert_eq!(summarize_args(&json!({"input":"*** Begin Patch\n*** Update File: a.rs\n@@\n-x\n+y\n*** Add File: b.rs\n+z\n*** End Patch"})), "a.rs, b.rs");
         assert_eq!(
             summarize_args(&json!({"tool":"set_node_flags","args":{"node_path":"/obj/a","display":true}})),
             // In the order the model wrote them.

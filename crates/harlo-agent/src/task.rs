@@ -340,14 +340,14 @@ mod tests {
     #[test]
     fn what_each_kind_may_use() {
         let names = |only: &[&str]| -> Vec<String> {
-            crate::tools::specs_of(Some(only), None).as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect()
+            crate::tools::specs_of(Some(only), None, false).as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect()
         };
         let explore = names(EXPLORE);
         assert!(!explore.iter().any(|n| n == "write" || n == "edit" || n == "task"), "{explore:?}");
         assert!(explore.contains(&"bash".to_owned()) && explore.contains(&"read".to_owned()));
         let general = names(GENERAL);
         assert!(general.contains(&"edit".to_owned()) && !general.contains(&"task".to_owned()));
-        let all = crate::tools::specs_of(None, Some(&[]));
+        let all = crate::tools::specs_of(None, Some(&[]), false);
         assert_eq!(all.as_array().unwrap().last().unwrap()["name"], "task");
     }
 

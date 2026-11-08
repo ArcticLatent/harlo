@@ -207,7 +207,7 @@ impl Gate for Approvals {
             // (An MCP server's tool that may change things: as bash, but
             // not in plan mode.)
             let mcp = name.starts_with(crate::mcp::PREFIX);
-            if plan && (mcp || matches!(name.as_str(), "write" | "edit")) {
+            if plan && (mcp || matches!(name.as_str(), "write" | "edit" | "apply_patch")) {
                 return Err(if mcp { PLAN_REFUSAL_MCP.to_owned() } else { PLAN_REFUSAL.to_owned() });
             }
             // Outside the sandbox: asked every time, in every mode.
@@ -240,6 +240,7 @@ impl Gate for Approvals {
                     if a.chars().count() > 300 { format!("{}…", a.chars().take(299).collect::<String>()) } else { a }
                 }
                 "edit" => format!("{} ({} change{})", args["path"].as_str().unwrap_or_default(), args["edits"].as_array().map_or(0, Vec::len), if args["edits"].as_array().map_or(0, Vec::len) == 1 { "" } else { "s" }),
+                "apply_patch" => crate::patch::parse(args["input"].as_str().unwrap_or_default()).map(|ops| ops.iter().map(crate::patch::Op::path).collect::<Vec<_>>().join(", ")).unwrap_or_default(),
                 _ => args["path"].as_str().unwrap_or_default().to_owned(),
             };
             sh.emit(json!({

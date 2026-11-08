@@ -678,7 +678,7 @@ impl Agent {
             };
             let outcomes = run_calls(&self.tools, &triples, &extra, stop).await;
             handed_over |= hands_over(&names, &outcomes);
-            let changed = names.iter().zip(&outcomes).any(|(n, o)| matches!(*n, "edit" | "write") && !o.failed);
+            let changed = names.iter().zip(&outcomes).any(|(n, o)| matches!(*n, "edit" | "write" | "apply_patch") && !o.failed);
             let (mut nudge, mut stuck) = (None, None);
             if changed {
                 repeats.changed();
@@ -913,15 +913,16 @@ impl Agent {
         // (Asked which model it is, it can say: it changes when you switch.)
         let (provider, id) = self.model.split_once('/').unwrap_or((providers::CHATGPT, &self.model));
         let model = format!("\nYou run on the model {id} (from {provider}).\n");
+        let instructions = if crate::patch::on(&self.model) { crate::patch::reworded(&self.instructions) } else { self.instructions.clone() };
         if self.harlo_text.is_empty() {
-            return format!("{}{model}", self.instructions);
+            return format!("{instructions}{model}");
         }
-        format!("{}{model}\n<harlo>\n{}\n</harlo>\n", self.instructions, self.harlo_text.trim())
+        format!("{instructions}{model}\n<harlo>\n{}\n</harlo>\n", self.harlo_text.trim())
     }
 
     /// The tools the model gets: its own, then harlo's.
     fn specs(&self) -> Value {
-        let mut all = tools::specs_of(self.allowed, (self.allowed.is_none() && crate::task::enabled()).then_some(self.profiles.as_slice()));
+        let mut all = tools::specs_of(self.allowed, (self.allowed.is_none() && crate::task::enabled()).then_some(self.profiles.as_slice()), crate::patch::on(&self.model));
         if let Some(list) = all.as_array_mut() {
             // (`recall` once there's something to recall: the request that
             // first has a stub breaks the cache anyway.)
@@ -1409,7 +1410,8 @@ async fn run_calls(tools: &Tools, calls: &[(&str, &str, &Value)], extra: &Extra<
     let cut = |text: &str| tools::Outcome::new(text, true);
     let (gate, harlo) = (extra.gate, extra.harlo);
     // (A subagent's: only its own.)
-    let not_here = |name: &str| extra.allowed.is_some_and(|only| !only.contains(&name));
+    // (apply_patch is edit when it's offered in its place.)
+    let not_here = |name: &str| extra.allowed.is_some_and(|only| !only.contains(&name) && !(name == "apply_patch" && only.contains(&"edit")));
     let mcp = extra.mcp;
     if calls.iter().all(|(_, n, _)| extra.read_only(n) && !not_here(n)) {
         let all = join_all(calls.iter().map(|(_, name, args)| async move { if args.is_null() { bad_args() } else { call_tool(tools, mcp, name, args).await } }));
@@ -1620,7 +1622,7 @@ fn harlo_specs(listed: &Value) -> Vec<Value> {
 }
 
 /// The system prompt: short; the project's own instructions after it.
-fn instructions(cwd: &Path, sandbox: Option<&crate::sandbox::Sandbox>) -> String {
+pub(crate) fn instructions(cwd: &Path, sandbox: Option<&crate::sandbox::Sandbox>) -> String {
     let mut s = String::from(
         "You are harlo-agent, a coding agent. You work in the user's project with your tools, and finish the task you're given.\n\
          \n\
