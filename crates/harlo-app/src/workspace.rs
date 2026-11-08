@@ -7291,7 +7291,7 @@ mod tests {
 
     #[test]
     fn harlos_sandbox_goes_on_its_command_line() {
-        use super::{HarnessKind, harlo_args};
+        use super::{HarnessKind, harlo_args, model_args};
         assert_eq!(harlo_args(HarnessKind::Harlo, true, true), ["--harlo-tools"]);
         assert_eq!(harlo_args(HarnessKind::Harlo, true, false), ["--harlo-tools", "--sandbox", "no-network"]);
         assert_eq!(harlo_args(HarnessKind::Harlo, false, true), ["--harlo-tools", "--sandbox", "off"]);
