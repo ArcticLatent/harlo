@@ -6133,14 +6133,15 @@ ApplicationWindow {
             win.check(used !== null && used.visible && used.text === (total / 1000).toFixed(1) + "k tokens", "the plan card has the run's total (" + (used ? used.text : "none") + ", " + total + ")")
             win.check(win.findContaining("Subagents · all done · " + (total / 1000).toFixed(1) + "k tokens") !== null, "and the Subagents box")
             win.shotWindow("clicks-review-done") } }
-        // The project's Team: ready-made ones, and its reviewer on another
-        // model (the next run's reviews use it).
+        // The project's Team: its helpers' agent, and its reviewer on
+        // another model (the next run's reviews use it).
         PauseAnimation { duration: 300 }
         ScriptAction { script: settingsDialog.openProject(JSON.parse(Workspace.projectsJson())[0].id) }
         PauseAnimation { duration: 800 }
         ScriptAction { script: {
-            const box = win.findName("teamPreset", settingsDialog.contentItem)
-            win.check(box !== null && box.model[box.currentIndex] === "Same as the session", "Team: ready-made, the same as the session at first (" + (box ? box.model : "none") + ")")
+            const box = win.findName("teamAgent", settingsDialog.contentItem)
+            win.check(box !== null && box.model[box.currentIndex] === "Same as the session", "Team: the helpers are like the session at first (" + (box ? box.model : "none") + ")")
+            win.check(win.findName("teamPreset", settingsDialog.contentItem) === null, "no ready-made teams (they repeated the rows below)")
             const i = box ? box.model.indexOf("Harlo") : -1
             win.check(i > 0, "Harlo is one of them")
             if (i > 0) { box.currentIndex = i; box.activated(i) } } }
@@ -6163,8 +6164,6 @@ ApplicationWindow {
             const pid = JSON.parse(Workspace.projectsJson())[0].id
             const v = JSON.parse(Workspace.setting("team_helpers_" + pid))
             win.check(v.reviewer && v.reviewer.agent === "harlo" && v.reviewer.model === "fake/fake-helper", "the team's reviewer is saved (" + JSON.stringify(v) + ")")
-            const box = win.findName("teamPreset", settingsDialog.contentItem)
-            win.check(box.model[box.currentIndex] === "Your own", "changed by hand, it's your own team")
             win.scrollIntoView(win.findName("teamReviewerModel", settingsDialog.contentItem))
             win.shotWindow("clicks-review-team")
             settingsDialog.close() } }
@@ -6268,6 +6267,14 @@ ApplicationWindow {
             win.check(Workspace.setting("harlo_task_model") === "fake/fake-helper" && Workspace.setting("harlo_fallback") === "fake/fake-helper" && Workspace.setting("harlo_helper_budget") === "500k",
                       "the three are saved as picked (" + [Workspace.setting("harlo_task_model"), Workspace.setting("harlo_fallback"), Workspace.setting("harlo_helper_budget")].join(", ") + ")")
             win.shotWindow("clicks-harlo-settings")
+            settingsDialog.openPage("git") } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const box = win.findName("commitModel", settingsDialog.contentItem)
+            const i = box ? box.model.indexOf("Fake Helper") : -1
+            win.check(box && box.model[box.currentIndex] === "Harlo's default" && i > 0, "Git: the commit messages' model is picked from Harlo's (" + (box ? box.model.join(", ") : "none") + ")")
+            if (i > 0) { box.currentIndex = i; box.activated(i) }
+            win.check(Workspace.setting("commit_model") === "fake/fake-helper", "and saved as its id (" + Workspace.setting("commit_model") + ")")
             settingsDialog.close() } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: { win.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo"); Workspace.setApprovalMode(win.harloKey, "yolo") } }

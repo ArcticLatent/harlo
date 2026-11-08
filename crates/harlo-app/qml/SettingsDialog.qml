@@ -432,7 +432,7 @@ Popup {
                 function save() { Workspace.setSpendLimits(amount(sessionLimit.text), amount(dayLimit.text)) }
                 SectionHeader {
                     title: "Spending limits"
-                    subtitle: "What the agents report their sessions cost (checked at each tool call and at the end of each turn; Claude Code at the end of each turn). Past a limit, harlo stops the run and holds the session's messages until you allow more. Empty: no limit. Today so far: $" + (spendLimits.spend.today || 0).toFixed(2) + " in harlo's sessions."
+                    subtitle: "What Claude Code reports its sessions cost, checked at the end of each turn (Harlo's sessions report none: Settings → Providers → Harlo has a token budget per helper instead). Past a limit, harlo stops the run and holds the session's messages until you allow more. Empty: no limit. Today so far: $" + (spendLimits.spend.today || 0).toFixed(2) + " in harlo's sessions."
                 }
                 Group {
                     SettingRow {
@@ -1893,16 +1893,25 @@ Popup {
             SectionHeader { title: "Commit messages"; subtitle: "The ✦ button in the Changes panel has a model write the message for the staged changes (or all changes): Harlo's, or Claude Code's when Harlo can't, with no tools and nothing saved." }
             Group {
                 SettingRow {
+                    id: commitModelRow
+                    property string saved: Workspace.setting("commit_model")
+                    readonly property var prov: Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()).find(p => p.id === "harlo") || null : null
+                    readonly property var ids: prov ? prov.modelIds || [] : []
+                    // (One it no longer lists stays a choice.)
+                    readonly property var choices: saved === "" || ids.indexOf(saved) >= 0 ? ids : ids.concat([saved])
+                    Component.onCompleted: Workspace.ensureProviders()
                     title: "Model"
-                    detail: "One of Harlo's; empty uses its default. A small, fast model is plenty, e.g. a \"mini\" or \"flash\" one. Claude Code uses this when it's one of Claude's (sonnet, haiku…), else Haiku."
+                    detail: "One of Harlo's: a small, fast one is plenty. Claude Code writes it when Harlo can't, with Haiku." + (ids.length === 0 ? " Harlo lists its models once it's signed in." : "")
                     icon: "sparkling"
-                    AppTextField {
+                    ComboField {
+                        objectName: "commitModel"
                         width: 240
-                        text: Workspace.setting("commit_model")
-                        placeholderText: "Harlo's default"
-                        font.family: Theme.mono
-                        font.pixelSize: Theme.px(12)
-                        onEditingFinished: Workspace.setSetting("commit_model", text)
+                        model: ["Harlo's default"].concat(commitModelRow.choices.map(id => { const i = commitModelRow.ids.indexOf(id); return i >= 0 ? Theme.modelLabel((commitModelRow.prov.models || [])[i] || id) : id }))
+                        currentIndex: commitModelRow.choices.indexOf(commitModelRow.saved) + 1
+                        onActivated: i => {
+                            commitModelRow.saved = i === 0 ? "" : commitModelRow.choices[i - 1]
+                            Workspace.setSetting("commit_model", commitModelRow.saved)
+                        }
                     }
                 }
             }
@@ -2410,39 +2419,9 @@ Popup {
                     function change(k, x) { const v = Object.assign({}, value); v[k] = x; save(v) }
                     // Ready-made teams: one agent for the steps, or one doing
                     // them and another reviewing them.
-                    readonly property var presets: {
-                        const list = [{ label: "Same as the session", v: {} }]
-                        for (const p of providers) list.push({ label: p.label, v: { agent: p.id } })
-                        for (const p of providers)
-                            for (const q of providers)
-                                if (p.id !== q.id) list.push({ label: p.label + ", reviewed by " + q.label, v: { agent: p.id, reviewer: { agent: q.id } } })
-                        return list
-                    }
-                    // The preset the team is (-1: one changed by hand).
-                    readonly property int preset: {
-                        const r = value.reviewer ? value.reviewer.agent || "" : ""
-                        if (value.model || value.thinking || (value.reviewer && value.reviewer.model)) return -1
-                        return presets.findIndex(x => (x.v.agent || "") === (value.agent || "") && (x.v.reviewer ? x.v.reviewer.agent : "") === r)
-                    }
                     readonly property var reviewerProvider: value.reviewer ? providers.find(p => p.id === value.reviewer.agent) || null : null
                     onVisibleChanged: if (visible) Workspace.ensureProviders()
                     SettingRow {
-                        title: "Ready-made"
-                        detail: "Who does a plan's steps, and who reviews them (Settings → Orchestration → Review each step). Change any of it below."
-                        icon: "robot-2"
-                        ComboField {
-                            objectName: "teamPreset"
-                            width: 240
-                            model: team.presets.map(x => x.label).concat(team.preset < 0 ? ["Your own"] : [])
-                            currentIndex: team.preset < 0 ? team.presets.length : team.preset
-                            onActivated: i => {
-                                if (i < team.presets.length) team.save(team.presets[i].v)
-                                currentIndex = Qt.binding(() => team.preset < 0 ? team.presets.length : team.preset)
-                            }
-                        }
-                    }
-                    SettingRow {
-                        divider: true
                         title: "Helpers"
                         detail: team.provider ? "Helpers are " + team.provider.label + " sessions, with the model and thinking below."
                                               : "The same as the session that starts them: its agent, model and thinking."
@@ -4110,7 +4089,6 @@ Popup {
                                             : prov.modelData.state === "missing" ? "Not installed"
                                             : prov.modelData.state === "error" ? "Error"
                                             : "Available · " + prov.modelData.modelCount + (prov.modelData.modelCount === 1 ? " model" : " models")
-                                              + (prov.modelData.canChat ? "" : " · sessions coming soon")
                                     }
                                     AppSwitch {
                                         objectName: "providerSwitch-" + prov.modelData.id
@@ -4223,14 +4201,6 @@ Popup {
                                             font.pixelSize: Theme.px(12)
                                         }
                                     }
-                                }
-                                Label {
-                                    visible: !prov.modelData.canChat
-                                    Layout.fillWidth: true
-                                    wrapMode: Text.Wrap
-                                    text: "harlo will start " + prov.modelData.label + " sessions in a coming update."
-                                    color: Theme.muted
-                                    font.pixelSize: Theme.px(12)
                                 }
                                 Flow {
                                     visible: prov.modelData.models.length > 0
