@@ -32,14 +32,14 @@ const REGISTER_CLIENT: &str = "dynamic_agent_client";
 const AGENT_NAME: &str = "harlo";
 const DIRECT_SCOPE: &str = "chatgpt.tokens.use.direct";
 const SCOPE: &str = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct";
-const CALLBACK_PORT: u16 = 1455;
+pub const CALLBACK_PORT: u16 = 1455;
 /// The Codex CLI's sign-in.
 const CODEX_ISSUER: &str = "https://auth.openai.com";
 pub const CODEX_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const CODEX_SCOPE: &str = "openid profile email offline_access";
 /// The claim the ChatGPT account's id is in.
 const AUTH_CLAIM: &str = "https://api.openai.com/auth";
-const CALLBACK_PATH: &str = "/auth/callback";
+pub const CALLBACK_PATH: &str = "/auth/callback";
 /// Refreshed this long before it expires, so no request starts with a
 /// token about to run out.
 const MARGIN: Duration = Duration::from_secs(180);
@@ -101,7 +101,7 @@ fn creds_path(sign: Sign) -> PathBuf {
     config_dir().join(format!("{}.json", sign.file()))
 }
 
-fn now() -> u64 {
+pub fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
 
@@ -111,11 +111,11 @@ fn random_bytes<const N: usize>() -> [u8; N] {
     b
 }
 
-fn random_token() -> String {
+pub fn random_token() -> String {
     URL_SAFE_NO_PAD.encode(random_bytes::<32>())
 }
 
-fn ensure_dir() -> Result<PathBuf> {
+pub fn ensure_dir() -> Result<PathBuf> {
     let dir = config_dir();
     fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     #[cfg(unix)]
@@ -127,7 +127,7 @@ fn ensure_dir() -> Result<PathBuf> {
 }
 
 /// Writes `text` to `path` readable only by the user, replacing it whole.
-fn write_private(path: &Path, text: &str) -> Result<()> {
+pub fn write_private(path: &Path, text: &str) -> Result<()> {
     let tmp = path.with_extension("tmp");
     let mut opts = OpenOptions::new();
     opts.write(true).create(true).truncate(true);
@@ -216,7 +216,7 @@ pub async fn sign_in(open: impl Fn(&str), paste: bool) -> Result<Credentials> {
     }
     let url = reqwest::Url::parse_with_params(AUTHORIZE_URL, &params)?;
     open(url.as_str());
-    let (code, issued) = wait_for_callback(&listener, &state, "harlo is connected to your ChatGPT plan. You can close this tab.", paste).await?;
+    let (code, issued) = wait_for_callback(&listener, &state, "ChatGPT", "harlo is connected to your ChatGPT plan. You can close this tab.", paste).await?;
     let client_id = issued.or(saved).ok_or_else(|| anyhow!("OpenAI's answer didn't include this app's client id; try again"))?;
     let token = token_request(TOKEN_URL, &[
         ("grant_type", "authorization_code"),
@@ -273,7 +273,7 @@ pub async fn codex_sign_in(open: impl Fn(&str), paste: bool) -> Result<Credentia
     ];
     let url = reqwest::Url::parse_with_params(&format!("{CODEX_ISSUER}/oauth/authorize"), &params)?;
     open(url.as_str());
-    let (code, _) = wait_for_callback(&listener, &state, "harlo is signed in with your ChatGPT account (the Codex sign-in). You can close this tab.", paste).await?;
+    let (code, _) = wait_for_callback(&listener, &state, "ChatGPT", "harlo is signed in with your ChatGPT account (the Codex sign-in). You can close this tab.", paste).await?;
     let token = token_request(
         &format!("{CODEX_ISSUER}/oauth/token"),
         &[("grant_type", "authorization_code"), ("client_id", CODEX_CLIENT_ID), ("code", &code), ("code_verifier", &verifier), ("redirect_uri", &redirect)],
@@ -336,9 +336,10 @@ fn read_callback(url: &reqwest::Url, state: &str) -> Callback {
 }
 
 /// The browser's redirect: (code, the client id issued on registration).
-/// `paste`: or the address the page ended on, pasted on the input (when
-/// the browser is on another computer and its redirect can't reach here).
-async fn wait_for_callback(listener: &tokio::net::TcpListener, state: &str, done: &str, paste: bool) -> Result<(String, Option<String>)> {
+/// `who`: what's signed in to, for what's said. `paste`: or the address the
+/// page ended on, pasted on the input (when the browser is on another
+/// computer and its redirect can't reach here).
+pub async fn wait_for_callback(listener: &tokio::net::TcpListener, state: &str, who: &str, done: &str, paste: bool) -> Result<(String, Option<String>)> {
     // (Read on a thread of its own: a read waiting on tokio's blocking pool
     // would keep the program from ending once the sign-in is done.)
     let mut lines = paste.then(|| {
@@ -379,7 +380,7 @@ async fn wait_for_callback(listener: &tokio::net::TcpListener, state: &str, done
                 };
                 match read_callback(&url, state) {
                     Callback::Code(code, issued) => return Ok((code, issued)),
-                    Callback::Declined(err) => bail!("ChatGPT sign-in was declined ({err})"),
+                    Callback::Declined(err) => bail!("{who} sign-in was declined ({err})"),
                     Callback::Stale => println!("That address is from another sign-in: use this one's link."),
                     Callback::Other => println!("That isn't the address the page ended on (it ends in {CALLBACK_PATH}?code=…)."),
                 }
@@ -400,8 +401,8 @@ async fn wait_for_callback(listener: &tokio::net::TcpListener, state: &str, done
                 let _ = sock.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
             }
             Callback::Declined(err) => {
-                let _ = sock.write_all(reply(false, "ChatGPT wasn't connected. You can close this tab.").as_bytes()).await;
-                bail!("ChatGPT sign-in was declined ({err})");
+                let _ = sock.write_all(reply(false, &format!("{who} wasn't connected. You can close this tab.")).as_bytes()).await;
+                bail!("{who} sign-in was declined ({err})");
             }
             Callback::Stale => {
                 let _ = sock.write_all(reply(false, "This sign-in link is out of date. Start again from harlo.").as_bytes()).await;

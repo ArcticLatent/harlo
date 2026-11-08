@@ -6,6 +6,10 @@
 //!                              sign in with ChatGPT (in the browser; --paste:
 //!                              or the address the page ended on, pasted)
 //! harlo-agent logout           forget the sign-in here
+//! harlo-agent mcp login <server> [--project <dir>] [--paste]
+//! harlo-agent mcp logout <server> [--project <dir>]
+//!                              sign in to an MCP server at an address (OAuth),
+//!                              or forget it (the project's servers too)
 //! harlo-agent status           who's signed in
 //! harlo-agent models           the models your plan can use
 //! harlo-agent -p "…" [-m model] [--thinking low|medium|high]
@@ -32,6 +36,7 @@ mod images;
 mod isolate;
 mod jobs;
 mod mcp;
+mod mcp_auth;
 mod profiles;
 mod providers;
 mod responses;
@@ -68,6 +73,7 @@ async fn main() -> ExitCode {
 async fn run(args: Vec<String>) -> Result<()> {
     match args.first().map(String::as_str) {
         Some("login") => login(sign_of(&args), args.iter().any(|a| a == "--paste")).await,
+        Some("mcp") => mcp_sign(&args[1..]).await,
         Some("logout") => {
             let sign = sign_of(&args);
             if auth::sign_out(sign)? {
@@ -233,6 +239,57 @@ async fn login(sign: auth::Sign, paste: bool) -> Result<()> {
         if creds.email.is_empty() { String::new() } else { format!(" as {}", creds.email) }
     );
     Ok(())
+}
+
+/// `mcp login|logout <server> [--project <dir>] [--paste]`.
+async fn mcp_sign(args: &[String]) -> Result<()> {
+    let (mut name, mut project, mut paste) = (None, None, false);
+    let mut it = args.iter().skip(1);
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--project" => project = Some(std::path::PathBuf::from(it.next().ok_or_else(|| anyhow::anyhow!("--project needs the folder"))?)),
+            "--paste" => paste = true,
+            n if name.is_none() && !n.starts_with('-') => name = Some(n.to_owned()),
+            other => bail!("harlo-agent mcp: unknown {other}"),
+        }
+    }
+    let Some(name) = name else { bail!("Usage: harlo-agent mcp login|logout <server> [--project <dir>]") };
+    let project = match project {
+        Some(p) => p,
+        None => std::env::current_dir()?,
+    };
+    let (configs, _) = mcp::load(&project);
+    let Some(c) = configs.iter().find(|c| c.name == name) else {
+        bail!("No MCP server {name} here (one in a project's .harlo/mcp.json starts only once harlo approves it)")
+    };
+    let (url, headers, sse) = match &c.kind {
+        mcp::Kind::Http { url, headers } => (url, headers, false),
+        mcp::Kind::Sse { url, headers } => (url, headers, true),
+        mcp::Kind::Stdio { .. } => bail!("{name} is a command, not an address: there's nothing to sign in to"),
+    };
+    match args.first().map(String::as_str) {
+        Some("login") => {
+            let s = |k: &str| c.oauth[k].as_str().filter(|v| !v.trim().is_empty()).map(|v| mcp::expand(v.trim()));
+            let scopes = c.oauth["scopes"].as_array().map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join(" ")).or_else(|| s("scopes")).filter(|v| !v.is_empty());
+            let server = mcp_auth::Server { name: &name, url, sse, headers, client_id: s("clientId"), client_secret: s("clientSecret"), scopes };
+            let open = |link: &str| {
+                println!("Sign in to {name} in your browser. If it doesn't open, visit:\n\n{link}\n");
+                let _ = std::process::Command::new("xdg-open").arg(link).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
+            };
+            mcp_auth::login(&server, open, paste).await?;
+            println!("Signed in to {name}. Harlo sends the sign-in with its requests to {url}.");
+            Ok(())
+        }
+        Some("logout") => {
+            if mcp_auth::forget(url)? {
+                println!("Signed out of {name} here.");
+            } else {
+                println!("Not signed in to {name}.");
+            }
+            Ok(())
+        }
+        _ => bail!("Usage: harlo-agent mcp login|logout <server> [--project <dir>]"),
+    }
 }
 
 /// Which session a run goes in.

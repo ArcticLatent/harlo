@@ -4,7 +4,8 @@
 //! - Where: `mcp.json` in harlo-agent's config folder, and the project's
 //!   `.harlo/mcp.json`, as `{ "mcpServers": { name: entry } }`. An entry is
 //!   a command (`command`, `args`, `env`, `cwd`) or an address (`url`,
-//!   `headers`; streamable HTTP), with `timeout` (seconds, to start) and
+//!   `headers`; streamable HTTP, or the older HTTP+SSE with `type: sse`),
+//!   with `timeout` (seconds, to start) and
 //!   `enabled`. `${VAR}`, `${VAR:-default}` and a whole `!command` in a
 //!   value are expanded. A project's server of the same name wins.
 //!   `HARLO_AGENT_MCP_CONFIG` names a file to read instead of `mcp.json`.
@@ -19,6 +20,8 @@
 //! - A tool is `mcp__<server>__<tool>` (at most 64 characters). One the
 //!   server marks read-only only looks; others change things (asked like
 //!   bash, refused in plan mode).
+//! - A server at an address that wants a sign-in: `harlo-agent mcp login
+//!   <name>` (`mcp_auth`); its token is sent from then on.
 //! - A command's server runs in its own process group, which goes with it.
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -54,12 +57,18 @@ pub struct Config {
     pub env: Vec<(String, String)>,
     pub cwd: Option<String>,
     pub timeout: Duration,
+    /// The entry's `oauth` (`clientId`, `clientSecret`, `scopes`), for
+    /// signing in (`mcp_auth`).
+    pub oauth: Value,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Kind {
     Stdio { program: String, args: Vec<String> },
     Http { url: String, headers: Vec<(String, String)> },
+    /// The older transport: a stream to GET, whose `endpoint` event says
+    /// where to POST.
+    Sse { url: String, headers: Vec<(String, String)> },
 }
 
 /// The servers configured for a project folder, and notes on those left
@@ -164,15 +173,13 @@ fn parse(name: &str, v: &Value, project: &Path) -> Result<Config, String> {
         let p = Path::new(&c);
         if p.is_absolute() { c } else { project.join(p).to_string_lossy().into_owned() }
     });
-    if ty == "sse" {
-        return Err("it uses SSE, which Harlo doesn't support; give its streamable HTTP address (type http) instead.".into());
-    }
-    let kind = if matches!(ty, "http" | "streamable-http") || (ty.is_empty() && !url.is_empty() && v.get("command").is_none()) {
+    let kind = if matches!(ty, "http" | "streamable-http" | "sse") || (ty.is_empty() && !url.is_empty() && v.get("command").is_none()) {
         let url = expand(url.trim());
         if !(url.starts_with("http://") || url.starts_with("https://")) {
             return Err("its url isn't an http:// or https:// address.".into());
         }
-        Kind::Http { url, headers: pairs(&v["headers"]).into_iter().map(|(k, val)| (k, expand(&val))).collect() }
+        let headers = pairs(&v["headers"]).into_iter().map(|(k, val)| (k, expand(&val))).collect();
+        if ty == "sse" { Kind::Sse { url, headers } } else { Kind::Http { url, headers } }
     } else {
         let mut words: Vec<String> = match &v["command"] {
             Value::String(c) => vec![c.clone()],
@@ -186,7 +193,7 @@ fn parse(name: &str, v: &Value, project: &Path) -> Result<Config, String> {
         };
         Kind::Stdio { program, args: words.collect() }
     };
-    Ok(Config { name: name.to_owned(), kind, env, cwd, timeout })
+    Ok(Config { name: name.to_owned(), kind, env, cwd, timeout, oauth: v["oauth"].clone() })
 }
 
 /// `${VAR}`, `${VAR:-default}` from the environment; a whole value of
@@ -458,6 +465,7 @@ impl Drop for CancelOnDrop {
 /// A server at an address (streamable HTTP).
 struct Http {
     client: reqwest::Client,
+    name: String,
     url: String,
     headers: Vec<(String, String)>,
     session: Mutex<Option<String>>,
@@ -467,13 +475,27 @@ struct Http {
 }
 
 impl Http {
-    fn new(url: &str, headers: &[(String, String)], changed: Arc<AtomicBool>) -> Result<Self, String> {
+    fn new(name: &str, url: &str, headers: &[(String, String)], changed: Arc<AtomicBool>) -> Result<Self, String> {
         let client = reqwest::Client::builder().connect_timeout(Duration::from_secs(15)).build().map_err(|e| e.to_string())?;
-        Ok(Http { client, url: url.to_owned(), headers: headers.to_vec(), session: Mutex::new(None), protocol: Mutex::new(PROTOCOL.into()), next: AtomicU64::new(1), changed })
+        Ok(Http { client, name: name.to_owned(), url: url.to_owned(), headers: headers.to_vec(), session: Mutex::new(None), protocol: Mutex::new(PROTOCOL.into()), next: AtomicU64::new(1), changed })
     }
 
-    /// Sends a message; the answer to it (None for a notification).
+    /// Sends a message; the answer to it (None for a notification). With a
+    /// sign-in, its token goes along (refreshed once if it's refused).
     async fn post(&self, body: &Value, timeout: Duration) -> Result<Option<Value>, String> {
+        let mut force = false;
+        loop {
+            let token = signed_in(&self.url, &self.headers, force).await;
+            match self.post_with(body, timeout, token.as_deref()).await {
+                Err(Fail::Refused(_)) if token.is_some() && !force => force = true,
+                Err(Fail::Refused(status)) => return Err(signin_needed(&self.name, &self.url, status, token.is_some())),
+                Err(Fail::Other(e)) => return Err(e),
+                Ok(r) => return Ok(r),
+            }
+        }
+    }
+
+    async fn post_with(&self, body: &Value, timeout: Duration, token: Option<&str>) -> Result<Option<Value>, Fail> {
         let mut req = self
             .client
             .post(&self.url)
@@ -487,10 +509,13 @@ impl Http {
         if let Some(s) = self.session.lock().unwrap().clone() {
             req = req.header("Mcp-Session-Id", s);
         }
+        if let Some(t) = token {
+            req = req.bearer_auth(t);
+        }
         let resp = req.body(body.to_string()).send().await.map_err(|e| format!("couldn't reach {}: {}", self.url, root_cause(&e)))?;
         let status = resp.status().as_u16();
         if status == 401 || status == 403 {
-            return Err(format!("{} wants you to sign in (HTTP {status}); Harlo can send a token in a header, but can't sign in to MCP servers yet.", self.url));
+            return Err(Fail::Refused(status));
         }
         if let Some(s) = resp.headers().get("mcp-session-id").and_then(|v| v.to_str().ok()) {
             *self.session.lock().unwrap() = Some(s.to_owned());
@@ -502,7 +527,7 @@ impl Http {
         if !(200..300).contains(&status) {
             let text = resp.text().await.unwrap_or_default();
             let detail: String = text.trim().chars().take(200).collect();
-            return Err(format!("HTTP {status} from {}{}", self.url, if detail.is_empty() { String::new() } else { format!(": {detail}") }));
+            return Err(format!("HTTP {status} from {}{}", self.url, if detail.is_empty() { String::new() } else { format!(": {detail}") }).into());
         }
         let mine = |v: &Value| v["id"] == body["id"] && v.get("method").is_none();
         if !stream {
@@ -529,7 +554,7 @@ impl Http {
                 }
             }
         }
-        Err("its answer ended before it said anything".into())
+        Err(Fail::Other("its answer ended before it said anything".into()))
     }
 
     async fn request(&self, method: &str, params: Value, timeout: Duration) -> Result<Value, String> {
@@ -546,6 +571,238 @@ impl Http {
     }
 }
 
+/// A server on the older HTTP+SSE transport: one stream it keeps open
+/// (answers and its own requests come there), and an address, from its
+/// first `endpoint` event, that messages are POSTed to.
+struct Sse {
+    client: reqwest::Client,
+    name: String,
+    url: String,
+    /// The sign-in's token, when there is one.
+    token: Mutex<Option<String>>,
+    headers: Vec<(String, String)>,
+    /// Where to POST, once the stream said.
+    endpoint: tokio::sync::watch::Receiver<Option<String>>,
+    pending: Pending,
+    next: AtomicU64,
+    gone: Arc<Mutex<Option<String>>>,
+    reader: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for Sse {
+    fn drop(&mut self) {
+        self.reader.abort();
+    }
+}
+
+/// An SSE stream's events, as (event, data), from its bytes.
+fn sse_events(buf: &mut String) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    *buf = buf.replace("\r\n", "\n");
+    while let Some(end) = buf.find("\n\n") {
+        let block: String = buf.drain(..end + 2).collect();
+        let mut event = "message".to_owned();
+        let mut data = Vec::new();
+        for l in block.lines() {
+            if let Some(e) = l.strip_prefix("event:") {
+                event = e.trim().to_owned();
+            } else if let Some(d) = l.strip_prefix("data:") {
+                data.push(d.strip_prefix(' ').unwrap_or(d).to_owned());
+            }
+        }
+        if !data.is_empty() {
+            out.push((event, data.join("\n")));
+        }
+    }
+    out
+}
+
+impl Sse {
+    async fn start(name: &str, url: &str, headers: &[(String, String)], project: &Path, changed: Arc<AtomicBool>) -> Result<Self, String> {
+        let client = reqwest::Client::builder().connect_timeout(Duration::from_secs(15)).build().map_err(|e| e.to_string())?;
+        let mut force = false;
+        let (resp, token) = loop {
+            let token = signed_in(url, headers, force).await;
+            let mut req = client.get(url).header("Accept", "text/event-stream");
+            for (k, v) in headers {
+                req = req.header(k.as_str(), v.as_str());
+            }
+            if let Some(t) = &token {
+                req = req.bearer_auth(t);
+            }
+            let resp = req.send().await.map_err(|e| format!("couldn't reach {url}: {}", root_cause(&e)))?;
+            let status = resp.status().as_u16();
+            if status == 401 || status == 403 {
+                if token.is_some() && !force {
+                    force = true;
+                    continue;
+                }
+                return Err(signin_needed(name, url, status, token.is_some()));
+            }
+            break (resp, token);
+        };
+        let status = resp.status().as_u16();
+        if !(200..300).contains(&status) {
+            return Err(format!("HTTP {status} from {url}"));
+        }
+        let base = resp.url().clone();
+        let (tx, endpoint) = tokio::sync::watch::channel(None);
+        let pending: Pending = Arc::default();
+        let gone: Arc<Mutex<Option<String>>> = Arc::default();
+        let reader = {
+            let (pending, gone, client, headers, project, bearer) = (pending.clone(), gone.clone(), client.clone(), headers.to_vec(), project.to_owned(), token.clone());
+            tokio::spawn(async move {
+                let mut bytes = resp.bytes_stream();
+                let mut buf = String::new();
+                let why = loop {
+                    let Some(chunk) = bytes.next().await else { break "its stream ended".to_owned() };
+                    let chunk = match chunk {
+                        Ok(c) => c,
+                        Err(e) => break format!("its stream broke: {}", root_cause(&e)),
+                    };
+                    buf.push_str(&String::from_utf8_lossy(&chunk));
+                    for (event, data) in sse_events(&mut buf) {
+                        if event == "endpoint" {
+                            if let Ok(u) = base.join(data.trim()) {
+                                let _ = tx.send(Some(u.to_string()));
+                            }
+                            continue;
+                        }
+                        let Ok(msg) = serde_json::from_str::<Value>(&data) else { continue };
+                        match (msg.get("method"), msg["id"].as_u64()) {
+                            (None, Some(id)) => {
+                                if let Some(tx) = pending.lock().unwrap().remove(&id) {
+                                    let _ = tx.send(msg);
+                                }
+                            }
+                            // The server asking: answered by a POST.
+                            (Some(_), _) if msg.get("id").is_some() => {
+                                let to = tx.borrow().clone();
+                                if let Some(to) = to {
+                                    let mut r = client.post(to).header("Content-Type", "application/json");
+                                    for (k, v) in &headers {
+                                        r = r.header(k.as_str(), v.as_str());
+                                    }
+                                    if let Some(t) = &bearer {
+                                        r = r.bearer_auth(t);
+                                    }
+                                    let _ = r.body(answer(&msg, &project).to_string()).send().await;
+                                }
+                            }
+                            (Some(m), None) if m == "notifications/tools/list_changed" => changed.store(true, Ordering::Relaxed),
+                            _ => {}
+                        }
+                    }
+                };
+                *gone.lock().unwrap() = Some(why);
+                // (Those waiting hear it's gone.)
+                pending.lock().unwrap().clear();
+            })
+        };
+        Ok(Sse { client, name: name.to_owned(), url: url.to_owned(), token: Mutex::new(token), headers: headers.to_vec(), endpoint, pending, next: AtomicU64::new(1), gone, reader })
+    }
+
+    fn why_gone(&self) -> Option<String> {
+        self.gone.lock().unwrap().clone()
+    }
+
+    /// Where to POST: once the stream has said (within `timeout`).
+    async fn endpoint(&self, timeout: Duration) -> Result<String, String> {
+        let mut rx = self.endpoint.clone();
+        let got = tokio::time::timeout(timeout, rx.wait_for(Option::is_some)).await;
+        match got {
+            Ok(Ok(v)) => Ok(v.clone().unwrap_or_default()),
+            Ok(Err(_)) => Err(self.why_gone().unwrap_or_else(|| "its stream ended".into())),
+            Err(_) => Err(format!("{} didn't say where to send messages within {} s", self.url, timeout.as_secs())),
+        }
+    }
+
+    async fn post(&self, body: &Value, timeout: Duration) -> Result<(), String> {
+        let to = self.endpoint(timeout).await?;
+        let mut req = self.client.post(&to).timeout(timeout.min(Duration::from_secs(60))).header("Content-Type", "application/json");
+        for (k, v) in &self.headers {
+            req = req.header(k.as_str(), v.as_str());
+        }
+        let token = self.token.lock().unwrap().clone();
+        if let Some(t) = &token {
+            req = req.bearer_auth(t);
+        }
+        let resp = req.body(body.to_string()).send().await.map_err(|e| format!("couldn't reach {to}: {}", root_cause(&e)))?;
+        let status = resp.status().as_u16();
+        if status == 401 || status == 403 {
+            // (A token refreshed meanwhile, for the next message.)
+            if token.is_some() {
+                *self.token.lock().unwrap() = signed_in(&self.url, &self.headers, true).await;
+            }
+            return Err(signin_needed(&self.name, &self.url, status, token.is_some()));
+        }
+        if !(200..300).contains(&status) {
+            let text = resp.text().await.unwrap_or_default();
+            let detail: String = text.trim().chars().take(200).collect();
+            return Err(format!("HTTP {status} from {to}{}", if detail.is_empty() { String::new() } else { format!(": {detail}") }));
+        }
+        Ok(())
+    }
+
+    async fn request(&self, method: &str, params: Value, timeout: Duration) -> Result<Value, String> {
+        if let Some(why) = self.why_gone() {
+            return Err(why);
+        }
+        let id = self.next.fetch_add(1, Ordering::Relaxed);
+        let (tx, rx) = oneshot::channel();
+        self.pending.lock().unwrap().insert(id, tx);
+        // (Dropped before its answer: no longer waited for.)
+        struct Forget(Pending, u64);
+        impl Drop for Forget {
+            fn drop(&mut self) {
+                self.0.lock().unwrap().remove(&self.1);
+            }
+        }
+        let _forget = Forget(self.pending.clone(), id);
+        self.post(&json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }), timeout).await?;
+        match tokio::time::timeout(timeout, rx).await {
+            Err(_) => Err(format!("no answer to {method} in {} s", timeout.as_secs())),
+            Ok(Err(_)) => Err(self.why_gone().unwrap_or_else(|| "its stream ended".into())),
+            Ok(Ok(msg)) => match msg.get("error") {
+                Some(e) => Err(e["message"].as_str().unwrap_or("an error").to_owned()),
+                None => Ok(msg["result"].clone()),
+            },
+        }
+    }
+
+    async fn notify(&self, method: &str) {
+        let _ = self.post(&json!({ "jsonrpc": "2.0", "method": method }), Duration::from_secs(15)).await;
+    }
+}
+
+/// Why a message didn't get through.
+enum Fail {
+    /// Refused for want of a sign-in (401, 403).
+    Refused(u16),
+    Other(String),
+}
+
+impl From<String> for Fail {
+    fn from(s: String) -> Self {
+        Fail::Other(s)
+    }
+}
+
+/// The sign-in's token for `url`, unless the entry sends its own
+/// Authorization header.
+async fn signed_in(url: &str, headers: &[(String, String)], force: bool) -> Option<String> {
+    if headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("authorization")) {
+        return None;
+    }
+    crate::mcp_auth::bearer(url, force).await
+}
+
+/// What a server that wants a sign-in is refused with.
+fn signin_needed(name: &str, url: &str, status: u16, had: bool) -> String {
+    let what = if had { "refused the sign-in" } else { "wants you to sign in" };
+    format!("{url} {what} (HTTP {status}): sign in with `harlo-agent mcp login {name}`, or Sign in under harlo's Settings → MCP.")
+}
+
 fn root_cause(e: &(dyn std::error::Error + 'static)) -> String {
     let mut cur = e;
     while let Some(next) = cur.source() {
@@ -557,6 +814,7 @@ fn root_cause(e: &(dyn std::error::Error + 'static)) -> String {
 enum Conn {
     Stdio(Stdio),
     Http(Http),
+    Sse(Sse),
 }
 
 impl Conn {
@@ -564,6 +822,7 @@ impl Conn {
         match self {
             Conn::Stdio(s) => s.request(method, params, timeout).await,
             Conn::Http(h) => h.request(method, params, timeout).await,
+            Conn::Sse(e) => e.request(method, params, timeout).await,
         }
     }
 
@@ -571,6 +830,7 @@ impl Conn {
         match self {
             Conn::Stdio(s) => s.notify(method).await,
             Conn::Http(h) => h.notify(method).await,
+            Conn::Sse(e) => e.notify(method).await,
         }
     }
 }
@@ -605,7 +865,8 @@ async fn start(c: Config, project: PathBuf) -> Result<Server, String> {
     let changed = Arc::new(AtomicBool::new(false));
     let conn = match &c.kind {
         Kind::Stdio { program, args } => Conn::Stdio(Stdio::start(&c, program, args, &project, changed.clone())?),
-        Kind::Http { url, headers } => Conn::Http(Http::new(url, headers, changed.clone())?),
+        Kind::Http { url, headers } => Conn::Http(Http::new(&c.name, url, headers, changed.clone())?),
+        Kind::Sse { url, headers } => Conn::Sse(tokio::time::timeout(c.timeout, Sse::start(&c.name, url, headers, &project, changed.clone())).await.map_err(|_| format!("it didn't answer within {} s", c.timeout.as_secs()))??),
     };
     let init = json!({ "protocolVersion": PROTOCOL, "capabilities": { "roots": {} }, "clientInfo": { "name": "harlo-agent", "version": env!("CARGO_PKG_VERSION") } });
     // (The whole start within its timeout, said as that.)
@@ -757,7 +1018,7 @@ mod tests {
         // (A url alone is an address; a command given as an argv works too.)
         assert!(matches!(parse("u", &json!({ "url": "http://h/mcp" }), p).unwrap().kind, Kind::Http { .. }));
         assert_eq!(parse("o", &json!({ "command": ["srv", "--x"] }), p).unwrap().kind, Kind::Stdio { program: "srv".into(), args: vec!["--x".into()] });
-        assert!(parse("s", &json!({ "type": "sse", "url": "http://h/sse" }), p).unwrap_err().contains("SSE"));
+        assert_eq!(parse("s", &json!({ "type": "sse", "url": "http://h/sse" }), p).unwrap().kind, Kind::Sse { url: "http://h/sse".into(), headers: vec![] });
         assert!(parse("n", &json!({}), p).unwrap_err().contains("no command"));
         assert!(parse("b", &json!({ "type": "http", "url": "ftp://h" }), p).is_err());
     }

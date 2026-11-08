@@ -11,7 +11,8 @@ ColumnLayout {
     id: page
     /// Settings is narrow.
     property bool compact: false
-    /// Sign in from a terminal (Main opens one).
+    /// Harlo signing in to a server (Main opens the sign-in).
+    signal signInRequested(string scope, string server)
     /// Where the server page's action bar floats (Settings' page bottom).
     property Item footerHost: null
     property bool showAllTools: false
@@ -377,7 +378,7 @@ ColumnLayout {
         RowLayout {
             spacing: 6
             Repeater {
-                model: [["stdio", "Command"], ["http", "Link"], ["sse", "Link (SSE, not Harlo)"]]
+                model: [["stdio", "Command"], ["http", "Link"], ["sse", "Link (SSE)"]]
                 FlatButton {
                     required property var modelData
                     objectName: "mcpTransport-" + modelData[0]
@@ -487,9 +488,17 @@ ColumnLayout {
                 text: !detail.st ? "Not tested yet."
                     : detail.st.state === "testing" ? "Testing…"
                     : detail.st.state === "connected" ? "Connected" + (detail.st.server ? " to " + detail.st.server : "") + "."
-                    : detail.st.state === "needs_auth" ? "The server wants you to sign in. Claude Code signs in to it from its own /mcp; Harlo can't sign in to servers yet, and harlo's test can't use a sign-in."
+                    : detail.st.state === "needs_auth" ? "The server wants you to sign in." + (page.editing.harnesses.includes("harlo") ? " Sign in for Harlo here" + (page.editing.harnesses.includes("claude") ? "; Claude Code signs in from its own /mcp." : ".") : " Claude Code signs in to it from its own /mcp.")
                     : detail.st.error
                 color: detail.st && detail.st.state === "failed" ? Theme.error : Theme.muted
+            }
+            FlatButton {
+                objectName: "mcpSignIn"
+                visible: detail.st !== undefined && detail.st !== null && detail.st.state === "needs_auth" && page.editing.harnesses.includes("harlo")
+                text: "Sign in"
+                accent: true
+                font.pixelSize: Theme.px(12)
+                onClicked: page.signInRequested(page.scope, page.editing.oldName)
             }
             FlatButton { objectName: "mcpTest"; text: "Test"; font.pixelSize: Theme.px(12); enabled: !(detail.st && detail.st.state === "testing"); onClicked: Mcp.test(page.scope, page.editing.oldName) }
         }

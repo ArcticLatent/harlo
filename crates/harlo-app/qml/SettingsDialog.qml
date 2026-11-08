@@ -17,6 +17,8 @@ Popup {
     signal setupRequested()
     /// Signing an agent in to a model provider.
     signal signInRequested(string agent, string label)
+    /// Harlo signing in to an MCP server of `scope`.
+    signal mcpSignInRequested(string scope, string server)
     /// MCP sign-in: run this in a terminal.
     signal runInTerminalRequested(string command)
     /// A file to open in harlo's editor (an agent's config, a log).
@@ -2490,6 +2492,7 @@ Popup {
         McpPage {
             compact: root.compact
             footerHost: root.pageFooter
+            onSignInRequested: (scope, server) => root.mcpSignInRequested(scope, server)
         }
     }
 

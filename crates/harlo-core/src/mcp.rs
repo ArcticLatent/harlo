@@ -7,8 +7,8 @@
 //! | Harlo | `~/.config/harlo-agent/mcp.json` (`$XDG_CONFIG_HOME`) | `<project>/.harlo/mcp.json` (approved entries) |
 //!
 //! harlo shows one list for both and edits each agent's file in its own
-//! dialect: Harlo's timeouts are in seconds and it has no SSE; Claude has no
-//! folder, timeout or off switch. Fields harlo doesn't edit (OAuth settings,
+//! dialect: Harlo's timeouts are in seconds; Claude has no folder, timeout
+//! or off switch. Fields harlo doesn't edit (OAuth settings,
 //! …) are kept as they are. Claude Code
 //! rewrites its `~/.claude.json` as it runs, so harlo changes its global
 //! servers with Claude's own `claude mcp add-json / remove`.
@@ -17,7 +17,7 @@
 //! approved for the project (a repository can bring a file that runs a
 //! command): saving or switching one here approves it, in
 //! `mcp-approved.json` beside Harlo's own `mcp.json` (on the project's
-//! machine), `{ project: { name: hash of the entry } }`. Harlo has no SSE.
+//! machine), `{ project: { name: hash of the entry } }`.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -92,12 +92,12 @@ const SERVERS: &str = "mcpServers";
 
 /// Harlo's config folder here (a scratch one in tests).
 #[cfg(test)]
-fn harlo_dir() -> PathBuf {
+pub(crate) fn harlo_dir() -> PathBuf {
     std::env::temp_dir().join(format!("harlo-mcp-test-config-{}", std::process::id()))
 }
 
 #[cfg(not(test))]
-fn harlo_dir() -> PathBuf {
+pub(crate) fn harlo_dir() -> PathBuf {
     std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).unwrap_or_else(|| home().join(".config")).join("harlo-agent")
 }
 
@@ -173,7 +173,7 @@ pub fn harlo_approved(scope: &Scope, name: &str) -> Option<bool> {
 pub struct Form {
     pub name: String,
     pub enabled: bool,
-    /// "stdio", "http" or "sse" (Claude only).
+    /// "stdio", "http" or "sse".
     pub transport: String,
     /// The program and its arguments (stdio).
     pub command: Vec<String>,
@@ -237,10 +237,12 @@ impl Form {
             }
         };
         let stdio = self.transport == "stdio";
-        // The transport: Claude spells it out; Harlo infers it (written for http).
+        // The transport: Claude spells it out; Harlo infers a command (written
+        // for an address).
         let ty = match (kind, self.transport.as_str()) {
             (HarnessKind::Claude, t) => Some(json!(t)),
             (_, "stdio") => m.get("type").filter(|t| *t == "stdio").cloned(),
+            (_, "sse") => Some(json!("sse")),
             (_, _) => Some(json!("http")),
         };
         set(&mut m, "type", ty);
@@ -276,9 +278,6 @@ impl Form {
         }
         if self.transport != "stdio" && !(self.url.starts_with("http://") || self.url.starts_with("https://")) {
             return Some("Enter the server's http:// or https:// address.".into());
-        }
-        if self.transport == "sse" && kinds.contains(&HarnessKind::Harlo) {
-            return Some("Harlo doesn't support SSE servers; untick Harlo, or use http.".into());
         }
         if !self.enabled && kinds == [HarnessKind::Claude] {
             return Some("Claude has no off switch for a server; remove it instead.".into());
@@ -693,8 +692,11 @@ mod tests {
         remove(&scope, "files").unwrap();
         remove(&scope, "came").unwrap();
         assert!(read().get(&key).is_none(), "{}", read());
-        // No SSE for Harlo; this computer's and a host's files.
-        assert!(Form { transport: "sse".into(), url: "https://h/sse".into(), ..form.clone() }.problem(&[HarnessKind::Harlo]).unwrap().contains("Harlo"));
+        // SSE for Harlo too, written as such; this computer's and a host's files.
+        let sse = Form { transport: "sse".into(), url: "https://h/sse".into(), ..form.clone() };
+        assert_eq!(sse.problem(&[HarnessKind::Harlo]), None);
+        assert_eq!(sse.to_entry(HarnessKind::Harlo, None)["type"], "sse");
+        assert_eq!(Form::from_entry(HarnessKind::Harlo, "s", &sse.to_entry(HarnessKind::Harlo, None)).transport, "sse");
         assert_eq!(config_path(HarnessKind::Harlo, &Scope::Global), harlo_dir().join("mcp.json"));
         assert!(config_path(HarnessKind::Harlo, &Scope::Host("not-a-host".into())).to_string_lossy().ends_with("/.config/harlo-agent/mcp.json"));
         let _ = std::fs::remove_dir_all(harlo_dir());
@@ -798,7 +800,7 @@ mod tests {
     fn checks_forms() {
         let mut f = Form { name: "ok".into(), transport: "sse".into(), url: "https://x".into(), enabled: true, ..Default::default() };
         assert!(f.problem(&[HarnessKind::Claude]).is_none());
-        assert!(f.problem(&[HarnessKind::Harlo]).is_some());
+        assert!(f.problem(&[HarnessKind::Harlo]).is_none());
         f.name = "bad name".into();
         assert!(f.problem(&[HarnessKind::Claude]).is_some());
     }

@@ -455,7 +455,12 @@ impl Accounts {
 
     pub fn start(mut self: Pin<&mut Self>, agent: &QString, provider: &QString, method: &QString) {
         self.as_mut().cancel();
-        let (agent, provider, method) = (agent.to_string(), provider.to_string(), method.to_string());
+        let (mut agent, provider, method) = (agent.to_string(), provider.to_string(), method.to_string());
+        // An MCP server's sign-in (`mcp:<server>`, the method its scope):
+        // Harlo where that scope's servers run.
+        if provider.starts_with("mcp:") {
+            agent = mcp_where(&method).0;
+        }
         let id = self.next_id + 1;
         self.as_mut().rust_mut().next_id = id;
         let (tx, rx) = mpsc::unbounded_channel();
@@ -1557,6 +1562,20 @@ fn ends_with_input(command: &str) -> String {
     )
 }
 
+/// Where an MCP scope's servers run: the agent to sign in (`harlo` or
+/// `harlo@host`) and the project folder there (None: the global servers).
+fn mcp_where(scope: &str) -> (String, Option<String>) {
+    use harlo_core::mcp::Scope;
+    match Scope::parse(scope) {
+        Scope::Global => ("harlo".into(), None),
+        Scope::Host(h) => (format!("harlo@{h}"), None),
+        Scope::Project(p) => match harlo_core::remote::split(&p) {
+            Some((host, dir)) => (format!("harlo@{host}"), Some(dir)),
+            None => ("harlo".into(), Some(p.to_string_lossy().into_owned())),
+        },
+    }
+}
+
 /// A device code in an agent's instructions ("Enter code: ABCD-1234").
 fn device_code(text: &str) -> Option<String> {
     text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
@@ -1580,6 +1599,29 @@ async fn sign_in(k: HarnessKind, provider: &str, method: &str, report: &Report, 
             report.text("Claude Code opens Anthropic's sign-in page in your browser. Approve it there; Claude Code keeps the sign-in.");
             command(sign_in_command(k, "claude", report.host.as_ref(), &args)?, report, rx).await?;
             Ok("Claude Code is signed in.".into())
+        }
+        HarnessKind::Harlo if provider.starts_with("mcp:") => {
+            let server = &provider["mcp:".len()..];
+            let (_, project) = mcp_where(method);
+            let mut args = vec!["mcp".to_owned(), "login".to_owned(), server.to_owned()];
+            if let Some(p) = project {
+                args.extend(["--project".to_owned(), p]);
+            }
+            let cmd = match report.host.clone() {
+                // There: harlo's copy of the agent; the page's return to
+                // localhost is forwarded there, or its address pasted.
+                Some(h) => {
+                    let program = tokio::task::spawn_blocking(move || harlo_there(&h)).await.map_err(|e| e.to_string())??;
+                    args.push("--paste".into());
+                    let words: Vec<&str> = args.iter().map(String::as_str).collect();
+                    sign_in_command(k, &harlo_core::remote::quote(&program), report.host.as_ref(), &words)?
+                }
+                None => agent_command(k, "harlo-agent", None, &args.iter().map(String::as_str).collect::<Vec<_>>())?,
+            };
+            report.text(&format!("Harlo opens {server}'s sign-in page in your browser. Approve it there; Harlo keeps the sign-in."));
+            command(cmd, report, rx).await?;
+            let place = report.host.as_ref().map_or(String::new(), |h| format!(" on {}", h.name));
+            Ok(format!("Harlo is signed in to {server}{place}."))
         }
         HarnessKind::Harlo => {
             let codex = provider == "codex";

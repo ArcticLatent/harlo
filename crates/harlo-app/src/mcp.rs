@@ -228,12 +228,25 @@ impl Mcp {
                 continue;
             }
             self.as_mut().rust_mut().status.insert(key.clone(), Probe { state: "testing".into(), ..Default::default() });
-            let form = server.form.clone();
+            let mut form = server.form.clone();
+            // Harlo's sign-in, when it has one here (a host keeps its own).
+            let here = match &scope {
+                Scope::Global => true,
+                Scope::Project(p) => harlo_core::remote::split(p).is_none(),
+                Scope::Host(_) => false,
+            };
+            let harlo = here && server.harnesses.contains(&HarnessKind::Harlo) && form.transport != "stdio";
             let project = project.clone();
             // At most the server's own timeout, else 30 s.
             let timeout = Duration::from_secs_f64(form.timeout_secs.unwrap_or(30.0).clamp(3.0, 30.0));
             let thread = self.qt_thread();
             crate::runtime().spawn_blocking(move || {
+                if harlo
+                    && !form.headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("authorization"))
+                    && let Some(t) = mcp_probe::harlo_token(&mcp_probe::expand(form.url.trim()))
+                {
+                    form.headers.push(("Authorization".into(), format!("Bearer {t}")));
+                }
                 let result = mcp_probe::probe(&form, project.as_deref(), timeout);
                 let _ = thread.queue(move |mut this| {
                     this.as_mut().rust_mut().status.insert(key, result);

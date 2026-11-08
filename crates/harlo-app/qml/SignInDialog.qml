@@ -15,6 +15,7 @@ AppDialog {
     standardButtons: Dialog.NoButton
 
     signal signedInOnHost()
+    signal mcpSignedIn(string scope, string server)
     property string agent: ""
     property string agentLabel: ""
     /// "pick" or "flow".
@@ -40,6 +41,18 @@ AppDialog {
         Accounts.loadProviders(id)
         open()
     }
+    /// Harlo signing in to an MCP server of `scope` (straight to the flow).
+    function openForMcp(scope, server) {
+        agent = "harlo"
+        agentLabel = "Harlo"
+        chosen = { id: "mcp:" + server, name: "Sign in to " + server, scope: scope, server: server }
+        method = { id: scope }
+        search = ""
+        openedUrls = ({})
+        page = "flow"
+        Accounts.start(agent, chosen.id, scope)
+        open()
+    }
     function begin(provider, m) {
         chosen = provider
         method = m
@@ -50,6 +63,10 @@ AppDialog {
     onClosed: {
         if (running) Accounts.cancel()
         const onHost = agent.indexOf("@") >= 0
+        if (flow && flow.state === "done" && chosen && chosen.server !== undefined) {
+            mcpSignedIn(chosen.scope, chosen.server)
+            return
+        }
         if (flow && flow.state === "done") {
             Workspace.refreshProviders()
             if (onHost) signedInOnHost()

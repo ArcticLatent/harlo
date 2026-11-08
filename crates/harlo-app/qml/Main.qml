@@ -772,6 +772,8 @@ ApplicationWindow {
             if (chat.isDraft) chat.draftView.loadHostModels()
             else chat.session.recheckModels()
         }
+        // Signed in to an MCP server: tested again.
+        onMcpSignedIn: (scope, server) => Mcp.test(scope, server)
     }
     // The firewall stops a paired phone on one of harlo's addresses.
     PhoneFirewallToast {
@@ -834,6 +836,7 @@ ApplicationWindow {
         onSetupRequested: win.openSetupGuide()
         onPairDeviceRequested: pairDeviceDialog.open()
         onSignInRequested: (agent, label) => signInDialog.openFor(agent, label)
+        onMcpSignInRequested: (scope, server) => signInDialog.openForMcp(scope, server)
         onTrayToggled: on => win.setTrayEnabled(on)
         onPromptRailToggled: on => chat.transcript.promptRail = on
         onOpenFileRequested: path => {
