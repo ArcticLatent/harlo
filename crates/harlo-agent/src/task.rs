@@ -1,7 +1,11 @@
 //! `task`: subagents inside one session. Each task is a new agent in this
-//! process with the session's model, folder and instructions but none of
-//! its conversation, a smaller set of tools, and its own log (beside the
-//! session's, in a folder named after it). Up to [`AT_ONCE`] run at a
+//! process with a smaller set of tools and its own log (beside the
+//! session's, in a folder named after it). It starts from the session's
+//! conversation as it is (a fork: its first request is the session's last
+//! one plus its part, so the cache serves it), except two or more that
+//! edit side by side (each in its own copy of the files) and a task on
+//! another model or profile: those start fresh, with the session's
+//! instructions only. Up to [`AT_ONCE`] run at a
 //! time; their final messages come back together, in the order asked.
 //! They use no `task` and none of harlo's tools: no subagents of their
 //! own, no helper sessions. Approvals go through the session's own; Stop
@@ -39,6 +43,22 @@ pub fn enabled() -> bool {
     std::env::var_os("HARLO_AGENT_NO_TASK").is_none()
 }
 
+/// Whether subagents start from the conversation so far (forks; measured:
+/// as often right, fewer tokens where they look around) instead of with
+/// nothing (`HARLO_AGENT_TASK=fresh`).
+pub fn forks() -> bool {
+    std::env::var("HARLO_AGENT_TASK").as_deref() != Ok("fresh")
+}
+
+/// What a fork starts from: the session's requests as they were sent
+/// (instructions, tools and the conversation before the call), so its
+/// first request shares their cache.
+pub struct Fork {
+    pub system: String,
+    pub specs: Value,
+    pub history: Vec<Value>,
+}
+
 /// `profiles`: the agent profiles a task may name.
 pub fn spec(profiles: &[crate::profiles::Profile]) -> Value {
     let agents = if profiles.is_empty() {
@@ -47,21 +67,26 @@ pub fn spec(profiles: &[crate::profiles::Profile]) -> Value {
         let listed: Vec<String> = profiles.iter().take(crate::profiles::LISTED).map(|p| format!("{}: {}", p.name, p.description.trim())).collect();
         format!(" agent names one of these profiles instead of kind (its instructions and tools, maybe its model): {}.", listed.join("; "))
     };
-    let mut spec = json!({
+    let fresh = if forks() { ", starting fresh (none of this conversation: their prompts must say everything they need)" } else { "" };
+    let copies = format!(
+        "general may also edit and write files; in a git project, two or more general tasks in one call each work in their own copy of the files{fresh}, \
+         and their changes are brought back here when they finish (any that clash with another's are kept aside, and the result says where)."
+    );
+    let description = format!(
+        "{} Several run at the same time. Use it for independent parts worth doing in parallel, or a search through much of the code that would fill your context; \
+         not for a quick look you can do yourself. kind explore (default) reads, searches and runs commands but changes no files; {copies}{agents}",
+        if forks() { FORK_START } else { FRESH_START }
+    );
+    json!({
         "type": "function", "name": "task", "strict": false,
-        "description": "Runs subagents: each takes one task with a fresh context (none of this conversation, so its prompt must say everything it needs: \
-                        the goal, paths, what to report), works with its own tools, and its final message comes back to you. Several run at the same time. \
-                        Use it for independent parts worth doing in parallel, or a search through much of the code that would fill your context; \
-                        not for a quick look you can do yourself. kind explore (default) reads, searches and runs commands but changes no files; \
-                        general may also edit and write files; in a git project, two or more general tasks in one call each work in their own copy of the files, \
-                        and their changes are brought back here when they finish (any that clash with another's are kept aside, and the result says where).",
+        "description": description,
         "parameters": {
             "type": "object",
             "properties": { "tasks": { "type": "array", "maxItems": MAX_TASKS, "items": {
                 "type": "object",
                 "properties": {
                     "description": { "type": "string", "description": "A few words, shown to the user" },
-                    "prompt": { "type": "string", "description": "The whole task, self-contained" },
+                    "prompt": { "type": "string", "description": if forks() { "Which part it does and what to report (everything it needs, for general tasks side by side)" } else { "The whole task, self-contained" } },
                     "kind": { "type": "string", "enum": ["explore", "general"] },
                     "agent": { "type": "string", "description": "An agent profile's name, instead of kind" },
                     "model": { "type": "string", "description": "provider/model to run it on, if not the subagents' default (a smaller one for simple work, a stronger one for hard)" },
@@ -71,11 +96,7 @@ pub fn spec(profiles: &[crate::profiles::Profile]) -> Value {
             } } },
             "required": ["tasks"], "additionalProperties": false,
         },
-    });
-    if let Some(d) = spec["description"].as_str().map(|d| format!("{d}{agents}")) {
-        spec["description"] = json!(d);
-    }
-    spec
+    })
 }
 
 /// What a session's subagents take from it.
@@ -101,7 +122,14 @@ pub struct Ctx {
     pub fallback: Option<String>,
     /// The session's language servers (shared, not started again).
     pub lsp: Arc<crate::lsp::Servers>,
+    /// Subagents as forks: what they start from.
+    pub fork: Option<Arc<Fork>>,
 }
+
+const FRESH_START: &str = "Runs subagents: each takes one task with a fresh context (none of this conversation, so its prompt must say everything it needs: \
+                           the goal, paths, what to report), works with its own tools, and its final message comes back to you.";
+const FORK_START: &str = "Runs subagents: each starts from this conversation as it is now (it knows what you know, so its prompt needn't repeat it: \
+                          say which part it does and what to report), works with its own tools, and its final message comes back to you.";
 
 impl Ctx {
     fn tell(&self, frame: Value) {
@@ -258,7 +286,16 @@ async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaph
         (Some(f), Some(p)) => Log::at(f.clone(), &cwd, p),
         _ => Log::ephemeral(&cwd),
     };
-    let mut agent = Agent::new(cwd, log, Past::default(), model, effort);
+    // A fork: the session's model, its requests as they were, the same cache
+    // (not in a copy of the files, nor on another model or profile).
+    let other_model = task["model"].as_str().is_some_and(|m| !m.is_empty() && m != ctx.model) || ctx.task_model.as_ref().is_some_and(|m| *m != ctx.model);
+    let fork = ctx.fork.as_ref().filter(|_| profile.is_none() && !other_model && done.worktree.is_none());
+    let (past, model, effort) = match fork {
+        // (Its log starts with its own messages: the parent's have ids of their own here.)
+        Some(f) => (Past { messages: f.history.clone(), ids: (0..f.history.len()).map(|i| format!("parent-{i}")).collect(), ..Past::default() }, ctx.model.clone(), effort),
+        None => (Past::default(), model, effort),
+    };
+    let mut agent = Agent::new(cwd, log, past, model, effort);
     agent.gate = ctx.gate.clone();
     agent.budget = ctx.budget.clone();
     agent.fallback = ctx.fallback.clone();
@@ -267,7 +304,16 @@ async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaph
     if let Some(p) = profile.filter(|p| !p.body.is_empty()) {
         agent.add_instructions(&format!("\n<agent_profile name=\"{}\">\n{}\n</agent_profile>\n", p.name, p.body));
     }
-    agent.cache_key = Some(format!("{}/task", ctx.cache_key));
+    agent.cache_key = Some(if fork.is_some() { ctx.cache_key.clone() } else { format!("{}/task", ctx.cache_key) });
+    let mut asked = prompt.clone();
+    if let Some(f) = fork {
+        agent.fixed = Some((f.system.clone(), f.specs.clone()));
+        asked = format!(
+            "<subagent>\nYou're now a subagent started from the conversation above, to do one part of it: {description}. The main agent goes on with the rest. \
+             Your tools are {} (others are refused). When you're done, your final message goes back to the main agent as your result: say briefly what you found or did.\n\n{prompt}\n</subagent>",
+            allowed.join(", ")
+        );
+    }
     agent.known = ctx.known.clone();
     let _ = agent.rename(&description);
     ctx.tell(json!({ "type": "subagent_lifecycle", "payload": {
@@ -285,7 +331,7 @@ async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaph
         (Shown::Limits(l), Some(n)) => n(json!({ "type": "harlo_limits", "provider": l["provider"], "account": l["account"], "windows": l["windows"] })),
         _ => {}
     };
-    let ended = agent.run(&prompt, &[], &token, &mut show).await;
+    let ended = agent.run(&asked, &[], &token, &mut show).await;
     done.status = match &ended {
         Ok(Ended::Done) => "completed",
         Ok(Ended::Stopped) => "aborted",
@@ -366,7 +412,7 @@ mod tests {
     async fn bad_calls_are_refused() {
         let ctx = Ctx {
             model: "x/y".into(), effort: None, cwd: std::env::temp_dir(), gate: None, parent_file: None, cache_key: "k".into(),
-            notify: None, known: Default::default(), running: Arc::default(), profiles: Vec::new(), task_model: None, budget: None, fallback: None, lsp: Default::default(),
+            notify: None, known: Default::default(), running: Arc::default(), profiles: Vec::new(), task_model: None, budget: None, fallback: None, lsp: Default::default(), fork: None,
         };
         let stop = CancellationToken::new();
         assert!(run(&json!({}), "c", &ctx, &stop).await.failed);

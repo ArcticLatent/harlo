@@ -350,6 +350,8 @@ pub struct Agent {
     prewalked: bool,
     /// What its requests share a cache by (None: its session's id).
     pub cache_key: Option<String>,
+    /// A forked subagent's instructions and tools: its parent's, as sent.
+    pub fixed: Option<(String, Value)>,
     pub notify: Option<Notify>,
     /// Its subagents running, by id.
     pub subagents: Arc<Mutex<HashMap<String, CancellationToken>>>,
@@ -407,6 +409,7 @@ impl Agent {
             fell_back: None,
             prewalked: false,
             cache_key: None,
+            fixed: None,
             notify: None,
             subagents: Arc::default(),
             harlo_tools: Vec::new(),
@@ -849,6 +852,11 @@ impl Agent {
             budget: self.budget.clone(),
             fallback: self.fallback.clone(),
             lsp: self.tools.lsp.clone(),
+            // (The conversation before the reply that asked for them.)
+            fork: crate::task::forks().then(|| {
+                let before = self.history.len().saturating_sub(1);
+                Arc::new(crate::task::Fork { system: self.system(), specs: self.specs(), history: self.history[..before].to_vec() })
+            }),
         }
     }
 
@@ -910,6 +918,9 @@ impl Agent {
 
     /// The system prompt: the project's, then what harlo's tools are for.
     fn system(&self) -> String {
+        if let Some((system, _)) = &self.fixed {
+            return system.clone();
+        }
         // (Asked which model it is, it can say: it changes when you switch.)
         let (provider, id) = self.model.split_once('/').unwrap_or((providers::CHATGPT, &self.model));
         let model = format!("\nYou run on the model {id} (from {provider}).\n");
@@ -922,6 +933,9 @@ impl Agent {
 
     /// The tools the model gets: its own, then harlo's.
     fn specs(&self) -> Value {
+        if let Some((_, specs)) = &self.fixed {
+            return specs.clone();
+        }
         let mut all = tools::specs_of(self.allowed, (self.allowed.is_none() && crate::task::enabled()).then_some(self.profiles.as_slice()), crate::patch::on(&self.model));
         if let Some(list) = all.as_array_mut() {
             // (`recall` once there's something to recall: the request that
