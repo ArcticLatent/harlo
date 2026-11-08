@@ -307,6 +307,9 @@ impl Agent {
 
     /// `images`: pi's image blocks, after the text.
     fn push_user(&mut self, text: &str, images: &[Value], show: &mut (dyn FnMut(Shown) + Send)) -> Result<()> {
+        // (`/skill:<name> …`: the skill, sent with it.)
+        let expanded = text.trim_start().starts_with("/skill:").then(|| crate::skills::expand(text, &crate::skills::find(&self.cwd, &home(), &crate::auth::config_dir()))).flatten();
+        let text = expanded.as_deref().unwrap_or(text);
         let mut content = Vec::new();
         if !text.is_empty() || images.is_empty() {
             content.push(json!({ "type": "text", "text": text }));
@@ -1251,6 +1254,7 @@ fn instructions(cwd: &Path, sandbox: Option<&crate::sandbox::Sandbox>) -> String
     for (path, text) in project_instructions(cwd) {
         s.push_str(&format!("\n<project_instructions path=\"{}\">\n{}\n</project_instructions>\n", path.display(), text.trim()));
     }
+    s.push_str(&crate::skills::listing(&crate::skills::find(cwd, &home(), &crate::auth::config_dir())));
     s.push_str(&format!("\nWorking directory: {}\n", cwd.display()));
     // (The day only, so the instructions stay the same all day; the time
     // is a tool.)

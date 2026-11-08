@@ -37,6 +37,7 @@ mod retry;
 mod rpc;
 mod sandbox;
 mod session;
+mod skills;
 mod stubs;
 mod task;
 mod tools;

@@ -629,10 +629,18 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
             drop(v);
             reply(Ok(stats))
         }
-        "get_commands" | "get_available_commands" => reply(Ok(json!({ "commands": [{
-            "name": "compact", "description": "Summarize the conversation so far to free up context",
-            "source": "builtin", "input": { "hint": "what to keep (optional)" },
-        }] }))),
+        "get_commands" | "get_available_commands" => {
+            let mut commands = vec![json!({
+                "name": "compact", "description": "Summarize the conversation so far to free up context",
+                "source": "builtin", "input": { "hint": "what to keep (optional)" },
+            })];
+            let cwd = std::env::current_dir().unwrap_or_default();
+            let home = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default();
+            for s in crate::skills::find(&cwd, &home, &crate::auth::config_dir()) {
+                commands.push(json!({ "name": format!("skill:{}", s.name), "description": s.description, "source": "skill", "path": s.path, "input": { "hint": "what to do (optional)" } }));
+            }
+            reply(Ok(json!({ "commands": commands })))
+        }
         // (The running ones come as events.)
         "get_subagents" => reply(Ok(json!({ "subagents": [] }))),
         "cancel_subagent" => {

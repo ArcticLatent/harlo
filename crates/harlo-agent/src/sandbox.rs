@@ -104,8 +104,8 @@ const HIDDEN_IN_HOME: &[&str] = &[
 ];
 /// Under the home folder, inside a hidden place: shown read-only. harlo's
 /// worktrees (a session reads its helpers' work there; its own is
-/// writable).
-const SHOWN_IN_HOME: &[&str] = &[".local/share/harlo/worktrees"];
+/// writable), and skills (Claude Code's among them).
+const SHOWN_IN_HOME: &[&str] = &[".local/share/harlo/worktrees", ".claude/skills", ".agents/skills"];
 /// Elsewhere: sockets that would let a command act as you (the Docker
 /// daemon's is as good as root).
 const HIDDEN_ELSEWHERE: &[&str] = &["/var/run/docker.sock", "/run/docker.sock", "/tmp/.X11-unix"];
@@ -231,7 +231,10 @@ impl Sandbox {
         }
         hidden.extend(p.hidden.iter().cloned());
         let hidden = existing(hidden);
-        let shown = existing(SHOWN_IN_HOME.iter().map(|s| home.join(s)).collect());
+        // (Skills, read-only: harlo-agent's own too.)
+        let mut shown: Vec<PathBuf> = SHOWN_IN_HOME.iter().map(|s| home.join(s)).collect();
+        shown.push(config.join("skills"));
+        let shown = existing(shown);
         Sandbox { network: p.network, project, project_writable, writable, hidden, shown, env: p.env.clone(), broken: None }
     }
 
