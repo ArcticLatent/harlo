@@ -114,7 +114,7 @@ Popup {
                         Repeater {
                             model: [
                                 [Keymap.seq("palette"), "searches sessions; start with > for actions"],
-                                ["@", "in the composer mentions a file"],
+                                ["@", "in the composer mentions a file, or another session of this folder"],
                                 ["Esc", "stops a running agent"],
                             ].filter(t => t[0] !== "")
                             RowLayout {

@@ -192,6 +192,10 @@ pub mod qobject {
         /// Fills `fileMatches` with files under the session's folder.
         #[qinvokable]
         fn search_files(self: Pin<&mut ChatSession>, query: &QString);
+        /// A session picked from the `@` list: its latest messages go with
+        /// the next message that mentions it (`mention`).
+        #[qinvokable]
+        fn mention_session(self: Pin<&mut ChatSession>, mention: &QString, harness: &QString, path: &QString);
         /// Adds a file (path or `file://` URL) to the next prompt. Returns
         /// false for folders and missing files.
         #[qinvokable]
@@ -363,6 +367,9 @@ pub struct ChatSessionRust {
     live: Option<(LiveRef, u64)>,
     /// Bumped on every bind; updates for an earlier binding are dropped.
     generation: u64,
+    /// Sessions picked from the composer's `@` list: their mention, and
+    /// the session (sent with the message that still mentions them).
+    mentions: Vec<(String, HarnessKind, PathBuf)>,
 }
 
 struct QtSink {
@@ -709,6 +716,9 @@ impl ChatSession {
             text
         };
         let paths: Vec<PathBuf> = self.attachments.iter().map(|p| PathBuf::from(p.to_string())).collect();
+        // Sessions it mentions (picked from the `@` list): read when it's sent.
+        let named = harlo_core::session_ref::tokens(&text);
+        let mentioned: Vec<(HarnessKind, PathBuf)> = self.mentions.iter().filter(|(m, _, _)| named.contains(m)).map(|(_, k, p)| (*k, p.clone())).collect();
         // (Another machine's session: what isn't inlined is copied there.)
         let host = harlo_core::remote::host_of(&self.folder());
         // Its model on a server harlo can start (set up here, or on the
@@ -716,7 +726,7 @@ impl ChatSession {
         // machine's agent's file is read in the background.)
         let (agent, model) = (self.harness.to_string(), self.model_id.to_string());
         let server = if host.is_none() { crate::accounts::managed_server(&agent, &model) } else { None };
-        if paths.is_empty() && server.is_none() && host.is_none() {
+        if paths.is_empty() && mentioned.is_empty() && server.is_none() && host.is_none() {
             h.prompt(&text, Vec::new(), mode);
             return;
         }
@@ -744,7 +754,12 @@ impl ChatSession {
                 }
             }
             let prepared = harlo_core::attach::prepare_for(&paths, host.as_deref());
-            h.prompt(&format!("{}{text}", prepared.prefix), prepared.images, mode);
+            let sessions: String = mentioned
+                .iter()
+                .filter_map(|(kind, path)| harlo_harness::store::read_session(*kind, path))
+                .map(|info| harlo_core::session_ref::block(&info, &harlo_core::session_ref::messages_of(info.harness, &info.path)))
+                .collect();
+            h.prompt(&format!("{sessions}{}{text}", prepared.prefix), prepared.images, mode);
         });
     }
 
@@ -1039,6 +1054,14 @@ impl ChatSession {
         if let Some(h) = self.handle() {
             h.send_raw(json!({ "type": "set_thinking_level", "level": level.to_string() }));
         }
+    }
+
+    pub fn mention_session(mut self: Pin<&mut Self>, mention: &QString, harness: &QString, path: &QString) {
+        let Some(kind) = HarnessKind::parse(&harness.to_string()) else { return };
+        let mention = mention.to_string();
+        let mut me = self.as_mut().rust_mut();
+        me.mentions.retain(|(m, _, _)| *m != mention);
+        me.mentions.push((mention, kind, PathBuf::from(path.to_string())));
     }
 
     pub fn search_files(self: Pin<&mut Self>, query: &QString) {

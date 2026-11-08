@@ -5,7 +5,7 @@ import QtQuick.Dialogs
 import QtQuick.Layouts
 import harlo
 
-// Message input with `/command` and `@file` completion, model and thinking
+// Message input with `/command` and `@file` / `@session` completion, model and thinking
 // pickers, and prompt history.
 Rectangle {
     id: root
@@ -171,6 +171,9 @@ Rectangle {
     property string completionMode: ""
     property string completionQuery: ""
     property int tokenStart: 0
+    // This folder's other sessions matching the `@` word (theirs go with
+    // the message as an excerpt).
+    property var sessionMatches: []
 
     function updateCompletion() {
         const before = input.text.substring(0, input.cursorPosition)
@@ -184,6 +187,7 @@ Rectangle {
             completionQuery = m[2]
             tokenStart = before.length - m[2].length - 1
             root.session.searchFiles(completionQuery)
+            sessionMatches = root.session.cwd !== "" ? JSON.parse(Workspace.sessionMentions(root.session.cwd, root.session.key, completionQuery)) : []
         } else {
             completionMode = ""
         }
@@ -201,8 +205,13 @@ Rectangle {
             const contains = all.filter(c => !c.name.toLowerCase().startsWith(q) && c.name.toLowerCase().includes(q))
             return starts.concat(contains).slice(0, 40)
         }
-        if (completionMode === "file")
-            return root.session.fileMatches.map(f => ({ name: f, detail: "", hint: "" }))
+        if (completionMode === "file") {
+            const files = root.session.fileMatches.map(f => ({ name: f, detail: "", hint: "", kind: "file" }))
+            const sessions = sessionMatches.map(s => ({ name: s.title, detail: "session · " + Theme.ago(s.modified, Date.now()) + (s.harness === "claude" ? " · Claude Code" : ""),
+                                                        hint: "", kind: "session", mention: s.mention, harness: s.harness, path: s.path }))
+            // (Named: sessions first; just `@`: files first, a few sessions after.)
+            return completionQuery === "" ? files.slice(0, 30).concat(sessions.slice(0, 3)) : sessions.concat(files)
+        }
         return []
     }
     onCompletionItemsChanged: {
@@ -218,7 +227,9 @@ Rectangle {
         if (!item)
             return
         const after = input.text.substring(input.cursorPosition)
-        const insert = completionMode === "command" ? "/" + item.name + " " : "@" + item.name + " "
+        const insert = completionMode === "command" ? "/" + item.name + " " : item.kind === "session" ? item.mention + " " : "@" + item.name + " "
+        if (item.kind === "session")
+            root.session.mentionSession(item.mention, item.harness, item.path)
         input.text = input.text.substring(0, tokenStart) + insert + after.replace(/^\S*/, "")
         input.cursorPosition = tokenStart + insert.length
         completion.close()
@@ -251,14 +262,15 @@ Rectangle {
                 background: Rectangle { radius: 4; color: item.highlighted ? Theme.selected : item.hovered ? Theme.hover : "transparent" }
                 contentItem: RowLayout {
                     spacing: 10
-                    FileIcon { visible: root.completionMode === "file"; path: visible ? item.modelData.name : ""; Layout.preferredWidth: 16; Layout.preferredHeight: 16 }
+                    FileIcon { visible: root.completionMode === "file" && item.modelData.kind !== "session"; path: visible ? item.modelData.name : ""; Layout.preferredWidth: 16; Layout.preferredHeight: 16 }
+                    Icon { visible: item.modelData.kind === "session"; name: "chat-thread"; Layout.preferredWidth: 16; Layout.preferredHeight: 16 }
                     Label {
                         text: (root.completionMode === "command" ? "/" : "") + item.modelData.name
                         color: Theme.foreground
-                        font.family: root.completionMode === "file" ? Theme.mono : Qt.application.font.family
+                        font.family: root.completionMode === "file" && item.modelData.kind !== "session" ? Theme.mono : Qt.application.font.family
                         font.pixelSize: Theme.px(13)
                         elide: Text.ElideMiddle
-                        Layout.maximumWidth: root.completionMode === "file" ? list.width - 46 : 220
+                        Layout.maximumWidth: item.modelData.kind === "session" ? list.width - 190 : root.completionMode === "file" ? list.width - 46 : 220
                     }
                     Label {
                         Layout.fillWidth: true
@@ -469,7 +481,7 @@ Rectangle {
                 : root.session.status === "offline" || root.session.status === "exited"
                 ? "Send a message to resume this session with " + Theme.harnessLabel(root.session.harness) + "…"
                 : root.planOn ? "Plan: describe what to plan (no files change)…"
-                : "Ask anything… / for commands, @ for files"
+                : "Ask anything… / for commands, @ for files and sessions"
             placeholderTextColor: Theme.muted
             color: Theme.foreground
             selectionColor: Theme.selection

@@ -6437,6 +6437,69 @@ ApplicationWindow {
             win.summary(); Qt.quit() } }
     }
 
+    // Another session, mentioned and searched: the project's past Harlo
+    // session (click-tests.sh writes it) picked from the composer's `@`
+    // list goes with the message as an excerpt; the model finds it with
+    // list_sessions' query and reads it with read_session.
+    SequentialAnimation {
+        id: harloSessionSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlosessions"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: { win.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo"); Workspace.setApprovalMode(win.harloKey, "yolo") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloSessionSteps, () => chat.session.modelName !== "" && JSON.parse(Workspace.sessionMentions(chat.session.cwd, chat.session.key, "")).length > 0, 15000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            const all = JSON.parse(Workspace.sessionMentions(chat.session.cwd, chat.session.key, ""))
+            win.check(all.length === 1 && all[0].mention === "@session:a1b2c3d4", "the project's past session is offered, not this one (" + JSON.stringify(all).slice(0, 200) + ")")
+            win.clickItem(win.findName("composerInput"), "composer")
+            TestInput.typeText("@sandbox") } }
+        PauseAnimation { duration: 700 }
+        ScriptAction { script: {
+            const items = chat.composerItem.completionItems
+            win.check(chat.composerItem.completionVisible && items.length > 0 && items[0].kind === "session" && items[0].name.indexOf("sandbox commands") >= 0,
+                      "typing @ and its words lists the session first (" + JSON.stringify(items.slice(0, 2)) + ")")
+            win.shotWindow("clicks-harlo-session-mention")
+            TestInput.key(Qt.Key_Return, 0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(win.findName("composerInput").text.indexOf("@session:a1b2c3d4 ") === 0, "picking it writes its mention (" + JSON.stringify(win.findName("composerInput").text) + ")")
+            TestInput.typeText("what did we pick?")
+            TestInput.key(Qt.Key_Return, 0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloSessionSteps, () => win.modelRequests().length > 0 && chat.session.status === "idle", 15000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const user = JSON.stringify((win.modelRequests()[0].messages || []).filter(m => m.role === "user").slice(-1))
+            win.check(user.indexOf("PICKED-BWRAP") >= 0 && user.indexOf("Session \\\"How should we sandbox commands?\\\"") >= 0 && user.indexOf("what did we pick?") >= 0,
+                      "its messages go with the message (" + user.slice(0, 300) + ")")
+            win.check(win.chatText().indexOf("what did we pick?") >= 0 && win.chatText().indexOf("PICKED-BWRAP") < 0, "the transcript shows the message, not the excerpt")
+            win.check(chat.session.title.indexOf("@session:") < 0 && chat.session.title.indexOf("what did we pick?") >= 0, "the title leaves the mention out (" + chat.session.title + ")")
+            win.shotWindow("clicks-harlo-session-sent")
+            win.sendByKeys("search past sessions for bubblewrap") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloSessionSteps, () => win.chatText().split("Done:").length > 1 && chat.session.status === "idle", 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const reqs = win.modelRequests(), last = reqs[reqs.length - 1]
+            const result = JSON.stringify((last.messages || []).filter(m => m.role === "tool").slice(-1))
+            win.check(result.indexOf("@session:a1b2c3d4") >= 0 && result.indexOf("**bubblewrap**") >= 0, "list_sessions with a query finds it, with the passage (" + result.slice(0, 300) + ")")
+            win.sendByKeys("read past session @session:a1b2c3d4") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloSessionSteps, () => win.chatText().split("Done:").length > 2 && chat.session.status === "idle", 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const reqs = win.modelRequests(), last = reqs[reqs.length - 1]
+            const result = JSON.stringify((last.messages || []).filter(m => m.role === "tool").slice(-1))
+            win.check(result.indexOf("closed") >= 0 && result.indexOf("Assistant: PICKED-BWRAP") >= 0, "read_session reads the past one (" + result.slice(0, 300) + ")")
+            win.shotWindow("clicks-harlo-session-read")
+            win.summary(); Qt.quit() } }
+    }
+
     // Plan limits from a Harlo session on the Codex sign-in (click-tests.sh:
     // a stand-in ChatGPT backend whose replies carry the plan's usage): the
     // meter shows them, under ChatGPT's logo.

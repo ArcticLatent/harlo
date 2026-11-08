@@ -83,8 +83,11 @@ pub fn tools(starting: Starting) -> Value {
         },
         {
             "name": "list_sessions",
-            "description": "harlo's open sessions: each one's id, title, agent, status (busy / idle / waiting for input), folder, and which session started it.",
-            "inputSchema": s(json!({}), &[]),
+            "description": "harlo's open sessions: each one's id, title, agent, status (busy / idle / waiting for input), folder, and which session started it. With query: past sessions of your folder (or everywhere) whose messages match it, with the passages.",
+            "inputSchema": s(json!({
+                "query": { "type": "string", "description": "Words to find in past sessions' messages." },
+                "everywhere": { "type": "boolean", "description": "Every folder's sessions, not just yours." }
+            }), &[]),
         },
         {
             "name": "start_session",
@@ -111,7 +114,7 @@ pub fn tools(starting: Starting) -> Value {
         },
         {
             "name": "read_session",
-            "description": "A harlo session's status and its last reply (or the last few messages).",
+            "description": "A harlo session's status and its last reply (or the last few messages); a past one's latest messages too (its @session id).",
             "inputSchema": s(json!({
                 "session": { "type": "string" },
                 "messages": { "type": "integer", "description": "How many of its latest messages to return (default 1: the last reply)." }

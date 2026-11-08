@@ -39,6 +39,7 @@ pub mod remote_sessions;
 pub mod scanner;
 pub mod schedules;
 pub mod search;
+pub mod session_ref;
 pub mod shelf;
 pub mod servers;
 #[cfg(test)]

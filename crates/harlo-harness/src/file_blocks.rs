@@ -54,11 +54,23 @@ pub fn strip_plan(text: &str) -> (&str, bool) {
 /// blocks, or the attached file names when there is no text.
 pub fn title_text(text: &str) -> String {
     let (files, rest) = split_blocks(text);
-    let line = rest.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default();
+    // (Mentions of other sessions say nothing on their own.)
+    let line = rest
+        .lines()
+        .map(|l| l.split_whitespace().filter(|w| !w.starts_with("@session:")).collect::<Vec<_>>().join(" "))
+        .find(|l| !l.is_empty())
+        .unwrap_or_default();
     if !line.is_empty() || files.is_empty() {
-        return line.to_owned();
+        return line;
     }
-    files.iter().map(|f| f.rsplit('/').next().unwrap_or(f)).collect::<Vec<_>>().join(", ")
+    files
+        .iter()
+        .map(|f| match f.strip_prefix("session: ") {
+            Some(s) => s.rsplit_once(" (@session:").map_or(s, |(t, _)| t),
+            None => f.rsplit('/').next().unwrap_or(f),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[cfg(test)]
@@ -84,5 +96,7 @@ mod tests {
         assert_eq!(title_text("<file name=\"/a/b.md\">\nx\n</file>\nFix it\nmore"), "Fix it");
         assert_eq!(title_text("<file name=\"/a/b.md\">\nx\n</file>\n<file name=\"/c.png\"></file>\n"), "b.md, c.png");
         assert_eq!(title_text("  \nplain"), "plain");
+        assert_eq!(title_text("<file name=\"session: Sandbox (@session:ab12cd34)\">\nx\n</file>\n@session:ab12cd34 what did we pick?"), "what did we pick?");
+        assert_eq!(title_text("<file name=\"session: Sandbox (@session:ab12cd34)\">\nx\n</file>\n@session:ab12cd34"), "Sandbox");
     }
 }
