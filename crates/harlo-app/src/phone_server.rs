@@ -978,7 +978,7 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
                         (Some(live), Some((key, _))) if key == msg["key"].as_str().unwrap_or_default() => {
                             let row = msg["row"].as_str().unwrap_or_default();
                             let ordinal = window.full.iter().position(|r| r.key == row).filter(|&i| window.full[i].kind == harlo_core::RowKind::User)
-                                .map(|i| window.full[..i].iter().filter(|r| r.kind == harlo_core::RowKind::User).count());
+                                .map(|i| window.full[..i].iter().filter(|r| r.is_sent()).count());
                             branch(&live, window.file.clone(), ordinal, msg["fork"].as_bool() == Some(true)).await
                         }
                         _ => json!({ "error": "Open the session first." }),
@@ -988,7 +988,7 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
                     // doing it (`undo`). (The snapshot is found here, by the message.)
                     op @ ("undoTargets" | "undoPlan" | "undo") => match (crate::registry::get(msg["key"].as_str().unwrap_or_default()), &open) {
                         (Some(live), Some((key, _))) if key == msg["key"].as_str().unwrap_or_default() => {
-                            let prompts: Vec<(String, i64)> = window.full.iter().filter(|r| r.kind == harlo_core::RowKind::User).map(|r| (r.key.clone(), r.time)).collect();
+                            let prompts: Vec<(String, i64)> = window.full.iter().filter(|r| r.is_sent()).map(|r| (r.key.clone(), r.time)).collect();
                             let (cwd, row, op) = (live.cwd.clone(), msg["row"].as_str().unwrap_or_default().to_owned(), op.to_owned());
                             tokio::task::spawn_blocking(move || {
                                 let mut reply = undo_op(&op, &cwd, &prompts, &row);

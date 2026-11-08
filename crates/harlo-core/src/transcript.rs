@@ -80,6 +80,43 @@ pub struct Row {
     pub model: String,
 }
 
+/// What harlo's own messages to an agent start with (a helper's report, an
+/// answer to a split, …): shown as harlo's, not as yours.
+pub const HARLO_PREFIX: &str = "[harlo] ";
+
+/// The notice title of a message harlo sent the agent.
+pub const FROM_HARLO: &str = "harlo";
+
+impl Row {
+    /// A message sent to the agent, yours or harlo's: each starts a turn,
+    /// and is a user message in the session's file.
+    pub fn is_sent(&self) -> bool {
+        self.kind == RowKind::User || self.from_harlo()
+    }
+
+    /// A message harlo sent the agent.
+    pub fn from_harlo(&self) -> bool {
+        self.kind == RowKind::Notice && self.title == FROM_HARLO
+    }
+
+    /// Where it sits among the turns: its kind, or "harlo" for harlo's
+    /// messages (they open a turn as yours do).
+    pub fn section(&self) -> &'static str {
+        if self.from_harlo() { FROM_HARLO } else { self.kind.as_str() }
+    }
+}
+
+/// The session a message of harlo's is about: `(key)` after a session's
+/// title (a helper that finished, stopped or asks).
+fn about_session(text: &str) -> String {
+    let Some(at) = text.find("\" (") else { return String::new() };
+    let rest = &text[at + 3..];
+    match rest.find(')') {
+        Some(end) if end > 0 && !rest[..end].contains(char::is_whitespace) => rest[..end].to_owned(),
+        _ => String::new(),
+    }
+}
+
 /// Now, in unix ms.
 fn now_ms() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
@@ -525,6 +562,17 @@ impl Transcript {
                     })
                     .collect();
                 let images = item.blocks.iter().filter(|b| matches!(b, Block::Image)).count();
+                // harlo's own (a helper's report, …): a harlo row, the
+                // session it's about to open.
+                let joined = text.join("\n");
+                if let Some(said) = joined.strip_prefix(HARLO_PREFIX) {
+                    let mut r = row(format!("{id}:u"), RowKind::Notice);
+                    r.title = FROM_HARLO.into();
+                    r.text = said.trim().to_owned();
+                    r.subtitle = about_session(said);
+                    rows.push(Arc::new(r));
+                    return rows;
+                }
                 let mut r = row(format!("{id}:u"), RowKind::User);
                 // Attached files (`<file>` blocks) show as names, not contents.
                 let (files, rest) = crate::attach::split_blocks(&text.join("\n"));
@@ -1023,6 +1071,33 @@ mod tests {
         assert!(matches!(changes.as_slice(), [ListChange::Insert { at: 0, rows }] if rows.len() == all.len() - first.len()), "{} changes", changes.len());
         assert!(rest[all.len() - first.len()..].iter().zip(&first).all(|(a, b)| Arc::ptr_eq(a, b)), "the same rows");
         assert_eq!(Transcript::default().last_rows(10), Vec::<Arc<Row>>::new());
+    }
+
+    #[test]
+    fn harlos_messages_show_as_harlos() {
+        let report = "[harlo] The Harlo session \"Helper\" (live:3) finished and reported: succeeded.\n\nWrote helper.txt.";
+        let messages = vec![
+            json!({"role":"user","content":"split it please","timestamp":1}),
+            json!({"role":"assistant","content":[{"type":"text","text":"Offered."}],"timestamp":2}),
+            json!({"role":"user","content":[{"type":"text","text":report}],"timestamp":3}),
+            json!({"role":"assistant","content":[{"type":"text","text":"Brought over."}],"timestamp":4}),
+            json!({"role":"user","content":"[harlo] The user turned down your split.","timestamp":5}),
+        ];
+        let mut t = Transcript::default();
+        t.load_messages(&messages);
+        let rows = t.rows();
+        let harlo: Vec<_> = rows.iter().filter(|r| r.from_harlo()).collect();
+        assert_eq!(harlo.len(), 2, "{rows:?}");
+        assert_eq!(harlo[0].kind, RowKind::Notice);
+        assert!(harlo[0].text.starts_with("The Harlo session \"Helper\" (live:3) finished"), "{}", harlo[0].text);
+        assert_eq!(harlo[0].subtitle, "live:3", "the helper to open");
+        assert_eq!(harlo[1].subtitle, "", "about no session");
+        assert_eq!(harlo[0].section(), "harlo");
+        // Yours stay yours; all three are sent messages (turns), in order.
+        assert_eq!(rows.iter().filter(|r| r.kind == RowKind::User).count(), 1);
+        assert_eq!(rows.iter().filter(|r| r.is_sent()).count(), 3);
+        // A message that only mentions harlo is yours.
+        assert_eq!(about_session("no (session) here"), "");
     }
 
     #[test]

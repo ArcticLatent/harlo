@@ -2967,7 +2967,7 @@ ApplicationWindow {
             const t = win.chatText(), kids = JSON.parse(Workspace.orchestratedJson(win.remoteClaudeKey))
             win.check(/Started a helper with harlo \([1-9][0-9]* tools\): live:/.test(t), "on the host, the agent finds harlo's tools (" + t.slice(-110) + ")")
             win.check(kids.length === 1 && Workspace.instanceOf(kids[0].id) === "box", "and its helper runs on box (" + JSON.stringify(kids) + ")")
-            win.check(t.indexOf("[harlo] The Claude session") >= 0, "whose reply comes back to it")
+            win.check(t.indexOf("The Claude session") >= 0 && t.indexOf("harlo · ") >= 0, "whose reply comes back to it")
             win.check(Workspace.sessionFile(win.remoteClaudeKey) !== "", "(still the host's session)")
             Workspace.renameSession(win.remoteClaudeKey, "Remote chat") } }
         PauseAnimation { duration: 1500 }
@@ -3104,7 +3104,7 @@ ApplicationWindow {
         ScriptAction { script: {
             const t = win.chatText(), kids = JSON.parse(Workspace.orchestratedJson(win.orchestrator))
             win.check(kids.length === 1 && kids[0].status === "completed", "the helper finishes (" + (kids[0] ? kids[0].status : "") + ")")
-            win.check(t.indexOf("[harlo] The Claude session") >= 0 && t.indexOf("Thanks; harlo says") >= 0 && t.indexOf("Hello from fake claude") >= 0, "and its reply comes back to the agent (" + t.slice(-120) + ")")
+            win.check(t.indexOf("The Claude session") >= 0 && t.indexOf("harlo · ") >= 0 && t.indexOf("Thanks; harlo says") >= 0 && t.indexOf("Hello from fake claude") >= 0, "and its reply comes back to the agent (" + t.slice(-120) + ")")
             win.shotWindow("clicks-orchestrate")
             win.clickItem(win.findName("subagentView", chat.subagentDock), "View") } }
         PauseAnimation { duration: 1200 }
@@ -5878,6 +5878,30 @@ ApplicationWindow {
                       "the helper isn't offered propose_helpers, nor told of it (" + helperReqs.length + " requests)")
             win.check(parentReqs.length > 0 && parentReqs.every(offers), "its parent is")
             win.shotWindow("clicks-split-brought") } }
+        PauseAnimation { duration: 200 }
+        // The report shows as harlo's, not yours: not on the prompt rail, no
+        // Edit & resend; Open helper shows the helper.
+        ScriptAction { script: {
+            // (Among harlo's rows: the report.)
+            const rows = []
+            const walk = it => { if (!it) return; if (it.objectName === "harloMessage" && it.visible) rows.push(it); for (const c of it.children || []) walk(c); if (it.contentItem && it.contentItem !== it) walk(it.contentItem) }
+            walk(chat)
+            const msg = rows.find(r => win.findName("harloMessageText", r).text.indexOf("finished and reported") >= 0) || null
+            const text = msg ? win.findName("harloMessageText", msg) : null
+            win.check(msg !== null && msg.objectName === "harloMessage" && msg.visible && text.text.indexOf("[harlo]") < 0,
+                      "the helper's report shows as harlo's (" + (text ? text.text.slice(0, 120) : "none") + ")")
+            const prompts = JSON.parse(chat.session.userPrompts())
+            win.check(prompts.length === 1 && prompts[0].text === "split it please", "the prompt rail has only yours (" + JSON.stringify(prompts) + ")")
+            win.check(msg !== null && win.findText("Edit & resend", msg.parent) === null, "no Edit & resend on it")
+            const open = msg ? win.findName("openHelper", msg) : null
+            win.check(open !== null && open.visible, "it offers Open helper")
+            win.clickItem(open, "Open helper") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const kids = JSON.parse(Workspace.orchestratedJson(win.harloKey))
+            const helper = kids.length ? kids[0].openKey : ""
+            win.check(helper !== "" && Workspace.activeKey === helper, "Open helper shows the helper (" + Workspace.activeKey + ", " + JSON.stringify(kids) + ")")
+            win.shotWindow("clicks-split-helper") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: { win.summary(); Qt.quit() } }
     }

@@ -43,17 +43,20 @@ Item {
     /// stands apart, paragraphs breathe, and tool calls and thoughts in a
     /// run sit together as one timeline.
     function gapAbove(kind, prev) {
-        if (prev === "") return kind === "user" ? 8 : 0
+        if (prev === "") return root.opensTurn(kind) ? 8 : 0
         const act = k => k === "tool" || k === "thinking"
-        // A new turn: a line between turns, then your avatar and name.
-        if (kind === "user") return 34
+        // A new turn: a line between turns, then your avatar and name (or
+        // harlo's, for its messages to the agent).
+        if (root.opensTurn(kind)) return 34
         if (act(kind) && act(prev)) return 0
         // The reply opens with the agent's avatar and name.
-        if (prev === "user") return 22 + root.headHeight
+        if (root.opensTurn(prev)) return 22 + root.headHeight
         if (kind === "markdown" && prev === "markdown") return 8
         if (act(kind) || act(prev)) return 8
         return 14
     }
+    /// Rows that start a turn: your messages and harlo's to the agent.
+    function opensTurn(section) { return section === "user" || section === "harlo" }
     function isActivity(kind) { return kind === "tool" || kind === "thinking" }
     /// A turn's head: avatar and name, over its first row.
     readonly property real headHeight: Theme.px(30)
@@ -296,7 +299,7 @@ Item {
         // Rows space themselves (gapAbove); the kinds of their neighbours
         // come from sections (no section headers).
         spacing: 0
-        section.property: "kind"
+        section.property: "rowSection"
         cacheBuffer: 1600
         topMargin: 16
         bottomMargin: 16
@@ -591,7 +594,7 @@ Item {
                     // The code block (in a list) just copied: its link says "Copied" a moment.
                     property int copiedBlock: -1
                     Timer { id: blockCopiedTimer; interval: 1200; onTriggered: mdRow.copiedBlock = -1 }
-                    AgentHead { replyModel: mdRow.rowModel; visible: mdRow.ListView.previousSection === "user"; y: mdRow.gap - height - 10 }
+                    AgentHead { replyModel: mdRow.rowModel; visible: root.opensTurn(mdRow.ListView.previousSection); y: mdRow.gap - height - 10 }
                     width: view.width
                     implicitHeight: md.implicitHeight + gap
                     TextEdit {
@@ -642,7 +645,7 @@ Item {
                                                                                              muted: String(Theme.muted), accent: String(Theme.primary), font: Theme.uiFont })))
                         : null
                     readonly property bool drawn: diagram !== null && diagram.state === "ready" && !showCode
-                    AgentHead { replyModel: codeRow.rowModel; visible: codeRow.ListView.previousSection === "user"; y: codeRow.gap - height - 10 }
+                    AgentHead { replyModel: codeRow.rowModel; visible: root.opensTurn(codeRow.ListView.previousSection); y: codeRow.gap - height - 10 }
                     width: view.width
                     implicitHeight: codeBox.height + gap
                     Rectangle {
@@ -776,7 +779,7 @@ Item {
                     required property bool groupOpen
                     readonly property bool open: view.expanded[rowKey] === true
                     readonly property real gap: root.gapAbove("thinking", ListView.previousSection)
-                    AgentHead { replyModel: thinkRow.rowModel; visible: thinkRow.ListView.previousSection === "user"; y: thinkRow.gap - height - 10 }
+                    AgentHead { replyModel: thinkRow.rowModel; visible: root.opensTurn(thinkRow.ListView.previousSection); y: thinkRow.gap - height - 10 }
                     // A run sits on one card: rounded where it starts and ends.
                     Rectangle {
                         readonly property bool first: !root.isActivity(thinkRow.ListView.previousSection)
@@ -879,7 +882,7 @@ Item {
                     z: asking ? 2 : 0
                     readonly property var askLines: asking ? root.session.requestTitle.split("\n").slice(1) : []
                     readonly property real gap: root.gapAbove("tool", ListView.previousSection)
-                    AgentHead { replyModel: toolRow.rowModel; visible: toolRow.ListView.previousSection === "user"; y: toolRow.gap - height - 10 }
+                    AgentHead { replyModel: toolRow.rowModel; visible: root.opensTurn(toolRow.ListView.previousSection); y: toolRow.gap - height - 10 }
                     // A run sits on one card: rounded where it starts and ends.
                     Rectangle {
                         readonly property bool first: !root.isActivity(toolRow.ListView.previousSection)
@@ -1085,21 +1088,29 @@ Item {
                 roleValue: "notice"
                 Item {
                     id: noticeRow
+                    required property int index
                     required property string rowModel
                     ListView.onAdd: if (Theme.motion > 0) noticeRowFade.start()
                     AddFade { id: noticeRowFade; target: noticeRow }
                     required property string rowKey
                     required property string text
                     required property string title
-                    // Startup notices can be huge (e.g. a list of every MCP tool).
-                    readonly property bool long: text.length > 240 || text.split("\n").length > 3
+                    required property string subtitle
+                    // harlo's message to the agent (a helper's report, …): it
+                    // opens a turn, as harlo's; `subtitle` is the session
+                    // it's about.
+                    readonly property bool harlo: title === "harlo"
+                    // Startup notices can be huge (e.g. a list of every MCP
+                    // tool); harlo's show their first lines.
+                    readonly property bool long: harlo ? text.split("\n").length > 2 || text.length > 200 : text.length > 240 || text.split("\n").length > 3
                     readonly property bool open: !long || view.expanded[rowKey] === true
-                    readonly property real gap: root.gapAbove("notice", ListView.previousSection)
-                    AgentHead { replyModel: noticeRow.rowModel; visible: noticeRow.ListView.previousSection === "user"; y: noticeRow.gap - height - 10 }
+                    readonly property real gap: root.gapAbove(harlo ? "harlo" : "notice", ListView.previousSection)
+                    AgentHead { replyModel: noticeRow.rowModel; visible: !noticeRow.harlo && root.opensTurn(noticeRow.ListView.previousSection); y: noticeRow.gap - height - 10 }
                     width: view.width
-                    implicitHeight: noticeText.implicitHeight + 4 + gap
+                    implicitHeight: (harlo ? harloCol.implicitHeight + 6 : noticeText.implicitHeight + 4) + gap
                     Label {
                         id: noticeText
+                        visible: !noticeRow.harlo
                         x: view.columnX
                         y: noticeRow.gap
                         width: view.columnWidth
@@ -1109,8 +1120,80 @@ Item {
                         elide: Text.ElideRight
                         font.pixelSize: Theme.px(12)
                         color: noticeRow.title === "error" ? Theme.error : noticeRow.title === "warning" ? Theme.warning : Theme.muted
-                        TapHandler { enabled: noticeRow.long; onTapped: view.toggle(noticeRow.rowKey) }
-                        HoverHandler { enabled: noticeRow.long; cursorShape: Qt.PointingHandCursor }
+                        TapHandler { enabled: noticeRow.long && !noticeRow.harlo; onTapped: view.toggle(noticeRow.rowKey) }
+                        HoverHandler { enabled: noticeRow.long && !noticeRow.harlo; cursorShape: Qt.PointingHandCursor }
+                    }
+                    // harlo's: a line between turns, as before yours.
+                    Rectangle {
+                        visible: noticeRow.harlo && noticeRow.index > 0
+                        x: (view.width - view.contentWidthLimit) / 2
+                        y: Math.round(noticeRow.gap / 2) - 6
+                        width: view.contentWidthLimit
+                        height: 1
+                        color: Theme.hairline
+                    }
+                    // The end of the turn before: undo it (and those after it).
+                    FlatButton {
+                        readonly property string turn: noticeRow.harlo ? root.undoBefore(noticeRow.rowKey) : ""
+                        visible: turn !== ""
+                        x: view.columnX - 2
+                        y: Math.round(noticeRow.gap / 2) - 6 - height / 2
+                        text: "↶ Undo from here"
+                        outlined: false
+                        padding: 2
+                        accent: Theme.textFaint
+                        font.pixelSize: Theme.px(11.5)
+                        background: Rectangle { color: Theme.background; radius: 6 }
+                        ToolTip.visible: hovered
+                        ToolTip.delay: 400
+                        ToolTip.text: "Put the folder's files back as they were before this turn (this turn and the ones after it)"
+                        onClicked: root.undoRequested(turn)
+                    }
+                    Column {
+                        id: harloCol
+                        objectName: "harloMessage"
+                        visible: noticeRow.harlo
+                        x: view.columnX
+                        y: noticeRow.gap
+                        width: view.columnWidth
+                        spacing: 4
+                        Row {
+                            spacing: 8
+                            Image {
+                                source: "qrc:/qt/qml/harlo/icons/app/harlo.svg"
+                                width: Theme.px(22)
+                                height: width
+                                sourceSize: Qt.size(width * 2, height * 2)
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                            Label { text: "harlo"; color: Theme.text; font.pixelSize: Theme.px(14.5); font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
+                            Label { text: "· to the agent"; color: Theme.textFaint; font.pixelSize: Theme.px(13); anchors.verticalCenter: parent.verticalCenter }
+                        }
+                        Label {
+                            id: harloText
+                            objectName: "harloMessageText"
+                            width: parent.width
+                            text: (noticeRow.long ? (noticeRow.open ? "▾ " : "▸ ") : "") + noticeRow.text
+                            wrapMode: Text.Wrap
+                            maximumLineCount: noticeRow.open ? 100000 : 2
+                            elide: Text.ElideRight
+                            font.pixelSize: Theme.px(13)
+                            color: Theme.muted
+                            textFormat: Text.PlainText
+                            TapHandler { enabled: noticeRow.long; onTapped: view.toggle(noticeRow.rowKey) }
+                            HoverHandler { enabled: noticeRow.long; cursorShape: Qt.PointingHandCursor }
+                        }
+                        FlatButton {
+                            objectName: "openHelper"
+                            visible: noticeRow.subtitle !== ""
+                            text: "Open helper"
+                            padding: 3
+                            font.pixelSize: Theme.px(11.5)
+                            ToolTip.visible: hovered
+                            ToolTip.delay: 400
+                            ToolTip.text: "Show the session this is about (" + noticeRow.subtitle + ")"
+                            onClicked: Workspace.open(noticeRow.subtitle)
+                        }
                     }
                 }
             }

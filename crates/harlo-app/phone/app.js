@@ -267,6 +267,22 @@ function rowEl(r) {
     sum.append(n, a, st); det.append(sum);
     if (r.text) { const pre = document.createElement("pre"); pre.textContent = r.text.length > 6000 ? r.text.slice(0, 6000) + "\n…" : r.text; det.append(pre); }
     d.append(det);
+  } else if (r.title === "harlo") {
+    // harlo's message to the agent (a helper's report, …): harlo's, folded
+    // to its first lines, with the session it's about.
+    d.classList.add("harlo");
+    const det = document.createElement("details"); const sum = document.createElement("summary");
+    const who = document.createElement("span"); who.className = "who"; who.textContent = "harlo";
+    sum.append(who, document.createTextNode(" " + r.text.split("\n")[0]));
+    det.append(sum);
+    const rest = r.text.split("\n").slice(1).join("\n").trim();
+    if (rest) { const p = document.createElement("div"); p.className = "more"; p.textContent = rest; det.append(p); }
+    d.append(det);
+    if (r.subtitle) {
+      const b = document.createElement("button"); b.className = "link"; b.textContent = "Open helper";
+      b.onclick = () => openSession(r.subtitle);
+      d.append(b);
+    }
   } else { d.classList.add(r.title); d.textContent = r.text; }
   return d;
 }

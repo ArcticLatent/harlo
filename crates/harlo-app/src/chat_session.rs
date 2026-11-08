@@ -301,6 +301,8 @@ const ROLE_GROUP: i32 = 0x108;
 const ROLE_SUMMARY: i32 = 0x109;
 const ROLE_GROUP_OPEN: i32 = 0x10a;
 const ROLE_MODEL: i32 = 0x10b;
+/// Where it sits among the turns (`Row::section`).
+const ROLE_SECTION: i32 = 0x10c;
 
 #[derive(Default)]
 pub struct ChatSessionRust {
@@ -486,7 +488,7 @@ impl ChatSession {
     /// How many user rows come before `row` (its place among your messages).
     fn user_ordinal(&self, row: i32) -> Option<usize> {
         let row = usize::try_from(row).ok()?;
-        (self.rows.get(row)?.kind == harlo_core::RowKind::User).then(|| self.rows[..row].iter().filter(|r| r.kind == harlo_core::RowKind::User).count())
+        (self.rows.get(row)?.kind == harlo_core::RowKind::User).then(|| self.rows[..row].iter().filter(|r| r.is_sent()).count())
     }
 
     /// Resolves the entry id of the user message at `row` (from the session
@@ -761,7 +763,7 @@ impl ChatSession {
             self.as_mut().set_undo_json(QString::default());
             return;
         }
-        let prompts: Vec<(String, i64)> = self.rows.iter().filter(|r| r.kind == RowKind::User).map(|r| (r.key.clone(), r.time)).collect();
+        let prompts: Vec<(String, i64)> = self.rows.iter().filter(|r| r.is_sent()).map(|r| (r.key.clone(), r.time)).collect();
         if prompts.is_empty() {
             return;
         }
@@ -799,7 +801,7 @@ impl ChatSession {
         let map: Value = serde_json::from_str(&self.undo_json.to_string()).ok()?;
         let snap = map[row_key]["snapshot"].as_str()?.to_owned();
         let at = self.rows.iter().position(|r| r.key == row_key)?;
-        Some((snap, self.rows[at + 1..].iter().filter(|r| r.kind == RowKind::User).count()))
+        Some((snap, self.rows[at + 1..].iter().filter(|r| r.is_sent()).count()))
     }
 
     pub fn preview_undo(mut self: Pin<&mut Self>, row_key: &QString) {
@@ -1259,6 +1261,7 @@ impl ChatSession {
             ROLE_SUMMARY => s(&row.summary),
             ROLE_GROUP_OPEN => QVariant::from(&row.group_open),
             ROLE_MODEL => s(&row.model),
+            ROLE_SECTION => s(row.section()),
             _ => QVariant::default(),
         }
     }
@@ -1278,6 +1281,7 @@ impl ChatSession {
             (ROLE_SUMMARY, "summary"),
             (ROLE_GROUP_OPEN, "groupOpen"),
             (ROLE_MODEL, "rowModel"),
+            (ROLE_SECTION, "rowSection"),
         ] {
             roles.insert(role, QByteArray::from(name));
         }

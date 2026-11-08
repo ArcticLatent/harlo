@@ -6496,6 +6496,14 @@ impl Workspace {
     /// `key` was started by `parent`'s agent: it's that session's subagent.
     fn adopt(mut self: Pin<&mut Self>, key: &str, parent: &str, title: &str, agent: &str, notify: bool, plan_step: Option<u32>) {
         self.as_mut().rust_mut().orch_children.insert(key.to_owned(), OrchChild { parent: parent.to_owned(), title: title.to_owned(), agent: agent.to_owned(), notify, status: "running".into(), report: None, asking: false, told_waiting: false, plan_step, stopped: false });
+        // Named for its part ("Helper"), not by its first message (harlo's
+        // briefing).
+        if !title.trim().is_empty()
+            && self.live.get(key).is_some_and(|e| e.info.name.is_empty())
+            && let Some(live) = registry::get(key)
+        {
+            live.handle.send_raw(serde_json::json!({ "type": "set_session_name", "name": title.trim() }));
+        }
         // (A plan's step: who does it.)
         if let Some(id) = plan_step {
             crate::plans::update(self.plan_file(parent).as_deref(), parent, |p| {

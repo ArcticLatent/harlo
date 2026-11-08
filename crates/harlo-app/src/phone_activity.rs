@@ -210,7 +210,7 @@ impl Tracker {
 
     fn state(&self) -> State {
         // This run: since your latest message.
-        let turn = self.rows.iter().rposition(|r| r.kind == RowKind::User);
+        let turn = self.rows.iter().rposition(|r| r.is_sent());
         let since = turn.map(|i| self.rows[i].time).filter(|t| *t > 0).unwrap_or(self.busy_at);
         let rows = &self.rows[turn.map_or(0, |i| i + 1)..];
         let (phase, now) = if let Some((_, approval)) = self.asks.first() {
