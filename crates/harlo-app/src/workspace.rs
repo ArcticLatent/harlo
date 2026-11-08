@@ -6133,10 +6133,13 @@ impl Workspace {
         // The caller's tools, and what they're for: harlo's, and its
         // project's specs and plan when they're on.
         let features = caller.as_deref().and_then(|c| self.features_of(c));
+        // (A helper: it reports to its parent, and offers no splits.)
+        let helper = caller.as_ref().and_then(|c| self.orch_children.get(c)).is_some_and(|c| c.notify);
+        let starting = self.agents_starting().for_session(helper);
         if tool == harlo_core::orchestration::TOOLS {
-            let mut tools = harlo_core::orchestration::tools(self.agents_starting()).as_array().cloned().unwrap_or_default();
+            let mut tools = harlo_core::orchestration::tools(starting).as_array().cloned().unwrap_or_default();
             // A helper: its report and its questions for its parent.
-            if caller.as_ref().and_then(|c| self.orch_children.get(c)).is_some_and(|c| c.notify) {
+            if helper {
                 tools.extend(harlo_core::orchestration::helper_tools().as_array().cloned().unwrap_or_default());
             }
             if let Some((_, specs, plan, commits)) = &features {
@@ -6150,7 +6153,7 @@ impl Workspace {
             return Ok(json!(tools));
         }
         if tool == harlo_core::orchestration::INSTRUCTIONS {
-            let mut text = format!("{} {}\n\n{}", harlo_core::orchestration::BASE_INSTRUCTIONS, harlo_core::orchestration::when_to_start(self.agents_starting()), harlo_core::orchestration::DIAGRAMS);
+            let mut text = format!("{} {}\n\n{}", harlo_core::orchestration::BASE_INSTRUCTIONS, harlo_core::orchestration::when_to_start(starting), harlo_core::orchestration::DIAGRAMS);
             if let Some((_, specs, plan, commits)) = &features {
                 if *specs {
                     text = format!("{text}\n\n{}", harlo_core::specs::INSTRUCTIONS);
@@ -6418,6 +6421,9 @@ impl Workspace {
                 let Some((caller, live)) = caller.as_ref().and_then(|c| registry::get(c).map(|l| (c.clone(), l))) else {
                     return Err("Only a session harlo started can offer a split.".into());
                 };
+                if helper {
+                    return Err("You're a helper: do your task yourself. If it's too big for one session, say so to your parent with ask_parent.".into());
+                }
                 if self.agents_starting() != harlo_core::orchestration::Starting::Offer {
                     return Err("harlo isn't set to have agents offer splits now (Settings → Orchestration): start helpers only when the user asks.".into());
                 }

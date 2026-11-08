@@ -50,6 +50,17 @@ impl Starting {
             _ => Starting::Offer,
         }
     }
+
+    /// For a helper (a session another one started, reporting back to
+    /// it): it doesn't offer splits of its own part (the split was
+    /// planned above it; a part too big goes back by ask_parent), so
+    /// "offer" is "only when asked" there.
+    pub fn for_session(self, helper: bool) -> Starting {
+        match self {
+            Starting::Offer if helper => Starting::WhenAsked,
+            other => other,
+        }
+    }
 }
 
 /// When agents may start sessions (see [`Starting`]).
@@ -763,6 +774,11 @@ mod tests {
         let start = |st: Starting| tools(st).as_array().unwrap().iter().find(|t| t["name"] == "start_session").unwrap()["description"].as_str().unwrap().to_owned();
         assert!(start(Starting::WhenAsked).contains("only when the user asks") && !start(Starting::OnTheirOwn).contains("only when"));
         assert!(start(Starting::Offer).contains("offer the split with propose_helpers"));
+        // A helper doesn't offer splits of its own part.
+        assert_eq!(Starting::Offer.for_session(true), Starting::WhenAsked);
+        assert_eq!(Starting::Offer.for_session(false), Starting::Offer);
+        assert_eq!(Starting::OnTheirOwn.for_session(true), Starting::OnTheirOwn);
+        assert!(!tools(Starting::Offer.for_session(true)).as_array().unwrap().iter().any(|t| t["name"] == "propose_helpers"));
         // The split offer: only when they offer.
         let proposes = |st: Starting| tools(st).as_array().unwrap().iter().any(|t| t["name"] == "propose_helpers");
         assert!(proposes(Starting::Offer) && !proposes(Starting::WhenAsked) && !proposes(Starting::OnTheirOwn));

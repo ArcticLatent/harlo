@@ -5867,6 +5867,16 @@ ApplicationWindow {
             win.check(t.indexOf("finished and reported: succeeded") >= 0, "its report comes back to Harlo")
             win.check(TestInput.readFile(win.argValue("--cwd=") + "/helper.txt") === "from the helper\n", "bring_over brings helper.txt to the project")
             win.check(git.unstagedCount + git.stagedCount > 0 || t.indexOf("helper.txt") >= 0, "as a change, nothing committed (" + t.slice(-200) + ")")
+            // The helper isn't offered splits of its own part; its parent is.
+            const reqs = win.modelRequests()
+            const firstUser = r => { const m = (r.messages || []).find(m => m.role === "user"); return m ? JSON.stringify(m.content) : "" }
+            const offers = r => (r.tools || []).some(x => x["function"].name.endsWith("propose_helpers"))
+            const said = r => JSON.stringify((r.messages || []).filter(m => m.role === "system"))
+            const helperReqs = reqs.filter(r => firstUser(r).indexOf("You're a helper") >= 0)
+            const parentReqs = reqs.filter(r => firstUser(r) === JSON.stringify("split it please"))
+            win.check(helperReqs.length > 0 && !helperReqs.some(offers) && !helperReqs.some(r => said(r).indexOf("propose_helpers") >= 0),
+                      "the helper isn't offered propose_helpers, nor told of it (" + helperReqs.length + " requests)")
+            win.check(parentReqs.length > 0 && parentReqs.every(offers), "its parent is")
             win.shotWindow("clicks-split-brought") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: { win.summary(); Qt.quit() } }
