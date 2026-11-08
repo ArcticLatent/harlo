@@ -1,7 +1,9 @@
 //! `todo`: the model's list of steps for a task, which it keeps up to date
 //! as it goes (the whole list each time). harlo shows the latest as the
-//! session's todos (`todoPhases` in `get_state`). Offered when
-//! `HARLO_AGENT_TODO=on` (being measured).
+//! session's todos (`todoPhases` in `get_state`). Offered only when
+//! `HARLO_AGENT_TODO=on`: measured on the longest tasks against none, it
+//! passed as often but took 67% more requests and 68% more tokens (each
+//! update is a round of its own), so it's off by default.
 
 use serde_json::{Value, json};
 
@@ -9,7 +11,7 @@ use crate::tools::Outcome;
 
 const STATUSES: &[&str] = &["pending", "in_progress", "completed"];
 
-/// Whether the tool is offered.
+/// Whether the tool is offered (opt-in).
 pub fn on() -> bool {
     std::env::var("HARLO_AGENT_TODO").is_ok_and(|v| v.trim() == "on")
 }
