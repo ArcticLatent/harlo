@@ -157,6 +157,8 @@ Rectangle {
                         required property int index
                         readonly property var m: root.mark(modelData.status)
                         readonly property bool open: modelData.status === "pending" || modelData.status === "active"
+                        // (The session reviewing it, while its review runs.)
+                        readonly property string reviewer: root.run && root.run.reviewing ? (root.run.reviewing[String(modelData.id)] || "") : ""
                         Layout.fillWidth: true
                         spacing: 2
                         HoverHandler { id: stepHover }
@@ -213,18 +215,27 @@ Rectangle {
                                     Icon { name: "node-tree"; color: Theme.muted; implicitWidth: 12; implicitHeight: 12 }
                                     Label {
                                         Layout.fillWidth: true
-                                        text: (stepRow.modelData.status === "active" ? "A helper is on it" : "Done by a helper") + ((stepRow.modelData.branch || "") !== "" ? " · ⎇ " + stepRow.modelData.branch : "")
+                                        text: (stepRow.reviewer !== "" ? "Done, being reviewed" : stepRow.modelData.status === "active" ? "A helper is on it" : "Done by a helper") + ((stepRow.modelData.branch || "") !== "" ? " · ⎇ " + stepRow.modelData.branch : "")
                                         color: Theme.muted
                                         font.pixelSize: Theme.px(11)
                                         elide: Text.ElideRight
                                     }
                                     FlatButton {
                                         objectName: "planOpenHelper-" + stepRow.modelData.id
-                                        visible: (stepRow.modelData.helper || "") !== "" && stepRow.modelData.status === "active"
+                                        // (Under review: the review's, below.)
+                                        visible: (stepRow.modelData.helper || "") !== "" && stepRow.modelData.status === "active" && stepRow.reviewer === ""
                                         text: "Open"
                                         padding: 2
                                         font.pixelSize: Theme.px(11)
                                         onClicked: Workspace.open(stepRow.modelData.helper)
+                                    }
+                                    FlatButton {
+                                        objectName: "planOpenReview-" + stepRow.modelData.id
+                                        visible: stepRow.reviewer !== ""
+                                        text: "Open review"
+                                        padding: 2
+                                        font.pixelSize: Theme.px(11)
+                                        onClicked: Workspace.open(stepRow.reviewer)
                                     }
                                 }
                                 // Its commit, or why there isn't one.
@@ -343,7 +354,7 @@ Rectangle {
             Layout.fillWidth: true
             Layout.topMargin: 2
             visible: root.expanded && root.paused
-            text: root.run ? root.run.paused : ""
+            text: root.run && root.run.paused ? root.run.paused.charAt(0).toUpperCase() + root.run.paused.slice(1) : ""
             color: Theme.warning
             font.pixelSize: Theme.px(11.5)
             wrapMode: Text.Wrap

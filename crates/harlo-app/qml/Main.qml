@@ -5963,6 +5963,91 @@ ApplicationWindow {
             win.summary(); Qt.quit() } }
     }
 
+    // A plan run reviews each step: Settings → Orchestration has it on; a
+    // step whose review finds problems goes back to its helper, which fixes
+    // it, and a second review lets the run go on; problems that stay pause
+    // the run (scripts/fake-harlo-model.py plays helper and reviewer).
+    SequentialAnimation {
+        id: planReviewSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloreview"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            Workspace.addProject(win.argValue("--cwd="))
+            settingsDialog.openPage("orchestration") } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: {
+            const sw = win.findName("orchReviewSteps", settingsDialog.contentItem)
+            win.check(sw !== null && sw.checked && win.findText("Review each step", settingsDialog.contentItem) !== null, "Settings → Orchestration: Review each step, on by default")
+            win.shotWindow("clicks-review-setting")
+            settingsDialog.close() } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            win.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo")
+            Workspace.setApprovalMode(win.harloKey, "yolo") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(planReviewSteps, () => chat.session.modelName !== "", 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: win.sendByKeys("make a plan please") }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(planReviewSteps, () => (JSON.parse(Workspace.planJson(win.harloKey)).steps || []).length === 1 && chat.session.status === "idle", 15000) }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: win.clickItem(win.findName("planRun"), "Run with helpers") }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: win.clickItem(win.findName("planRunTeam"), "Helpers: as this session") }
+        // Its helper writes helper.txt and reports; a review starts.
+        ScriptAction { script: win.waitUntil(planReviewSteps, () => { const r = JSON.parse(Workspace.planJson(win.harloKey)).run; return !!r && Object.keys(r.reviewing || {}).length > 0 }, 30000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            win.check(win.findContaining("being reviewed") !== null && win.findName("planOpenReview-1") !== null, "the step shows it's being reviewed, with Open review")
+            win.shotWindow("clicks-review-running") } }
+        // The review finds a problem; the helper fixes it; a second review
+        // passes and the plan finishes.
+        ScriptAction { script: win.waitUntil(planReviewSteps, () => { const p = JSON.parse(Workspace.planJson(win.harloKey)); return !p.run && (p.steps || []).every(s => s.status === "done") }, 60000) }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: {
+            const cwd = win.argValue("--cwd=")
+            const p = JSON.parse(Workspace.planJson(win.harloKey))
+            const step = (p.steps || [])[0] || {}
+            win.check(step.status === "done" && step.summary.indexOf("Fixed") >= 0 && step.summary.indexOf("Reviewed: Looks right") >= 0, "the step is done, with its review (" + step.summary + ")")
+            win.check(TestInput.readFile(cwd + "/helper.txt") === "from the helper\nsecond line\n", "the helper fixed what the review found")
+            const kids = JSON.parse(Workspace.orchestratedJson(win.harloKey))
+            const reviews = kids.filter(k => k.name.indexOf("Review: Step 1") === 0)
+            win.check(reviews.length === 2 && reviews.every(k => k.status === "completed"), "two reviews, both completed (" + JSON.stringify(kids.map(k => [k.name, k.status])) + ")")
+            const reqs = win.modelRequests()
+            const first = r => { const m = (r.messages || []).find(m => m.role === "user"); return m ? JSON.stringify(m.content) : "" }
+            const reviewReqs = reqs.filter(r => first(r).indexOf("You review one step") >= 0)
+            win.check(reviewReqs.length > 0 && reviewReqs.every(r => first(r).indexOf("git diff ") >= 0), "the reviewer is told where the step's changes are")
+            const fixes = reqs.filter(r => (r.messages || []).some(m => m.role === "user" && JSON.stringify(m.content).indexOf("A review of your step found problems") >= 0))
+            win.check(fixes.length > 0 && fixes.some(r => JSON.stringify(r.messages).indexOf("helper.txt:1 needs a second line") >= 0), "the problems went back to the step's helper")
+            win.shotWindow("clicks-review-done") } }
+        // Problems that stay: the run pauses for you.
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo")
+            Workspace.setApprovalMode(win.harloKey, "yolo") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(planReviewSteps, () => chat.session.modelName !== "", 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: win.sendByKeys("make a bad plan please") }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(planReviewSteps, () => (JSON.parse(Workspace.planJson(win.harloKey)).steps || []).length === 1 && chat.session.status === "idle", 15000) }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: win.clickItem(win.findName("planRun"), "Run with helpers") }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: win.clickItem(win.findName("planRunTeam"), "Helpers: as this session") }
+        ScriptAction { script: win.waitUntil(planReviewSteps, () => { const r = JSON.parse(Workspace.planJson(win.harloKey)).run; return !!r && (r.paused || "") !== "" }, 60000) }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const p = JSON.parse(Workspace.planJson(win.harloKey))
+            const step = (p.steps || [])[0] || {}
+            win.check(p.run && p.run.paused.indexOf("its review still found problems after a round of fixes") >= 0 && p.run.paused.indexOf("helper.txt:1") >= 0, "problems after a round of fixes pause the run (" + (p.run ? p.run.paused : "no run") + ")")
+            win.check(step.status === "pending" && step.summary.indexOf("Not done: its review found problems") === 0, "and the step waits again (" + step.status + ": " + step.summary + ")")
+            win.check(win.findText("Paused") !== null && win.findText("Run again") !== null, "the plan card says Paused, with Run again")
+            win.shotWindow("clicks-review-paused")
+            win.summary(); Qt.quit() } }
+    }
+
     // Settings → Providers → Harlo: the subagents' model and the model to go
     // on with, typed in; a new session's subagent runs on the first, and a
     // server that stays busy hands the turn to the second.

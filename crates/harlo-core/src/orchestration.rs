@@ -301,6 +301,38 @@ pub fn helper_brief(parent: &str, task: &str) -> String {
     )
 }
 
+/// What the reviewer of a plan's step is told, in a run with helpers:
+/// the step (`task`, as its helper got it), what the helper said it did
+/// and changed, and where to see the changes (`base`: the commit the step
+/// started from, "" when unknown). It reports its verdict with report_done.
+pub fn review_brief(parent: &str, task: &str, summary: &str, files: &[String], base: &str) -> String {
+    let parent = if parent.trim().is_empty() { String::new() } else { format!(" (\"{}\")", parent.trim()) };
+    let files = if files.is_empty() { String::new() } else { format!("\nFiles it says it changed: {}.", files.join(", ")) };
+    let see = if base.trim().is_empty() {
+        "See the changes with `git status`, `git diff` and, for commits it made, `git log`.".to_owned()
+    } else {
+        format!("See the changes with `git diff {base}` (the step started at {base}; commits it made are in `git log {base}..`) and `git status` for new files.", base = base.trim())
+    };
+    format!(
+        "[harlo] You review one step of a plan that another agent's session{parent} runs with helpers. A helper has just done the step, in this folder.\n\
+         - Check that it does what the step asks, and look for bugs, missed cases, behaviour it broke elsewhere and tests that don't test it. Run the tests that apply.\n\
+         - Don't change any files, and start no helpers: you only report.\n\
+         - Then call report_done once: outcome succeeded when the step is right (mention small things in the summary), failed when something must be fixed. When it failed, the summary lists each problem with its file and line, most serious first: the helper is given it to fix. Then end your turn.\n\n\
+         The step, as the helper was given it:\n\n{task}\n\n\
+         What the helper said it did: {summary}{files}\n\n{see}",
+        summary = if summary.trim().is_empty() { "(nothing)" } else { summary.trim() },
+    )
+}
+
+/// What a step's helper is told when its review found problems: fix them,
+/// then report again.
+pub fn review_fix_message(problems: &str) -> String {
+    format!(
+        "[harlo] A review of your step found problems. Fix them here, run the tests again, then call report_done again (succeeded or failed) with what you did. The review:\n\n{}",
+        problems.trim()
+    )
+}
+
 /// What a helper in a new worktree on `branch` is told of where it works
 /// (`root`: the project's main checkout, which its task may name).
 pub fn worktree_note(branch: &str, root: &str) -> String {
@@ -699,6 +731,18 @@ mod tests {
 
     fn m(label: &str, agent: &str, model: &str) -> Member {
         Member { label: label.into(), agent: agent.into(), model: model.into() }
+    }
+
+    #[test]
+    fn a_review_is_told_the_step_and_where_its_changes_are() {
+        let b = review_brief("Build it", "Do step 2 of 3 of a plan: parser", "Wrote the parser.", &["src/parse.rs".into()], "abc123");
+        assert!(b.starts_with("[harlo] You review one step") && b.contains("(\"Build it\")"));
+        assert!(b.contains("Do step 2 of 3 of a plan: parser") && b.contains("Wrote the parser.") && b.contains("src/parse.rs"));
+        assert!(b.contains("git diff abc123") && b.contains("report_done") && b.contains("Don't change any files"));
+        let b = review_brief("", "t", "", &[], "");
+        assert!(b.contains("`git status`, `git diff`") && b.contains("(nothing)") && !b.contains("session (\""));
+        let m = review_fix_message("  a.rs:3 off by one \n");
+        assert!(m.starts_with("[harlo] A review of your step found problems") && m.ends_with("a.rs:3 off by one") && m.contains("report_done again"));
     }
 
     #[test]

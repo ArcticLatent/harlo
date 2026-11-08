@@ -2716,7 +2716,9 @@ impl Workspace {
         v["commits"] = json!(commits);
         // Running with helpers: the agent, and why it paused.
         if let Some(run) = self.plan_runs.get(&key) {
-            v["run"] = json!({ "agent": run.agent.as_str(), "agentName": run.agent.label(), "model": run.model, "paused": run.paused });
+            // (Steps under review: the session reviewing each.)
+            let reviewing: serde_json::Map<String, serde_json::Value> = run.reviews.iter().map(|(id, r)| (id.to_string(), json!(r.reviewer))).collect();
+            v["run"] = json!({ "agent": run.agent.as_str(), "agentName": run.agent.label(), "model": run.model, "paused": run.paused, "review": run.review, "reviewing": reviewing });
         }
         QString::from(&v.to_string())
     }
@@ -5945,6 +5947,26 @@ struct PlanRun {
     file: Option<PathBuf>,
     /// Steps tried again after a failure (once each, then the run pauses).
     retried: HashSet<u32>,
+    /// Each finished step is reviewed before the next (Settings →
+    /// Orchestration, on by default).
+    review: bool,
+    /// Steps under review: who did it and what it said.
+    reviews: HashMap<u32, StepReview>,
+    /// Steps whose review's problems went back to their helper (once each:
+    /// problems after that pause the run).
+    fixes: HashSet<u32>,
+    /// The commit a step in the session's own folder started from (for its
+    /// review).
+    bases: HashMap<u32, String>,
+}
+
+/// A plan's step under review: its helper and what it reported.
+#[derive(Clone)]
+struct StepReview {
+    worker: String,
+    summary: String,
+    /// The session reviewing it.
+    reviewer: String,
 }
 
 /// A session an agent started (orchestration).
@@ -5971,6 +5993,9 @@ struct OrchChild {
     /// You stopped it (with its parent): it ends without reporting, and is
     /// settled.
     stopped: bool,
+    /// It reviews this step of its parent's plan (a run with helpers): its
+    /// verdict goes to the run.
+    review_of: Option<u32>,
 }
 
 /// The first message of a session started from the new-session page.
@@ -6495,7 +6520,7 @@ impl Workspace {
 
     /// `key` was started by `parent`'s agent: it's that session's subagent.
     fn adopt(mut self: Pin<&mut Self>, key: &str, parent: &str, title: &str, agent: &str, notify: bool, plan_step: Option<u32>) {
-        self.as_mut().rust_mut().orch_children.insert(key.to_owned(), OrchChild { parent: parent.to_owned(), title: title.to_owned(), agent: agent.to_owned(), notify, status: "running".into(), report: None, asking: false, told_waiting: false, plan_step, stopped: false });
+        self.as_mut().rust_mut().orch_children.insert(key.to_owned(), OrchChild { parent: parent.to_owned(), title: title.to_owned(), agent: agent.to_owned(), notify, status: "running".into(), report: None, asking: false, told_waiting: false, plan_step, stopped: false, review_of: None });
         // Named for its part ("Helper"), not by its first message (harlo's
         // briefing).
         if !title.trim().is_empty()
@@ -6574,6 +6599,8 @@ impl Workspace {
             _ => None,
         });
         let status = match &child.report {
+            // (A review that found problems did its job.)
+            Some(_) if child.review_of.is_some() => "completed",
             Some(r) => if r.succeeded { "completed" } else { "failed" },
             None if error.is_some() && reply.as_deref().is_none_or(|r| r.trim().is_empty()) => "failed",
             None => "completed",
@@ -6584,12 +6611,28 @@ impl Workspace {
             c.told_waiting = false;
         }
         self.as_mut().bump_orchestration();
+        // A step's review: its verdict goes to the run.
+        if let Some(id) = child.review_of {
+            let verdict = match &child.report {
+                Some(r) => Some((r.succeeded, r.summary.clone())),
+                None => reply.as_deref().and_then(|r| harlo_core::plan::outcome_in(r).map(|ok| (ok, harlo_core::notifications::summary(r, 600)))),
+            };
+            self.as_mut().settle_helper(key);
+            return self.as_mut().plan_step_reviewed(&child.parent, id, verdict, error);
+        }
         // A plan's step: its result goes to the run.
         if let Some(id) = child.plan_step {
             let said = match &child.report {
                 Some(r) => Some((r.succeeded, r.summary.clone())),
                 None => reply.as_deref().and_then(|r| harlo_core::plan::outcome_in(r).map(|ok| (ok, harlo_core::notifications::summary(r, 300)))),
             };
+            // Done: reviewed before the run goes on (when the run reviews).
+            if let Some((true, summary)) = &said
+                && self.plan_runs.get(&child.parent).is_some_and(|r| r.review && r.paused.is_empty())
+            {
+                let files = child.report.as_ref().map(|r| r.files.clone()).unwrap_or_default();
+                return self.as_mut().review_plan_step(&child.parent, id, key, summary, &files);
+            }
             if said.as_ref().is_some_and(|(ok, _)| *ok) {
                 self.as_mut().settle_helper(key);
             } else {
@@ -6758,7 +6801,19 @@ impl Workspace {
         if plan.current_stage().is_none() {
             return QString::from("Every step of the plan has finished.");
         }
-        self.as_mut().rust_mut().plan_runs.insert(key.clone(), PlanRun { agent: kind, model, thinking, paused: String::new(), file, retried: HashSet::new() });
+        let review = self.setting_str(PLAN_REVIEW) != "0";
+        self.as_mut().rust_mut().plan_runs.insert(key.clone(), PlanRun {
+                agent: kind,
+                model,
+                thinking,
+                paused: String::new(),
+                file,
+                retried: HashSet::new(),
+                review,
+                reviews: HashMap::new(),
+                fixes: HashSet::new(),
+                bases: HashMap::new(),
+            });
         self.as_mut().plans_changed();
         self.as_mut().advance_plan(&key);
         QString::default()
@@ -6847,6 +6902,13 @@ impl Workspace {
                 );
                 continue;
             }
+            // (Where it starts from: its review looks at what changed since.)
+            if run.review
+                && let Some(head) = harlo_core::plan::snapshot(&cwd, 0).map(|s| s.head).filter(|h| !h.is_empty())
+                && let Some(r) = self.as_mut().rust_mut().plan_runs.get_mut(owner)
+            {
+                r.bases.insert(id, head);
+            }
             let key = self.as_mut().start_session_budget(run.agent, cwd.clone(), &run.model, &run.thinking, false, budget);
             if let Some(live) = registry::get(&key) {
                 live.handle.send_raw(json!({ "type": "set_session_name", "name": title }));
@@ -6885,6 +6947,100 @@ impl Workspace {
                 self.as_mut().pause_plan(owner, &format!("step {n} ({}) {why}", plan.step(id).map(|s| s.title.as_str()).unwrap_or_default()));
             }
         }
+    }
+
+    /// A step's helper reported it done: another session of the run's agent
+    /// reviews it, in the same folder, before the run goes on.
+    fn review_plan_step(mut self: Pin<&mut Self>, owner: &str, id: u32, worker: &str, summary: &str, files: &[String]) {
+        let Some(run) = self.plan_runs.get(owner).cloned() else { return self.as_mut().plan_step_ended(owner, id, Ok(summary.to_owned())) };
+        let Some(cwd) = self.live.get(worker).map(|e| e.info.cwd.clone()) else {
+            self.as_mut().settle_helper(worker);
+            return self.as_mut().plan_step_ended(owner, id, Ok(summary.to_owned()));
+        };
+        let plan = crate::plans::get(self.plan_file(owner).as_deref(), owner);
+        let n = plan.steps.iter().position(|s| s.id == id).map_or(0, |i| i + 1);
+        let step = plan.step(id).cloned().unwrap_or_default();
+        let mut task = format!("Step {n} of {}: {}", plan.steps.len(), step.title);
+        if !step.detail.is_empty() {
+            task.push_str(&format!("\n\n{}", step.detail));
+        }
+        // Where it started: the session's folder then, or its worktree's base.
+        let base = run.bases.get(&id).cloned().or_else(|| {
+            self.worktrees.iter().filter(|w| !w.removed && !w.base_commit.is_empty() && cwd.starts_with(&w.path)).max_by_key(|w| w.path.components().count()).map(|w| w.base_commit.clone())
+        });
+        let mut brief = harlo_core::orchestration::review_brief(&self.title_of(owner), &task, summary, files, base.as_deref().unwrap_or_default());
+        if !step.branch.is_empty() && !plan.branches_before(&[id]).is_empty() {
+            brief.push_str("\n\n(Earlier steps' branches were merged into this one first: review only this step's own changes.)");
+        }
+        if let Some(r) = self.as_mut().rust_mut().plan_runs.get_mut(owner) {
+            r.reviews.insert(id, StepReview { worker: worker.to_owned(), summary: summary.to_owned(), reviewer: String::new() });
+        }
+        let title = format!("Review: Step {n}: {}", step.title);
+        let approval = self.approval_of(owner).filter(|_| has_shield(run.agent.as_str(), &cwd));
+        let key = self.as_mut().start_session_budget(run.agent, cwd, &run.model, &run.thinking, false, None);
+        if let Some(r) = self.as_mut().rust_mut().plan_runs.get_mut(owner).and_then(|r| r.reviews.get_mut(&id)) {
+            r.reviewer = key.clone();
+        }
+        if let Some(live) = registry::get(&key) {
+            live.handle.send_raw(json!({ "type": "set_session_name", "name": title }));
+        }
+        self.as_mut().adopt(&key, owner, &title, run.agent.as_str(), true, None);
+        if let Some(c) = self.as_mut().rust_mut().orch_children.get_mut(&key) {
+            c.review_of = Some(id);
+        }
+        if let Some(mode) = &approval {
+            self.as_mut().set_approval_mode(&QString::from(&key), &QString::from(mode));
+        }
+        self.as_mut().apply_thinking(&key, &run.thinking);
+        send_first_prompt(&key, FirstPrompt { text: brief, ..Default::default() }, Some(self.qt_thread()));
+        self.as_mut().plans_changed();
+    }
+
+    /// A step's review ended (`verdict`: right, or the problems it found;
+    /// None: no verdict). Right: the step is done and the run goes on.
+    /// Problems: back to its helper once, then the run pauses for you.
+    fn plan_step_reviewed(mut self: Pin<&mut Self>, owner: &str, id: u32, verdict: Option<(bool, String)>, error: Option<String>) {
+        let review = self.as_mut().rust_mut().plan_runs.get_mut(owner).and_then(|r| r.reviews.remove(&id));
+        let (worker, summary) = review.map(|r| (r.worker, r.summary)).unwrap_or_default();
+        let file = self.plan_file(owner);
+        let plan = crate::plans::get(file.as_deref(), owner);
+        let n = plan.steps.iter().position(|s| s.id == id).map_or(0, |i| i + 1);
+        let step = format!("step {n} ({})", plan.step(id).map(|s| s.title.as_str()).unwrap_or_default());
+        let problems = match verdict {
+            Some((true, said)) => {
+                self.as_mut().settle_helper(&worker);
+                let said = said.trim();
+                let summary = if said.is_empty() { summary } else { format!("{}\n\nReviewed: {said}", summary.trim()) };
+                return self.as_mut().plan_step_ended(owner, id, Ok(summary));
+            }
+            Some((false, problems)) => problems,
+            None => {
+                self.as_mut().settle_after_look(&worker);
+                let why = match error {
+                    Some(e) => format!("its review stopped with an error: {e}"),
+                    None => "its review ended without a verdict".to_owned(),
+                };
+                let _ = crate::plans::update(file.as_deref(), owner, |p| p.put_back(id, &format!("Not done: {why}")));
+                self.as_mut().plans_changed();
+                return self.as_mut().pause_plan(owner, &format!("{step}: {why}"));
+            }
+        };
+        // Back to its helper, once: it fixes them and reports again, and
+        // that's reviewed again.
+        let again = self.as_mut().rust_mut().plan_runs.get_mut(owner).is_some_and(|r| r.paused.is_empty() && r.fixes.insert(id));
+        if again && let Some(live) = registry::get(&worker) {
+            if let Some(c) = self.as_mut().rust_mut().orch_children.get_mut(&worker) {
+                c.report = None;
+            }
+            let busy = self.live.get(&worker).is_some_and(|e| e.info.status == SessionStatus::Busy);
+            live.handle.prompt(&harlo_core::orchestration::review_fix_message(&problems), Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });
+            return self.as_mut().plans_changed();
+        }
+        self.as_mut().settle_after_look(&worker);
+        let short = harlo_core::notifications::summary(&problems, 300);
+        let _ = crate::plans::update(file.as_deref(), owner, |p| p.put_back(id, &format!("Not done: its review found problems: {short}")));
+        self.as_mut().plans_changed();
+        self.as_mut().pause_plan(owner, &format!("{step}: its review still found problems after a round of fixes: {short}"));
     }
 
     /// The file a session's plan is kept by: its session file (the one its
@@ -7120,6 +7276,9 @@ impl Workspace {
     /// A helper that failed, or ended without saying: settled once you've
     /// looked at it (now, if you are).
     fn settle_after_look(mut self: Pin<&mut Self>, key: &str) {
+        if key.is_empty() {
+            return;
+        }
         if self.active_key.to_string() == key {
             self.as_mut().rust_mut().settle_later.insert(key.to_owned());
         } else {
@@ -7128,7 +7287,7 @@ impl Workspace {
     }
 
     fn settle_helper(mut self: Pin<&mut Self>, key: &str) {
-        if self.setting_str("settle_sessions") == "0" {
+        if key.is_empty() || self.setting_str("settle_sessions") == "0" {
             return;
         }
         if self.active_key.to_string() == key || self.file_for_key(key).is_none() {
@@ -7257,6 +7416,8 @@ const MAX_HELPER_DEPTH: usize = 3;
 /// The setting: agents may start sessions on their own ("1"), else only
 /// when the user asks.
 const ORCH_ON_THEIR_OWN: &str = "orchestration_on_their_own";
+/// Whether a plan's run reviews each step ("0" off; on by default).
+const PLAN_REVIEW: &str = "plan_review";
 
 /// An agent's name ("claude" → "Claude").
 fn agent_label(agent: &str) -> &str {

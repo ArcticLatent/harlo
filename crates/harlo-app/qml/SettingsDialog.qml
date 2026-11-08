@@ -2557,6 +2557,22 @@ Popup {
                         }
                     }
                 }
+                SettingRow {
+                    id: reviewSteps
+                    visible: Workspace.orchestrationOn
+                    divider: true
+                    // ("" on, the default; "0" off.)
+                    property bool reviews: Workspace.setting("plan_review") !== "0"
+                    title: "Review each step"
+                    detail: reviews ? "When a plan runs with helpers, another session of the same agent reviews each finished step before the next one starts. Problems go back to the step's helper once; if the review still finds some, the run pauses for you."
+                               : "Off: a plan's steps follow each other as soon as their helpers report."
+                    icon: "eye"
+                    AppSwitch {
+                        objectName: "orchReviewSteps"
+                        checked: reviewSteps.reviews
+                        onToggled: { Workspace.setSetting("plan_review", checked ? "" : "0"); reviewSteps.reviews = checked }
+                    }
+                }
             }
 
             SectionHeader {
