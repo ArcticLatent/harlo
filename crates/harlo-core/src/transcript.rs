@@ -78,6 +78,11 @@ pub struct Row {
     pub run_ms: i64,
     /// The model of the reply it's in ("" unknown, or not a reply).
     pub model: String,
+    /// Tool rows: what the agent said the call is for (a command's
+    /// description), "" when it said nothing.
+    pub label: String,
+    /// Shell tool rows: the whole command.
+    pub command: String,
 }
 
 /// What harlo's own messages to an agent start with (a helper's report, an
@@ -171,6 +176,8 @@ struct ToolRun {
 
 /// Tool output beyond this is cut from the front for display.
 const TOOL_OUTPUT_DISPLAY_CHARS: usize = 6000;
+/// A shell command shown with its call, at most (characters).
+const COMMAND_DISPLAY_CHARS: usize = 4000;
 
 #[derive(Default)]
 pub struct Transcript {
@@ -639,6 +646,10 @@ impl Transcript {
                             r.title = name.clone();
                             r.call_id = call_id.clone();
                             r.subtitle = summarize_args(args);
+                            if let Some(command) = args["command"].as_str().filter(|_| crate::tool_facts::is_shell(name)) {
+                                r.command = command.chars().take(COMMAND_DISPLAY_CHARS).collect();
+                                r.label = args["description"].as_str().map(|d| first_line(d, 200)).unwrap_or_default();
+                            }
                             r.text = tail_chars(&run.output, TOOL_OUTPUT_DISPLAY_CHARS);
                             if run.started > 0 {
                                 r.time = run.started;

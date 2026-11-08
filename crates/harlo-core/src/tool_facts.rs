@@ -24,7 +24,7 @@ pub fn facts(name: &str, args: &Value, output: &str, is_error: bool) -> (String,
             let diff = lines.iter().take(DIFF_LINES).map(|l| format!("+{l}")).collect::<Vec<_>>().join("\n");
             return (format!("+{}", lines.len()), diff);
         }
-    } else if matches!(short.as_str(), "bash" | "shell" | "exec" | "command" | "run" | "terminal") {
+    } else if is_shell(name) {
         return (command_result(output, is_error), String::new());
     } else if matches!(short.as_str(), "read" | "view" | "cat" | "readfile" | "file") && !is_error {
         let n = output.lines().count();
@@ -38,6 +38,12 @@ pub fn facts(name: &str, args: &Value, output: &str, is_error: bool) -> (String,
         }, String::new());
     }
     (if is_error { "failed".into() } else { String::new() }, String::new())
+}
+
+/// A tool that runs a shell command.
+pub fn is_shell(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    matches!(lower.rsplit(['.', '_', ':']).next().unwrap_or(&lower), "bash" | "shell" | "exec" | "command" | "run" | "terminal")
 }
 
 fn counts(added: usize, removed: usize) -> String {
@@ -71,7 +77,7 @@ fn edit_diff(args: &Value) -> Option<(usize, usize, String)> {
         lines.truncate(DIFF_LINES);
         return Some((added, removed, lines.join("\n")));
     }
-    // A patch (omp's `*** Begin Patch`, a unified diff): its + and - lines.
+    // A patch (`*** Begin Patch`, a unified diff): its + and - lines.
     let patch = args.as_object()?.values().filter_map(Value::as_str).find(|s| {
         s.contains("*** Begin Patch") || s.contains("\n@@") || s.starts_with("@@") || s.lines().any(|l| l.starts_with('+') || l.starts_with('-'))
     })?;

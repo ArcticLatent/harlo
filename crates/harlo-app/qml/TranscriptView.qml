@@ -874,6 +874,38 @@ Item {
                     required property string group
                     required property string summary
                     required property bool groupOpen
+                    required property string result
+                    required property string diff
+                    required property real took
+                    required property string label
+                    required property string command
+                    // An edit's or a write's lines under it (a write: every
+                    // line added, numbered; an edit: what it took out and put in).
+                    readonly property bool preview: diff !== "" && !asking
+                    readonly property bool newFile: preview && result.indexOf("−") < 0
+                    readonly property int previewLines: 8
+                    readonly property int diffCount: diff === "" ? 0 : diff.split("\n").length
+                    // (A write's own count: its diff stops at 400 lines.)
+                    readonly property int lineCount: newFile && /^\+\d+$/.test(result) ? Number(result.slice(1)) : diffCount
+                    readonly property var lines: preview ? JSON.parse(root.session.diffLines(subtitle.replace(/…$/, ""), diff, open ? 400 : previewLines)) : []
+                    readonly property bool shell: command !== "" && !asking
+                    // The command under its line when the line doesn't say it all.
+                    readonly property bool commandBox: shell && (label !== "" || command.indexOf("\n") >= 0 || local(command).length > 90)
+                    // A finished command's last lines (all of it, opened).
+                    readonly property string tail: shell && !open ? text.split("\n").filter(l => l.trim() !== "").slice(-3).join("\n") : ""
+                    readonly property bool failed: rowState === "error" || /^(exit|failed)|failed$/.test(result)
+                    readonly property bool canOpen: text !== "" || (preview && lineCount > previewLines)
+                    // Paths in the session's folder from there; a command's
+                    // `cd <the folder> &&` left out.
+                    readonly property string here: (root.session.cwd || "").replace(/^ssh:\/\/[^\/]+/, "").replace(/\/$/, "")
+                    function local(t) {
+                        if (here === "") return t
+                        const cd = "cd " + here + " && "
+                        if (t.startsWith(cd)) return t.slice(cd.length)
+                        if (t.startsWith("cd \"" + here + "\" && ")) return t.slice(here.length + 9)
+                        return t.split(here + "/").join("")
+                    }
+                    function seconds(ms) { return ms <= 0 ? "" : ms < 10000 ? (ms / 1000).toFixed(1) + "s" : ms < 60000 ? Math.round(ms / 1000) + "s" : Math.floor(ms / 60000) + "m " + Math.round(ms % 60000 / 1000) + "s" }
                     readonly property bool open: view.expanded[rowKey] === true
                     readonly property var agents: callId !== "" ? root.subagents.filter(a => a.parentToolCallId === callId) : []
                     // The agent waits for your approval to run this call.
@@ -935,7 +967,7 @@ Item {
                         radius: 8
                         // (Solid when it asks: a row under it doesn't show through.)
                         color: toolRow.asking ? Qt.tint(Theme.raised, Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, 0.06))
-                             : toolHover.hovered && toolRow.text !== "" ? Theme.hover : "transparent"
+                             : toolHover.hovered && toolRow.canOpen ? Theme.hover : "transparent"
                         border.color: toolRow.asking ? Theme.warning : "transparent"
                         HoverHandler { id: toolHover }
                         ColumnLayout {
@@ -957,13 +989,45 @@ Item {
                                     font.pixelSize: Theme.px(12)
                                 }
                                 Label { text: Theme.toolLabel(toolRow.title); color: Theme.foreground; font.bold: true; font.pixelSize: Theme.px(13) }
-                                Label {
+                                // What it's for, when the agent said; else its
+                                // file (as a chip) or its arguments.
+                                Item {
                                     Layout.fillWidth: true
-                                    text: toolRow.subtitle !== "" || toolRow.rowState !== "pending" ? toolRow.subtitle : Theme.toolWriting(toolRow.title)
-                                    color: Theme.muted
-                                    elide: Text.ElideRight
-                                    font.family: Theme.mono
-                                    font.pixelSize: Theme.mpx(12)
+                                    implicitHeight: toolWhat.implicitHeight + (toolRow.preview ? 4 : 0)
+                                    Rectangle {
+                                        visible: toolRow.preview && toolRow.label === ""
+                                        width: Math.min(toolWhat.implicitWidth + 12, parent.width)
+                                        height: parent.height
+                                        radius: 5
+                                        color: Theme.codeBg
+                                        border.color: Theme.hairline
+                                    }
+                                    Label {
+                                        id: toolWhat
+                                        objectName: "toolWhat"
+                                        x: toolRow.preview && toolRow.label === "" ? 6 : 0
+                                        width: Math.min(implicitWidth, parent.width - x * 2)
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: toolRow.label !== "" ? toolRow.label : toolRow.subtitle !== "" || toolRow.rowState !== "pending" ? toolRow.local(toolRow.subtitle) : Theme.toolWriting(toolRow.title)
+                                        color: toolRow.label !== "" ? Theme.foreground : Theme.muted
+                                        elide: Text.ElideRight
+                                        font.family: toolRow.label !== "" ? Theme.uiFont : Theme.mono
+                                        font.pixelSize: toolRow.label !== "" ? Theme.px(12.5) : Theme.mpx(12)
+                                    }
+                                }
+                                // What it came to and how long it took (a command's
+                                // under it).
+                                Label {
+                                    objectName: "toolResult"
+                                    visible: text !== "" && !toolRow.shell
+                                    textFormat: Text.StyledText
+                                    text: {
+                                        const r = toolRow.result.replace(/^\+(\d+) −(\d+)$/, "<font color='" + Theme.rgb(Theme.diffAdd) + "'>+$1</font> <font color='" + Theme.rgb(Theme.diffRemove) + "'>−$2</font>")
+                                        const r2 = toolRow.newFile ? (toolRow.lineCount === 1 ? "1 line" : toolRow.lineCount + " lines") : r
+                                        return [r2, toolRow.seconds(toolRow.took)].filter(x => x !== "").join(" · ")
+                                    }
+                                    color: toolRow.failed ? Theme.error : Theme.textMuted
+                                    font.pixelSize: Theme.px(11.5)
                                 }
                                 FlatButton {
                                     // edit/write/patch tools: jump to the file's diff.
@@ -976,7 +1040,129 @@ Item {
                                     accent: Theme.info
                                     onClicked: root.openDiff(toolRow.subtitle.replace(/…$/, ""))
                                 }
-                                Label { text: toolRow.open ? "▾" : "▸"; color: Theme.muted; visible: toolRow.text !== "" }
+                                Label { text: toolRow.open ? "▾" : "▸"; color: Theme.muted; visible: toolRow.canOpen }
+                            }
+                            // An edit's or a write's lines.
+                            Rectangle {
+                                objectName: "toolPreview"
+                                Layout.fillWidth: true
+                                Layout.leftMargin: 22
+                                visible: toolRow.preview
+                                implicitHeight: previewCol.implicitHeight + 10
+                                radius: 6
+                                color: Theme.codeBg
+                                border.color: Theme.hairline
+                                clip: true
+                                Column {
+                                    id: previewCol
+                                    x: 1
+                                    y: 5
+                                    width: parent.width - 2
+                                    // (Numbers as wide as the last one.)
+                                    readonly property real numberWidth: toolRow.newFile ? numberProbe.implicitWidth + 16 : 20
+                                    Label { id: numberProbe; visible: false; text: String(toolRow.lines.length); font.family: Theme.mono; font.pixelSize: Theme.mpx(12) }
+                                    Repeater {
+                                        model: toolRow.lines
+                                        Rectangle {
+                                            required property var modelData
+                                            required property int index
+                                            width: previewCol.width
+                                            implicitHeight: lineText.implicitHeight + 2
+                                            readonly property bool added: !toolRow.newFile && modelData.s === "+"
+                                            readonly property bool removed: modelData.s === "-"
+                                            color: added ? Qt.rgba(Theme.diffAdd.r, Theme.diffAdd.g, Theme.diffAdd.b, 0.13) : removed ? Qt.rgba(Theme.diffRemove.r, Theme.diffRemove.g, Theme.diffRemove.b, 0.13) : "transparent"
+                                            Label {
+                                                width: previewCol.numberWidth - 8
+                                                horizontalAlignment: Text.AlignRight
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: toolRow.newFile ? String(index + 1) : parent.added ? "+" : parent.removed ? "−" : ""
+                                                color: parent.added ? Theme.diffAdd : parent.removed ? Theme.diffRemove : Theme.textFaint
+                                                font.family: Theme.mono
+                                                font.pixelSize: Theme.mpx(12)
+                                            }
+                                            Label {
+                                                id: lineText
+                                                x: previewCol.numberWidth
+                                                width: parent.width - x - 8
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                textFormat: Text.RichText
+                                                text: Theme.htmlStyle + "<pre style=\"margin:0;\">" + (modelData.h === "" ? " " : modelData.h) + "</pre>"
+                                                color: Theme.foreground
+                                                elide: Text.ElideRight
+                                                font.family: Theme.mono
+                                                font.pixelSize: Theme.mpx(12)
+                                            }
+                                        }
+                                    }
+                                    FlatButton {
+                                        objectName: "toolMoreLines"
+                                        x: 6
+                                        visible: toolRow.lineCount > toolRow.previewLines
+                                        text: toolRow.open ? "Fewer lines" : "▾ " + (toolRow.lineCount - toolRow.previewLines) + (toolRow.lineCount - toolRow.previewLines === 1 ? " more line" : " more lines")
+                                        padding: 2
+                                        font.pixelSize: Theme.px(11)
+                                        onClicked: view.toggle(toolRow.rowKey)
+                                    }
+                                }
+                            }
+                            // A command: all of it, its last lines, and how it went.
+                            Rectangle {
+                                objectName: "toolCommand"
+                                Layout.fillWidth: true
+                                Layout.leftMargin: 22
+                                visible: toolRow.commandBox
+                                implicitHeight: commandText.implicitHeight + 12
+                                radius: 6
+                                color: Theme.codeBg
+                                border.color: Theme.hairline
+                                Label {
+                                    id: commandText
+                                    x: 8
+                                    y: 6
+                                    width: parent.width - 16
+                                    text: toolRow.local(toolRow.command)
+                                    color: Theme.foreground
+                                    wrapMode: Text.WrapAnywhere
+                                    maximumLineCount: toolRow.open ? 400 : 6
+                                    elide: Text.ElideRight
+                                    textFormat: Text.PlainText
+                                    font.family: Theme.mono
+                                    font.pixelSize: Theme.mpx(12)
+                                }
+                            }
+                            // (A line each: each one shortened to the column.)
+                            Column {
+                                objectName: "toolTail"
+                                readonly property string text: toolRow.tail
+                                Layout.fillWidth: true
+                                Layout.leftMargin: 22
+                                visible: toolRow.tail !== ""
+                                Repeater {
+                                    model: toolRow.tail === "" ? [] : toolRow.tail.split("\n")
+                                    Label {
+                                        required property string modelData
+                                        width: parent.width
+                                        text: modelData
+                                        color: Theme.muted
+                                        elide: Text.ElideRight
+                                        textFormat: Text.PlainText
+                                        font.family: Theme.mono
+                                        font.pixelSize: Theme.mpx(12)
+                                    }
+                                }
+                            }
+                            Label {
+                                objectName: "toolStatus"
+                                Layout.leftMargin: 22
+                                visible: toolRow.shell && toolRow.rowState !== "pending"
+                                textFormat: Text.StyledText
+                                text: {
+                                    const word = toolRow.rowState === "running" ? "Running…" : toolRow.failed ? "Failed" : "Done"
+                                    const col = Theme.rgb(toolRow.rowState === "running" ? Theme.primary : toolRow.failed ? Theme.error : Theme.success)
+                                    const more = [toolRow.result, toolRow.seconds(toolRow.took)].filter(x => x !== "").join(" · ")
+                                    return "<font color='" + col + "'>" + word + "</font>" + (more !== "" ? "  <font color='" + Theme.rgb(Theme.textMuted) + "'>" + more + "</font>" : "")
+                                }
+                                font.pixelSize: Theme.px(12)
                             }
                             // The subagents this call started (the task tool), as a tree.
                             RowLayout {
@@ -1059,7 +1245,7 @@ Item {
                             Rectangle {
                                 Layout.fillWidth: true
                                 Layout.leftMargin: 22
-                                visible: toolRow.open && toolRow.text !== ""
+                                visible: toolRow.open && toolRow.text !== "" && !toolRow.preview
                                 implicitHeight: Math.min(outText.implicitHeight + 12, 320)
                                 color: Theme.codeBg
                                 radius: 4
@@ -1079,7 +1265,7 @@ Item {
                                 }
                             }
                         }
-                        TapHandler { enabled: toolRow.text !== ""; onTapped: view.toggle(toolRow.rowKey) }
+                        TapHandler { enabled: toolRow.canOpen; onTapped: view.toggle(toolRow.rowKey) }
                     }
                 }
             }

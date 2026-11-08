@@ -940,6 +940,19 @@ ApplicationWindow {
         }
         return null
     }
+    /// Every visible item named `name` under `root` (the ones in view).
+    function findAllNames(name, root) {
+        const found = []
+        const walk = item => {
+            for (const c of item.children) {
+                if (!c.visible || c.opacity <= 0) continue
+                if (c.objectName === name && shown(c)) found.push(c)
+                walk(c)
+            }
+        }
+        walk(root)
+        return found
+    }
     /// Scrolls every scroll area around `item` so it is in view, as a
     /// person would before clicking it.
     function scrollIntoView(item) {
@@ -3607,6 +3620,59 @@ ApplicationWindow {
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
             win.check(Workspace.setting("graphics") === "auto" && win.findName("graphicsRestartRow", settingsDialog.contentItem) === null, "back to the one it started with: no restart")
+            win.summary(); Qt.quit() } }
+    }
+
+    // Tool calls as cards (the stand-in Claude): a write's lines numbered
+    // and coloured, more on a click; an edit's lines out and in; a command
+    // under what it's for, its last lines and how it went; a failed one;
+    // a read on one line; and no notice for a command in the foreground.
+    SequentialAnimation {
+        id: toolCardSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clickstoolcards"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
+            Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: { win.claudeKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "claude") } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: win.sendByKeys("show the tools please") }
+        ScriptAction { script: win.waitUntil(toolCardSteps, () => win.chatText().indexOf("Limits now come from") >= 0 && chat.session.status === "idle", 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            // (The run folds once it's done: opened.)
+            const head = win.findContaining("Wrote 1 file", chat.transcript) || win.findContaining("wrote 1 file", chat.transcript)
+            win.check(head !== null, "the run's line (" + win.chatText().slice(0, 200) + ")")
+            if (head) win.clickItem(head, "the run's line") } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const t = chat.transcript
+            const what = win.findAllNames("toolWhat", t).map(l => l.text)
+            win.check(what.indexOf("Running the full test suite") >= 0, "a command shows what it's for (" + what.join(" | ") + ")")
+            const previews = win.findAllNames("toolPreview", t).filter(p => p.visible)
+            win.check(previews.length === 2, "the write and the edit show their lines (" + previews.length + ")")
+            const more = win.findAllNames("toolMoreLines", t).filter(b => b.visible)
+            win.check(more.length === 1 && more[0].text.indexOf("3 more lines") >= 0, "the write's first 8 of 11 lines, and 3 more (" + more.map(b => b.text) + ")")
+            const results = win.findAllNames("toolResult", t).filter(l => l.visible).map(l => l.text)
+            win.check(results.some(r => r.indexOf("11 lines") >= 0) && results.some(r => r.indexOf("+2") >= 0 && r.indexOf("−2") >= 0), "the write's line count and the edit's +/− (" + results.join(" | ") + ")")
+            const status = win.findAllNames("toolStatus", t).filter(l => l.visible).map(l => l.text)
+            win.check(status.length === 2 && status.some(x => x.indexOf("Done") >= 0 && x.indexOf("7 passed") >= 0) && status.some(x => x.indexOf("Failed") >= 0),
+                      "each command says how it went (" + status.join(" | ") + ")")
+            const tails = win.findAllNames("toolTail", t).filter(l => l.visible).map(l => l.text)
+            win.check(tails.some(x => x.indexOf("7 passed") >= 0), "and its last lines (" + tails.join(" | ") + ")")
+            win.check(win.findAllNames("toolCommand", t).filter(c => c.visible).length === 1, "the command under what it's for, in a box (the other is on its line)")
+            win.check(what.indexOf("src/config.rs") >= 0 && what.indexOf("README.md") >= 0, "paths from the session's folder")
+            win.check(win.chatText().indexOf("Running the full test suite\n") < 0 && win.findContaining("▸ cargo", t) === null, "no notice for a command in the foreground")
+            win.shotWindow("clicks-tool-cards")
+            win.clickItem(more[0], "3 more lines") } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const p = win.findAllNames("toolPreview", chat.transcript).filter(p => p.visible)
+            win.check(win.findAllNames("toolMoreLines", chat.transcript).some(b => b.visible && b.text === "Fewer lines"), "opened: all of it")
+            win.scrollIntoView(p[0])
+            win.shotWindow("clicks-tool-cards-open")
             win.summary(); Qt.quit() } }
     }
 

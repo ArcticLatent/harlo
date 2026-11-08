@@ -122,6 +122,11 @@ pub mod qobject {
         fn undo_turn(self: Pin<&mut ChatSession>, row_key: &QString);
         #[qinvokable]
         fn abort(self: Pin<&mut ChatSession>);
+        /// A tool call's diff (`+`, `-`, ` ` lines) as JSON `[{ s, h }]`:
+        /// each line's mark and its text coloured as `path`'s language, the
+        /// first `limit` lines.
+        #[qinvokable]
+        fn diff_lines(self: &ChatSession, path: &QString, diff: &QString, limit: i32) -> QString;
         /// Answers the current dialog with a value (select/input/editor).
         #[qinvokable]
         fn answer_value(self: Pin<&mut ChatSession>, value: &QString);
@@ -307,6 +312,12 @@ const ROLE_GROUP_OPEN: i32 = 0x10a;
 const ROLE_MODEL: i32 = 0x10b;
 /// Where it sits among the turns (`Row::section`).
 const ROLE_SECTION: i32 = 0x10c;
+const ROLE_RESULT: i32 = 0x10d;
+const ROLE_DIFF: i32 = 0x10e;
+/// A tool call's time (ms; 0 unknown or running).
+const ROLE_TOOK: i32 = 0x10f;
+const ROLE_LABEL: i32 = 0x110;
+const ROLE_COMMAND: i32 = 0x111;
 
 #[derive(Default)]
 pub struct ChatSessionRust {
@@ -892,6 +903,15 @@ impl ChatSession {
         }
     }
 
+    pub fn diff_lines(&self, path: &QString, diff: &QString, limit: i32) -> QString {
+        let diff = diff.to_string();
+        let lines: Vec<&str> = diff.lines().take(limit.max(0) as usize).collect();
+        let texts: Vec<&str> = lines.iter().map(|l| l.get(1..).unwrap_or_default()).collect();
+        let html = harlo_core::markdown::highlight_lines(&path.to_string(), &texts);
+        let out: Vec<serde_json::Value> = lines.iter().zip(html).map(|(l, h)| serde_json::json!({ "s": l.get(..1).unwrap_or(" "), "h": h })).collect();
+        QString::from(&serde_json::Value::from(out).to_string())
+    }
+
     pub fn answer_value(self: Pin<&mut Self>, value: &QString) {
         self.answer(json!({ "value": value.to_string() }));
     }
@@ -1285,6 +1305,11 @@ impl ChatSession {
             ROLE_GROUP_OPEN => QVariant::from(&row.group_open),
             ROLE_MODEL => s(&row.model),
             ROLE_SECTION => s(row.section()),
+            ROLE_RESULT => s(&row.result),
+            ROLE_DIFF => s(&row.diff),
+            ROLE_TOOK => QVariant::from(&(if row.time > 0 && row.ended >= row.time { (row.ended - row.time) as f64 } else { 0.0 })),
+            ROLE_LABEL => s(&row.label),
+            ROLE_COMMAND => s(&row.command),
             _ => QVariant::default(),
         }
     }
@@ -1305,6 +1330,11 @@ impl ChatSession {
             (ROLE_GROUP_OPEN, "groupOpen"),
             (ROLE_MODEL, "rowModel"),
             (ROLE_SECTION, "rowSection"),
+            (ROLE_RESULT, "result"),
+            (ROLE_DIFF, "diff"),
+            (ROLE_TOOK, "took"),
+            (ROLE_LABEL, "label"),
+            (ROLE_COMMAND, "command"),
         ] {
             roles.insert(role, QByteArray::from(name));
         }
