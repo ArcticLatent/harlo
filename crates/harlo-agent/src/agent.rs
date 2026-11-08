@@ -345,6 +345,9 @@ pub struct Agent {
     pub fallback: Option<String>,
     /// On the fallback: the model it left, and when to try it again (unix s).
     fell_back: Option<(String, i64)>,
+    /// Whether the switch after the first change (`HARLO_AGENT_PREWALK`)
+    /// was made, or isn't to be.
+    prewalked: bool,
     /// What its requests share a cache by (None: its session's id).
     pub cache_key: Option<String>,
     pub notify: Option<Notify>,
@@ -402,6 +405,7 @@ impl Agent {
             budget: None,
             fallback: None,
             fell_back: None,
+            prewalked: false,
             cache_key: None,
             notify: None,
             subagents: Arc::default(),
@@ -672,6 +676,7 @@ impl Agent {
             };
             let outcomes = run_calls(&self.tools, &triples, &extra, stop).await;
             handed_over |= hands_over(&names, &outcomes);
+            let changed = names.iter().zip(&outcomes).any(|(n, o)| matches!(*n, "edit" | "write") && !o.failed);
             for ((c, name), o) in calls.iter().zip(&names).zip(outcomes) {
                 show(Shown::ToolEnd { call_id: c["id"].as_str().unwrap_or_default(), name, text: &o.text, failed: o.failed });
                 let mut content = vec![json!({ "type": "text", "text": o.text })];
@@ -691,12 +696,34 @@ impl Agent {
                 }
                 self.push(result, show)?;
             }
+            if changed {
+                self.prewalk(show)?;
+            }
             if stop.is_cancelled() {
                 self.stopped(show)?;
                 return Ok(Ended::Stopped);
             }
         }
         bail!("The turn ended after {max} rounds of tool calls, the most one turn may take. Send a message to go on.")
+    }
+
+    /// After the first change made, once: on with `HARLO_AGENT_PREWALK`'s
+    /// model (to measure whether a cheaper one can finish what this one
+    /// planned).
+    fn prewalk(&mut self, show: &mut (dyn FnMut(Shown) + Send)) -> Result<()> {
+        if std::mem::replace(&mut self.prewalked, true) {
+            return Ok(());
+        }
+        let Some(to) = std::env::var("HARLO_AGENT_PREWALK").ok().map(|m| m.trim().to_owned()).filter(|m| !m.is_empty()).map(|m| providers::full(&m)).filter(|m| *m != self.model) else {
+            return Ok(());
+        };
+        show(Shown::Notice { level: "info", text: &format!("The first change is made: going on with {to}.") });
+        self.model = to;
+        let (provider, id) = self.model.split_once('/').unwrap_or((providers::CHATGPT, &self.model));
+        self.log.append(json!({ "type": "model_change", "provider": provider, "modelId": id }))?;
+        self.logged.0 = Some(self.model.clone());
+        show(Shown::ModelChanged(&self.model));
+        Ok(())
     }
 
     /// The note a stopped turn leaves, for the model's next turn (not shown).
