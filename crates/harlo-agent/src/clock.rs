@@ -21,6 +21,7 @@ pub struct Local {
 
 const DAYS: [&str; 7] = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
+#[allow(deprecated)] // (libc's time_t on musl: 64-bit there too, as it says it will be.)
 fn at(unix: i64, utc: bool) -> Local {
     let t: libc::time_t = unix as libc::time_t;
     // SAFETY: tm is plain data, filled by localtime_r/gmtime_r from t.
