@@ -85,6 +85,12 @@ pub fn read_only(name: &str) -> bool {
 /// when None), and `task` with them when `task` (the profiles it may name).
 pub fn specs_of(only: Option<&[&str]>, task: Option<&[crate::profiles::Profile]>) -> Value {
     let mut all: Vec<Value> = specs().as_array().cloned().unwrap_or_default();
+    // (Anchored edits, when measured.)
+    if crate::hashline::on() {
+        for t in all.iter_mut().filter(|t| t["name"] == "edit") {
+            *t = crate::hashline::spec();
+        }
+    }
     if let Some(only) = only {
         all.retain(|t| t["name"].as_str().is_some_and(|n| only.contains(&n)));
     }
@@ -333,11 +339,16 @@ impl Tools {
         let (max, max_bytes) = if preview { (PREVIEW_LINES, PREVIEW_BYTES) } else { (limit.map_or(READ_LINES, |l| (l as usize).clamp(1, READ_LINES)), READ_BYTES) };
         let mut out = String::new();
         let mut n = 0;
+        let anchored = crate::hashline::on();
         for l in &lines[start..] {
             if n >= max || out.len() + l.len() + 1 > max_bytes {
                 break;
             }
-            out.push_str(l);
+            if anchored {
+                out.push_str(&crate::hashline::annotate(start + n + 1, l));
+            } else {
+                out.push_str(l);
+            }
             out.push('\n');
             n += 1;
         }
@@ -387,6 +398,9 @@ impl Tools {
     }
 
     fn edit(&self, p: &str, edits: &Value) -> Outcome {
+        if crate::hashline::on() {
+            return self.edit_anchored(p, edits);
+        }
         let path = self.path(p);
         let list: Vec<edit::Edit> = edits
             .as_array()
@@ -414,6 +428,30 @@ impl Tools {
                 }
                 self.remember(&path);
                 ok(format!("Edited {} ({} change{}, from line {first}).", path.display(), list.len(), if list.len() == 1 { "" } else { "s" }))
+            }
+            Err(why) => fail(why),
+        }
+    }
+
+    /// `edit` by anchors (`HARLO_AGENT_EDIT=hashline`): a stale line is
+    /// caught by its tag, so a file changed elsewhere since isn't refused
+    /// as a whole.
+    fn edit_anchored(&self, p: &str, edits: &Value) -> Outcome {
+        let path = self.path(p);
+        if let Some(no) = self.fenced(&path) {
+            return no;
+        }
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(e) => return fail(format!("Can't read {}: {e}", path.display())),
+        };
+        match crate::hashline::apply(&content, edits) {
+            Ok((new, view)) => {
+                if let Err(e) = std::fs::write(&path, &new) {
+                    return fail(format!("Can't write {}: {e}", path.display()));
+                }
+                self.remember(&path);
+                ok(format!("Edited {}. Now:\n{view}", path.display()))
             }
             Err(why) => fail(why),
         }
