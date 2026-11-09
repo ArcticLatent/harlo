@@ -1394,7 +1394,6 @@ Item {
         const what = shell ? "this command" : Theme.toolLabel(tool).replace(/^\w/, c => c.toUpperCase())
         return askLines.indexOf("Outside the sandbox") >= 0 ? "Run " + what + " outside the sandbox?" : shell ? "Run this command?" : "Allow " + what + " to run?"
     }
-    /// Brings row `i` to the middle and flashes it (search results).
     /// Row `i`'s end is on screen (an approval's buttons are there), its
     /// run open. (Re-read as the view scrolls: it reads `contentY`.)
     function rowEndInView(i) {
@@ -1405,7 +1404,10 @@ Item {
         return bottom > 24 && bottom <= view.height + 1
     }
 
-    function revealIndex(i) {
+    /// Brings row `i` to the middle and flashes it (search results, find).
+    /// With `query`, its words are marked: for a few seconds, or with `keep`
+    /// until `clearMarks` (find keeps them while it's open).
+    function revealIndex(i, query, keep) {
         view.follow = false
         view.positionViewAtIndex(i, ListView.Center)
         Qt.callLater(() => {
@@ -1424,7 +1426,67 @@ Item {
             const p = item.mapToItem(root, 0, 0)
             flash.x = p.x; flash.y = p.y; flash.width = item.width; flash.height = item.height
             flashAnim.restart()
+            root.markWords(item, query || "", keep === true)
         })
+    }
+    // ---- marked words (where a search or find landed) ----
+    /// `[{x, y, w, h}]` in the list's content, so they scroll with it.
+    property var wordMarks: []
+    function textIn(item) {
+        if (!item || !item.visible) return null
+        if (item.positionToRectangle !== undefined && item.getText !== undefined && item.length > 0) return item
+        for (let k = 0; k < item.children.length; k++) {
+            const t = textIn(item.children[k])
+            if (t) return t
+        }
+        return null
+    }
+    function markWords(item, query, keep) {
+        const out = []
+        const te = textIn(item)
+        const words = query.toLowerCase().split(/\s+/).map(w => w.replace(/[\s"'“”‘’`*()\[\]{}<>,;:!?]/g, "")).filter(w => w !== "")
+        if (te && words.length > 0) {
+            const text = te.getText(0, te.length).toLowerCase()
+            for (const w of words) {
+                for (let at = text.indexOf(w); at >= 0 && out.length < 60; at = text.indexOf(w, at + w.length)) {
+                    const a = te.positionToRectangle(at), b = te.positionToRectangle(at + w.length)
+                    if (Math.abs(a.y - b.y) >= 1 || b.x <= a.x) continue
+                    const p = te.mapToItem(view.contentItem, a.x, a.y)
+                    out.push({ x: p.x, y: p.y, w: b.x - a.x, h: a.height })
+                }
+            }
+        }
+        wordMarks = out
+        marksLayer.opacity = 1
+        if (keep) marksFade.stop()
+        else marksFade.restart()
+    }
+    function clearMarks() { marksFade.stop(); wordMarks = [] }
+    /// The first row at the top of the view (find starts from it).
+    function topIndex() { return Math.max(0, view.indexAt(view.width / 2, view.contentY + 12)) }
+    Item {
+        id: marksLayer
+        objectName: "wordMarks"
+        parent: view.contentItem
+        z: 10
+        Repeater {
+            model: root.wordMarks
+            Rectangle {
+                required property var modelData
+                x: modelData.x - 1
+                y: modelData.y
+                width: modelData.w + 2
+                height: modelData.h
+                radius: 3
+                color: Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, Theme.isLight ? 0.35 : 0.3)
+            }
+        }
+        SequentialAnimation {
+            id: marksFade
+            PauseAnimation { duration: 6000 }
+            NumberAnimation { target: marksLayer; property: "opacity"; to: 0; duration: 800 }
+            ScriptAction { script: root.wordMarks = [] }
+        }
     }
     function copyToClipboard(t) { clipboardHelper.copyText(t) }
     /// Scrolls like the scrollbar does (sets contentY directly; for tests).

@@ -14,6 +14,21 @@ Rectangle {
     color: Theme.chrome
     Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.hairline }
 
+    // Tabs shrink (to 120 px each) before the strip scrolls, so a few tabs
+    // all show whole instead of one being cut at the edge.
+    FontMetrics { id: tabFont; font.pixelSize: Theme.px(13.5); font.weight: Font.Medium }
+    function naturalWidth(entry) {
+        const p = entry.split("\t"), fd = p[0].startsWith("file:") || p[0].startsWith("diff:")
+        return Math.min(280, Math.max(120, tabFont.advanceWidth(((p[4] || "") !== "" ? "⎇ " : "") + p[1]) + (fd ? 80 : 64)))
+    }
+    readonly property real fit: {
+        const list = Workspace.tabs
+        let sum = 0
+        for (const t of list) sum += naturalWidth(t)
+        const room = tabs.width - 4 * Math.max(0, list.length - 1)
+        return sum > room && sum > 0 ? room / sum : 1
+    }
+
     ListView {
         id: tabs
         anchors.fill: parent
@@ -48,7 +63,7 @@ Rectangle {
             readonly property string diffPath: isDiff ? key.substring(7) : ""
             readonly property bool dirty: isFile && root.dirtyPaths[key.substring(5)] !== undefined
             readonly property bool active: key === Workspace.activeKey
-            width: Math.min(280, Math.max(120, label.implicitWidth + (isFile || isDiff ? 80 : 64)))
+            width: Math.floor(Math.max(120, root.naturalWidth(modelData) * root.fit))
             height: tabs.height
 
             // A soft pill, as the sidebar's rows.

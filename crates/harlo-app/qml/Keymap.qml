@@ -9,7 +9,7 @@ QtObject {
     id: keymap
 
     readonly property var defaults: ({
-        palette: "Ctrl+K", goToSession: "Ctrl+P", searchAll: "Ctrl+Shift+F", actions: "Ctrl+Shift+P",
+        palette: "Ctrl+K", goToSession: "Ctrl+P", searchAll: "Ctrl+Shift+F", findInSession: "Ctrl+F", actions: "Ctrl+Shift+P",
         nextTab: "Ctrl+Tab", nextTabAlt: "Ctrl+PgDown", prevTab: "Ctrl+Shift+Tab", prevTabAlt: "Ctrl+PgUp",
         jumpPrompt: "Ctrl+J", prevPrompt: "Alt+Up", nextPrompt: "Alt+Down", focusRuns: "Ctrl+Shift+Up",
         newSession: "Ctrl+N", closeTab: "Ctrl+W",

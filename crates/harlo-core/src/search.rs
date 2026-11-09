@@ -99,10 +99,18 @@ pub fn best_block<S: AsRef<str>>(blocks: &[S], input: &str) -> usize {
     best.0
 }
 
+/// A hit's snippet as styled text: its matches in `<b>`, markdown's
+/// backticks and `**` left out (the text reads as it does in the session).
 fn snippet_html(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len() + 16);
-    for c in raw.chars() {
+    let mut chars = raw.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '*' && chars.peek() == Some(&'*') {
+            chars.next();
+            continue;
+        }
         match c {
+            '`' => {}
             '\u{2}' => out.push_str("<b>"),
             '\u{3}' => out.push_str("</b>"),
             '&' => out.push_str("&amp;"),
@@ -243,6 +251,11 @@ mod tests {
         }
         std::fs::write(&path, lines.join("\n") + "\n").unwrap();
         path
+    }
+
+    #[test]
+    fn snippets_leave_out_markdown() {
+        assert_eq!(snippet_html("the raw `\u{2}returnTo\u{3}` and **bold** 2*3 <x>"), "the raw <b>returnTo</b> and bold 2*3 &lt;x&gt;");
     }
 
     #[test]

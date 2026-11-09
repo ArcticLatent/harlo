@@ -431,6 +431,10 @@ pub mod qobject {
         /// `{ path, index, role, snippet, title, harness, cwd, modified }`.
         #[qinvokable]
         fn search_messages(self: &Workspace, query: &QString, limit: i32) -> QString;
+        /// The sessions used last, newest first, for the search's empty
+        /// state: JSON array of `{ path, title, harness, cwd, modified }`.
+        #[qinvokable]
+        fn recent_sessions(self: &Workspace, limit: i32) -> QString;
         /// Sessions to offer for `@` in a composer: `cwd`'s, newest first,
         /// matching `query`, not `key`'s own. JSON array of `{ mention,
         /// title, harness, path, modified }`.
@@ -2351,7 +2355,7 @@ impl Workspace {
             }
             if let Some((staged, path)) = diff_key(key) {
                 let name = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_owned());
-                let title = format!("{} ({})", name.replace(['\t', '\n'], " "), if staged { "Staged" } else { "Working Tree" });
+                let title = format!("{} ({})", name.replace(['\t', '\n'], " "), if staged { "staged" } else { "changes" });
                 list.append(QString::from(&format!("{key}\t{title}\t\tdiff\t")));
                 continue;
             }
@@ -5001,6 +5005,25 @@ impl Workspace {
             })
             .collect();
         QString::from(&serde_json::Value::Array(list).to_string())
+    }
+
+    pub fn recent_sessions(&self, limit: i32) -> QString {
+        let mut list: Vec<_> = self.sessions.values().collect();
+        list.sort_by(|a, b| b.modified.cmp(&a.modified));
+        let out: Vec<serde_json::Value> = list
+            .into_iter()
+            .take(limit.clamp(1, 50) as usize)
+            .map(|i| {
+                serde_json::json!({
+                    "path": i.path.to_string_lossy(),
+                    "title": i.display_title(),
+                    "harness": i.harness.as_str(),
+                    "cwd": harlo_core::sidebar::tilde(&i.cwd),
+                    "modified": i.modified.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
+                })
+            })
+            .collect();
+        QString::from(&serde_json::Value::Array(out).to_string())
     }
 
     pub fn home_dir(&self) -> QString {

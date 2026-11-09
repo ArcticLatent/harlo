@@ -33,6 +33,8 @@ Rectangle {
         onAdded: id => root.newSessionRequested(id)
     }
     signal manageInstancesRequested()
+    /// The filter's words, to search the messages for (Ctrl+Shift+F).
+    signal searchMessagesRequested(string text)
 
     AppDialog {
         id: renameDialog
@@ -244,7 +246,9 @@ Rectangle {
             Layout.bottomMargin: 10
             implicitHeight: 38
             leftPadding: 36
-            placeholderText: "Search"
+            objectName: "sessionFilter"
+            // (Titles only; the messages are searched with Ctrl+Shift+F.)
+            placeholderText: "Filter sessions"
             placeholderTextColor: Theme.textFaint
             color: Theme.text
             font.pixelSize: Theme.px(14)
@@ -255,6 +259,34 @@ Rectangle {
                 Icon { name: "search"; color: Theme.textFaint; implicitWidth: 16; implicitHeight: 16; x: 12; anchors.verticalCenter: parent.verticalCenter }
             }
             onTextChanged: Workspace.setFilter(text)
+            Keys.onEscapePressed: text = ""
+        }
+        // Filtering: the same words in the messages, a click away.
+        ItemDelegate {
+            id: searchMessages
+            objectName: "filterSearchMessages"
+            visible: search.text.trim() !== ""
+            Layout.fillWidth: true
+            Layout.leftMargin: 14
+            Layout.rightMargin: 14
+            Layout.bottomMargin: 6
+            implicitHeight: 30
+            leftPadding: 12
+            rightPadding: 10
+            contentItem: RowLayout {
+                spacing: 8
+                Icon { name: "search-eye"; color: Theme.textMuted; implicitWidth: 14; implicitHeight: 14 }
+                Label {
+                    Layout.fillWidth: true
+                    text: "Find “" + search.text.trim() + "” in messages"
+                    color: Theme.textMuted
+                    font.pixelSize: Theme.px(12.5)
+                    elide: Text.ElideRight
+                }
+                Label { visible: root.width >= 240; text: Keymap.seq("searchAll"); color: Theme.textFaint; font.pixelSize: Theme.px(11.5) }
+            }
+            background: Rectangle { radius: 8; color: searchMessages.hovered ? Theme.rowHover : "transparent" }
+            onClicked: root.searchMessagesRequested(search.text.trim())
         }
 
         ListView {

@@ -184,6 +184,11 @@ pub mod qobject {
         /// a search found, or -1.
         #[qinvokable]
         fn index_of_hit(self: &ChatSession, prefix: &QString, query: &QString) -> i32;
+        /// Find in this session: the rows whose text (yours and the agent's
+        /// replies, not thinking or tools) has every word of `query`, as a
+        /// JSON array of row indexes.
+        #[qinvokable]
+        fn find_rows(self: &ChatSession, query: &QString) -> QString;
         /// Row index of the row with this key, or -1.
         #[qinvokable]
         fn index_of_key(self: &ChatSession, key: &QString) -> i32;
@@ -590,6 +595,25 @@ impl ChatSession {
             .collect();
         let texts: Vec<&str> = blocks.iter().map(|(_, text)| text.as_str()).collect();
         blocks.get(harlo_core::search::best_block(&texts, &query.to_string())).map_or(first, |(i, _)| *i) as i32
+    }
+
+    pub fn find_rows(&self, query: &QString) -> QString {
+        let words: Vec<String> = query.to_string().split_whitespace().map(|w| w.to_lowercase()).collect();
+        if words.is_empty() {
+            return QString::from("[]");
+        }
+        let found: Vec<usize> = self
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| matches!(r.kind, RowKind::User | RowKind::Markdown | RowKind::Code))
+            .filter(|(_, r)| {
+                let text = if r.html.is_empty() { r.text.to_lowercase() } else { harlo_core::markdown::plain_text(&r.html).to_lowercase() };
+                words.iter().all(|w| text.contains(w.as_str()))
+            })
+            .map(|(i, _)| i)
+            .collect();
+        QString::from(&serde_json::to_string(&found).unwrap_or_else(|_| "[]".into()))
     }
 
     pub fn index_of_key(&self, key: &QString) -> i32 {

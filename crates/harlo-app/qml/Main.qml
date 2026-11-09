@@ -403,6 +403,7 @@ ApplicationWindow {
                     onProjectSettingsRequested: projectId => settingsDialog.openProject(projectId)
                     onNewSessionRequested: projectId => win.openDraft(projectId)
                     onExportRequested: (key, title) => win.exportMarkdown(key, title)
+                    onSearchMessagesRequested: text => searchDialog.openSearch(text)
                 }
             }
             // The chat, with the terminal panel under it.
@@ -615,6 +616,7 @@ ApplicationWindow {
             { id: "palette", seq: Keymap.seq("palette"), label: "Command palette", group: nav, glyph: "⌕", run: () => palette.openWith("") },
             { id: "goToSession", seq: Keymap.seq("goToSession"), label: "Go to session", group: nav, glyph: "↗", run: () => palette.openWith("") },
             { id: "searchAll", seq: Keymap.seq("searchAll"), label: "Search all sessions", group: nav, glyph: "⌕", run: () => searchDialog.openSearch() },
+            { id: "findInSession", seq: Keymap.seq("findInSession"), label: "Find in this session", group: nav, glyph: "⌕", run: () => chat.openFind() },
             { id: "actions", seq: Keymap.seq("actions"), label: "Run an action", group: nav, glyph: "›", run: () => palette.openWith(">") },
             { id: "jumpPrompt", seq: Keymap.seq("jumpPrompt"), label: "Jump to a prompt", group: nav, glyph: "≡", run: () => { if (chat.transcript.visible) chat.transcript.openPromptRail() } },
             { id: "prevPrompt", seq: Keymap.seq("prevPrompt"), label: "Previous prompt", group: nav, glyph: "↑", run: () => { if (chat.transcript.visible) chat.transcript.stepPrompt(-1) } },
@@ -3734,6 +3736,8 @@ ApplicationWindow {
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            // (Side by side here: inline has its own steps at the end.)
+            Workspace.setSetting("diff_layout", "split")
             Workspace.addProject(win.argValue("--cwd="))
             Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "demo") } }
         PauseAnimation { duration: 1200 }
@@ -3759,7 +3763,7 @@ ApplicationWindow {
             const dv = chat.diffView
             win.check(Math.abs(dv.rightPane.rowsAt() - dv.rightPane.flick.contentY) < 1, "the rows scroll with the text (" + dv.rightPane.rowsAt() + ", " + dv.rightPane.flick.contentY + ")")
             win.shotWindow("clicks-diff-next")
-            win.clickItem(win.findName("diffCollapse"), "Collapse unchanged regions") } }
+            win.diffCollapseClick() } }
         PauseAnimation { duration: 600 }
         ScriptAction { script: {
             const dv = chat.diffView
@@ -3772,7 +3776,7 @@ ApplicationWindow {
         ScriptAction { script: {
             const dv = chat.diffView
             win.check(dv.rows.length === 40 && dv.folds.length === 1, "a click opens a fold (" + dv.rows.length + " rows)")
-            win.clickItem(win.findName("diffCollapse"), "Collapse unchanged regions, off") } }
+            win.diffCollapseClick() } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
             win.check(chat.diffView.rows.length === 43 && Workspace.setting("diff_collapse") === "0", "off: every line again")
@@ -3807,6 +3811,31 @@ ApplicationWindow {
         PauseAnimation { duration: 3500 }
         ScriptAction { script: {
             win.check(chat.diffView.rightPane.editor.text === "hello once more", "it follows the file as it changes (" + chat.diffView.rightPane.editor.text + ")")
+            win.clickText("app.rs", changes) } }
+        PauseAnimation { duration: 1500 }
+        // Inline: from the More menu, one column.
+        ScriptAction { script: win.clickItem(win.findName("diffMore"), "More") }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: win.clickItem(win.findName("diffLayoutUnified"), "Always inline") }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: {
+            const dv = chat.diffView, u = dv.uni ? dv.uni.rows : []
+            const pairs = dv.rows.filter(r => r[0] === 1 && r[5] === 1).length
+            win.check(dv.unified && !dv.leftPane.visible && u.length === dv.rows.length + pairs && Workspace.setting("diff_layout") === "unified", "inline: one column, a line for each side of a change (" + u.length + " rows)")
+            const gone = u.findIndex(r => r[14] === 1), added = u.findIndex(r => r[5] === 1)
+            // (The staged side of app.rs: line 3 as it was, then as it is.)
+            const lines = dv.rightPane.editor.text.split("\n")
+            win.reviewKey = lines[gone] || ""
+            win.check(gone >= 0 && added === gone + 1 && lines[gone] === "line 3" && lines[added] === "line 3 changed", "the removed line, then the added one, in the one text (" + lines[gone] + " / " + lines[added] + ")")
+            win.check((win.findName("hunk-stage-0") !== null || win.findName("hunk-unstage-0") !== null) && dv.blocks.length > 0 && dv.hunks.every(h => h[1] >= 0 && h[1] < u.length), "hunk buttons and the change map follow")
+            win.shotWindow("clicks-diff-inline")
+            win.clickAt(win.findName("gutter-u-" + gone, dv)) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const box = chat.diffView.commentBox
+            win.check(box.visible && box.side === "old" && box.code === win.reviewKey && box.line === 3, "a comment on a removed line, inline (" + box.side + " " + box.code + " " + box.line + ")")
+            box.close()
+            chat.diffView.setLayout("auto")
             win.summary(); Qt.quit() } }
     }
 
@@ -4659,6 +4688,7 @@ ApplicationWindow {
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            Workspace.setSetting("diff_layout", "split")
             Workspace.addProject(win.argValue("--cwd="))
             win.reviewKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "demo") } }
         PauseAnimation { duration: 1200 }
@@ -4694,8 +4724,11 @@ ApplicationWindow {
             const dv = chat.diffView, bar = win.findName("reviewBar", dv)
             win.check(dv.comments.length === 2 && dv.comments.some(c => c.side === "old"), "Ctrl+Enter keeps the second (on a removed line)")
             win.check(bar !== null && bar.visible && dv.canSend, "the bar: 2 comments, ready to send")
-            const summary = win.findName("reviewSummary", bar)
-            win.check(summary !== null && summary.text.indexOf("2 comments on 1 file · for ") === 0, "it says how many, on how many files, for which session (" + (summary ? summary.text : "") + ")")
+            const summary = win.findName("reviewSummary", bar), who = win.findName("reviewFor", bar)
+            // (Narrow, who they're for is cut first: it may have no room.)
+            win.check(summary !== null && (summary.text === "2 comments on 1 file" || (chat.diffView.width < 460 && summary.text === "2 comments")) && (who === null || who.text.indexOf("for ") === 0), "it says how many, on how many files, for which session (" + (summary ? summary.text + " " + (who ? who.text : "-") : "") + ")")
+            // Each saved comment shows under its line.
+            win.check(win.findName("diffNote-0", dv) !== null && win.findName("diffNote-1", dv) !== null && dv.rows.filter(r => r[0] === 4).length === 6, "the comments show under their lines (" + dv.rows.filter(r => r[0] === 4).length + " rows kept for them)")
             win.shot("clicks-review") } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: win.clickItem(win.findName("reviewSend", chat.diffView), "Send to the agent") }
@@ -4716,6 +4749,15 @@ ApplicationWindow {
             Qt.quit() } }
     }
     property int reviewRow: -1
+    /// The diff's "hide unchanged lines": its button, or (a tight toolbar)
+    /// the More menu's item.
+    function diffCollapseClick() {
+        const b = win.findName("diffCollapse")
+        if (b) { win.clickItem(b, "Hide unchanged lines"); return }
+        win.clickItem(win.findName("diffMore"), "More")
+        diffMenuTimer.restart()
+    }
+    Timer { id: diffMenuTimer; interval: 350; onTriggered: win.clickItem(win.findName("diffMenuCollapse"), "Hide unchanged lines (menu)") }
     /// A click in the middle of an item, without scrolling to it (the
     /// diff's line numbers follow its text: scrolling them alone would
     /// part them).
@@ -6041,6 +6083,132 @@ ApplicationWindow {
         ScriptAction { script: { win.log("opened:", Workspace.activeKey.split("/").pop(), "rows:", chat.transcript.count, "pending:", chat.pendingReveal); win.shot("search-opened") } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: Qt.quit() }
+    }
+
+    // Screenshots of the diff viewer and the session search, for a design
+    // review (not a test: SCENARIOS=diffshots KEEP=1 scripts/click-tests.sh 1280).
+    function diffShot(name) { win.shotWindow("diff-" + name) }
+    function diffSearch(q) { searchDialog.query = q; searchDialog.run() }
+    SequentialAnimation {
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "diffshots"
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: {
+            Workspace.chooseThemeMode("dark")
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            win.height = 900
+            Workspace.addProject(win.argValue("--cwd=").replace(/\/repo$/, "/webapp")) } }
+        PauseAnimation { duration: 3000 }
+        ScriptAction { script: win.clickText("Fix the login redirect loop", sidebar) }
+        PauseAnimation { duration: 2000 }
+        ScriptAction { script: { windowSettings.rightMode = "changes"; git.refresh(true) } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: { win.diffShot("changes"); win.clickText("session.ts", changes) } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            const dv = chat.diffView
+            // Beside the sidebar and Changes, the sides don't fit: inline.
+            win.check(dv.unified === !dv.splitFits && (win.width > 1500 || dv.unified), "inline when the sides don't fit (" + dv.width + " px, inline " + dv.unified + ")")
+            win.check(win.findName("hunk-stage-0", dv) !== null && win.findName("hunk-discard-0", dv) !== null, "each change has Stage and Discard buttons")
+            win.diffShot("file")
+            win.clickItem(win.findName("diffNext"), "next change") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: { win.diffShot("next"); win.diffCollapseClick() } }
+        PauseAnimation { duration: 700 }
+        ScriptAction { script: {
+            win.diffShot("collapsed")
+            const dv = chat.diffView, u = dv.shownRows
+            win.reviewRow = u.findIndex(r => r[5] === 1 && r[14] !== 1)
+            win.clickAt(win.findName((dv.unified ? "gutter-u-" : "gutter-r-") + win.reviewRow, dv)) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            win.clickItem(win.findName("commentText", chat.diffView.commentBox.contentItem), "the comment")
+            TestInput.typeText("Should this also check the cookie's secure flag? It only matters behind a proxy that ends TLS.") } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: { win.diffShot("comment-box"); win.clickItem(win.findName("commentSave", chat.diffView.commentBox.contentItem), "Comment") } }
+        PauseAnimation { duration: 700 }
+        ScriptAction { script: {
+            const dv = chat.diffView
+            win.check(win.findName("diffNote-0", dv) !== null, "the saved comment shows under its line")
+            win.diffShot("review-bar")
+            // Wide (no sidebar, no panel): side by side.
+            windowSettings.sidebarOpen = false
+            windowSettings.rightMode = "" } }
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: {
+            const dv = chat.diffView
+            win.check(dv.unified === !dv.splitFits, "side by side when it fits (" + dv.width + " px, inline " + dv.unified + ")")
+            win.diffShot("wide")
+            win.clickItem(win.findName("diffMore"), "More") } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: { win.diffShot("more-menu"); TestInput.key(Qt.Key_Escape, 0) } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: { windowSettings.sidebarOpen = true; windowSettings.rightMode = "changes" } }
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: { win.diffShot("rail"); win.clickText("return-to.test.ts", changes) } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: { win.diffShot("new-file"); win.clickText("guard.ts", changes) } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: { win.diffShot("small"); Workspace.chooseThemeMode("light") } }
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: { win.diffShot("small-light"); win.clickText("session.ts", changes) } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: { win.diffShot("collapsed-light"); Workspace.chooseThemeMode("dark") } }
+        PauseAnimation { duration: 900 }
+        // The sidebar's filter, and from it the messages.
+        ScriptAction { script: { win.clickItem(win.findName("sessionFilter"), "Filter sessions"); TestInput.typeText("cookie") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const row = win.findName("filterSearchMessages")
+            win.check(row !== null && row.visible, "filtering offers the messages search")
+            win.shotWindow("search-filter")
+            win.clickItem(row, "Search messages for") } }
+        PauseAnimation { duration: 700 }
+        ScriptAction { script: {
+            win.check(searchDialog.visible && searchDialog.query === "cookie" && searchDialog.hits.length > 0, "it opens the search with those words (" + searchDialog.hits.length + " hits)")
+            const f = win.findName("sessionFilter"); f.text = ""
+            win.diffSearch("") } }
+        PauseAnimation { duration: 600 }
+        // Search: empty (recent sessions), results, none, then a hit opened.
+        ScriptAction { script: {
+            win.check(searchDialog.recents.length === 4 && win.findName("searchHint") !== null, "empty, it says what it searches and offers recent sessions (" + searchDialog.recents.length + ")")
+            win.shotWindow("search-empty")
+            win.diffSearch("returnTo") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const h = searchDialog.hits
+            win.check(h.length > 0 && h.every(x => x.snippet.indexOf("`") < 0), "snippets without markdown")
+            win.shotWindow("search-results")
+            searchDialog.current = Math.min(2, h.length - 1) } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: { win.shotWindow("search-chosen"); win.diffSearch("kubernetes") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: { win.shotWindow("search-none"); Workspace.chooseThemeMode("light"); win.diffSearch("returnTo") } }
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: { win.shotWindow("search-results-light"); Workspace.chooseThemeMode("dark") } }
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            const i = searchDialog.hits.findIndex(h => (h.title || "").indexOf("security review") >= 0 && h.snippet.indexOf("evil") >= 0)
+            searchDialog.pick(Math.max(0, i)) } }
+        PauseAnimation { duration: 1800 }
+        ScriptAction { script: {
+            win.check(chat.transcript.wordMarks.length > 0, "the matched words are marked where it lands (" + chat.transcript.wordMarks.length + ")")
+            win.shotWindow("search-opened")
+            chat.openFind()
+            TestInput.typeText("cookie") } }
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            const fb = chat.findBar
+            win.check(fb.visible && fb.hits.length === 3 && fb.current >= 0 && chat.transcript.wordMarks.length > 0, "find in the session: every message with the word, the one shown marked (" + fb.hits.length + ")")
+            win.shotWindow("find")
+            TestInput.key(Qt.Key_Return, 0) } }
+        PauseAnimation { duration: 700 }
+        ScriptAction { script: {
+            win.shotWindow("find-next")
+            TestInput.key(Qt.Key_Escape, 0) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            win.check(!chat.findBar.visible && chat.transcript.wordMarks.length === 0, "Esc closes it and clears the marks")
+            win.summary(); Qt.quit() } }
     }
 
     // Todos and queue editing (demo harness).

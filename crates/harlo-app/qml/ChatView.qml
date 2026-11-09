@@ -24,6 +24,9 @@ Rectangle {
     property alias unsavedDialog: unsavedDialog
     property alias undoDialog: undoDialog
     property alias reviewStore: reviewStore
+    property alias findBar: findBar
+    /// Ctrl+F: find in the session shown.
+    function openFind() { if (!root.covered && root.hasSession) findBar.show() }
     // Review comments on diffs, by repository (`{ root: [ { path, side, line,
     // code, text } ] }`), until sent or cleared.
     QtObject {
@@ -253,7 +256,7 @@ Rectangle {
         repeat: true
         onTriggered: {
             const i = session.indexOfHit(root.pendingReveal, root.revealQuery)
-            if (i >= 0) { transcript.revealIndex(i); stop(); root.pendingReveal = "" }
+            if (i >= 0) { transcript.revealIndex(i, root.revealQuery); stop(); root.pendingReveal = "" }
             else if (++root.revealTries > 40) { stop(); root.pendingReveal = "" }
         }
     }
@@ -467,6 +470,85 @@ Rectangle {
                 promptRail: Workspace.setting("prompt_rail") !== "0"
                 onPromptRailFinished: composer.focusInput()
                 visible: root.hasSession
+            }
+            // Ctrl+F: find in this session. Each match is a message (yours
+            // or a reply); Enter goes to the next, Shift+Enter back, its
+            // words marked while the bar is open.
+            Rectangle {
+                id: findBar
+                objectName: "findBar"
+                property bool open: false
+                property var hits: []
+                property int current: -1
+                readonly property string sessionKey: root.session.key
+                onSessionKeyChanged: if (open) { open = false; hits = []; current = -1; transcript.clearMarks() }
+                visible: open && root.hasSession
+                anchors.top: parent.top
+                anchors.right: parent.right
+                anchors.topMargin: 8
+                anchors.rightMargin: 16
+                width: Math.min(400, parent.width - 32)
+                height: 40
+                radius: 10
+                color: Theme.raised
+                border.color: Theme.border
+                z: 20
+                function show() {
+                    open = true
+                    findField.selectAll()
+                    findField.forceActiveFocus()
+                    if (findField.text.trim() !== "") search()
+                }
+                function hide() {
+                    open = false
+                    hits = []
+                    current = -1
+                    transcript.clearMarks()
+                    composer.focusInput()
+                }
+                function search() {
+                    hits = findField.text.trim() === "" ? [] : JSON.parse(root.session.findRows(findField.text))
+                    if (hits.length === 0) { current = -1; transcript.clearMarks(); return }
+                    // The first match from where you're reading.
+                    const top = transcript.topIndex()
+                    const i = hits.findIndex(h => h >= top)
+                    go(i >= 0 ? i : 0)
+                }
+                function go(i) {
+                    if (hits.length === 0) return
+                    current = (i + hits.length) % hits.length
+                    transcript.revealIndex(hits[current], findField.text, true)
+                }
+                Timer { id: findDebounce; interval: 200; onTriggered: findBar.search() }
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 6
+                    anchors.rightMargin: 6
+                    spacing: 2
+                    AppTextField {
+                        id: findField
+                        objectName: "findField"
+                        Layout.fillWidth: true
+                        leftPadding: 30
+                        placeholderText: "Find in this session"
+                        background: null
+                        Icon { x: 8; anchors.verticalCenter: parent.verticalCenter; name: "search"; color: Theme.muted; implicitWidth: 14; implicitHeight: 14 }
+                        onTextEdited: findDebounce.restart()
+                        Keys.onReturnPressed: event => findBar.go(findBar.current + ((event.modifiers & Qt.ShiftModifier) ? -1 : 1))
+                        Keys.onEnterPressed: event => findBar.go(findBar.current + ((event.modifiers & Qt.ShiftModifier) ? -1 : 1))
+                        Keys.onEscapePressed: findBar.hide()
+                    }
+                    Label {
+                        objectName: "findCount"
+                        text: findBar.hits.length > 0 ? (findBar.current + 1) + " of " + findBar.hits.length : findField.text.trim() !== "" && !findDebounce.running ? "None" : ""
+                        color: Theme.textMuted
+                        font.pixelSize: Theme.px(12)
+                        Layout.rightMargin: 4
+                    }
+                    ComposerIconButton { objectName: "findPrev"; iconName: "arrow-up-s"; tip: "Previous (Shift+Enter)"; enabled: findBar.hits.length > 0; onClicked: findBar.go(findBar.current - 1) }
+                    ComposerIconButton { objectName: "findNext"; iconName: "arrow-down-s"; tip: "Next (Enter)"; enabled: findBar.hits.length > 0; onClicked: findBar.go(findBar.current + 1) }
+                    ComposerIconButton { objectName: "findClose"; iconName: "close"; tip: "Close (Esc)"; onClicked: findBar.hide() }
+                }
             }
             // Scrolled back: the text fades out under the Latest button
             // rather than running into it.

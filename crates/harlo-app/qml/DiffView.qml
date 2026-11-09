@@ -8,7 +8,9 @@ import harlo
 // Removed lines are red, added ones green, the changed part of a line
 // stronger; hatched rows stand in for lines the other side doesn't have.
 // The strip on the right maps every change; the buttons between the sides
-// stage, unstage or discard a hunk. It reloads as the file changes.
+// stage, unstage or discard a hunk. It reloads as the file changes. When
+// the two sides wouldn't fit ~50 characters each it shows one column
+// instead (inline: a change's removed lines above its added ones).
 Rectangle {
     id: root
     required property string path      // absolute; "" when no diff tab is active
@@ -31,7 +33,8 @@ Rectangle {
     readonly property string relPath: dg.root !== "" && path.startsWith(dg.root + "/") ? path.substring(dg.root.length + 1) : fileName
     readonly property var comments: review && dg.root !== "" ? (review.all[dg.root] || []) : []
     function commentAt(side, line) { return comments.findIndex(c => c.path === relPath && c.side === side && c.line === line) }
-    function openComment(isLeft, row) {
+    // `row`: the line's row in `rows`; `pane` and `shown`: where it shows.
+    function openComment(isLeft, row, pane, shown) {
         const r = rows[row]
         if (!r || !review) return
         const kind = r[isLeft ? 0 : 5], line = r[isLeft ? 1 : 6]
@@ -39,7 +42,12 @@ Rectangle {
         const side = isLeft ? "old" : "new"
         const code = ((isLeft ? view.left : view.right).split("\n")[row] || "").trim()
         const i = commentAt(side, line)
-        commentBox.edit(side, line, code, i >= 0 ? comments[i].text : "", row, isLeft)
+        commentBox.edit(side, line, code, i >= 0 ? comments[i].text : "", shown, pane)
+    }
+    // A saved comment's card: open it again.
+    function editComment(ci, pane, shown) {
+        const c = comments[ci]
+        if (c) commentBox.edit(c.side, c.line, c.code, c.text, shown, pane)
     }
     function reviewMessage() {
         const lines = ["Review comments on your changes. Please address each one:", ""]
@@ -56,14 +64,13 @@ Rectangle {
         property int line: 0
         property string code: ""
         property bool existing: false
-        function edit(s, l, c, text, row, isLeft) {
+        function edit(s, l, c, text, row, pane) {
             side = s
             line = l
             code = c
             existing = text !== ""
             commentText.text = text
-            const pane = isLeft ? leftPane : rightPane
-            x = Math.min(pane.x + 40, root.width - width - 12)
+            x = Math.max(12, Math.min(pane.x + 40, root.width - width - 12))
             y = Math.min(Math.max(8, sides.y + 8 + (row + 1) * root.lineHeight - pane.flick.contentY + 4), root.height - height - 12)
             open()
             commentText.forceActiveFocus()
@@ -153,12 +160,26 @@ Rectangle {
     property alias rightPane: rightPane
     property alias commentBox: commentBox
 
+    // ---- layout: side by side, or inline --------------------------------
+    // "auto" (side by side when each side fits ~50 characters), "split" or
+    // "unified"; remembered.
+    property string layoutSetting: Workspace.setting("diff_layout") || "auto"
+    function setLayout(v) {
+        Workspace.setSetting("diff_layout", v)
+        layoutSetting = v
+        jumped = false
+    }
+    FontMetrics { id: codeMetrics; font.family: Theme.mono; font.pixelSize: Theme.mpx(13) }
+    readonly property bool splitFits: (sides.width - sides.middleWidth - sides.rulerWidth) / 2 - 66 >= 50 * codeMetrics.averageCharacterWidth
+    readonly property bool unified: !sides.added && (layoutSetting === "unified" || (layoutSetting !== "split" && !splitFits))
+
     onPathChanged: load()
     onStagedChanged: load()
     Component.onCompleted: load()
     function load() {
         jumped = false
         expanded = ({})
+        layoutSetting = Workspace.setting("diff_layout") || "auto"
         if (path !== "") dg.showFile(path, staged)
     }
     readonly property bool remote: path.startsWith("ssh://")
@@ -187,13 +208,19 @@ Rectangle {
     readonly property int context: 3
     // Folds opened by hand (by their first row; a fold row's [10]).
     property var expanded: ({})
+    // A saved comment shows under its line, on rows of its own (kind 4:
+    // `[4, 0, offset, -1, -1, 4, 0, offset, -1, -1, -1, comment, k]`).
+    readonly property int noteRows: 3
     readonly property var view: {
         const src = allRows, left = dg.splitLeft, right = dg.splitRight
-        if (!collapse || src.length === 0)
+        const mine = []
+        comments.forEach((c, i) => { if (c.path === relPath) mine.push([c, i]) })
+        if ((!collapse && mine.length === 0) || src.length === 0)
             return { rows: src, left: left, right: right, index: null }
+        const notesAt = r => mine.filter(([c]) => c.side === "old" ? r[0] < 2 && r[1] === c.line : r[5] < 2 && r[6] === c.line).map(([, i]) => i)
         // Rows within `context` of a change stay.
-        const keep = new Array(src.length).fill(false)
-        for (let i = 0; i < src.length; i++) {
+        const keep = new Array(src.length).fill(!collapse)
+        for (let i = 0; collapse && i < src.length; i++) {
             if (src[i][0] === 0 && src[i][5] === 0) continue
             for (let j = Math.max(0, i - context); j <= Math.min(src.length - 1, i + context); j++) keep[j] = true
         }
@@ -224,12 +251,46 @@ Rectangle {
             for (; i < end && i < src.length; i++) {
                 index[i] = rows.length
                 add(src[i], lLines[i] || "", rLines[i] || "")
+                for (const ci of notesAt(src[i]))
+                    for (let k = 0; k < noteRows; k++) add([4, 0, 0, -1, -1, 4, 0, 0, -1, -1, -1, ci, k], "", "")
             }
         }
         return { rows: rows, left: lOut.join("\n"), right: rOut.join("\n"), index: index }
     }
     readonly property var rows: view.rows
-    readonly property var hunks: info ? (view.index ? info.hunks.map(h => [h[0], view.index[h[1]]]) : info.hunks) : []
+    // Inline: one column of `rows`, a change's removed lines above its added
+    // ones. Same fields, plus [13] its row in `rows` and [14] 1 for an old line.
+    readonly property var uni: {
+        if (!unified) return null
+        const src = view.rows, lL = view.left.split("\n"), rL = view.right.split("\n")
+        const out = [], lines = [], index = new Array(src.length)
+        let off = 0
+        const add = (r, text) => { r[2] = off; r[7] = off; out.push(r); lines.push(text); off += text.length + 1 }
+        const changed = r => r[0] === 1 || r[0] === 2 || r[5] === 1 || r[5] === 2
+        for (let i = 0; i < src.length;) {
+            const r = src[i]
+            if (!changed(r)) {
+                index[i] = out.length
+                if (r[0] === 3 || r[0] === 4) { const c = r.slice(); c[13] = i; c[14] = 0; add(c, "") }
+                else add([-1, r[1], 0, -1, -1, 0, r[6], 0, -1, -1, -1, -1, -1, i, 0], rL[i] || "")
+                i++
+                continue
+            }
+            let j = i
+            while (j < src.length && changed(src[j])) j++
+            for (let k = i; k < j; k++) if (src[k][0] === 1) { index[k] = out.length; add([1, src[k][1], 0, src[k][3], src[k][4], -1, 0, 0, -1, -1, -1, -1, -1, k, 1], lL[k] || "") }
+            for (let k = i; k < j; k++) if (src[k][5] === 1) { if (index[k] === undefined) index[k] = out.length; add([-1, 0, 0, -1, -1, 1, src[k][6], 0, src[k][8], src[k][9], -1, -1, -1, k, 0], rL[k] || "") }
+            i = j
+        }
+        return { rows: out, text: lines.join("\n"), index: index }
+    }
+    /// The rows the main (right, or only) pane shows.
+    readonly property var shownRows: uni ? uni.rows : rows
+    readonly property var hunks: {
+        if (!info) return []
+        const toView = view.index ? info.hunks.map(h => [h[0], view.index[h[1]]]) : info.hunks
+        return uni ? toView.map(h => [h[0], uni.index[h[1]]]) : toView
+    }
     readonly property var folds: rows.reduce((out, r, i) => { if (r[0] === 3) out.push({ row: i, count: r[1], start: r[10] }); return out }, [])
     function openFold(start) {
         const e = Object.assign({}, expanded)
@@ -243,8 +304,11 @@ Rectangle {
     readonly property var blocks: {
         const out = []
         let cur = null
+        const rows = root.shownRows
         for (let i = 0; i < rows.length; i++) {
             const r = rows[i], l = r[0] === 1 || r[0] === 2, rt = r[5] === 1 || r[5] === 2
+            // (A comment under a changed line doesn't split its change.)
+            if (r[0] === 4) continue
             if (l || rt) {
                 if (!cur) { cur = { start: i, end: i + 1, left: false, right: false }; out.push(cur) }
                 cur.end = i + 1
@@ -259,7 +323,7 @@ Rectangle {
     readonly property real lineHeight: leftPane.lineHeight
     // The first time a file's changes show, they're scrolled into view.
     property bool jumped: false
-    onBlocksChanged: if (!jumped && blocks.length > 0 && leftPane.ready && rightPane.ready) { jumped = true; Qt.callLater(() => showRow(blocks[0].start)) }
+    onBlocksChanged: if (!jumped && blocks.length > 0 && leftPane.ready && rightPane.ready) { jumped = true; Qt.callLater(() => { if (blocks.length > 0) showRow(blocks[0].start) }) }
 
     function topRow() { return Math.floor(rightPane.flick.contentY / lineHeight) }
     function showRow(row) {
@@ -297,20 +361,23 @@ Rectangle {
         spacing: 0
 
         // ---- toolbar ------------------------------------------------------
-        // (In an Item: however much it holds, it doesn't widen the view;
-        // narrow, the less needed parts go.)
+        // (In an Item: however much it holds, it doesn't widen the view.
+        // Narrow, the folder and counts go and the file's actions move into
+        // a menu.)
         Item {
         Layout.fillWidth: true
         implicitHeight: toolbar.implicitHeight + 12
         clip: true
         readonly property bool narrow: width < 640
-        readonly property bool tight: width < 440
+        // (Tighter still: the counts go, and hiding unchanged lines and the
+        // layout join the menu.)
+        readonly property bool tight: width < 360
         RowLayout {
             id: toolbar
             anchors.fill: parent
             anchors.leftMargin: 12
             anchors.rightMargin: 8
-            spacing: 8
+            spacing: 6
             FileIcon { path: root.fileName; Layout.preferredWidth: 16; Layout.preferredHeight: 16; sourceSize: Qt.size(16, 16) }
             Label { text: root.fileName; color: Theme.foreground; font.pixelSize: Theme.px(13); font.bold: true; elide: Text.ElideRight; Layout.minimumWidth: 0; Layout.maximumWidth: implicitWidth }
             Label {
@@ -329,13 +396,14 @@ Rectangle {
                 radius: 9
                 color: Theme.subtle
                 border.color: Theme.border
-                Label { id: sideLabel; anchors.centerIn: parent; text: root.staged ? "Staged" : "Working Tree"; color: Theme.muted; font.pixelSize: Theme.px(10.5) }
+                Label { id: sideLabel; anchors.centerIn: parent; text: root.staged ? "Staged" : "Working tree"; color: Theme.muted; font.pixelSize: Theme.px(10.5) }
                 HoverHandler { id: sideHover }
                 ToolTip.visible: sideHover.hovered
                 ToolTip.text: root.staged ? "What's staged (right) against the last commit (left)" : "The file as it is (right) against what's staged or committed (left)"
             }
             Label {
                 objectName: "diffStats"
+                visible: !toolbar.parent.tight
                 text: dg.diffStats
                 color: Theme.muted
                 font.family: Theme.mono
@@ -347,49 +415,82 @@ Rectangle {
                 color: Theme.muted
                 font.pixelSize: Theme.px(11.5)
             }
-            FlatButton {
+            ToolIcon {
                 objectName: "diffPrev"
                 enabled: root.blocks.length > 0
-                text: "↑"; outlined: false; padding: 3; font.pixelSize: Theme.px(13)
-                ToolTip.visible: hovered; ToolTip.text: "Previous change (Alt+↑)"
+                iconName: "arrow-up-s"
+                tip: "Previous change (Alt+↑)"
                 onClicked: root.nextChange(-1)
             }
-            FlatButton {
+            ToolIcon {
                 objectName: "diffNext"
                 enabled: root.blocks.length > 0
-                text: "↓"; outlined: false; padding: 3; font.pixelSize: Theme.px(13)
-                ToolTip.visible: hovered; ToolTip.text: "Next change (Alt+↓)"
+                iconName: "arrow-down-s"
+                tip: "Next change (Alt+↓)"
                 onClicked: root.nextChange(1)
             }
-            FlatButton {
+            ToolIcon {
                 objectName: "diffCollapse"
-                text: "⇕"; outlined: root.collapse; padding: 3; font.pixelSize: Theme.px(13)
-                accent: root.collapse ? Theme.primary : Theme.foreground
-                ToolTip.visible: hovered
-                ToolTip.text: root.collapse ? "Show unchanged regions" : "Collapse unchanged regions (show only the changes and the lines around them)"
+                visible: !toolbar.parent.tight
+                iconName: "expand-up-down"
+                on: root.collapse
+                tip: root.collapse ? "Show unchanged lines" : "Hide unchanged lines (keep the changes and 3 lines around each)"
                 onClicked: root.setCollapse(!root.collapse)
             }
-            Rectangle { implicitWidth: 1; implicitHeight: 16; color: Theme.border }
+            ToolIcon {
+                objectName: "diffLayout"
+                visible: !sides.added && !toolbar.parent.tight
+                iconName: root.unified ? "layout-column" : "layout-row"
+                tip: root.unified ? "Show side by side" + (root.layoutSetting === "auto" ? " (shown inline: the sides don't fit)" : "")
+                                  : "Show inline (one column)"
+                onClicked: root.setLayout(root.unified ? "split" : "unified")
+            }
+            Rectangle { visible: !toolbar.parent.narrow; implicitWidth: 1; implicitHeight: 16; color: Theme.border; Layout.leftMargin: 2; Layout.rightMargin: 2 }
             FlatButton {
-                text: toolbar.parent.tight ? "↗" : toolbar.parent.narrow ? "Open" : "Open file"; font.pixelSize: Theme.px(11.5); padding: 4
+                objectName: "diffOpen"
+                visible: !toolbar.parent.narrow
+                text: "Open file"; font.pixelSize: Theme.px(11.5); padding: 4
                 ToolTip.visible: hovered; ToolTip.text: "Open it in the editor"
                 onClicked: root.openFile(root.path)
             }
             FlatButton {
                 objectName: "diffDiscardFile"
-                visible: !root.staged && dg.selectedPath !== ""
-                text: toolbar.parent.tight ? "↺" : "Discard"; accent: Theme.error; font.pixelSize: Theme.px(11.5); padding: 4
+                visible: !toolbar.parent.narrow && !root.staged && dg.selectedPath !== ""
+                text: "Discard…"; accent: Theme.error; font.pixelSize: Theme.px(11.5); padding: 4
                 ToolTip.visible: hovered; ToolTip.text: "Discard all the changes to this file"
                 onClicked: { confirmDiscard.hunk = -1; confirmDiscard.open() }
             }
             FlatButton {
                 objectName: "diffStageFile"
-                visible: dg.selectedPath !== ""
-                text: toolbar.parent.tight ? (root.staged ? "−" : "+") : root.staged ? "Unstage" : "Stage"; font.pixelSize: Theme.px(11.5); padding: 4
+                visible: !toolbar.parent.narrow && dg.selectedPath !== ""
+                text: root.staged ? "Unstage" : "Stage"; font.pixelSize: Theme.px(11.5); padding: 4
                 ToolTip.visible: hovered; ToolTip.text: root.staged ? "Unstage the whole file" : "Stage the whole file"
                 onClicked: root.staged ? dg.unstageFile(dg.selectedPath) : dg.stageFile(dg.selectedPath)
             }
+            // Narrow: the file's actions and the layout choice in a menu.
+            ToolIcon {
+                id: moreButton
+                objectName: "diffMore"
+                iconName: "more"
+                tip: "More"
+                onClicked: moreMenu.popup(moreButton, 0, moreButton.height + 4)
+            }
         }
+        }
+        AppMenu {
+            id: moreMenu
+            objectName: "diffMoreMenu"
+            AppMenuItem { text: "Open file"; visible: toolbar.parent.narrow; onTriggered: root.openFile(root.path) }
+            AppMenuItem { text: root.staged ? "Unstage the file" : "Stage the file"; visible: toolbar.parent.narrow && dg.selectedPath !== ""
+                onTriggered: root.staged ? dg.unstageFile(dg.selectedPath) : dg.stageFile(dg.selectedPath) }
+            AppMenuItem { text: "Discard the changes…"; danger: true; visible: toolbar.parent.narrow && !root.staged && dg.selectedPath !== ""
+                onTriggered: { confirmDiscard.hunk = -1; confirmDiscard.open() } }
+            AppMenuSeparator { visible: toolbar.parent.narrow; height: visible ? implicitHeight : 0 }
+            AppMenuItem { objectName: "diffMenuCollapse"; text: "Hide unchanged lines"; visible: toolbar.parent.tight; marked: root.collapse; onTriggered: root.setCollapse(!root.collapse) }
+            AppMenuSeparator { visible: toolbar.parent.tight; height: visible ? implicitHeight : 0 }
+            AppMenuItem { objectName: "diffLayoutAuto"; text: "Side by side when it fits"; marked: root.layoutSetting === "auto"; onTriggered: root.setLayout("auto") }
+            AppMenuItem { objectName: "diffLayoutSplit"; text: "Always side by side"; marked: root.layoutSetting === "split"; onTriggered: root.setLayout("split") }
+            AppMenuItem { objectName: "diffLayoutUnified"; text: "Always inline"; marked: root.layoutSetting === "unified"; onTriggered: root.setLayout("unified") }
         }
         Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.border }
 
@@ -433,17 +534,20 @@ Rectangle {
             }
             readonly property int middleWidth: 30
             readonly property int rulerWidth: 14
-            // A new file has no old side: its lines take the whole width.
+            // A new file has no old side: its lines take the whole width, as
+            // they do inline.
             readonly property bool added: dg.splitLeft.replace(/\n/g, "") === "" && dg.splitRight.trim() !== ""
-            readonly property real paneWidth: (width - middleWidth - rulerWidth) / (added ? 1 : 2)
+            readonly property bool single: added || root.unified
+            readonly property real paneWidth: (width - middleWidth - rulerWidth) / (single ? 1 : 2)
 
             DiffPane {
                 id: leftPane
                 isLeft: true
+                rows: root.rows
                 text: root.view.left
                 x: 0
-                visible: !sides.added
-                width: sides.added ? 0 : sides.paneWidth
+                visible: !sides.single
+                width: sides.single ? 0 : sides.paneWidth
                 height: sides.height
                 onScrolled: y => { if (rightPane.flick.contentY !== y) rightPane.flick.contentY = y }
             }
@@ -464,35 +568,40 @@ Rectangle {
                         readonly property real rowY: 8 + modelData[1] * root.lineHeight - rightPane.flick.contentY
                         x: (middle.width - width) / 2
                         y: rowY
-                        visible: rowY > -40 && rowY < middle.height
-                        spacing: 2
+                        visible: rowY > -60 && rowY < middle.height
+                        spacing: 4
                         Repeater {
-                            model: root.staged ? [["−", "Unstage this change", "unstage"]] : [["+", "Stage this change", "stage"], ["↺", "Discard this change", "discard"]]
-                            Rectangle {
+                            model: root.staged ? [["subtract", "Unstage this change", "unstage"]] : [["add", "Stage this change", "stage"], ["arrow-go-back", "Discard this change…", "discard"]]
+                            Button {
                                 id: hunkButton
                                 required property var modelData
                                 objectName: "hunk-" + modelData[2] + "-" + hunkButtons.hunk
-                                width: 20
-                                height: 18
-                                radius: 4
-                                color: hunkHover.hovered ? Theme.hover : Theme.elevated
-                                border.color: Theme.border
-                                Label {
-                                    anchors.centerIn: parent
-                                    text: hunkButton.modelData[0]
-                                    color: hunkButton.modelData[2] === "discard" ? Theme.error : Theme.foreground
-                                    font.pixelSize: Theme.px(12)
-                                }
-                                HoverHandler { id: hunkHover }
-                                ToolTip.visible: hunkHover.hovered
-                                ToolTip.text: hunkButton.modelData[1]
-                                TapHandler {
-                                    onTapped: {
-                                        const what = hunkButton.modelData[2]
-                                        if (what === "stage") dg.stageHunk(hunkButtons.hunk)
-                                        else if (what === "unstage") dg.unstageHunk(hunkButtons.hunk)
-                                        else { confirmDiscard.hunk = hunkButtons.hunk; confirmDiscard.open() }
+                                implicitWidth: 22
+                                implicitHeight: 22
+                                padding: 0
+                                flat: true
+                                contentItem: Item {
+                                    Icon {
+                                        anchors.centerIn: parent
+                                        name: hunkButton.modelData[0]
+                                        color: hunkButton.modelData[2] === "discard" ? Theme.error : Theme.foreground
+                                        implicitWidth: 14
+                                        implicitHeight: 14
                                     }
+                                }
+                                background: Rectangle {
+                                    radius: 6
+                                    color: hunkButton.down ? Theme.pressed : hunkButton.hovered ? Theme.hover : Theme.elevated
+                                    border.color: hunkButton.visualFocus ? Theme.accent : Theme.border
+                                }
+                                ToolTip.visible: hovered || visualFocus
+                                ToolTip.delay: 300
+                                ToolTip.text: modelData[1]
+                                onClicked: {
+                                    const what = hunkButton.modelData[2]
+                                    if (what === "stage") dg.stageHunk(hunkButtons.hunk)
+                                    else if (what === "unstage") dg.unstageHunk(hunkButtons.hunk)
+                                    else { confirmDiscard.hunk = hunkButtons.hunk; confirmDiscard.open() }
                                 }
                             }
                         }
@@ -502,7 +611,9 @@ Rectangle {
             DiffPane {
                 id: rightPane
                 isLeft: false
-                text: root.view.right
+                unified: root.unified
+                rows: root.shownRows
+                text: root.uni ? root.uni.text : root.view.right
                 x: leftPane.width + sides.middleWidth
                 width: sides.paneWidth
                 height: sides.height
@@ -516,13 +627,17 @@ Rectangle {
                 width: sides.rulerWidth
                 height: sides.height
                 Rectangle { width: 1; height: parent.height; color: Theme.border }
-                readonly property real rowScale: root.rows.length > 0 ? height / root.rows.length : 0
+                // All on screen: each change beside its rows; else the whole
+                // file squeezed to the strip.
+                readonly property bool fits: root.shownRows.length * root.lineHeight + 8 <= height
+                readonly property real startY: fits ? 8 : 0
+                readonly property real rowScale: fits ? root.lineHeight : root.shownRows.length > 0 ? height / root.shownRows.length : 0
                 Repeater {
                     model: root.blocks
                     Item {
                         required property var modelData
                         x: 2
-                        y: modelData.start * ruler.rowScale
+                        y: ruler.startY + modelData.start * ruler.rowScale
                         width: ruler.width - 3
                         height: Math.max(2, (modelData.end - modelData.start) * ruler.rowScale)
                         Rectangle { width: parent.width / 2; height: parent.height; color: Theme.error; opacity: 0.8; visible: parent.modelData.left }
@@ -532,6 +647,7 @@ Rectangle {
                 // Where the view is.
                 Rectangle {
                     readonly property var f: rightPane.flick
+                    visible: !ruler.fits
                     x: 1
                     width: parent.width - 1
                     y: f.contentHeight > 0 ? f.contentY / f.contentHeight * parent.height : 0
@@ -557,6 +673,7 @@ Rectangle {
             id: reviewBar
             objectName: "reviewBar"
             readonly property int files: [...new Set(root.comments.map(c => c.path))].length
+            readonly property bool narrow: root.width < 460
             visible: root.comments.length > 0
             Layout.fillWidth: true
             Layout.margins: 10
@@ -569,15 +686,27 @@ Rectangle {
                 color: Theme.accentSoft
                 Label { anchors.centerIn: parent; text: root.comments.length; color: Theme.accent; font.pixelSize: Theme.px(11.5); font.weight: Font.DemiBold }
             }
+            // How many (always whole), then for whom (cut first).
             Label {
                 objectName: "reviewSummary"
+                text: (root.comments.length === 1 ? "1 comment" : root.comments.length + " comments") + (reviewBar.narrow ? "" : " on " + (reviewBar.files === 1 ? "1 file" : reviewBar.files + " files"))
+                color: Theme.text
+                font.pixelSize: Theme.px(13)
+            }
+            Label {
+                id: reviewFor
+                objectName: "reviewFor"
+                // (Narrow: Send's tooltip says it.)
+                opacity: reviewBar.narrow ? 0 : 1
                 Layout.fillWidth: true
                 Layout.minimumWidth: 0
                 elide: Text.ElideRight
-                text: (root.comments.length === 1 ? "1 comment" : root.comments.length + " comments") + " on " + (reviewBar.files === 1 ? "1 file" : reviewBar.files + " files")
-                      + (root.canSend ? " · for " + root.sessionTitle : " · open a session in this folder to send them")
-                color: Theme.text
+                text: root.canSend ? "for " + root.sessionTitle : "open a session in this folder to send them"
+                color: Theme.textMuted
                 font.pixelSize: Theme.px(13)
+                HoverHandler { id: forHover }
+                ToolTip.visible: forHover.hovered && truncated
+                ToolTip.text: text
             }
             FlatButton {
                 text: "Clear"
@@ -588,7 +717,9 @@ Rectangle {
             }
             FlatButton {
                 objectName: "reviewSend"
-                text: "Send to the agent"
+                text: reviewBar.narrow ? "Send" : "Send to the agent"
+                ToolTip.visible: hovered && reviewBar.narrow
+                ToolTip.text: root.canSend ? "Send them to " + root.sessionTitle : "Open a session in this folder to send them"
                 variant: "primary"
                 enabled: root.canSend
                 font.pixelSize: Theme.px(12.5)
@@ -602,18 +733,51 @@ Rectangle {
         }
     }
 
-    // One side: line numbers, row colours, the text (read-only, selectable,
-    // syntax-highlighted).
+    // A toolbar button: an icon, a tooltip, `on` when toggled.
+    component ToolIcon: Button {
+        id: ti
+        property string iconName
+        property string tip: ""
+        property bool on: false
+        flat: true
+        padding: 0
+        implicitWidth: 26
+        implicitHeight: 26
+        contentItem: Item {
+            Icon { anchors.centerIn: parent; name: ti.iconName; color: ti.on ? Theme.accent : Theme.foreground; implicitWidth: 16; implicitHeight: 16; opacity: ti.enabled ? 1 : 0.35 }
+        }
+        background: Rectangle {
+            radius: 6
+            color: ti.down ? Theme.pressed : ti.on ? Theme.selected : ti.hovered ? Theme.hover : "transparent"
+            border.color: ti.visualFocus ? Theme.accent : "transparent"
+            Behavior on color { ColorAnimation { duration: Theme.hoverMotion } }
+        }
+        ToolTip.visible: (hovered || visualFocus) && tip !== ""
+        ToolTip.delay: 400
+        ToolTip.text: tip
+    }
+
+    // One side (or, inline, the one column): line numbers, row colours, the
+    // text (read-only, selectable, syntax-highlighted), folds and comments.
     component DiffPane: Item {
         id: pane
         property bool isLeft: true
+        /// Inline: each row says its side ([14] 1 for an old line).
+        property bool unified: false
+        property var rows: []
         property string text: ""
         signal scrolled(real y)
         property alias flick: flick
         property alias editor: editor
         readonly property real lineHeight: editor.lineCount > 0 ? editor.contentHeight / editor.lineCount : 16
         readonly property int base: isLeft ? 0 : 5
-        readonly property color tint: isLeft ? Theme.error : Theme.success
+        readonly property var folds: rows.reduce((out, r, i) => { if (r[0] === 3) out.push({ row: i, count: r[1], start: r[10] }); return out }, [])
+        // Saved comments' cards: on the side they're about (inline, all).
+        readonly property var notes: rows.reduce((out, r, i) => {
+            const c = r[0] === 4 && r[12] === 0 ? root.comments[r[11]] : null
+            if (c && (pane.unified || (c.side === "old") === pane.isLeft)) out.push({ row: i, comment: r[11] })
+            return out
+        }, [])
         readonly property int gutterWidth: 58
         readonly property bool ready: editor.text === text
         // Test hook: how far the row colours are scrolled.
@@ -644,7 +808,7 @@ Rectangle {
             anchors.fill: parent
             anchors.topMargin: 8
             interactive: false
-            model: root.rows.length
+            model: pane.rows.length
             // Kept in step by hand: a new model resets a ListView's
             // position, which would undo a binding.
             function follow() { contentY = flick.contentY + originY }
@@ -655,14 +819,17 @@ Rectangle {
             delegate: Item {
                 id: rowItem
                 required property int index
-                readonly property var r: root.rows[index] || [0, 0, 0, -1, -1, 0, 0, 0, -1, -1]
-                readonly property int kind: r[pane.base]
+                readonly property var r: pane.rows[index] || [0, 0, 0, -1, -1, 0, 0, 0, -1, -1]
+                // Which side's fields: the pane's, or inline the row's own.
+                readonly property int base: pane.unified ? (r[14] === 1 ? 0 : 5) : pane.base
+                readonly property color tint: base === 0 ? Theme.error : Theme.success
+                readonly property int kind: r[base]
                 width: rowsView.width
                 height: pane.lineHeight
                 Rectangle {
                     anchors.fill: parent
                     visible: rowItem.kind === 1
-                    color: Qt.rgba(pane.tint.r, pane.tint.g, pane.tint.b, 0.14)
+                    color: Qt.rgba(rowItem.tint.r, rowItem.tint.g, rowItem.tint.b, 0.14)
                 }
                 // Nothing on this side: hatched.
                 Image {
@@ -676,9 +843,9 @@ Rectangle {
                 }
                 // The part of the line that changed.
                 Rectangle {
-                    readonly property int from: rowItem.r[pane.base + 3]
-                    readonly property int to: rowItem.r[pane.base + 4]
-                    readonly property int offset: rowItem.r[pane.base + 2]
+                    readonly property int from: rowItem.r[rowItem.base + 3]
+                    readonly property int to: rowItem.r[rowItem.base + 4]
+                    readonly property int offset: rowItem.r[rowItem.base + 2]
                     visible: rowItem.kind === 1 && from >= 0 && pane.ready
                     // (After the text is laid out: its size says when.)
                     readonly property real x0: visible && editor.contentWidth > 0 ? editor.positionToRectangle(Math.min(offset + from, editor.length)).x : 0
@@ -686,13 +853,14 @@ Rectangle {
                     x: pane.gutterWidth + 8 + x0 - flick.contentX
                     width: Math.max(2, x1 - x0)
                     height: parent.height
-                    color: Qt.rgba(pane.tint.r, pane.tint.g, pane.tint.b, 0.32)
+                    // (Light: red reads heavier than green at the same strength.)
+                    color: Qt.rgba(rowItem.tint.r, rowItem.tint.g, rowItem.tint.b, Theme.isLight && rowItem.base === 0 ? 0.22 : 0.32)
                 }
                 Rectangle { width: pane.gutterWidth; height: parent.height; color: Theme.background; opacity: rowItem.kind === 1 ? 0.35 : 1 }
                 // A review comment on this line: its mark; a click on the
                 // number adds one (or opens it).
-                readonly property int lineNo: rowItem.kind < 2 ? rowItem.r[pane.base + 1] : -1
-                readonly property bool commented: lineNo > 0 && root.comments.length > 0 && root.commentAt(pane.isLeft ? "old" : "new", lineNo) >= 0
+                readonly property int lineNo: rowItem.kind < 2 ? rowItem.r[rowItem.base + 1] : -1
+                readonly property bool commented: lineNo > 0 && root.comments.length > 0 && root.commentAt(rowItem.base === 0 ? "old" : "new", lineNo) >= 0
                 Rectangle {
                     x: 3
                     anchors.verticalCenter: parent.verticalCenter
@@ -701,19 +869,20 @@ Rectangle {
                     radius: 7
                     visible: rowItem.commented || (gutterHover.hovered && rowItem.lineNo > 0 && root.review !== null)
                     color: rowItem.commented ? Theme.accent : Theme.controlFill
-                    Label {
+                    Icon {
                         anchors.centerIn: parent
-                        text: rowItem.commented ? "💬" : "+"
+                        name: "chat-thread"
                         color: rowItem.commented ? Theme.textOnPrimary : Theme.text
-                        font.pixelSize: rowItem.commented ? Theme.px(8) : Theme.px(11)
+                        implicitWidth: 9
+                        implicitHeight: 9
                     }
                 }
                 Item {
-                    objectName: "gutter-" + (pane.isLeft ? "l" : "r") + "-" + rowItem.index
+                    objectName: "gutter-" + (pane.unified ? "u" : pane.isLeft ? "l" : "r") + "-" + rowItem.index
                     width: pane.gutterWidth
                     height: parent.height
                     HoverHandler { id: gutterHover; cursorShape: rowItem.lineNo > 0 ? Qt.PointingHandCursor : Qt.ArrowCursor }
-                    TapHandler { onTapped: root.openComment(pane.isLeft, rowItem.index) }
+                    TapHandler { onTapped: root.openComment(rowItem.base === 0, pane.unified ? rowItem.r[13] : rowItem.index, pane, rowItem.index) }
                     ToolTip.visible: gutterHover.hovered && rowItem.lineNo > 0
                     ToolTip.delay: 600
                     ToolTip.text: rowItem.commented ? "Your comment (click to edit)" : "Comment on this line"
@@ -721,10 +890,10 @@ Rectangle {
                 Label {
                     width: pane.gutterWidth - 18
                     height: parent.height
-                    text: rowItem.kind >= 2 ? "" : rowItem.r[pane.base + 1]
+                    text: rowItem.kind >= 2 ? "" : rowItem.r[rowItem.base + 1]
                     horizontalAlignment: Text.AlignRight
                     verticalAlignment: Text.AlignVCenter
-                    color: rowItem.kind === 1 ? pane.tint : Theme.muted
+                    color: rowItem.kind === 1 ? rowItem.tint : Theme.muted
                     opacity: rowItem.kind === 1 ? 0.9 : 0.55
                     font.family: Theme.mono
                     font.pixelSize: Theme.mpx(12)
@@ -734,9 +903,9 @@ Rectangle {
                     width: 12
                     height: parent.height
                     visible: rowItem.kind === 1
-                    text: pane.isLeft ? "−" : "+"
+                    text: rowItem.base === 0 ? "−" : "+"
                     verticalAlignment: Text.AlignVCenter
-                    color: pane.tint
+                    color: rowItem.tint
                     font.family: Theme.mono
                     font.pixelSize: Theme.mpx(12)
                 }
@@ -745,7 +914,7 @@ Rectangle {
 
         // Folded unchanged regions: a bar over the text, open on a click.
         Repeater {
-            model: root.folds
+            model: pane.folds
             Rectangle {
                 id: fold
                 required property var modelData
@@ -758,15 +927,13 @@ Rectangle {
                 color: foldHover.hovered ? Theme.hover : Theme.elevated
                 Rectangle { width: parent.width; height: 1; color: Theme.border }
                 Rectangle { y: parent.height - 1; width: parent.width; height: 1; color: Theme.border }
-                Label {
-                    x: pane.gutterWidth - 30
-                    width: 24
-                    height: parent.height
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                    text: "⇕"
+                Icon {
+                    x: pane.gutterWidth - 24
+                    anchors.verticalCenter: parent.verticalCenter
+                    name: "expand-up-down"
                     color: Theme.muted
-                    font.pixelSize: Theme.px(12)
+                    implicitWidth: 12
+                    implicitHeight: 12
                 }
                 Label {
                     x: pane.gutterWidth + 8
@@ -780,6 +947,54 @@ Rectangle {
                 TapHandler { onTapped: root.openFold(fold.modelData.start) }
                 ToolTip.visible: foldHover.hovered
                 ToolTip.text: "Show these lines"
+            }
+        }
+
+        // Saved comments: a card under the line, on rows kept for it.
+        Repeater {
+            model: pane.notes
+            Rectangle {
+                id: note
+                required property var modelData
+                readonly property var comment: root.comments[modelData.comment] || ({ text: "" })
+                objectName: "diffNote-" + modelData.comment
+                z: 2
+                x: pane.gutterWidth + 4
+                width: pane.width - x - 10
+                height: root.noteRows * pane.lineHeight - 6
+                y: 8 + modelData.row * pane.lineHeight - flick.contentY + 3
+                visible: y > -height && y < pane.height
+                radius: 8
+                color: noteHover.hovered ? Theme.hover : Theme.raised
+                border.color: Theme.hairline
+                Rectangle { width: 3; height: parent.height - 12; y: 6; x: 0; radius: 1.5; color: Theme.accent }
+                Icon { x: 12; y: 9; name: "chat-thread"; color: Theme.accent; implicitWidth: 13; implicitHeight: 13 }
+                Label {
+                    id: noteText
+                    x: 32
+                    y: 7
+                    width: parent.width - x - (noteHover.hovered ? 44 : 12)
+                    text: note.comment.text
+                    color: Theme.text
+                    font.pixelSize: Theme.px(12.5)
+                    wrapMode: Text.Wrap
+                    maximumLineCount: Math.max(1, Math.floor((note.height - 12) / (font.pixelSize * 1.35)))
+                    elide: Text.ElideRight
+                }
+                Label {
+                    visible: noteHover.hovered
+                    anchors.right: parent.right
+                    anchors.rightMargin: 10
+                    y: 8
+                    text: "Edit"
+                    color: Theme.textMuted
+                    font.pixelSize: Theme.px(12)
+                }
+                HoverHandler { id: noteHover; cursorShape: Qt.PointingHandCursor }
+                TapHandler { onTapped: root.editComment(note.modelData.comment, pane, note.modelData.row - 1) }
+                ToolTip.visible: noteHover.hovered && noteText.truncated
+                ToolTip.delay: 500
+                ToolTip.text: note.comment.text
             }
         }
 
