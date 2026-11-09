@@ -199,7 +199,12 @@ Rectangle {
                     Item {
                         id: lead
                         Layout.fillWidth: true
-                        readonly property bool beside: leadValue.implicitWidth + 10 + leadText.implicitWidth <= width
+                        // (The text's natural width, from a hidden twin: its
+                        // width follows this, and a wrapped label's own
+                        // implicitWidth can follow its width.)
+                        Label { id: leadTwin; visible: false; text: leadText.text; font: leadText.font }
+                        readonly property real textNatural: Math.ceil(leadTwin.implicitWidth)
+                        readonly property bool beside: leadValue.implicitWidth + 10 + textNatural <= width
                         implicitHeight: beside ? leadValue.implicitHeight : leadValue.implicitHeight + 2 + leadText.implicitHeight
                         Label {
                             id: leadValue
@@ -216,7 +221,7 @@ Rectangle {
                             x: lead.beside ? leadValue.implicitWidth + 10 : 0
                             // On the figure's baseline.
                             y: lead.beside ? leadValue.baselineOffset - baselineOffset : leadValue.implicitHeight + 2
-                            width: lead.beside ? implicitWidth : lead.width
+                            width: lead.beside ? lead.textNatural : lead.width
                             wrapMode: Text.Wrap
                             text: "over " + root.plural(content.r.sessions || 0, "session", "sessions") + " and " + root.plural(content.r.prompts || 0, "prompt", "prompts") + " " + content.period
                             color: Theme.textMuted
@@ -488,11 +493,18 @@ Rectangle {
                         Item {
                             id: modelHead
                             Layout.fillWidth: true
+                            implicitWidth: 0
                             implicitHeight: modelNum.implicitHeight
                             readonly property real room: width - modelNum.implicitWidth - 12
+                            // Natural widths, from hidden twins that are never
+                            // cut: a label's width bound to its own implicitWidth
+                            // loops once it's cut short.
+                            Label { id: nameTwin; visible: false; text: modelName.text; font: modelName.font }
+                            Label { id: thinkingTwin; visible: false; text: modelThinking.text; font: modelThinking.font }
+                            Label { id: providerTwin; visible: false; text: modelData.provider; font: modelThinking.font }
                             Label {
                                 id: modelName
-                                width: Math.min(implicitWidth, modelHead.room)
+                                width: Math.max(0, Math.min(Math.ceil(nameTwin.implicitWidth), modelHead.room))
                                 text: root.modelName(modelData.model)
                                 color: Theme.foreground
                                 font.pixelSize: Theme.px(13)
@@ -502,7 +514,7 @@ Rectangle {
                                 id: modelThinking
                                 x: modelName.width + 8
                                 anchors.baseline: modelName.baseline
-                                width: visible ? Math.max(0, Math.min(implicitWidth, modelHead.room - x)) : 0
+                                width: visible ? Math.max(0, Math.min(Math.ceil(thinkingTwin.implicitWidth), modelHead.room - x)) : 0
                                 visible: modelData.thinking !== "" && modelHead.room - x > 24
                                 text: modelData.thinking
                                 color: Theme.textMuted
@@ -512,7 +524,7 @@ Rectangle {
                             Label {
                                 x: modelThinking.visible ? modelThinking.x + modelThinking.width + 8 : modelName.width + 8
                                 anchors.baseline: modelName.baseline
-                                width: Math.max(0, Math.min(implicitWidth, modelHead.room - x))
+                                width: Math.max(0, Math.min(Math.ceil(providerTwin.implicitWidth), modelHead.room - x))
                                 visible: modelData.provider !== "" && modelHead.room - x > 24
                                 text: modelData.provider
                                 color: Theme.textFaint

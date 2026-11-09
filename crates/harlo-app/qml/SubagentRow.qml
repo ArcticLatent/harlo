@@ -81,12 +81,20 @@ Rectangle {
                 implicitHeight: nameLabel.implicitHeight
                 // The status and what it used, at the right.
                 readonly property real tailRoom: tail.width > 0 ? tail.width + 6 : 0
+                // Natural widths, from hidden twins that are never cut: a
+                // label's width bound to its own implicitWidth loops once
+                // it's cut short.
+                Label { id: nameTwin; visible: false; text: nameLabel.text; font: nameLabel.font }
+                Label { id: whoTwin; visible: false; text: agentLabel.text; font: agentLabel.font }
+                readonly property real nameNatural: Math.ceil(nameTwin.implicitWidth)
+                readonly property real whoNatural: Math.ceil(whoTwin.implicitWidth)
                 Label {
                     id: nameLabel
+                    objectName: "subagentName"
                     // (The name tells helpers apart: it keeps its whole
                     // width, the kind and the task give way first; cut only
                     // when the line has no more room.)
-                    width: Math.max(0, Math.min(Math.ceil(implicitWidth), Math.floor(nameLine.width - nameLine.tailRoom)))
+                    width: Math.max(0, Math.min(nameLine.nameNatural, Math.floor(nameLine.width - nameLine.tailRoom)))
                     text: agentRow.a.name || agentRow.a.id
                     color: Theme.foreground
                     font.pixelSize: Theme.px(13)
@@ -98,11 +106,11 @@ Rectangle {
                     id: agentLabel
                     objectName: "subagentWho"
                     // (Shown while the name fits beside it; narrow, shortened.)
-                    readonly property real room: nameLine.width - nameLine.tailRoom - nameLabel.implicitWidth - 6
-                    visible: room >= Math.min(implicitWidth, Theme.px(40))
+                    readonly property real room: nameLine.width - nameLine.tailRoom - nameLine.nameNatural - 6
+                    visible: room >= Math.min(nameLine.whoNatural, Theme.px(40))
                     x: nameLabel.width + 6
                     anchors.baseline: nameLabel.baseline
-                    width: visible ? Math.min(implicitWidth, room) : 0
+                    width: visible ? Math.min(nameLine.whoNatural, room) : 0
                     text: Theme.helperKind(agentRow.a.agent) + (agentRow.a.model ? " · " + Theme.helperModel(agentRow.a.agent, agentRow.a.model) : "")
                     color: Theme.textMuted
                     font.pixelSize: Theme.px(11.5)

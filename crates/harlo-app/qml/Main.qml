@@ -1599,6 +1599,8 @@ ApplicationWindow {
                 const name = win.findText("ScoutLark", chat.transcript), row = win.ancestorWith(name, "viewRequested"), dot = win.findName("subagentDot", row)
                 const dy = Math.abs(dot.mapToItem(null, 0, dot.height / 2).y - name.mapToItem(null, 0, name.height / 2).y)
                 win.check(dy <= 1, "a helper's dot is level with its name (" + dy.toFixed(1) + " px off)")
+                const nm = win.findName("subagentName", row)
+                win.check(nm.width >= Math.floor(nm.implicitWidth), "a helper's name keeps its whole width while the line has room (" + nm.width + " of " + nm.implicitWidth.toFixed(1) + ")")
             }
  win.clickText("Cancel", win.ancestorWith(win.findText("BuildOtter", chat.transcript), "viewRequested")) } }
         PauseAnimation { duration: 1200 }
