@@ -3416,6 +3416,8 @@ ApplicationWindow {
     // page from its top, then a screen further down while there's more, then
     // a few in the light theme.
     property var setQueue: []
+    property bool glassLink: false
+    property var setSearch: null
     function findMoreText(root) {
         for (const c of root.children) {
             if (!c.visible) continue
@@ -3508,6 +3510,37 @@ ApplicationWindow {
             q.push(() => {
                 const notes = win.findAllNames("needsPhone", settingsDialog.contentItem)
                 win.check(Phone.enabled || (notes.length === 2 && win.findText("Turn on phone access first.", settingsDialog.contentItem) === null), "Devices says once per section that phone access is off (" + notes.length + ")")
+                settingsDialog.openPage("voice")
+            })
+            // A search lands on the row it matched, lit for a moment.
+            q.push(() => {
+                settingsDialog.openPage("general")
+                if (settingsDialog.compact) settingsDialog.navOpen = true
+                const f = win.findName("settingsSearch", settingsDialog.contentItem)
+                win.setSearch = f
+                f.text = "sandbox"
+                f.accepted()
+            })
+            q.push(() => {
+                const pg = win.findName("settingsPage", settingsDialog.contentItem)
+                const flash = win.findName("settingsSeekFlash", settingsDialog.contentItem)
+                win.check(settingsDialog.page === "providers" && pg && pg.contentY > 0 && flash && flash.opacity > 0, "searching sandbox lands on its row on Providers (" + settingsDialog.page + ", " + (pg ? pg.contentY : -1) + ")")
+                win.shotWindow("set-seek")
+                win.setSearch.text = ""
+                settingsDialog.navOpen = false
+                settingsDialog.openPage("appearance")
+            })
+            // Glass that can't be drawn: off, with a way to the renderer.
+            q.push(() => {
+                const b = win.findName("glassRenderer", settingsDialog.contentItem)
+                const sw = win.findName("glassSwitch", settingsDialog.contentItem)
+                win.check(b === null || (!sw.enabled && !sw.checked), "Glass is off and disabled when it can't be drawn")
+                win.glassLink = b !== null
+                if (b) win.clickItem(b, "Renderer…")
+            })
+            q.push(() => {
+                const pg = win.findName("settingsPage", settingsDialog.contentItem)
+                if (win.glassLink) win.check(settingsDialog.page === "general" && pg.contentY > 0, "Renderer… opens General at its renderer row")
                 settingsDialog.openPage("voice")
             })
             // Voice: a chosen model that isn't here isn't "in use".

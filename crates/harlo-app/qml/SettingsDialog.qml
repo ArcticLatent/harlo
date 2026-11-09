@@ -58,6 +58,17 @@ Popup {
     readonly property var current: pages.find(p => p.id === page) || pages[0]
 
     function openPage(id) { page = id; open() }
+    /// A search, or a link from another row, lands on the row: the page
+    /// scrolls to the first row or section whose title (else description)
+    /// says `text`, and it flashes.
+    property string seek: ""
+    signal seekRequested()
+    onPageChanged: if (page === "usage") seek = ""
+    function seekTo(id, text) {
+        seek = text
+        if (page === id) seekRequested()
+        else page = id
+    }
     /// Settings → Projects on one project.
     property int projectId: -1
     readonly property var projectIconPresets: ["code-box", "terminal-box", "rocket", "flask", "gamepad", "briefcase", "home", "global", "leaf", "shield", "palette",
@@ -130,6 +141,7 @@ Popup {
     // same way).
     component SectionHeader: ColumnLayout {
         id: sectionHead
+        readonly property bool seekable: true
         property string title
         property string subtitle
         property string more: ""
@@ -190,6 +202,7 @@ Popup {
     // Title and description on the left, a control on the right.
     component SettingRow: Item {
         id: settingRow
+        readonly property bool seekable: true
         property string title
         property string detail
         property string more: ""
@@ -373,6 +386,7 @@ Popup {
                         }
                         AppTextField {
                             id: searchField
+                            objectName: "settingsSearch"
                             visible: root.navWide
                             Layout.fillWidth: true
                             Layout.bottomMargin: 10
@@ -385,7 +399,7 @@ Popup {
                                 else event.accepted = false
                             }
                             // (Enter: the first page found.)
-                            onAccepted: if (root.shownPages.length > 0) { root.page = root.shownPages[0].id; root.navOpen = false }
+                            onAccepted: if (root.shownPages.length > 0) { root.seekTo(root.shownPages[0].id, text.trim()); root.navOpen = false }
                             Icon { x: 10; anchors.verticalCenter: parent.verticalCenter; name: "search"; color: Theme.muted; implicitWidth: 15; implicitHeight: 15 }
                         }
                         Repeater {
@@ -436,7 +450,8 @@ Popup {
                                             }
                                         }
                                         background: Rectangle { radius: 9; color: navItem.current ? Theme.rowSelected : navItem.hovered ? Theme.rowHover : "transparent"; Behavior on color { ColorAnimation { duration: Theme.hoverMotion } } }
-                                        onClicked: { root.page = modelData.id; root.navOpen = false }
+                                        // (From a search: to the row it matched.)
+                                        onClicked: { if (root.query.trim() !== "") root.seekTo(modelData.id, root.query.trim()); else root.page = modelData.id; root.navOpen = false }
                                     }
                                 }
                             }
@@ -606,8 +621,41 @@ Popup {
             objectName: "settingsPage"
             contentHeight: pageBody.implicitHeight + 64
             clip: true
-            // (Another page opens at its top, not where the last one was.)
-            Connections { target: root; function onPageChanged() { pageFlick.contentY = 0 } }
+            // (Another page opens at its top, not where the last one was;
+            // or at the row a search or a link asked for.)
+            Connections {
+                target: root
+                function onPageChanged() { pageFlick.contentY = 0; if (root.seek !== "") seekTimer.restart() }
+                function onSeekRequested() { seekTimer.restart() }
+            }
+            // (Once the page is laid out.)
+            Timer { id: seekTimer; interval: 80; onTriggered: pageFlick.seekNow() }
+            function findRow(item, q, inDetail) {
+                for (const c of item.children) {
+                    if (!c.visible) continue
+                    if (c.seekable === true) {
+                        const t = inDetail ? (c.detail || c.subtitle || "") + " " + (c.more || "") : (c.title || "")
+                        if (String(t).toLowerCase().includes(q)) return c
+                    }
+                    const f = findRow(c, q, inDetail)
+                    if (f) return f
+                }
+                return null
+            }
+            function seekNow() {
+                const q = root.seek.toLowerCase()
+                root.seek = ""
+                if (q === "") return
+                const row = findRow(pageBody, q, false) || findRow(pageBody, q, true)
+                if (!row) return
+                const at = row.mapToItem(pageFlick.contentItem, 0, 0)
+                contentY = Math.max(0, Math.min(contentHeight - height, at.y - 48))
+                flash.x = at.x - 4
+                flash.y = at.y - 4
+                flash.width = row.width + 8
+                flash.height = row.height + 8
+                flashAnim.restart()
+            }
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar { }
             ColumnLayout {
@@ -627,6 +675,24 @@ Popup {
                     })[root.page] || null
                 }
             }
+            // The row a search landed on, lit for a moment.
+            Rectangle {
+                id: flash
+                objectName: "settingsSeekFlash"
+                opacity: 0
+                radius: 12
+                color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.12)
+                border.color: Theme.accent
+                border.width: 1
+                SequentialAnimation {
+                    id: flashAnim
+                    NumberAnimation { target: flash; property: "opacity"; to: 1; duration: 120 }
+                    PauseAnimation { duration: 900 }
+                    NumberAnimation { target: flash; property: "opacity"; to: 0; duration: 600; easing.type: Easing.OutCubic }
+                }
+            }
+            // (Opened from Usage, which has no rows to seek.)
+            Component.onCompleted: if (root.seek !== "") seekTimer.restart()
         }
     }
 
@@ -761,7 +827,8 @@ Popup {
                     property string error: ""
                     title: "Start harlo when you log in"
                     detail: autostartRow.error !== "" ? autostartRow.error
-                          : "Starts in the background, in the system tray (the window opens if there is no tray). Adds harlo to ~/.config/autostart."
+                          : "Starts in the background, in the system tray."
+                    more: autostartRow.error !== "" ? "" : "The window opens if there is no tray. Adds harlo to ~/.config/autostart."
                     icon: "home"
                     AppSwitch {
                         objectName: "autostartSwitch"
@@ -785,8 +852,9 @@ Popup {
                 SettingRow {
                     divider: true
                     title: "Check for updates"
-                    detail: "At startup and every 6 hours (and when a remote host connects), harlo looks for newer versions of itself (installed from a package or an AppImage) and of the agents you use, and offers to update them."
+                    detail: "Looks for new versions of harlo and your agents every 6 hours, and offers to update them."
                             + (Updates.checkStatus !== "" ? "\n" + Updates.checkStatus : "")
+                    more: "Also at startup and when a remote host connects. harlo updates itself when it was installed from a package or an AppImage."
                     icon: "refresh"
                     RowLayout {
                         spacing: 8
@@ -1013,16 +1081,35 @@ Popup {
                     }
                 }
                 SettingRow {
+                    id: glassRow
                     divider: true
                     title: "Glass"
-                    detail: GraphicsInfo.api === GraphicsInfo.Software
-                        ? "Needs graphics acceleration, which harlo is running without, so menus and dialogs stay solid."
+                    // (Without acceleration it can't be drawn: off and
+                    // disabled, the choice kept for when it can.)
+                    readonly property bool noGpu: GraphicsInfo.api === GraphicsInfo.Software
+                    detail: noGpu ? "Needs graphics acceleration; harlo is drawing in software, so menus and dialogs stay solid."
                         : "Menus, dialogs and the composer show a soft blur of what's behind them."
                     icon: "window"
-                    AppSwitch { objectName: "glassSwitch"; checked: Workspace.glass; onToggled: Workspace.chooseGlass(checked, Workspace.glassOpacity) }
+                    RowLayout {
+                        spacing: 8
+                        FlatButton {
+                            objectName: "glassRenderer"
+                            visible: glassRow.noGpu
+                            text: "Renderer…"
+                            font.pixelSize: Theme.px(12)
+                            onClicked: root.seekTo("general", "Renderer")
+                        }
+                        AppSwitch {
+                            objectName: "glassSwitch"
+                            enabled: !glassRow.noGpu
+                            checked: Workspace.glass && !glassRow.noGpu
+                            onToggled: { Workspace.chooseGlass(checked, Workspace.glassOpacity); checked = Qt.binding(() => Workspace.glass && !glassRow.noGpu) }
+                        }
+                    }
                 }
                 SettingRow {
                     divider: true
+                    opacity: glassRow.noGpu ? 0.6 : 1
                     title: "Glass opacity"
                     detail: "Higher values make menus and dialogs more solid."
                     icon: "eye"
@@ -1039,7 +1126,7 @@ Popup {
                         AppSlider {
                             objectName: "glassOpacity"
                             implicitWidth: root.compact ? 110 : 160
-                            enabled: Workspace.glass
+                            enabled: Workspace.glass && !glassRow.noGpu
                             from: 0.4
                             to: 1.0
                             stepSize: 0.05
@@ -4536,14 +4623,23 @@ Popup {
                                     onClicked: lspCopier.copyText(lsRow.modelData.install)
                                 }
                             }
+                            // Why, in its first clause; all of it (and the
+                            // program's path) on hover.
                             Label {
+                                id: lsWhy
+                                objectName: "lspWhy"
                                 visible: lsRow.broken
                                 Layout.fillWidth: true
                                 Layout.leftMargin: 22
-                                text: lsRow.modelData.path + ": " + lsRow.modelData.why.replace(/\.+$/, "") + "."
+                                readonly property string full: lsRow.modelData.path + ": " + lsRow.modelData.why.replace(/\.+$/, "") + "."
+                                text: lsRow.modelData.why.split(/[,;:] | because /)[0].replace(/\.+$/, "") + "."
                                 color: Theme.warning
                                 font.pixelSize: Theme.px(12)
-                                wrapMode: Text.Wrap
+                                elide: Text.ElideRight
+                                HoverHandler { id: lsWhyHover }
+                                ToolTip.visible: lsWhyHover.hovered
+                                ToolTip.text: lsWhy.full
+                                ToolTip.delay: 300
                             }
                             Label {
                                 Layout.fillWidth: true
@@ -4567,8 +4663,9 @@ Popup {
             SectionHeader { title: "Diagnostics"; subtitle: "For tracking down problems. harlo.log has this run's messages (the last run's is harlo.log.1); crashes leave a crash-….log with a backtrace." }
             Group {
                 SettingRow {
-                    title: "Log harness traffic"
-                    detail: "Writes every message to and from the agents, and their error output, to logs/protocol/ (one file per agent process, the last 40 kept). Applies to agents started afterwards; the logs contain your prompts and the agents' answers. Also on with --debug-protocol."
+                    title: "Log agent traffic"
+                    detail: "Writes every message to and from the agents to logs/protocol/."
+                    more: "Their error output too, one file per agent process, the last 40 kept. Applies to agents started afterwards; the logs contain your prompts and the agents' answers. Also on with --debug-protocol."
                     icon: "bug"
                     AppSwitch {
                         checked: Workspace.setting("debug_protocol") === "1"
