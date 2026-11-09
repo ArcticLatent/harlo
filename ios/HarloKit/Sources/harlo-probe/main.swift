@@ -469,8 +469,13 @@ func working(_ model: HarloModel, _ s: OpenSession) async {
 
 let args = CommandLine.arguments
 guard args.count >= 2 else {
-    print("usage: harlo-probe <pairing link>")
+    print("usage: harlo-probe <pairing link> | harlo-probe record <pairing link> <recording.jsonl>")
     exit(2)
+}
+if args[1] == "record", args.count >= 4 {
+    await record(args[2], to: args[3])
+    print("IOS-RECORD checks:", failures == 0 ? "all passed" : "\(failures) failed")
+    exit(failures == 0 ? 0 : 1)
 }
 await run(args[1])
 print("IOS-E2E checks:", failures == 0 ? "all passed" : "\(failures) failed")
@@ -548,4 +553,134 @@ func pushes(_ model: HarloModel, store: SecretStore) async {
     // That session is in the home folder, no repository: no View diff.
     await model.loadUndo()
     check(model.session === a && !a.git, "outside a repository, harlo says so (no View diff)")
+}
+
+// ---- recording -------------------------------------------------------------
+
+/// Records a tour of harlo's features for the app's UI tests and screenshots
+/// (scripts/ios-record.sh): Harlo sessions on the scripted tour model doing
+/// real work, a Claude session, and at each point worth a picture a scene.
+@MainActor
+func record(_ link: String, to path: String) async {
+    guard let rec = Recorder(path: path) else {
+        check(false, "the recording can be written (\(path))")
+        return
+    }
+    Recorder.shared = rec
+    let model = HarloModel(store: MemoryStore(), deviceName: "iPhone")
+    let paired = await model.pair(link)
+    let up = await waitFor(10) { model.state == .connected }
+    check(paired && up, "pairs with harlo (\(model.alert ?? ""))")
+    guard let choices = await model.newSessionChoices(), let repo = choices.projects.first else {
+        check(false, "a project to work in (\(model.alert ?? ""))")
+        return
+    }
+    let models = choices.models(for: "harlo")
+    print("IOS-RECORD agents \(choices.agents.map(\.id)), harlo's models \(models)")
+
+    /// Sends, then waits for the run to end (`until`: and for this).
+    func turn(_ text: String, _ seconds: Double = 30, until: @MainActor (OpenSession) -> Bool = { _ in true }) async -> Bool {
+        guard await connected(), let s = model.session else { return false }
+        let before = s.rows.count
+        guard await model.send(text) else { return false }
+        _ = await waitFor(5) { s.rows.count > before || s.busy }
+        return await waitFor(seconds) { !s.busy && s.requests.isEmpty && until(s) }
+    }
+    /// (Foundation's WebSocket on Linux can drop: the model reconnects.)
+    func connected() async -> Bool {
+        let ok = await waitFor(20) { model.state == .connected && model.session.map { !$0.liveKey.isEmpty && !$0.loading } ?? true }
+        if !ok { print("IOS-RECORD not connected: \(model.state)") }
+        return ok
+    }
+    func send(_ text: String) async {
+        _ = await connected()
+        if !(await model.send(text)) { print("IOS-RECORD not sent: \(model.alert ?? "")") }
+    }
+    func start(_ agent: String, _ text: String, model id: String = "") async -> OpenSession? {
+        guard await connected(), await model.startSession(project: repo, agent: agent, model: id, approval: agent == "harlo" ? "yolo" : "", text: text),
+              let s = model.session, await waitFor(10, { !s.liveKey.isEmpty }) else { return nil }
+        _ = await waitFor(30) { !s.busy && s.rows.contains { $0.kind == "markdown" && $0.state == "done" } }
+        return s
+    }
+
+    // Two other sessions first (older in the list): a Harlo question and
+    // Claude Code with a subagent.
+    let other = await start("harlo", "Why does the relay drop idle phones?", model: "tour/tour-coder")
+    check(other != nil, "a short Harlo session")
+    let claude = await start("claude", "Have a subagent look over the README and delegate the review")
+    check(claude != nil && claude?.rows.contains { $0.kind == "tool" } == true, "a Claude Code session with tool calls (\(claude?.rows.map(\.kind) ?? []))")
+
+    // The main session: a fix, with reads, an edit and the tests.
+    guard let s = await start("harlo", "The session list jumps to the top when a session finishes. Find out why and fix it.", model: "tour/tour-coder") else {
+        check(false, "the main session starts (\(model.alert ?? ""))")
+        return
+    }
+    check(s.rows.filter { $0.kind == "tool" }.count >= 4, "it reads, edits and runs the tests (\(s.rows.map { $0.kind == "tool" ? $0.title : $0.kind }))")
+    // What its other screens ask for.
+    _ = await model.changes()
+    _ = await model.diff("src/sidebar.rs")
+    _ = await model.files(matching: "")
+    _ = await model.files(matching: "side")
+    _ = await model.sessionMentions(matching: "")
+    _ = await model.file("src/sidebar.rs")
+    _ = await model.branches()
+    _ = await model.models()
+    _ = await model.thinkingLevels()
+    _ = await model.actionLog()
+    _ = await model.markdown()
+    _ = await model.modelServers()
+    await model.loadUndo()
+    rec.scene("session")
+
+    // A question for you.
+    await send("Before you go on: which approach should we take?")
+    let asked = await waitFor(20) { s.requests.contains { !$0.questions.isEmpty } }
+    check(asked, "it asks a question (\(s.requests.map(\.method)))")
+    rec.scene("ask")
+    if let q = s.requests.first(where: { !$0.questions.isEmpty }) {
+        await model.answer(q, UIRequest.askAnswer(q.questions, picked: [[q.questions[0].options[0]]], typed: [""]))
+    }
+    _ = await waitFor(20) { !s.busy && s.requests.isEmpty }
+
+    // A destructive command waits for approval.
+    await send("Clean up the build folder while you're at it.")
+    let approval = await waitFor(20) { s.requests.contains(where: \.approval) }
+    check(approval, "a destructive command asks first (\(s.requests.map(\.title)))")
+    rec.scene("approval")
+    if let a = s.requests.first(where: \.approval) { await model.answer(a, a.approval(false)) }
+    _ = await waitFor(20) { !s.busy && s.requests.isEmpty }
+
+    // A background build and a subagent; the build's end comes later.
+    await send("Build the release in the background, and meanwhile look for other full rebuilds.")
+    let working = await waitFor(20) { !s.subagents.isEmpty }
+    check(working, "a subagent works (\(s.subagents.map(\.status)))")
+    rec.scene("working")
+    let built = await waitFor(40) { !s.busy && s.rows.contains { $0.html.contains("release build finished") || $0.text.contains("release build finished") } }
+    check(built, "the background build's end comes, and the agent says so")
+
+    // A side question.
+    await send("/btw why is merging by key faster than rebuilding?")
+    let aside = await waitFor(20) { s.aside?.done == true }
+    check(aside, "a side question is answered (\(s.aside?.text.prefix(40) ?? "none"))")
+    rec.scene("aside")
+
+    // An MCP server's tool, the plan, a helper.
+    let rolled = await turn("Roll the dice to pick which list to fix next.")
+    check(rolled && s.rows.contains { $0.kind == "tool" && $0.title.contains("roll") }, "an MCP tool (\(s.rows.filter { $0.kind == "tool" }.map(\.title).suffix(2)))")
+    let planned = await turn("Plan the rest of the work.")
+    _ = await waitFor(5) { (s.plan?.steps.count ?? 0) >= 3 }
+    check(planned && (s.plan?.steps.count ?? 0) >= 3, "a plan (\(s.plan?.steps.map(\.title) ?? []))")
+    rec.scene("plan")
+    let helped = await turn("Have a helper update the changelog.", 90) { s in s.rows.contains { $0.html.contains("changelog entry is in") } }
+    check(helped, "a helper's change brought over (\(s.rows.suffix(4).map { "\($0.kind) \($0.title) \($0.text.prefix(30))" }))")
+    rec.scene("helpers")
+
+    // Another model now; earlier replies were the first one's.
+    if let helper = await model.models().first(where: { $0.modelId == "tour-helper" }) { await model.setModel(helper) }
+    let summed = await turn("Summarize what changed.")
+    check(summed && s.info.modelId.hasSuffix("tour-helper"), "the model switched (\(s.info.modelId))")
+    _ = await model.sessionMentions(matching: "")
+    _ = await model.changes()
+    rec.scene("end")
+    Recorder.shared = nil
 }

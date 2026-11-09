@@ -12,7 +12,10 @@ struct HarloApp: App {
     /// Wi-Fi to mobile data and back: check the connection at once.
     @State private var network: NetworkWatch?
     /// The logo's animation, on opening (not in the screenshots' tour).
-    @State private var splash = !Tour.enabled
+    @State private var splash = !Tour.enabled && !Replaying.enabled
+    /// Neither the tour nor a recording: the real app, with its connection,
+    /// notifications and Live Activities.
+    private var real: Bool { !Tour.enabled && !Replaying.enabled }
 
     var body: some Scene {
         WindowGroup {
@@ -34,7 +37,7 @@ struct HarloApp: App {
             .environment(delegate.model)
             // Connected while in front; iOS cuts sockets in the background.
             .onChange(of: phase, initial: true) { _, now in
-                guard !Tour.enabled else { return }
+                guard real else { return }
                 let model = delegate.model
                 if network == nil {
                     network = NetworkWatch { Task { await model.networkChanged() } }
@@ -50,15 +53,15 @@ struct HarloApp: App {
             }
             // While in front, the badge follows what waits.
             .onChange(of: delegate.model.waiting.count) { _, n in
-                if phase == .active, !Tour.enabled { UNUserNotificationCenter.current().setBadgeCount(n) { _ in } }
+                if phase == .active, real { UNUserNotificationCenter.current().setBadgeCount(n) { _ in } }
             }
             // Just paired: ask for notifications.
             .onChange(of: delegate.model.host?.key) { _, key in
-                if key != nil, !Tour.enabled, !delegate.model.demo { Task { await Notifications.register() } }
+                if key != nil, real, !delegate.model.demo { Task { await Notifications.register() } }
             }
             // Live Activities of sessions that stopped working end.
             .onChange(of: delegate.model.sessions) { _, list in
-                if phase == .active, !Tour.enabled { LiveActivities.tidy(list) }
+                if phase == .active, real { LiveActivities.tidy(list) }
             }
             // A Live Activity tapped: its session (harlo://session?key=…);
             // the plan limits widget: harlo://limits.

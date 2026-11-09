@@ -442,6 +442,8 @@ final class ModelPartsTests: XCTestCase {
         // harlo's, under either agent's name for them, and the plan's.
         XCTAssertEqual(ToolName.words("mcp__harlo__start_session", running: false), "harlo: start a session")
         XCTAssertEqual(ToolName.words("harlo_bring_over", running: false), "harlo: bring over a helper's changes")
+        XCTAssertEqual(ToolName.words("start_session", running: false), "harlo: start a session", "as Harlo calls it")
+        XCTAssertEqual(ToolName.symbol("bring_over"), "person.2")
         XCTAssertEqual(ToolName.words("mcp__harlo__plan_done", running: false), "Finish a step")
         XCTAssertEqual(ToolName.words("plan_set", running: false), "Plan")
         // An MCP server's.
@@ -1018,5 +1020,122 @@ final class PlanTests: XCTestCase {
 
     func testColoursAsHex() {
         XCTAssertEqual(RGBA(hex: "#5b9bf0")?.hex, "#5b9bf0")
+    }
+}
+
+@MainActor
+final class ReplayTests: XCTestCase {
+    /// A recording as harlo-probe writes one.
+    static let recording = [
+        #"{"ready":{"name":"workstation","features":["sessionMentions","limits"]}}"#,
+        #"{"call":"sessions","args":{},"reply":{"sessions":[{"key":"live:1","title":"Fix the scrolling","harness":"harlo","status":"input"}]}}"#,
+        #"{"call":"open","args":{"key":"live:1"},"reply":{"key":"live:1","harness":"harlo"}}"#,
+        #"{"ev":{"ev":"reset","key":"live:1","rows":[{"key":"u1","kind":"user","text":"Fix the scrolling"},{"key":"t1","kind":"tool","title":"bash","label":"Run the tests","command":"cargo test"}]}}"#,
+        #"{"ev":{"ev":"request","key":"live:1","request":{"id":"r1","method":"select","title":"Allow tool: bash","options":["Approve","Deny"],"approval":true}}}"#,
+        #"{"scene":"approval"}"#,
+        #"{"call":"answer","args":{"key":"live:1","requestId":"r1","answer":{"value":"Deny"}},"reply":{"ok":true}}"#,
+        #"{"ev":{"ev":"cleared","key":"live:1","id":"r1"}}"#,
+        #"{"ev":{"ev":"rows","key":"live:1","changes":[]}}"#,
+        #"{"call":"files","args":{"key":"live:1","query":"no"},"reply":{"files":["notes.txt"]}}"#,
+        #"{"scene":"answered"}"#,
+    ].joined(separator: "\n")
+
+    func testScenesAndAnswers() throws {
+        XCTAssertEqual(Replay.scenes(in: Self.recording), ["approval", "answered"])
+        XCTAssertThrowsError(try Replay(recording: Self.recording, scene: "nope"))
+        let r = try Replay(recording: Self.recording, scene: "approval")
+        XCTAssertEqual(r.harloName, "workstation")
+        XCTAssertTrue(r.features.contains("sessionMentions"))
+        XCTAssertEqual(r.events(of: "live:1").map { $0["ev"].text }, ["reset", "request"], "only up to the scene")
+        // A request made only after the scene still answers; one never made says so.
+        XCTAssertEqual(r.answer("files", ["key": "live:1", "query": "other"])["files"].array?.count, 1)
+        XCTAssertNotNil(r.answer("diff", [:])["error"].string)
+    }
+
+    func testTheAppShowsTheRecordingAtAScene() async throws {
+        let m = HarloModel.replaying(try Replay(recording: Self.recording, scene: "approval"))
+        XCTAssertTrue(m.replaying)
+        for _ in 0..<50 where m.sessions.isEmpty { try await Task.sleep(nanoseconds: 20_000_000) }
+        XCTAssertEqual(m.state, .connected)
+        XCTAssertEqual(m.host?.name, "workstation")
+        let summary = try XCTUnwrap(m.sessions.first)
+        m.open(summary)
+        let s = try XCTUnwrap(m.session)
+        for _ in 0..<50 where s.rows.isEmpty || s.requests.isEmpty { try await Task.sleep(nanoseconds: 20_000_000) }
+        XCTAssertEqual(s.rows.map(\.kind), ["user", "tool"])
+        XCTAssertEqual(s.rows.last?.label, "Run the tests")
+        XCTAssertEqual(s.requests.first?.id, "r1")
+        // Answering it: harlo's `cleared` follows.
+        await m.answer(s.requests[0], s.requests[0].approval(false))
+        for _ in 0..<50 where !s.requests.isEmpty { try await Task.sleep(nanoseconds: 20_000_000) }
+        XCTAssertTrue(s.requests.isEmpty)
+        XCTAssertNil(m.alert)
+        // It stays connected whatever happens to the app.
+        m.suspend()
+        XCTAssertEqual(m.state, .connected)
+    }
+}
+
+/// The app's recording (scripts/ios-record.sh) played back at each scene, as
+/// the UI tests and screenshots see it.
+@MainActor
+final class RecordingTests: XCTestCase {
+    static let text = try? String(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        .appendingPathComponent("../../../fixtures/recording.jsonl").standardized, encoding: .utf8)
+    static let main = "The session list jumps to the top"
+
+    func open(_ scene: String) async throws -> (HarloModel, OpenSession) {
+        let text = try XCTUnwrap(Self.text, "ios/fixtures/recording.jsonl")
+        let m = HarloModel.replaying(try Replay(recording: text, scene: scene))
+        for _ in 0..<100 where m.sessions.isEmpty { try await Task.sleep(nanoseconds: 20_000_000) }
+        let summary = try XCTUnwrap(m.sessions.first { $0.title.hasPrefix(Self.main) }, "\(scene): \(m.sessions.map(\.title))")
+        m.open(summary)
+        let s = try XCTUnwrap(m.session)
+        for _ in 0..<100 where s.rows.isEmpty || s.loading { try await Task.sleep(nanoseconds: 20_000_000) }
+        XCTAssertNil(s.error, scene)
+        return (m, s)
+    }
+
+    func testEveryScene() async throws {
+        let text = try XCTUnwrap(Self.text)
+        XCTAssertEqual(Replay.scenes(in: text), ["session", "ask", "approval", "working", "aside", "plan", "helpers", "end"])
+        let tools = { (s: OpenSession) in s.rows.filter { $0.kind == "tool" } }
+
+        var (m, s) = try await open("session")
+        XCTAssertTrue(m.features.contains("sessionMentions"))
+        XCTAssertEqual(m.sessions.count, 3, "\(m.sessions.map(\.title))")
+        let tests = try XCTUnwrap(tools(s).first { $0.label == "Run the tests" })
+        XCTAssertEqual(tests.command, "./run-tests.sh")
+        XCTAssertTrue(tests.shownOutput().hasSuffix("112 passed; 0 failed; 0 ignored; finished in 1.84s"))
+        XCTAssertEqual(s.rows.first { $0.kind == "markdown" }?.model, "tour-coder")
+
+        (m, s) = try await open("ask")
+        XCTAssertEqual(s.requests.first?.questions.first?.options.count, 2)
+        (m, s) = try await open("approval")
+        let approval = try XCTUnwrap(s.requests.first)
+        XCTAssertTrue(approval.approval && approval.message.contains("git clean"), approval.message)
+        XCTAssertEqual(m.waiting.count, 1)
+        (m, s) = try await open("working")
+        XCTAssertFalse(s.subagents.isEmpty)
+        (m, s) = try await open("aside")
+        XCTAssertEqual(s.aside?.done, true)
+        XCTAssertTrue(s.rows.contains { $0.kind == "notice" && $0.text.contains("Background job j1") })
+        (m, s) = try await open("plan")
+        for _ in 0..<50 where (s.plan?.steps.count ?? 0) < 3 { try await Task.sleep(nanoseconds: 20_000_000) }
+        XCTAssertEqual(s.plan?.steps.count, 3)
+        XCTAssertTrue(tools(s).contains { ToolName.words($0.title, running: false) == "dice roll" })
+        (m, s) = try await open("helpers")
+        XCTAssertTrue(s.rows.contains { $0.fromHarlo && !$0.label.isEmpty })
+        XCTAssertTrue(tools(s).contains { ToolName.words($0.title, running: false) == "harlo: bring over a helper's changes" })
+        (m, s) = try await open("end")
+        XCTAssertTrue(s.info.modelId.hasSuffix("tour-helper"), s.info.modelId)
+        let mentions = await m.sessionMentions(matching: "")
+        XCTAssertTrue(mentions.contains { $0.harness == "claude" }, "\(mentions.map(\.title))")
+        // The Claude Code session: its subagent's call.
+        let claude = try XCTUnwrap(m.sessions.first { $0.harness == "claude" })
+        m.open(claude)
+        let c = try XCTUnwrap(m.session)
+        for _ in 0..<100 where c.rows.isEmpty { try await Task.sleep(nanoseconds: 20_000_000) }
+        XCTAssertTrue(c.rows.contains { $0.kind == "tool" && $0.title == "Agent" }, "\(c.rows.map(\.title))")
     }
 }

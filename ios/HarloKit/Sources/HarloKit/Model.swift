@@ -259,6 +259,9 @@ public final class HarloModel {
     @ObservationIgnored public var samples: Samples?
     /// The demo: sample sessions, no harlo (see Demo.swift).
     public internal(set) var demo = false
+    /// Connected to a recording, not a harlo (Replay.swift): it stays
+    /// connected, whatever the app's state or the network.
+    @ObservationIgnored public internal(set) var replaying = false
     @ObservationIgnored var demoCount = 0
     @ObservationIgnored var demoServers: [ModelServers] = []
     /// Sessions marked unread here (kept), until opened.
@@ -306,7 +309,7 @@ public final class HarloModel {
 
     /// The app is in front: connect, and keep reconnecting.
     public func resume() {
-        guard !demo else { return }
+        guard !demo, !replaying else { return }
         active = true
         if loop == nil, host != nil { startLoop(with: nil) }
         // Connected in the background (a notification's Allow): the open
@@ -319,7 +322,7 @@ public final class HarloModel {
 
     /// The app went to the background: hang up (iOS would cut it anyway).
     public func suspend() {
-        guard !demo else { return }
+        guard !demo, !replaying else { return }
         active = false
         better?.cancel()
         better = nil
@@ -346,7 +349,7 @@ public final class HarloModel {
     /// down): a connection that no longer answers is dropped at once
     /// (rather than at the next ping), and a wait for the next try ends.
     public func networkChanged() async {
-        guard active, host != nil, !demo else { return }
+        guard active, host != nil, !demo, !replaying else { return }
         if let c = client, state == .connected {
             if await c.alive(timeout: 3) {
                 // Still there: but a better way in may be back (home Wi-Fi).
@@ -371,7 +374,7 @@ public final class HarloModel {
     /// it moved.
     @discardableResult
     public func moveToBetter() async -> Bool {
-        guard !moving, let old = client, state == .connected, var h = host, let now = h.lastEndpoint else { return false }
+        guard !moving, !replaying, let old = client, state == .connected, var h = host, let now = h.lastEndpoint else { return false }
         let better = h.tryOrder.filter { Endpoints.rank($0) < Endpoints.rank(now) }
         guard !better.isEmpty else { return false }
         moving = true

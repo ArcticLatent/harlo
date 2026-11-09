@@ -245,8 +245,9 @@ QtObject {
         return sv ? sv.engine : ""
     }
     function toolLabel(name) {
-        // harlo's own (Claude's "mcp__harlo__x", others' "harlo_x"): what it does.
-        const h = /^(?:mcp__harlo__|harlo_)(.+)$/.exec(name || "")
+        // harlo's own (Claude's "mcp__harlo__x", others' "harlo_x", Harlo's
+        // own "x"): what it does.
+        const h = /^(?:mcp__harlo__|harlo_)?(.+)$/.exec(name || "")
         if (h && harloTools[h[1]]) return harloTools[h[1]]
         const m = /^mcp__([^_]+(?:_[^_]+)*?)__(.+)$/.exec(name || "")
         return m ? m[1] + " " + m[2].replace(/_/g, " ") : name
@@ -267,7 +268,7 @@ QtObject {
     // What a harlo tool's call is busy with before its arguments are in: the
     // agent writing them (a briefing can take a minute).
     function toolWriting(name) {
-        const h = /^(?:mcp__harlo__|harlo_)(.+)$/.exec(name || "")
+        const h = /^(?:mcp__harlo__|harlo_)?(.+)$/.exec(name || "")
         return h ? ({ propose_helpers: "writing each helper's briefing…", start_session: "writing its briefing…", send_message: "writing the message…",
                       request_approval: "writing the question…", report_done: "writing the report…", ask_parent: "writing the question…" })[h[1]] || "" : ""
     }

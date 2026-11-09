@@ -33,7 +33,24 @@ targets:
       - target: HarloNotifications
       # The Live Activity on the lock screen and in the Dynamic Island.
       - target: HarloWidgets
-    scheme: {}
+    # The recording of harlo the UI tests play back (-replay), in Debug
+    # builds only: TestFlight's builds (Release) don't have it.
+    postCompileScripts:
+      - name: Recording for the UI tests
+        basedOnDependencyAnalysis: false
+        inputFiles:
+          - $(SRCROOT)/../fixtures/recording.jsonl
+        outputFiles:
+          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/recording.jsonl
+        script: |
+          if [ "$CONFIGURATION" = Debug ]; then
+            cp "$SCRIPT_INPUT_FILE_0" "$SCRIPT_OUTPUT_FILE_0"
+          else
+            rm -f "$SCRIPT_OUTPUT_FILE_0"
+          fi
+    scheme:
+      testTargets:
+        - HarloUITests
     # Push notifications; the Keychain group the notification extension
     # reads too (the app's own, where its keys have always been).
     entitlements:
@@ -102,6 +119,26 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         CODE_SIGN_STYLE: Automatic
         ENABLE_PREVIEWS: true
+        # (The recording's copy declares its input and output.)
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+
+  # The app driven on the simulator against its recording of harlo
+  # (-replay): each screen checked and pictured (screenshots for design
+  # critiques; see .github/workflows/ios.yml's ui-tests job).
+  HarloUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: HarloUITests
+    dependencies:
+      - target: Harlo
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.arcticlatent.harlo.uitests
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.0"
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: YES
 
   # Opens harlo's notifications before they show: what they say comes
   # sealed for this phone (Apple carries a placeholder), opened with the

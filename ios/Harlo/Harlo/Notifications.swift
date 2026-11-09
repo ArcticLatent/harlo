@@ -11,6 +11,7 @@ import WidgetKit
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     lazy var model: HarloModel = {
         if Tour.enabled { return HarloModel.sample(busier: true) }
+        if Replaying.enabled { return Replaying.model() }
         let m = HarloModel(store: KeychainStore(), deviceName: UIDevice.current.name)
         // The home screen widget follows the session list.
         m.widgetChanged = { WidgetCenter.shared.reloadTimelines(ofKind: "HarloSessions") }

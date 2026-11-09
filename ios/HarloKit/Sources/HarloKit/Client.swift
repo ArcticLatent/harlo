@@ -35,6 +35,8 @@ public actor HarloClient {
     public nonisolated let events: AsyncStream<Event>
     public private(set) var closeReason: String?
     public private(set) var isConnected = false
+    /// Answers from a recording instead of harlo (Replay.swift).
+    private var replay: Replay?
 
     /// Connects and says hello: with `code` (and this phone's name) the first
     /// time, to pair; by key alone afterwards. Throws `.denied` with harlo's
@@ -47,6 +49,34 @@ public actor HarloClient {
         let client = HarloClient(endpoint: endpoint, identity: identity, harloKey: key)
         let ready = try await client.hello(code: code, deviceName: deviceName, timeout: timeout, endpoint: endpoint)
         return (client, ready)
+    }
+
+    /// A connection to a recording: it answers as harlo did, and opening a
+    /// session sends that session's events up to the scene.
+    public static func replaying(_ replay: Replay) -> HarloClient {
+        let c = HarloClient(endpoint: URL(string: "ws://127.0.0.1:9/replay")!, identity: KeyPair.generate(), harloKey: Data(repeating: 7, count: 32))
+        Task { await c.startReplay(replay) }
+        return c
+    }
+
+    private func startReplay(_ r: Replay) {
+        replay = r
+        isConnected = true
+        for e in r.latestShared() { if let ev = Event(e) { continuation.yield(ev) } }
+    }
+
+    /// What a recording answers, with what harlo would send after it.
+    private func replayed(_ r: Replay, _ op: String, _ args: JSON) -> JSON {
+        let reply = r.answer(op, args)
+        switch op {
+        case "open":
+            for e in r.events(of: reply["key"].text) { if let ev = Event(e) { continuation.yield(ev) } }
+        case "answer":
+            continuation.yield(.cleared(key: args["key"].text, id: args["requestId"].text))
+        default:
+            break
+        }
+        return reply
     }
 
     private init(endpoint: URL, identity: KeyPair, harloKey: Data) {
@@ -92,6 +122,7 @@ public actor HarloClient {
         }
         switch reply["type"].text {
         case "ready":
+            Recorder.shared?.write(["ready": ["name": reply["name"], "features": reply["features"]]])
             let box = try Box(theirPublic: harloKey, ours: identity)
             channel = Channel(box: box, id: reply["conn"].text)
             isConnected = true
@@ -134,7 +165,20 @@ public actor HarloClient {
     /// Sends a request (`sessions`, `open`, `send`, `abort`, `answer`, `ping`)
     /// and waits for its reply. A reply `{ error }` is returned as is.
     public func call(_ op: String, _ args: JSON = [:]) async throws -> JSON {
+        if let r = replay {
+            guard isConnected else { throw HarloError.notConnected }
+            return replayed(r, op, args)
+        }
         guard isConnected, channel != nil else { throw HarloError.notConnected }
+        if let rec = Recorder.shared {
+            let reply = try await sent(op, args)
+            rec.write(["call": .string(op), "args": args, "reply": reply])
+            return reply
+        }
+        return try await sent(op, args)
+    }
+
+    private func sent(_ op: String, _ args: JSON) async throws -> JSON {
         let id = nextId
         nextId += 1
         var msg = args
@@ -502,6 +546,7 @@ public actor HarloClient {
             return true
         }
         if let ev = Event(msg) {
+            Recorder.shared?.write(["ev": msg])
             continuation.yield(ev)
             if ev == .revoked {
                 finish("This phone was removed in harlo.")

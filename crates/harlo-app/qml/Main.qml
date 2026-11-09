@@ -5303,7 +5303,10 @@ ApplicationWindow {
         PauseAnimation { duration: 800 }
         ScriptAction { script: {
             if (win.argValue("--project=")) Workspace.addProject(win.argValue("--project="))
-            Phone.setAccessPort(Number(win.argValue("--phone-port=") || 7676)); Phone.setAccess(true); Workspace.newSession(-1, "demo")
+            Phone.setAccessPort(Number(win.argValue("--phone-port=") || 7676)); Phone.setAccess(true)
+            // (Without one: --nodemo=1, as the iOS app's recording starts.)
+            if (win.argValue("--nodemo=") !== "1") Workspace.newSession(-1, "demo")
+            if (win.argValue("--fake-claude=")) Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
             if (win.argValue("--relay=")) Phone.useRelay(true) } }
         PauseAnimation { duration: 1500 }
         // A long session (--history=N exchanges before it), as a phone may open.

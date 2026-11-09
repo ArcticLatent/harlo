@@ -5,8 +5,8 @@
 import Foundation
 
 public enum ToolName {
-    /// harlo's own tools (Claude's `mcp__harlo__x`, Harlo's `harlo_x`): what
-    /// they do.
+    /// harlo's own tools (Claude's `mcp__harlo__x`, others' `harlo_x`,
+    /// Harlo's own `x`): what they do.
     static let harlo: [String: String] = [
         "propose_helpers": "harlo: offer a split",
         "start_session": "harlo: start a session",
@@ -26,12 +26,13 @@ public enum ToolName {
         "plan_set": "Plan", "plan_read": "Read the plan", "plan_start": "Start a step", "plan_done": "Finish a step",
     ]
 
-    /// A tool of harlo's own (`mcp__harlo__x`, `harlo_x`): its name there.
-    static func harloTool(_ name: String) -> String? {
+    /// A tool's name without harlo's prefix (`mcp__harlo__x`, `harlo_x`;
+    /// Harlo calls them by their own names).
+    static func harloTool(_ name: String) -> String {
         for prefix in ["mcp__harlo__", "harlo_"] where name.hasPrefix(prefix) {
             return String(name.dropFirst(prefix.count))
         }
-        return nil
+        return name
     }
 
     /// An MCP server's tool (`mcp__<server>__<tool>`): the server and the
@@ -47,11 +48,8 @@ public enum ToolName {
     /// The call's name as words: "Read file", "Ran command", "Asked you",
     /// "context-mode ctx execute", "harlo: start a session".
     public static func words(_ tool: String, running: Bool) -> String {
-        if let h = harloTool(tool) {
-            if let said = plan[h] { return said }
-            if let said = harlo[h] { return said }
-        }
-        if let said = plan[tool] { return said }
+        let h = harloTool(tool)
+        if let said = plan[h] ?? harlo[h] { return said }
         if let m = mcp(tool) { return m.server + " " + m.tool.replacingOccurrences(of: "_", with: " ") }
         let pick = { (now: String, done: String) in running ? now : done }
         switch tool.lowercased() {
@@ -86,11 +84,9 @@ public enum ToolName {
 
     /// Its SF Symbol.
     public static func symbol(_ tool: String) -> String {
-        if let h = harloTool(tool) {
-            if plan[h] != nil { return "checklist" }
-            if harlo[h] != nil { return "person.2" }
-        }
-        if plan[tool] != nil { return "checklist" }
+        let h = harloTool(tool)
+        if plan[h] != nil { return "checklist" }
+        if harlo[h] != nil { return "person.2" }
         if mcp(tool) != nil { return "puzzlepiece.extension" }
         switch tool.lowercased() {
         case "read", "view", "cat", "glob", "ls", "find": return "doc.text"

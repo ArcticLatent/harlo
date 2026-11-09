@@ -2,7 +2,11 @@
 # with the App Store Connect API key and uploaded to TestFlight; and, when
 # asked for (run by hand with screenshots on), screenshots of every screen
 # from the iOS simulator (the app's `-tour` mode, sample content, dark and
-# light) as the `screenshots` artifact.
+# light) as the `screenshots` artifact; and (uitests on) the UI tests,
+# driving the app on its recording of harlo (ios/fixtures/recording.jsonl)
+# on several phones, appearances and text sizes, as the `ui-tests` artifact:
+# a folder per run with each screen's picture, its accessibility audit, and
+# what failed. scripts/ios-ui-tests.sh runs it and fetches that.
 #
 # Secrets: APPLE_TEAM_ID, ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8 (the .p8's
 # text). The key needs the Admin role, so Xcode can make the signing
@@ -30,6 +34,15 @@ on:
         description: "Screenshots on a Pro Max (the App Store's 6.9-inch size)"
         type: boolean
         default: false
+      uitests:
+        description: "UI tests on the recording, with screenshots and accessibility audits"
+        type: boolean
+        default: false
+      uitests_set:
+        description: "full: three phones, dark and light, a large text size; quick: one phone, light"
+        type: choice
+        options: [full, quick]
+        default: full
 
 concurrency:
   # (By event: a screenshots run by hand never cancels a push's build.)
@@ -270,4 +283,130 @@ jobs:
         with:
           name: screenshots
           path: ${{ runner.temp }}/shots
+          if-no-files-found: ignore
+
+  ui-tests:
+    if: github.event_name == 'workflow_dispatch' && inputs.uitests
+    runs-on: macos-15
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Xcode (the newest installed)
+        run: |
+          newest=$(ls -d /Applications/Xcode_*.app | grep -v -i beta | sort -V | tail -1)
+          sudo xcode-select -s "$newest"
+          echo "::notice::$(xcodebuild -version | tr '\n' ' ')"
+
+      - name: Build for testing
+        run: |
+          set -o pipefail
+          brew install xcodegen
+          (cd ios/Harlo && xcodegen generate)
+          xcodebuild build-for-testing -project ios/Harlo/Harlo.xcodeproj -scheme Harlo -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/dd" -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/build.log" | grep -E "error:|\*\* TEST BUILD" || true
+          if ! grep -q "TEST BUILD SUCCEEDED" "$RUNNER_TEMP/build.log"; then
+            grep -E "error:" "$RUNNER_TEMP/build.log" | sort -u | head -40 | sed 's/^/::error::/'
+            exit 1
+          fi
+
+      - name: Runs
+        env:
+          SET: ${{ inputs.uitests_set }}
+        run: |
+          # Each run: a phone on the newest iOS, light or dark, a text size.
+          xcrun simctl list devices available -j > "$RUNNER_TEMP/devices.json"
+          python3 - "$RUNNER_TEMP/devices.json" "$SET" > "$RUNNER_TEMP/runs.txt" <<'PY'
+          import json, re, sys
+          d = json.load(open(sys.argv[1]))["devices"]
+          rts = sorted((k for k in d if "iOS" in k), key=lambda k: [int(x) for x in re.findall(r"\d+", k.split("iOS")[-1])])
+          phones = next(([x for x in d[rt] if x["name"].startswith("iPhone")] for rt in reversed(rts) if any(x["name"].startswith("iPhone") for x in d[rt])), [])
+          def pick(*patterns):
+              for p in patterns:
+                  for x in phones:
+                      if re.search(p, x["name"]):
+                          return x
+              return phones[0]
+          pro, mx = pick(r"^iPhone \d+ Pro$"), pick(r"Pro Max$")
+          small = pick(r"iPhone SE", r"mini$", r"^iPhone \d+e$", r"^iPhone \d+$")
+          large = "UICTContentSizeCategoryAccessibilityL"
+          runs = [("pro-light", pro, "light", "")]
+          if sys.argv[2] != "quick":
+              runs += [("pro-dark", pro, "dark", ""), ("small-light", small, "light", ""), ("max-dark", mx, "dark", ""), ("pro-light-largetext", pro, "light", large)]
+          for name, dev, look, size in runs:
+              print(name, dev["udid"], look, size or "-", dev["name"].replace(" ", "_"))
+          PY
+          cat "$RUNNER_TEMP/runs.txt"
+
+      - name: UI tests
+        run: |
+          xctestrun=$(ls "$RUNNER_TEMP"/dd/Build/Products/*.xctestrun | head -1)
+          mkdir -p "$RUNNER_TEMP/results" "$RUNNER_TEMP/ui"
+          failed=0
+          # (The runs on their own descriptor: xcodebuild reads stdin.)
+          while read -r name udid look size device <&3; do
+            echo "::group::$name ($device, $look, ${size})"
+            xcrun simctl boot "$udid" 2>/dev/null || true
+            xcrun simctl bootstatus "$udid" -b
+            xcrun simctl ui "$udid" appearance "$look"
+            xcrun simctl status_bar "$udid" override --time 9:41 --dataNetwork wifi --wifiMode active --wifiBars 3 --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100 || true
+            [ "$size" = "-" ] && size=""
+            TEST_RUNNER_HARLO_TEXT_SIZE="$size" xcodebuild test-without-building -xctestrun "$xctestrun" -destination "id=$udid" \
+              -resultBundlePath "$RUNNER_TEMP/results/$name.xcresult" 2>&1 | grep -E "Test Case .*(passed|failed)|error:|\*\* TEST" || true
+            out="$RUNNER_TEMP/ui/$name"
+            mkdir -p "$out/raw"
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/results/$name.xcresult" --output-path "$out/raw" || true
+            xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/results/$name.xcresult" > "$out/summary.json" || true
+            python3 - "$out" "$name" "$device" <<'PY'
+          import json, os, re, sys
+          out, name, device = sys.argv[1:]
+          raw = os.path.join(out, "raw")
+          # Each attachment by its name in the test: 01-dashboard.png, audit-dashboard.txt.
+          try:
+              manifest = json.load(open(os.path.join(raw, "manifest.json")))
+          except Exception:
+              manifest = []
+          for test in manifest:
+              for a in test.get("attachments", []):
+                  human = a.get("suggestedHumanReadableName") or a["exportedFileName"]
+                  base, ext = os.path.splitext(human)
+                  base = re.sub(r"_\d+_[0-9A-Fa-f-]{36}$", "", base)
+                  os.replace(os.path.join(raw, a["exportedFileName"]), os.path.join(out, base + ext))
+          try:
+              s = json.load(open(os.path.join(out, "summary.json")))
+          except Exception:
+              s = {}
+          failures = s.get("testFailures", [])
+          with open(os.path.join(out, "failures.txt"), "w") as f:
+              for x in failures:
+                  f.write(f"{x.get('testName')}: {x.get('failureText')}\n")
+          print(f"{name} on {device}: {s.get('passedTests', '?')} passed, {s.get('failedTests', '?')} failed")
+          for x in failures[:30]:
+              print(f"::error::{name}: {x.get('testName')}: {x.get('failureText')}")
+          PY
+            rm -rf "$out/raw"
+            grep -q '"result" *: *"Passed"' "$out/summary.json" || failed=1
+            xcrun simctl shutdown "$udid" || true
+            echo "::endgroup::"
+          done 3< "$RUNNER_TEMP/runs.txt"
+          echo "::notice::$(ls "$RUNNER_TEMP"/ui/*/*.png 2>/dev/null | wc -l) screenshots"
+          exit $failed
+
+      - name: Screens and audits
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ui-tests
+          path: ${{ runner.temp }}/ui
+          if-no-files-found: ignore
+
+      - name: Results
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ui-test-results
+          path: |
+            ${{ runner.temp }}/results
+            ${{ runner.temp }}/build.log
           if-no-files-found: ignore
