@@ -114,6 +114,8 @@ fn main() {
     harlo_harness::set_remote_program(harlo_core::agent_host::remote_program);
     // (Other machines' servers this computer's agents reach through SSH.)
     std::thread::spawn(harlo_core::model_servers::forward_uses);
+    // (Node for the MCP servers harlo installed and turned on, if theirs is gone.)
+    std::thread::spawn(harlo_core::mcp_catalog::on_start);
     harlo_core::servers::set_after_start(accounts::sync_context);
     diagnostics::init_logging();
     diagnostics::install_panic_hook();

@@ -315,7 +315,7 @@ fn harlo_install(engine: Engine) -> Option<PathBuf> {
 }
 
 /// A version's numbers, to compare ("v0.2.10" after "v0.2.9", "b12024").
-fn version_key(version: &str) -> Vec<u64> {
+pub(crate) fn version_key(version: &str) -> Vec<u64> {
     version.split(|c: char| !c.is_ascii_digit()).filter_map(|n| n.parse().ok()).collect()
 }
 
@@ -470,7 +470,7 @@ fn http(timeout: Duration) -> ureq::Agent {
     ureq::Agent::config_builder().timeout_global(Some(timeout)).http_status_as_error(false).tls_config(tls).build().into()
 }
 
-fn get_json(url: &str) -> Result<Value, String> {
+pub(crate) fn get_json(url: &str) -> Result<Value, String> {
     get_json_as(url, "application/vnd.github+json")
 }
 
@@ -505,7 +505,7 @@ fn release(engine: Engine) -> Result<Value, String> {
     }
 }
 
-fn asset_named(release: &Value, name: &str, sums: Option<&str>) -> Option<Asset> {
+pub(crate) fn asset_named(release: &Value, name: &str, sums: Option<&str>) -> Option<Asset> {
     let a = release["assets"].as_array()?.iter().find(|a| a["name"] == name)?;
     // GitHub's digest, else the release's checksum file.
     let sha = a["digest"].as_str().and_then(|d| d.strip_prefix("sha256:")).map(str::to_owned).or_else(|| {

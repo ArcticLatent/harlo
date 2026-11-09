@@ -59,6 +59,23 @@ pub mod qobject {
         /// the host of a `host:` / remote project scope).
         #[qinvokable]
         fn installed_on(self: &Mcp, harness: &QString, scope: &QString) -> bool;
+        /// The servers harlo installs with a click: `[{ id, name, about,
+        /// license, repo, version, agents, chosen, taken, needs, node,
+        /// nodeError, latest, busy, progress, message, error }]` (as last
+        /// looked: `catalog_refresh` looks again).
+        #[qinvokable]
+        fn catalog_json(self: &Mcp) -> QString;
+        /// Looks at them again, and for a newer release (at most hourly
+        /// unless `force`).
+        #[qinvokable]
+        fn catalog_refresh(self: Pin<&mut Mcp>, force: bool);
+        /// Turns one on for `harnesses` (JSON array; downloading it first if
+        /// it isn't yet), or off (`harnesses`: chosen for next time).
+        #[qinvokable]
+        fn catalog_set(self: Pin<&mut Mcp>, id: &QString, on: bool, harnesses: &QString);
+        /// Updates one to its newest release.
+        #[qinvokable]
+        fn catalog_update(self: Pin<&mut Mcp>, id: &QString);
     }
 }
 
@@ -69,6 +86,7 @@ use std::time::Duration;
 
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::QString;
+use harlo_core::mcp_catalog;
 use harlo_core::mcp::{self, Form, Scope};
 use harlo_core::mcp_probe::{self, Probe};
 use harlo_harness::HarnessKind;
@@ -81,6 +99,11 @@ pub struct McpRust {
     revision: i32,
     /// Test results by (scope, server).
     status: HashMap<(String, String), Probe>,
+    /// The servers harlo offers, as last looked, with what's being done to them,
+    /// by id.
+    catalog: serde_json::Map<String, Value>,
+    /// When a newer release was last looked for.
+    catalog_checked: Option<std::time::Instant>,
 }
 
 fn form_json(f: &Form) -> Value {
@@ -145,6 +168,8 @@ impl Mcp {
         let servers: Vec<Value> = listing
             .servers
             .iter()
+            // (harlo's own: under Ready to install.)
+            .filter(|s| scope != Scope::Global || mcp_catalog::which(&s.form).is_none())
             .map(|s| {
                 // (A project's server Harlo won't start yet: not saved here.)
                 let unapproved = s.harnesses.contains(&HarnessKind::Harlo) && mcp::harlo_approved(&scope, &s.form.name) == Some(false);
@@ -280,6 +305,111 @@ impl Mcp {
 
     pub fn installed(&self, harness: &QString) -> bool {
         HarnessKind::parse(&harness.to_string()).and_then(program).is_some()
+    }
+
+    pub fn catalog_json(&self) -> QString {
+        let list: Vec<Value> = mcp_catalog::OFFERED
+            .iter()
+            .map(|b| self.catalog.get(b.id).cloned().unwrap_or_else(|| json!({ "id": b.id, "name": b.name, "about": b.about, "license": b.license, "repo": b.repo, "loading": true })))
+            .collect();
+        QString::from(&Value::from(list).to_string())
+    }
+
+    /// Changes the fields of one's entry.
+    fn catalog_put(mut self: Pin<&mut Self>, id: &str, fields: Value) {
+        let mut this = self.as_mut().rust_mut();
+        let entry = this.catalog.entry(id.to_owned()).or_insert_with(|| json!({}));
+        if let (Some(e), Some(f)) = (entry.as_object_mut(), fields.as_object()) {
+            for (k, v) in f {
+                e.insert(k.clone(), v.clone());
+            }
+        }
+        self.bump();
+    }
+
+    pub fn catalog_refresh(mut self: Pin<&mut Self>, force: bool) {
+        let look_up = force || self.catalog_checked.is_none_or(|t| t.elapsed() > Duration::from_secs(3600));
+        if look_up {
+            self.as_mut().rust_mut().catalog_checked = Some(std::time::Instant::now());
+        }
+        let thread = self.qt_thread();
+        crate::runtime().spawn_blocking(move || {
+            for b in mcp_catalog::OFFERED {
+                let mut st = mcp_catalog::status(&b);
+                st["loading"] = json!(false);
+                let _ = thread.queue(move |this| this.catalog_put(b.id, st));
+            }
+            if look_up {
+                for b in mcp_catalog::OFFERED {
+                    // (Offline, or GitHub's limit: nothing to say.)
+                    if let Ok((latest, _)) = mcp_catalog::latest(&b) {
+                        let _ = thread.queue(move |this| this.catalog_put(b.id, json!({ "latest": latest })));
+                    }
+                }
+            }
+        });
+    }
+
+    pub fn catalog_set(mut self: Pin<&mut Self>, id: &QString, on: bool, harnesses: &QString) {
+        let Some(b) = mcp_catalog::get(&id.to_string()) else { return };
+        let kinds: Vec<HarnessKind> = serde_json::from_str::<Vec<String>>(&harnesses.to_string()).unwrap_or_default().iter().filter_map(|h| HarnessKind::parse(h)).filter(|k| mcp::HARNESSES.contains(k)).collect();
+        self.as_mut().catalog_put(b.id, json!({ "busy": if on { "on" } else { "off" }, "progress": 0.0, "error": "", "message": "" }));
+        mcp::use_claude(program(HarnessKind::Claude));
+        let thread = self.qt_thread();
+        crate::runtime().spawn_blocking(move || {
+            let mut shown = std::time::Instant::now();
+            let t = thread.clone();
+            let mut progress = |done: u64, total: u64| {
+                if total > 0 && shown.elapsed() > Duration::from_millis(150) {
+                    shown = std::time::Instant::now();
+                    let p = done as f64 / total as f64;
+                    let _ = t.queue(move |this| this.catalog_put(b.id, json!({ "progress": p })));
+                }
+            };
+            let result = if on { mcp_catalog::enable(&b, &kinds, &mut progress) } else { mcp_catalog::disable(&b, &kinds) };
+            let mut st = mcp_catalog::status(&b);
+            st["busy"] = json!("");
+            st["error"] = json!(result.err().unwrap_or_default());
+            let _ = thread.queue(move |mut this| {
+                let tested = on && st["error"] == "";
+                this.as_mut().rust_mut().status.remove(&("global".to_owned(), b.id.to_owned()));
+                this.as_mut().catalog_put(b.id, st);
+                if tested {
+                    this.as_mut().test(&QString::from("global"), &QString::from(b.id));
+                }
+            });
+        });
+    }
+
+    pub fn catalog_update(mut self: Pin<&mut Self>, id: &QString) {
+        let Some(b) = mcp_catalog::get(&id.to_string()) else { return };
+        self.as_mut().catalog_put(b.id, json!({ "busy": "update", "progress": 0.0, "error": "", "message": "" }));
+        let thread = self.qt_thread();
+        crate::runtime().spawn_blocking(move || {
+            let mut shown = std::time::Instant::now();
+            let t = thread.clone();
+            let result = mcp_catalog::update(&b, &mut |done, total| {
+                if total > 0 && shown.elapsed() > Duration::from_millis(150) {
+                    shown = std::time::Instant::now();
+                    let p = done as f64 / total as f64;
+                    let _ = t.queue(move |this| this.catalog_put(b.id, json!({ "progress": p })));
+                }
+            });
+            let mut st = mcp_catalog::status(&b);
+            st["busy"] = json!("");
+            match result {
+                Ok(m) => st["message"] = json!(m),
+                Err(e) => st["error"] = json!(e),
+            }
+            let _ = thread.queue(move |mut this| {
+                let on = st["agents"].as_array().is_some_and(|a| !a.is_empty());
+                this.as_mut().catalog_put(b.id, st);
+                if on {
+                    this.as_mut().rust_mut().status.remove(&("global".to_owned(), b.id.to_owned()));
+                    this.as_mut().test(&QString::from("global"), &QString::from(b.id));
+                }
+            });
+        });
     }
 
     pub fn installed_on(&self, harness: &QString, scope: &QString) -> bool {

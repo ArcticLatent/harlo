@@ -26,6 +26,7 @@ pub mod listdiff;
 pub mod listing;
 pub mod markdown;
 pub mod mcp;
+pub mod mcp_catalog;
 pub mod model_servers;
 pub mod orchestration;
 pub mod migrate;

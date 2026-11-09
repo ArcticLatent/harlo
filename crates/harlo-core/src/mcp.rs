@@ -562,6 +562,31 @@ pub fn put_entry(kind: HarnessKind, scope: &Scope, form: Option<&Form>, name: &s
     write_back(kind, scope, &path, &config, &before)
 }
 
+/// Sets (Some) or removes (None) one field of a harness's entry for a
+/// server, the rest as it is (nothing when it has no entry).
+pub fn set_field(kind: HarnessKind, scope: &Scope, name: &str, key: &str, value: Option<Value>) -> Result<()> {
+    let path = config_path(kind, scope);
+    let mut config = read_config(&path)?;
+    let before = config[SERVERS].as_object().cloned().unwrap_or_default();
+    let Some(entry) = config[SERVERS].get_mut(name).and_then(Value::as_object_mut) else { return Ok(()) };
+    match value {
+        Some(v) => {
+            entry.insert(key.to_owned(), v);
+        }
+        None => {
+            entry.remove(key);
+        }
+    }
+    if config[SERVERS].as_object() == Some(&before) {
+        return Ok(());
+    }
+    write_back(kind, scope, &path, &config, &before)?;
+    if kind == HarnessKind::Harlo {
+        approve(scope, name, config[SERVERS].get(name))?;
+    }
+    Ok(())
+}
+
 /// Removes a server from every agent's config in a scope.
 pub fn remove(scope: &Scope, name: &str) -> Result<()> {
     for kind in HARNESSES {

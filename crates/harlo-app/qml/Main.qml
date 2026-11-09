@@ -7528,6 +7528,111 @@ ApplicationWindow {
             win.summary(); Qt.quit() } }
     }
 
+    // An MCP server harlo installs with a click (click-tests.sh: a stand-in
+    // GitHub whose release is the real context-mode, then a newer one):
+    // turned on for Harlo (downloaded), tested, updated, used by a session,
+    // turned off.
+    SequentialAnimation {
+        id: catalogSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlocatalog"
+        function offered() { return JSON.parse(Mcp.catalogJson())[0] || {} }
+        function entry() {
+            const text = TestInput.readFile(win.selftestDir + "/config/harlo-agent/mcp.json") || "{}"
+            return (JSON.parse(text).mcpServers || {})["context-mode"] || null
+        }
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            Workspace.setProviderEnabled("claude", false)
+            Workspace.addProject(win.argValue("--cwd="))
+            settingsDialog.openPage("mcp") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(catalogSteps, () => catalogSteps.offered().loading === false && catalogSteps.offered().latest === "2.1.7", 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const d = settingsDialog.contentItem, b = catalogSteps.offered()
+            const card = win.findName("mcpCatalog-context-mode", d), sw = win.findName("mcpCatalogToggle-context-mode", d), u = win.findName("mcpCatalogUpdate-context-mode", d)
+            win.check(card !== null && card.visible, "Ready to install lists context-mode")
+            win.check(sw !== null && !sw.checked && sw.enabled, "off at first, and it can be turned on")
+            win.check(win.findName("mcpCatalogVersion-context-mode", d).text === "Not installed · version 2.1.7 is the newest", "not installed, and its newest release (" + win.findName("mcpCatalogVersion-context-mode", d).text + ")")
+            win.check(u === null || !u.visible, "no Update before it's installed")
+            win.check(b.version === "" && b.node !== "" && b.nodeError === "", "nothing downloaded yet; a Node found (" + JSON.stringify(b) + ")")
+            win.check(TestInput.readFile(win.selftestDir + "/data/harlo/mcp/context-mode/current/package.json") === "" && catalogSteps.entry() === null, "nothing in harlo's folder or Harlo's servers yet")
+            win.shotPopup(settingsDialog, "clicks-catalog-off")
+            win.clickItem(sw, "turn on") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(catalogSteps, () => (catalogSteps.offered().agents || []).length > 0 || (catalogSteps.offered().error || "") !== "", 30000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const b = catalogSteps.offered(), e = catalogSteps.entry() || {}
+            win.check(JSON.stringify(b.agents) === JSON.stringify(["harlo"]) && b.error === "" && b.version === "2.1.7", "downloaded and on for Harlo (" + JSON.stringify(b) + ")")
+            const data = win.selftestDir + "/data/harlo/mcp/context-mode"
+            win.check(JSON.parse(TestInput.readFile(data + "/2.1.7/package.json") || "{}").version === "2.1.7", "in harlo's folder")
+            win.check(e.command && e.command.startsWith("/") && e.command.endsWith("/node"), "the entry runs Node by its path (" + e.command + ")")
+            win.check(JSON.stringify(e.args) === JSON.stringify([data + "/current/server.mjs", "--agent", "claude-code"]), "harlo's copy, through current (" + JSON.stringify(e.args) + ")")
+            win.check(JSON.stringify(e.hiddenTools) === JSON.stringify(["ctx_upgrade", "ctx_doctor"]) && e.enabled === true, "its own updating hidden from Harlo (" + JSON.stringify(e) + ")") } }
+        ScriptAction { script: win.waitUntil(catalogSteps, () => (JSON.parse(Mcp.statusJson("global"))["context-mode"] || {}).state === "connected", 30000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const d = settingsDialog.contentItem
+            const pill = win.findName("mcpCatalogStatus-context-mode", d)
+            win.check(pill.text === "Connected · 9 tools", "tested: connected (" + pill.text + ")")
+            win.check(win.findName("mcpServer-context-mode", d) === null, "not listed again under Your servers")
+            win.shotPopup(settingsDialog, "clicks-catalog-on")
+            // (Looking again finds the newer release.)
+            win.clickItem(win.findName("mcpRefresh", d), "refresh") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(catalogSteps, () => catalogSteps.offered().latest === "2.1.8", 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const d = settingsDialog.contentItem, u = win.findName("mcpCatalogUpdate-context-mode", d)
+            win.check(win.findName("mcpCatalogVersion-context-mode", d).text === "Version 2.1.7 · 2.1.8 is out" && u !== null && u.visible, "a newer release: Update (" + win.findName("mcpCatalogVersion-context-mode", d).text + ")")
+            win.clickItem(u, "Update") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(catalogSteps, () => catalogSteps.offered().busy === "" && (catalogSteps.offered().message !== "" || catalogSteps.offered().error !== ""), 30000) }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const d = settingsDialog.contentItem, b = catalogSteps.offered()
+            win.check(b.message === "context-mode is updated: 2.1.7 → 2.1.8. New sessions use it." && b.version === "2.1.8", "updated from the release (" + b.message + b.error + ")")
+            const pkg = TestInput.readFile(win.selftestDir + "/data/harlo/mcp/context-mode/current/package.json") || "{}"
+            win.check(JSON.parse(pkg).version === "2.1.8", "current is the new one")
+            win.check(TestInput.readFile(win.selftestDir + "/data/harlo/mcp/context-mode/2.1.7/package.json") !== "", "the one before stays, for sessions still running it")
+            const u = win.findName("mcpCatalogUpdate-context-mode", d)
+            win.check(win.findName("mcpCatalogVersion-context-mode", d).text === "Version 2.1.8 · up to date" && (u === null || !u.visible), "up to date: no Update (" + win.findName("mcpCatalogVersion-context-mode", d).text + ")")
+            win.check(win.findName("mcpCatalogNote-context-mode", d).text === b.message, "it says so")
+            win.shotPopup(settingsDialog, "clicks-catalog-updated")
+            settingsDialog.close() } }
+        PauseAnimation { duration: 400 }
+        // A Harlo session uses it.
+        ScriptAction { script: { win.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo"); Workspace.setApprovalMode(win.harloKey, "yolo") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(catalogSteps, () => chat.session.modelName !== "", 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: win.sendByKeys("how much was kept out? mcp ctx_stats") }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(catalogSteps, () => win.chatText().indexOf("Done:") >= 0, 40000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(win.chatText().indexOf("Done: ctx_stats:") >= 0, "Harlo calls context-mode's tool (" + win.chatText().slice(-200) + ")")
+            const req = win.modelRequests().slice(-1)[0] || {}
+            const names = (req.tools || []).map(t => t.function.name)
+            win.check(names.includes("mcp__context-mode__ctx_execute") && !names.includes("mcp__context-mode__ctx_upgrade") && !names.includes("mcp__context-mode__ctx_doctor"), "offered its tools but the two hidden (" + names.filter(n => n.indexOf("context") >= 0).join() + ")")
+            const system = ((req.messages || [])[0] || {}).content || ""
+            win.check(system.indexOf('<mcp_server name="context-mode">') >= 0 && system.indexOf("ctx_execute") >= 0, "and its instructions")
+            win.shotWindow("clicks-catalog-session")
+            settingsDialog.openPage("mcp") } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: win.clickItem(win.findName("mcpCatalogToggle-context-mode", settingsDialog.contentItem), "turn off") }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(catalogSteps, () => catalogSteps.offered().busy === "" && (catalogSteps.offered().agents || []).length === 0, 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const d = settingsDialog.contentItem
+            win.check(catalogSteps.entry() === null, "off: its entry is gone")
+            win.check(win.findName("mcpCatalogStatus-context-mode", d).text === "Off" && win.findName("mcpCatalogFor-context-mode-harlo", d).checked, "Off, and Harlo stays ticked for next time")
+            win.summary(); Qt.quit() } }
+    }
+
     // Claude Code's skills and agent profiles in a Harlo session (the test's
     // ~/.claude/skills/greet and the repo's .claude/agents/reviewer, from
     // click-tests.sh), and the commit message Harlo writes.

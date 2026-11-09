@@ -35,7 +35,7 @@ ColumnLayout {
     readonly property var listing: Mcp.revision >= 0 ? JSON.parse(Mcp.listJson(scope)) : { servers: [], errors: [], files: {} }
     readonly property var status: Mcp.revision >= 0 ? JSON.parse(Mcp.statusJson(scope)) : ({})
     onScopeChanged: { editing = null; Mcp.testAll(scope) }
-    Component.onCompleted: Mcp.testAll(scope)
+    Component.onCompleted: { Mcp.testAll(scope); if (showCatalog) Mcp.catalogRefresh(false) }
 
     // ---- the server being edited (null: the grid) ---------------------------
     /// { oldName, form, harnesses, isNew }
@@ -86,6 +86,14 @@ ColumnLayout {
         editing = null
         Mcp.test(scope, name)
         return true
+    }
+    /// Whether version `a` is newer than `b` ("2.1.10" after "2.1.9").
+    function newerVersion(a, b) {
+        const x = a.split(/\D+/).filter(p => p !== "").map(Number), y = b.split(/\D+/).filter(p => p !== "").map(Number)
+        for (let i = 0; i < Math.max(x.length, y.length); i++) {
+            if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0)
+        }
+        return false
     }
     function statusText(s, enabled) {
         if (!enabled) return "Disabled"
@@ -211,9 +219,9 @@ ColumnLayout {
             outlined: false
             implicitWidth: 30
             contentItem: Icon { name: "refresh"; color: Theme.muted; implicitWidth: 15; implicitHeight: 15 }
-            onClicked: Mcp.testAll(page.scope)
+            onClicked: { Mcp.testAll(page.scope); if (page.showCatalog) Mcp.catalogRefresh(true) }
             ToolTip.visible: hovered
-            ToolTip.text: "Test the servers again"
+            ToolTip.text: page.showCatalog ? "Test the servers again, and look for new releases" : "Test the servers again"
         }
         Item { Layout.fillWidth: true }
     }
@@ -226,6 +234,132 @@ ColumnLayout {
         model: page.listing.errors
         Hint_ { required property string modelData; Layout.topMargin: 6; color: Theme.error; text: modelData }
     }
+
+    // ---- servers harlo installs with a click (this computer's global ones):
+    // a switch, the agents, the version and Update --------------------------
+    readonly property bool showCatalog: page.editing === null && page.scope === "global"
+    readonly property var catalog: Mcp.revision >= 0 ? JSON.parse(Mcp.catalogJson()) : []
+    onShowCatalogChanged: if (showCatalog) Mcp.catalogRefresh(false)
+    SectionTitle_ { visible: page.showCatalog; text: "Ready to install" }
+    Hint_ { visible: page.showCatalog; Layout.topMargin: 2; text: "Turn one on and harlo downloads it from its project's releases and sets it up for the agents you tick." }
+    Repeater {
+        model: page.showCatalog ? page.catalog : []
+        Rectangle {
+            id: bcard
+            required property var modelData
+            readonly property var b: modelData
+            readonly property bool on: (b.agents || []).length > 0
+            readonly property bool busy: (b.busy || "") !== ""
+            readonly property var st: page.status[b.id]
+            /// The agents ticked: those it's on for, else those chosen last
+            /// (none yet: the installed ones).
+            readonly property var ticked: on ? b.agents : ((b.chosen || []).length > 0 ? b.chosen : page.defaultAgents())
+            /// Those of them turned on in Settings → Providers (it's set up
+            /// for these).
+            readonly property var shown: ticked.filter(a => page.agents.some(x => x.id === a))
+            readonly property bool newer: (b.latest || "") !== "" && b.version !== "" && page.newerVersion(b.latest, b.version)
+            objectName: "mcpCatalog-" + b.id
+            Layout.fillWidth: true
+            Layout.topMargin: 10
+            implicitHeight: bcol.implicitHeight + 24
+            radius: 10
+            color: Theme.elevated
+            border.color: Theme.border
+            ColumnLayout {
+                id: bcol
+                x: 12; y: 12
+                width: parent.width - 24
+                spacing: 6
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Icon { name: "server"; color: Theme.muted; implicitWidth: 15; implicitHeight: 15 }
+                    Label { text: bcard.b.name; color: Theme.foreground; font.pixelSize: Theme.px(13); font.weight: Font.Medium }
+                    Pill_ {
+                        objectName: "mcpCatalogStatus-" + bcard.b.id
+                        visible: text !== ""
+                        text: bcard.b.busy === "on" ? (bcard.b.version === "" ? "Installing…" : "Setting up…") : bcard.b.busy === "off" ? "Turning off…" : bcard.on ? page.statusText(bcard.st, true) : "Off"
+                        tint: bcard.busy || !bcard.on ? Theme.muted : page.statusColor(bcard.st, true)
+                    }
+                    Item { Layout.fillWidth: true }
+                    AppSwitch {
+                        objectName: "mcpCatalogToggle-" + bcard.b.id
+                        enabled: !bcard.busy && !bcard.b.loading && (bcard.on || bcard.shown.length > 0)
+                        checked: bcard.on
+                        onToggled: Mcp.catalogSet(bcard.b.id, checked, JSON.stringify(checked ? bcard.shown : bcard.ticked))
+                        ToolTip.visible: hovered
+                        ToolTip.text: checked ? "On: new sessions start it. Click to turn it off." : bcard.b.version === "" ? "Off. Click to download it and set it up for the agents ticked." : "Off. Click to set it up for the agents ticked."
+                    }
+                }
+                Hint_ { text: bcard.b.about; color: Theme.textMuted }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 12
+                    Label { text: "For"; color: Theme.muted; font.pixelSize: Theme.px(12) }
+                    Repeater {
+                        model: page.agents
+                        AppCheckBox {
+                            required property var modelData
+                            objectName: "mcpCatalogFor-" + bcard.b.id + "-" + modelData.id
+                            text: Theme.harnessLabel(modelData.id)
+                            enabled: !bcard.busy
+                            checked: bcard.ticked.includes(modelData.id)
+                            onToggled: {
+                                // (Only this one changes: an agent turned off in
+                                // Providers keeps its own.)
+                                const next = checked ? bcard.ticked.filter(x => x !== modelData.id).concat([modelData.id]) : bcard.ticked.filter(x => x !== modelData.id)
+                                // (On: set up again for these, or off when none
+                                // is left; off: remembered for turning it on.)
+                                if (bcard.on) Mcp.catalogSet(bcard.b.id, next.length > 0, JSON.stringify(next))
+                                else Mcp.catalogSet(bcard.b.id, false, JSON.stringify(next))
+                            }
+                        }
+                    }
+                    Item { Layout.fillWidth: true }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Label {
+                        objectName: "mcpCatalogVersion-" + bcard.b.id
+                        Layout.fillWidth: true
+                        text: bcard.b.busy === "update" ? "Updating… " + Math.round((bcard.b.progress || 0) * 100) + "%"
+                              : bcard.b.busy === "on" && bcard.b.version === "" ? "Downloading… " + Math.round((bcard.b.progress || 0) * 100) + "%"
+                              : bcard.b.version === "" ? "Not installed" + ((bcard.b.latest || "") !== "" ? " · version " + bcard.b.latest + " is the newest" : "")
+                              : "Version " + bcard.b.version + (bcard.newer ? " · " + bcard.b.latest + " is out" : (bcard.b.latest || "") !== "" ? " · up to date" : "")
+                        color: Theme.muted
+                        font.pixelSize: Theme.px(12)
+                        elide: Text.ElideRight
+                    }
+                    FlatButton {
+                        objectName: "mcpCatalogUpdate-" + bcard.b.id
+                        text: "Update"
+                        font.pixelSize: Theme.px(12)
+                        enabled: !bcard.busy
+                        // (Installed, and not up to date as far as anyone looked.)
+                        visible: bcard.b.version !== "" && (bcard.newer || (bcard.b.latest || "") === "")
+                        onClicked: Mcp.catalogUpdate(bcard.b.id)
+                    }
+                }
+                Hint_ {
+                    objectName: "mcpCatalogNote-" + bcard.b.id
+                    readonly property string problem: bcard.b.error || (bcard.b.taken ? "You have another server called " + bcard.b.id + " below: remove it to use harlo's." : "") || (!bcard.on ? bcard.b.nodeError || "" : "")
+                    visible: text !== ""
+                    text: problem !== "" ? problem : (bcard.b.message || "")
+                    color: problem !== "" ? (bcard.b.error ? Theme.error : Theme.warning) : Theme.muted
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: bcard.b.license + " · github.com/" + bcard.b.repo
+                    color: Theme.muted
+                    opacity: 0.8
+                    font.pixelSize: Theme.px(11)
+                    elide: Text.ElideRight
+                }
+            }
+        }
+    }
+    SectionTitle_ { visible: page.showCatalog; text: "Your servers" }
 
     // ---- grid ----------------------------------------------------------------
     GridLayout {
