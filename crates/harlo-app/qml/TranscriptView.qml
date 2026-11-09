@@ -546,10 +546,12 @@ Item {
             return s
         }
         property int laidOut: 0
-        function lineTop(i) { return laidOut >= 0 && i < starts.length ? edit.positionToRectangle(starts[i]).y : edit.contentHeight }
+        // (Clamped: for a moment after the text changes, the starts can
+        // still be the old text's, and Qt warns of a position past its end.)
+        function lineTop(i) { return laidOut >= 0 && i < starts.length ? edit.positionToRectangle(Math.min(starts[i], edit.length)).y : edit.contentHeight }
         function lineHeight(i) { return laidOut >= 0 ? (i + 1 < starts.length ? lineTop(i + 1) : edit.contentHeight) - lineTop(i) : 0 }
         // (A wrapped line's first row: where its number goes.)
-        function rowHeight(i) { return laidOut >= 0 && i < starts.length ? edit.positionToRectangle(starts[i]).height : 0 }
+        function rowHeight(i) { return laidOut >= 0 && i < starts.length ? edit.positionToRectangle(Math.min(starts[i], edit.length)).height : 0 }
         // Tints: an added or removed line, a grep match among its context.
         Repeater {
             model: ct.lines ? ct.lines.length : 0

@@ -681,8 +681,8 @@ Rectangle {
                     readonly property int offset: rowItem.r[pane.base + 2]
                     visible: rowItem.kind === 1 && from >= 0 && pane.ready
                     // (After the text is laid out: its size says when.)
-                    readonly property real x0: visible && editor.contentWidth > 0 ? editor.positionToRectangle(offset + from).x : 0
-                    readonly property real x1: visible && editor.contentWidth > 0 ? editor.positionToRectangle(offset + to).x : 0
+                    readonly property real x0: visible && editor.contentWidth > 0 ? editor.positionToRectangle(Math.min(offset + from, editor.length)).x : 0
+                    readonly property real x1: visible && editor.contentWidth > 0 ? editor.positionToRectangle(Math.min(offset + to, editor.length)).x : 0
                     x: pane.gutterWidth + 8 + x0 - flick.contentX
                     width: Math.max(2, x1 - x0)
                     height: parent.height
