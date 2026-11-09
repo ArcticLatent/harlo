@@ -127,6 +127,12 @@ pub mod qobject {
         /// first `limit` lines.
         #[qinvokable]
         fn diff_lines(self: &ChatSession, path: &QString, diff: &QString, limit: i32) -> QString;
+        /// A call's output as code when it's a file's lines (a printed file,
+        /// numbered output, a read tool's): `{ path, total, lines: [{ n
+        /// (its number, "" unknown), c (grep context), h (highlighted) }] }`,
+        /// the first `limit` lines; "" when it isn't.
+        #[qinvokable]
+        fn code_view(self: &ChatSession, tool: &QString, command: &QString, path: &QString, output: &QString, limit: i32) -> QString;
         /// A run's rows (see `Row::group`), as the list's roles, JSON (a
         /// finished run shows in one box).
         #[qinvokable]
@@ -931,6 +937,17 @@ impl ChatSession {
         let html = harlo_core::markdown::highlight_lines(&path.to_string(), &texts);
         let out: Vec<serde_json::Value> = lines.iter().zip(html).map(|(l, h)| serde_json::json!({ "s": l.get(..1).unwrap_or(" "), "h": h })).collect();
         QString::from(&serde_json::Value::from(out).to_string())
+    }
+
+    pub fn code_view(&self, tool: &QString, command: &QString, path: &QString, output: &QString, limit: i32) -> QString {
+        let output = output.to_string();
+        match harlo_core::listing::view(&tool.to_string(), &command.to_string(), &path.to_string(), &output, limit.max(1) as usize) {
+            Some(v) => {
+                let lines: Vec<serde_json::Value> = v.lines.iter().map(|l| serde_json::json!({ "n": l.num, "c": l.context, "h": l.html })).collect();
+                QString::from(&serde_json::json!({ "path": v.path, "total": harlo_core::listing::line_count(&output), "lines": lines }).to_string())
+            }
+            None => QString::default(),
+        }
     }
 
     pub fn answer_value(self: Pin<&mut Self>, value: &QString) {

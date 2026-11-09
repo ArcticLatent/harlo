@@ -332,20 +332,31 @@ Item {
         readonly property int diffCount: diff === "" ? 0 : diff.split("\n").length
         // (A write's own count: its diff stops at 400 lines.)
         readonly property int lineCount: newFile && /^\+\d+$/.test(result) ? Number(result.slice(1)) : diffCount
-        readonly property var lines: preview ? JSON.parse(root.session.diffLines(subtitle.replace(/…$/, ""), diff, open ? 400 : previewLines)) : []
+        readonly property var lines: preview ? JSON.parse(root.session.diffLines(subtitle.replace(/…$/, ""), diff, open ? 400 : previewLines))
+            : code ? code.lines.map(l => ({ s: " ", n: l.n, c: l.c, h: l.h })) : []
+        // Output that is a file's lines (a printed file, grep -n in one
+        // file, a read): numbered and highlighted like a file, its first
+        // lines (where it starts matters), never wrapped.
+        readonly property var code: {
+            if (preview || asking || text === "" || rowState === "running") return null
+            const j = root.session.codeView(title, command, subtitle.replace(/…$/, ""), text, open ? 400 : previewLines)
+            return j === "" ? null : JSON.parse(j)
+        }
         readonly property bool shell: command !== "" && !asking
         readonly property string shownCommand: shell ? root.local(command) : ""
         // The command in the well when its line doesn't say it all.
         readonly property bool commandInWell: shell && (label !== "" || shownCommand.indexOf("\n") >= 0 || shownCommand.length > 90)
         readonly property var outLines: text === "" ? [] : text.split("\n").filter(l => l.trim() !== "")
         readonly property int tailLines: 3
-        readonly property var tail: outInWell && shell && !open ? outLines.slice(-tailLines) : []
+        readonly property var tail: outInWell && shell && !open && !code ? outLines.slice(-tailLines) : []
         readonly property var tailGutters: root.numbered(tail)
         // (One line of output that's what the line already says, "48 passed": not again.)
         readonly property bool echoed: shell && outLines.length === 1 && result !== "" && outLines[0].trim() === result.trim()
         readonly property bool outInWell: shell ? outLines.length > 0 && rowState !== "running" && !echoed : open && text !== "" && !preview
+        // (A read's lines show once it's opened; a command's at once.)
+        readonly property bool codeShown: !!code && (shell || open)
         readonly property bool failed: rowState === "error" || /^(exit|failed)|failed$/.test(result)
-        readonly property int hidden: preview ? lineCount - previewLines : shell ? outLines.length - tailLines : 0
+        readonly property int hidden: preview ? lineCount - previewLines : code ? code.total - previewLines : shell ? outLines.length - tailLines : 0
         readonly property bool canOpen: (text !== "" && !shell && !preview) || hidden > 0 || (commandInWell && shownCommand.split("\n").length > 2)
         // (harlo's tools about a session: its title, not its key.)
         readonly property bool aboutSession: /^(mcp__harlo__)?(bring_over|send_message|read_session|stop_session)$/.test(title) && /^[\w-]+:\S+$/.test(subtitle)
@@ -517,7 +528,7 @@ Item {
             objectName: card.preview ? "toolPreview" : "toolWell"
             Layout.fillWidth: true
             Layout.leftMargin: 22
-            visible: card.preview || card.commandInWell || card.outInWell
+            visible: card.preview || card.commandInWell || card.outInWell || card.codeShown
             // (As tall as it is: a run's box is what scrolls.)
             implicitHeight: wellCol.implicitHeight + 12
             radius: 6
@@ -532,39 +543,13 @@ Item {
                     id: wellCol
                     width: wellFlick.width
                     spacing: 0
-                    readonly property real numberWidth: card.newFile ? numberProbe.implicitWidth + 18 : 22
-                    Label { id: numberProbe; visible: false; text: String(card.lines.length); font.family: Theme.mono; font.pixelSize: Theme.mpx(12) }
-                    Repeater {
-                        model: card.lines
-                        Rectangle {
-                            required property var modelData
-                            required property int index
-                            width: wellCol.width
-                            implicitHeight: lineText.implicitHeight + 2
-                            readonly property bool added: !card.newFile && modelData.s === "+"
-                            readonly property bool removed: modelData.s === "-"
-                            color: added ? Qt.rgba(Theme.diffAdd.r, Theme.diffAdd.g, Theme.diffAdd.b, 0.10) : removed ? Qt.rgba(Theme.diffRemove.r, Theme.diffRemove.g, Theme.diffRemove.b, 0.10) : "transparent"
-                            Label {
-                                width: wellCol.numberWidth - 10
-                                horizontalAlignment: Text.AlignRight
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: card.newFile ? String(index + 1) : parent.added ? "+" : parent.removed ? "−" : ""
-                                color: parent.added ? Theme.diffAdd : parent.removed ? Theme.diffRemove : Theme.textFaint
-                                font.family: Theme.mono
-                                font.pixelSize: Theme.mpx(12)
-                            }
-                            Label {
-                                id: lineText
-                                x: wellCol.numberWidth
-                                width: parent.width - x - 10
-                                anchors.verticalCenter: parent.verticalCenter
-                                textFormat: Text.RichText
-                                text: Theme.htmlStyle + "<pre style=\"margin:0;\">" + (modelData.h === "" ? " " : modelData.h) + "</pre>"
-                                color: Theme.foreground
-                                font.family: Theme.mono
-                                font.pixelSize: Theme.mpx(12)
-                            }
-                        }
+                    readonly property real numberWidth: card.newFile || card.code ? numberProbe.implicitWidth + 18 : 22
+                    Label {
+                        id: numberProbe
+                        visible: false
+                        text: card.code ? card.code.lines.reduce((w, l) => l.n.length > w.length ? l.n : w, "0") : String(card.lines.length)
+                        font.family: Theme.mono
+                        font.pixelSize: Theme.mpx(12)
                     }
                     Label {
                         objectName: "toolCommand"
@@ -580,7 +565,42 @@ Item {
                         font.family: Theme.mono
                         font.pixelSize: Theme.mpx(12)
                     }
-                    Item { visible: card.commandInWell && card.outInWell; width: 1; height: 6 }
+                    Item { visible: card.commandInWell && (card.outInWell || card.codeShown); width: 1; height: 6 }
+                    Repeater {
+                        model: card.preview || card.codeShown ? card.lines : []
+                        Rectangle {
+                            required property var modelData
+                            required property int index
+                            objectName: card.code ? "codeLine" : ""
+                            width: wellCol.width
+                            implicitHeight: lineText.implicitHeight + 2
+                            readonly property bool added: !card.newFile && modelData.s === "+"
+                            readonly property bool removed: modelData.s === "-"
+                            color: added ? Qt.rgba(Theme.diffAdd.r, Theme.diffAdd.g, Theme.diffAdd.b, 0.10) : removed ? Qt.rgba(Theme.diffRemove.r, Theme.diffRemove.g, Theme.diffRemove.b, 0.10) : "transparent"
+                            Label {
+                                width: wellCol.numberWidth - 10
+                                horizontalAlignment: Text.AlignRight
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: card.code ? parent.modelData.n : card.newFile ? String(index + 1) : parent.added ? "+" : parent.removed ? "−" : ""
+                                color: parent.added ? Theme.diffAdd : parent.removed ? Theme.diffRemove : Theme.textFaint
+                                font.family: Theme.mono
+                                font.pixelSize: Theme.mpx(12)
+                            }
+                            Label {
+                                id: lineText
+                                x: wellCol.numberWidth
+                                width: parent.width - x - 10
+                                anchors.verticalCenter: parent.verticalCenter
+                                textFormat: Text.RichText
+                                text: Theme.htmlStyle + "<pre style=\"margin:0;\">" + (modelData.h === "" ? " " : modelData.h) + "</pre>"
+                                // (grep's context lines, around the matches: dimmer.)
+                                opacity: modelData.c ? 0.6 : 1
+                                color: Theme.foreground
+                                font.family: Theme.mono
+                                font.pixelSize: Theme.mpx(12)
+                            }
+                        }
+                    }
                     // A command's last lines (each one shortened to the well), or
                     // all of a call's output, opened.
                     Repeater {
@@ -601,7 +621,7 @@ Item {
                         }
                     }
                     TextEdit {
-                        visible: card.outInWell && (card.open || !card.shell)
+                        visible: card.outInWell && (card.open || !card.shell) && !card.code
                         x: 10
                         width: wellCol.width - 20
                         // (Line numbers at the start of its lines as a gutter.)

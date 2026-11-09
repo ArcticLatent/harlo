@@ -3672,9 +3672,12 @@ ApplicationWindow {
                       && results.some(r => r.indexOf("7 passed") >= 0) && results.some(r => r.indexOf("exit 101") >= 0), "what each came to (" + results.join(" | ") + ")")
             const tails = win.findAllNames("toolTail", box).map(l => l.text)
             win.check(tails.some(x => x.indexOf("7 passed") >= 0), "a command's last lines (" + tails.join(" | ") + ")")
-            const numbered = win.findAllNames("toolTail", box).filter(l => l.row)
-            win.check(numbered.length === 3 && numbered[0].row.gutter === "3" && !numbered[0].row.context && numbered[2].row.context && numbered[2].row.body === "}",
-                      "grep's line numbers as a gutter, its context lines dimmer (" + numbered.map(l => JSON.stringify(l.row)).join(" ") + ")")
+            const code = win.findAllNames("codeLine", box).map(l => l.modelData)
+            win.check(code.length === 6 && code[0].n === "3" && !code[0].c && code[2].c && code[2].h.indexOf("}") >= 0,
+                      "grep's line numbers as a gutter, its context lines dimmer (" + JSON.stringify(code.slice(0, 3)) + ")")
+            win.check(code[3].n === "2" && code[5].n === "4" && code[3].h.indexOf("<span") >= 0 && /^    let/.test(code[3].h.replace(/<[^>]+>/g, "")),
+                      "a printed file's lines numbered from where it starts, highlighted, indented (" + JSON.stringify(code.slice(3)) + ")")
+            win.check(win.findAllNames("toolTail", box).every(l => !/^\d+[:-]|^    let/.test(l.text)), "a listing isn't shown again as plain lines")
             win.check(win.findAllNames("toolCommand", box).length === 2, "the commands under what they're for (the other is on its line)")
             win.check(win.chatText().indexOf("Running the full test suite\n") < 0 && win.findContaining("▸ cargo", t) === null, "no notice for a command in the foreground")
             // The wheel: the box first, then the session past its top.

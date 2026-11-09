@@ -193,13 +193,39 @@ pub fn warm_up() {
     highlighter();
 }
 
+/// Languages the built-in set lacks, as the nearest one it has: QML and
+/// TypeScript read well as JavaScript, Kotlin as Java, and so on.
+fn alias(token: &str) -> &str {
+    match token.to_ascii_lowercase().as_str() {
+        "qml" | "ts" | "tsx" | "mts" | "cts" | "jsx" | "mjs" | "cjs" | "typescript" | "typescriptreact" | "javascriptreact" => "js",
+        "kt" | "kts" | "kotlin" => "java",
+        "zsh" | "fish" | "bash" | "ksh" | "shell" | "console" => "sh",
+        "jsonc" | "json5" => "json",
+        "vue" | "svelte" => "html",
+        "scss" | "sass" | "less" => "css",
+        "hpp" | "hxx" | "hh" => "cpp",
+        _ => token,
+    }
+}
+
+/// The language of a file, by its extension (or name: a Makefile), if the
+/// highlighter has it (or a near one).
+pub fn language_of(path: &str) -> Option<&'static syntect::parsing::SyntaxReference> {
+    let h = highlighter();
+    let p = std::path::Path::new(path);
+    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let found = if ext.is_empty() { h.syntaxes.find_syntax_by_extension(name) } else { h.syntaxes.find_syntax_by_extension(alias(ext)) };
+    found.filter(|s| s.name != "Plain Text")
+}
+
 /// Highlights code into a Qt rich-text `<pre>` block (token classes; see
 /// `TOKEN_CLASSES`).
 pub fn highlight(code: &str, lang: &str) -> String {
     let h = highlighter();
     let syntax = h
         .syntaxes
-        .find_syntax_by_token(lang)
+        .find_syntax_by_token(alias(lang))
         .unwrap_or_else(|| h.syntaxes.find_syntax_plain_text());
     let mut lines = HighlightLines::new(syntax, &h.theme);
     let mut html = String::with_capacity(code.len() * 3);
@@ -223,11 +249,7 @@ pub fn highlight(code: &str, lang: &str) -> String {
 /// so multi-line strings and comments mostly colour correctly.
 pub fn highlight_lines(path: &str, lines: &[&str]) -> Vec<String> {
     let h = highlighter();
-    let ext = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or("");
-    let syntax = h
-        .syntaxes
-        .find_syntax_by_extension(ext)
-        .unwrap_or_else(|| h.syntaxes.find_syntax_plain_text());
+    let syntax = language_of(path).unwrap_or_else(|| h.syntaxes.find_syntax_plain_text());
     let mut state = HighlightLines::new(syntax, &h.theme);
     lines
         .iter()

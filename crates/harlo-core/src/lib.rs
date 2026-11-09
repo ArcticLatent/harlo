@@ -23,6 +23,7 @@ pub mod providers;
 pub mod git;
 pub mod git_hosting;
 pub mod listdiff;
+pub mod listing;
 pub mod markdown;
 pub mod mcp;
 pub mod model_servers;
