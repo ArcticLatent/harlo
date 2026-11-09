@@ -114,13 +114,12 @@ QtObject {
     readonly property color diffAdd: diffBlueOrange ? (isLight ? "#1f6fd6" : "#5b9bf0") : ((c.syntax.highlights || {}).diffAdded || success)
     readonly property color diffRemove: diffBlueOrange ? (isLight ? "#c7761c" : "#f2a65a") : ((c.syntax.highlights || {}).diffRemoved || error)
     /// How wide messages and the composer grow (Settings → Appearance → Chat width).
-    // Comfortable: the reading width, about 85 characters of a reply's
-    // text (66 average ones of the interface font at 15px); the session's
-    // text, code, helpers and composer all share it. Wide and Full widen
-    // them together. (Unscaled: `px` scales it with the text.)
-    readonly property FontMetrics readingMetrics: FontMetrics { font.family: theme.uiFont; font.pixelSize: 15 }
-    readonly property real readingWidth: Math.max(520, Math.round(readingMetrics.averageCharacterWidth * 66))
-    readonly property real chatMaxWidth: look.chatWidth === "full" ? 100000 : look.chatWidth === "wide" ? 1180 : readingWidth
+    // Comfortable: 760, about 100 characters of a reply's text, with room
+    // for code beside it (the reading width alone, ~550, left code and
+    // tool output cramped in a large window); the session's text, code,
+    // helpers and composer all share it. Wide and Full widen them
+    // together. (Unscaled: `px` scales it with the text.)
+    readonly property real chatMaxWidth: look.chatWidth === "full" ? 100000 : look.chatWidth === "wide" ? 1180 : 760
     /// Panels open and close in this long (ms; 0: at once).
     readonly property int motion: look.motion === undefined ? 160 : look.motion
     /// Hover and selection colours ease in this long (ms).

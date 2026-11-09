@@ -646,10 +646,11 @@ Item {
                         if (m) ct.openAt(decodeURIComponent(m[2]), Number(m[1]))
                     }
                     HoverHandler { cursorShape: edit.hoveredLink !== "" ? Qt.PointingHandCursor : Qt.IBeamCursor }
-                    // (Lines move as the text lays out again: their numbers with them.)
-                    onContentHeightChanged: Qt.callLater(() => ct.laidOut++)
-                    onWidthChanged: Qt.callLater(() => ct.laidOut++)
-                    onTextChanged: Qt.callLater(() => ct.laidOut++)
+                    // (Lines move as the text lays out again: their numbers with
+                    // them. The box can be gone by then, its row scrolled away.)
+                    onContentHeightChanged: Qt.callLater(() => { if (ct) ct.laidOut++ })
+                    onWidthChanged: Qt.callLater(() => { if (ct) ct.laidOut++ })
+                    onTextChanged: Qt.callLater(() => { if (ct) ct.laidOut++ })
                 }
             }
             // More to the side: that edge fades out.
