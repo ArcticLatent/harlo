@@ -320,6 +320,9 @@ QtObject {
             + "p,ul,ol,blockquote,table{margin-top:8px;margin-bottom:8px;}"
             // A list inside a list: no gap above or below it.
             + "li ul,li ol{margin-top:0px;margin-bottom:0px;}"
+            // Lists step in 24px a level, not Qt's 40 (a numbered one 28:
+            // room for "10.").
+            + "ul{margin-left:-16px;}ol{margin-left:-12px;}"
             // (Headings: see `proseHtml`.)
             // Tables: no grid (Qt draws a cell's borders all or none); a
             // hairline under the header row (see `proseHtml`), the names

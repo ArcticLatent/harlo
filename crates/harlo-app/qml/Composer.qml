@@ -477,7 +477,7 @@ Rectangle {
             objectName: "composerInput"
             focus: true
             // (Narrow: short enough for one line; the rest is in the help.)
-            placeholderText: bar.narrow ? (root.session.status === "busy" ? "Follow up, or steer (Ctrl+Enter)…" : root.planOn ? "Describe what to plan…" : "Ask anything…")
+            placeholderText: !bar.roomForHint ? (root.session.status === "busy" ? "Follow up, or steer (Ctrl+Enter)…" : root.planOn ? "Describe what to plan…" : "Ask anything…")
                 : root.session.status === "busy"
                 ? "Queue a follow-up (Enter) or steer now (Ctrl+Enter)…"
                 : root.session.status === "offline" || root.session.status === "exited"
@@ -600,6 +600,12 @@ Rectangle {
         // stays on the bar.
         readonly property bool narrow: width < 560
         readonly property bool tight: width < 420
+        // Each gives way at its own width (the reading column is about
+        // 555px here): the thinking level's word first, then the context
+        // meter, then the placeholder's / and @ hint.
+        readonly property bool roomForLevel: width >= 600
+        readonly property bool roomForMeter: width >= 500
+        readonly property bool roomForHint: width >= 470
 
         ComposerIconButton {
             objectName: "attachButton"
@@ -689,7 +695,7 @@ Rectangle {
         // stretch past where the agent compacts is shaded, behind a line.
         Rectangle {
             id: ctxBar
-            visible: root.session.contextText !== "" && !bar.narrow
+            visible: root.session.contextText !== "" && bar.roomForMeter
             Layout.preferredWidth: 52
             Layout.preferredHeight: 10
             radius: height / 2
@@ -769,7 +775,7 @@ Rectangle {
             visible: !bar.tight
             iconName: "brain-ai-3"
             // Narrow: the icon alone (the level is in the tooltip).
-            text: bar.narrow ? "" : root.session.thinking || "default"
+            text: !bar.roomForLevel ? "" : root.session.thinking || "default"
             tint: root.session.thinking && root.session.thinking !== "off" ? Theme.info : Theme.muted
             maxLabel: 120
             enabled: root.session.harness !== "demo"

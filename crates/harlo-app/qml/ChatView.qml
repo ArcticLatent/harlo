@@ -352,7 +352,9 @@ Rectangle {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                anchors.leftMargin: 28
+                // (The title starts where the session's column does: one
+                // left edge from the header down.)
+                anchors.leftMargin: Math.max(28, transcript.gutter)
                 anchors.rightMargin: 18
                 spacing: 6
                 ColumnLayout {

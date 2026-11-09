@@ -393,7 +393,9 @@ Rectangle {
 
         ColumnLayout {
             id: page
-            width: Math.min(parent.width - 48, 780)
+            // (The session's own width: the box you type in keeps its size
+            // when the session starts.)
+            width: Math.min(parent.width - 48, Theme.px(Math.min(Theme.chatMaxWidth, 1180)))
             x: (parent.width - width) / 2
             y: Math.max(40, (parent.height - implicitHeight) / 2 - 40)
             spacing: 14
