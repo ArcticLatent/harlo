@@ -854,7 +854,9 @@ Item {
             // The keyboard: a call in a run is reached from the run's line
             // (Up and Down); one on its own takes Tab. Enter or Space opens
             // it, Ctrl+C copies its listing.
-            activeFocusOnTab: card.group === "" && (card.canOpen || !!card.code || card.preview)
+            // (Kept while it has the focus: Qt won't take it from the focused
+            // item, and warns; a call joining a run drops it once focus moves.)
+            activeFocusOnTab: activeFocus || (card.group === "" && (card.canOpen || !!card.code || card.preview))
             Accessible.role: Accessible.Button
             Accessible.name: root.toolName(card.title) + ", " + card.target + (card.result !== "" ? ", " + card.result.replace(/<[^>]+>/g, "") : "") + (card.canOpen ? (card.open ? ", open" : ", folded") : "")
             Keys.onPressed: e => {

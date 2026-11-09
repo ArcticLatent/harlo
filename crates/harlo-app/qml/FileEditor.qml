@@ -410,7 +410,12 @@ Rectangle {
                 interactive: false
                 clip: true
                 model: editor.lineCount
-                contentY: flick.contentY - originY
+                // (Set, not bound: a list's originY moves with its contentY,
+                // so a binding on both loops.)
+                function follow() { contentY = flick.contentY + originY }
+                Connections { target: flick; function onContentYChanged() { gutter.follow() } }
+                onCountChanged: Qt.callLater(follow)
+                Component.onCompleted: follow()
                 delegate: Label {
                     required property int index
                     width: gutter.width - 10
