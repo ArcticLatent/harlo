@@ -65,14 +65,26 @@ Rectangle {
             Layout.topMargin: 12
             visible: root.st.project >= 0
             spacing: 10
-            Label {
+            ColumnLayout {
                 Layout.fillWidth: true
-                wrapMode: Text.Wrap
-                text: root.st.enabled ? "Agents read and keep these specs (new sessions)." : "Off: agents don't get the spec tools. On, they read the specs before changing code and keep them true."
-                color: Theme.muted
-                font.pixelSize: Theme.px(12)
+                spacing: 2
+                Label {
+                    Layout.fillWidth: true
+                    text: "Spec tools"
+                    color: Theme.text
+                    font.pixelSize: Theme.px(13)
+                    font.weight: Font.Medium
+                }
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    text: root.st.enabled ? "Agents read the specs before changing code and keep them true (new sessions)." : "When on, agents read the specs before changing code and keep them true."
+                    color: Theme.muted
+                    font.pixelSize: Theme.px(12)
+                }
             }
             AppSwitch {
+                Layout.alignment: Qt.AlignTop
                 objectName: "specsSwitch"
                 checked: root.st.enabled
                 onToggled: { Workspace.setSetting("specs_" + root.st.project, checked ? "1" : "0"); root.load() }

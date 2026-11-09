@@ -14,7 +14,11 @@ Item {
     signal closeRequested()
     Layout.fillWidth: true
     Layout.minimumWidth: 0
-    implicitHeight: Math.max(textCol.implicitHeight, 32) + 34
+    // (The same height with or without a subtitle, so the hairline doesn't
+    // jump between panels.)
+    implicitHeight: Math.max(titleMetrics.height + 3 + subMetrics.height, 32) + 34
+    FontMetrics { id: titleMetrics; font.pixelSize: Theme.px(18); font.weight: Font.DemiBold }
+    FontMetrics { id: subMetrics; font.pixelSize: Theme.px(13) }
     Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.hairline }
     ColumnLayout {
         id: textCol

@@ -71,7 +71,14 @@ Rectangle {
                 spacing: 6
                 Label {
                     id: nameLabel
-                    Layout.maximumWidth: agentRow.width * 0.45
+                    // (The name tells helpers apart: it keeps its width,
+                    // the kind and the task give way first. A layout never
+                    // shrinks an item that doesn't fill, so it fills up to
+                    // its own width.)
+                    Layout.fillWidth: true
+                    Layout.maximumWidth: implicitWidth
+                    Layout.preferredWidth: implicitWidth
+                    Layout.minimumWidth: Math.min(implicitWidth, Theme.px(48))
                     text: agentRow.a.name || agentRow.a.id
                     color: Theme.foreground
                     font.pixelSize: Theme.px(13)
@@ -82,6 +89,8 @@ Rectangle {
                 Label {
                     id: agentLabel
                     objectName: "subagentWho"
+                    // (Shown while the name fits beside it.)
+                    visible: rowCol.width - (statusLabel.visible ? statusLabel.implicitWidth + 6 : 0) - (usedLabel.visible ? usedLabel.implicitWidth + 6 : 0) >= nameLabel.implicitWidth + 6 + Math.min(implicitWidth, Theme.px(40))
                     text: Theme.helperKind(agentRow.a.agent) + (agentRow.a.model ? " · " + Theme.helperModel(agentRow.a.agent, agentRow.a.model) : "")
                     color: Theme.textMuted
                     font.pixelSize: Theme.px(11.5)
@@ -97,8 +106,11 @@ Rectangle {
                     Layout.minimumWidth: 0
                     // (Takes what's left, never more: a long task is cut.)
                     Layout.preferredWidth: 0
-                    // (Named after its description: the task instead, on one line.)
-                    text: String((agentRow.a.name && agentRow.a.name === agentRow.a.description ? "" : agentRow.a.description) || agentRow.a.task || "").replace(/\s+/g, " ").trim().slice(0, 300)
+                    // (Named after its description: the task instead, on one
+                    // line; nothing when that only repeats the name.)
+                    readonly property string task: String((agentRow.a.name && agentRow.a.name === agentRow.a.description ? "" : agentRow.a.description) || agentRow.a.task || "").replace(/\s+/g, " ").trim().slice(0, 300)
+                    function same(x, y) { return x.toLowerCase().replace(/[\s.…:]+$/, "") === y.toLowerCase().replace(/[\s.…:]+$/, "") }
+                    text: task !== "" && agentRow.a.name && (same(task, String(agentRow.a.name).trim()) || String(agentRow.a.name).toLowerCase().startsWith(task.toLowerCase())) ? "" : task
                     color: Theme.muted
                     font.pixelSize: Theme.px(12)
                     elide: Text.ElideRight
@@ -107,6 +119,7 @@ Rectangle {
                 }
                 // What it used so far.
                 Label {
+                    id: usedLabel
                     objectName: "subagentUsed"
                     visible: text !== "" && agentRow.width >= 420
                     text: Theme.usedLabel(agentRow.a.used)
@@ -114,6 +127,7 @@ Rectangle {
                     font.pixelSize: Theme.px(11)
                 }
                 Label {
+                    id: statusLabel
                     objectName: "subagentStatus"
                     // (Finished: the faint dot says it. A harlo session
                     // waiting: on its parent, or on you.)

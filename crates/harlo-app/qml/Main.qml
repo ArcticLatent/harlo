@@ -3484,7 +3484,14 @@ ApplicationWindow {
         // The helpers, opened.
         ScriptAction { script: { chat.transcript.scrollToEnd(); const d = win.findName("subagentDock"); if (d) d.expanded = true } }
         PauseAnimation { duration: 800 }
-        ScriptAction { script: { win.critShot("helpers"); Workspace.chooseThemeMode("light") } }
+        ScriptAction { script: {
+            win.critShot("helpers")
+            // A helper's task that only repeats its name isn't shown again.
+            const d = win.findName("subagentDock")
+            win.check(d !== null && (win.findText("Explore", d) !== null) === (win.width > 900), "helpers show their kind while their names fit beside it")
+            const count = (t, r) => { let n = 0; for (const c of r.children) { if (!c.visible || c.opacity <= 0) continue; if (c.text === t) n++; n += count(t, c) } return n }
+            win.check(d !== null && count("Analyze the transcript layout", d) === 1, "a helper's name shows once, not again as its task (" + (d ? count("Analyze the transcript layout", d) : -1) + ")")
+            Workspace.chooseThemeMode("light") } }
         PauseAnimation { duration: 800 }
         ScriptAction { script: { win.critShot("helpers-light"); Workspace.chooseThemeMode("dark"); const d = win.findName("subagentDock"); if (d) d.expanded = false } }
         PauseAnimation { duration: 600 }
@@ -3493,7 +3500,12 @@ ApplicationWindow {
         PauseAnimation { duration: 1200 }
         ScriptAction { script: { win.critShot("right-context"); windowSettings.rightMode = "activity" } }
         PauseAnimation { duration: 1200 }
-        ScriptAction { script: { win.critShot("right-activity"); windowSettings.rightMode = "changes"; git.refresh(true) } }
+        ScriptAction { script: {
+            win.critShot("right-activity")
+            // Only filters that narrow the list; one tool throughout needs no name under each row.
+            win.check(win.findName("activityFilter-all") !== null && win.findName("activityFilter-command") === null && win.findName("activityFilter-read") === null && win.findName("activityFilter-other") === null, "Activity offers no empty filter, nor one equal to all")
+            win.check(win.findText("Agent", win.findName("activityList")) === null, "and its rows don't each repeat their tool")
+            windowSettings.rightMode = "changes"; git.refresh(true) } }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: { win.critShot("right-changes"); windowSettings.rightMode = "files" } }
         PauseAnimation { duration: 1200 }
@@ -3501,7 +3513,10 @@ ApplicationWindow {
         PauseAnimation { duration: 1200 }
         ScriptAction { script: { win.critShot("right-notes"); windowSettings.rightMode = "specs" } }
         PauseAnimation { duration: 1200 }
-        ScriptAction { script: { win.critShot("right-specs"); windowSettings.rightMode = "context"; Workspace.chooseThemeMode("light") } }
+        ScriptAction { script: {
+            win.critShot("right-specs")
+            win.check(win.findText("Spec tools") !== null, "the Specs switch has a name")
+            windowSettings.rightMode = "context"; Workspace.chooseThemeMode("light") } }
         PauseAnimation { duration: 1200 }
         ScriptAction { script: { win.critShot("right-context-light"); Workspace.chooseThemeMode("dark"); windowSettings.rightMode = "" } }
         PauseAnimation { duration: 800 }

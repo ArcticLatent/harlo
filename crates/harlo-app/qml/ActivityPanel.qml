@@ -23,9 +23,14 @@ Rectangle {
     property string filter: "all"
     readonly property var shown: {
         if (!log) return []
-        const of = { command: ["command"], change: ["edit", "write"], read: ["read", "search"], other: ["web", "agent", "other"] }
-        return log.actions.filter(a => filter === "all" || of[filter].indexOf(a.kind) >= 0).slice().reverse()
+        return log.actions.filter(a => filter === "all" || kinds[filter].indexOf(a.kind) >= 0).slice().reverse()
     }
+    readonly property var kinds: ({ command: ["command"], change: ["edit", "write"], read: ["read", "search"], other: ["web", "agent", "other"] })
+    function kindCount(id) { return log ? log.actions.filter(a => kinds[id].indexOf(a.kind) >= 0).length : 0 }
+    // (A filter no longer offered goes back to all.)
+    onLogChanged: if (filter !== "all" && (kindCount(filter) === 0 || kindCount(filter) === log.actions.length)) filter = "all"
+    // (Every row the same tool: its name under each says nothing.)
+    readonly property bool oneTool: shown.length > 1 && shown.every(a => a.tool === shown[0].tool)
     function when(ms) { return ms ? new Date(ms).toLocaleTimeString(Qt.locale(), "h:mm AP") : "" }
     function icon(kind) {
         return ({ command: "terminal-box", edit: "code-box", write: "add-circle", read: "eye", search: "search", web: "global", agent: "robot-2" })[kind] || "sparkling"
@@ -66,7 +71,7 @@ Rectangle {
 
         PanelHeader {
             title: "Activity"
-            subtitle: root.session.title || ""
+            subtitle: root.session.title || Workspace.activeTitle || ""
             onCloseRequested: root.closeRequested()
             PanelButton {
                 objectName: "activityCopy"
@@ -103,8 +108,9 @@ Rectangle {
                     { id: "command", label: root.log.commands + (root.log.commands === 1 ? " command" : " commands") + (root.log.failed > 0 ? " · " + root.log.failed + " failed" : "") },
                     { id: "change", label: root.log.changed.length + (root.log.changed.length === 1 ? " file changed" : " files changed") },
                     { id: "read", label: root.log.read.length + " read" },
-                    { id: "other", label: "Other" },
-                ] : []
+                    { id: "other", label: root.kindCount("other") + " other" },
+                // (A filter that would show nothing, or the same as all, isn't offered.)
+                ].filter(f => f.id === "all" || (root.kindCount(f.id) > 0 && root.kindCount(f.id) < root.log.actions.length)) : []
                 Button {
                     id: filterChip
                     required property var modelData
@@ -186,7 +192,8 @@ Rectangle {
                         }
                         Label {
                             Layout.fillWidth: true
-                            text: [Theme.toolLabel(row.modelData.tool), row.modelData.pending ? "running…" : row.modelData.error ? "failed" + (row.modelData.result && row.modelData.result !== "failed" ? " · " + row.modelData.result : "") : row.modelData.result]
+                            visible: text !== ""
+                            text: [root.oneTool ? "" : Theme.toolLabel(row.modelData.tool), row.modelData.pending ? "running…" : row.modelData.error ? "failed" + (row.modelData.result && row.modelData.result !== "failed" ? " · " + row.modelData.result : "") : row.modelData.result]
                                   .filter(s => s).join(" · ")
                             color: row.modelData.error ? Theme.error : Theme.textFaint
                             font.pixelSize: Theme.px(11.5)

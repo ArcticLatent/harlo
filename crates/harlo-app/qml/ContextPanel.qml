@@ -48,7 +48,7 @@ Rectangle {
 
         PanelHeader {
             title: "Context"
-            subtitle: root.session.title || ""
+            subtitle: root.session.title || Workspace.activeTitle || ""
             onCloseRequested: root.closeRequested()
             PanelButton { iconName: "refresh"; tip: "Refresh"; onClicked: root.reload() }
         }
