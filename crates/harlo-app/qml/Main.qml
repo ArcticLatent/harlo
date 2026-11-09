@@ -3036,6 +3036,14 @@ ApplicationWindow {
             if (chat.session.harness !== "claude") { win.summary(); Qt.quit() }
             else win.sendByKeys("one more") } }
         PauseAnimation { duration: 4000 }
+        // An edit there: numbered from the host's file (read over SSH).
+        ScriptAction { script: win.sendByKeys("show the tools please") }
+        PauseAnimation { duration: 5000 }
+        ScriptAction { script: {
+            const edit = win.findAllNames("previewCode", chat.transcript).find(v => v.signs)
+            const en = edit ? edit.lines.map(l => l.n) : []
+            win.check(edit && JSON.stringify(en) === JSON.stringify(["3", "", "", "4", "5", "6"]) && edit.lines[0].p.indexOf("ssh://box") === 0,
+                      "an edit on the host, numbered from its file there (" + JSON.stringify(en) + ")") } }
         ScriptAction { script: {
             win.check(win.chatText().split("Hello from fake claude").length > 2 && chat.session.status === "idle", "and it carries on there (resumed)")
             win.shotWindow("clicks-remote-claude")
@@ -3982,7 +3990,7 @@ ApplicationWindow {
             win.check(all === 400, "Copy: all 400 matches, not just what's kept (" + all + ")")
             const nlLast = nl && nl.code ? nl.code.lines[nl.code.lines.length - 1].n : "none"
             const up = win.findAllNames("toolEarlierLines", box)
-            win.check(nl && nl.code && nl.code.earlier && nlLast === "1200" && up.length === 1 && /^↑ \d+ earlier lines$/.test(up[0].text) && win.findAllNames("toolEarlier", box).length === 0,
+            win.check(nl && nl.code && nl.code.earlier && nlLast === "1200" && up.length === 1 && /^↑ \d+ of 1194 earlier lines$/.test(up[0].text) && win.findAllNames("toolEarlier", box).length === 0,
                       "a long log, kept to its end: its last lines, the earlier ones above them (" + nlLast + " · " + (up[0] ? up[0].text : "none") + ")")
             win.listingAt("Search the whole tree")
             const w = win.findAllNames("toolWhat", box).find(l => l.plain.indexOf("Search the whole tree") >= 0)
@@ -3995,6 +4003,9 @@ ApplicationWindow {
             win.listingAt("Number the log")
             win.shotWindow("listings-search-log")
             const up = win.findAllNames("toolEarlierLines", box)[0]
+            const nlw = win.findAllNames("toolWhat", box).find(l => l.plain.indexOf("Number the log") >= 0)
+            const lv = nlw ? win.findAllNames("codeView", nlw.parent.parent.parent)[0] : null
+            win.holdY = lv ? lv.mapToItem(null, 0, lv.height).y : -1
             if (up) win.clickItem(up, "the log's earlier lines") } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
@@ -4005,11 +4016,15 @@ ApplicationWindow {
             win.check(lines.length > 6 && lines[lines.length - 1].n === "1200" && Number(lines[0].n) > 1 && win.findAllNames("toolEarlier", box).length === 1
                       && win.findAllNames("toolMoreLines", box).some(b => b.text === "↑ Fewer lines") && win.findAllNames("toolEarlierLines", box).length === 0,
                       "opened, the log's kept lines to its end, and earlier lines not here said (" + (lines[0] ? lines[0].n : "none") + "–" + (lines.length ? lines[lines.length - 1].n : "") + ")")
+            const lv = nl ? win.findAllNames("codeView", nl)[0] : null
+            const y = lv ? lv.mapToItem(null, 0, lv.height).y : -2
+            win.check(win.holdY > 0 && Math.abs(y - win.holdY) < 2, "opening the earlier lines keeps the last line where it was (" + Math.round(win.holdY) + " → " + Math.round(y) + ")")
             win.listingAt("Number the log")
             win.shotWindow("listings-search-log-open")
             win.summary(); Qt.quit() } }
     }
     property real perfOpen: 0
+    property real holdY: 0
 
     property var keyHead: null
     function listingBox() {

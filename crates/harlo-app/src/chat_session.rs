@@ -96,6 +96,9 @@ pub mod qobject {
         /// "ready" | "undoing" | "done" | "failed", restore: [paths], remove:
         /// [paths], later, headMoved, message }`; "" for none.
         #[qproperty(QString, undo_plan, cxx_name = "undoPlanJson")]
+        /// Bumped when a host's file arrives (an edit's lines are numbered
+        /// from it: `diffLines` again).
+        #[qproperty(i32, files_read, cxx_name = "filesRead")]
         type ChatSession = super::ChatSessionRust;
     }
 
@@ -404,6 +407,10 @@ pub struct ChatSessionRust {
     /// Sessions picked from the composer's `@` list: their mention, and
     /// the session (sent with the message that still mentions them).
     mentions: Vec<(String, HarnessKind, PathBuf)>,
+    files_read: i32,
+    /// Files on a host that edits were numbered from: when each was asked
+    /// for, and its text once it came.
+    host_files: std::cell::RefCell<std::collections::HashMap<String, (std::time::Instant, Option<Arc<str>>)>>,
 }
 
 struct QtSink {
@@ -439,6 +446,7 @@ impl ChatSession {
             live.handle.unsubscribe(sub);
         }
         self.as_mut().rust_mut().generation += 1;
+        self.host_files.borrow_mut().clear();
         unsafe {
             self.as_mut().begin_reset_model();
             self.as_mut().rust_mut().rows.clear();
@@ -946,11 +954,16 @@ impl ChatSession {
     pub fn diff_lines(&self, path: &QString, diff: &QString, limit: i32, file: &QString) -> QString {
         let diff = diff.to_string();
         let all: Vec<&str> = diff.lines().collect();
-        // Numbered as the file is now (a local file, not too big to read).
+        // Numbered as the file is now (not too big to read; a host's comes
+        // later, read over SSH).
         let file = file.to_string();
-        let text = (!file.is_empty())
-            .then(|| std::fs::metadata(&file).ok().filter(|m| m.is_file() && m.len() < 4 << 20).and_then(|_| std::fs::read_to_string(&file).ok()))
-            .flatten();
+        let text: Option<Arc<str>> = if file.is_empty() {
+            None
+        } else if harlo_core::remote::is_remote(std::path::Path::new(&file)) {
+            self.host_file(&file)
+        } else {
+            std::fs::metadata(&file).ok().filter(|m| m.is_file() && m.len() < 4 << 20).and_then(|_| std::fs::read_to_string(&file).ok()).map(Arc::from)
+        };
         let numbers = text.map(|t| harlo_core::listing::diff_numbers(&all, &t)).unwrap_or_else(|| vec![None; all.len()]);
         let lines = &all[..all.len().min(limit.max(0) as usize)];
         let texts: Vec<&str> = lines.iter().map(|l| l.get(1..).unwrap_or_default()).collect();
@@ -962,6 +975,36 @@ impl ChatSession {
             .map(|((l, h), n)| serde_json::json!({ "s": l.get(..1).unwrap_or(" "), "h": h, "n": n.map(|n| n.to_string()).unwrap_or_default() }))
             .collect();
         QString::from(&serde_json::Value::from(out).to_string())
+    }
+
+    /// A host's file as last read (None until it has come), asked for
+    /// again when that was over 20 s ago; `filesRead` says when it comes.
+    fn host_file(&self, path: &str) -> Option<Arc<str>> {
+        let known = self.host_files.borrow().get(path).cloned();
+        if let Some((at, text)) = &known
+            && at.elapsed() < std::time::Duration::from_secs(20)
+        {
+            return text.clone();
+        }
+        let old = known.and_then(|(_, t)| t);
+        self.host_files.borrow_mut().insert(path.to_owned(), (std::time::Instant::now(), old.clone()));
+        let (thread, generation, path) = (self.qt_thread(), self.generation, path.to_owned());
+        crate::runtime().spawn_blocking(move || {
+            let Ok(harlo_core::files::FileContent::Text(text)) = harlo_core::files::read_text(std::path::Path::new(&path)) else { return };
+            let _ = thread.queue(move |mut this| {
+                if this.generation != generation {
+                    return;
+                }
+                let text: Arc<str> = text.into();
+                let changed = this.host_files.borrow().get(&path).and_then(|(_, t)| t.clone()).is_none_or(|t| t != text);
+                this.host_files.borrow_mut().insert(path, (std::time::Instant::now(), Some(text)));
+                if changed {
+                    let n = this.files_read + 1;
+                    this.as_mut().set_files_read(n);
+                }
+            });
+        });
+        old
     }
 
     pub fn code_view(&self, tool: &QString, command: &QString, path: &QString, output: &QString, limit: i32) -> QString {

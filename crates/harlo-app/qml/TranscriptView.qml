@@ -163,6 +163,39 @@ Item {
     }
     function fileAt(p, command) { return fullPath(p, command, session.cwd || "") }
 
+    // Keeps `item`'s bottom at `y` (in the window) once what's above it has
+    // grown or shrunk: the scroll areas around it move by what it moved,
+    // the nearest first (a run's box, then the session; not while the
+    // session follows its end, which keeps it in place already).
+    function holdPlace(item, y) {
+        if (isNaN(y)) return
+        holdTimer.item = item
+        holdTimer.y0 = y
+        holdTimer.tries = 3
+        Qt.callLater(holdTimer.hold)
+        holdTimer.restart()
+    }
+    Timer {
+        id: holdTimer
+        property var item: null
+        property real y0: 0
+        property int tries: 0
+        interval: 30
+        onTriggered: { hold(); if (--tries > 0) restart() }
+        function hold() {
+            if (!item) return
+            let delta = item.mapToItem(null, 0, item.height).y - y0
+            for (let p = item.parent; p && Math.abs(delta) > 0.5; p = p.parent) {
+                if (p.contentY === undefined || p.contentHeight === undefined || p.contentHeight <= p.height + 0.5) continue
+                if (p === view && view.follow) break
+                const lo = p.originY || 0, hi = lo + p.contentHeight - p.height
+                const to = Math.max(lo, Math.min(hi, p.contentY + delta))
+                delta -= to - p.contentY
+                p.contentY = to
+            }
+        }
+    }
+
     // ---- the keyboard in a run: its line takes Tab, Up and Down go
     // through its steps, Escape back to its line.
     function runSteps(group) {
@@ -696,7 +729,9 @@ Item {
         readonly property var codeLines: {
             if (preview) {
                 const path = subtitle.replace(/…$/, "")
-                return JSON.parse(root.session.diffLines(path, diff, open ? 400 : previewLines, root.host === "" && !newFile ? absolute(path) : ""))
+                // (Again when a host's file has come: its numbers with it.)
+                void root.session.filesRead
+                return JSON.parse(root.session.diffLines(path, diff, open ? 400 : previewLines, newFile ? "" : absolute(path)))
                     .map((l, i) => ({ n: newFile ? String(i + 1) : l.n, h: l.h, mark: newFile ? "" : l.s === "+" ? "add" : l.s === "-" ? "remove" : "", p: newFile || l.n !== "" ? absolute(path) : "" }))
             }
             if (!code) return []
@@ -737,6 +772,19 @@ Item {
         // Kept to its end (a log, a command's last lines): what's left out
         // came before, so it's said above them.
         readonly property bool fromEnd: code ? code.earlier === true : shell && !preview
+        // Before its first line shown, when its lines are numbered from 1
+        // on (more than the hidden ones when its start wasn't kept).
+        readonly property int before: {
+            const n = code && code.lines.length ? Number(code.lines[0].n) : NaN
+            return n > 1 && /^\d+$/.test(code.lines[0].n) ? n - 1 : 0
+        }
+        // Opened or folded; kept to its end, its last line stays where it
+        // is on screen (what grows or shrinks is above it).
+        function toggleOpen() {
+            const y = fromEnd ? wellCode.mapToItem(null, 0, wellCode.height).y : NaN
+            view.toggle(rowKey)
+            if (fromEnd) root.holdPlace(wellCode, y)
+        }
         function absolute(p) { return root.fileAt(p, command) }
         readonly property bool failed: rowState === "error" || /^(exit|failed)|failed$/.test(result)
         // A listing's whole length: the call's own count ("1200 lines")
@@ -786,7 +834,7 @@ Item {
             Accessible.name: root.toolName(card.title) + ", " + card.target + (card.result !== "" ? ", " + card.result.replace(/<[^>]+>/g, "") : "") + (card.canOpen ? (card.open ? ", open" : ", folded") : "")
             Keys.onPressed: e => {
                 root.clickedStep = null
-                if (card.canOpen && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter || e.key === Qt.Key_Space)) { view.toggle(card.rowKey); e.accepted = true }
+                if (card.canOpen && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter || e.key === Qt.Key_Space)) { card.toggleOpen(); e.accepted = true }
                 else if (e.key === Qt.Key_C && (e.modifiers & Qt.ControlModifier) && (!!card.code || card.preview)) { callCopy.clicked(); e.accepted = true }
                 else if (e.key === Qt.Key_Escape && card.group === "") { root.leaveRuns(""); e.accepted = true }
                 else e.accepted = (card.group !== "" && root.stepKey(headBox, e.key)) || root.typedOn(e)
@@ -868,7 +916,7 @@ Item {
                 }
             }
             HoverHandler { id: headHover; cursorShape: card.canOpen ? Qt.PointingHandCursor : Qt.ArrowCursor }
-            TapHandler { enabled: card.canOpen; onTapped: { root.clickFocus(headBox); view.toggle(card.rowKey) } }
+            TapHandler { enabled: card.canOpen; onTapped: { root.clickFocus(headBox); card.toggleOpen() } }
         }
         // The subagents this call started (the task tool), as a tree.
         RowLayout {
@@ -1035,13 +1083,14 @@ Item {
                         visible: card.fromEnd && card.hidden > 0 && !card.open
                         x: toolWellBox.gutter ? wellCode.gutterWidth : 10
                         bottomPadding: 3
-                        text: "↑ " + card.hidden + (card.hidden === 1 ? " earlier line" : " earlier lines")
+                        // (Of all before it, when only some were kept.)
+                        text: "↑ " + card.hidden + (card.before > card.hidden ? " of " + card.before : "") + (Math.max(card.hidden, card.before) === 1 ? " earlier line" : " earlier lines")
                         color: earlierHover.hovered ? Theme.foreground : Theme.muted
                         font.pixelSize: Theme.px(12)
                         Accessible.role: Accessible.Button
                         Accessible.name: "Show " + card.hidden + (card.hidden === 1 ? " earlier line" : " earlier lines")
                         HoverHandler { id: earlierHover; cursorShape: Qt.PointingHandCursor }
-                        TapHandler { onTapped: view.toggle(card.rowKey) }
+                        TapHandler { onTapped: card.toggleOpen() }
                     }
                     // Kept to its end: what came before isn't here.
                     Label {
@@ -1114,7 +1163,7 @@ Item {
                             color: moreHover.hovered ? Theme.foreground : Theme.muted
                             font.pixelSize: Theme.px(12)
                             HoverHandler { id: moreHover; cursorShape: Qt.PointingHandCursor }
-                            TapHandler { onTapped: view.toggle(card.rowKey) }
+                            TapHandler { onTapped: card.toggleOpen() }
                         }
                         Label {
                             objectName: "toolBeyond"
