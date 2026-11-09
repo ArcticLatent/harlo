@@ -277,6 +277,81 @@ impl Diagrams {
     }
 }
 
+/// The ```mermaid blocks of a reply, in order.
+pub fn blocks(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut open: Option<(String, Vec<&str>)> = None;
+    for line in text.lines() {
+        let t = line.trim();
+        match &mut open {
+            None => {
+                if let Some(rest) = t.strip_prefix("```").or_else(|| t.strip_prefix("~~~")) {
+                    if rest.trim().eq_ignore_ascii_case("mermaid") {
+                        open = Some((t[..3].to_owned(), Vec::new()));
+                    }
+                }
+            }
+            Some((fence, lines)) => {
+                if t.starts_with(fence.as_str()) && t.trim_start_matches(fence.chars().next().unwrap_or('`')).is_empty() {
+                    out.push(lines.join("\n"));
+                    open = None;
+                } else {
+                    lines.push(line);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// What's wrong in a diagram's source, as Mermaid would see it: None when
+/// it parses, or is a kind merman doesn't draw (the browser does).
+pub fn problem(source: &str) -> Option<String> {
+    if source.trim().is_empty() {
+        return Some("it's empty".into());
+    }
+    let engine = Engine::new();
+    // (merman is new: a failure in it isn't the diagram's.)
+    let parsed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| engine.parse_diagram_sync(source, merman::ParseOptions::strict()))).ok()?;
+    match parsed {
+        Ok(_) => None,
+        Err(merman::Error::DiagramParse { diagnostic, .. }) => {
+            let at = diagnostic.span().map(|s| source[..s.start.min(source.len())].matches('\n').count() + 1);
+            let said = first_line(diagnostic.message());
+            Some(match at {
+                Some(n) => format!("line {n}: {said}"),
+                None => said,
+            })
+        }
+        Err(merman::Error::DetectType(_)) => Some("no diagram type: its first line should name one (flowchart TD, sequenceDiagram, classDiagram, …)".into()),
+        Err(e @ merman::Error::MalformedFrontMatter) => Some(first_line(&e.to_string())),
+        Err(_) => None,
+    }
+}
+
+/// What harlo tells an agent whose reply has diagrams that don't parse
+/// (None: they all do).
+pub fn fix_message(reply: &str) -> Option<String> {
+    let found = blocks(reply);
+    let bad: Vec<String> = found
+        .iter()
+        .enumerate()
+        .filter_map(|(i, b)| problem(b).map(|p| if found.len() > 1 { format!("diagram {} of {}: {p}", i + 1, found.len()) } else { p }))
+        .take(3)
+        .collect();
+    if bad.is_empty() {
+        return None;
+    }
+    let one = bad.len() == 1;
+    Some(format!(
+        "[harlo] {} in your last reply didn't parse, so it shows as code instead of a picture: {}. Send {} again, fixed, in a ```mermaid block (only the diagram{}; no need to repeat the rest).",
+        if one { "A diagram" } else { "Diagrams" },
+        bad.join("; "),
+        if one { "it" } else { "them" },
+        if one { "" } else { "s" }
+    ))
+}
+
 /// The most a phone's picture of a diagram may be (a relay carries 4 MB a
 /// message, in base64 twice).
 const PHONE_BYTES: usize = 2 << 20;
@@ -338,6 +413,21 @@ mod tests {
         assert_eq!(script_json(&json!({ "s": "</script><b>" })), r#"{"s":"<\/script><b>"}"#);
         let png = [0x89, b'P', b'N', b'G', 13, 10, 26, 10, 0, 0, 0, 13, b'I', b'H', b'D', b'R', 0, 0, 2, 0, 0, 0, 1, 0];
         assert_eq!(png_size(&png), Some((512, 256)));
+    }
+
+    #[test]
+    fn checks_diagrams_in_replies() {
+        let reply = "Here:\n\n```mermaid\nflowchart TD\n  A --> B\n```\n\nand\n\n```mermaid\nflowchart TD\n  A --> B\n  C -->\n```\n\n```rust\nlet x = 1;\n```\n";
+        assert_eq!(blocks(reply), ["flowchart TD\n  A --> B", "flowchart TD\n  A --> B\n  C -->"]);
+        assert_eq!(problem("flowchart TD\n  A --> B"), None);
+        let bad = problem("flowchart TD\n  A --> B\n  C -->").expect("a broken diagram");
+        assert!(bad.starts_with("line 3: ") || bad.starts_with("line 4: "), "{bad}");
+        assert!(problem("flowchar TD\n A --> B").unwrap().starts_with("no diagram type"));
+        assert_eq!(problem("  "), Some("it's empty".into()));
+        let said = fix_message(reply).unwrap();
+        assert!(said.starts_with("[harlo] A diagram in your last reply didn't parse, so it shows as code instead of a picture: diagram 2 of 2: line "), "{said}");
+        assert!(said.ends_with("Send it again, fixed, in a ```mermaid block (only the diagram; no need to repeat the rest)."), "{said}");
+        assert_eq!(fix_message("No diagrams here.\n```mermaid\nsequenceDiagram\n  A->>B: hi\n```"), None);
     }
 
     #[test]

@@ -938,6 +938,9 @@ pub struct WorkspaceRust {
     /// Sessions you stopped, with their helpers: a helper whose worktree
     /// is still being made doesn't start (until the session works again).
     halted: HashSet<String>,
+    /// Sessions harlo asked to send a diagram again, fixed: their next
+    /// reply isn't checked (once, never a loop).
+    diagram_asked: HashSet<String>,
     /// Remote files being copied here (`localCopy`).
     copying: std::cell::RefCell<HashSet<PathBuf>>,
     quota_loading: bool,
@@ -5475,6 +5478,12 @@ impl Workspace {
             let result = self.as_mut().orchestrate_as(Some(key.to_owned()), &tool, &args);
             crate::orchestration::answer_pipe(self.qt_thread(), key.to_owned(), call, tool, args, result);
         }
+        // Its reply's diagrams: ones that don't parse go back to it.
+        for note in &notes {
+            if let Note::Event(harlo_core::Notable::Completed { last_message, .. }) = note {
+                self.as_mut().check_diagrams(key, last_message);
+            }
+        }
         for note in notes {
             self.as_mut().notify(key, note);
         }
@@ -5487,6 +5496,32 @@ impl Workspace {
         if active {
             self.update_active_title();
         }
+    }
+
+    /// A finished reply's Mermaid diagrams, checked off this thread: when
+    /// one doesn't parse (it shows as code), the agent is told what's
+    /// wrong and sends it again, once; not for a helper (its report has
+    /// gone to its parent) nor when you've written to it since.
+    fn check_diagrams(mut self: Pin<&mut Self>, key: &str, reply: &str) {
+        if self.as_mut().rust_mut().diagram_asked.remove(key) || !self.orchestration_on || !reply.contains("mermaid") {
+            return;
+        }
+        if self.orch_children.get(key).is_some_and(|c| c.notify) {
+            return;
+        }
+        let (thread, key, reply) = (self.qt_thread(), key.to_owned(), reply.to_owned());
+        crate::runtime().spawn_blocking(move || {
+            let Some(message) = crate::diagrams::fix_message(&reply) else { return };
+            let _ = thread.queue(move |mut this| {
+                if this.live.get(&key).is_none_or(|e| e.info.status == SessionStatus::Busy) {
+                    return;
+                }
+                if let Some(live) = registry::get(&key) {
+                    this.as_mut().rust_mut().diagram_asked.insert(key.clone());
+                    live.handle.prompt(&message, Vec::new(), harlo_harness::SendMode::Normal);
+                }
+            });
+        });
     }
 
     /// A phone's request (see `phone_server`): `{ op, … }` → its reply.

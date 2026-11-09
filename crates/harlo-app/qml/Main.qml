@@ -7037,6 +7037,53 @@ ApplicationWindow {
     }
     property int specRequests: 0
 
+    // A diagram that doesn't parse: harlo tells the agent what's wrong
+    // when its turn ends and it sends the diagram again, fixed, drawn as a
+    // picture; one sent broken again isn't asked about a second time.
+    function harloNotes() {
+        const reqs = win.modelRequests()
+        const msgs = (reqs[reqs.length - 1] || {}).messages || []
+        return msgs.filter(m => m.role === "user" && JSON.stringify(m.content).indexOf("A diagram in your last reply didn't parse") >= 0)
+    }
+    property string diagramKey2: ""
+    SequentialAnimation {
+        id: diagramSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlodiagram"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: win.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo") }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(diagramSteps, () => chat.session.modelName !== "", 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: win.sendByKeys("draw a broken diagram") }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(diagramSteps, () => win.chatText().indexOf("Again:") >= 0 && chat.session.status === "idle", 15000) }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            const notes = win.harloNotes()
+            const said = notes.length ? JSON.stringify(notes[0].content) : ""
+            win.check(notes.length === 1 && /line \d+: /.test(said), "harlo tells the agent what's wrong in its diagram (" + said.slice(0, 260) + ")")
+            const pics = win.findAllNames("diagram", chat.transcript)
+            win.check(pics.length >= 1, "the diagram sent again is drawn (" + pics.length + " pictures)")
+            win.check(win.modelRequests().length === 2, "and harlo asks no more (" + win.modelRequests().length + " requests)")
+            win.shotWindow("clicks-harlo-diagram")
+            win.diagramKey2 = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(diagramSteps, () => chat.session.modelName !== "", 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: win.sendByKeys("draw a stubborn diagram") }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(diagramSteps, () => win.chatText().indexOf("Again:") >= 0 && chat.session.status === "idle", 15000) }
+        PauseAnimation { duration: 2500 }
+        ScriptAction { script: {
+            const reqs = win.modelRequests()
+            win.check(reqs.length === 4, "broken again: harlo asks only once (" + reqs.length + " requests)")
+            win.summary(); Qt.quit() } }
+    }
+
     // A split: Harlo offers a helper in a worktree, Start helpers starts it,
     // it writes a file and reports, and Harlo brings its work over
     // (bring_over) to the project as an uncommitted change.
