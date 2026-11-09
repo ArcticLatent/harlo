@@ -258,7 +258,9 @@ final class HarloUITests: XCTestCase {
     func test15OtherTabs() {
         launch("end")
         app.tabBars.buttons["New Session"].tap()
-        see("What should the agent do?")
+        // (A field's placeholder isn't its label.)
+        let field = app.descendants(matching: .any).matching(NSPredicate(format: "placeholderValue == %@", "What should the agent do?")).firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 8), "the new session's message box")
         shot("24-new-session")
         audit("new-session")
         app.tabBars.buttons["Settings"].tap()
