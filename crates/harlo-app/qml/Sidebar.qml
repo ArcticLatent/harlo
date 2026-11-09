@@ -556,6 +556,8 @@ Rectangle {
         required property int index
         // Room above each group but the first.
         readonly property real gap: index > 0 ? 16 : 2
+        // A narrow sidebar: the name keeps its room.
+        readonly property bool narrow: width < Theme.px(220)
         width: ListView.view.width
         height: 30 + gap
         // The arrow shows on hover, whatever the platform's hover setting.
@@ -596,6 +598,9 @@ Rectangle {
             Label {
                 objectName: "projectTitle-" + groupRow.title
                 Layout.fillWidth: true
+                // (Narrow: a few letters at least; the count and the
+                // provider's mark give way first.)
+                Layout.minimumWidth: Math.min(implicitWidth, Theme.px(48))
                 Layout.leftMargin: 2
                 text: groupRow.title
                 color: groupRow.hovered ? Theme.text : Theme.textMuted
@@ -633,14 +638,14 @@ Rectangle {
             // What the project's new sessions run.
             ProviderMark {
                 objectName: "projectProvider-" + groupRow.title
-                visible: groupRow.kind === "project" && known
+                visible: groupRow.kind === "project" && known && !groupRow.narrow
                 provider: groupRow.harness
                 implicitWidth: 12
                 implicitHeight: 12
                 opacity: 0.8
                 tip: "New sessions here use " + Theme.harnessLabel(groupRow.harness)
             }
-            Label { text: groupRow.count; color: Theme.textFaint; font.pixelSize: Theme.px(12) }
+            Label { visible: !groupRow.narrow; text: groupRow.count; color: Theme.textFaint; font.pixelSize: Theme.px(12) }
             FlatButton {
                 text: "+"
                 outlined: false

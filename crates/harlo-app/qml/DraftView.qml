@@ -438,9 +438,11 @@ Rectangle {
                 }
                 Chip {
                     visible: root.currentBranch !== ""
-                    iconName: root.useWorktree ? "git-branch" : root.atDefaultBranch ? "alert" : "git-branch"
+                    // (On the default branch it says so in words: the
+                    // warning tint alone needed a hover to explain.)
+                    iconName: "git-branch"
                     iconColor: root.useWorktree ? Theme.success : root.atDefaultBranch ? Theme.warning : Theme.muted
-                    text: root.useWorktree ? "New worktree" : root.currentBranch
+                    text: root.useWorktree ? "New worktree" : root.atDefaultBranch ? "Directly on " + root.currentBranch : root.currentBranch
                     onClicked: branchMenu.popup(this, 0, height + 4)
                     ToolTip.visible: hovered && root.atDefaultBranch && !root.useWorktree
                     ToolTip.text: "Working directly on " + root.currentBranch + ". Pick “New worktree” to keep it untouched."

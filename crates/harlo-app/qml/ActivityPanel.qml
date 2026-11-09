@@ -175,11 +175,14 @@ Rectangle {
                             Layout.fillWidth: true
                             text: row.modelData.target !== "" ? row.modelData.target : Theme.toolLabel(row.modelData.tool)
                             color: Theme.text
-                            font.family: row.modelData.target !== "" ? Theme.mono : Theme.uiFont
-                            font.pixelSize: Theme.px(12)
+                            // (The code font for code: a command, a path, a
+                            // pattern; a helper's task or a page reads as text.)
+                            readonly property bool code: row.modelData.target !== "" && ["command", "edit", "write", "read", "search"].indexOf(row.modelData.kind) >= 0
+                            font.family: code ? Theme.mono : Theme.uiFont
+                            font.pixelSize: Theme.px(code ? 12 : 13)
                             elide: row.isFile ? Text.ElideMiddle : Text.ElideRight
                             maximumLineCount: 2
-                            wrapMode: row.isFile ? Text.NoWrap : Text.WrapAnywhere
+                            wrapMode: row.isFile ? Text.NoWrap : code ? Text.WrapAnywhere : Text.WrapAtWordBoundaryOrAnywhere
                         }
                         Label {
                             Layout.fillWidth: true

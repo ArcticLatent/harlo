@@ -31,22 +31,6 @@ Rectangle {
     // While a run streams, refresh now and then.
     Timer { interval: 3000; repeat: true; running: root.visible && root.session.status === "busy"; onTriggered: root.reload() }
 
-    component Stat: Rectangle {
-        property string label
-        property string value
-        Layout.fillWidth: true
-        implicitHeight: 68
-        radius: 12
-        color: Theme.raised
-        border.color: Theme.hairline
-        Column {
-            anchors.verticalCenter: parent.verticalCenter
-            x: 14
-            spacing: 5
-            Caption { text: parent.parent.label }
-            Label { text: parent.parent.value; color: Theme.text; font.pixelSize: Theme.px(18); font.weight: Font.DemiBold }
-        }
-    }
     // A card's label: small, in sentence case, quieter than its value.
     component Caption: Label {
         color: Theme.label
@@ -203,15 +187,22 @@ Rectangle {
                     }
                 }
 
-                GridLayout {
+                // What the session holds, in one line that adds up: yours,
+                // the replies and the tools' results make the total.
+                Label {
+                    objectName: "contextCounts"
                     Layout.fillWidth: true
-                    columns: 2
-                    columnSpacing: 10
-                    rowSpacing: 10
-                    Stat { label: "Messages"; value: root.fmt(body.r.messages) }
-                    Stat { label: "User"; value: root.fmt(body.r.user) }
-                    Stat { label: "Assistant"; value: root.fmt(body.r.assistant) }
-                    Stat { label: "Cost"; value: "$" + Number(body.r.cost || 0).toFixed(2) }
+                    Layout.leftMargin: 2
+                    Layout.topMargin: 2
+                    wrapMode: Text.Wrap
+                    textFormat: Text.StyledText
+                    readonly property int results: body.r.toolResults || 0
+                    text: "<b>" + root.fmt(body.r.messages) + "</b> " + (body.r.messages === 1 ? "message" : "messages") + ": "
+                        + root.fmt(body.r.user) + " yours, " + root.fmt(body.r.assistant) + (body.r.assistant === 1 ? " reply" : " replies")
+                        + (results > 0 ? ", " + root.fmt(results) + (results === 1 ? " tool result" : " tool results") : "")
+                        + " · " + "$" + Number(body.r.cost || 0).toFixed(2)
+                    color: Theme.textMuted
+                    font.pixelSize: Theme.px(13)
                 }
 
                 // Last assistant message

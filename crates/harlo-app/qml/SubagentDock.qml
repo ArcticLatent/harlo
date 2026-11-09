@@ -88,12 +88,38 @@ Rectangle {
             objectName: "subagentList"
             visible: root.expanded
             Layout.fillWidth: true
-            Layout.preferredHeight: Math.min(rows.implicitHeight, Theme.px(216))
+            // (Whole rows: the last one that fits under the cap ends it.)
+            Layout.preferredHeight: {
+                const cap = Theme.px(216)
+                if (rows.implicitHeight <= cap) return rows.implicitHeight
+                let h = 0
+                for (let i = 0; i < rows.children.length; i++) {
+                    const r = rows.children[i]
+                    if (!r.visible || r.height <= 0 || r.y === undefined) continue
+                    if (r.y + r.height > cap) break
+                    h = r.y + r.height
+                }
+                return h > 0 ? h : cap
+            }
             contentWidth: width
             contentHeight: rows.implicitHeight
             clip: contentHeight > height
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar { policy: list.contentHeight > list.height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff }
+            // More below: the bottom row fades into the card.
+            Rectangle {
+                parent: list
+                z: 2
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: Theme.px(22)
+                visible: list.contentY + list.height < list.contentHeight - 1
+                gradient: Gradient {
+                    GradientStop { position: 0; color: Qt.rgba(Theme.elevated.r, Theme.elevated.g, Theme.elevated.b, 0) }
+                    GradientStop { position: 1; color: Theme.elevated }
+                }
+            }
             Column {
                 id: rows
                 width: list.width

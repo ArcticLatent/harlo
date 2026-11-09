@@ -542,17 +542,15 @@ Rectangle {
                         id: sectionHeader
                         RowLayout {
                             height: 34
-                            // A section label, as the sidebar's.
+                            // A section label, in sentence case (as Context's).
                             Label {
                                 Layout.leftMargin: 18
                                 Layout.alignment: Qt.AlignBottom
                                 bottomPadding: 6
                                 text: entry.modelData.header + " · " + entry.modelData.count
-                                font.capitalization: Font.AllUppercase
                                 color: Theme.label
-                                font.pixelSize: Theme.px(11)
+                                font.pixelSize: Theme.px(12)
                                 font.weight: Font.Medium
-                                font.letterSpacing: Theme.px(11) * 0.07
                             }
                             Item { Layout.fillWidth: true }
                             FlatButton {

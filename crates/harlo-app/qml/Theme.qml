@@ -114,7 +114,13 @@ QtObject {
     readonly property color diffAdd: diffBlueOrange ? (isLight ? "#1f6fd6" : "#5b9bf0") : ((c.syntax.highlights || {}).diffAdded || success)
     readonly property color diffRemove: diffBlueOrange ? (isLight ? "#c7761c" : "#f2a65a") : ((c.syntax.highlights || {}).diffRemoved || error)
     /// How wide messages and the composer grow (Settings → Appearance → Chat width).
-    readonly property real chatMaxWidth: look.chatWidth === "full" ? 100000 : look.chatWidth === "wide" ? 1180 : 860
+    // Comfortable: the reading width, about 85 characters of a reply's
+    // text (66 average ones of the interface font at 15px); the session's
+    // text, code, helpers and composer all share it. Wide and Full widen
+    // them together. (Unscaled: `px` scales it with the text.)
+    readonly property FontMetrics readingMetrics: FontMetrics { font.family: theme.uiFont; font.pixelSize: 15 }
+    readonly property real readingWidth: Math.max(520, Math.round(readingMetrics.averageCharacterWidth * 66))
+    readonly property real chatMaxWidth: look.chatWidth === "full" ? 100000 : look.chatWidth === "wide" ? 1180 : readingWidth
     /// Panels open and close in this long (ms; 0: at once).
     readonly property int motion: look.motion === undefined ? 160 : look.motion
     /// Hover and selection colours ease in this long (ms).
@@ -314,15 +320,7 @@ QtObject {
             + "p,ul,ol,blockquote,table{margin-top:8px;margin-bottom:8px;}"
             // A list inside a list: no gap above or below it.
             + "li ul,li ol{margin-top:0px;margin-bottom:0px;}"
-            // Headings step down in size; each has more room above than
-            // below, so it belongs to the text under it. The fourth level is
-            // a little larger than the text, never only bold text.
-            + "h1,h2,h3,h4,h5,h6{font-weight:600;color:" + rgb(text) + ";}"
-            + "h1{font-size:" + px(23) + "px;margin-top:24px;margin-bottom:8px;}"
-            + "h2{font-size:" + px(19) + "px;margin-top:22px;margin-bottom:6px;}"
-            + "h3{font-size:" + px(16.5) + "px;margin-top:18px;margin-bottom:4px;}"
-            + "h4{font-size:" + px(15.5) + "px;margin-top:16px;margin-bottom:2px;}"
-            + "h5,h6{font-size:" + px(14) + "px;margin-top:14px;margin-bottom:2px;color:" + rgb(textMuted) + ";}"
+            // (Headings: see `proseHtml`.)
             // Tables: no grid (Qt draws a cell's borders all or none); a
             // hairline under the header row (see `proseHtml`), the names
             // left as the cells.
@@ -353,10 +351,19 @@ QtObject {
     /// table cell behind each paragraph alone, so a <pre>'s lines, or a
     /// paragraph above it, leave gaps.)
     function proseHtml(html, copied, atTop) {
-        // A heading that opens a reply: no room above it (the reply's
-        // name is there).
-        if (atTop)
-            html = html.replace(/^<h([1-6])>/, '<h$1 style="margin-top:0px;">')
+        // Headings step down in size, each with more room above than below
+        // so it belongs to the text under it; the fourth level is a little
+        // larger than the text, never only bold. (Paragraphs styled as
+        // headings: Qt sizes <h1>–<h6> itself, the fourth smaller than the
+        // text, whatever a style says.) One that opens a reply has no room
+        // above it (the reply's name is there).
+        const heads = { 1: [21, 24, 8], 2: [19, 22, 6], 3: [17, 18, 4], 4: [16, 16, 2], 5: [14, 14, 2], 6: [14, 14, 2] }
+        html = html.replace(/<h([1-6])(?:\s[^>]*)?>([\s\S]*?)<\/h\1>/g, (all, level, inner, offset) => {
+            const [size, above, below] = heads[level]
+            const top = atTop && offset === 0 ? 0 : above
+            return '<p style="font-size:' + px(size) + 'px;font-weight:600;margin-top:' + top + 'px;margin-bottom:' + below + 'px;color:'
+                + rgb(level >= 5 ? textMuted : text) + ';">' + inner + "</p>"
+        })
         // A rule: a hairline the width of the text (Qt draws <hr> in the
         // text colour, the loudest line in a reply). A one-cell table
         // with a 1px font is one pixel high.
