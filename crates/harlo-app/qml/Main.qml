@@ -3490,6 +3490,8 @@ ApplicationWindow {
             const d = win.findName("subagentDock")
             win.check(d !== null && (win.findText("Explore", d) !== null) === (win.width > 900), "helpers show their kind while their names fit beside it")
             const count = (t, r) => { let n = 0; for (const c of r.children) { if (!c.visible || c.opacity <= 0) continue; if (c.text === t) n++; n += count(t, c) } return n }
+            const cut = (r) => { let n = []; for (const c of r.children) { if (!c.visible || c.opacity <= 0) continue; if (c.font && c.font.bold && c.truncated) n.push(c.text); n = n.concat(cut(c)) } return n }
+            if (win.width > 900) win.check(d !== null && cut(d).length === 0, "with room, no helper's name is cut (" + (d ? cut(d).join(", ") : "") + ")")
             win.check(d !== null && count("Analyze the transcript layout", d) === 1, "a helper's name shows once, not again as its task (" + (d ? count("Analyze the transcript layout", d) : -1) + ")")
             Workspace.chooseThemeMode("light") } }
         PauseAnimation { duration: 800 }

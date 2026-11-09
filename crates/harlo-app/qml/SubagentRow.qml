@@ -71,14 +71,15 @@ Rectangle {
                 spacing: 6
                 Label {
                     id: nameLabel
-                    // (The name tells helpers apart: it keeps its width,
-                    // the kind and the task give way first. A layout never
-                    // shrinks an item that doesn't fill, so it fills up to
-                    // its own width.)
-                    Layout.fillWidth: true
-                    Layout.maximumWidth: implicitWidth
-                    Layout.preferredWidth: implicitWidth
-                    Layout.minimumWidth: Math.min(implicitWidth, Theme.px(48))
+                    // (The name tells helpers apart: it keeps its whole
+                    // width, the kind and the task give way first; cut only
+                    // when the row has no more room. Given outright: a
+                    // layout's share left it a few pixels short, cut.)
+                    readonly property real room: rowCol.width - (agentLabel.visible ? agentLabel.implicitWidth + 6 : 0)
+                        - (statusLabel.visible ? statusLabel.implicitWidth + 6 : 0) - (usedLabel.visible ? usedLabel.implicitWidth + 6 : 0)
+                    Layout.preferredWidth: Math.max(0, Math.min(Math.ceil(implicitWidth), Math.floor(room)))
+                    Layout.minimumWidth: Layout.preferredWidth
+                    Layout.maximumWidth: Layout.preferredWidth
                     text: agentRow.a.name || agentRow.a.id
                     color: Theme.foreground
                     font.pixelSize: Theme.px(13)
