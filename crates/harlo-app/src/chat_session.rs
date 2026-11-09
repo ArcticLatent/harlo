@@ -137,6 +137,9 @@ pub mod qobject {
         /// few reads show their lines at once).
         #[qinvokable]
         fn reads_after(self: &ChatSession, group: &QString, row_key: &QString) -> i32;
+        /// A call's whole output (its row may keep only part of it).
+        #[qinvokable]
+        fn call_output(self: &ChatSession, row_key: &QString) -> QString;
         /// A call's listing as plain text, all of it (to copy), or "".
         #[qinvokable]
         fn code_text(self: &ChatSession, tool: &QString, command: &QString, path: &QString, output: &QString) -> QString;
@@ -954,8 +957,16 @@ impl ChatSession {
         match harlo_core::listing::view(&tool.to_string(), &command.to_string(), &path.to_string(), &output, limit.max(1) as usize) {
             Some(v) => {
                 let lines: Vec<serde_json::Value> = v.lines.iter().map(|l| serde_json::json!({ "n": l.num, "c": l.context, "h": l.html, "f": l.file })).collect();
-                QString::from(&serde_json::json!({ "path": v.path, "total": v.total, "more": v.more, "lines": lines }).to_string())
+                QString::from(&serde_json::json!({ "path": v.path, "total": v.total, "more": v.more, "earlier": v.earlier, "lines": lines }).to_string())
             }
+            None => QString::default(),
+        }
+    }
+
+    pub fn call_output(&self, row_key: &QString) -> QString {
+        let key = row_key.to_string();
+        match self.rows.iter().find(|r| r.key == key) {
+            Some(r) => QString::from(r.full.as_ref().map(|f| &*f.0).unwrap_or(r.text.as_str())),
             None => QString::default(),
         }
     }

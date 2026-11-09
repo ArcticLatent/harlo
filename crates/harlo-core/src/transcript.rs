@@ -35,6 +35,18 @@ impl RowKind {
     }
 }
 
+/// A call's whole output, shared with its row (compared by identity: the
+/// same output is the same, a new one a change).
+#[derive(Debug, Clone, Default)]
+pub struct FullOutput(pub Arc<str>);
+
+impl PartialEq for FullOutput {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+impl Eq for FullOutput {}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Row {
     /// Stable identity across snapshots.
@@ -44,6 +56,8 @@ pub struct Row {
     pub html: String,
     /// Plain text: user prompt, thinking, raw code, tool output, notice.
     pub text: String,
+    /// A call's whole output when `text` keeps only part of it (to copy).
+    pub full: Option<FullOutput>,
     /// Tool name, code language, notice level.
     pub title: String,
     /// Tool argument summary.
@@ -168,7 +182,7 @@ struct ToolRun {
     /// The call returned (end event or result message).
     ended: bool,
     is_error: bool,
-    output: String,
+    output: Arc<str>,
     /// When it started and returned (unix ms; 0 unknown).
     started: i64,
     ended_at: i64,
@@ -274,7 +288,7 @@ impl Transcript {
                     return false;
                 }
                 run.running = true;
-                run.output = content_text(&partial["content"]);
+                run.output = content_text(&partial["content"]).into();
                 self.touch_tool(call_id)
             }
             E::ToolEnd { call_id, result, is_error } => {
@@ -282,7 +296,7 @@ impl Transcript {
                 run.running = false;
                 run.ended = true;
                 run.is_error = *is_error;
-                run.output = content_text(&result["content"]);
+                run.output = content_text(&result["content"]).into();
                 if run.ended_at == 0 {
                     run.ended_at = now_ms();
                 }
@@ -446,7 +460,7 @@ impl Transcript {
                 run.running = false;
                 run.ended = true;
                 run.is_error = message["isError"].as_bool().unwrap_or(false);
-                run.output = content_text(&message["content"]);
+                run.output = content_text(&message["content"]).into();
                 if run.ended_at == 0 {
                     run.ended_at = message_time(message);
                 }
@@ -657,8 +671,11 @@ impl Transcript {
                             }
                             // (A file's lines keep their start, the rest a click
                             // away in the file; other output keeps its end.)
-                            let listing = crate::listing::is_read(name) || (!r.command.is_empty() && crate::listing::file_print(&r.command).is_some());
-                            r.text = if listing { head_chars(&run.output, TOOL_OUTPUT_DISPLAY_CHARS) } else { tail_chars(&run.output, TOOL_OUTPUT_DISPLAY_CHARS) };
+                            let start = crate::listing::keeps_start(name, &r.command);
+                            r.text = if start { head_chars(&run.output, TOOL_OUTPUT_DISPLAY_CHARS) } else { tail_chars(&run.output, TOOL_OUTPUT_DISPLAY_CHARS) };
+                            if r.text.len() != run.output.len() {
+                                r.full = Some(FullOutput(run.output.clone()));
+                            }
                             if run.started > 0 {
                                 r.time = run.started;
                             }
@@ -926,6 +943,8 @@ fn tail_chars(s: &str, max: usize) -> String {
     }
     let skip = count - max;
     let start = s.char_indices().nth(skip).map(|(i, _)| i).unwrap_or(0);
+    // (From a line's start: half a line would read as a line of its own.)
+    let start = s[start..].find('\n').map(|i| start + i + 1).filter(|&i| i < s.len()).unwrap_or(start);
     format!("…\n{}", &s[start..])
 }
 
@@ -1061,6 +1080,14 @@ mod tests {
 
     fn apply_changes(rows: &mut Vec<Arc<Row>>, changes: Vec<RowChange>) {
         crate::listdiff::apply(rows, changes);
+    }
+
+    #[test]
+    fn output_kept_from_its_end_starts_at_a_line() {
+        let s: String = (1..=2000).map(|i| format!("line {i}\n")).collect();
+        let kept = tail_chars(&s, 6000);
+        let first = kept.strip_prefix("…\n").unwrap().lines().next().unwrap();
+        assert!(first.starts_with("line ") && s.contains(&format!("\n{first}\n")), "{first}");
     }
 
     #[test]

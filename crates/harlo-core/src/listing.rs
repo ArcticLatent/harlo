@@ -34,6 +34,8 @@ pub struct CodeView {
     pub total: usize,
     /// The output was cut after these lines (it has more than is kept).
     pub more: bool,
+    /// The output was cut before these lines (kept to its end).
+    pub earlier: bool,
 }
 
 /// A line before it's highlighted: the file whose language it's in, its
@@ -149,7 +151,34 @@ pub fn view(tool: &str, command: &str, path: &str, output: &str, limit: usize) -
         }
         i = j;
     }
-    Some(CodeView { path: file, lines: out, total, more: output.ends_with("\n…") })
+    Some(CodeView { path: file, lines: out, total, more: output.ends_with("\n…"), earlier: output.starts_with("…\n") })
+}
+
+/// Output whose start matters more than its end, kept from there when
+/// it's long: a file's lines (a read, a command printing a file) and
+/// numbered search results (`grep -n`, `rg -n`, `git grep -n`).
+pub fn keeps_start(tool: &str, command: &str) -> bool {
+    if is_read(tool) {
+        return true;
+    }
+    if command.trim().is_empty() {
+        return false;
+    }
+    file_print(command).is_some() || split_steps(command).iter().any(|words| numbered_search(words))
+}
+
+fn numbered_search(words: &[String]) -> bool {
+    let Some((prog, rest)) = words.split_first() else { return false };
+    let prog = prog.rsplit('/').next().unwrap_or(prog);
+    let args: &[String] = match prog {
+        "grep" | "egrep" | "fgrep" | "rg" => rest,
+        "git" if rest.first().is_some_and(|w| w == "grep") => &rest[1..],
+        _ => return false,
+    };
+    // (Up to a pipe: what's after it is another program's.)
+    args.iter()
+        .take_while(|a| a.as_str() != "|")
+        .any(|a| a == "--line-number" || (a.starts_with('-') && !a.starts_with("--") && a[1..].chars().all(|c| c.is_ascii_alphanumeric()) && a.contains('n')))
 }
 
 /// How many lines `view` would give, unlimited (for "N more lines").
@@ -481,6 +510,19 @@ mod tests {
         // Not code: a test run, dates, one stray number.
         assert!(view("bash", "cargo test", "", "test a ... ok\ntest b ... ok", 400).is_none());
         assert!(view("bash", "ls -l", "", "2026-11-08 a\n2026-11-09 b", 400).is_none());
+    }
+
+    #[test]
+    fn search_and_file_output_keep_their_start() {
+        assert!(keeps_start("Read", ""));
+        assert!(keeps_start("Bash", "grep -rn limits src/"));
+        assert!(keeps_start("Bash", "cd app && rg -n --hidden foo"));
+        assert!(keeps_start("Bash", "git grep -n Limits | head -50"));
+        assert!(keeps_start("Bash", "sed -n '1,400p' src/main.rs"));
+        assert!(!keeps_start("Bash", "grep -r limits src/"));
+        assert!(!keeps_start("Bash", "cargo test -- --nocapture"));
+        assert!(!keeps_start("Bash", "find . -name '*.rs'"));
+        assert!(view("bash", "grep -rn x src/", "", "…\nsrc/a.rs:9:x\nsrc/a.rs:10:x", 400).unwrap().earlier);
     }
 
     #[test]

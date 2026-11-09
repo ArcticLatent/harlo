@@ -397,7 +397,7 @@ Item {
                 if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter || e.key === Qt.Key_Space) { view.toggle(thought.rowKey); e.accepted = true }
                 else e.accepted = root.stepKey(thoughtBox, e.key) || root.typedOn(e)
             }
-            Rectangle { x: -6; width: parent.width + 12; height: parent.height; radius: 6; color: thoughtHover.hovered ? Theme.hover : "transparent" }
+            Rectangle { x: thoughtWord.x - 6; width: parent.width - x + 6; height: parent.height; radius: 6; color: thoughtHover.hovered ? Theme.hover : "transparent" }
             // (Focused: ringed from its word, the run's line left clear.)
             Rectangle {
                 visible: root.keyFocus(thoughtBox)
@@ -742,8 +742,10 @@ Item {
         readonly property var beyondAt: {
             if (beyond === 0 || (code && code.path === "")) return null
             const nums = codeLines.filter(l => /^\d+$/.test(l.n) && l.p)
-            const last = nums[nums.length - 1]
-            return last ? { p: last.p, n: Number(last.n) + 1 } : null
+            const first = nums[0], last = nums[nums.length - 1]
+            // (Only a file's lines in a row: search results skip about.)
+            if (!last || Number(last.n) - Number(first.n) !== nums.length - 1) return null
+            return { p: last.p, n: Number(last.n) + 1 }
         }
         readonly property bool canOpen: (text !== "" && !shell && !preview) || hidden > 0 || (commandInWell && shownCommand.split("\n").length > 2)
         // (harlo's tools about a session: its title, not its key.)
@@ -776,8 +778,9 @@ Item {
                 else if (e.key === Qt.Key_Escape && card.group === "") { root.leaveRuns(""); e.accepted = true }
                 else e.accepted = (card.group !== "" && root.stepKey(headBox, e.key)) || root.typedOn(e)
             }
+            // (Hover and focus share a left edge: the step's name.)
             Rectangle {
-                x: -6; width: parent.width + 12; height: parent.height; radius: 6
+                x: toolNameLabel.x - 6; width: parent.width - x + 6; height: parent.height; radius: 6
                 color: headHover.hovered && card.canOpen ? Theme.hover : "transparent"
             }
             // (Focused: ringed from its name, the run's line left clear.)
@@ -824,7 +827,8 @@ Item {
                     id: callCopy
                     // (A folded read offers its lines instead; Ctrl+C still copies.)
                     visible: (card.codeShown || card.preview) && (cardHover.hovered || copied || activeFocus || root.keyFocus(headBox))
-                    copyFrom: () => card.code ? root.session.codeText(card.title, card.command, card.subtitle.replace(/…$/, ""), card.text)
+                    // (From the call's whole output: the row may keep only part.)
+                    copyFrom: () => card.code ? root.session.codeText(card.title, card.command, card.subtitle.replace(/…$/, ""), root.session.callOutput(card.rowKey))
                                               : card.diff.split("\n").filter(l => !l.startsWith("-")).map(l => l.slice(1)).join("\n")
                 }
                 // An older read, folded to its line: what a click does.
@@ -832,7 +836,7 @@ Item {
                     objectName: "showLines"
                     visible: card.isRead && !!card.code && !card.codeShown && (headHover.hovered || root.keyFocus(headBox))
                     text: "Show lines"
-                    color: Theme.textMuted
+                    color: Theme.foreground
                     font.pixelSize: Theme.px(12)
                 }
                 Label {
@@ -1011,6 +1015,16 @@ Item {
                         height: 13
                         Rectangle { y: 6; width: parent.width; height: 1; color: Theme.codeRule }
                     }
+                    // Kept to its end: what came before isn't here.
+                    Label {
+                        objectName: "toolEarlier"
+                        visible: toolWellBox.hasCode && !!card.code && card.code.earlier === true
+                        x: toolWellBox.gutter ? wellCode.gutterWidth : 10
+                        topPadding: 4
+                        text: "Earlier lines not shown"
+                        color: Theme.textFaint
+                        font.pixelSize: Theme.px(12)
+                    }
                     CodeText {
                         id: wellCode
                         objectName: card.preview ? "previewCode" : "codeView"
@@ -1135,7 +1149,8 @@ Item {
             // At its end until scrolled by hand, and again once scrolled back
             // there (its cards measure themselves after it's made, and a
             // Flickable keeps its contentY when the content grows).
-            property bool pinned: true
+            // (A run of one call opens at its top, its call's line in view.)
+            property bool pinned: (box.rows || []).filter(r => r.kind !== "thinking").length !== 1
             function atEnd() { return contentY >= contentHeight - height - 2 }
             function place() { if (pinned && height > 0) contentY = Math.max(0, contentHeight - height) }
             onContentHeightChanged: place()

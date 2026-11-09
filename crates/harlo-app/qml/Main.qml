@@ -3946,6 +3946,8 @@ ApplicationWindow {
         ScriptAction { script: {
             const v = win.findAllNames("codeView", chat.transcript).find(c => c.lines.length === 400)
             win.check(v !== undefined, "opened: 400 lines (" + win.findAllNames("codeView", chat.transcript).map(c => c.lines.length) + ")")
+            const lf = win.findName("runBoxScroll", win.listingBox())
+            win.check(lf && lf.contentY === 0, "a run of one call, opened: its top in view (" + (lf ? lf.contentY : "none") + ")")
             if (v) {
                 win.check(v.lines[0].n === "1" && v.lines[399].n === "400", "…from its first line")
                 // The numbers and tints placed again (as on a resize): ten times.
@@ -3961,6 +3963,30 @@ ApplicationWindow {
             const ed = chat.fileEditor.editor
             const line = ed ? ed.text.slice(0, ed.cursorPosition).split("\n").length : -1
             win.check(chat.filePath.endsWith("/src/long.rs") && line === 401, "Open at line 401: the file there (" + chat.filePath + ", " + line + ")")
+            Workspace.open(chat.session.key) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: win.sendByKeys("search a big tree") }
+        ScriptAction { script: win.waitUntil(listingSteps, () => win.chatText().indexOf("Searched it") >= 0 && chat.session.status === "idle", 20000) }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            chat.transcript.follow = false
+            const box = win.listingBox()
+            const card = what => { const w = win.findAllNames("toolWhat", box).find(l => l.plain.indexOf(what) >= 0); return w ? w.parent.parent.parent : null }
+            const grep = card("Search the whole tree"), nl = card("Number the log")
+            win.check(grep && grep.code && grep.code.lines[0].n === "3" && !grep.code.earlier, "400 matches: kept from the first (" + (grep && grep.code ? grep.code.lines[0].n : "none") + ")")
+            const all = grep ? chat.session.codeText("Bash", grep.command, "", chat.session.callOutput(grep.rowKey)).split("\n").length : 0
+            win.check(all === 400, "Copy: all 400 matches, not just what's kept (" + all + ")")
+            win.check(nl && nl.code && nl.code.earlier && Number(nl.code.lines[0].n) > 1 && win.findAllNames("toolEarlier", box).length === 1, "a long log, kept to its end: says earlier lines aren't here (" + (nl && nl.code ? nl.code.lines[0].n : "none") + ")")
+            win.listingAt("Search the whole tree")
+            const w = win.findAllNames("toolWhat", box).find(l => l.plain.indexOf("Search the whole tree") >= 0)
+            if (w) win.clickItem(w, "the search's line") } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const box = win.listingBox()
+            const beyond = win.findAllNames("toolBeyond", box)[0]
+            win.check(beyond && beyond.text === "More lines not shown here" && win.findAllNames("toolBeyondOpen", box).length === 0, "opened: more past these, no file jump for search results (" + (beyond ? beyond.text : "none") + ")")
+            win.listingAt("Number the log")
+            win.shotWindow("listings-search-log")
             win.summary(); Qt.quit() } }
     }
     property real perfOpen: 0
