@@ -304,6 +304,173 @@ Item {
             font.pixelSize: Theme.px(13)
         }
     }
+    // Code: one selectable text, its line numbers in a column beside it
+    // (each where its line is, wrapped or not), some lines tinted (added,
+    // removed, a grep match), long lines scrolled sideways (the wheel
+    // sideways, or Shift and the wheel). `lines`: [{ n, h, mark }] (mark:
+    // add, remove, match, context, file); or `html`, a whole <pre>,
+    // numbered 1…N.
+    component CodeText: Item {
+        id: ct
+        property var lines: null
+        property string html: ""
+        // Numbers in their own column; or an edit's +/− (`signs`).
+        property bool numbers: true
+        property bool signs: false
+        property real fontSize: Theme.mpx(12)
+        property bool wrap: Theme.wrapCode
+        property real topPad: 0
+        property real bottomPad: 0
+        // (Numbers: 8 px either side in their column, then 6 px to the code.)
+        readonly property real gutterWidth: numbers ? probe.implicitWidth + 22 : signs ? 22 : 10
+        readonly property int count: lines ? lines.length : Math.max(1, starts.length - (edit.getText(Math.max(0, edit.length - 1), edit.length) === "\n" ? 1 : 0))
+        readonly property string selectedText: edit.selectedText
+        implicitHeight: edit.implicitHeight + topPad + bottomPad
+        function number(i) {
+            if (!lines) return String(i + 1)
+            const l = lines[i]
+            return !l ? "" : signs ? (l.mark === "add" ? "+" : l.mark === "remove" ? "−" : "") : l.n
+        }
+        Label {
+            id: probe
+            visible: false
+            text: ct.lines ? ct.lines.reduce((w, l) => String(l.n).length > w.length ? String(l.n) : w, "0") : String(ct.count)
+            font.family: Theme.mono
+            font.pixelSize: ct.fontSize
+        }
+        // Where each line starts in the text, and (once laid out) its top.
+        readonly property var starts: {
+            const t = edit.getText(0, edit.length)
+            const s = [0]
+            for (let i = 0; i < t.length; i++) {
+                const c = t.charCodeAt(i)
+                if (c === 10 || c === 0x2028 || c === 0x2029) s.push(i + 1)
+            }
+            return s
+        }
+        property int laidOut: 0
+        function lineTop(i) { return laidOut >= 0 && i < starts.length ? edit.positionToRectangle(starts[i]).y : edit.contentHeight }
+        function lineHeight(i) { return laidOut >= 0 ? (i + 1 < starts.length ? lineTop(i + 1) : edit.contentHeight) - lineTop(i) : 0 }
+        // (A wrapped line's first row: where its number goes.)
+        function rowHeight(i) { return laidOut >= 0 && i < starts.length ? edit.positionToRectangle(starts[i]).height : 0 }
+        // Tints: an added or removed line, a grep match among its context.
+        Repeater {
+            model: ct.lines ? ct.lines.length : 0
+            Rectangle {
+                required property int index
+                readonly property string mark: ct.lines[index].mark || ""
+                visible: mark === "add" || mark === "remove" || mark === "match"
+                y: ct.topPad + ct.lineTop(index)
+                width: ct.width
+                height: ct.lineHeight(index)
+                color: mark === "add" ? Qt.rgba(Theme.diffAdd.r, Theme.diffAdd.g, Theme.diffAdd.b, 0.10)
+                     : mark === "remove" ? Qt.rgba(Theme.diffRemove.r, Theme.diffRemove.g, Theme.diffRemove.b, 0.10)
+                     : Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.07)
+            }
+        }
+        Repeater {
+            model: ct.numbers || ct.signs ? ct.count : 0
+            Label {
+                required property int index
+                readonly property string mark: ct.lines && ct.lines[index] ? ct.lines[index].mark || "" : ""
+                x: 0
+                y: ct.topPad + ct.lineTop(index)
+                width: ct.gutterWidth - 14
+                height: ct.rowHeight(index)
+                verticalAlignment: Text.AlignVCenter
+                horizontalAlignment: Text.AlignRight
+                text: ct.number(index)
+                color: mark === "add" ? Theme.diffAdd : mark === "remove" ? Theme.diffRemove : mark === "match" ? Theme.textMuted : Theme.textFaint
+                font.family: Theme.mono
+                font.pixelSize: ct.fontSize
+            }
+        }
+        // The text; the wheel sideways moves it (up and down goes on to the
+        // list around it).
+        MouseArea {
+            x: ct.gutterWidth
+            y: ct.topPad
+            width: ct.width - x
+            height: edit.implicitHeight
+            acceptedButtons: Qt.NoButton
+            onWheel: wheel => {
+                const along = wheel.pixelDelta.x !== 0 ? wheel.pixelDelta.x : wheel.angleDelta.x !== 0 ? wheel.angleDelta.x / 2.5
+                            : (wheel.modifiers & Qt.ShiftModifier) ? (wheel.pixelDelta.y !== 0 ? wheel.pixelDelta.y : wheel.angleDelta.y / 2.5) : 0
+                if (along === 0 || codeFlick.contentWidth <= codeFlick.width) { wheel.accepted = false; return }
+                codeFlick.contentX = Math.max(0, Math.min(codeFlick.contentWidth - codeFlick.width, codeFlick.contentX - along))
+            }
+            Flickable {
+                id: codeFlick
+                objectName: "codeScroll"
+                anchors.fill: parent
+                contentWidth: ct.wrap ? width : edit.implicitWidth + 12
+                contentHeight: height
+                clip: true
+                // (A drag selects; the wheel or the bar scrolls.)
+                interactive: false
+                boundsBehavior: Flickable.StopAtBounds
+                ScrollBar.horizontal: ScrollBar { policy: codeFlick.contentWidth > codeFlick.width ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff }
+                TextEdit {
+                    id: edit
+                    objectName: "codeText"
+                    width: ct.wrap ? codeFlick.width - 10 : implicitWidth
+                    textFormat: TextEdit.RichText
+                    // (A <pre> never wraps: with Word wrap, one that does.)
+                    readonly property string pre: "<pre style=\"margin:0;" + (ct.wrap ? "white-space:pre-wrap;" : "") + "\">"
+                    text: Theme.htmlStyle + (ct.lines ? pre + ct.lines.map(l => l.h === "" ? " " : l.h).join("\n") + "</pre>" : ct.html.replace("<pre style=\"margin:0;\">", pre))
+                    color: Theme.foreground
+                    selectionColor: Theme.selection
+                    selectedTextColor: Theme.foreground
+                    readOnly: true
+                    selectByMouse: true
+                    wrapMode: ct.wrap ? TextEdit.WrapAnywhere : TextEdit.NoWrap
+                    font.family: Theme.mono
+                    font.pixelSize: ct.fontSize
+                    // (Lines move as the text lays out again: their numbers with them.)
+                    onContentHeightChanged: Qt.callLater(() => ct.laidOut++)
+                    onWidthChanged: Qt.callLater(() => ct.laidOut++)
+                    onTextChanged: Qt.callLater(() => ct.laidOut++)
+                }
+            }
+            // More to the side: that edge fades out.
+            Rectangle {
+                visible: codeFlick.contentX > 1
+                width: 18
+                height: parent.height
+                gradient: Gradient {
+                    orientation: Gradient.Horizontal
+                    GradientStop { position: 0; color: Theme.codeBg }
+                    GradientStop { position: 1; color: Qt.rgba(Theme.codeBg.r, Theme.codeBg.g, Theme.codeBg.b, 0) }
+                }
+            }
+            Rectangle {
+                objectName: "codeMoreRight"
+                visible: codeFlick.contentX + codeFlick.width < codeFlick.contentWidth - 1
+                x: parent.width - width
+                width: 28
+                height: parent.height
+                gradient: Gradient {
+                    orientation: Gradient.Horizontal
+                    GradientStop { position: 0; color: Qt.rgba(Theme.codeBg.r, Theme.codeBg.g, Theme.codeBg.b, 0) }
+                    GradientStop { position: 1; color: Theme.codeBg }
+                }
+            }
+        }
+    }
+    // Copy, then "Copied" for a moment.
+    component CopyButton: FlatButton {
+        id: copyButton
+        // The text, or (worked out on the click) a function giving it.
+        property string copyText
+        property var copyFrom: null
+        property bool copied: false
+        objectName: "copyCode"
+        text: copied ? "Copied" : "Copy"
+        font.pixelSize: Theme.px(11)
+        padding: 2
+        onClicked: { clipboardHelper.copyText(copyFrom ? copyFrom() : copyText); copied = true; copiedTimer.restart() }
+        Timer { id: copiedTimer; interval: 1200; onTriggered: copyButton.copied = false }
+    }
     // A tool call: one line (what it is, what it touched, what it came to)
     // and, when there's something to see, one well under it: a write's or
     // an edit's lines, a command's last lines.
@@ -332,11 +499,27 @@ Item {
         readonly property int diffCount: diff === "" ? 0 : diff.split("\n").length
         // (A write's own count: its diff stops at 400 lines.)
         readonly property int lineCount: newFile && /^\+\d+$/.test(result) ? Number(result.slice(1)) : diffCount
-        readonly property var lines: preview ? JSON.parse(root.session.diffLines(subtitle.replace(/…$/, ""), diff, open ? 400 : previewLines))
-            : code ? code.lines.map(l => ({ s: " ", n: l.n, c: l.c, h: l.h })) : []
-        // Output that is a file's lines (a printed file, grep -n in one
-        // file, a read): numbered and highlighted like a file, its first
-        // lines (where it starts matters), never wrapped.
+        // The well's code: a write's lines numbered, an edit's out and in, or
+        // a listing (grep's matches tinted among their context, each file's
+        // lines under its name, a blank line between files).
+        readonly property bool hasContext: !!code && code.lines.some(l => l.c)
+        readonly property var codeLines: {
+            if (preview)
+                return JSON.parse(root.session.diffLines(subtitle.replace(/…$/, ""), diff, open ? 400 : previewLines))
+                    .map((l, i) => ({ n: newFile ? String(i + 1) : "", h: l.h, mark: newFile ? "" : l.s === "+" ? "add" : l.s === "-" ? "remove" : "" }))
+            if (!code) return []
+            const out = []
+            for (const l of code.lines) {
+                if (l.f !== "") {
+                    if (out.length) out.push({ n: "", h: "", mark: "gap" })
+                    out.push({ n: "", h: "<span style=\"color:" + Theme.rgb(Theme.textMuted) + ";\">" + root.local(l.f).replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</span>", mark: "file" })
+                } else out.push({ n: l.n, h: l.h, mark: l.c ? "context" : hasContext ? "match" : "" })
+            }
+            return out
+        }
+        // Output that is a file's lines (a printed file, grep -n, a read):
+        // numbered and highlighted like a file, its first lines (where it
+        // starts matters).
         readonly property var code: {
             if (preview || asking || text === "" || rowState === "running") return null
             const j = root.session.codeView(title, command, subtitle.replace(/…$/, ""), text, open ? 400 : previewLines)
@@ -353,8 +536,7 @@ Item {
         // (One line of output that's what the line already says, "48 passed": not again.)
         readonly property bool echoed: shell && outLines.length === 1 && result !== "" && outLines[0].trim() === result.trim()
         readonly property bool outInWell: shell ? outLines.length > 0 && rowState !== "running" && !echoed : open && text !== "" && !preview
-        // (A read's lines show once it's opened; a command's at once.)
-        readonly property bool codeShown: !!code && (shell || open)
+        readonly property bool codeShown: !!code
         readonly property bool failed: rowState === "error" || /^(exit|failed)|failed$/.test(result)
         readonly property int hidden: preview ? lineCount - previewLines : code ? code.total - previewLines : shell ? outLines.length - tailLines : 0
         readonly property bool canOpen: (text !== "" && !shell && !preview) || hidden > 0 || (commandInWell && shownCommand.split("\n").length > 2)
@@ -537,11 +719,13 @@ Item {
             // Line numbers on a column of their own, from the code's first
             // line (under a command, if any) to the well's bottom.
             readonly property bool gutter: (card.preview && card.newFile) || (card.codeShown && card.code.lines.some(l => l.n !== ""))
+            readonly property bool hasCode: card.preview || card.codeShown
+            HoverHandler { id: wellHover }
             Rectangle {
                 visible: parent.gutter
                 // (Under the command's rule: the column is the code's, not the command's.)
                 y: card.commandInWell ? 6 + cmdLabel.height + 7 : 0
-                width: wellCol.numberWidth - 6
+                width: wellCode.gutterWidth - 6
                 height: parent.height - y
                 color: Theme.codeGutter
                 topLeftRadius: y === 0 ? 6 : 0
@@ -557,21 +741,13 @@ Item {
                     id: wellCol
                     width: wellFlick.width
                     spacing: 0
-                    // (Numbers: 8 px either side in their column, then 6 px to the code.)
-                    readonly property real numberWidth: card.newFile || card.code ? numberProbe.implicitWidth + 22 : 22
-                    Label {
-                        id: numberProbe
-                        visible: false
-                        text: card.code ? card.code.lines.reduce((w, l) => l.n.length > w.length ? l.n : w, "0") : String(card.lines.length)
-                        font.family: Theme.mono
-                        font.pixelSize: Theme.mpx(12)
-                    }
                     Label {
                         id: cmdLabel
                         objectName: "toolCommand"
                         visible: card.commandInWell
                         x: 10
-                        width: wellCol.width - 20
+                        // (Room at its end for Copy.)
+                        width: wellCol.width - 20 - (toolWellBox.hasCode ? 44 : 0)
                         text: "<font color='" + Theme.rgb(Theme.textFaint) + "'>$</font> " + card.shownCommand.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\n/g, "<br>")
                         textFormat: Text.StyledText
                         color: Theme.foreground
@@ -590,40 +766,14 @@ Item {
                         height: 13
                         Rectangle { y: 6; width: parent.width; height: 1; color: Theme.codeRule }
                     }
-                    Repeater {
-                        model: card.preview || card.codeShown ? card.lines : []
-                        Rectangle {
-                            required property var modelData
-                            required property int index
-                            objectName: card.code ? "codeLine" : ""
-                            width: wellCol.width
-                            implicitHeight: lineText.implicitHeight + 2
-                            readonly property bool added: !card.newFile && modelData.s === "+"
-                            readonly property bool removed: modelData.s === "-"
-                            color: added ? Qt.rgba(Theme.diffAdd.r, Theme.diffAdd.g, Theme.diffAdd.b, 0.10) : removed ? Qt.rgba(Theme.diffRemove.r, Theme.diffRemove.g, Theme.diffRemove.b, 0.10) : "transparent"
-                            Label {
-                                width: wellCol.numberWidth - (card.newFile || card.code ? 14 : 10)
-                                horizontalAlignment: Text.AlignRight
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: card.code ? parent.modelData.n : card.newFile ? String(index + 1) : parent.added ? "+" : parent.removed ? "−" : ""
-                                color: parent.added ? Theme.diffAdd : parent.removed ? Theme.diffRemove : Theme.textFaint
-                                font.family: Theme.mono
-                                font.pixelSize: Theme.mpx(12)
-                            }
-                            Label {
-                                id: lineText
-                                x: wellCol.numberWidth
-                                width: parent.width - x - 10
-                                anchors.verticalCenter: parent.verticalCenter
-                                textFormat: Text.RichText
-                                text: Theme.htmlStyle + "<pre style=\"margin:0;\">" + (modelData.h === "" ? " " : modelData.h) + "</pre>"
-                                // (grep's context lines, around the matches: dimmer.)
-                                opacity: modelData.c ? 0.6 : 1
-                                color: Theme.foreground
-                                font.family: Theme.mono
-                                font.pixelSize: Theme.mpx(12)
-                            }
-                        }
+                    CodeText {
+                        id: wellCode
+                        objectName: card.preview ? "previewCode" : "codeView"
+                        visible: toolWellBox.hasCode
+                        width: wellCol.width
+                        lines: visible ? card.codeLines : []
+                        numbers: toolWellBox.gutter
+                        signs: card.preview && !card.newFile
                     }
                     // A command's last lines (each one shortened to the well), or
                     // all of a call's output, opened.
@@ -663,7 +813,7 @@ Item {
                     Label {
                         objectName: "toolMoreLines"
                         visible: card.hidden > 0
-                        x: toolWellBox.gutter ? wellCol.numberWidth : 10
+                        x: toolWellBox.gutter ? wellCode.gutterWidth : 10
                         topPadding: 3
                         text: card.open ? "Fewer lines" : card.hidden + (card.hidden === 1 ? " more line" : " more lines")
                         color: moreHover.hovered ? Theme.muted : Theme.textFaint
@@ -671,6 +821,23 @@ Item {
                         HoverHandler { id: moreHover; cursorShape: Qt.PointingHandCursor }
                         TapHandler { onTapped: view.toggle(card.rowKey) }
                     }
+                }
+            }
+            // Copy: all of the listing (not just the lines shown), a write's
+            // file, an edit's new lines.
+            Rectangle {
+                visible: toolWellBox.hasCode && (wellHover.hovered || wellCopy.copied)
+                x: parent.width - width - 4
+                y: 3
+                width: wellCopy.implicitWidth + 4
+                height: wellCopy.implicitHeight + 2
+                radius: 4
+                color: Theme.codeBg
+                CopyButton {
+                    id: wellCopy
+                    anchors.centerIn: parent
+                    copyFrom: () => card.code ? root.session.codeText(card.title, card.command, card.subtitle.replace(/…$/, ""), card.text)
+                                              : card.diff.split("\n").filter(l => !l.startsWith("-")).map(l => l.slice(1)).join("\n")
                 }
             }
         }
@@ -685,7 +852,8 @@ Item {
         property bool dflt
         // (Read again as the list changes: a finished run rarely does.)
         readonly property var rows: (view.count, summary, JSON.parse(root.session.runJson(group)))
-        readonly property real maxHeight: Math.max(Theme.px(160), Math.min(Theme.px(380), view.height * 0.45))
+        // (Room for a listing or two; the session stays in view around it.)
+        readonly property real maxHeight: Math.max(Theme.px(160), Math.min(Theme.px(560), view.height * 0.6))
         objectName: "runBox"
         spacing: 2
         RunHeader { Layout.fillWidth: true; group: box.group; summary: box.summary; dflt: box.dflt }
@@ -1276,15 +1444,17 @@ Item {
                         x: view.columnX
                         y: codeRow.gap
                         width: view.columnWidth
-                        height: codeHeader.height + (codeRow.drawn ? diagramBox.height : codeFlick.height) + (diagramNote.visible ? diagramNote.height : 0)
-                        radius: 10
+                        objectName: "replyCode"
+                        height: codeRule.y + 1 + (codeRow.drawn ? diagramBox.height : blockCode.height) + (diagramNote.visible ? diagramNote.height : 0)
+                        // (The same well as a tool's code: its header, a rule, the
+                        // numbers on their own column.)
+                        radius: 6
                         color: Theme.codeBg
-                        border.color: Theme.hairline
                         RowLayout {
                             id: codeHeader
                             width: parent.width
                             height: 28
-                            Label { Layout.leftMargin: 10; text: codeRow.title || "text"; color: Theme.muted; font.pixelSize: Theme.px(12) }
+                            Label { Layout.leftMargin: 10; text: root.session.languageName(codeRow.title); color: Theme.muted; font.pixelSize: Theme.px(12) }
                             Item { Layout.fillWidth: true }
                             FlatButton {
                                 visible: codeRow.mermaid && codeRow.diagram !== null && codeRow.diagram.state === "ready"
@@ -1300,22 +1470,17 @@ Item {
                                 font.pixelSize: Theme.px(11)
                                 onClicked: Diagrams.openInBrowser(codeRow.text, Theme.isLight)
                             }
-                            FlatButton {
-                                id: copyCode
-                                Layout.rightMargin: 4
+                            CopyButton {
+                                Layout.rightMargin: 6
                                 Layout.preferredHeight: 22
-                                // "Copied" for a moment after a click.
-                                property bool copied: false
-                                text: copied ? "Copied" : "Copy"
-                                font.pixelSize: Theme.px(11)
-                                onClicked: { clipboardHelper.copyText(codeRow.text); copied = true; copiedTimer.restart() }
-                                Timer { id: copiedTimer; interval: 1200; onTriggered: copyCode.copied = false }
+                                copyText: codeRow.text
                             }
                         }
+                        Rectangle { id: codeRule; y: codeHeader.height; width: parent.width; height: 1; color: Theme.codeRule }
                         // Drawing it, or why it isn't drawn.
                         Label {
                             id: diagramNote
-                            anchors.top: codeHeader.bottom
+                            anchors.top: codeRule.bottom
                             x: 10
                             width: parent.width - 20
                             visible: codeRow.mermaid && codeRow.diagram !== null && codeRow.diagram.state !== "ready"
@@ -1330,7 +1495,7 @@ Item {
                         Item {
                             id: diagramBox
                             objectName: "diagram"
-                            anchors.top: codeHeader.bottom
+                            anchors.top: codeRule.bottom
                             visible: codeRow.drawn
                             width: parent.width
                             height: visible ? diagramImage.height + 20 : 0
@@ -1355,33 +1520,24 @@ Item {
                                 ToolTip.delay: 600
                             }
                         }
-                        Flickable {
-                            id: codeFlick
-                            anchors.top: diagramNote.visible ? diagramNote.bottom : codeHeader.bottom
+                        Rectangle {
+                            visible: !codeRow.drawn
+                            anchors.top: blockCode.top
+                            width: blockCode.gutterWidth - 6
+                            height: blockCode.height
+                            color: Theme.codeGutter
+                            bottomLeftRadius: 6
+                        }
+                        CodeText {
+                            id: blockCode
+                            objectName: "replyCodeView"
+                            anchors.top: diagramNote.visible ? diagramNote.bottom : codeRule.bottom
                             visible: !codeRow.drawn
                             width: parent.width
-                            height: codeText.implicitHeight + 16
-                            // Settings → Appearance → Word wrap: long lines wrap.
-                            contentWidth: Theme.wrapCode ? width : codeText.implicitWidth + 20
-                            clip: true
-                            boundsBehavior: Flickable.StopAtBounds
-                            flickableDirection: Flickable.HorizontalFlick
-                            ScrollBar.horizontal: ScrollBar { policy: codeFlick.contentWidth > codeFlick.width ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff }
-                            TextEdit {
-                                id: codeText
-                                x: 10
-                                y: 4
-                                textFormat: TextEdit.RichText
-                                text: Theme.htmlStyle + codeRow.html
-                                color: Theme.foreground
-                                selectionColor: Theme.selection
-                                readOnly: true
-                                selectByMouse: true
-                                font.family: Theme.mono
-                                font.pixelSize: Theme.mpx(13)
-                                width: Theme.wrapCode ? codeFlick.width - 20 : implicitWidth
-                                wrapMode: Theme.wrapCode ? TextEdit.WrapAnywhere : TextEdit.NoWrap
-                            }
+                            html: codeRow.html
+                            fontSize: Theme.mpx(13)
+                            topPad: 8
+                            bottomPad: 8
                         }
                     }
                 }

@@ -133,6 +133,12 @@ pub mod qobject {
         /// the first `limit` lines; "" when it isn't.
         #[qinvokable]
         fn code_view(self: &ChatSession, tool: &QString, command: &QString, path: &QString, output: &QString, limit: i32) -> QString;
+        /// A call's listing as plain text, all of it (to copy), or "".
+        #[qinvokable]
+        fn code_text(self: &ChatSession, tool: &QString, command: &QString, path: &QString, output: &QString) -> QString;
+        /// A code block's language by name ("TypeScript" for `ts`).
+        #[qinvokable]
+        fn language_name(self: &ChatSession, token: &QString) -> QString;
         /// A run's rows (see `Row::group`), as the list's roles, JSON (a
         /// finished run shows in one box).
         #[qinvokable]
@@ -943,11 +949,19 @@ impl ChatSession {
         let output = output.to_string();
         match harlo_core::listing::view(&tool.to_string(), &command.to_string(), &path.to_string(), &output, limit.max(1) as usize) {
             Some(v) => {
-                let lines: Vec<serde_json::Value> = v.lines.iter().map(|l| serde_json::json!({ "n": l.num, "c": l.context, "h": l.html })).collect();
-                QString::from(&serde_json::json!({ "path": v.path, "total": harlo_core::listing::line_count(&output), "lines": lines }).to_string())
+                let lines: Vec<serde_json::Value> = v.lines.iter().map(|l| serde_json::json!({ "n": l.num, "c": l.context, "h": l.html, "f": l.file })).collect();
+                QString::from(&serde_json::json!({ "path": v.path, "total": v.total, "lines": lines }).to_string())
             }
             None => QString::default(),
         }
+    }
+
+    pub fn code_text(&self, tool: &QString, command: &QString, path: &QString, output: &QString) -> QString {
+        QString::from(&harlo_core::listing::text(&tool.to_string(), &command.to_string(), &path.to_string(), &output.to_string()).unwrap_or_default())
+    }
+
+    pub fn language_name(&self, token: &QString) -> QString {
+        QString::from(&harlo_core::markdown::language_name(&token.to_string()))
     }
 
     pub fn answer_value(self: Pin<&mut Self>, value: &QString) {

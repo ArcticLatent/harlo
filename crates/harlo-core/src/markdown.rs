@@ -218,6 +218,28 @@ pub fn language_of(path: &str) -> Option<&'static syntect::parsing::SyntaxRefere
     known(if ext.is_empty() { None } else { h.syntaxes.find_syntax_by_extension(alias(ext)) }).or_else(|| known(h.syntaxes.find_syntax_by_extension(name)))
 }
 
+/// A code block's language by name, for its label: "TypeScript" for
+/// `ts`, "Shell" for `bash`; the word itself when the highlighter doesn't
+/// know it ("mermaid"), "Text" when there's none.
+pub fn language_name(token: &str) -> String {
+    let token = token.trim();
+    if token.is_empty() || token.eq_ignore_ascii_case("text") || token.eq_ignore_ascii_case("plain") {
+        return "Text".into();
+    }
+    match highlighter().syntaxes.find_syntax_by_token(alias(token)) {
+        Some(s) if s.name == "Plain Text" => "Text".into(),
+        Some(s) => match s.name.as_str() {
+            "Bourne Again Shell (bash)" => "Shell".into(),
+            "Separated Values" => "CSV".into(),
+            "Protocol Buffer" => "Protobuf".into(),
+            "TypeScriptReact" => "TSX".into(),
+            "Vue Component" => "Vue".into(),
+            name => name.into(),
+        },
+        None => token.into(),
+    }
+}
+
 /// Highlights code into a Qt rich-text `<pre>` block (token classes; see
 /// `TOKEN_CLASSES`).
 pub fn highlight(code: &str, lang: &str) -> String {
@@ -387,5 +409,11 @@ mod tests {
         assert_eq!(plain_text("<p>Hello <b>world</b> &amp; you</p><ul><li>one</li><li>two&nbsp;x</li></ul>"), "Hello world & you\none\ntwo x");
         assert_eq!(plain_text("<table><tr><th>A</th><th>B</th></tr></table>"), "A, B");
         assert_eq!(plain_text("a &lt;b&gt; c"), "a <b> c");
+    }
+
+    #[test]
+    fn languages_by_name() {
+        let n = |t: &str| language_name(t);
+        assert_eq!([n("ts"), n("bash"), n("toml"), n("rust"), n("qml"), n(""), n("mermaid")], ["TypeScript", "Shell", "TOML", "Rust", "QML", "Text", "mermaid"]);
     }
 }

@@ -13,27 +13,40 @@ use crate::markdown::highlight_lines;
 use crate::mcp::split_command;
 
 /// One line: its number ("" when not known), whether it's grep context
-/// (not a match), and its text as highlighted rich text.
+/// (not a match), and its text as highlighted rich text. A file's header
+/// (grep in several files: its lines come under it) has `file` set and no
+/// number.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CodeLine {
     pub num: String,
     pub context: bool,
     pub html: String,
+    pub file: String,
 }
 
-/// The lines as code, and the file they're from (its extension picks the
-/// language).
+/// The lines as code, the file they're from (its extension picks the
+/// language; empty for several files) and how many lines there are in all
+/// (`lines` stops at the limit).
 #[derive(Debug, Clone, PartialEq)]
 pub struct CodeView {
     pub path: String,
     pub lines: Vec<CodeLine>,
+    pub total: usize,
 }
 
-/// The output of a call (`tool`, its shell `command` if it's one, the
-/// `path` it's about if it names one) as code, or None when it isn't a
-/// file's lines (or there'd be nothing to add: no numbers, no language).
-/// `limit`: the most lines returned (from the top).
-pub fn view(tool: &str, command: &str, path: &str, output: &str, limit: usize) -> Option<CodeView> {
+/// A line before it's highlighted: the file whose language it's in, its
+/// number, text, whether it's context, whether it's a file's header.
+struct Pending<'a> {
+    file: String,
+    num: String,
+    body: &'a str,
+    context: bool,
+    header: bool,
+}
+
+/// The listing's lines before they're highlighted, and its file (empty for
+/// several), or None when the output isn't a file's lines.
+fn rows<'a>(tool: &str, command: &str, path: &str, output: &'a str) -> Option<(String, Vec<Pending<'a>>)> {
     // (Output kept to its end starts with "…": where it starts isn't known.)
     let (cut, output) = match output.strip_prefix("…\n") {
         Some(rest) => (true, rest),
@@ -47,32 +60,92 @@ pub fn view(tool: &str, command: &str, path: &str, output: &str, limit: usize) -
         return None;
     }
     let printed = if command.trim().is_empty() { None } else { file_print(command) };
-    let numbered = numbered(&lines);
-    // Where the file's language comes from: the numbered lines' own path
-    // (grep in several files names each), else the command's file, else the
-    // call's.
-    let (file, nums, bodies, context): (String, Vec<String>, Vec<&str>, Vec<bool>) = match (numbered, &printed) {
+    let plain = |file: &str, num: String, body| Pending { file: file.to_owned(), num, body, context: false, header: false };
+    // (A read tool numbers every line: one is enough.)
+    let (file, rows): (String, Vec<Pending>) = match (numbered(&lines, if is_read(tool) { 1 } else { 2 }), &printed) {
         (Some(rows), _) => {
-            let file = rows.path.clone().or_else(|| printed.as_ref().map(|p| p.path.clone())).or_else(|| command_file(command)).unwrap_or_else(|| path.to_owned());
-            (file, rows.nums, rows.bodies, rows.context)
+            // Where the language comes from: each line's own path (grep
+            // names it), else the command's file, else the call's.
+            let fallback = printed.as_ref().map(|p| p.path.clone()).or_else(|| command_file(command)).unwrap_or_else(|| path.to_owned());
+            let mut files: Vec<&str> = Vec::new();
+            for r in rows.iter().flatten() {
+                if let Some(p) = r.path.as_deref() {
+                    if !files.contains(&p) {
+                        files.push(p);
+                    }
+                }
+            }
+            let several = files.len() > 1;
+            let file = if several { String::new() } else { files.first().map(|p| p.to_string()).unwrap_or(fallback.clone()) };
+            let mut out = Vec::with_capacity(rows.len() + files.len());
+            let mut current: Option<String> = None;
+            for (row, line) in rows.into_iter().zip(&lines) {
+                match row {
+                    Some(r) => {
+                        // (Several files: each one's lines under its name.)
+                        if several && r.path.is_some() && r.path != current {
+                            current = r.path.clone();
+                            out.push(Pending { file: current.clone().unwrap_or_default(), num: String::new(), body: "", context: false, header: true });
+                        }
+                        let f = r.path.or_else(|| current.clone()).unwrap_or_else(|| file.clone());
+                        out.push(Pending { file: f, num: r.num, body: r.body, context: r.context, header: false });
+                    }
+                    // (grep's "--" between groups: a gap, as context.)
+                    None => out.push(Pending { file: current.clone().unwrap_or_else(|| file.clone()), num: String::new(), body: line, context: true, header: false }),
+                }
+            }
+            (file, out)
         }
         (None, Some(p)) => {
             let start = if cut { None } else { p.start };
-            let nums = lines.iter().enumerate().map(|(i, _)| start.map(|s| (s + i).to_string()).unwrap_or_default()).collect();
-            (p.path.clone(), nums, lines.clone(), vec![false; lines.len()])
+            (p.path.clone(), lines.iter().enumerate().map(|(i, l)| plain(&p.path, start.map(|s| (s + i).to_string()).unwrap_or_default(), *l)).collect())
         }
         // A read tool's plain lines: its file's language, no numbers.
-        (None, None) if is_read(tool) && !path.is_empty() => (path.to_owned(), vec![String::new(); lines.len()], lines.clone(), vec![false; lines.len()]),
+        (None, None) if is_read(tool) && !path.is_empty() => (path.to_owned(), lines.iter().map(|l| plain(path, String::new(), *l)).collect()),
         _ => return None,
     };
-    let known = has_language(&file);
-    if !known && nums.iter().all(String::is_empty) {
+    if !file.is_empty() && !has_language(&file) && rows.iter().all(|r| r.num.is_empty()) {
         return None;
     }
-    let take = bodies.len().min(limit.max(1));
-    let html = if known { highlight_lines(&file, &bodies[..take]) } else { bodies[..take].iter().map(|b| crate::transcript::escape_html(b)).collect() };
-    let lines = (0..take).map(|i| CodeLine { num: nums[i].clone(), context: context[i], html: html[i].clone() }).collect();
-    Some(CodeView { path: file, lines })
+    Some((file, rows))
+}
+
+/// The listing as plain text, all of it (to copy): its lines without their
+/// numbers, a file's name before its lines.
+pub fn text(tool: &str, command: &str, path: &str, output: &str) -> Option<String> {
+    let (_, rows) = rows(tool, command, path, output)?;
+    Some(rows.iter().map(|r| if r.header { r.file.as_str() } else { r.body }).collect::<Vec<_>>().join("\n"))
+}
+
+/// The output of a call (`tool`, its shell `command` if it's one, the
+/// `path` it's about if it names one) as code, or None when it isn't a
+/// file's lines (or there'd be nothing to add: no numbers, no language).
+/// `limit`: the most lines returned (from the top).
+pub fn view(tool: &str, command: &str, path: &str, output: &str, limit: usize) -> Option<CodeView> {
+    let (file, rows) = rows(tool, command, path, output)?;
+    let total = rows.len();
+    let take = total.min(limit.max(1));
+    // Highlighted a file at a time (each run of lines from one file).
+    let mut out = Vec::with_capacity(take);
+    let mut i = 0;
+    while i < take {
+        if rows[i].header {
+            out.push(CodeLine { num: String::new(), context: false, html: String::new(), file: rows[i].file.clone() });
+            i += 1;
+            continue;
+        }
+        let mut j = i;
+        while j < take && !rows[j].header && rows[j].file == rows[i].file {
+            j += 1;
+        }
+        let bodies: Vec<&str> = rows[i..j].iter().map(|r| r.body).collect();
+        let html = if has_language(&rows[i].file) { highlight_lines(&rows[i].file, &bodies) } else { bodies.iter().map(|b| crate::transcript::escape_html(b)).collect() };
+        for (r, h) in rows[i..j].iter().zip(html) {
+            out.push(CodeLine { num: r.num.clone(), context: r.context, html: h, file: String::new() });
+        }
+        i = j;
+    }
+    Some(CodeView { path: file, lines: out, total })
 }
 
 /// How many lines `view` would give, unlimited (for "N more lines").
@@ -250,94 +323,78 @@ fn split_steps(command: &str) -> Vec<Vec<String>> {
     steps
 }
 
-struct Numbered<'a> {
+/// A line that carries its number: grep's path (if it names one), the
+/// number, the text after it, whether it's grep context.
+struct NumberedLine<'a> {
     path: Option<String>,
-    nums: Vec<String>,
-    bodies: Vec<&'a str>,
-    context: Vec<bool>,
+    num: String,
+    body: &'a str,
+    context: bool,
 }
 
-/// Lines that carry their numbers: grep -n (one file; its context lines
-/// with `-`), cat -n and nl (a tab), a read tool's `N→`. None unless every
-/// line does but grep's `--` between groups (so a command that printed
-/// something else too stays text), and at least two (one stray "3: …").
-fn numbered<'a>(lines: &[&'a str]) -> Option<Numbered<'a>> {
-    let mut path: Option<String> = None;
-    let mut several = false;
-    let mut rows: Vec<Option<(String, &'a str, bool)>> = Vec::with_capacity(lines.len());
-    for l in lines {
-        rows.push(numbered_line(l).map(|(p, n, body, ctx)| {
-            if let Some(p) = p {
-                match &path {
-                    Some(q) if *q != p => several = true,
-                    None => path = Some(p),
-                    _ => {}
-                }
-            }
-            (n, body, ctx)
-        }));
-    }
+/// Lines that carry their numbers: grep -n (its context lines with `-`, a
+/// path before each when it searched several files), cat -n and nl (a
+/// tab), a read tool's `N→`. None unless every line does but grep's `--`
+/// between groups (so a command that printed something else too stays
+/// text), and at least `least` (two from a command: one stray "3: …"
+/// isn't a listing). Each line: its number, or None for a `--`.
+fn numbered<'a>(lines: &[&'a str], least: usize) -> Option<Vec<Option<NumberedLine<'a>>>> {
+    let rows: Vec<Option<NumberedLine<'a>>> = lines.iter().map(|l| numbered_line(l)).collect();
     let hits = rows.iter().filter(|r| r.is_some()).count();
     let real = lines.iter().filter(|l| !l.trim().is_empty() && l.trim() != "--").count();
-    if several || hits < 2 || hits < real {
+    if hits < least || hits < real {
         return None;
     }
-    let mut out = Numbered { path, nums: Vec::new(), bodies: Vec::new(), context: Vec::new() };
-    for (row, l) in rows.into_iter().zip(lines) {
-        match row {
-            Some((n, body, ctx)) => {
-                out.nums.push(n);
-                out.bodies.push(body);
-                out.context.push(ctx);
-            }
-            // (grep's "--" between groups, and the like.)
-            None => {
-                out.nums.push(String::new());
-                out.bodies.push(l);
-                out.context.push(true);
-            }
-        }
-    }
-    Some(out)
+    Some(rows)
 }
 
 /// One numbered line: its path (grep in a file), number, text, and whether
 /// it's grep context.
-fn numbered_line(l: &str) -> Option<(Option<String>, String, &str, bool)> {
+fn numbered_line(l: &str) -> Option<NumberedLine<'_>> {
     // cat -n / nl: spaces, the number, a tab. A read tool: the number, "→".
     let trimmed = l.trim_start();
     let digits = trimmed.chars().take_while(char::is_ascii_digit).count();
     if digits > 0 {
         let rest = &trimmed[digits..];
         if let Some(body) = rest.strip_prefix('\t').or_else(|| rest.strip_prefix('→')) {
-            return Some((None, trimmed[..digits].to_owned(), body, false));
+            return Some(NumberedLine { path: None, num: trimmed[..digits].to_owned(), body, context: false });
         }
     }
-    // grep -n: [path:]N:text (a match) or [path-]N-text (context).
-    let (path, rest) = match l.find([':', '-']) {
-        Some(i) if !l[..i].chars().all(|c| c.is_ascii_digit()) => {
-            let p = &l[..i];
-            if p.contains(char::is_whitespace) || !(p.contains('/') || p.contains('.')) {
-                return None;
-            }
-            (Some(p.to_owned()), &l[i + 1..])
+    // grep -n: [path:]N:text (a match) or [path-]N-text (context). The
+    // path may hold either sign itself ("harlo-core/src/a.rs"): the first
+    // place where a sign, digits and the same sign follow.
+    let at = |i: usize| -> Option<NumberedLine<'_>> {
+        let sep = l[i..].chars().next()?;
+        let rest = &l[i + sep.len_utf8()..];
+        let digits = rest.chars().take_while(char::is_ascii_digit).count();
+        if digits == 0 || !rest[digits..].starts_with(sep) {
+            return None;
         }
-        _ => (None, l),
+        let body = &rest[digits + 1..];
+        // (Not a date or a time: "2026-11-08 …", "12:30:45 …".)
+        if body.starts_with(|c: char| c.is_ascii_digit()) {
+            return None;
+        }
+        let path = &l[..i];
+        if path.is_empty() || path.contains(char::is_whitespace) || !(path.contains('/') || path.contains('.')) {
+            return None;
+        }
+        Some(NumberedLine { path: Some(path.to_owned()), num: rest[..digits].to_owned(), body, context: sep == '-' })
     };
-    let digits = rest.chars().take_while(char::is_ascii_digit).count();
-    if digits == 0 {
-        return None;
+    if !l.starts_with(|c: char| c.is_ascii_digit()) {
+        return l.char_indices().filter(|(_, c)| *c == ':' || *c == '-').find_map(|(i, _)| at(i));
     }
-    let sep = rest[digits..].chars().next()?;
+    // No path: N:text or N-text.
+    let digits = l.chars().take_while(char::is_ascii_digit).count();
+    let sep = l[digits..].chars().next()?;
     if sep != ':' && sep != '-' {
         return None;
     }
-    let body = &rest[digits + 1..];
-    // (Not a date or a time: "2026-11-08 …", "12:30:45 …".)
+    let body = &l[digits + 1..];
     if body.starts_with(|c: char| c.is_ascii_digit()) {
         return None;
     }
-    Some((path, rest[..digits].to_owned(), body, sep == '-'))
+    Some(NumberedLine { path: None, num: l[..digits].to_owned(), body, context: sep == '-' })
 }
 
 #[cfg(test)]
@@ -394,15 +451,28 @@ mod tests {
         let v = view("bash", "grep -n -C1 limit src/main.rs", "", grep, 400).unwrap();
         assert_eq!(v.path, "src/main.rs");
         assert_eq!(v.lines.iter().map(|l| (l.num.as_str(), l.context)).collect::<Vec<_>>(), [("3", false), ("4", false), ("5", true)]);
-        // In one named file; several files stay as they were.
+        // In one named file.
         let v = view("bash", "grep -rn fn src", "", "src/a.rs:1:fn a() {}\nsrc/a.rs:9:fn b() {}", 400).unwrap();
-        assert_eq!((v.path.as_str(), v.lines[1].num.as_str()), ("src/a.rs", "9"));
-        assert!(view("bash", "grep -rn fn src", "", "src/a.rs:1:fn a() {}\nsrc/b.rs:2:fn b() {}", 400).is_none());
+        assert_eq!((v.path.as_str(), v.lines[1].num.as_str(), v.lines[0].file.as_str()), ("src/a.rs", "9", ""));
+        // In several: each file's lines under its name, in its language.
+        let out = "crates/harlo-core/src/a.rs:1:fn a() {}\ncrates/harlo-core/src/a.rs-2-}\nqml/B.qml:4:Item { property string t: \"x\" }";
+        let v = view("bash", "grep -rn -A1 fn crates qml", "", out, 400).unwrap();
+        let shape: Vec<(&str, &str, bool)> = v.lines.iter().map(|l| (l.file.as_str(), l.num.as_str(), l.context)).collect();
+        assert_eq!(shape, [("crates/harlo-core/src/a.rs", "", false), ("", "1", false), ("", "2", true), ("qml/B.qml", "", false), ("", "4", false)]);
+        assert_eq!((v.path.as_str(), v.total), ("", 5));
+        assert!(v.lines[1].html.contains("<span") && v.lines[4].html.contains("<span"), "{:?}", v.lines);
+        // To copy: the lines, each file's name before its own.
+        assert_eq!(text("bash", "grep -rn -A1 fn crates qml", "", out).unwrap(), "crates/harlo-core/src/a.rs\nfn a() {}\n}\nqml/B.qml\nItem { property string t: \"x\" }");
+        // (The limit counts the headers too; the total is all of it.)
+        let v = view("bash", "grep -rn fn crates qml", "", out, 2).unwrap();
+        assert_eq!((v.lines.len(), v.total), (2, 5));
         // cat -n, and a read tool's arrows.
         let v = view("bash", "cat -n x.py", "", "     1\timport os\n     2\tprint(1)", 400).unwrap();
         assert_eq!((v.path.as_str(), v.lines[1].num.as_str()), ("x.py", "2"));
         let v = view("Read", "", "/p/x.rs", "     7→fn a() {}\n     8→}", 400).unwrap();
         assert_eq!((v.path.as_str(), v.lines[0].num.as_str()), ("/p/x.rs", "7"));
+        let v = view("Read", "", "/p/README.md", "1\thello", 400).unwrap();
+        assert_eq!((v.lines[0].num.as_str(), v.lines[0].html.as_str()), ("1", "hello"));
         // Not code: a test run, dates, one stray number.
         assert!(view("bash", "cargo test", "", "test a ... ok\ntest b ... ok", 400).is_none());
         assert!(view("bash", "ls -l", "", "2026-11-08 a\n2026-11-09 b", 400).is_none());

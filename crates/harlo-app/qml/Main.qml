@@ -3672,11 +3672,14 @@ ApplicationWindow {
                       && results.some(r => r.indexOf("7 passed") >= 0) && results.some(r => r.indexOf("exit 101") >= 0), "what each came to (" + results.join(" | ") + ")")
             const tails = win.findAllNames("toolTail", box).map(l => l.text)
             win.check(tails.some(x => x.indexOf("7 passed") >= 0), "a command's last lines (" + tails.join(" | ") + ")")
-            const code = win.findAllNames("codeLine", box).map(l => l.modelData)
-            win.check(code.length === 6 && code[0].n === "3" && !code[0].c && code[2].c && code[2].h.indexOf("}") >= 0,
-                      "grep's line numbers as a gutter, its context lines dimmer (" + JSON.stringify(code.slice(0, 3)) + ")")
-            win.check(code[3].n === "2" && code[5].n === "4" && code[3].h.indexOf("<span") >= 0 && /^    let/.test(code[3].h.replace(/<[^>]+>/g, "")),
-                      "a printed file's lines numbered from where it starts, highlighted, indented (" + JSON.stringify(code.slice(3)) + ")")
+            const code = win.findAllNames("codeView", box).reduce((all, v) => all.concat(v.lines), [])
+            win.check(code.length === 7 && code[0].n === "1" && code[0].h === "hello", "a read's line, numbered (" + JSON.stringify(code[0]) + ")")
+            win.check(code[1].n === "3" && code[1].mark === "match" && code[3].mark === "context" && code[3].h.indexOf("}") >= 0,
+                      "grep's line numbers as a gutter, its matches tinted among their context (" + JSON.stringify(code.slice(1, 4)) + ")")
+            win.check(code[4].n === "2" && code[6].n === "4" && code[4].h.indexOf("<span") >= 0 && /^    let/.test(code[4].h.replace(/<[^>]+>/g, "")),
+                      "a printed file's lines numbered from where it starts, highlighted, indented (" + JSON.stringify(code.slice(4)) + ")")
+            const sel = win.findAllNames("codeText", box)
+            win.check(sel.length >= 2 && sel.every(e => e.selectByMouse && e.readOnly), "a listing's text can be selected")
             win.check(win.findAllNames("toolTail", box).every(l => !/^\d+[:-]|^    let/.test(l.text)), "a listing isn't shown again as plain lines")
             win.check(win.findAllNames("toolCommandRule", box).length >= 1, "a rule between a command and its listing")
             win.check(win.findAllNames("toolCommand", box).length === 2, "the commands under what they're for (the other is on its line)")
@@ -3747,12 +3750,19 @@ ApplicationWindow {
         PauseAnimation { duration: 600 }
         ScriptAction { script: {
             const box = win.listingBox()
-            const code = win.findAllNames("codeLine", box).map(l => l.modelData)
-            win.check(code.length === 21, "cat -n, sed, head and cat show 6, 6, 6 and 3 lines; grep in several files and the closed read none (" + code.length + ")")
+            const code = win.findAllNames("codeView", box).reduce((all, v) => all.concat(v.lines), [])
+            win.check(code.length === 33, "cat -n, the read, grep, sed, head and cat show 6, 6, 6, 6, 6 and 3 lines (" + code.length + ")")
             win.check(code[0].n === "1" && code[0].h.indexOf("<span") >= 0 && code[5].n === "6", "cat -n: its numbers, TypeScript highlighted (" + JSON.stringify(code[0]) + ")")
-            win.check(code[6].n === "38" && code[10].h.indexOf("file_print") >= 0, "sed: numbered from 38")
-            win.check(code[12].n === "1" && code[12].h.indexOf("<span") >= 0 && code[18].n === "1" && code[18].h.indexOf("<span") < 0, "TOML highlighted; an unknown file numbered, plain (" + JSON.stringify([code[12], code[18]]) + ")")
-            win.check(win.findAllNames("toolTail", box).filter(l => l.row).length === 3, "grep in several files: its lines as text, path and number in the gutter")
+            win.check(code[6].n === "1" && code[9].h.indexOf("<span") >= 0, "a read: its first lines at once, QML highlighted (" + JSON.stringify(code[9]) + ")")
+            win.check(code[12].mark === "file" && code[12].h.indexOf("src/main.rs") >= 0 && code[13].n === "3" && code[15].mark === "gap" && code[16].mark === "file" && code[16].h.indexOf("src/app.ts") >= 0 && code[17].h.indexOf("<span") >= 0,
+                      "grep in several files: each file's lines under its name, in its language (" + JSON.stringify(code.slice(12, 18).map(l => [l.n, l.mark])) + ")")
+            win.check(code[18].n === "38" && code[22].h.indexOf("file_print") >= 0, "sed: numbered from 38")
+            win.check(code[24].n === "1" && code[24].h.indexOf("<span") >= 0 && code[30].n === "1" && code[30].h.indexOf("<span") < 0, "TOML highlighted; an unknown file numbered, plain (" + JSON.stringify([code[24], code[30]]) + ")")
+            win.check(win.findAllNames("toolTail", box).length === 0, "no listing as plain last lines")
+            win.check(win.width < 1000 || win.findAllNames("codeMoreRight", box).length >= 1, "a line longer than the well: its edge fades, more to the side")
+            const blocks = win.findAllNames("replyCodeView", chat.transcript)
+            win.check(blocks.length === 3 && blocks[0].count === 4 && blocks[0].numbers && blocks[1].count === 1, "a reply's code blocks: numbered (" + blocks.map(b => b.count) + ")")
+            win.check(["TypeScript", "Shell", "TOML"].every(n => win.findText(n, chat.transcript) !== null), "code blocks name their language")
             win.listingAt("cat -n")
             win.shotWindow("listings-catn-read") } }
         PauseAnimation { duration: 200 }
@@ -3769,20 +3779,27 @@ ApplicationWindow {
         // (A press while the list still moves only stops it: a moment first.)
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
-            // (Tapping its line doesn't reach it yet, found by the critique:
-            // opened through the list's own toggle meanwhile.)
-            const card = win.findAllNames("toolResult", win.listingBox()).find(l => l.text === "13 lines").parent.parent.parent
-            let v = card
-            while (v && typeof v.toggle !== "function") v = v.parent
-            v.toggle(card.rowKey) } }
+            // (Its line, not its path: the path opens the file.)
+            win.clickItem(win.findAllNames("toolResult", win.listingBox()).find(l => l.text === "13 lines"), "the read's line") } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
             const box = win.listingBox()
-            const code = win.findAllNames("codeLine", box).map(l => l.modelData)
+            const code = win.findAllNames("codeView", box).reduce((all, v) => all.concat(v.lines), [])
             const qml = code.filter(l => /Item|QtQuick/.test(l.h))
-            win.check(code.length === 34 && qml.length >= 2 && qml[0].h.indexOf("<span") >= 0, "the read, opened: its 13 lines numbered, QML highlighted (" + code.length + ")")
+            win.check(code.length === 40 && qml.length >= 2 && qml[0].h.indexOf("<span") >= 0, "the read, opened: its 13 lines numbered, QML highlighted (" + code.length + ")")
             win.listingAt("qml/Badge.qml")
             win.shotWindow("listings-read-open")
+            Workspace.chooseLook("wrap", "true") } }
+        // Word wrap on: a long line takes two rows, the next line's number
+        // where that line starts.
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const sed = win.findAllNames("codeView", win.listingBox()).find(v => v.lines.length && v.lines[0].n === "38")
+            const one = sed.lineHeight(0), long = sed.lineHeight(4)
+            win.check(Theme.wrapCode && long > one * 1.5 && Math.abs(sed.lineTop(5) - (sed.lineTop(4) + long)) < 1, "wrapped: the long line takes " + Math.round(long / one) + " rows, 43 below it (" + [one, long, sed.lineTop(4), sed.lineTop(5)] + ")")
+            win.listingAt("Look at how")
+            win.shotWindow("listings-wrap")
+            Workspace.chooseLook("wrap", "null")
             Workspace.chooseThemeMode("light") } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: { win.listingAt("cat -n"); win.shotWindow("listings-catn-read-light") } }
@@ -3805,8 +3822,10 @@ ApplicationWindow {
         const box = listingBox(), f = win.findName("runBoxScroll", box)
         const w = win.findAllNames("toolWhat", box).find(l => l.plain.indexOf(what) >= 0)
         if (!w) { win.check(false, "find the card " + what); return }
+        // (As a hand would: the session stops following its end, and the
+        // box stays where it's put instead of going back to its end.)
+        chat.transcript.follow = false
         win.scrollIntoView(f)
-        // (As a hand would: it stays where it's put, not pinned to its end.)
         f.pinned = false
         f.contentY = Math.max(0, Math.min(f.contentHeight - f.height, w.mapToItem(f.contentItem, 0, 0).y - (below || 8)))
     }
