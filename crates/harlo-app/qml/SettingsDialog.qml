@@ -98,7 +98,7 @@ Popup {
         if (t.length <= 110) return [t, ""]
         for (let i = 20; i < t.length - 2; i++) {
             const c = t[i]
-            if ((c === "." || c === "?" || c === "!" || c === ")") && t[i + 1] === " " && /[A-Z(]/.test(t[i + 2])) {
+            if ((c === "." || c === "?" || c === "!" || c === ")") && t[i + 1] === " " && (/[A-Z(]/.test(t[i + 2]) || t.startsWith("harlo", i + 2))) {
                 if (c === ")" && t[i - 1] !== ".") continue
                 if (/(e\.g|i\.e|etc|vs)\.$/.test(t.slice(Math.max(0, i - 4), i + 1))) continue
                 return [t.slice(0, i + 1), t.slice(i + 2)]
@@ -106,18 +106,21 @@ Popup {
         }
         return [t, ""]
     }
-    function escapeHtml(t) { return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") }
+    function escapeHtml(t) { return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>") }
     component MoreText: Label {
         id: moreText
         property string full
         property string more: ""
         property bool open: false
-        readonly property var parts: more !== "" ? [full, more] : root.splitLead(full)
+        // (A short rest is shown whole: a link for a few words costs more
+        // than the words.)
+        readonly property var split: more !== "" ? [full, more] : root.splitLead(full)
+        readonly property var parts: split[1] !== "" && split[1].length < 70 ? [split[0] + " " + split[1], ""] : split
         // (The words as shown, for tests and copying.)
         readonly property string plain: open && parts[1] !== "" ? parts[0] + " " + parts[1] : parts[0]
-        textFormat: Text.StyledText
-        text: root.escapeHtml(plain) + (parts[1] === "" ? "" : "&nbsp;&nbsp;<a href=\"more\">" + (open ? "Less" : "More") + "</a>")
-        linkColor: Theme.primary
+        // More reads as a quiet word (Text, Medium), underlined on hover.
+        textFormat: Text.RichText
+        text: root.escapeHtml(plain) + (parts[1] === "" ? "" : "&nbsp;&nbsp;<a href=\"more\" style=\"color:" + Theme.text + "; text-decoration:" + (hoveredLink !== "" ? "underline" : "none") + "; font-weight:500\">" + (open ? "Less" : "More") + "</a>")
         wrapMode: Text.Wrap
         onLinkActivated: open = !open
         HoverHandler { cursorShape: moreText.hoveredLink !== "" ? Qt.PointingHandCursor : Qt.ArrowCursor }
@@ -510,7 +513,6 @@ Popup {
                 id: usageColumn
                 spacing: 0
                 PageTitle { }
-                SectionHeader { subtitle: "Your plans' limits, and totals across all Harlo and Claude sessions." }
                 // Other machines: those connected, or whose limits were seen.
                 readonly property var limitHosts: {
                     const seen = (() => { try { return JSON.parse(Workspace.hostLimitsJson || "{}") } catch (e) { return {} } })()
@@ -519,7 +521,6 @@ Popup {
                 }
                 PlanLimits {
                     Layout.fillWidth: true
-                    Layout.topMargin: 14
                     Layout.bottomMargin: 8
                     title: usageColumn.limitHosts.length > 0 ? "Plan limits on this PC" : "Plan limits"
                 }
@@ -925,7 +926,8 @@ Popup {
                         objectName: "theme-" + modelData.name
                         readonly property bool current: Workspace.themeFamily === modelData.name
                         Layout.fillWidth: true
-                        implicitHeight: 118
+                        // (Compact: 31 of them make a long page.)
+                        implicitHeight: 94
                         radius: 12
                         color: themeHover.hovered ? Theme.rowHover : Theme.raised
                         Behavior on color { ColorAnimation { duration: Theme.hoverMotion } }
@@ -935,8 +937,8 @@ Popup {
                         TapHandler { onTapped: Workspace.chooseTheme(themeCard.modelData.name) }
                         Row {
                             anchors.horizontalCenter: parent.horizontalCenter
-                            y: 14
-                            spacing: 14
+                            y: 11
+                            spacing: 12
                             Repeater {
                                 model: ["light", "dark"]
                                 Item {
@@ -944,8 +946,8 @@ Popup {
                                     readonly property var cols: themeCard.modelData[modelData]
                                     // The variant showing now: ringed.
                                     readonly property bool showing: themeCard.current && Theme.variant === modelData
-                                    width: 56
-                                    height: 56
+                                    width: 46
+                                    height: 46
                                     visible: cols[0] !== ""
                                     Rectangle {
                                         visible: parent.showing
@@ -955,13 +957,13 @@ Popup {
                                         border.color: Theme.accent
                                         border.width: 2
                                     }
-                                    ThemeOrb { anchors.centerIn: parent; width: 46; height: 46; colors: parent.cols }
+                                    ThemeOrb { anchors.centerIn: parent; width: 38; height: 38; colors: parent.cols }
                                 }
                             }
                         }
                         Label {
                             x: 14
-                            y: parent.height - height - 12
+                            y: parent.height - height - 10
                             width: parent.width - 28
                             text: themeCard.modelData.name
                             color: themeCard.current ? Theme.text : Theme.textMuted
@@ -2166,13 +2168,16 @@ Popup {
                 // (Also the left rail's phone button, once a phone is paired.)
                 SettingRow {
                     title: "Send notifications"
-                    detail: Phone.paused ? "Paused: nothing goes to your phones (the pairing stays). A test notification still does."
-                                         : "Pause them while you work at the computer: click the phone button in the left rail, or here."
+                    // (Nothing goes with phone access off: as the relay's rows.)
+                    detail: !Phone.enabled ? "Turn on phone access first."
+                          : Phone.paused ? "Paused: nothing goes to your phones (the pairing stays). A test notification still does."
+                          : "Pause them while you work at the computer: click the phone button in the left rail, or here."
                     icon: "smartphone"
                     AppSwitch {
                         objectName: "pushPausedSwitch"
-                        checked: !Phone.paused
-                        onToggled: { Phone.setNotificationsPaused(!checked); checked = Qt.binding(() => !Phone.paused) }
+                        enabled: Phone.enabled
+                        checked: Phone.enabled && !Phone.paused
+                        onToggled: { Phone.setNotificationsPaused(!checked); checked = Qt.binding(() => Phone.enabled && !Phone.paused) }
                     }
                 }
                 SettingRow {
@@ -2181,6 +2186,7 @@ Popup {
                     detail: Phone.pushNote === "sending" ? "Sending…"
                           : Phone.pushNote !== "" ? Phone.pushNote
                           : pushGroup.cfg.error ? "The last one didn't go: " + pushGroup.cfg.error
+                          : !Phone.enabled ? "Turn on phone access first."
                           : "Sends one through " + Phone.relayAddress + " to every phone that allowed notifications in the harlo app."
                     detailColor: Phone.pushNote.startsWith("Sent") ? Theme.success
                                : (Phone.pushNote !== "" && Phone.pushNote !== "sending") || (Phone.pushNote === "" && pushGroup.cfg.error) ? Theme.error : Theme.muted
@@ -4128,6 +4134,8 @@ Popup {
                             required property var modelData
                             required property int index
                             readonly property bool expanded: providerList.open === modelData.id
+                            // (Signed out: Sign in on the row itself.)
+                            readonly property bool signedOut: modelData.enabled && modelData.state === "error" && String(modelData.error || "").startsWith("Not signed in")
                             readonly property string configured: Workspace.providersRevision >= 0 ? Workspace.setting(modelData.id + "_path") : ""
                             objectName: "provider-" + modelData.id
                             Layout.fillWidth: true
@@ -4170,6 +4178,15 @@ Popup {
                                             : prov.modelData.state === "missing" ? "Not installed"
                                             : prov.modelData.state === "error" ? (String(prov.modelData.error || "").trim().split("\n")[0] || "Didn't start")
                                             : "Available · " + prov.modelData.modelCount + (prov.modelData.modelCount === 1 ? " model" : " models")
+                                    }
+                                    FlatButton {
+                                        objectName: "rowSignIn-" + prov.modelData.id
+                                        visible: prov.signedOut
+                                        text: "Sign in…"
+                                        font.pixelSize: Theme.px(12.5)
+                                        padding: 4
+                                        horizontalPadding: 10
+                                        onClicked: { providerList.open = prov.modelData.id; root.signInRequested(prov.modelData.id, prov.modelData.label) }
                                     }
                                     AppSwitch {
                                         objectName: "providerSwitch-" + prov.modelData.id

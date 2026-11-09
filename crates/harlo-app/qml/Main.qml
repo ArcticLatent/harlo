@@ -3416,6 +3416,15 @@ ApplicationWindow {
     // page from its top, then a screen further down while there's more, then
     // a few in the light theme.
     property var setQueue: []
+    function findMoreText(root) {
+        for (const c of root.children) {
+            if (!c.visible) continue
+            if (c.plain !== undefined && c.parts !== undefined && c.parts[1] !== "" && shown(c)) return c
+            const f = findMoreText(c)
+            if (f) return f
+        }
+        return null
+    }
     function setShotPage(id, part) {
         const f = win.findName("settingsPage", settingsDialog.contentItem)
         win.shotWindow("set-" + id + (part > 0 ? "-" + (part + 1) : ""))
@@ -3480,6 +3489,17 @@ ApplicationWindow {
             q.push(() => {
                 const st = win.findName("providerStatus-harlo", settingsDialog.contentItem)
                 win.check(st && st.text !== "Error" && st.text !== "", "Providers says why Harlo isn't ready (" + (st ? st.text : "") + ")")
+                win.check(win.findName("rowSignIn-harlo", settingsDialog.contentItem) !== null, "and offers Sign in on its row")
+                // More shows the rest of a row's words, Less hides it again.
+                const m = win.findMoreText(settingsDialog.contentItem)
+                win.check(m !== null, "a row has More")
+                if (m) {
+                    const before = m.plain.length
+                    m.linkActivated("more")
+                    win.check(m.open && m.plain.length > before && m.text.indexOf(">Less<") > 0, "More shows the rest")
+                    m.linkActivated("more")
+                    win.check(!m.open && m.plain.length === before, "Less hides it")
+                }
                 settingsDialog.openPage("general")
             })
             q.push(() => win.check(win.findName("defaultModelSignIn", settingsDialog.contentItem) !== null, "General's Model row says where to sign in"))

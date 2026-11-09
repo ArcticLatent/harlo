@@ -37,17 +37,20 @@ ColumnLayout {
     RowLayout {
         Layout.fillWidth: true
         spacing: 8
-        Label { text: root.title; color: Theme.foreground; font.bold: true; font.pixelSize: Theme.px(14) }
+        // (A section of Settings → Usage: its heading, Refresh at its right.)
+        Label { text: root.title; color: Theme.text; font.pixelSize: Theme.px(16); font.weight: Font.DemiBold; font.letterSpacing: -0.1 }
         Label {
             Layout.fillWidth: true
             text: root.report.loading ? "checking…" : root.updated(root.report.updatedAt)
-            color: Theme.muted
-            font.pixelSize: Theme.px(12)
+            color: Theme.textMuted
+            font.pixelSize: Theme.px(12.5)
             elide: Text.ElideRight
         }
         FlatButton {
             text: "Refresh"
-            font.pixelSize: Theme.px(12)
+            font.pixelSize: Theme.px(12.5)
+            padding: 4
+            horizontalPadding: 10
             enabled: !root.report.loading
             onClicked: root.host === "" ? Workspace.refreshQuota() : Workspace.refreshHostQuota(root.host)
         }
@@ -60,15 +63,27 @@ ColumnLayout {
         font.pixelSize: Theme.px(12)
         wrapMode: Text.Wrap
     }
-    Label {
+    // (None yet: said inside a card, as Settings' empty sections.)
+    Rectangle {
         Layout.fillWidth: true
+        Layout.topMargin: 4
         visible: root.accounts.length === 0 && !root.report.error && !root.report.loading
-        text: root.host === ""
-            ? "No limits to show. They come from Claude Code (signed in with a Claude plan) and from Harlo (signed in with a ChatGPT plan)."
-            : "No limits from " + root.host + " yet. They come from its own Claude Code (signed in with a Claude plan) once it's connected, and from Harlo's sessions there."
-        color: Theme.muted
-        font.pixelSize: Theme.px(12)
-        wrapMode: Text.Wrap
+        implicitHeight: noLimits.implicitHeight + 32
+        radius: 12
+        color: Theme.raised
+        border.color: Theme.hairline
+        Label {
+            id: noLimits
+            x: 16
+            y: 16
+            width: parent.width - 32
+            text: root.host === ""
+                ? "No limits to show. They come from Claude Code (signed in with a Claude plan) and from Harlo (signed in with a ChatGPT plan)."
+                : "No limits from " + root.host + " yet. They come from its own Claude Code (signed in with a Claude plan) once it's connected, and from Harlo's sessions there."
+            color: Theme.textMuted
+            font.pixelSize: Theme.px(12.5)
+            wrapMode: Text.Wrap
+        }
     }
     Repeater {
         model: root.accounts

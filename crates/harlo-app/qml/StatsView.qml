@@ -136,8 +136,17 @@ Rectangle {
                     }
                 }
                 BusyIndicator { running: stats.loading; visible: stats.loading; implicitWidth: 18; implicitHeight: 18; Layout.alignment: Qt.AlignTop }
-                Label { text: stats.updated ? "Updated " + stats.updated : ""; color: Theme.muted; font.pixelSize: Theme.px(12); Layout.alignment: Qt.AlignTop; Layout.topMargin: 7 }
-                FlatButton { text: "↻"; outlined: false; Layout.alignment: Qt.AlignTop; onClicked: root.refresh() }
+                // (Narrow: the time goes to the button's tooltip, so the
+                // periods stay on one line.)
+                Label { visible: body.width >= 560; text: stats.updated ? "Updated " + stats.updated : ""; color: Theme.muted; font.pixelSize: Theme.px(12); Layout.alignment: Qt.AlignTop; Layout.topMargin: 7 }
+                FlatButton {
+                    text: "↻"
+                    outlined: false
+                    Layout.alignment: Qt.AlignTop
+                    onClicked: root.refresh()
+                    ToolTip.visible: hovered && stats.updated !== ""
+                    ToolTip.text: "Updated " + stats.updated
+                }
             }
 
             Label {

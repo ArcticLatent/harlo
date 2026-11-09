@@ -94,11 +94,11 @@ pub fn check(kind: HarnessKind, configured: &str, runtime: &tokio::runtime::Hand
     // one it can't give leaves them).
     if kind == HarnessKind::Claude && claude_signed_out(&program) {
         status.models.clear();
-        status.error = Some("Not signed in. Sign in under Accounts.".to_owned());
+        status.error = Some("Not signed in.".to_owned());
     }
     // harlo-agent signed out: where to sign in.
     if kind == HarnessKind::Harlo && status.error.as_deref().is_some_and(|e| e.contains("Not signed in") || e.contains("sign-in has ended")) {
-        status.error = Some("Not signed in. Sign in under Accounts.".to_owned());
+        status.error = Some("Not signed in.".to_owned());
     }
     status.version = status.version.as_deref().map(version_number);
     status

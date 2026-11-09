@@ -156,7 +156,6 @@ Rectangle {
             FlatButton {
                 visible: !card.forgejo && !card.cliMissing
                 text: card.tokenOpen ? "Hide the token" : "Use a token"
-                outlined: false
                 font.pixelSize: Theme.px(12)
                 onClicked: card.tokenOpen = !card.tokenOpen
             }
