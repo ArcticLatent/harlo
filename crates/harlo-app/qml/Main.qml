@@ -1134,6 +1134,8 @@ ApplicationWindow {
             win.check(Workspace.approvalMode(chat.session.key) === win.approvalNext, "the session starts in that mode (" + Workspace.approvalMode(chat.session.key) + ")")
             win.check(chat.session.requestIsApproval, "the prompt asks for approval")
             win.check(win.findText("Run this command?", chat.transcript) !== null, "the bash row asks 'Run this command?'")
+            win.check(win.findName("sessionStatus", chat).text === "needs you" && Qt.colorEqual(win.findName("sessionStatus", chat).color, Theme.warning), "the header says it needs you, not 'working'")
+            win.check(win.findAllNames("runLive", chat.transcript).filter(d => d.visible).every(d => Qt.colorEqual(d.color, Theme.warning)), "the run's dot is the warning colour while it waits")
             win.check(win.findText("Waiting for your approval", chat.transcript) === null, "the footer doesn't say it again")
             // (The bar only when the row is out of view.)
             win.check(!win.shown(chat.requestDock), "with its row in view, no bar besides")
@@ -3122,6 +3124,10 @@ ApplicationWindow {
             const t = win.chatText(), kids = JSON.parse(Workspace.orchestratedJson(win.orchestrator))
             win.check(kids.length === 1 && kids[0].status === "completed", "the helper finishes (" + (kids[0] ? kids[0].status : "") + ")")
             win.check(t.indexOf("The Claude session") >= 0 && t.indexOf("harlo · ") >= 0 && t.indexOf("Thanks; harlo says") >= 0 && t.indexOf("Hello from fake claude") >= 0, "and its reply comes back to the agent (" + t.slice(-120) + ")")
+            const who = win.findName("subagentWho", chat)
+            win.check(who !== null && who.text.indexOf("Claude Code") === 0 && who.text.indexOf("claude-") < 0, "the helper is named as elsewhere, not by its ids (" + (who ? who.text : "none") + ")")
+            const st = win.findName("subagentStatus", chat)
+            win.check(st === null || !st.visible, "finished needs no word: its faint dot says it")
             win.shotWindow("clicks-orchestrate")
             win.clickItem(win.findName("subagentView", chat.subagentDock), "View") } }
         PauseAnimation { duration: 1200 }
@@ -4532,6 +4538,13 @@ ApplicationWindow {
             const run = win.findText("Thought, edited 1 file, wrote 1 file, ran 1 command", t)
             win.check(run !== null, "the second run's summary")
             win.check(win.findContaining("npm test -- auth", t) !== null && win.findAllNames("runBox", t).length > 0, "a finished run starts open, in its box")
+            const whats = win.findAllNames("toolWhat", t)
+            const npm = whats.find(l => l.plain === "npm test -- auth")
+            let card = npm
+            while (card && card.echoed === undefined) card = card.parent
+            win.check(card && card.echoed && !card.outInWell, "one line of output that the line already says ('48 passed') isn't shown again")
+            const guard = whats.find(l => l.plain === "src/auth/guard.ts")
+            win.check(guard && guard.font.family === Theme.mono && npm.font.family === Theme.mono, "paths and commands in code type")
             win.shotWindow("clicks-runs-open")
             win.clickItem(run, "the summary") } }
         PauseAnimation { duration: 500 }
@@ -5994,10 +6007,17 @@ ApplicationWindow {
             const rows = []
             const walk = it => { if (!it) return; if (it.objectName === "harloMessage" && it.visible) rows.push(it); for (const c of it.children || []) walk(c); if (it.contentItem && it.contentItem !== it) walk(it.contentItem) }
             walk(chat)
-            const msg = rows.find(r => win.findName("harloMessageText", r).text.indexOf("finished and reported") >= 0) || null
+            const msg = rows.find(r => / finished/.test(win.findName("harloMessageText", r).text)) || null
             const text = msg ? win.findName("harloMessageText", msg) : null
             win.check(msg !== null && msg.objectName === "harloMessage" && msg.visible && text.text.indexOf("[harlo]") < 0,
                       "the helper's report shows as harlo's (" + (text ? text.text.slice(0, 120) : "none") + ")")
+            win.check(text !== null && !/live:|report_done|\(local:|session "/.test(text.text), "it says what happened plainly, no session keys or tool names (" + (text ? text.text : "") + ")")
+            const toggle = msg ? win.findName("harloSentToggle", msg) : null
+            win.check(toggle !== null && toggle.visible, "what harlo sent is a click away")
+            if (toggle) toggle.clicked()
+            const sent = msg ? win.findName("harloSent", msg) : null
+            win.check(sent !== null && sent.visible && sent.text.indexOf("finished and reported") >= 0, "a click shows it")
+            if (toggle) toggle.clicked()
             const prompts = JSON.parse(chat.session.userPrompts())
             win.check(prompts.length === 1 && prompts[0].text === "split it please", "the prompt rail has only yours (" + JSON.stringify(prompts) + ")")
             win.check(msg !== null && win.findText("Edit & resend", msg.parent) === null, "no Edit & resend on it")
@@ -6226,6 +6246,9 @@ ApplicationWindow {
         PauseAnimation { duration: 100 }
         ScriptAction { script: {
             win.check(win.findContaining("being reviewed") !== null && win.findName("planOpenReview-1") !== null, "the step shows it's being reviewed, with Open review")
+            const planWhat = win.findAllNames("toolWhat", chat.transcript).find(l => l.plain === "Write helper.txt")
+            win.check(planWhat && planWhat.font.family !== Theme.mono, "a plan's step reads as prose, not code")
+            win.check(win.findText("Plan", chat.transcript) !== null && win.findText("Plan set", chat.transcript) === null, "the plan tool is named 'Plan'")
             win.shotWindow("clicks-review-running") } }
         // The review finds a problem; the helper fixes it; a second review
         // passes and the plan finishes.
@@ -6252,8 +6275,6 @@ ApplicationWindow {
             win.check(stepKid && stepKid.model === "fake/fake-helper" && reviews.every(k => k.model === "fake/fake-coder"), "the step's helper ran on the model chosen for it, its reviews on the run's (" + JSON.stringify(kids.map(k => [k.name, k.model])) + ")")
             win.check(kids.length === 3 && kids.every(k => k.used && k.used.tokens > 0), "each helper shows what it used (" + JSON.stringify(kids.map(k => k.used)) + ")")
             const total = kids.reduce((t, k) => t + k.used.tokens, 0)
-            const used = win.findName("planRunUsed")
-            win.check(used !== null && used.visible && used.text === (total / 1000).toFixed(1) + "k tokens", "the plan card has the run's total (" + (used ? used.text : "none") + ", " + total + ")")
             win.check(win.findContaining("Subagents · all done · " + (total / 1000).toFixed(1) + "k tokens") !== null, "and the Subagents box")
             win.shotWindow("clicks-review-done") } }
         // The project's Team: its helpers' agent, and its reviewer on
@@ -6335,7 +6356,8 @@ ApplicationWindow {
             const step = (p.steps || [])[0] || {}
             win.check(p.run && p.run.paused.indexOf("its review still found problems after a round of fixes") >= 0 && p.run.paused.indexOf("helper.txt:1") >= 0, "problems after a round of fixes pause the run (" + (p.run ? p.run.paused : "no run") + ")")
             win.check(step.status === "pending" && step.summary.indexOf("Not done: its review found problems") === 0, "and the step waits again (" + step.status + ": " + step.summary + ")")
-            win.check(win.findText("Paused") !== null && win.findText("Run again") !== null, "the plan card says Paused, with Run again")
+            win.check(win.findText("· paused") !== null && win.findText("Run again") !== null, "the plan card says paused, with Run again")
+            win.check(win.findName("planPaused").text.indexOf("Paused at step 1.") === 0 && win.findName("planPaused").text.indexOf("helper.txt:1") < 0, "the pause names the step and what to do; the problem is said once, at the step (" + win.findName("planPaused").text + ")")
             const kids = JSON.parse(Workspace.orchestratedJson(win.harloKey))
             const reviews = kids.filter(k => k.review !== null && k.review !== undefined)
             win.check(reviews.length === 2 && reviews.every(k => k.model === "fake/fake-helper") && kids.filter(k => k.step === 1).every(k => k.model === "fake/fake-coder"),

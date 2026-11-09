@@ -30,6 +30,8 @@ Rectangle {
     readonly property bool agentBusy: !!session && (session.status === "busy" || session.status === "starting")
     readonly property var run: plan.run || null
     readonly property bool paused: !!run && (run.paused || "") !== ""
+    // The step a pause is about ("step 2 (…) …"), else 0.
+    readonly property int pausedStep: paused ? Number((/^step (\d+) /.exec(run.paused) || [0, 0])[1]) : 0
     // What the run's helpers (its steps' and their reviews') used, together.
     readonly property string runUsed: !!session && session.key !== "" && Workspace.orchestrationRevision >= 0
         ? Theme.usedLabel(Theme.usedTotal(JSON.parse(Workspace.orchestratedJson(session.key)).filter(h => (h.step !== null && h.step !== undefined) || (h.review !== null && h.review !== undefined)).map(h => h.used || null)))
@@ -50,7 +52,7 @@ Rectangle {
     property int editing: -1
 
     visible: plan.enabled && steps.length > 0
-    implicitHeight: col.implicitHeight + 16
+    implicitHeight: col.implicitHeight + 22
     radius: 10
     color: Theme.elevated
     border.color: Theme.border
@@ -78,54 +80,57 @@ Rectangle {
 
     ColumnLayout {
         id: col
-        x: 12
-        y: 8
-        width: parent.width - 24
-        spacing: 4
+        x: 14
+        y: 11
+        width: parent.width - 28
+        spacing: 6
 
         RowLayout {
             Layout.fillWidth: true
             spacing: 8
-            Icon { name: "list-check-2"; color: Theme.primary; implicitWidth: 15; implicitHeight: 15 }
+            Icon { name: "list-check-2"; color: Theme.textMuted; implicitWidth: 15; implicitHeight: 15 }
             Label {
-                text: "Plan · " + root.finished + "/" + root.steps.length
-                color: Theme.foreground
+                text: "Plan"
+                color: Theme.text
+                font.pixelSize: Theme.px(13.5)
+                font.weight: Font.DemiBold
+            }
+            Label {
+                objectName: "planProgress"
+                text: root.finished + " of " + root.steps.length + " done"
+                color: Theme.textMuted
                 font.pixelSize: Theme.px(12)
-                font.bold: true
+                font.features: { "tnum": 1 }
             }
             Rectangle {
+                visible: root.width >= 480
                 implicitWidth: 60
                 implicitHeight: 4
                 radius: 2
                 color: Theme.subtle
                 Rectangle { width: parent.width * (root.steps.length ? root.finished / root.steps.length : 0); height: parent.height; radius: 2; color: Theme.success }
             }
-            // Running with helpers (or paused, waiting for you).
-            Rectangle {
+            // Running with helpers (or paused, waiting for you); what they
+            // used is in its tooltip.
+            Label {
+                id: runChip
                 objectName: "planRunChip"
                 visible: !!root.run
-                implicitWidth: runChip.implicitWidth + 12
-                implicitHeight: 18
-                radius: 9
-                readonly property color tint: root.paused ? Theme.warning : Theme.primary
-                color: Qt.rgba(tint.r, tint.g, tint.b, 0.15)
-                Label { id: runChip; anchors.centerIn: parent; text: root.paused ? "Paused" : "Running with helpers"; color: parent.tint; font.pixelSize: Theme.px(10.5); font.bold: true }
-            }
-            Label {
-                objectName: "planRunUsed"
-                visible: root.runUsed !== ""
-                text: root.runUsed
-                color: Theme.muted
-                font.pixelSize: Theme.px(11)
-                ToolTip.visible: usedHover.hovered
-                ToolTip.text: "What this plan's helpers and their reviews used, together."
+                text: "· " + (root.paused ? "paused" : root.width >= 480 ? "running with helpers" : "running")
+                color: root.paused ? Theme.warning : Theme.primary
+                font.pixelSize: Theme.px(12)
+                font.weight: Font.Medium
+                ToolTip.visible: runUsedHover.hovered && root.runUsed !== ""
+                ToolTip.text: "This plan's helpers and their reviews used " + root.runUsed + "."
                 ToolTip.delay: 500
-                HoverHandler { id: usedHover }
+                HoverHandler { id: runUsedHover }
+                readonly property string used: root.runUsed
             }
+            // Folded: the step in hand (open, the list shows it).
             Label {
                 Layout.fillWidth: true
                 Layout.minimumWidth: 0
-                text: root.current ? root.current.title : (root.finished === root.steps.length ? "All done" : "")
+                text: root.expanded ? "" : root.current ? root.current.title : (root.finished === root.steps.length ? "All done" : "")
                 color: Theme.muted
                 font.pixelSize: Theme.px(12)
                 elide: Text.ElideRight
@@ -136,9 +141,7 @@ Rectangle {
                 visible: root.planning && !root.run && root.finished < root.steps.length
                 enabled: !root.agentBusy
                 text: "Build"
-                accent: Theme.success
-                padding: 3
-                font.pixelSize: Theme.px(11.5)
+                variant: "primary"
                 onClicked: root.build()
                 ToolTip.visible: hovered
                 ToolTip.text: root.agentBusy ? "Once the agent has finished planning" : "Switch to Build and have the agent work through the plan"
@@ -183,6 +186,7 @@ Rectangle {
                         readonly property bool open: modelData.status === "pending" || modelData.status === "active"
                         // (The session reviewing it, while its review runs.)
                         readonly property string reviewer: root.run && root.run.reviewing ? (root.run.reviewing[String(modelData.id)] || "") : ""
+                        readonly property bool pausedHere: root.pausedStep === index + 1
                         Layout.fillWidth: true
                         spacing: 2
                         HoverHandler { id: stepHover }
@@ -223,7 +227,8 @@ Rectangle {
                                     // (A helper's report can run long: two lines, a click for all.)
                                     property bool full: false
                                     text: stepRow.modelData.summary || stepRow.modelData.detail || ""
-                                    color: Theme.textFaint
+                                    // The step the run stopped at: what went wrong, once, here.
+                                    color: stepRow.pausedHere ? Theme.warning : Theme.textFaint
                                     font.pixelSize: Theme.px(11.5)
                                     wrapMode: Text.Wrap
                                     maximumLineCount: full ? 1000 : 2
@@ -249,16 +254,16 @@ Rectangle {
                                         // (Under review: the review's, below.)
                                         visible: (stepRow.modelData.helper || "") !== "" && stepRow.modelData.status === "active" && stepRow.reviewer === ""
                                         text: "Open"
-                                        padding: 2
-                                        font.pixelSize: Theme.px(11)
+                                        padding: 3
+                                        font.pixelSize: Theme.px(12)
                                         onClicked: Workspace.open(stepRow.modelData.helper)
                                     }
                                     FlatButton {
                                         objectName: "planOpenReview-" + stepRow.modelData.id
                                         visible: stepRow.reviewer !== ""
                                         text: "Open review"
-                                        padding: 2
-                                        font.pixelSize: Theme.px(11)
+                                        padding: 3
+                                        font.pixelSize: Theme.px(12)
                                         onClicked: Workspace.open(stepRow.reviewer)
                                     }
                                 }
@@ -303,8 +308,8 @@ Rectangle {
                                         objectName: "planReview-" + stepRow.modelData.id
                                         visible: (stepRow.modelData.commit || "") !== ""
                                         text: "Review…"
-                                        padding: 2
-                                        font.pixelSize: Theme.px(11)
+                                        padding: 3
+                                        font.pixelSize: Theme.px(12)
                                         onClicked: reviewMenu.popup()
                                         AppMenu {
                                             id: reviewMenu
@@ -323,14 +328,28 @@ Rectangle {
                                     }
                                 }
                             }
-                            // Your edits (on hover; their room is kept, so the text
-                            // doesn't rewrap when they show; on a narrow card the
-                            // step's text has it until then).
-                            Row {
+                            // Your edits, on hover: over the step's right end (they
+                            // take no room, so the text doesn't rewrap and the
+                            // step's own buttons stay at the right edge).
+                            Item {
+                                Layout.preferredWidth: 0
                                 Layout.alignment: Qt.AlignTop
-                                visible: root.width >= 560 || stepHover.hovered
-                                opacity: stepHover.hovered ? 1 : 0
-                                enabled: stepHover.hovered
+                                implicitHeight: 24
+                            Rectangle {
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.topMargin: -2
+                                width: editRow.width + 8
+                                height: editRow.height + 4
+                                radius: 7
+                                color: root.color
+                                border.color: Theme.border
+                                visible: stepHover.hovered
+                                z: 2
+                            Row {
+                                id: editRow
+                                objectName: "planStepEdits"
+                                anchors.centerIn: parent
                                 spacing: 0
                                 StepButton { iconName: "arrow-up-s"; tip: "Move up"; enabled: stepRow.index > 0; onClicked: root.edit({ op: "shift", id: stepRow.modelData.id, by: -1 }) }
                                 StepButton { iconName: "arrow-down-s"; tip: "Move down"; enabled: stepRow.index < root.steps.length - 1; onClicked: root.edit({ op: "shift", id: stepRow.modelData.id, by: 1 }) }
@@ -356,6 +375,8 @@ Rectangle {
                                 }
                                 StepButton { visible: stepRow.modelData.status === "pending"; iconName: "delete-bin"; tip: "Remove it"; onClicked: root.edit({ op: "remove", id: stepRow.modelData.id }) }
                                 StepButton { visible: stepRow.modelData.status === "pending" || stepRow.modelData.status === "active"; iconName: "add"; tip: "Add a step after it"; onClicked: { root.editing = 0; addAfter.value = stepRow.modelData.id; editTitle.text = ""; editDetail.text = "" } }
+                            }
+                            }
                             }
                         }
                     }
@@ -410,9 +431,12 @@ Rectangle {
             Layout.fillWidth: true
             Layout.topMargin: 2
             visible: root.expanded && root.paused
-            text: root.run && root.run.paused ? root.run.paused.charAt(0).toUpperCase() + root.run.paused.slice(1) : ""
-            color: Theme.warning
-            font.pixelSize: Theme.px(11.5)
+            objectName: "planPaused"
+            // About a step: that step says what went wrong; this says what to do.
+            text: root.pausedStep > 0 ? "Paused at step " + root.pausedStep + ". Run it again, or skip or change the step first."
+                : root.run && root.run.paused ? "Paused: " + root.run.paused + "." : ""
+            color: Theme.textMuted
+            font.pixelSize: Theme.px(12)
             wrapMode: Text.Wrap
         }
         RowLayout {
@@ -427,9 +451,7 @@ Rectangle {
                 text: root.paused ? "Run again" : "Run with helpers"
                 // (Not while the agent works through it itself: two at once.)
                 enabled: !root.agentBusy
-                accent: Theme.primary
-                padding: 3
-                font.pixelSize: Theme.px(11.5)
+                variant: "primary"
                 onClicked: {
                     root.helpers = JSON.parse(Workspace.helpersJson(root.session.key))
                     runMenu.popup()
@@ -461,8 +483,6 @@ Rectangle {
                 objectName: "planStopRun"
                 visible: !!root.run
                 text: "Stop the run"
-                padding: 3
-                font.pixelSize: Theme.px(11.5)
                 onClicked: Workspace.stopPlanRun(root.session.key)
                 ToolTip.visible: hovered
                 ToolTip.text: "No more steps start; helpers at work finish theirs."
@@ -471,12 +491,11 @@ Rectangle {
             FlatButton {
                 objectName: "planAddStep"
                 text: "Add a step"
-                padding: 3
-                font.pixelSize: Theme.px(11.5)
                 onClicked: { root.editing = 0; addAfter.value = -1; editTitle.text = ""; editDetail.text = ""; editTitle.forceActiveFocus() }
             }
             Label {
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 text: root.run ? "" : root.agentBusy && root.finished < root.steps.length ? "Run with helpers once the agent stops (or when you stop it)."
                     : "The agent reads your changes before each step."
                 color: Theme.textFaint
@@ -486,9 +505,7 @@ Rectangle {
             FlatButton {
                 text: "Clear"
                 outlined: false
-                accent: Theme.muted
-                padding: 3
-                font.pixelSize: Theme.px(11.5)
+                accent: Theme.textMuted
                 onClicked: root.edit({ op: "clear" })
             }
         }

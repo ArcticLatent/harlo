@@ -228,6 +228,7 @@ QtObject {
         request_approval: "harlo: ask you to approve",
         report_done: "harlo: report back",
         ask_parent: "harlo: ask the session that started it",
+        bring_over: "harlo: bring over a helper's changes",
     })
     // What a harlo tool's call is busy with before its arguments are in: the
     // agent writing them (a briefing can take a minute).

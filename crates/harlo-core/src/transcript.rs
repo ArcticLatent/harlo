@@ -576,6 +576,7 @@ impl Transcript {
                     let mut r = row(format!("{id}:u"), RowKind::Notice);
                     r.title = FROM_HARLO.into();
                     r.text = said.trim().to_owned();
+                    r.label = crate::orchestration::said_plainly(said);
                     r.subtitle = about_session(said);
                     rows.push(Arc::new(r));
                     return rows;
@@ -638,6 +639,10 @@ impl Transcript {
                             }
                             let mut r = row(format!("{id}:{bi}"), RowKind::Thinking);
                             r.text = text.clone();
+                            // Anything after it means the thought is over.
+                            if bi + 1 < blocks.len() {
+                                r.state = "done".to_owned();
+                            }
                             rows.push(Arc::new(r));
                         }
                         Block::Tool { call_id, name, args } => {
@@ -1062,6 +1067,18 @@ mod tests {
     }
 
     #[test]
+    fn a_thought_is_over_once_the_reply_moves_on() {
+        let mut t = Transcript::default();
+        t.apply(&HarnessEvent::MessageStart { id: "a1".into(), message: json!({"role":"assistant","content":[]}) });
+        t.apply(&HarnessEvent::BlockStart { id: "a1".into(), index: 0, kind: BlockKind::Thinking, tool: None });
+        t.apply(&HarnessEvent::BlockDelta { id: "a1".into(), index: 0, kind: BlockKind::Thinking, delta: "Look first.".into() });
+        let thought = |t: &mut Transcript| t.rows().iter().find(|r| r.kind == RowKind::Thinking).unwrap().state.clone();
+        assert_eq!(thought(&mut t), "streaming");
+        t.apply(&HarnessEvent::BlockStart { id: "a1".into(), index: 1, kind: BlockKind::ToolCall, tool: Some(("c1".into(), "bash".into())) });
+        assert_eq!(thought(&mut t), "done");
+    }
+
+    #[test]
     fn finished_tools_stay_finished() {
         let mut t = Transcript::default();
         let call = json!({"type":"toolCall","id":"c1","name":"task","arguments":{}});
@@ -1146,6 +1163,7 @@ mod tests {
         assert_eq!(harlo[0].kind, RowKind::Notice);
         assert!(harlo[0].text.starts_with("The Harlo session \"Helper\" (live:3) finished"), "{}", harlo[0].text);
         assert_eq!(harlo[0].subtitle, "live:3", "the helper to open");
+        assert_eq!(harlo[0].label, "Helper finished: Wrote helper.txt.", "said plainly");
         assert_eq!(harlo[1].subtitle, "", "about no session");
         assert_eq!(harlo[0].section(), "harlo");
         // Yours stay yours; all three are sent messages (turns), in order.

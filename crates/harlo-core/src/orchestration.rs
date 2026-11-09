@@ -373,6 +373,92 @@ fn finished_text(agent: &str, title: &str, key: &str, report: Option<&Report>, r
     }
 }
 
+/// harlo's message to an agent (without its "[harlo] " prefix), as the
+/// user reads it in the chat: what happened, in a line, without the
+/// session keys and tool names the agent needs. The full text stays one
+/// click away. Unknown shapes come back as their first line.
+pub fn said_plainly(said: &str) -> String {
+    let said = said.trim();
+    let first = |t: &str| -> String {
+        let line = t.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default();
+        match line.char_indices().nth(160) {
+            Some((i, _)) => format!("{}…", line[..i].trim_end()),
+            None => line.to_owned(),
+        }
+    };
+    let quoted = |t: &str| -> Option<(String, String)> {
+        // "\"Title\" (key) rest" → (title, rest)
+        let t = t.strip_prefix('"')?;
+        let end = t.find("\" (")?;
+        let rest = &t[end + 3..];
+        let close = rest.find(')')?;
+        Some((t[..end].to_owned(), rest[close + 1..].trim_start().to_owned()))
+    };
+    // A helper's news: "The <agent> session "<title>" (<key>) …".
+    if let Some(rest) = said.strip_prefix("The ").and_then(|r| r.find(" session \"").map(|i| &r[i + 9..])) {
+        if let Some((title, rest)) = quoted(rest) {
+            let after = |p: &str| rest.strip_prefix(p).map(str::trim);
+            if let Some(r) = after("finished and reported: succeeded.") {
+                return format!("{title} finished: {}", first(r));
+            }
+            if let Some(r) = after("finished and reported: FAILED.") {
+                return format!("{title} couldn't finish: {}", first(r));
+            }
+            if let Some(r) = after("finished without reporting (report_done). Its last reply:") {
+                return format!("{title} finished. Its last reply: {}", first(r));
+            }
+            if let Some(r) = after("stopped with an error, without reporting:") {
+                return format!("{title} stopped with an error: {}", first(r));
+            }
+            if after("finished without a reply or a report.").is_some() {
+                return format!("{title} finished without a reply.");
+            }
+            if let Some(r) = after("asks you:") {
+                return format!("{title} asks: {}", first(r));
+            }
+            if let Some(r) = after("is waiting for the user") {
+                let what = first(r.trim_start_matches(':'));
+                return if what.is_empty() { format!("{title} is waiting for you.") } else { format!("{title} is waiting for you: {what}") };
+            }
+        }
+    }
+    if said.starts_with("The user turned down your split") {
+        return "You turned down the split: the agent does the work itself.".into();
+    }
+    if said.starts_with("The user agreed to your split.") {
+        return "You agreed to the split: the helpers are working.".into();
+    }
+    if let Some(r) = said.strip_prefix("The user answered your approval request (\"") {
+        if let Some(end) = r.find("\"): ") {
+            return format!("You answered \"{}\": {}", &r[..end], first(&r[end + 4..]));
+        }
+    }
+    if let Some(r) = said.strip_prefix("The user dismissed your approval request (\"") {
+        if let Some(end) = r.find("\")") {
+            return format!("You dismissed \"{}\".", &r[..end]);
+        }
+    }
+    if let Some(r) = said.strip_prefix("Your helper \"") {
+        if let Some(end) = r.find("\" didn't start") {
+            return format!("{} didn't start: its worktree couldn't be made.", &r[..end]);
+        }
+    }
+    if let Some(r) = said.strip_prefix("Your plan ran with helpers and has finished: ") {
+        return format!("The plan has finished: {}", first(r).split(". Read each step").next().unwrap_or_default());
+    }
+    if said.starts_with("A review of your step found problems.") {
+        let review = said.split_once("The review:").map(|(_, r)| r).unwrap_or_default();
+        return format!("The review found problems: {}", first(review));
+    }
+    if said.starts_with("You're a helper:") {
+        return "Started as a helper, with the task below.".into();
+    }
+    if said.starts_with("You review one step of a plan") {
+        return "Started to review a step of the plan.".into();
+    }
+    first(said)
+}
+
 /// To an agent whose helper (`title`) couldn't start: its worktree on
 /// `branch` couldn't be made.
 pub fn worktree_failed(title: &str, branch: &str, error: &str) -> String {
@@ -730,6 +816,28 @@ mod tests {
         assert_eq!(drift_note("helper/x", "main", 0), "");
         assert!(drift_note("helper/x", "main", 1).contains("main has moved on by 1 commit since"));
         assert!(drift_note("helper/x", "main", 3).contains("by 3 commits"));
+    }
+
+    #[test]
+    fn harlos_messages_read_plainly() {
+        let said = |m: String| said_plainly(m.strip_prefix("[harlo] ").unwrap());
+        let report = Report { succeeded: true, summary: "Wrote helper.txt.\nAnd more.".into(), files: vec![] };
+        assert_eq!(said(finished_message("Harlo", "Helper", "live:3", Some(&report), None, None, None)), "Helper finished: Wrote helper.txt.");
+        let failed = Report { succeeded: false, ..report.clone() };
+        assert_eq!(said(finished_message("Claude", "Fix", "k1", Some(&failed), None, None, None)), "Fix couldn't finish: Wrote helper.txt.");
+        assert_eq!(said(finished_message("Claude", "Helper", "live:2", None, Some("Hello there.\nMore"), None, None)), "Helper finished. Its last reply: Hello there.");
+        assert_eq!(said(finished_message("Claude", "Helper", "live:2", None, None, Some("it crashed"), None)), "Helper stopped with an error: it crashed");
+        assert_eq!(said(finished_message("Claude", "Helper", "live:2", None, None, None, None)), "Helper finished without a reply.");
+        assert_eq!(said(question_message("Harlo", "Helper", "live:2", "Which port?")), "Helper asks: Which port?");
+        assert_eq!(said(waiting_message("Harlo", "Helper", "live:2", "approval to use bash: ls")), "Helper is waiting for you: approval to use bash: ls");
+        assert_eq!(said(proposal_answer(None)), "You turned down the split: the agent does the work itself.");
+        assert_eq!(said(worktree_failed("Helper", "b1", "busy")), "Helper didn't start: its worktree couldn't be made.");
+        assert!(!said(helper_brief("Main", "Do it")).contains("harlo sends"));
+        // Nothing internal left in any of them.
+        for m in [finished_message("Claude", "Helper", "live:2", None, Some("Hi"), None, None), question_message("Harlo", "H", "live:9", "Q")] {
+            let plain = said(m);
+            assert!(!plain.contains("live:") && !plain.contains("report_done"), "{plain}");
+        }
     }
 
     #[test]

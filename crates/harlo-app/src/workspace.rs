@@ -159,6 +159,9 @@ pub mod qobject {
         /// editedByUser }] }` (`enabled`: the plan is on for its project).
         #[qinvokable]
         fn plan_json(self: &Workspace, key: &QString) -> QString;
+        /// A session's title, as the sidebar shows it ("" when unknown).
+        #[qinvokable]
+        fn session_title(self: &Workspace, key: &QString) -> QString;
         /// The specs of a session's repository (`key`: a session, or
         /// `project:<id>`): `{ root, project (its id, -1 outside one),
         /// enabled, specs: [{ path, title, summary }] }`.
@@ -2700,6 +2703,10 @@ impl Workspace {
             "0" => false,
             _ => self.projects.iter().find(|p| p.id == project_id as i64).is_some_and(|p| harlo_core::git::looks_like_repo(&p.path)),
         }
+    }
+
+    pub fn session_title(&self, key: &QString) -> QString {
+        QString::from(self.title_of(&key.to_string()).as_str())
     }
 
     pub fn plan_json(&self, key: &QString) -> QString {

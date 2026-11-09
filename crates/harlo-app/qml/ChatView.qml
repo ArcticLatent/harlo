@@ -366,7 +366,7 @@ Rectangle {
                         font.letterSpacing: -0.2
                         elide: Text.ElideRight
                     }
-                    Row {
+                    RowLayout {
                         Layout.fillWidth: true
                         spacing: 12
                         clip: true
@@ -382,15 +382,22 @@ Rectangle {
                             // A model on one of your servers: the engine it runs on.
                             readonly property string engine: Theme.modelEngine(session.harness, session.modelId)
                             visible: session.modelName !== ""
+                            // (Short of room, it gives way before the status.)
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            Layout.maximumWidth: implicitWidth
+                            elide: Text.ElideRight
                             // (Its thinking level; none said when it's off.)
                             text: Theme.modelLabel(session.modelName) + (engine ? " on " + engine : "") + (session.thinking && session.thinking !== "off" ? " · " + session.thinking : "")
                             color: Theme.textMuted
                             font.pixelSize: Theme.px(13)
                         }
                         Label {
-                            visible: session.status !== "" && session.status !== "idle" && session.status !== "offline"
-                            text: session.status === "busy" ? "working" : session.status
-                            color: Theme.statusColor(session.status)
+                            objectName: "sessionStatus"
+                            // A question or an approval waiting: that's the news, not "working".
+                            visible: session.hasRequest || (session.status !== "" && session.status !== "idle" && session.status !== "offline")
+                            text: session.hasRequest ? "needs you" : session.status === "busy" ? "working" : session.status
+                            color: session.hasRequest ? Theme.warning : Theme.statusColor(session.status)
                             font.pixelSize: Theme.px(13)
                         }
                     }

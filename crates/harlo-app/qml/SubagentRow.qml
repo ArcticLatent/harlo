@@ -11,15 +11,33 @@ Rectangle {
     property ChatSession session
     property var a: ({})
     signal viewRequested(var agent, bool steer)
+    // Finished is the usual end: a faint dot, no colour. Colour is for
+    // what's news (running, failed, waiting for you).
     function statusColor(s) {
-        return s === "running" || s === "pending" ? Theme.primary : s === "completed" ? Theme.success
-             : s === "failed" ? Theme.error : s === "asking" || s === "waiting" ? Theme.warning : Theme.muted
+        return s === "running" || s === "pending" ? Theme.primary : s === "failed" ? Theme.error
+             : s === "asking" || s === "waiting" ? Theme.warning : Theme.textFaint
     }
+    // What it's doing, in words ("Running cargo test").
     function toolLine(a) {
         const p = a.progress || {}
         if (a.status !== "running" || !p.currentTool) return ""
-        const args = p.currentToolIntent || (p.currentToolArgs ? (p.currentToolArgs.command || p.currentToolArgs.path || p.currentToolArgs.pattern || p.currentToolArgs.query || "") : "")
-        return p.currentTool + (args ? ": " + String(args).replace(/\s+/g, " ").slice(0, 80) : "")
+        const args = String(p.currentToolIntent || (p.currentToolArgs ? (p.currentToolArgs.command || p.currentToolArgs.path || p.currentToolArgs.pattern || p.currentToolArgs.query || "") : "")).replace(/\s+/g, " ").slice(0, 80)
+        if (p.currentToolIntent) return args
+        const t = String(p.currentTool).toLowerCase()
+        const verb = /^(bash|shell|exec|run|command)/.test(t) ? "Running" : /^read/.test(t) ? "Reading" : /^(edit|multiedit|patch|apply)/.test(t) ? "Editing"
+                   : /^write/.test(t) ? "Writing" : /^(grep|find|glob|search|ls)/.test(t) ? "Searching" : /^(fetch|web)/.test(t) ? "Looking up" : ""
+        return verb !== "" ? verb + (args ? " " + args : "") : (String(p.currentTool).charAt(0).toUpperCase() + String(p.currentTool).slice(1)) + (args ? ": " + args : "")
+    }
+    // Who it is, as the app names it elsewhere ("Claude Code · Sonnet 5").
+    function agentName(id) { return ({ harlo: "Harlo", claude: "Claude Code", pi: "pi" })[id] || id || "" }
+    function modelName(agent, model) {
+        const p = Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()).find(x => x.id === agent) : null
+        const i = p ? (p.modelIds || []).indexOf(model) : -1
+        if (i >= 0 && p.models[i]) return Theme.modelLabel(p.models[i])
+        // (Not listed: a Claude id reads as its picker names it, "claude-sonnet-5" → "Sonnet 5".)
+        const id = String(model).split("/").pop()
+        const c = /^claude-([a-z]+)-(\d+)(?:-(\d+))?(\[1m\])?$/.exec(id)
+        return c ? c[1].charAt(0).toUpperCase() + c[1].slice(1) + " " + c[2] + (c[3] ? "." + c[3] : "") + (c[4] ? " 1M" : "") : Theme.modelLabel(id)
     }
     readonly property bool live: a.status === "running" || a.status === "pending"
     // A harlo helper waiting for you: what it asks (a tool's approval is
@@ -69,14 +87,13 @@ Rectangle {
                     font.bold: true
                     elide: Text.ElideRight
                 }
-                Rectangle {
-                    implicitWidth: agentLabel.implicitWidth + 10
-                    implicitHeight: 16
-                    radius: 4
-                    color: Theme.subtle
-                    border.color: Theme.border
-                    // (A harlo session: its model too.)
-                    Label { id: agentLabel; anchors.centerIn: parent; text: (agentRow.a.agent || "task") + (agentRow.a.model ? " · " + Theme.modelLabel(String(agentRow.a.model).split("/").pop()) : ""); color: Theme.muted; font.pixelSize: Theme.px(10) }
+                // Who it is (a harlo session: its model too), in plain text.
+                Label {
+                    id: agentLabel
+                    objectName: "subagentWho"
+                    text: agentRow.agentName(agentRow.a.agent || "task") + (agentRow.a.model ? " · " + agentRow.modelName(agentRow.a.agent, agentRow.a.model) : "")
+                    color: Theme.textMuted
+                    font.pixelSize: Theme.px(11.5)
                 }
                 Label {
                     Layout.fillWidth: true
@@ -100,11 +117,13 @@ Rectangle {
                     font.pixelSize: Theme.px(11)
                 }
                 Label {
-                    visible: !agentRow.live
-                    // (A harlo session waiting: on its parent, or on you.)
+                    objectName: "subagentStatus"
+                    // (Finished: the faint dot says it. A harlo session
+                    // waiting: on its parent, or on you.)
+                    visible: !agentRow.live && agentRow.a.status !== "completed"
                     text: agentRow.a.status === "waiting" ? qsTr("needs you") : agentRow.a.status
-                    color: agentRow.statusColor(agentRow.a.status)
-                    font.pixelSize: Theme.px(11)
+                    color: agentRow.a.status === "stopped" ? Theme.textMuted : agentRow.statusColor(agentRow.a.status)
+                    font.pixelSize: Theme.px(11.5)
                 }
             }
             Label {
@@ -113,13 +132,12 @@ Rectangle {
                 visible: text !== ""
                 maximumLineCount: 1
                 text: {
-                    if (agentRow.asks) return "↳ wants " + String(agentRow.asks.text).replace(/\s+/g, " ")
-                    const t = agentRow.toolLine(agentRow.a)
-                    return t !== "" ? "↳ " + t : ""
+                    if (agentRow.asks) return "Waiting for you: " + String(agentRow.asks.text).replace(/\s+/g, " ")
+                    return agentRow.toolLine(agentRow.a)
                 }
-                color: Theme.muted
-                font.family: Theme.mono
-                font.pixelSize: Theme.px(11)
+                objectName: "subagentDoing"
+                color: agentRow.asks ? Theme.warning : Theme.textMuted
+                font.pixelSize: Theme.px(11.5)
                 elide: Text.ElideRight
             }
         }
@@ -138,7 +156,6 @@ Rectangle {
             objectName: "subagentDeny"
             visible: agentRow.approvable
             text: "Deny"
-            accent: Theme.error
             font.pixelSize: Theme.px(11)
             padding: 4
             onClicked: Workspace.answerHelper(agentRow.a.openKey, agentRow.asks.id, "Deny")
@@ -147,7 +164,7 @@ Rectangle {
             objectName: "subagentApprove"
             visible: agentRow.approvable
             text: "Approve"
-            accent: Theme.success
+            variant: "primary"
             font.pixelSize: Theme.px(11)
             padding: 4
             onClicked: Workspace.answerHelper(agentRow.a.openKey, agentRow.asks.id, "Approve")

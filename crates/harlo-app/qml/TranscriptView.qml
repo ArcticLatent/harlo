@@ -148,7 +148,11 @@ Item {
     }
     // A tool's name, the same for every agent: "bash" and "Bash" both
     // "Bash", "web_search" "Web search" (an MCP tool's as Theme says).
+    // The shared plan's tools, by what they do.
+    readonly property var planTools: ({ plan_set: "Plan", plan_read: "Read the plan", plan_start: "Start a step", plan_done: "Finish a step" })
     function toolName(t) {
+        const p = /^(?:mcp__harlo__|harlo_)?(plan_[a-z]+)$/.exec(t || "")
+        if (p && planTools[p[1]]) return planTools[p[1]]
         const l = Theme.toolLabel(t)
         return /^[a-z][a-z_]*$/.test(l) ? (l.charAt(0).toUpperCase() + l.slice(1)).replace(/_/g, " ") : l
     }
@@ -246,8 +250,8 @@ Item {
                 elide: Text.ElideRight
                 font.pixelSize: Theme.px(13)
             }
-            // Still going.
-            Rectangle { visible: runHead.dflt; implicitWidth: 6; implicitHeight: 6; radius: 3; color: Theme.primary }
+            // Still going (waiting for you: the warning colour).
+            Rectangle { objectName: "runLive"; visible: runHead.dflt; implicitWidth: 6; implicitHeight: 6; radius: 3; color: root.session.hasRequest ? Theme.warning : Theme.primary }
         }
         HoverHandler { id: runHover; cursorShape: Qt.PointingHandCursor }
         TapHandler { onTapped: view.toggleRun(runHead.group, runHead.dflt) }
@@ -337,11 +341,19 @@ Item {
         readonly property int tailLines: 3
         readonly property var tail: outInWell && shell && !open ? outLines.slice(-tailLines) : []
         readonly property var tailGutters: root.numbered(tail)
-        readonly property bool outInWell: shell ? outLines.length > 0 && rowState !== "running" : open && text !== "" && !preview
+        // (One line of output that's what the line already says, "48 passed": not again.)
+        readonly property bool echoed: shell && outLines.length === 1 && result !== "" && outLines[0].trim() === result.trim()
+        readonly property bool outInWell: shell ? outLines.length > 0 && rowState !== "running" && !echoed : open && text !== "" && !preview
         readonly property bool failed: rowState === "error" || /^(exit|failed)|failed$/.test(result)
         readonly property int hidden: preview ? lineCount - previewLines : shell ? outLines.length - tailLines : 0
         readonly property bool canOpen: (text !== "" && !shell && !preview) || hidden > 0 || (commandInWell && shownCommand.split("\n").length > 2)
-        readonly property string target: label !== "" ? label : subtitle !== "" || rowState !== "pending" ? root.local(subtitle) : Theme.toolWriting(title)
+        // (harlo's tools about a session: its title, not its key.)
+        readonly property bool aboutSession: /^(mcp__harlo__)?(bring_over|send_message|read_session|stop_session)$/.test(title) && /^[\w-]+:\S+$/.test(subtitle)
+        readonly property string sessionTitle: aboutSession ? Workspace.sessionTitle(subtitle) : ""
+        readonly property string target: label !== "" ? label : sessionTitle !== "" ? sessionTitle : subtitle !== "" || rowState !== "pending" ? root.local(subtitle) : Theme.toolWriting(title)
+        // Code type only for code: a command, a path, a pattern, a link. A
+        // title, a question or a task's description is prose.
+        readonly property bool codeLike: label === "" && sessionTitle === "" && (shell || command !== "" || /^(bash|shell|exec|run_?command|read|edit|multi_?edit|write|apply_?patch|patch|create|ls|find|glob|grep|lsp|web_?fetch|fetch|notebook)/i.test(title) || !/\s/.test(target))
         readonly property bool isPath: label === "" && !shell && /^[^\s]+$/.test(target) && /[\/.]/.test(target)
         readonly property real headHeight: headBox.height
         spacing: 4
@@ -370,8 +382,8 @@ Item {
                     text: card.isPath ? root.pathHtml(card.target) : card.target
                     color: Theme.textMuted
                     elide: Text.ElideRight
-                    font.family: card.label !== "" ? Theme.uiFont : Theme.mono
-                    font.pixelSize: card.label !== "" ? Theme.px(13) : Theme.mpx(12)
+                    font.family: card.codeLike ? Theme.mono : Theme.uiFont
+                    font.pixelSize: card.codeLike ? Theme.mpx(12) : Theme.px(13)
                 }
                 FlatButton {
                     // An edit or a write: its file's diff, in the Changes panel.
@@ -435,7 +447,8 @@ Item {
                 const r = l.slice(7).trim()
                 return r.charAt(0).toUpperCase() + r.slice(1)
             }).join("\n")
-            color: Theme.warning
+            // (The card is already the warning; only "can't be undone" is news.)
+            color: card.destructive ? Theme.error : Theme.textMuted
             font.pixelSize: Theme.px(12)
             wrapMode: Text.Wrap
             textFormat: Text.PlainText
@@ -1513,6 +1526,7 @@ Item {
                     required property string text
                     required property string title
                     required property string subtitle
+                    required property string label
                     // harlo's message to the agent (a helper's report, …): it
                     // opens a turn, as harlo's; `subtitle` is the session
                     // it's about.
@@ -1520,7 +1534,7 @@ Item {
                     // Startup notices can be huge (e.g. a list of every MCP
                     // tool); harlo's show their first lines.
                     readonly property bool long: harlo ? text.split("\n").length > 2 || text.length > 200 : text.length > 240 || text.split("\n").length > 3
-                    readonly property bool open: !long || view.expanded[rowKey] === true
+                    readonly property bool open: harlo ? view.expanded[rowKey] === true : !long || view.expanded[rowKey] === true
                     readonly property real gap: root.gapAbove(harlo ? "harlo" : "notice", ListView.previousSection)
                     AgentHead { replyModel: noticeRow.rowModel; visible: !noticeRow.harlo && root.opensTurn(noticeRow.ListView.previousSection); y: noticeRow.gap - height - 10 }
                     width: view.width
@@ -1590,30 +1604,55 @@ Item {
                             Label { text: "harlo"; color: Theme.text; font.pixelSize: Theme.px(13.5); font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
                             Label { text: "to the agent"; color: Theme.textMuted; font.pixelSize: Theme.px(12.5); anchors.verticalCenter: parent.verticalCenter }
                         }
+                        // What happened, in a line; what harlo told the agent
+                        // (session keys, tool names) a click away.
                         Label {
                             id: harloText
                             objectName: "harloMessageText"
                             width: parent.width
-                            text: (noticeRow.long ? (noticeRow.open ? "▾ " : "▸ ") : "") + noticeRow.text
+                            text: noticeRow.label !== "" ? noticeRow.label : noticeRow.text
                             wrapMode: Text.Wrap
-                            maximumLineCount: noticeRow.open ? 100000 : 2
+                            maximumLineCount: 3
                             elide: Text.ElideRight
-                            font.pixelSize: Theme.px(13)
-                            color: Theme.muted
+                            font.pixelSize: Theme.px(13.5)
+                            color: Theme.text
                             textFormat: Text.PlainText
-                            TapHandler { enabled: noticeRow.long; onTapped: view.toggle(noticeRow.rowKey) }
-                            HoverHandler { enabled: noticeRow.long; cursorShape: Qt.PointingHandCursor }
                         }
-                        FlatButton {
-                            objectName: "openHelper"
-                            visible: noticeRow.subtitle !== ""
-                            text: "Open helper"
-                            padding: 3
-                            font.pixelSize: Theme.px(11.5)
-                            ToolTip.visible: hovered
-                            ToolTip.delay: 400
-                            ToolTip.text: "Show the session this is about (" + noticeRow.subtitle + ")"
-                            onClicked: Workspace.open(noticeRow.subtitle)
+                        Row {
+                            spacing: 6
+                            topPadding: 2
+                            FlatButton {
+                                objectName: "openHelper"
+                                visible: noticeRow.subtitle !== ""
+                                text: "Open helper"
+                                padding: 4
+                                font.pixelSize: Theme.px(12)
+                                ToolTip.visible: hovered
+                                ToolTip.delay: 400
+                                ToolTip.text: "Show the session this is about"
+                                onClicked: Workspace.open(noticeRow.subtitle)
+                            }
+                            FlatButton {
+                                objectName: "harloSentToggle"
+                                visible: noticeRow.label !== "" && noticeRow.label !== noticeRow.text
+                                text: noticeRow.open ? "Hide what harlo sent" : "What harlo sent"
+                                outlined: false
+                                padding: 4
+                                accent: Theme.textMuted
+                                font.pixelSize: Theme.px(12)
+                                onClicked: view.toggle(noticeRow.rowKey)
+                            }
+                        }
+                        Label {
+                            objectName: "harloSent"
+                            visible: noticeRow.open && noticeRow.label !== "" && noticeRow.label !== noticeRow.text
+                            width: parent.width
+                            topPadding: 4
+                            text: noticeRow.text
+                            wrapMode: Text.Wrap
+                            font.pixelSize: Theme.px(12.5)
+                            color: Theme.textMuted
+                            textFormat: Text.PlainText
                         }
                     }
                 }
