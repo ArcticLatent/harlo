@@ -47,6 +47,13 @@ Rectangle {
     property string diskNotice: ""
     // Cursor and scroll to restore after a reload.
     property var restoreView: null
+    // A line to show once its file is open ({path, line}): a listing's line
+    // number, clicked in a session.
+    property var pendingLine: null
+    function showLine(p, line) {
+        root.pendingLine = { path: p, line: line }
+        if (p === root.path && editorLoader.item && editorLoader.item.ready) editorLoader.item.applyLine()
+    }
     Timer {
         interval: 1500
         repeat: true
@@ -335,6 +342,38 @@ Rectangle {
                 ready = true
                 editor.forceActiveFocus()
                 if (view) Qt.callLater(() => { flick.contentX = view.x; flick.contentY = Math.min(view.y, Math.max(0, flick.contentHeight - flick.height)) })
+                applyLine()
+            }
+            // The line asked for: the cursor at its start, a third of the
+            // way down the view.
+            function applyLine() {
+                const want = root.pendingLine
+                if (!want || want.path !== root.path) return
+                root.pendingLine = null
+                const text = editor.text
+                let at = 0
+                for (let n = 1; n < want.line; n++) {
+                    const nl = text.indexOf("\n", at)
+                    if (nl < 0) break
+                    at = nl + 1
+                }
+                // (Placed once the view is laid out: until then it doesn't
+                // follow the cursor.)
+                lineScroll.tries = 0
+                lineScroll.restart()
+                editor.cursorPosition = at
+                editor.forceActiveFocus()
+            }
+            Timer {
+                id: lineScroll
+                property int tries: 0
+                interval: 40
+                onTriggered: {
+                    if (flick.height <= 0 && ++tries < 25) { restart(); return }
+                    flick.contentX = 0
+                    const y = editor.cursorRectangle.y
+                    flick.contentY = Math.max(0, Math.min(y - flick.height / 3, flick.contentHeight - flick.height))
+                }
             }
 
             Loader {
@@ -388,6 +427,7 @@ Rectangle {
 
                 // Keep the cursor in view while typing or moving with the keyboard.
                 function ensureVisible(r) {
+                    if (lineScroll.running) return   // (a line asked for: placed once laid out)
                     if (contentX >= r.x) contentX = r.x
                     else if (contentX + width <= r.x + r.width + 20) contentX = r.x + r.width + 20 - width
                     if (contentY >= r.y) contentY = r.y

@@ -161,7 +161,8 @@ pub fn line_count(output: &str) -> usize {
     n
 }
 
-fn is_read(tool: &str) -> bool {
+/// A tool that reads a file (its output is the file's lines).
+pub fn is_read(tool: &str) -> bool {
     matches!(tool.to_ascii_lowercase().as_str(), "read" | "view" | "read_file" | "readfile" | "cat")
 }
 

@@ -3811,8 +3811,75 @@ ApplicationWindow {
             if (a) win.scrollIntoView(a)
             win.shotWindow("listings-reply-code-light")
             Workspace.chooseThemeMode("dark")
+            // Copy: on hover only, a reply's as a tool's; a tool's in its
+            // call's line, never over its code.
+            TestInput.moveTo(4, 4)
+            const block = win.findAllNames("replyCode", chat.transcript)[0]
+            win.check(block && win.findAllNames("copyCode", block).length === 0, "a reply's Copy: hidden until hovered")
+            if (block) {
+                const p = block.mapToItem(null, block.width / 2, block.height / 2)
+                TestInput.moveTo(p.x, p.y)
+                win.check(win.findAllNames("copyCode", block).length === 1, "…and shown on hover")
+            }
+            TestInput.moveTo(4, 4)
+            win.check(win.findAllNames("copyCode", win.listingBox()).every(c => !c.visible), "a tool's Copy: hidden until hovered")
+            win.listingAt("Look at how")
+            const sedCard = win.findAllNames("toolWhat", win.listingBox()).find(l => l.plain.indexOf("Look at how") >= 0)
+            const at = sedCard.mapToItem(null, sedCard.width / 2, sedCard.height / 2)
+            TestInput.moveTo(at.x, at.y + 30) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const box = win.listingBox()
+            const copy = win.findAllNames("copyCode", box).find(c => c.visible)
+            const head = copy ? (function up(i) { return !i || i.objectName === "toolHead" ? i : up(i.parent) })(copy.parent) : null
+            win.check(copy && head, "hovered: its Copy, in the call's line (" + (copy ? copy.parent : "none") + ")")
+            const sed = win.findAllNames("codeView", box).find(v => v.lines.length && v.lines[0].n === "38")
+            win.check(copy && sed && copy.mapToItem(null, 0, copy.height).y <= sed.mapToItem(null, 0, 0).y, "the Copy sits above the code")
+            win.shotWindow("listings-copy-hover")
+            // The Latest pill: centred, off the column's controls.
+            const latest = win.findName("latestButton", chat.transcript)
+            win.check(latest && Math.abs(latest.x + latest.width / 2 - latest.parent.width / 2) < 2, "Latest: centred (" + (latest ? [latest.x, latest.width, latest.parent.width] : "") + ")")
+            // A line number: opens the file at that line.
+            const n38 = win.findAllNames("codeNumber", sed).find(l => l.text === "38")
+            win.check(n38 && sed.lines[0].p.endsWith("/src/listing.rs"), "sed's numbers: links to src/listing.rs (" + (sed ? sed.lines[0].p : "") + ")")
+            if (n38) win.clickItem(n38, "line 38") } }
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            const ed = chat.fileEditor.editor
+            const line = ed ? ed.text.slice(0, ed.cursorPosition).split("\n").length : -1
+            win.check(chat.filePath.endsWith("/src/listing.rs") && line === 38, "line 38: the file opens at it (" + chat.filePath + ", line " + line + ")")
+            const top = chat.fileEditor.editor.parent.parent.contentY, lh = chat.fileEditor.editor.contentHeight / chat.fileEditor.editor.lineCount
+            win.check(top > 0 && top < 37 * lh - 2 * lh, "…with lines above it in view (" + Math.round(top / lh) + " lines scrolled)")
+            win.shotWindow("listings-open-at-line")
+            Workspace.open(chat.session.key) } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            // The keyboard: a call's line takes focus; Enter opens it.
+            win.listingAt("head -16")
+            const w = win.findAllNames("toolWhat", win.listingBox()).find(l => l.plain.indexOf("head -16") >= 0)
+            const head = (function up(i) { return !i || i.objectName === "toolHead" ? i : up(i.parent) })(w)
+            win.keyHead = head
+            win.check(head && head.activeFocusOnTab, "a call's line: reachable with Tab")
+            if (head) head.forceActiveFocus(Qt.TabFocusReason)
+            TestInput.key(Qt.Key_Return, 0) } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const head = win.keyHead
+            win.check(head && head.activeFocus && head.parent.open, "Enter opens it, its line ringed (" + (head ? [head.activeFocus, head.parent.open] : "") + ")")
+            win.listingAt("head -16")
+            win.shotWindow("listings-keyboard")
+            win.sendByKeys("read five files") } }
+        ScriptAction { script: win.waitUntil(listingSteps, () => win.chatText().indexOf("Read them all") >= 0 && chat.session.status === "idle", 20000) }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const box = win.listingBox()
+            const shown = win.findAllNames("codeView", box).filter(v => v.visible && v.lines.length)
+            win.check(shown.length === 3 && shown[0].lines[0].h.indexOf("c.rs") >= 0, "five reads: the last 3 show their lines (" + shown.map(v => v.lines.length && v.lines[0].h.replace(/<[^>]+>/g, "")) + ")")
+            win.listingAt("a.rs")
+            win.shotWindow("listings-five-reads")
             win.summary(); Qt.quit() } }
     }
+    property var keyHead: null
     function listingBox() {
         const boxes = win.findAllNames("runBox", chat.transcript)
         return boxes[boxes.length - 1]

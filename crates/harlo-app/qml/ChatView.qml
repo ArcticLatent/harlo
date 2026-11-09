@@ -447,6 +447,7 @@ Rectangle {
                 // `root.session`: a bare `session` here would name this property itself.
                 session: root.session
                 onOpenDiff: path => root.openDiff(path)
+                onOpenFileAt: (path, line) => { fileEditor.showLine(path, line); root.requestOpenFile(path) }
                 onEditRequested: row => root.session.editAndResend(row)
                 onUndoRequested: key => undoDialog.show(key)
                 onSubagentRequested: (agent, steer) => subagentDialog.show(agent, steer)

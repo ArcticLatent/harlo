@@ -16,6 +16,8 @@ Item {
     readonly property alias gutter: view.gutter
     /// A file-editing tool row asked to show its diff.
     signal openDiff(string path)
+    // A file at a line (a listing's line number, or a file's name in it).
+    signal openFileAt(string path, int line)
     /// Your message at row `index`: edit and resend it (the session forks there).
     signal editRequested(int index)
     /// Undo the turn of one of your messages (its row key).
@@ -317,6 +319,9 @@ Item {
         // Numbers in their own column; or an edit's +/− (`signs`).
         property bool numbers: true
         property bool signs: false
+        // A line with a path (`p`) opens its file at that line: its number
+        // is a link, and so is a file's name.
+        signal openAt(string path, int line)
         property real fontSize: Theme.mpx(12)
         property bool wrap: Theme.wrapCode
         property real topPad: 0
@@ -373,6 +378,8 @@ Item {
             Label {
                 required property int index
                 readonly property string mark: ct.lines && ct.lines[index] ? ct.lines[index].mark || "" : ""
+                readonly property bool opens: !!(ct.lines && ct.lines[index] && ct.lines[index].p) && /^\d+$/.test(text)
+                objectName: opens ? "codeNumber" : ""
                 x: 0
                 y: ct.topPad + ct.lineTop(index)
                 width: ct.gutterWidth - 14
@@ -380,9 +387,15 @@ Item {
                 verticalAlignment: Text.AlignVCenter
                 horizontalAlignment: Text.AlignRight
                 text: ct.number(index)
-                color: mark === "add" ? Theme.diffAdd : mark === "remove" ? Theme.diffRemove : mark === "match" ? Theme.textMuted : Theme.textFaint
+                color: opens && numberHover.hovered ? Theme.primary : mark === "add" ? Theme.diffAdd : mark === "remove" ? Theme.diffRemove : mark === "match" ? Theme.textMuted : Theme.textFaint
                 font.family: Theme.mono
                 font.pixelSize: ct.fontSize
+                font.underline: opens && numberHover.hovered
+                HoverHandler { id: numberHover; enabled: parent.opens; cursorShape: Qt.PointingHandCursor }
+                TapHandler { enabled: parent.opens; onTapped: ct.openAt(ct.lines[index].p, Number(ct.number(index))) }
+                ToolTip.visible: opens && numberHover.hovered
+                ToolTip.text: "Open at line " + text
+                ToolTip.delay: 600
             }
         }
         // The text; the wheel sideways moves it (up and down goes on to the
@@ -426,6 +439,12 @@ Item {
                     wrapMode: ct.wrap ? TextEdit.WrapAnywhere : TextEdit.NoWrap
                     font.family: Theme.mono
                     font.pixelSize: ct.fontSize
+                    // (A file's name in it: a link to the file.)
+                    onLinkActivated: link => {
+                        const m = /^harlo-open:(\d+):(.*)$/.exec(link)
+                        if (m) ct.openAt(decodeURIComponent(m[2]), Number(m[1]))
+                    }
+                    HoverHandler { cursorShape: edit.hoveredLink !== "" ? Qt.PointingHandCursor : Qt.IBeamCursor }
                     // (Lines move as the text lays out again: their numbers with them.)
                     onContentHeightChanged: Qt.callLater(() => ct.laidOut++)
                     onWidthChanged: Qt.callLater(() => ct.laidOut++)
@@ -489,6 +508,10 @@ Item {
         property string command
         // Waiting for your approval (the row's own).
         property bool asking: false
+        // Reads after it in its run: only a run's last 3 reads show their
+        // lines at once (the rest open on a click).
+        property int readsAfter: 0
+        readonly property bool isRead: /^(read|view|read_?file)$/i.test(title)
         property var askLines: []
         readonly property bool open: view.expanded[rowKey] === true
         readonly property var agents: callId !== "" ? root.subagents.filter(a => a.parentToolCallId === callId) : []
@@ -506,14 +529,19 @@ Item {
         readonly property var codeLines: {
             if (preview)
                 return JSON.parse(root.session.diffLines(subtitle.replace(/…$/, ""), diff, open ? 400 : previewLines))
-                    .map((l, i) => ({ n: newFile ? String(i + 1) : "", h: l.h, mark: newFile ? "" : l.s === "+" ? "add" : l.s === "-" ? "remove" : "" }))
+                    .map((l, i) => ({ n: newFile ? String(i + 1) : "", h: l.h, mark: newFile ? "" : l.s === "+" ? "add" : l.s === "-" ? "remove" : "", p: newFile ? subtitle.replace(/…$/, "") : "" }))
             if (!code) return []
             const out = []
+            let file = code.path
             for (const l of code.lines) {
                 if (l.f !== "") {
+                    file = l.f
                     if (out.length) out.push({ n: "", h: "", mark: "gap" })
-                    out.push({ n: "", h: "<span style=\"color:" + Theme.rgb(Theme.textMuted) + ";\">" + root.local(l.f).replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</span>", mark: "file" })
-                } else out.push({ n: l.n, h: l.h, mark: l.c ? "context" : hasContext ? "match" : "" })
+                    // (Its name: a link to the file, at its first line here.)
+                    const first = code.lines.find((x, i) => i > code.lines.indexOf(l) && x.n !== "")
+                    out.push({ n: "", mark: "file", h: "<a href=\"harlo-open:" + (first ? first.n : 1) + ":" + encodeURIComponent(absolute(l.f)) + "\" style=\"color:"
+                               + Theme.rgb(Theme.textMuted) + "; text-decoration:none;\">" + root.local(l.f).replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</a>" })
+                } else out.push({ n: l.n, h: l.h, mark: l.c ? "context" : hasContext ? "match" : "", p: file !== "" ? absolute(file) : "" })
             }
             return out
         }
@@ -536,7 +564,15 @@ Item {
         // (One line of output that's what the line already says, "48 passed": not again.)
         readonly property bool echoed: shell && outLines.length === 1 && result !== "" && outLines[0].trim() === result.trim()
         readonly property bool outInWell: shell ? outLines.length > 0 && rowState !== "running" && !echoed : open && text !== "" && !preview
-        readonly property bool codeShown: !!code
+        readonly property bool codeShown: !!code && (!isRead || readsAfter < 3 || open)
+        // A path a listing names, as a file to open: from the command's
+        // folder (`cd dir && …`), else the session's.
+        function absolute(p) {
+            if (p === "" || p.startsWith("/")) return p
+            const cd = /^cd\s+("?)([^"&;]+?)\1\s*&&/.exec(command)
+            const dir = cd ? (cd[2].startsWith("/") ? cd[2] : root.here + "/" + cd[2]) : root.here
+            return dir.replace(/\/$/, "") + "/" + p.replace(/^\.\//, "")
+        }
         readonly property bool failed: rowState === "error" || /^(exit|failed)|failed$/.test(result)
         readonly property int hidden: preview ? lineCount - previewLines : code ? code.total - previewLines : shell ? outLines.length - tailLines : 0
         readonly property bool canOpen: (text !== "" && !shell && !preview) || hidden > 0 || (commandInWell && shownCommand.split("\n").length > 2)
@@ -550,12 +586,23 @@ Item {
         readonly property bool isPath: label === "" && !shell && /^[^\s]+$/.test(target) && /[\/.]/.test(target)
         readonly property real headHeight: headBox.height
         spacing: 4
+        HoverHandler { id: cardHover }
         Item {
             id: headBox
             objectName: "toolHead"
             Layout.fillWidth: true
             implicitHeight: head.implicitHeight + 6
-            Rectangle { x: -6; width: parent.width + 12; height: parent.height; radius: 6; color: headHover.hovered && card.canOpen ? Theme.hover : "transparent" }
+            // The keyboard: Tab to a call, Enter or Space opens it.
+            activeFocusOnTab: card.canOpen
+            Keys.onPressed: e => {
+                if (card.canOpen && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter || e.key === Qt.Key_Space)) { view.toggle(card.rowKey); e.accepted = true }
+            }
+            Rectangle {
+                x: -6; width: parent.width + 12; height: parent.height; radius: 6
+                color: headHover.hovered && card.canOpen ? Theme.hover : "transparent"
+                border.width: headBox.activeFocus ? 1 : 0
+                border.color: Theme.accent
+            }
             RowLayout {
                 id: head
                 anchors.verticalCenter: parent.verticalCenter
@@ -587,6 +634,14 @@ Item {
                     outlined: false
                     accent: Theme.info
                     onClicked: root.openDiff(card.subtitle.replace(/…$/, ""))
+                }
+                // Copy: all of the listing (not just the lines shown), a
+                // write's file, an edit's new lines; on hover (or the keyboard).
+                CopyButton {
+                    id: callCopy
+                    visible: (!!card.code || card.preview) && (cardHover.hovered || copied || activeFocus || headBox.activeFocus)
+                    copyFrom: () => card.code ? root.session.codeText(card.title, card.command, card.subtitle.replace(/…$/, ""), card.text)
+                                              : card.diff.split("\n").filter(l => !l.startsWith("-")).map(l => l.slice(1)).join("\n")
                 }
                 Label {
                     objectName: "toolResult"
@@ -720,7 +775,6 @@ Item {
             // line (under a command, if any) to the well's bottom.
             readonly property bool gutter: (card.preview && card.newFile) || (card.codeShown && card.code.lines.some(l => l.n !== ""))
             readonly property bool hasCode: card.preview || card.codeShown
-            HoverHandler { id: wellHover }
             Rectangle {
                 visible: parent.gutter
                 // (Under the command's rule: the column is the code's, not the command's.)
@@ -746,8 +800,7 @@ Item {
                         objectName: "toolCommand"
                         visible: card.commandInWell
                         x: 10
-                        // (Room at its end for Copy.)
-                        width: wellCol.width - 20 - (toolWellBox.hasCode ? 44 : 0)
+                        width: wellCol.width - 20
                         text: "<font color='" + Theme.rgb(Theme.textFaint) + "'>$</font> " + card.shownCommand.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\n/g, "<br>")
                         textFormat: Text.StyledText
                         color: Theme.foreground
@@ -774,6 +827,7 @@ Item {
                         lines: visible ? card.codeLines : []
                         numbers: toolWellBox.gutter
                         signs: card.preview && !card.newFile
+                        onOpenAt: (p, line) => root.openFileAt(p, line)
                     }
                     // A command's last lines (each one shortened to the well), or
                     // all of a call's output, opened.
@@ -823,23 +877,6 @@ Item {
                     }
                 }
             }
-            // Copy: all of the listing (not just the lines shown), a write's
-            // file, an edit's new lines.
-            Rectangle {
-                visible: toolWellBox.hasCode && (wellHover.hovered || wellCopy.copied)
-                x: parent.width - width - 4
-                y: 3
-                width: wellCopy.implicitWidth + 4
-                height: wellCopy.implicitHeight + 2
-                radius: 4
-                color: Theme.codeBg
-                CopyButton {
-                    id: wellCopy
-                    anchors.centerIn: parent
-                    copyFrom: () => card.code ? root.session.codeText(card.title, card.command, card.subtitle.replace(/…$/, ""), card.text)
-                                              : card.diff.split("\n").filter(l => !l.startsWith("-")).map(l => l.slice(1)).join("\n")
-                }
-            }
         }
     }
     // A finished run, open: its summary line, then its thoughts and calls
@@ -870,7 +907,8 @@ Item {
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {
                 id: boxBar
-                policy: boxFlick.contentHeight > boxFlick.height ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
+                // (Shown while it's used or hovered: the prompt rail is beside it.)
+                policy: boxFlick.contentHeight > boxFlick.height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
                 onPressedChanged: boxFlick.pinned = !pressed && boxFlick.atEnd()
             }
             // At its end until scrolled by hand, and again once scrolled back
@@ -921,6 +959,7 @@ Item {
                                 took: cell.modelData.took
                                 label: cell.modelData.label
                                 command: cell.modelData.command
+                                readsAfter: (view.count, root.session.readsAfter(box.group, cell.modelData.rowKey))
                             }
                         }
                     }
@@ -1445,6 +1484,7 @@ Item {
                         y: codeRow.gap
                         width: view.columnWidth
                         objectName: "replyCode"
+                        HoverHandler { id: blockHover }
                         height: codeRule.y + 1 + (codeRow.drawn ? diagramBox.height : blockCode.height) + (diagramNote.visible ? diagramNote.height : 0)
                         // (The same well as a tool's code: its header, a rule, the
                         // numbers on their own column.)
@@ -1473,6 +1513,8 @@ Item {
                             CopyButton {
                                 Layout.rightMargin: 6
                                 Layout.preferredHeight: 22
+                                // (On hover, as a tool's: the language stays.)
+                                opacity: blockHover.hovered || copied || activeFocus ? 1 : 0
                                 copyText: codeRow.text
                             }
                         }
@@ -1710,6 +1752,7 @@ Item {
                             command: toolRow.command
                             asking: toolRow.asking
                             askLines: toolRow.askLines
+                            readsAfter: (view.count, root.session.readsAfter(toolRow.group, toolRow.rowKey))
                         }
                     }
                 }
@@ -1861,7 +1904,8 @@ Item {
         }
 
         FlatButton {
-            anchors.right: parent.right
+            // (Centred: the column's right edge has its controls, Copy among them.)
+            anchors.horizontalCenter: parent.horizontalCenter
             anchors.bottom: parent.bottom
             anchors.margins: 16
             objectName: "latestButton"

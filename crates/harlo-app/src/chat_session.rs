@@ -133,6 +133,10 @@ pub mod qobject {
         /// the first `limit` lines; "" when it isn't.
         #[qinvokable]
         fn code_view(self: &ChatSession, tool: &QString, command: &QString, path: &QString, output: &QString, limit: i32) -> QString;
+        /// How many reads come after this call in its run (a run's last
+        /// few reads show their lines at once).
+        #[qinvokable]
+        fn reads_after(self: &ChatSession, group: &QString, row_key: &QString) -> i32;
         /// A call's listing as plain text, all of it (to copy), or "".
         #[qinvokable]
         fn code_text(self: &ChatSession, tool: &QString, command: &QString, path: &QString, output: &QString) -> QString;
@@ -954,6 +958,16 @@ impl ChatSession {
             }
             None => QString::default(),
         }
+    }
+
+    pub fn reads_after(&self, group: &QString, row_key: &QString) -> i32 {
+        let (group, key) = (group.to_string(), row_key.to_string());
+        if group.is_empty() {
+            return 0;
+        }
+        let run: Vec<_> = self.rows.iter().filter(|r| r.group == group).collect();
+        let Some(at) = run.iter().position(|r| r.key == key) else { return 0 };
+        run[at + 1..].iter().filter(|r| r.kind == RowKind::Tool && harlo_core::listing::is_read(&r.title)).count() as i32
     }
 
     pub fn code_text(&self, tool: &QString, command: &QString, path: &QString, output: &QString) -> QString {
