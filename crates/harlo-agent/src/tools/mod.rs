@@ -352,9 +352,33 @@ impl Tools {
         let s = |k: &str| args[k].as_str().unwrap_or_default();
         match name {
             "read" => self.read(s("path"), args["offset"].as_u64(), args["limit"].as_u64()),
-            "write" => self.write(s("path"), s("content")),
-            "edit" => self.edit(s("path"), &args["edits"]),
-            "apply_patch" => self.patch(s("input")),
+            "write" | "edit" | "apply_patch" => {
+                let mut out = match name {
+                    "write" => self.write(s("path"), s("content")),
+                    "edit" => self.edit(s("path"), &args["edits"]),
+                    _ => self.patch(s("input")),
+                };
+                if !out.failed && crate::lsp::diagnostics_on() {
+                    let changed: Vec<PathBuf> = match name {
+                        "apply_patch" => crate::patch::parse(s("input"))
+                            .unwrap_or_default()
+                            .iter()
+                            .filter_map(|op| match op {
+                                crate::patch::Op::Add { path, .. } => Some(path),
+                                crate::patch::Op::Update { move_to: Some(to), .. } => Some(to),
+                                crate::patch::Op::Update { path, .. } => Some(path),
+                                crate::patch::Op::Delete { .. } => None,
+                            })
+                            .map(|p| self.path(p))
+                            .collect(),
+                        _ => vec![self.path(s("path"))],
+                    };
+                    if let Some(errors) = self.lsp.errors_after(&changed, &self.cwd, self.sandbox.as_deref()).await {
+                        out.text = format!("{}\n\n{errors}", out.text);
+                    }
+                }
+                out
+            }
             "bash" => {
                 let sandbox = self.sandbox.as_deref();
                 if let Some(why) = sandbox.and_then(|sb| sb.broken.as_ref()) {

@@ -266,6 +266,32 @@ pub fn spec() -> Value {
     })
 }
 
+/// How long an edit waits for the server's word on it (starting the
+/// server and its first reading of the project included); past it, the
+/// edit's result says nothing of errors.
+const DIAG_WAIT: Duration = Duration::from_secs(15);
+/// Errors shown after an edit, at most.
+const DIAG_SHOWN: usize = 10;
+const DIAG_CHARS: usize = 200;
+/// After an edited file's word: how long the server must be quiet before
+/// other files' errors are read, waited at most.
+const DIAG_QUIET: Duration = Duration::from_millis(250);
+const DIAG_GRACE: Duration = Duration::from_secs(2);
+/// How long an edited file's word is waited for from a server that only
+/// publishes diagnostics, once it has read the project.
+const DIAG_PUSH_WAIT: Duration = Duration::from_secs(3);
+/// Other files sent before whose errors are asked for after an edit, at
+/// most.
+const DIAG_OTHERS: usize = 40;
+
+/// Whether an edit's result says what errors the language server now sees
+/// in the files it changed (`HARLO_AGENT_DIAGNOSTICS=on|off`; never with
+/// `HARLO_AGENT_LSP=off`).
+pub fn diagnostics_on() -> bool {
+    let env = |k: &str| std::env::var(k).map(|v| v.trim().to_owned()).unwrap_or_default();
+    env("HARLO_AGENT_LSP") != "off" && env("HARLO_AGENT_DIAGNOSTICS") == "on"
+}
+
 /// The servers this session started, by language and root.
 #[derive(Default)]
 pub struct Servers {
@@ -317,6 +343,54 @@ impl Servers {
                 fail(e)
             }
         }
+    }
+
+    /// The errors the language servers see after an edit of `paths`: in
+    /// those files, and in other files sent to a server before whose errors
+    /// changed since last told. None: none, no server for them, or no word
+    /// in time.
+    pub async fn errors_after(&self, paths: &[PathBuf], cwd: &Path, sandbox: Option<&Sandbox>) -> Option<String> {
+        if sandbox.is_some_and(|sb| sb.broken.is_some()) {
+            return None;
+        }
+        let deadline = Instant::now() + DIAG_WAIT;
+        let mut groups: Vec<((usize, PathBuf), Vec<(PathBuf, &'static str)>)> = Vec::new();
+        for p in paths {
+            let Some((li, language)) = lang_of(p) else { continue };
+            if installed(li).is_none() || !p.is_file() {
+                continue;
+            }
+            let key = (li, root_of(p, cwd, LANGS[li].markers));
+            match groups.iter_mut().find(|(k, _)| *k == key) {
+                Some((_, files)) => files.push((p.clone(), language)),
+                None => groups.push((key, vec![(p.clone(), language)])),
+            }
+        }
+        let mut parts = Vec::new();
+        let mut shown = 0;
+        for ((li, root), files) in groups {
+            let Some(command) = installed(li) else { continue };
+            let Ok(server) = self.server(li, &root, command, sandbox).await else { continue };
+            match server.errors_after(&files, cwd, deadline).await {
+                Ok(rows) if !rows.is_empty() => {
+                    let n = rows.len();
+                    let room = DIAG_SHOWN.saturating_sub(shown);
+                    let mut text = format!("{} sees {n} error{} now:\n{}", server.name, if n == 1 { "" } else { "s" }, rows[..n.min(room)].join("\n"));
+                    if n > room {
+                        text.push_str(&format!("\n[{} more not shown]", n - room));
+                    }
+                    shown += n.min(room);
+                    parts.push(text);
+                }
+                Ok(_) => {}
+                Err(_) => {
+                    if server.exited() {
+                        self.running.lock().unwrap().remove(&(li, root));
+                    }
+                }
+            }
+        }
+        (!parts.is_empty()).then(|| parts.join("\n\n"))
     }
 
     /// The server for a language and root: running, or started.
@@ -410,6 +484,16 @@ struct Busy {
 
 type Pending = Arc<StdMutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>;
 
+/// What the server last said is wrong in a file.
+struct Published {
+    /// The document's version they're for (None: the server didn't say).
+    version: Option<i64>,
+    at: Instant,
+    items: Vec<Value>,
+}
+
+type Diags = Arc<StdMutex<HashMap<PathBuf, Published>>>;
+
 pub struct Server {
     name: String,
     stdin: Arc<Mutex<ChildStdin>>,
@@ -425,6 +509,11 @@ pub struct Server {
     stderr: Arc<StdMutex<String>>,
     /// rust-analyzer says when it's done; others are watched for progress.
     says_when_done: bool,
+    /// Its diagnostics by file, and a count that goes up with each.
+    diags: Diags,
+    published: watch::Receiver<u64>,
+    /// The errors last told for each file.
+    told: StdMutex<HashMap<PathBuf, Vec<String>>>,
 }
 
 impl Drop for Server {
@@ -444,23 +533,27 @@ async fn send(stdin: &Mutex<ChildStdin>, message: &Value) -> Result<(), String> 
     w.flush().await.map_err(|e| format!("the server stopped ({e})"))
 }
 
-/// The settings a server asks for (rust-analyzer: nothing that runs the
-/// project's code, files watched by the server itself).
-fn settings(name: &str) -> Value {
-    match name {
+/// The settings a server asks for, by section (rust-analyzer: nothing
+/// that runs the project's code, files watched by the server itself;
+/// basedpyright: Pyright's usual checks, not its stricter default).
+fn settings(section: &str) -> Value {
+    match section {
         "rust-analyzer" => json!({
             "checkOnSave": false,
             "cargo": { "buildScripts": { "enable": false }, "extraEnv": { "CARGO_NET_OFFLINE": "true" } },
             "procMacro": { "enable": false },
             "files": { "watcher": "server" },
         }),
+        "basedpyright" => json!({ "analysis": settings("basedpyright.analysis") }),
+        "basedpyright.analysis" => json!({ "typeCheckingMode": "standard" }),
         _ => Value::Null,
     }
 }
 
 impl Server {
     async fn start(li: usize, root: &Path, command: &[String], sandbox: Option<&Sandbox>) -> Result<Arc<Server>, String> {
-        let name = command[0].clone();
+        // (Its program's name: the command has its whole path.)
+        let name = Path::new(&command[0]).file_name().map_or_else(|| command[0].clone(), |n| n.to_string_lossy().into_owned());
         let line = format!("exec {}", command.iter().map(|a| quote(a)).collect::<Vec<_>>().join(" "));
         let mut cmd = crate::tools::bash::command(&line, root, sandbox);
         cmd.stdin(Stdio::piped()).kill_on_drop(true);
@@ -475,6 +568,8 @@ impl Server {
         let stdin = Arc::new(Mutex::new(stdin));
         let pending: Pending = Arc::default();
         let (tx, busy) = watch::channel(Busy::default());
+        let diags: Diags = Arc::default();
+        let (published_tx, published) = watch::channel(0u64);
         let stderr = Arc::new(StdMutex::new(String::new()));
         {
             let stderr = stderr.clone();
@@ -494,7 +589,7 @@ impl Server {
                 }
             });
         }
-        tokio::spawn(read_loop(stdout, stdin.clone(), pending.clone(), tx, name.clone(), root.to_path_buf(), child));
+        tokio::spawn(read_loop(stdout, stdin.clone(), pending.clone(), tx, (diags.clone(), published_tx), name.clone(), root.to_path_buf(), child));
         let mut server = Server {
             says_when_done: name == "rust-analyzer",
             name,
@@ -508,6 +603,9 @@ impl Server {
             docs: Mutex::default(),
             pgid,
             stderr,
+            diags,
+            published,
+            told: StdMutex::default(),
         };
         let root_uri = uri(root);
         let init = json!({
@@ -520,7 +618,7 @@ impl Server {
             "capabilities": {
                 "general": { "positionEncodings": ["utf-8", "utf-16"] },
                 "window": { "workDoneProgress": true },
-                "workspace": { "configuration": true, "workspaceFolders": true },
+                "workspace": { "configuration": true, "workspaceFolders": true, "didChangeWatchedFiles": { "dynamicRegistration": false } },
                 "textDocument": {
                     "synchronization": { "dynamicRegistration": false },
                     "definition": { "linkSupport": true },
@@ -529,6 +627,8 @@ impl Server {
                     "hover": { "contentFormat": ["markdown", "plaintext"] },
                     "callHierarchy": {},
                     "documentSymbol": { "hierarchicalDocumentSymbolSupport": true },
+                    "publishDiagnostics": { "versionSupport": true },
+                    "diagnostic": { "dynamicRegistration": false, "relatedDocumentSupport": false },
                 },
                 "experimental": { "serverStatusNotification": true },
             },
@@ -599,7 +699,7 @@ impl Server {
 
     /// Sends `path` as it is now (and any other document sent before that
     /// changed on disk since).
-    async fn sync(&self, path: &Path, language: &str, text: &str) -> Result<(), String> {
+    async fn sync(&self, path: &Path, language: &str, text: &str) -> Result<i64, String> {
         let mut docs = self.docs.lock().await;
         let others: Vec<PathBuf> = docs.keys().filter(|p| p.as_path() != path).cloned().collect();
         for p in others {
@@ -624,14 +724,15 @@ impl Server {
                 *version += 1;
                 send(&self.stdin, &json!({ "jsonrpc": "2.0", "method": "textDocument/didChange", "params": { "textDocument": { "uri": uri(path), "version": *version }, "contentChanges": [{ "text": text }] } })).await?;
                 *old = text.to_owned();
+                Ok(*version)
             }
-            Some(_) => {}
+            Some((version, _)) => Ok(*version),
             None => {
                 send(&self.stdin, &json!({ "jsonrpc": "2.0", "method": "textDocument/didOpen", "params": { "textDocument": { "uri": uri(path), "languageId": language, "version": 1, "text": text } } })).await?;
                 docs.insert(path.to_path_buf(), (1, text.to_owned()));
+                Ok(1)
             }
         }
-        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -684,6 +785,115 @@ impl Server {
 }
 
 impl Server {
+    /// Sends the edited `files` and asks for the server's diagnostics on
+    /// them and the other files sent to it before (waits for them, from a
+    /// server that only publishes them); the errors to tell, as
+    /// `path:line:column: message [code]`.
+    async fn errors_after(&self, files: &[(PathBuf, &str)], cwd: &Path, deadline: Instant) -> Result<Vec<String>, String> {
+        let since = Instant::now();
+        // (Changed on disk, first: a server that read a file from disk for
+        // another one's sake reads it again; one sent already it ignores.)
+        let changes: Vec<Value> = files.iter().map(|(p, _)| json!({ "uri": uri(p), "type": 2 })).collect();
+        send(&self.stdin, &json!({ "jsonrpc": "2.0", "method": "workspace/didChangeWatchedFiles", "params": { "changes": changes } })).await?;
+        let mut want = Vec::new();
+        for (p, language) in files {
+            let text = String::from_utf8_lossy(&std::fs::read(p).map_err(|e| e.to_string())?).into_owned();
+            want.push((p.clone(), self.sync(p, language, &text).await?));
+        }
+        self.settled(deadline).await?;
+        let edited: Vec<PathBuf> = want.iter().map(|(p, _)| p.clone()).collect();
+        let (texts, mut others): (HashMap<PathBuf, String>, Vec<PathBuf>) = {
+            let docs = self.docs.lock().await;
+            (docs.iter().map(|(p, (_, t))| (p.clone(), t.clone())).collect(), docs.keys().filter(|p| !edited.contains(p)).cloned().collect())
+        };
+        others.sort();
+        others.truncate(DIAG_OTHERS);
+        let mut found: Vec<(PathBuf, Vec<Value>)> = Vec::new();
+        if self.caps["diagnosticProvider"].is_object() {
+            for p in edited.iter().chain(&others) {
+                match self.pull(p, deadline).await {
+                    Ok(items) => found.push((p.clone(), items)),
+                    Err(e) if edited.contains(p) => return Err(e),
+                    Err(_) => {}
+                }
+            }
+        } else {
+            // (A server that publishes only what changed says nothing of an
+            // edit that leaves its errors as they were: its last word holds.)
+            let wait = deadline.min(Instant::now() + DIAG_PUSH_WAIT);
+            let mut published = self.published.clone();
+            loop {
+                let ready = {
+                    let d = self.diags.lock().unwrap();
+                    want.iter().all(|(p, v)| d.get(p).is_some_and(|x| x.version.map_or(x.at >= since, |pv| pv >= *v)))
+                };
+                let left = wait.saturating_duration_since(Instant::now());
+                if ready || left.is_zero() || self.exited() {
+                    break;
+                }
+                let _ = tokio::time::timeout(left.min(Duration::from_millis(200)), published.changed()).await;
+            }
+            // Other files' word follows theirs: waited for until the server
+            // is quiet a moment.
+            let grace = (Instant::now() + DIAG_GRACE).min(deadline);
+            while let Ok(Ok(())) = tokio::time::timeout(DIAG_QUIET.min(grace.saturating_duration_since(Instant::now())), published.changed()).await {}
+            let versions: HashMap<PathBuf, i64> = self.docs.lock().await.iter().map(|(p, (v, _))| (p.clone(), *v)).collect();
+            let d = self.diags.lock().unwrap();
+            for p in edited.iter().chain(&others) {
+                let Some(publ) = d.get(p) else { continue };
+                // (Another file's word from before its text now: not told.)
+                if !edited.contains(p) && publ.version.is_some_and(|v| Some(&v) != versions.get(p)) {
+                    continue;
+                }
+                found.push((p.clone(), publ.items.clone()));
+            }
+        }
+        let mut told = self.told.lock().unwrap();
+        let show = |p: &Path| p.strip_prefix(cwd).map_or_else(|_| p.display().to_string(), |r| r.display().to_string());
+        let mut rows = Vec::new();
+        for (p, items) in found {
+            let lines: Vec<&str> = texts.get(&p).map(|t| t.lines().collect()).unwrap_or_default();
+            let errors: Vec<String> = items
+                .iter()
+                .filter(|i| i["severity"].as_u64().is_none_or(|s| s == 1))
+                .map(|i| {
+                    let line = i["range"]["start"]["line"].as_u64().unwrap_or(0) as usize;
+                    let col = self.encoding.from_server(lines.get(line).copied().unwrap_or_default(), i["range"]["start"]["character"].as_u64().unwrap_or(0) as usize) + 1;
+                    let msg = i["message"].as_str().unwrap_or_default().lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("error");
+                    let msg = if msg.chars().count() > DIAG_CHARS { format!("{}…", msg.chars().take(DIAG_CHARS).collect::<String>()) } else { msg.to_owned() };
+                    let code = match &i["code"] {
+                        Value::String(c) => format!(" [{c}]"),
+                        Value::Number(c) => format!(" [{c}]"),
+                        _ => String::new(),
+                    };
+                    format!("{}:{}:{col}: {msg}{code}", show(&p), line + 1)
+                })
+                .collect();
+            if edited.contains(&p) || told.get(&p) != Some(&errors) {
+                rows.extend(errors.iter().cloned());
+            }
+            told.insert(p, errors);
+        }
+        Ok(rows)
+    }
+
+    /// A file's diagnostics, asked for (asked again while the server is
+    /// busy with a change).
+    async fn pull(&self, path: &Path, deadline: Instant) -> Result<Vec<Value>, String> {
+        let mut tries = 0;
+        loop {
+            match self.request("textDocument/diagnostic", json!({ "textDocument": { "uri": uri(path) } }), deadline).await {
+                Ok(r) => return Ok(r["items"].as_array().cloned().unwrap_or_default()),
+                Err(e) if tries < 5 && (e.contains("content modified") || e.to_lowercase().contains("cancel")) => {
+                    tries += 1;
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    self.settled(deadline).await?;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
     /// Sets each caller's `container` (the type or class its function is
     /// in, from its file's outline), so a method reads as `Type::method`.
     async fn name_containers(&self, calls: &mut Value, deadline: Instant) {
@@ -754,7 +964,8 @@ fn container(outline: &Value, line: u64, col: u64) -> Option<String> {
 
 /// Reads the server's messages: answers to our requests, its own requests
 /// (answered plainly), and what it says about its work.
-async fn read_loop(out: tokio::process::ChildStdout, stdin: Arc<Mutex<ChildStdin>>, pending: Pending, busy: watch::Sender<Busy>, name: String, root: PathBuf, mut child: tokio::process::Child) {
+#[allow(clippy::too_many_arguments)]
+async fn read_loop(out: tokio::process::ChildStdout, stdin: Arc<Mutex<ChildStdin>>, pending: Pending, busy: watch::Sender<Busy>, (diags, published): (Diags, watch::Sender<u64>), name: String, root: PathBuf, mut child: tokio::process::Child) {
     let mut r = BufReader::new(out);
     let mut active: HashSet<String> = HashSet::new();
     loop {
@@ -799,9 +1010,7 @@ async fn read_loop(out: tokio::process::ChildStdout, stdin: Arc<Mutex<ChildStdin
             (Some(method), Some(id)) => {
                 let result = match method {
                     "workspace/configuration" => {
-                        let items = m["params"]["items"].as_array().map_or(0, Vec::len);
-                        let s = settings(&name);
-                        Value::Array(m["params"]["items"].as_array().into_iter().flatten().take(items).map(|i| if i["section"].as_str().is_none_or(|x| x.starts_with(&name)) { s.clone() } else { Value::Null }).collect())
+                        Value::Array(m["params"]["items"].as_array().into_iter().flatten().map(|i| settings(i["section"].as_str().unwrap_or(&name))).collect())
                     }
                     "workspace/workspaceFolders" => json!([{ "uri": uri(&root), "name": "project" }]),
                     _ => Value::Null,
@@ -824,6 +1033,14 @@ async fn read_loop(out: tokio::process::ChildStdout, stdin: Arc<Mutex<ChildStdin
                     b.progress = n;
                     b.changed = Some(Instant::now());
                 });
+            }
+            (Some("textDocument/publishDiagnostics"), None) => {
+                let p = &m["params"];
+                if let Some(path) = p["uri"].as_str().and_then(path_of) {
+                    let items = p["diagnostics"].as_array().cloned().unwrap_or_default();
+                    diags.lock().unwrap().insert(path, Published { version: p["version"].as_i64(), at: Instant::now(), items });
+                    published.send_modify(|n| *n += 1);
+                }
             }
             (Some("experimental/serverStatus"), None) => {
                 let q = m["params"]["quiescent"].as_bool();
@@ -1084,6 +1301,72 @@ mod tests {
         assert!(hover.text.contains("Ledger"), "{}", hover.text);
         let missing = servers.call_at(&dir, &ask("references", 6, "nope"), &dir, None).await;
         assert!(missing.failed && missing.text.contains("isn't on line 6"), "{}", missing.text);
+        drop(servers);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn rust_analyzer_says_what_an_edit_broke() {
+        if installed(0).is_none() {
+            eprintln!("(no rust-analyzer: skipped)");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("harlo-lsp-diag-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(dir.join("Cargo.toml"), "[package]\nname = \"t\"\nversion = \"0.1.0\"\nedition = \"2021\"\n").unwrap();
+        let lib = dir.join("src/lib.rs");
+        let rate = dir.join("src/rate.rs");
+        let good = "mod rate;\n\npub fn total(items: &[u32]) -> u32 {\n    items.iter().map(|&c| rate::rate(c)).sum()\n}\n";
+        std::fs::write(&rate, "pub fn rate(cents: u32) -> u32 {\n    cents * 2\n}\n").unwrap();
+        std::fs::write(&lib, good).unwrap();
+        let servers = Servers::default();
+        let after = |p: &PathBuf| servers.errors_after(vec![p.clone()].leak(), &dir, None);
+        assert_eq!(after(&lib).await, None, "a clean file says nothing");
+        // An edit that breaks the file it's in.
+        std::fs::write(&lib, good.replace("    items", "    let n: u32 = \"many\";\n    n + items")).unwrap();
+        assert_eq!(after(&lib).await.as_deref(), Some("rust-analyzer sees 1 error now:\nsrc/lib.rs:4:18: expected u32, found &'static str [E0308]"));
+        // The same again: still told, it's the file edited.
+        std::fs::write(&lib, good.replace("    items", "    let n: u32 = \"many\";\n    n + items").replace("total", "sum_up")).unwrap();
+        assert!(after(&lib).await.is_some_and(|t| t.contains("E0308")));
+        std::fs::write(&lib, good).unwrap();
+        assert_eq!(after(&lib).await, None, "mended");
+        // An edit elsewhere that breaks a file sent before.
+        std::fs::write(&rate, "pub fn rate(cents: u32, percent: u32) -> u32 {\n    cents * percent / 100\n}\n").unwrap();
+        assert_eq!(after(&rate).await.as_deref(), Some("rust-analyzer sees 1 error now:\nsrc/lib.rs:4:39: expected 2 arguments, found 1 [E0107]"));
+        // Told once: another edit there that leaves it says nothing.
+        std::fs::write(&rate, "pub fn rate(cents: u32, percent: u32) -> u32 {\n    cents * percent / 1000\n}\n").unwrap();
+        assert_eq!(after(&rate).await, None);
+        // Not a Rust file, or not there: nothing.
+        assert_eq!(servers.errors_after(&[dir.join("Cargo.toml"), dir.join("src/gone.rs")], &dir, None).await, None);
+        drop(servers);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn pyright_says_what_an_edit_broke() {
+        if installed(1).is_none_or(|c| !c[0].contains("pyright")) {
+            eprintln!("(no Pyright: skipped)");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("harlo-lsp-diag-py-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("pyproject.toml"), "[project]\nname = \"t\"\nversion = \"0.1\"\n").unwrap();
+        let app = dir.join("app.py");
+        let rates = dir.join("rates.py");
+        let good = "from rates import rate\n\n\ndef total(items: list[int]) -> int:\n    return sum(rate(c) for c in items)\n";
+        std::fs::write(&rates, "def rate(cents: int) -> int:\n    return cents * 2\n").unwrap();
+        std::fs::write(&app, good).unwrap();
+        let servers = Servers::default();
+        let after = |p: &PathBuf| servers.errors_after(vec![p.clone()].leak(), &dir, None);
+        assert_eq!(after(&app).await, None, "a clean file says nothing");
+        std::fs::write(&app, good.replace("    return", "    n: int = \"many\"\n    return n +")).unwrap();
+        let broken = after(&app).await.unwrap_or_default();
+        assert!(broken.starts_with("basedpyright-langserver sees 1 error now:\napp.py:5:14: Type \"Literal['many']\""), "{broken}");
+        std::fs::write(&app, good).unwrap();
+        assert_eq!(after(&app).await, None, "mended");
+        std::fs::write(&rates, "def rate(cents: int, percent: int) -> int:\n    return cents * percent // 100\n").unwrap();
+        let elsewhere = after(&rates).await.unwrap_or_default();
+        assert!(elsewhere.starts_with("basedpyright-langserver sees 1 error now:\napp.py:5:16: Argument missing for parameter \"percent\""), "{elsewhere}");
         drop(servers);
         std::fs::remove_dir_all(&dir).unwrap();
     }
