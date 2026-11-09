@@ -26,7 +26,15 @@ pub fn facts(name: &str, args: &Value, output: &str, is_error: bool) -> (String,
         }
     } else if is_shell(name) {
         return (command_result(output, is_error), String::new());
+    } else if matches!(short.as_str(), "ask" | "askuserquestion") && !is_error {
+        return (ask_result(output), String::new());
     } else if matches!(short.as_str(), "read" | "view" | "cat" | "readfile" | "file") && !is_error {
+        // (A big file's read says its whole length in a note first.)
+        if let Some(n) = output.strip_prefix('[').and_then(|o| o.split_once(" lines (")).and_then(|(head, _)| head.rsplit(' ').next()?.parse::<usize>().ok())
+            && output.lines().next().is_some_and(|l| l.contains("These are lines "))
+        {
+            return (format!("{n} lines"), String::new());
+        }
         let n = output.lines().count();
         return (if n == 1 { "1 line".into() } else { format!("{n} lines") }, String::new());
     } else if matches!(short.as_str(), "grep" | "search" | "glob" | "find" | "rg" | "ls" | "list") && !is_error {
@@ -38,6 +46,30 @@ pub fn facts(name: &str, args: &Value, output: &str, is_error: bool) -> (String,
         }, String::new());
     }
     (if is_error { "failed".into() } else { String::new() }, String::new())
+}
+
+/// What was answered to a question for the user, in a few words: the
+/// options picked or the words typed, each question's after the other's;
+/// "dismissed" when none was. Harlo's ("The user answered:\n- Q\n  A")
+/// and Claude's ("User has answered your questions: "Q"="A", …").
+fn ask_result(output: &str) -> String {
+    let mut said: Vec<String> = Vec::new();
+    if let Some(rest) = output.strip_prefix("The user answered:") {
+        said = rest.lines().filter(|l| l.starts_with("  ")).map(|l| l.trim().replace("(in their words) ", "")).filter(|a| a != "(nothing picked)").collect();
+    } else if output.contains("answered your questions") {
+        // "Q"="A" pairs: the answer is the quoted text after each "=".
+        let mut rest = output;
+        while let Some(at) = rest.find("\"=\"") {
+            rest = &rest[at + 3..];
+            let end = rest.find('"').unwrap_or(rest.len());
+            said.push(rest[..end].to_owned());
+            rest = &rest[end..];
+        }
+    } else if output.contains("dismissed") || output.contains("declined") {
+        return "dismissed".into();
+    }
+    let text = said.join("; ");
+    if text.chars().count() > 40 { format!("{}…", text.chars().take(39).collect::<String>().trim_end()) } else { text }
 }
 
 /// A tool that runs a shell command.
@@ -156,6 +188,19 @@ fn count_before(text: &str, word: &str) -> usize {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_question_shows_what_was_answered() {
+        let none = json!({});
+        assert_eq!(facts("ask", &none, "The user answered:\n- Which colour?\n  Red\n- Which parts?\n  (in their words) only the api", false).0, "Red; only the api");
+        assert_eq!(facts("AskUserQuestion", &none, "User has answered your questions: \"Which colour?\"=\"Blue\", \"Size?\"=\"Large\". You can now continue with the user's answers in mind.", false).0, "Blue; Large");
+        assert_eq!(facts("ask", &none, "The user dismissed the questions without answering.", false).0, "dismissed");
+        let long = format!("The user answered:\n- Q\n  {}", "word ".repeat(20));
+        assert!(facts("ask", &none, &long, false).0.ends_with('…'));
+        // A big file's read: its whole length, from the note.
+        let big = "[src/x.rs is 900 lines (30 KB), more than one read shows. These are lines 1-2: grep it.]\na\nb";
+        assert_eq!(facts("read", &none, big, false).0, "900 lines");
+    }
 
     #[test]
     fn edits_count_their_lines() {

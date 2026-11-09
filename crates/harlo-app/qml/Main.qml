@@ -6240,6 +6240,8 @@ ApplicationWindow {
         ScriptAction { script: {
             const asked = win.modelRequests().filter(b => (b.messages || []).some(m => m.role === "tool" && JSON.stringify(m.content).indexOf("Blue") >= 0))
             win.check(!chat.session.hasRequest && asked.length > 0, "the answer goes back to the model (" + win.chatText().slice(-120) + ")")
+            const askRes = win.findAllNames("toolResult", chat.transcript).map(l => l.text)
+            win.check(askRes.indexOf("Blue") >= 0, "the question's line shows what was answered (" + askRes.join(" | ") + ")")
             win.sendByKeys("/btw which colour did I pick?") } }
         PauseAnimation { duration: 300 }
         // The side question: a card above the composer, not in the conversation.
@@ -6250,6 +6252,8 @@ ApplicationWindow {
             const a = chat.session.asideJson !== "" ? JSON.parse(chat.session.asideJson) : {}
             win.check(card !== null && (a.text || "").indexOf("Aside: which colour did I pick?") === 0, "/btw answers in the card above the composer (" + JSON.stringify(a).slice(0, 160) + ")")
             win.check(win.chatText().indexOf("Aside:") < 0, "and not in the conversation")
+            const foot = win.findText("A side question: not part of the conversation, and not kept.")
+            win.check(foot && !foot.truncated && foot.mapToItem(null, foot.contentWidth, 0).x <= win.findName("asideCard").mapToItem(null, win.findName("asideCard").width, 0).x + 1, "the aside's footnote stays inside its card")
             win.shotWindow("clicks-harlo-btw")
             win.clickItem(win.findName("asideDismiss"), "dismiss the aside") } }
         PauseAnimation { duration: 400 }

@@ -554,6 +554,7 @@ Rectangle {
                     text: "A side question: not part of the conversation, and not kept."
                     color: Theme.muted
                     font.pixelSize: Theme.px(11)
+                    wrapMode: Text.Wrap
                 }
             }
         }
