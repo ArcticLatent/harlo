@@ -450,7 +450,8 @@ Item {
         id: ct
         property var lines: null
         property string html: ""
-        // Numbers in their own column; or an edit's +/− (`signs`).
+        // Numbers in their own column; and an edit's +/− (`signs`), after
+        // its numbers when it has them.
         property bool numbers: true
         property bool signs: false
         // A line with a path (`p`) opens its file at that line: its number
@@ -468,7 +469,11 @@ Item {
         function number(i) {
             if (!lines) return String(i + 1)
             const l = lines[i]
-            return !l ? "" : signs ? (l.mark === "add" ? "+" : l.mark === "remove" ? "−" : "") : l.n
+            if (!l) return ""
+            if (!signs) return l.n
+            const sign = l.mark === "add" ? "+" : l.mark === "remove" ? "−" : ""
+            // (A removed line has no number: its sign under the others'.)
+            return numbers ? (l.n || "") + "\u00a0" + (sign || "\u00a0") : sign
         }
         // Wrapped lines: each its own block, hanging from its indentation.
         FontMetrics { id: monoMetrics; font.family: Theme.mono; font.pixelSize: ct.fontSize }
@@ -491,7 +496,7 @@ Item {
         Label {
             id: probe
             visible: false
-            text: ct.lines ? ct.lines.reduce((w, l) => String(l.n).length > w.length ? String(l.n) : w, "0") : String(ct.count)
+            text: ct.lines ? ct.lines.reduce((w, l) => String(l.n).length > w.length ? String(l.n) : w, "0") + (ct.signs ? "\u00a0+" : "") : String(ct.count)
             font.family: Theme.mono
             font.pixelSize: ct.fontSize
         }
@@ -530,7 +535,9 @@ Item {
             Label {
                 required property int index
                 readonly property string mark: ct.lines && ct.lines[index] ? ct.lines[index].mark || "" : ""
-                readonly property bool opens: !!(ct.lines && ct.lines[index] && ct.lines[index].p) && /^\d+$/.test(text)
+                // (Its line's number, without an edit's sign.)
+                readonly property string num: ct.lines && ct.lines[index] ? String(ct.lines[index].n || "") : String(index + 1)
+                readonly property bool opens: !!(ct.lines && ct.lines[index] && ct.lines[index].p) && /^\d+$/.test(num)
                 objectName: opens ? "codeNumber" : ""
                 x: 0
                 y: ct.topPad + ct.lineTop(index)
@@ -544,11 +551,11 @@ Item {
                 font.pixelSize: ct.fontSize
                 font.underline: opens && numberHover.hovered
                 HoverHandler { id: numberHover; enabled: parent.opens; cursorShape: Qt.PointingHandCursor }
-                TapHandler { enabled: parent.opens; onTapped: ct.openAt(ct.lines[index].p, Number(ct.number(index))) }
+                TapHandler { enabled: parent.opens; onTapped: ct.openAt(ct.lines[index].p, Number(parent.num)) }
                 Accessible.role: opens ? Accessible.Link : Accessible.StaticText
-                Accessible.name: opens ? "Open " + ct.lines[index].p.split("/").pop() + " at line " + text : text
+                Accessible.name: opens ? "Open " + ct.lines[index].p.split("/").pop() + " at line " + num : text
                 ToolTip.visible: opens && numberHover.hovered
-                ToolTip.text: "Open at line " + text
+                ToolTip.text: "Open at line " + num
                 ToolTip.delay: 600
             }
         }
@@ -674,7 +681,8 @@ Item {
         property var askLines: []
         readonly property bool open: view.expanded[rowKey] === true
         readonly property var agents: callId !== "" ? root.subagents.filter(a => a.parentToolCallId === callId) : []
-        // A write: every line added, numbered; an edit: lines out and in.
+        // A write: every line added, numbered; an edit: lines out and in,
+        // numbered where its new lines are in the file now (a local one).
         readonly property bool preview: diff !== "" && !asking
         readonly property bool newFile: preview && result.indexOf("−") < 0
         readonly property int previewLines: 6
@@ -686,9 +694,11 @@ Item {
         // lines under its name, a blank line between files).
         readonly property bool hasContext: !!code && code.lines.some(l => l.c)
         readonly property var codeLines: {
-            if (preview)
-                return JSON.parse(root.session.diffLines(subtitle.replace(/…$/, ""), diff, open ? 400 : previewLines))
-                    .map((l, i) => ({ n: newFile ? String(i + 1) : "", h: l.h, mark: newFile ? "" : l.s === "+" ? "add" : l.s === "-" ? "remove" : "", p: newFile ? absolute(subtitle.replace(/…$/, "")) : "" }))
+            if (preview) {
+                const path = subtitle.replace(/…$/, "")
+                return JSON.parse(root.session.diffLines(path, diff, open ? 400 : previewLines, root.host === "" && !newFile ? absolute(path) : ""))
+                    .map((l, i) => ({ n: newFile ? String(i + 1) : l.n, h: l.h, mark: newFile ? "" : l.s === "+" ? "add" : l.s === "-" ? "remove" : "", p: newFile || l.n !== "" ? absolute(path) : "" }))
+            }
             if (!code) return []
             const out = []
             let file = code.path
@@ -724,6 +734,9 @@ Item {
         readonly property bool echoed: shell && outLines.length === 1 && result !== "" && outLines[0].trim() === result.trim()
         readonly property bool outInWell: shell ? outLines.length > 0 && rowState !== "running" && !echoed : open && text !== "" && !preview
         readonly property bool codeShown: !!code && (!isRead || readsAfter < 3 || open)
+        // Kept to its end (a log, a command's last lines): what's left out
+        // came before, so it's said above them.
+        readonly property bool fromEnd: code ? code.earlier === true : shell && !preview
         function absolute(p) { return root.fileAt(p, command) }
         readonly property bool failed: rowState === "error" || /^(exit|failed)|failed$/.test(result)
         // A listing's whole length: the call's own count ("1200 lines")
@@ -737,7 +750,7 @@ Item {
         // Opened, what still isn't shown (-1: more, how many unknown), and
         // where its file goes on ({p, n}), for "Open at line n".
         readonly property int beyond: !open ? 0
-                                    : code ? (Math.max(0, fullCount - code.lines.length) || (code.more ? -1 : 0))
+                                    : code ? (code.earlier ? 0 : Math.max(0, fullCount - code.lines.length) || (code.more ? -1 : 0))
                                     : preview ? Math.max(0, lineCount - 400) : 0
         readonly property var beyondAt: {
             if (beyond === 0 || (code && code.path === "")) return null
@@ -969,7 +982,7 @@ Item {
             color: Theme.codeBg
             // Line numbers on a column of their own, from the code's first
             // line (under a command, if any) to the well's bottom.
-            readonly property bool gutter: (card.preview && card.newFile) || (card.codeShown && card.code.lines.some(l => l.n !== ""))
+            readonly property bool gutter: (card.preview && card.codeLines.some(l => l.n !== "")) || (card.codeShown && card.code.lines.some(l => l.n !== ""))
             readonly property bool hasCode: card.preview || card.codeShown
             Rectangle {
                 visible: parent.gutter
@@ -1015,10 +1028,25 @@ Item {
                         height: 13
                         Rectangle { y: 6; width: parent.width; height: 1; color: Theme.codeRule }
                     }
+                    // Kept to its end, folded: its last lines, what came
+                    // before them a click away.
+                    Label {
+                        objectName: "toolEarlierLines"
+                        visible: card.fromEnd && card.hidden > 0 && !card.open
+                        x: toolWellBox.gutter ? wellCode.gutterWidth : 10
+                        bottomPadding: 3
+                        text: "↑ " + card.hidden + (card.hidden === 1 ? " earlier line" : " earlier lines")
+                        color: earlierHover.hovered ? Theme.foreground : Theme.muted
+                        font.pixelSize: Theme.px(12)
+                        Accessible.role: Accessible.Button
+                        Accessible.name: "Show " + card.hidden + (card.hidden === 1 ? " earlier line" : " earlier lines")
+                        HoverHandler { id: earlierHover; cursorShape: Qt.PointingHandCursor }
+                        TapHandler { onTapped: view.toggle(card.rowKey) }
+                    }
                     // Kept to its end: what came before isn't here.
                     Label {
                         objectName: "toolEarlier"
-                        visible: toolWellBox.hasCode && !!card.code && card.code.earlier === true
+                        visible: toolWellBox.hasCode && !!card.code && card.code.earlier === true && (card.open || card.hidden <= 0)
                         x: toolWellBox.gutter ? wellCode.gutterWidth : 10
                         topPadding: 4
                         text: "Earlier lines not shown"
@@ -1075,12 +1103,12 @@ Item {
                     Flow {
                         x: toolWellBox.gutter ? wellCode.gutterWidth : 10
                         width: wellCol.width - x - 10
-                        visible: card.hidden > 0 || card.beyond !== 0
+                        visible: (card.hidden > 0 && (card.open || !card.fromEnd)) || card.beyond !== 0
                         spacing: 2
                         topPadding: 3
                         Label {
                             objectName: "toolMoreLines"
-                            visible: card.hidden > 0
+                            visible: card.hidden > 0 && (card.open || !card.fromEnd)
                             rightPadding: 12
                             text: card.open ? "↑ Fewer lines" : "↓ " + card.hidden + (card.hidden === 1 ? " more line" : " more lines")
                             color: moreHover.hovered ? Theme.foreground : Theme.muted

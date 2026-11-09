@@ -126,7 +126,7 @@ pub mod qobject {
         /// each line's mark and its text coloured as `path`'s language, the
         /// first `limit` lines.
         #[qinvokable]
-        fn diff_lines(self: &ChatSession, path: &QString, diff: &QString, limit: i32) -> QString;
+        fn diff_lines(self: &ChatSession, path: &QString, diff: &QString, limit: i32, file: &QString) -> QString;
         /// A call's output as code when it's a file's lines (a printed file,
         /// numbered output, a read tool's): `{ path, total, lines: [{ n
         /// (its number, "" unknown), c (grep context), h (highlighted) }] }`,
@@ -943,12 +943,24 @@ impl ChatSession {
         QString::from(&serde_json::Value::from(rows).to_string())
     }
 
-    pub fn diff_lines(&self, path: &QString, diff: &QString, limit: i32) -> QString {
+    pub fn diff_lines(&self, path: &QString, diff: &QString, limit: i32, file: &QString) -> QString {
         let diff = diff.to_string();
-        let lines: Vec<&str> = diff.lines().take(limit.max(0) as usize).collect();
+        let all: Vec<&str> = diff.lines().collect();
+        // Numbered as the file is now (a local file, not too big to read).
+        let file = file.to_string();
+        let text = (!file.is_empty())
+            .then(|| std::fs::metadata(&file).ok().filter(|m| m.is_file() && m.len() < 4 << 20).and_then(|_| std::fs::read_to_string(&file).ok()))
+            .flatten();
+        let numbers = text.map(|t| harlo_core::listing::diff_numbers(&all, &t)).unwrap_or_else(|| vec![None; all.len()]);
+        let lines = &all[..all.len().min(limit.max(0) as usize)];
         let texts: Vec<&str> = lines.iter().map(|l| l.get(1..).unwrap_or_default()).collect();
         let html = harlo_core::markdown::highlight_lines(&path.to_string(), &texts);
-        let out: Vec<serde_json::Value> = lines.iter().zip(html).map(|(l, h)| serde_json::json!({ "s": l.get(..1).unwrap_or(" "), "h": h })).collect();
+        let out: Vec<serde_json::Value> = lines
+            .iter()
+            .zip(html)
+            .zip(&numbers)
+            .map(|((l, h), n)| serde_json::json!({ "s": l.get(..1).unwrap_or(" "), "h": h, "n": n.map(|n| n.to_string()).unwrap_or_default() }))
+            .collect();
         QString::from(&serde_json::Value::from(out).to_string())
     }
 

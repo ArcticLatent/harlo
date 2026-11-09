@@ -3674,6 +3674,10 @@ ApplicationWindow {
             win.check(previews.length === 2, "the write and the edit show their lines (" + previews.length + ")")
             const more = win.findAllNames("toolMoreLines", box)
             win.check(more.length === 1 && more[0].text === "↓ 5 more lines", "the write's first 6 of 11 lines, and 5 more (" + more.map(b => b.text) + ")")
+            const edit = win.findAllNames("previewCode", box).find(v => v.signs)
+            const en = edit ? edit.lines.map(l => l.n) : []
+            win.check(edit && edit.numbers && JSON.stringify(en) === JSON.stringify(["3", "", "", "4", "5", "6"]) && win.findAllNames("codeNumber", edit).length === 4,
+                      "an edit numbered where its new lines are in the file, its removed lines not (" + JSON.stringify(en) + ")")
             const results = win.findAllNames("toolResult", box).map(l => l.text)
             win.check(results.some(r => r.indexOf("11 lines") >= 0) && results.some(r => r.indexOf("+2") >= 0 && r.indexOf("−2") >= 0)
                       && results.some(r => r.indexOf("7 passed") >= 0) && results.some(r => r.indexOf("exit 101") >= 0), "what each came to (" + results.join(" | ") + ")")
@@ -3976,7 +3980,10 @@ ApplicationWindow {
             win.check(grep && grep.code && grep.code.lines[0].n === "3" && !grep.code.earlier, "400 matches: kept from the first (" + (grep && grep.code ? grep.code.lines[0].n : "none") + ")")
             const all = grep ? chat.session.codeText("Bash", grep.command, "", chat.session.callOutput(grep.rowKey)).split("\n").length : 0
             win.check(all === 400, "Copy: all 400 matches, not just what's kept (" + all + ")")
-            win.check(nl && nl.code && nl.code.earlier && Number(nl.code.lines[0].n) > 1 && win.findAllNames("toolEarlier", box).length === 1, "a long log, kept to its end: says earlier lines aren't here (" + (nl && nl.code ? nl.code.lines[0].n : "none") + ")")
+            const nlLast = nl && nl.code ? nl.code.lines[nl.code.lines.length - 1].n : "none"
+            const up = win.findAllNames("toolEarlierLines", box)
+            win.check(nl && nl.code && nl.code.earlier && nlLast === "1200" && up.length === 1 && /^↑ \d+ earlier lines$/.test(up[0].text) && win.findAllNames("toolEarlier", box).length === 0,
+                      "a long log, kept to its end: its last lines, the earlier ones above them (" + nlLast + " · " + (up[0] ? up[0].text : "none") + ")")
             win.listingAt("Search the whole tree")
             const w = win.findAllNames("toolWhat", box).find(l => l.plain.indexOf("Search the whole tree") >= 0)
             if (w) win.clickItem(w, "the search's line") } }
@@ -3987,6 +3994,19 @@ ApplicationWindow {
             win.check(beyond && beyond.text === "More lines not shown here" && win.findAllNames("toolBeyondOpen", box).length === 0, "opened: more past these, no file jump for search results (" + (beyond ? beyond.text : "none") + ")")
             win.listingAt("Number the log")
             win.shotWindow("listings-search-log")
+            const up = win.findAllNames("toolEarlierLines", box)[0]
+            if (up) win.clickItem(up, "the log's earlier lines") } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const box = win.listingBox()
+            const w = win.findAllNames("toolWhat", box).find(l => l.plain.indexOf("Number the log") >= 0)
+            const nl = w ? w.parent.parent.parent : null
+            const lines = nl && nl.code ? nl.code.lines : []
+            win.check(lines.length > 6 && lines[lines.length - 1].n === "1200" && Number(lines[0].n) > 1 && win.findAllNames("toolEarlier", box).length === 1
+                      && win.findAllNames("toolMoreLines", box).some(b => b.text === "↑ Fewer lines") && win.findAllNames("toolEarlierLines", box).length === 0,
+                      "opened, the log's kept lines to its end, and earlier lines not here said (" + (lines[0] ? lines[0].n : "none") + "–" + (lines.length ? lines[lines.length - 1].n : "") + ")")
+            win.listingAt("Number the log")
+            win.shotWindow("listings-search-log-open")
             win.summary(); Qt.quit() } }
     }
     property real perfOpen: 0

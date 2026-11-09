@@ -131,17 +131,20 @@ pub fn view(tool: &str, command: &str, path: &str, output: &str, limit: usize) -
     let (file, rows) = rows(tool, command, path, output)?;
     let total = rows.len();
     let take = total.min(limit.max(1));
+    // Kept to its end (a log): its last lines, the end being what matters.
+    let earlier = output.starts_with("…\n");
+    let (from, to) = if earlier { (total - take, total) } else { (0, take) };
     // Highlighted a file at a time (each run of lines from one file).
     let mut out = Vec::with_capacity(take);
-    let mut i = 0;
-    while i < take {
+    let mut i = from;
+    while i < to {
         if rows[i].header {
             out.push(CodeLine { num: String::new(), context: false, html: String::new(), file: rows[i].file.clone() });
             i += 1;
             continue;
         }
         let mut j = i;
-        while j < take && !rows[j].header && rows[j].file == rows[i].file {
+        while j < to && !rows[j].header && rows[j].file == rows[i].file {
             j += 1;
         }
         let bodies: Vec<&str> = rows[i..j].iter().map(|r| r.body).collect();
@@ -151,7 +154,35 @@ pub fn view(tool: &str, command: &str, path: &str, output: &str, limit: usize) -
         }
         i = j;
     }
-    Some(CodeView { path: file, lines: out, total, more: output.ends_with("\n…"), earlier: output.starts_with("…\n") })
+    Some(CodeView { path: file, lines: out, total, more: output.ends_with("\n…"), earlier })
+}
+
+/// An edit's diff (`+`, `-` and ` ` lines; ` …` between edits), numbered
+/// as its file is now: each edit's new side (its ` ` and `+` lines) found
+/// once in `file`, its lines numbered from there. A removed line, or an
+/// edit whose new side isn't there exactly once, has none.
+pub fn diff_numbers(diff: &[&str], file: &str) -> Vec<Option<usize>> {
+    let mut out = vec![None; diff.len()];
+    let mut start = 0;
+    while start < diff.len() {
+        let end = (start..diff.len()).find(|&i| diff[i] == " …").unwrap_or(diff.len());
+        let new: Vec<usize> = (start..end).filter(|&i| !diff[i].starts_with('-')).collect();
+        let text: String = new.iter().map(|&i| diff[i].get(1..).unwrap_or_default()).collect::<Vec<_>>().join("\n");
+        if !text.trim().is_empty() {
+            // (At a line's start, and only once: else it could be anywhere.)
+            let mut at = file.match_indices(text.as_str()).map(|(k, _)| k).filter(|&k| k == 0 || file.as_bytes()[k - 1] == b'\n');
+            if let Some(first) = at.next() {
+                if at.next().is_none() {
+                    let line = file[..first].matches('\n').count() + 1;
+                    for (k, &i) in new.iter().enumerate() {
+                        out[i] = Some(line + k);
+                    }
+                }
+            }
+        }
+        start = end + 1;
+    }
+    out
 }
 
 /// Output whose start matters more than its end, kept from there when
@@ -523,6 +554,30 @@ mod tests {
         assert!(!keeps_start("Bash", "cargo test -- --nocapture"));
         assert!(!keeps_start("Bash", "find . -name '*.rs'"));
         assert!(view("bash", "grep -rn x src/", "", "…\nsrc/a.rs:9:x\nsrc/a.rs:10:x", 400).unwrap().earlier);
+    }
+
+    #[test]
+    fn a_log_kept_to_its_end_shows_its_last_lines() {
+        let full: String = (1..=1200).map(|i| format!("{i:6}\tlog line {i}\n")).collect();
+        let kept = crate::transcript::tail_chars(&full, 6000);
+        assert!(kept.starts_with("…\n"));
+        let v = view("Bash", "nl app.log", "", &kept, 6).unwrap();
+        assert!(v.earlier && v.lines.len() == 6 && v.total > 6);
+        assert_eq!(v.lines[5].num, "1200");
+        assert_eq!(v.lines[0].num, "1195");
+    }
+
+    #[test]
+    fn an_edit_is_numbered_where_its_new_lines_are() {
+        let file = "fn main() {\n    let limits = Limits::from_env();\n    serve(limits.default);\n}\n";
+        let diff = [" fn main() {", "-    let limit = 100;", "-    serve(limit);", "+    let limits = Limits::from_env();", "+    serve(limits.default);", " }"];
+        assert_eq!(diff_numbers(&diff, file), vec![Some(1), None, None, Some(2), Some(3), Some(4)]);
+        // Two edits: each found on its own; one that's there twice, or not at all, has none.
+        let file = "a\nb\nx\nc\nx\n";
+        let diff = ["-q", "+b", " …", "+x", " …", "+zz"];
+        assert_eq!(diff_numbers(&diff, file), vec![None, Some(2), None, None, None, None]);
+        // Not inside another line.
+        assert_eq!(diff_numbers(&["+b"], "ab\nb\n"), vec![Some(2)]);
     }
 
     #[test]

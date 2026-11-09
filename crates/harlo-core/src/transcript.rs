@@ -936,7 +936,7 @@ pub(crate) fn head_chars(s: &str, max: usize) -> String {
     format!("{}\n…", &s[..end])
 }
 
-fn tail_chars(s: &str, max: usize) -> String {
+pub(crate) fn tail_chars(s: &str, max: usize) -> String {
     let count = s.chars().count();
     if count <= max {
         return s.to_owned();
