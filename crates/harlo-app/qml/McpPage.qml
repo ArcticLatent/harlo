@@ -88,6 +88,13 @@ ColumnLayout {
         return true
     }
     /// Whether version `a` is newer than `b` ("2.1.10" after "2.1.9").
+    // 950, 1.2k, 12k, 1.3M.
+    function shortCount(n) {
+        if (n < 1000) return String(n)
+        if (n < 10000) return (Math.floor(n / 100) / 10).toFixed(1).replace(/\.0$/, "") + "k"
+        if (n < 1000000) return Math.floor(n / 1000) + "k"
+        return (Math.floor(n / 100000) / 10).toFixed(1).replace(/\.0$/, "") + "M"
+    }
     function newerVersion(a, b) {
         const x = a.split(/\D+/).filter(p => p !== "").map(Number), y = b.split(/\D+/).filter(p => p !== "").map(Number)
         for (let i = 0; i < Math.max(x.length, y.length); i++) {
@@ -348,13 +355,51 @@ ColumnLayout {
                     text: problem !== "" ? problem : (bcard.b.message || "")
                     color: problem !== "" ? (bcard.b.error ? Theme.error : Theme.warning) : Theme.muted
                 }
-                Label {
+                // Its repository (opens in the browser), its stars, its licence.
+                RowLayout {
                     Layout.fillWidth: true
-                    text: bcard.b.license + " · github.com/" + bcard.b.repo
-                    color: Theme.muted
-                    opacity: 0.8
-                    font.pixelSize: Theme.px(11)
-                    elide: Text.ElideRight
+                    spacing: 5
+                    Icon { name: "github"; color: repoLink.hovered ? Theme.foreground : Theme.muted; implicitWidth: 13; implicitHeight: 13 }
+                    Label {
+                        id: repoLink
+                        objectName: "mcpCatalogRepo-" + bcard.b.id
+                        readonly property bool hovered: repoHover.hovered
+                        readonly property string url: "https://github.com/" + bcard.b.repo
+                        text: bcard.b.repo
+                        color: hovered ? Theme.foreground : Theme.muted
+                        font.pixelSize: Theme.px(11)
+                        font.underline: hovered
+                        HoverHandler { id: repoHover; cursorShape: Qt.PointingHandCursor }
+                        TapHandler { onTapped: Qt.openUrlExternally(repoLink.url) }
+                        ToolTip.visible: repoHover.hovered
+                        ToolTip.text: "Open " + url
+                        ToolTip.delay: 600
+                    }
+                    Icon {
+                        visible: starsLabel.visible
+                        Layout.leftMargin: 6
+                        name: "star"; color: Theme.muted; implicitWidth: 12; implicitHeight: 12
+                    }
+                    Label {
+                        id: starsLabel
+                        objectName: "mcpCatalogStars-" + bcard.b.id
+                        visible: (bcard.b.stars || 0) > 0
+                        text: page.shortCount(bcard.b.stars || 0)
+                        color: Theme.muted
+                        font.pixelSize: Theme.px(11)
+                        ToolTip.visible: starsHover.hovered
+                        ToolTip.text: Number(bcard.b.stars || 0).toLocaleString(Qt.locale(), "f", 0) + " stars on GitHub"
+                        ToolTip.delay: 600
+                        HoverHandler { id: starsHover }
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: "·  " + bcard.b.license
+                        color: Theme.muted
+                        opacity: 0.8
+                        font.pixelSize: Theme.px(11)
+                        elide: Text.ElideRight
+                    }
                 }
             }
         }

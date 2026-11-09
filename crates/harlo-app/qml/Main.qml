@@ -7547,7 +7547,7 @@ ApplicationWindow {
             Workspace.addProject(win.argValue("--cwd="))
             settingsDialog.openPage("mcp") } }
         PauseAnimation { duration: 300 }
-        ScriptAction { script: win.waitUntil(catalogSteps, () => catalogSteps.offered().loading === false && catalogSteps.offered().latest === "2.1.7", 20000) }
+        ScriptAction { script: win.waitUntil(catalogSteps, () => catalogSteps.offered().loading === false && catalogSteps.offered().latest === "2.1.7" && catalogSteps.offered().stars > 0, 20000) }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             const d = settingsDialog.contentItem, b = catalogSteps.offered()
@@ -7556,6 +7556,9 @@ ApplicationWindow {
             win.check(sw !== null && !sw.checked && sw.enabled, "off at first, and it can be turned on")
             win.check(win.findName("mcpCatalogVersion-context-mode", d).text === "Not installed · version 2.1.7 is the newest", "not installed, and its newest release (" + win.findName("mcpCatalogVersion-context-mode", d).text + ")")
             win.check(u === null || !u.visible, "no Update before it's installed")
+            const repo = win.findName("mcpCatalogRepo-context-mode", d), stars = win.findName("mcpCatalogStars-context-mode", d)
+            win.check(repo !== null && repo.visible && repo.text === "mksglu/context-mode" && repo.url === "https://github.com/mksglu/context-mode", "its repository, a link to it (" + (repo ? repo.text + " " + repo.url : "none") + ")")
+            win.check(stars !== null && stars.visible && stars.text === "12k" && stars.ToolTip.text === "12,345 stars on GitHub", "its stars (" + (stars ? stars.text + ", " + stars.ToolTip.text : "none") + ")")
             win.check(b.version === "" && b.node !== "" && b.nodeError === "", "nothing downloaded yet; a Node found (" + JSON.stringify(b) + ")")
             win.check(TestInput.readFile(win.selftestDir + "/data/harlo/mcp/context-mode/current/package.json") === "" && catalogSteps.entry() === null, "nothing in harlo's folder or Harlo's servers yet")
             win.shotPopup(settingsDialog, "clicks-catalog-off")

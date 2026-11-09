@@ -339,6 +339,12 @@ pub fn latest(b: &Offered) -> Result<(String, crate::engines::Asset), String> {
     Ok((tag, asset))
 }
 
+/// How many stars its repository has on GitHub.
+pub fn stars(b: &Offered) -> Result<u64, String> {
+    let repo = crate::engines::get_json(&format!("{}/repos/{}", api(), b.repo))?;
+    repo["stargazers_count"].as_u64().ok_or_else(|| "GitHub didn't say how many stars it has.".into())
+}
+
 /// Downloads its newest release when it's newer than the one in use (or
 /// there's none), checked against its published SHA-256, and makes it the
 /// one in use. With `node`, a release whose Node isn't installed is refused.
@@ -449,6 +455,7 @@ mod tests {
         assert!(newer(&version, "2.1.6"), "{version}");
         assert_eq!(asset.sha256.len(), 64);
         assert!(asset.url.starts_with("https://github.com/mksglu/context-mode/releases/download/"), "{}", asset.url);
+        assert!(stars(&B).unwrap() > 1000);
         let root = std::env::temp_dir().join(format!("harlo-catalog-live-{}", std::process::id()));
         let mut got = 0;
         let (before, now) = install_latest_in(&root, &B, true, &mut |d, _| got = d).unwrap();

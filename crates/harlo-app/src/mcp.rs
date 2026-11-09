@@ -345,6 +345,9 @@ impl Mcp {
                     if let Ok((latest, _)) = mcp_catalog::latest(&b) {
                         let _ = thread.queue(move |this| this.catalog_put(b.id, json!({ "latest": latest })));
                     }
+                    if let Ok(stars) = mcp_catalog::stars(&b) {
+                        let _ = thread.queue(move |this| this.catalog_put(b.id, json!({ "stars": stars })));
+                    }
                 }
             }
         });
