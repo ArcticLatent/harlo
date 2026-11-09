@@ -359,6 +359,9 @@ Rectangle {
                         // and/or the worktree branch, and why it's settled.
                         // On the Settled shelf: faded, until you point at it.
                         readonly property bool dim: settled !== "" && !active && !hovered
+                        // A narrow sidebar: the title keeps its room (no time,
+                        // and a helper shows by its indent alone).
+                        readonly property bool tight: width < 240
                         readonly property string detail: [helperOf !== "" ? "Helper of “" + helperOf + "”" : "", branch !== "" ? "⎇ " + branch : "", subtitle, settled].filter(t => t !== "").join("  ·  ")
                         width: ListView.view.width
                         height: 42
@@ -371,8 +374,8 @@ Rectangle {
                         rightInset: 10
                         topInset: 1
                         bottomInset: 1
-                        leftPadding: 18 + Math.min(nest, 3) * 14
-                        rightPadding: 18
+                        leftPadding: (tight ? 14 : 18) + Math.min(nest, 3) * (tight ? 10 : 14)
+                        rightPadding: tight ? 14 : 18
                         topPadding: 2
                         bottomPadding: 2
                         readonly property color rowColor: active ? Theme.rowSelected : hovered ? Theme.rowHover : Theme.chrome
@@ -382,11 +385,11 @@ Rectangle {
                             Behavior on color { ColorAnimation { duration: Theme.hoverMotion } }
                         }
                         contentItem: RowLayout {
-                            spacing: 11
+                            spacing: sessionRow.tight ? 7 : 11
                             // A helper: hooked under its parent.
                             Label {
                                 objectName: "sessionHelperMark"
-                                visible: sessionRow.nest > 0
+                                visible: sessionRow.nest > 0 && !sessionRow.tight
                                 text: "↳"
                                 color: Theme.textFaint
                                 font.pixelSize: Theme.px(13)
@@ -401,7 +404,10 @@ Rectangle {
                                 Behavior on opacity { NumberAnimation { duration: Theme.hoverMotion } }
                             }
                             Label {
+                                objectName: "sessionTitle"
                                 Layout.fillWidth: true
+                                Layout.minimumWidth: 0
+                                Layout.preferredWidth: 0
                                 text: (sessionRow.pinned ? "★ " : "") + sessionRow.title
                                 color: sessionRow.active || sessionRow.status === "unread" ? Theme.text : sessionRow.dim ? Theme.textFaint : Theme.textMuted
                                 elide: Text.ElideRight
@@ -437,7 +443,7 @@ Rectangle {
                                 ToolTip.text: sessionRow.changes + (sessionRow.changes === 1 ? " uncommitted change" : " uncommitted changes") + " in this session's repository"
                                 ToolTip.delay: 400
                             }
-                            Label { text: Theme.ago(sessionRow.modified, root.now); color: Theme.textFaint; font.pixelSize: Theme.px(12) }
+                            Label { visible: !sessionRow.tight; text: Theme.ago(sessionRow.modified, root.now); color: Theme.textFaint; font.pixelSize: Theme.px(12) }
                         }
                         onClicked: Workspace.open(rowKey)
                         TapHandler {

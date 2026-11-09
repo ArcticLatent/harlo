@@ -44,6 +44,10 @@ Rectangle {
             Icon { name: "node-tree"; color: root.running > 0 ? Theme.primary : Theme.muted; implicitWidth: 15; implicitHeight: 15 }
             Label {
                 Layout.fillWidth: true
+                // (Narrow: it shortens, the chevron stays clear.)
+                Layout.minimumWidth: 0
+                Layout.preferredWidth: 0
+                elide: Text.ElideRight
                 readonly property int finished: root.agents.length - root.running - root.stalled
                 text: "Subagents · " + (root.running > 0 ? root.running + " running" : root.stalled > 0 ? "" : root.agents.every(a => a.status === "stopped") ? "stopped" : "all done")
                     + (root.stalled > 0 ? (root.running > 0 ? " · " : "") + root.stalled + " waiting" : "")
@@ -59,7 +63,7 @@ Rectangle {
                 color: Theme.muted
                 font.pixelSize: Theme.px(11)
                 elide: Text.ElideRight
-                Layout.maximumWidth: 260
+                Layout.maximumWidth: Math.min(260, root.width * 0.35)
             }
             Button {
                 id: toggle

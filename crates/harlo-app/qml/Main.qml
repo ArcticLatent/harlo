@@ -6246,6 +6246,10 @@ ApplicationWindow {
         PauseAnimation { duration: 100 }
         ScriptAction { script: {
             win.check(win.findContaining("being reviewed") !== null && win.findName("planOpenReview-1") !== null, "the step shows it's being reviewed, with Open review")
+            // The sidebar's rows fit (a helper's too), at any width.
+            const titles = win.findAllNames("sessionTitle", sidebar).filter(t => t.visible)
+            const fits = t => Array.from(t.parent.children).filter(c => c.visible).every(c => c.x + c.width <= t.parent.width + 1)
+            win.check(titles.length >= 3 && titles.every(t => t.width >= 24 && fits(t)), "the sidebar's rows fit, each title with room (" + titles.map(t => Math.round(t.width)).join(", ") + ")")
             const planWhat = win.findAllNames("toolWhat", chat.transcript).find(l => l.plain === "Write helper.txt")
             win.check(planWhat && planWhat.font.family !== Theme.mono, "a plan's step reads as prose, not code")
             win.check(win.findText("Plan", chat.transcript) !== null && win.findText("Plan set", chat.transcript) === null, "the plan tool is named 'Plan'")
