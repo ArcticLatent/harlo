@@ -3411,6 +3411,86 @@ ApplicationWindow {
         ScriptAction { script: { win.summary(); Qt.quit() } }
     }
 
+    // Screenshots of every Settings page for a design critique (not a test:
+    // SCENARIOS=settingsshots KEEP=1 scripts/click-tests.sh 1280 524): each
+    // page from its top, then a screen further down while there's more, then
+    // a few in the light theme.
+    property var setQueue: []
+    function setShotPage(id, part) {
+        const f = win.findName("settingsPage", settingsDialog.contentItem)
+        win.shotWindow("set-" + id + (part > 0 ? "-" + (part + 1) : ""))
+        if (f && part < 5 && f.contentY + f.height < f.contentHeight - 8) {
+            f.contentY = Math.min(f.contentHeight - f.height, f.contentY + f.height - 80)
+            win.setQueue.unshift(() => win.setShotPage(id, part + 1))
+        }
+    }
+    Timer {
+        id: setTimer
+        interval: 700
+        repeat: true
+        onTriggered: {
+            const step = win.setQueue.shift()
+            if (!step) { stop(); win.summary(); Qt.quit(); return }
+            step()
+        }
+    }
+    SequentialAnimation {
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "settingsshots"
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: {
+            Workspace.chooseThemeMode("dark")
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            win.height = 900
+            Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
+            const base = win.argValue("--cwd=").replace(/\/repo$/, "")
+            Workspace.addProject(base + "/webapp")
+            Workspace.addProject(base + "/api")
+            Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            const q = []
+            for (const pg of settingsDialog.pages) {
+                q.push(() => settingsDialog.openPage(pg.id))
+                q.push(() => {
+                    const f = win.findName("settingsPage", settingsDialog.contentItem)
+                    // (Opened after a page shot scrolled down.)
+                    win.check(!f || f.contentY === 0, pg.title + " opens at its top")
+                    win.setShotPage(pg.id, 0)
+                })
+            }
+            // Narrow: the search button opens the page list over the page.
+            q.push(() => {
+                const b = win.findName("settingsNavSearch", settingsDialog.contentItem)
+                win.check(settingsDialog.compact === (b !== null), "the nav's search button shows only when narrow")
+                if (b) win.clickItem(b, "search settings")
+            })
+            q.push(() => {
+                if (!settingsDialog.compact) return
+                const nav = win.findName("settingsNav", settingsDialog.contentItem)
+                win.check(settingsDialog.navOpen && nav && nav.width === 236 && win.findText("Workspace", settingsDialog.contentItem) !== null, "it opens with the pages' names")
+                win.shotWindow("set-nav-open")
+                win.clickItem(win.findName("settingsNav-git", settingsDialog.contentItem), "Git")
+            })
+            q.push(() => {
+                if (!settingsDialog.compact) return
+                win.check(!settingsDialog.navOpen && settingsDialog.page === "git", "picking a page closes it")
+            })
+            // States that say why: Harlo isn't signed in here.
+            q.push(() => settingsDialog.openPage("providers"))
+            q.push(() => {
+                const st = win.findName("providerStatus-harlo", settingsDialog.contentItem)
+                win.check(st && st.text !== "Error" && st.text !== "", "Providers says why Harlo isn't ready (" + (st ? st.text : "") + ")")
+                settingsDialog.openPage("general")
+            })
+            q.push(() => win.check(win.findName("defaultModelSignIn", settingsDialog.contentItem) !== null, "General's Model row says where to sign in"))
+            for (const id of ["general", "appearance", "providers"]) {
+                q.push(() => { Workspace.chooseThemeMode("light"); settingsDialog.openPage(id) })
+                q.push(() => { win.shotWindow("set-" + id + "-light"); Workspace.chooseThemeMode("dark") })
+            }
+            win.setQueue = q
+            setTimer.start() } }
+    }
+
     // Screenshots for a design critique (not a test: SCENARIOS=critiqueshots
     // KEEP=1 scripts/click-tests.sh 1280 524): a Claude session of prose
     // with headings and several prompts, its prompt list, a dozen helpers,

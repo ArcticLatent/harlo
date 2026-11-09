@@ -70,6 +70,12 @@ Popup {
     y: Math.round((parent.height - height) / 2)
     width: Math.min(1120, parent.width - 48)
     readonly property bool compact: width < 760
+    // Narrow: the page list is icons; its search button opens it whole,
+    // over the page, with names and the search field.
+    property bool navOpen: false
+    readonly property bool navWide: !compact || navOpen
+    onCompactChanged: navOpen = false
+    onClosed: navOpen = false
     height: Math.min(860, parent.height - 48)
     padding: 0
     modal: true
@@ -84,14 +90,76 @@ Popup {
     exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Math.round(Theme.motion * 0.5) } }
 
     // ---- building blocks --------------------------------------------------
+    // A description read at a glance: its first sentence, and "More" for
+    // the rest (how, exceptions, where it applies). `more` gives the rest
+    // outright; otherwise a long text splits after its first sentence.
+    function splitLead(t) {
+        t = String(t || "")
+        if (t.length <= 110) return [t, ""]
+        for (let i = 20; i < t.length - 2; i++) {
+            const c = t[i]
+            if ((c === "." || c === "?" || c === "!" || c === ")") && t[i + 1] === " " && /[A-Z(]/.test(t[i + 2])) {
+                if (c === ")" && t[i - 1] !== ".") continue
+                if (/(e\.g|i\.e|etc|vs)\.$/.test(t.slice(Math.max(0, i - 4), i + 1))) continue
+                return [t.slice(0, i + 1), t.slice(i + 2)]
+            }
+        }
+        return [t, ""]
+    }
+    function escapeHtml(t) { return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") }
+    component MoreText: Label {
+        id: moreText
+        property string full
+        property string more: ""
+        property bool open: false
+        readonly property var parts: more !== "" ? [full, more] : root.splitLead(full)
+        // (The words as shown, for tests and copying.)
+        readonly property string plain: open && parts[1] !== "" ? parts[0] + " " + parts[1] : parts[0]
+        textFormat: Text.StyledText
+        text: root.escapeHtml(plain) + (parts[1] === "" ? "" : "&nbsp;&nbsp;<a href=\"more\">" + (open ? "Less" : "More") + "</a>")
+        linkColor: Theme.primary
+        wrapMode: Text.Wrap
+        onLinkActivated: open = !open
+        HoverHandler { cursorShape: moreText.hoveredLink !== "" ? Qt.PointingHandCursor : Qt.ArrowCursor }
+    }
+    // A section's heading, its one-line lede (More for the rest), and its
+    // actions at the right of the heading ("Add …": every page adds the
+    // same way).
     component SectionHeader: ColumnLayout {
+        id: sectionHead
         property string title
         property string subtitle
+        property string more: ""
+        default property alias actions: actionRow.data
         Layout.fillWidth: true
         spacing: 3
         // (None: a page's first section, under the page's own title.)
-        Label { visible: parent.title !== ""; text: parent.title; color: Theme.text; font.pixelSize: Theme.px(16); font.weight: Font.DemiBold; font.letterSpacing: -0.1 }
-        Label { visible: parent.subtitle !== ""; text: parent.subtitle; color: Theme.textMuted; font.pixelSize: Theme.px(12.5); wrapMode: Text.Wrap; Layout.fillWidth: true }
+        GridLayout {
+            visible: sectionHead.title !== "" || actionRow.children.length > 0
+            Layout.fillWidth: true
+            // (Narrow: the actions go under the heading rather than squeeze it.)
+            columns: actionRow.implicitWidth > sectionHead.width * 0.55 ? 1 : 2
+            columnSpacing: 8
+            rowSpacing: 8
+            Label { Layout.fillWidth: true; visible: sectionHead.title !== ""; text: sectionHead.title; color: Theme.text; font.pixelSize: Theme.px(16); font.weight: Font.DemiBold; font.letterSpacing: -0.1; wrapMode: Text.Wrap }
+            Item { visible: sectionHead.title === ""; Layout.fillWidth: true }
+            Row { id: actionRow; spacing: 6; Layout.alignment: Qt.AlignVCenter }
+        }
+        MoreText { visible: sectionHead.subtitle !== ""; full: sectionHead.subtitle; more: sectionHead.more; color: Theme.textMuted; font.pixelSize: Theme.px(12.5); Layout.fillWidth: true }
+    }
+    // The one way a page adds something: at its section's heading.
+    component AddButton: FlatButton {
+        font.pixelSize: Theme.px(12.5)
+        padding: 4
+        horizontalPadding: 10
+    }
+    // A section with nothing in it yet: said inside its card.
+    component EmptyNote: Label {
+        Layout.fillWidth: true
+        Layout.margins: 16
+        color: Theme.textMuted
+        font.pixelSize: Theme.px(12.5)
+        wrapMode: Text.Wrap
     }
     component Rule: Rectangle { Layout.fillWidth: true; Layout.topMargin: 22; Layout.bottomMargin: 18; implicitHeight: 1; color: Theme.hairline }
     component Hint: Label { color: Theme.muted; font.pixelSize: Theme.px(12); wrapMode: Text.Wrap; Layout.fillWidth: true }
@@ -112,6 +180,7 @@ Popup {
         id: settingRow
         property string title
         property string detail
+        property string more: ""
         property color detailColor: Theme.muted
         property string icon: ""
         property bool divider: false
@@ -141,7 +210,7 @@ Popup {
             width: settingRow.textWidth
             spacing: 2
             Label { text: settingRow.title; color: Theme.text; font.pixelSize: Theme.px(13.5); font.weight: Font.Medium; Layout.fillWidth: true; wrapMode: Text.Wrap }
-            Label { visible: settingRow.detail !== ""; text: settingRow.detail; color: settingRow.detailColor === Theme.muted ? Theme.textMuted : settingRow.detailColor; font.pixelSize: Theme.px(12.5); Layout.fillWidth: true; wrapMode: Text.Wrap }
+            MoreText { visible: settingRow.detail !== ""; full: settingRow.detail; more: settingRow.more; color: settingRow.detailColor === Theme.muted ? Theme.textMuted : settingRow.detailColor; font.pixelSize: Theme.px(12.5); Layout.fillWidth: true }
         }
         Item {
             id: controlSlot
@@ -242,30 +311,69 @@ Popup {
                 anchors.margins: 1
                 spacing: 0
 
-                // Page list (icons only in a narrow window)
-                Rectangle {
+                // Page list (icons only in a narrow window, until opened)
+                Item {
                     Layout.fillHeight: true
                     Layout.preferredWidth: root.compact ? 58 : 236
+                    // (Opened, it lies over the page.)
+                    z: 3
+                // A shade under the opened list closes it.
+                Rectangle {
+                    visible: root.compact && root.navOpen
+                    x: parent.width
+                    width: card.width - parent.width
+                    height: parent.height
+                    color: Qt.rgba(0, 0, 0, 0.25)
+                    TapHandler { onTapped: root.navOpen = false }
+                }
+                Rectangle {
+                    objectName: "settingsNav"
+                    height: parent.height
+                    width: root.navWide ? 236 : parent.width
+                    Behavior on width { enabled: root.compact; NumberAnimation { duration: Math.round(Theme.motion * 0.6); easing.type: Easing.OutCubic } }
+                    clip: true
                     // A shade over the glass.
-                    color: Theme.glass ? Qt.rgba(Theme.chrome.r, Theme.chrome.g, Theme.chrome.b, 0.6) : Theme.chrome
+                    // (Opened over the page, it's solid.)
+                    color: Theme.glass && !root.navOpen ? Qt.rgba(Theme.chrome.r, Theme.chrome.g, Theme.chrome.b, 0.6) : Theme.chrome
                     radius: 13
                     topRightRadius: 0
                     bottomRightRadius: 0
                     Rectangle { anchors.right: parent.right; width: 1; height: parent.height; color: Theme.hairline }
                     ColumnLayout {
                         anchors.fill: parent
-                        anchors.margins: root.compact ? 8 : 14
-                        anchors.rightMargin: root.compact ? 9 : 15
+                        anchors.margins: root.navWide ? 14 : 8
+                        anchors.rightMargin: root.navWide ? 15 : 9
                         spacing: 2
+                        // Narrow: opens the list with its search field.
+                        ItemDelegate {
+                            id: navSearch
+                            objectName: "settingsNavSearch"
+                            visible: !root.navWide
+                            Layout.fillWidth: true
+                            Layout.topMargin: 6
+                            implicitHeight: 36
+                            leftPadding: 12
+                            onClicked: { root.navOpen = true; searchField.forceActiveFocus() }
+                            contentItem: Icon { name: "search"; color: navSearch.hovered ? Theme.foreground : Theme.textMuted; implicitWidth: 16; implicitHeight: 16 }
+                            background: Rectangle { radius: 9; color: navSearch.hovered ? Theme.rowHover : "transparent" }
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Search settings"
+                        }
                         AppTextField {
                             id: searchField
-                            visible: !root.compact
+                            visible: root.navWide
                             Layout.fillWidth: true
                             Layout.bottomMargin: 10
                             leftPadding: 32
                             placeholderText: "Search settings"
                             onTextChanged: root.query = text
-                            Keys.onEscapePressed: event => { if (text !== "") { text = ""; event.accepted = true } else event.accepted = false }
+                            Keys.onEscapePressed: event => {
+                                if (text !== "") { text = ""; event.accepted = true }
+                                else if (root.navOpen) { root.navOpen = false; event.accepted = true }
+                                else event.accepted = false
+                            }
+                            // (Enter: the first page found.)
+                            onAccepted: if (root.shownPages.length > 0) { root.page = root.shownPages[0].id; root.navOpen = false }
                             Icon { x: 10; anchors.verticalCenter: parent.verticalCenter; name: "search"; color: Theme.muted; implicitWidth: 15; implicitHeight: 15 }
                         }
                         Repeater {
@@ -278,13 +386,11 @@ Popup {
                                 Layout.fillWidth: true
                                 spacing: 2
                                 Label {
-                                    visible: !root.compact && groupBlock.modelData[1] !== ""
-                                    text: groupBlock.modelData[1].toUpperCase()
-                                    // (Set apart from the pages: the theme's accent, toned down.)
-                                    color: Theme.blend(Theme.textMuted, Theme.accent, 0.7)
-                                    font.pixelSize: Theme.px(11.5)
+                                    visible: root.navWide && groupBlock.modelData[1] !== ""
+                                    text: groupBlock.modelData[1]
+                                    color: Theme.textMuted
+                                    font.pixelSize: Theme.px(12)
                                     font.weight: Font.DemiBold
-                                    font.letterSpacing: Theme.px(11.5) * 0.07
                                     Layout.topMargin: 12
                                     Layout.bottomMargin: 4
                                     Layout.leftMargin: 10
@@ -299,16 +405,16 @@ Popup {
                                         readonly property bool current: root.page === modelData.id
                                         Layout.fillWidth: true
                                         implicitHeight: 36
-                                        leftPadding: root.compact ? 12 : 10
-                                        rightPadding: root.compact ? 0 : 8
-                                        Layout.topMargin: root.compact && index === 0 ? 8 : 0
-                                        ToolTip.visible: root.compact && hovered
+                                        leftPadding: root.navWide ? 10 : 12
+                                        rightPadding: root.navWide ? 8 : 0
+                                        Layout.topMargin: !root.navWide && index === 0 ? 8 : 0
+                                        ToolTip.visible: !root.navWide && hovered
                                         ToolTip.text: modelData.title
                                         contentItem: RowLayout {
                                             spacing: 10
                                             Icon { name: navItem.modelData.icon; color: navItem.current ? Theme.accent : Theme.textMuted; implicitWidth: 16; implicitHeight: 16 }
                                             Label {
-                                                visible: !root.compact
+                                                visible: root.navWide
                                                 Layout.fillWidth: true
                                                 text: navItem.modelData.title
                                                 color: navItem.current ? Theme.text : Theme.textMuted
@@ -318,13 +424,13 @@ Popup {
                                             }
                                         }
                                         background: Rectangle { radius: 9; color: navItem.current ? Theme.rowSelected : navItem.hovered ? Theme.rowHover : "transparent"; Behavior on color { ColorAnimation { duration: Theme.hoverMotion } } }
-                                        onClicked: root.page = modelData.id
+                                        onClicked: { root.page = modelData.id; root.navOpen = false }
                                     }
                                 }
                             }
                         }
                         Label {
-                            visible: root.shownPages.length === 0
+                            visible: root.navWide && root.shownPages.length === 0
                             text: "No settings match “" + root.query + "”."
                             color: Theme.muted
                             font.pixelSize: Theme.px(12)
@@ -335,6 +441,7 @@ Popup {
                         }
                         Item { Layout.fillHeight: true }
                     }
+                }
                 }
 
                 // Page
@@ -380,95 +487,104 @@ Popup {
     }
 
     // ---- pages ------------------------------------------------------------
+    // Every page starts at the same left edge; wide ones (Shortcuts, Usage)
+    // only reach further right.
+    function pageX(w) { return Math.max(28, Math.floor((w - 720) / 2)) }
+    function pageWidth(w, wide) { return Math.min(w - pageX(w) - 58, wide ? 940 : 720) }
+    component PageTitle: Label {
+        text: root.current.title
+        color: Theme.foreground
+        font.pixelSize: Theme.px(20)
+        font.bold: true
+        Layout.bottomMargin: 18
+    }
+
     Component {
         id: usagePage
-        ColumnLayout {
-            id: usageColumn
-            spacing: 0
-            SectionHeader {
-                Layout.leftMargin: 16
-                Layout.topMargin: 24
-                Layout.bottomMargin: 4
-                subtitle: "Your plans' limits, and totals across all Harlo and Claude sessions."
-            }
-            // Other machines: those connected, or whose limits were seen.
-            readonly property var limitHosts: {
-                const seen = (() => { try { return JSON.parse(Workspace.hostLimitsJson || "{}") } catch (e) { return {} } })()
-                const hosts = Remotes.revision >= 0 ? JSON.parse(Remotes.hostsJson()) : []
-                return hosts.filter(h => h.state === "connected" || seen[h.name] !== undefined).map(h => h.name)
-            }
-            PlanLimits {
-                Layout.fillWidth: true
-                Layout.leftMargin: 16
-                Layout.rightMargin: 16
-                Layout.topMargin: 8
-                Layout.bottomMargin: 8
-                title: usageColumn.limitHosts.length > 0 ? "Plan limits on this PC" : "Plan limits"
-            }
-            Repeater {
-                model: usageColumn.limitHosts
-                PlanLimits {
-                    required property string modelData
-                    host: modelData
-                    Layout.fillWidth: true
-                    Layout.leftMargin: 16
-                    Layout.rightMargin: 16
-                    Layout.topMargin: 8
-                    Layout.bottomMargin: 8
-                }
-            }
-            // Spending limits: per session and per day, in dollars.
-            ColumnLayout {
-                id: spendLimits
-                Layout.fillWidth: true
-                Layout.leftMargin: 16
-                Layout.rightMargin: 16
-                Layout.topMargin: 10
-                Layout.bottomMargin: 8
+        StatsView {
+            id: usageStats
+            color: "transparent"
+            columnX: root.pageX(width)
+            columnWidth: root.pageWidth(width, true)
+            header: ColumnLayout {
+                id: usageColumn
                 spacing: 0
-                readonly property var spend: Workspace.spendJson !== "" ? JSON.parse(Workspace.spendJson) : ({ limits: { session: 0, day: 0 }, today: 0 })
-                function amount(t) { const v = parseFloat(String(t).replace(/[$,\s]/g, "")); return isFinite(v) && v > 0 ? v : 0 }
-                function shown(v) { return v > 0 ? (v % 1 === 0 ? v.toFixed(0) : v.toFixed(2)) : "" }
-                function save() { Workspace.setSpendLimits(amount(sessionLimit.text), amount(dayLimit.text)) }
-                SectionHeader {
-                    title: "Spending limits"
-                    subtitle: "What Claude Code reports its sessions cost, checked at the end of each turn (Harlo's sessions report none: Settings → Providers → Harlo has a token budget per helper instead). Past a limit, harlo stops the run and holds the session's messages until you allow more. Empty: no limit. Today so far: $" + (spendLimits.spend.today || 0).toFixed(2) + " in harlo's sessions."
+                PageTitle { }
+                SectionHeader { subtitle: "Your plans' limits, and totals across all Harlo and Claude sessions." }
+                // Other machines: those connected, or whose limits were seen.
+                readonly property var limitHosts: {
+                    const seen = (() => { try { return JSON.parse(Workspace.hostLimitsJson || "{}") } catch (e) { return {} } })()
+                    const hosts = Remotes.revision >= 0 ? JSON.parse(Remotes.hostsJson()) : []
+                    return hosts.filter(h => h.state === "connected" || seen[h.name] !== undefined).map(h => h.name)
                 }
-                Group {
-                    SettingRow {
-                        title: "Per session"
-                        detail: "One session's cost so far."
-                        icon: "scales-3"
-                        AppTextField {
-                            id: sessionLimit
-                            objectName: "spendSession"
-                            implicitWidth: 110
-                            placeholderText: "no limit"
-                            text: spendLimits.shown(spendLimits.spend.limits.session)
-                            leftPadding: 22
-                            Label { x: 10; anchors.verticalCenter: parent.verticalCenter; text: "$"; color: Theme.muted; font.pixelSize: Theme.px(12) }
-                            onEditingFinished: spendLimits.save()
-                        }
-                    }
-                    SettingRow {
-                        divider: true
-                        title: "Per day"
-                        detail: "All of harlo's sessions together, since midnight."
-                        icon: "time"
-                        AppTextField {
-                            id: dayLimit
-                            objectName: "spendDay"
-                            implicitWidth: 110
-                            placeholderText: "no limit"
-                            text: spendLimits.shown(spendLimits.spend.limits.day)
-                            leftPadding: 22
-                            Label { x: 10; anchors.verticalCenter: parent.verticalCenter; text: "$"; color: Theme.muted; font.pixelSize: Theme.px(12) }
-                            onEditingFinished: spendLimits.save()
-                        }
+                PlanLimits {
+                    Layout.fillWidth: true
+                    Layout.topMargin: 14
+                    Layout.bottomMargin: 8
+                    title: usageColumn.limitHosts.length > 0 ? "Plan limits on this PC" : "Plan limits"
+                }
+                Repeater {
+                    model: usageColumn.limitHosts
+                    PlanLimits {
+                        required property string modelData
+                        host: modelData
+                        Layout.fillWidth: true
+                        Layout.topMargin: 8
+                        Layout.bottomMargin: 8
                     }
                 }
+                // Spending limits: per session and per day, in dollars.
+                ColumnLayout {
+                    id: spendLimits
+                    Layout.fillWidth: true
+                    Layout.topMargin: 6
+                    Layout.bottomMargin: 18
+                    spacing: 0
+                    readonly property var spend: Workspace.spendJson !== "" ? JSON.parse(Workspace.spendJson) : ({ limits: { session: 0, day: 0 }, today: 0 })
+                    function amount(t) { const v = parseFloat(String(t).replace(/[$,\s]/g, "")); return isFinite(v) && v > 0 ? v : 0 }
+                    function shown(v) { return v > 0 ? (v % 1 === 0 ? v.toFixed(0) : v.toFixed(2)) : "" }
+                    function save() { Workspace.setSpendLimits(amount(sessionLimit.text), amount(dayLimit.text)) }
+                    SectionHeader {
+                        title: "Spending limits"
+                        subtitle: "Today so far: $" + (spendLimits.spend.today || 0).toFixed(2) + " in harlo's sessions. Past a limit, harlo stops the run until you allow more."
+                        more: "Costs are what Claude Code reports, checked at the end of each turn. Harlo's sessions report none: Settings → Providers → Harlo has a token budget per helper instead. Empty: no limit."
+                    }
+                    Group {
+                        SettingRow {
+                            title: "Per session"
+                            detail: "One session's cost so far."
+                            icon: "scales-3"
+                            AppTextField {
+                                id: sessionLimit
+                                objectName: "spendSession"
+                                implicitWidth: 110
+                                placeholderText: "no limit"
+                                text: spendLimits.shown(spendLimits.spend.limits.session)
+                                leftPadding: 22
+                                Label { x: 10; anchors.verticalCenter: parent.verticalCenter; text: "$"; color: Theme.muted; font.pixelSize: Theme.px(12) }
+                                onEditingFinished: spendLimits.save()
+                            }
+                        }
+                        SettingRow {
+                            divider: true
+                            title: "Per day"
+                            detail: "All of harlo's sessions together, since midnight."
+                            icon: "time"
+                            AppTextField {
+                                id: dayLimit
+                                objectName: "spendDay"
+                                implicitWidth: 110
+                                placeholderText: "no limit"
+                                text: spendLimits.shown(spendLimits.spend.limits.day)
+                                leftPadding: 22
+                                Label { x: 10; anchors.verticalCenter: parent.verticalCenter; text: "$"; color: Theme.muted; font.pixelSize: Theme.px(12) }
+                                onEditingFinished: spendLimits.save()
+                            }
+                        }
+                    }
+                }
+                SectionHeader { title: "Activity"; Layout.bottomMargin: 6 }
             }
-            StatsView { Layout.fillWidth: true; Layout.fillHeight: true; color: "transparent" }
         }
     }
 
@@ -476,24 +592,21 @@ Popup {
         id: scrolledPage
         Flickable {
             id: pageFlick
+            objectName: "settingsPage"
             contentHeight: pageBody.implicitHeight + 64
             clip: true
+            // (Another page opens at its top, not where the last one was.)
+            Connections { target: root; function onPageChanged() { pageFlick.contentY = 0 } }
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar { }
             ColumnLayout {
                 id: pageBody
-                x: Math.max(28, (pageFlick.width - width) / 2)
+                x: root.pageX(pageFlick.width)
                 y: 26
                 // Room for the close button on the right; shortcuts use two columns.
-                width: Math.min(pageFlick.width - 56 - 30, root.page === "shortcuts" ? 940 : 720)
+                width: root.pageWidth(pageFlick.width, root.page === "shortcuts")
                 spacing: 0
-                Label {
-                    text: root.current.title
-                    color: Theme.foreground
-                    font.pixelSize: Theme.px(20)
-                    font.bold: true
-                    Layout.bottomMargin: 18
-                }
+                PageTitle { }
                 Loader {
                     Layout.fillWidth: true
                     sourceComponent: ({
@@ -543,10 +656,18 @@ Popup {
                     property string current: Workspace.setting("default_model_" + agent)
                     onAgentChanged: current = Workspace.setting("default_model_" + agent)
                     title: "Model"
-                    detail: prov ? "New " + prov.label + " sessions start with this one; the new-session page can still pick another."
-                                 + (ids.length === 0 ? " " + prov.label + " lists its models once it's signed in to a provider." : "")
-                                 : "Pick a provider first."
+                    detail: !prov ? "Pick a provider first."
+                          : ids.length === 0 ? prov.label + " lists its models once it's signed in."
+                          : "New " + prov.label + " sessions start with this one; the new-session page can still pick another."
                     icon: "sparkling"
+                    // (No models before sign-in: where to sign in.)
+                    FlatButton {
+                        objectName: "defaultModelSignIn"
+                        visible: modelRow.prov !== null && modelRow.ids.length === 0
+                        text: "Sign in on Providers"
+                        font.pixelSize: Theme.px(12.5)
+                        onClicked: root.page = "providers"
+                    }
                     ComboField {
                         objectName: "defaultModel"
                         visible: modelRow.ids.length > 0
@@ -576,6 +697,7 @@ Popup {
                 SettingRow {
                     divider: true
                     title: "Keep running when the window is closed"
+                    icon: "window"
                     detail: "Closing the window hides it to the tray, and your sessions keep running; quit from the tray menu" + (Keymap.seq("quit") !== "" ? " or with " + Keymap.seq("quit") : "") + ". Off, or without the tray icon, closing the window quits harlo."
                     AppSwitch {
                         checked: Workspace.setting("close_to_tray") !== "0"
@@ -980,8 +1102,8 @@ Popup {
             Group {
                 Repeater {
                     model: [
-                        { kind: "ui", title: "Interface font", detail: "Everything outside code and the terminal.", fixed: false },
-                        { kind: "mono", title: "Code font", detail: "Code blocks, diffs, file previews, the editor and the terminal.", fixed: true },
+                        { kind: "ui", title: "Interface font", detail: "Everything outside code and the terminal.", icon: "file-text", fixed: false },
+                        { kind: "mono", title: "Code font", detail: "Code blocks, diffs, file previews, the editor and the terminal.", icon: "code-box", fixed: true },
                     ]
                     ColumnLayout {
                         id: fontPick
@@ -1011,12 +1133,24 @@ Popup {
                             columns: root.compact ? 2 : 3
                             columnSpacing: 10
                             rowSpacing: 8
-                            ColumnLayout {
+                            // (As every row: its icon, its title and a line under it.)
+                            RowLayout {
                                 Layout.fillWidth: true
                                 Layout.columnSpan: root.compact ? 2 : 1
-                                spacing: 2
-                                Label { text: fontPick.modelData.title; color: Theme.text; font.pixelSize: Theme.px(13); font.weight: Font.Medium }
-                                Label { Layout.fillWidth: true; text: fontPick.modelData.detail; color: Theme.textMuted; font.pixelSize: Theme.px(12); wrapMode: Text.Wrap }
+                                spacing: 12
+                                Rectangle {
+                                    implicitWidth: 32
+                                    implicitHeight: 32
+                                    radius: 9
+                                    color: Theme.controlFill
+                                    Icon { anchors.centerIn: parent; name: fontPick.modelData.icon; color: Theme.textMuted; implicitWidth: 16; implicitHeight: 16 }
+                                }
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 2
+                                    Label { text: fontPick.modelData.title; color: Theme.text; font.pixelSize: Theme.px(13.5); font.weight: Font.Medium }
+                                    Label { Layout.fillWidth: true; text: fontPick.modelData.detail; color: Theme.textMuted; font.pixelSize: Theme.px(12.5); wrapMode: Text.Wrap }
+                                }
                             }
                             ComboField {
                                 objectName: "fontPick-" + fontPick.modelData.title
@@ -1157,11 +1291,11 @@ Popup {
                 save()
             }
             readonly property var eventRows: [
-                { name: "completion", title: "Agent completion", detail: "A run finishes." },
-                { name: "subagent", title: "Helper finished", detail: "A helper finishes." },
-                { name: "error", title: "Agent errors", detail: "A reply fails, the harness stops unexpectedly, or a helper fails." },
-                { name: "question", title: "Agent questions", detail: "The agent asks you something or wants a tool approved." },
-                { name: "limits", title: "Plan limits", detail: "A plan limit (Claude's, ChatGPT's) is used up, and when one you'd nearly or fully used resets, with a sound of its own.", fixed: true },
+                { name: "completion", title: "Agent completion", detail: "A run finishes.", icon: "checkbox-circle" },
+                { name: "subagent", title: "Helper finished", detail: "A helper finishes.", icon: "node-tree" },
+                { name: "error", title: "Agent errors", detail: "A reply fails, the harness stops unexpectedly, or a helper fails.", icon: "alert" },
+                { name: "question", title: "Agent questions", detail: "The agent asks you something or wants a tool approved.", icon: "question" },
+                { name: "limits", title: "Plan limits", detail: "A plan limit (Claude's, ChatGPT's) is used up, and when one you'd nearly or fully used resets, with a sound of its own.", icon: "speed", fixed: true },
             ]
             property string testNote: ""
 
@@ -1265,6 +1399,7 @@ Popup {
                         divider: index > 0
                         title: modelData.title
                         detail: modelData.detail
+                        icon: modelData.icon
                         AppSwitch {
                             objectName: "notifyEvent-" + evRow.modelData.name
                             checked: notify.cfg.events[evRow.modelData.name].on
@@ -1573,14 +1708,17 @@ Popup {
                 return day + " " + d.toLocaleTimeString(Qt.locale(), "HH:mm")
             }
 
-            SectionHeader { title: "Scheduled prompts"; subtitle: "Send a prompt on a schedule, e.g. every weekday morning. Each run starts a new session in the project; you get the usual notification when it finishes. Schedules run while harlo is running (Settings → General → Start harlo when you log in)." }
-            RowLayout {
-                Layout.fillWidth: true
-                Layout.topMargin: 12
-                Item { Layout.fillWidth: true }
-                DialogButton { text: "New schedule"; accent: true; onClicked: editor.openFor(null) }
+            SectionHeader {
+                title: "Scheduled prompts"
+                subtitle: "Send a prompt on a schedule, e.g. every weekday morning."
+                more: "Each run starts a new session in the project; you get the usual notification when it finishes. Schedules run while harlo is running (Settings → General → Start harlo when you log in)."
+                AddButton { objectName: "newSchedule"; text: "New schedule"; onClicked: editor.openFor(null) }
             }
-            Hint { Layout.topMargin: 10; visible: schedules.list.length === 0; text: "No schedules yet." }
+            Group {
+                visible: schedules.list.length === 0
+                Layout.topMargin: 12
+                EmptyNote { text: "No schedules yet." }
+            }
             Repeater {
                 model: schedules.list
                 Rectangle {
@@ -1822,7 +1960,8 @@ Popup {
             Group {
                 SettingRow {
                     title: "Put them on a Settled shelf"
-                    detail: "A helper goes on its project's Settled shelf (under its sessions in the sidebar) once it's done, and a worktree session when its branch's pull request is merged or closed (GitHub, GitLab), or after a week without activity. Working in one brings it back; right-click → Put back does too. Pinned sessions stay. Off: every session comes back."
+                    detail: "Finished helpers and merged worktree sessions move under their project's sessions, out of the way."
+                    more: "A helper goes on its project's Settled shelf (under its sessions in the sidebar) once it's done, and a worktree session when its branch's pull request is merged or closed (GitHub, GitLab), or after a week without activity. Working in one brings it back; right-click → Put back does too. Pinned sessions stay. Off: every session comes back."
                     icon: "archive-stack"
                     AppSwitch {
                         objectName: "settleSessions"
@@ -1869,7 +2008,8 @@ Popup {
             Group {
                 SettingRow {
                     title: "Undo a turn"
-                    detail: "Before each message, harlo keeps a snapshot of the project's files (in git, off your branches), so a turn can be undone: click Undo under the agent's reply (earlier turns: Undo from here, on the line before your next message when you point at it; on the phone, long-press the reply). Off: no snapshots, and no Undo. Snapshots older than a month are removed; turn it off for a repository with very large untracked files."
+                    detail: "Undo under the agent's reply puts the project's files back as they were before that turn."
+                    more: "Before each message, harlo keeps a snapshot of the project's files (in git, off your branches). Earlier turns: Undo from here, on the line before your next message when you point at it; on the phone, long-press the reply. Off: no snapshots, and no Undo. Snapshots older than a month are removed; turn it off for a repository with very large untracked files."
                     icon: "history"
                     AppSwitch {
                         objectName: "undoSnapshotsSwitch"
@@ -1966,10 +2106,6 @@ Popup {
                     }
                 }
             }
-            RowLayout {
-                Layout.topMargin: 10
-                FlatButton { objectName: "pairDeviceSettings"; text: "Pair a device…"; accent: Theme.primary; font.pixelSize: Theme.px(12); onClicked: root.pairDeviceRequested() }
-            }
             Rule { }
             SectionHeader { title: "From anywhere"; subtitle: "For phones away from home: mobile data, other Wi-Fi. Not needed if the phone has Tailscale (or another VPN) to this computer. Notifications arrive either way; these let the phone open sessions and send your answers back. Everything stays end-to-end encrypted." }
             Group {
@@ -2059,8 +2195,12 @@ Popup {
                 }
             }
             Rule { }
-            SectionHeader { title: "Paired devices"; subtitle: "Removing one disconnects it and it can't come back without pairing again." }
-            Hint { visible: devs.list.length === 0; Layout.topMargin: 8; text: "No phones paired yet." }
+            SectionHeader {
+                title: "Paired devices"
+                subtitle: "Removing one disconnects it and it can't come back without pairing again."
+                AddButton { objectName: "pairDeviceSettings"; text: "Pair a device…"; onClicked: root.pairDeviceRequested() }
+            }
+            Group { visible: devs.list.length === 0; EmptyNote { text: "No phones paired yet." } }
             Group {
                 visible: devs.list.length > 0
                 Repeater {
@@ -2344,6 +2484,7 @@ Popup {
                     FlatButton { text: "Save"; variant: "primary"; font.pixelSize: Theme.px(12); onClicked: Workspace.setProjectSetup(proj.p.id, setupArea.text) }
                     FlatButton { text: "Cancel"; outlined: false; font.pixelSize: Theme.px(12); onClicked: setupArea.text = proj.p.setup }
                 }
+                Rule { visible: proj.p !== null }
                 // Specs and the shared plan.
                 SectionHeader {
                     visible: proj.p !== null
@@ -2386,7 +2527,8 @@ Popup {
                         divider: true
                         visible: planRow.on
                         title: "Commit each finished step"
-                        detail: "When a step is done, harlo commits its changes on their own, with the step as the message, if they're provably the step's: not when a file it touched already had changes, the branch moved, or another session worked there meanwhile (then it says why and leaves them to you). A finished step can be reviewed by another agent. Off unless you turn it on (or the shared plan) here."
+                        detail: "When a step is done, harlo commits its changes with the step as the message."
+                        more: "Only if they're provably the step's: not when a file it touched already had changes, the branch moved, or another session worked there meanwhile (then it says why and leaves them to you). A finished step can be reviewed by another agent. Off unless you turn it on (or the shared plan) here."
                         icon: "git-commit"
                         AppSwitch {
                             objectName: "projectPlanCommits"
@@ -2632,13 +2774,10 @@ Popup {
                 Remotes.connectHost(name)
             }
             SectionHeader {
-                subtitle: "Work on other machines over SSH. Each one is an instance, with its own projects and sessions: switch to it from the instance menu at the top of the sidebar, then + Project adds its folders; its chats, terminal, git and files work there. harlo signs in with your SSH keys or agent. Each connected machine shows whether it has Claude Code, installs it for you, and signs Claude in there; harlo brings Harlo itself."
-            }
-            RowLayout {
-                Layout.fillWidth: true
-                Layout.topMargin: 12
-                Label { text: remotes.hosts.length === 1 ? "1 host" : remotes.hosts.length + " hosts"; color: Theme.muted; font.pixelSize: Theme.px(12); Layout.fillWidth: true }
-                FlatButton { objectName: "addRemoteHost"; text: "+ Add SSH connection"; font.pixelSize: Theme.px(12); accent: Theme.primary; visible: remotes.editing === null; onClicked: addHostDialog.open() }
+                title: "SSH connections"
+                subtitle: "Work on other machines over SSH, each with its own projects and sessions."
+                more: "Switch to one from the instance menu at the top of the sidebar, then + Project adds its folders; its chats, terminal, git and files work there. harlo signs in with your SSH keys or agent. Each connected machine shows whether it has Claude Code, installs it for you, and signs Claude in there; harlo brings Harlo itself."
+                AddButton { objectName: "addRemoteHost"; text: "Add SSH connection"; enabled: remotes.editing === null; onClicked: addHostDialog.open() }
             }
             // Add: from ~/.ssh/config, or typed (also the instance menu's).
             AddHostDialog { id: addHostDialog }
@@ -2672,7 +2811,7 @@ Popup {
                     }
                 }
             }
-            Hint { visible: remotes.hosts.length === 0 && remotes.editing === null; Layout.topMargin: 8; text: "No remote machines yet." }
+            Group { visible: remotes.hosts.length === 0 && remotes.editing === null; EmptyNote { text: "No remote machines yet." } }
             Group {
                 visible: remotes.hosts.length > 0
                 Repeater {
@@ -3081,50 +3220,26 @@ Popup {
             Connections { target: Accounts; function onRevisionChanged() { srv.check() } }
             Timer { interval: 3000; repeat: true; running: srv.visible; onTriggered: srv.check() }
             SectionHeader {
-                subtitle: "Models you run yourself or your company serves, for Harlo: they show in the model lists (under Local when they run on this computer or your network). Claude Code only uses Anthropic's models."
-            }
-            // The two ways to add one: set one up here, or connect to one.
-            Rectangle {
-                visible: srv.agents.length > 0
-                Layout.fillWidth: true
-                Layout.topMargin: 12
-                implicitHeight: addCol.implicitHeight + 32
-                radius: 12
-                color: Theme.accentSoft
-                border.color: Theme.blend(Theme.hairline, Theme.accent, 0.35)
-                ColumnLayout {
-                    id: addCol
-                    anchors.fill: parent
-                    anchors.margins: 16
-                    spacing: 6
-                    RowLayout {
-                        spacing: 10
-                        Icon { name: "server"; color: Theme.accent; implicitWidth: 18; implicitHeight: 18 }
-                        Label { text: "Run a model on this computer"; color: Theme.foreground; font.pixelSize: Theme.px(14); font.weight: Font.DemiBold }
-                    }
-                    Hint {
-                        text: "harlo installs an engine, downloads a model that fits your graphics card, starts it and adds it to your agents. Start and Stop it here or from the left bar."
-                    }
-                    RowLayout {
-                        Layout.topMargin: 6
-                        spacing: 8
-                        FlatButton {
-                            objectName: "setupModelServer"
-                            text: "Set up a local model…"
-                            variant: "primary"
-                            font.pixelSize: Theme.px(12.5)
-                            onClicked: setupServer.openOn("")
-                        }
-                        FlatButton {
-                            objectName: "addModelServer"
-                            text: "Connect to a running server…"
-                            font.pixelSize: Theme.px(12.5)
-                            onClicked: modelServerDialog.open()
-                            ToolTip.visible: hovered
-                            ToolTip.text: "One you run yourself or your company serves (Ollama, LM Studio, vLLM, a gateway…): its address, and harlo finds its models."
-                            ToolTip.delay: 400
-                        }
-                    }
+                title: "Your servers"
+                subtitle: "Models you run yourself or your company serves, for Harlo."
+                more: "They show in the model lists (under Local when they run on this computer or your network). Claude Code only uses Anthropic's models. harlo starts and stops the servers it set up; they stop when harlo quits. Tick an agent to add a server to its config, untick it to take it out."
+                AddButton {
+                    objectName: "setupModelServer"
+                    visible: srv.agents.length > 0
+                    text: "Set up a local model…"
+                    onClicked: setupServer.openOn("")
+                    ToolTip.visible: hovered
+                    ToolTip.text: "harlo installs an engine, downloads a model that fits your graphics card, starts it and adds it to your agents."
+                    ToolTip.delay: 400
+                }
+                AddButton {
+                    objectName: "addModelServer"
+                    visible: srv.agents.length > 0
+                    text: "Connect…"
+                    onClicked: modelServerDialog.open()
+                    ToolTip.visible: hovered
+                    ToolTip.text: "One you run yourself or your company serves (Ollama, LM Studio, vLLM, a gateway…): its address, and harlo finds its models."
+                    ToolTip.delay: 400
                 }
             }
             // Setting one up, in the background (the dialog can be hidden).
@@ -3137,24 +3252,7 @@ Popup {
                 Label { Layout.fillWidth: true; text: parent.job ? (ServerSetup.host !== "" ? ServerSetup.host + ": " : "") + parent.job.step : ""; color: Theme.muted; font.pixelSize: Theme.px(12); elide: Text.ElideRight }
                 FlatButton { text: "Show"; font.pixelSize: Theme.px(12); onClicked: setupServer.open() }
             }
-            Label {
-                visible: srv.list.length > 0
-                Layout.topMargin: 18
-                text: "YOUR SERVERS"
-                color: Theme.blend(Theme.textMuted, Theme.accent, 0.7)
-                font.pixelSize: Theme.px(11.5)
-                font.weight: Font.DemiBold
-                font.letterSpacing: Theme.px(11.5) * 0.07
-            }
-            Label {
-                visible: srv.agents.length === 0
-                Layout.topMargin: 12
-                Layout.fillWidth: true
-                wrapMode: Text.Wrap
-                text: "Model servers are for Harlo, which isn't installed."
-                color: Theme.muted
-                font.pixelSize: Theme.px(12.5)
-            }
+            Group { visible: srv.agents.length === 0; EmptyNote { text: "Model servers are for Harlo, which isn't installed." } }
             Group {
                 visible: srv.list.length > 0
                 Repeater {
@@ -3417,25 +3515,12 @@ Popup {
                     }
                 }
             }
-            Label {
+            Group {
                 visible: srv.agents.length > 0 && srv.list.length === 0
-                Layout.topMargin: 12
-                Layout.fillWidth: true
-                wrapMode: Text.Wrap
-                text: "No model servers yet."
-                color: Theme.muted
-                font.pixelSize: Theme.px(12.5)
+                EmptyNote { text: "No model servers yet. Set up a local model: harlo installs an engine, downloads a model that fits your graphics card and starts it. Start and Stop it here or from the left bar." }
             }
-            Hint { Layout.topMargin: 6; visible: srv.list.length > 0; text: "harlo starts and stops the servers it set up; they stop when harlo quits. Tick an agent to add a server to its config, untick it to take it out." }
-            Label {
-                visible: srv.engines.length > 0
-                Layout.topMargin: 18
-                text: "ENGINES ON THIS COMPUTER"
-                color: Theme.blend(Theme.textMuted, Theme.accent, 0.7)
-                font.pixelSize: Theme.px(11.5)
-                font.weight: Font.DemiBold
-                font.letterSpacing: Theme.px(11.5) * 0.07
-            }
+            Rule { visible: srv.engines.length > 0 }
+            SectionHeader { visible: srv.engines.length > 0; title: "Engines on this computer"; subtitle: "What runs the servers harlo set up here." }
             Group {
                 visible: srv.engines.length > 0
                 Repeater {
@@ -3524,14 +3609,8 @@ Popup {
                     }))
                     Layout.fillWidth: true
                     spacing: 0
-                    Label {
-                        Layout.topMargin: 18
-                        text: "ON " + hostBlock.host.toUpperCase()
-                        color: Theme.blend(Theme.textMuted, Theme.accent, 0.7)
-                        font.pixelSize: Theme.px(11.5)
-                        font.weight: Font.DemiBold
-                        font.letterSpacing: Theme.px(11.5) * 0.07
-                    }
+                    Rule { }
+                    SectionHeader { title: "On " + hostBlock.host }
                     RowLayout {
                         Layout.fillWidth: true
                         Layout.topMargin: 8
@@ -3835,7 +3914,8 @@ Popup {
             }
             // The agents' own files, to read.
             Flow {
-                visible: srv.agents.length > 0
+                // (Only when an agent has a file to show.)
+                visible: srv.agents.length > 0 && Accounts.revision >= 0 && srv.agents.some(a => Accounts.serversFile(a.id) !== "")
                 Layout.fillWidth: true
                 Layout.topMargin: 18
                 spacing: 4
@@ -4082,12 +4162,13 @@ Popup {
                                         objectName: "providerStatus-" + prov.modelData.id
                                         Layout.fillWidth: true
                                         elide: Text.ElideRight
-                                        color: Theme.muted
+                                        color: prov.modelData.enabled && prov.modelData.state === "error" ? Theme.warning : Theme.muted
                                         font.pixelSize: Theme.px(12.5)
+                                        // (An error says why, in its first line; the rest is under the row.)
                                         text: !prov.modelData.enabled ? "Disabled"
                                             : prov.modelData.state === "checking" ? "Checking…"
                                             : prov.modelData.state === "missing" ? "Not installed"
-                                            : prov.modelData.state === "error" ? "Error"
+                                            : prov.modelData.state === "error" ? (String(prov.modelData.error || "").trim().split("\n")[0] || "Didn't start")
                                             : "Available · " + prov.modelData.modelCount + (prov.modelData.modelCount === 1 ? " model" : " models")
                                     }
                                     AppSwitch {
@@ -4239,7 +4320,8 @@ Popup {
             Group {
                 SettingRow {
                     title: "Sandbox commands"
-                    detail: "Harlo's commands run with the system and your home folder read-only: they can change the project, /tmp and tool caches, and can't see SSH and GPG keys, credentials, sign-ins or browser profiles. Harlo's file tools keep to the same. A command that needs more asks you before it runs outside the sandbox. Needs bubblewrap (bwrap) on the machine the session runs on; MCP servers and harlo's tools aren't sandboxed. Applies to Harlo sessions started afterwards."
+                    detail: "Harlo's commands can change the project and nothing else, and can't see your keys or sign-ins."
+                    more: "The system and your home folder are read-only: commands can change the project, /tmp and tool caches, and can't see SSH and GPG keys, credentials, sign-ins or browser profiles. Harlo's file tools keep to the same. A command that needs more asks you before it runs outside the sandbox. Needs bubblewrap (bwrap) on the machine the session runs on; MCP servers and harlo's tools aren't sandboxed. Applies to Harlo sessions started afterwards."
                     icon: "shield-check"
                     AppSwitch {
                         id: harloSandboxSwitch
@@ -4281,7 +4363,8 @@ Popup {
                     property string saved: Workspace.setting("harlo_task_model")
                     readonly property var choices: harloModels.choices(saved)
                     title: "Its own helpers' model"
-                    detail: "What Harlo's own helpers (its task tool) run on when the task doesn't name a model. A smaller model often does searches and simple edits as well, for less. Applies to Harlo sessions started afterwards." + harloModels.none
+                    detail: "What Harlo's own helpers run on when the task doesn't name a model." + harloModels.none
+                    more: "Its own helpers are its task tool's. A smaller model often does searches and simple edits as well, for less. Applies to Harlo sessions started afterwards."
                     icon: "robot-2"
                     ComboField {
                         objectName: "harloTaskModel"
@@ -4300,7 +4383,8 @@ Popup {
                     property string saved: Workspace.setting("harlo_fallback")
                     readonly property var choices: harloModels.choices(saved)
                     title: "When the plan's limit is reached"
-                    detail: "Stop, or go on with another model when the model's plan says its usage limit is reached (or the server stays busy after its retries), and say so. Harlo tries the plan's model again after the limit resets. Applies to Harlo sessions started afterwards." + harloModels.none
+                    detail: "Stop, or go on with another model and say so." + harloModels.none
+                    more: "When the model's plan says its usage limit is reached, or the server stays busy after its retries. Harlo tries the plan's model again after the limit resets. Applies to Harlo sessions started afterwards."
                     icon: "refresh"
                     ComboField {
                         objectName: "harloFallback"
@@ -4320,7 +4404,8 @@ Popup {
                     // (A value set some other way is kept as a choice.)
                     readonly property var choices: ["", "500k", "1m", "2m", "5m", "10m"].concat(["", "500k", "1m", "2m", "5m", "10m"].indexOf(saved) >= 0 ? [] : [saved])
                     title: "Token budget per helper"
-                    detail: "The most a Harlo helper session (one another session starts) may use, in tokens sent and received, its own helpers' included; a helper's coding task often takes a few hundred thousand. Past it, it makes no more requests and its parent is told."
+                    detail: "The most a Harlo helper session may use, in tokens sent and received."
+                    more: "A helper session is one another session starts; its own helpers count too. A helper's coding task often takes a few hundred thousand. Past it, it makes no more requests and its parent is told."
                     icon: "scales-3"
                     ComboField {
                         objectName: "harloHelperBudget"
@@ -4339,7 +4424,8 @@ Popup {
                     divider: true
                     readonly property var info: Accounts.languageServers === "" ? ({}) : JSON.parse(Accounts.languageServers)
                     title: "Code intelligence"
-                    detail: "Harlo asks a language server where code is defined, used and called from, when a text search can't tell same-named things apart, for far fewer tokens on those questions. It uses the servers installed on this computer: install one for a language you work in, then start a new session."
+                    detail: "Harlo asks a language server where code is defined, used and called from."
+                    more: "For when a text search can't tell same-named things apart, for far fewer tokens on those questions. It uses the servers installed on this computer: install one for a language you work in, then start a new session."
                         + (codeIntel.info.state === "failed" ? "\n" + codeIntel.info.error : "")
                     icon: "code-box"
                     Component.onCompleted: Accounts.loadLanguageServers()

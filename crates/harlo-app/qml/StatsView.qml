@@ -14,6 +14,12 @@ Rectangle {
     property int days: 30
     property int projectId: -1
     property string modelMetric: "tokens"
+    // Shown above the filters, in the same scroll (Settings → Usage puts
+    // its title and limits there).
+    property Component header: null
+    // Where the column starts and how wide it gets (-1: centred).
+    property real columnX: -1
+    property real columnWidth: 980
 
     // Test hook.
     function scrollToEnd() { flick.contentY = Math.max(0, flick.contentHeight - flick.height) }
@@ -94,10 +100,12 @@ Rectangle {
         ColumnLayout {
             id: body
             readonly property int cols: width > 720 ? 3 : 2
-            x: Math.max(16, (flick.width - width) / 2)
-            y: 20
-            width: Math.min(flick.width - 32, 980)
+            x: root.columnX >= 0 ? root.columnX : Math.max(16, Math.round((flick.width - width) / 2))
+            y: root.header ? 26 : 20
+            width: root.columnX >= 0 ? Math.min(flick.width - root.columnX - 30, root.columnWidth) : Math.min(flick.width - 32, root.columnWidth)
             spacing: 10
+
+            Loader { active: !!root.header; visible: active; sourceComponent: root.header; Layout.fillWidth: true }
 
             // Filters
             RowLayout {
@@ -139,8 +147,17 @@ Rectangle {
                 Layout.topMargin: 20
             }
 
+            // (Nothing yet: one line, not a page of zeros.)
+            Label {
+                objectName: "statsEmpty"
+                visible: !!root.r && !(root.r.sessions > 0)
+                text: root.days > 0 ? "No sessions in the last " + root.days + " days" + (root.projectId >= 0 ? " in this project." : ".") : "No sessions yet."
+                color: Theme.textMuted
+                font.pixelSize: Theme.px(13)
+                Layout.topMargin: 14
+            }
             ColumnLayout {
-                visible: !!root.r
+                visible: !!root.r && root.r.sessions > 0
                 Layout.fillWidth: true
                 spacing: 10
                 readonly property var r: root.r || ({ tokens: {}, efficiency: {}, daily: [], models: [], tools: [] })

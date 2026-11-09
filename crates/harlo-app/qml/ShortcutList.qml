@@ -160,12 +160,11 @@ RowLayout {
         spacing: 2
         Layout.fillWidth: true
         Label {
-            text: section.data_.title.toUpperCase()
-            color: Theme.muted
-            font.pixelSize: Theme.px(11)
-            font.bold: true
-            font.letterSpacing: 0.8
-            Layout.bottomMargin: 4
+            text: section.data_.title
+            color: Theme.text
+            font.pixelSize: Theme.px(13.5)
+            font.weight: Font.DemiBold
+            Layout.bottomMargin: 6
         }
         Repeater {
             model: section.data_.rows

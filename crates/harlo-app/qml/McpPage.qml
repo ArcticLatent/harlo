@@ -168,17 +168,36 @@ ColumnLayout {
         }
     }
 
-    // ---- header -------------------------------------------------------------
+    // ---- header: the section's heading, with Add at its right (as every
+    // Settings page adds), its lede, then where the servers are for --------
     RowLayout {
+        visible: page.editing === null
         Layout.fillWidth: true
         spacing: 8
-        Label {
-            Layout.fillWidth: true
-            text: page.editing === null ? "Tool servers your agents can call. Open one to see its status and settings." : ""
-            color: Theme.muted
-            font.pixelSize: Theme.px(12)
-            wrapMode: Text.Wrap
+        Label { Layout.fillWidth: true; text: "Servers"; color: Theme.text; font.pixelSize: Theme.px(16); font.weight: Font.DemiBold; font.letterSpacing: -0.1 }
+        FlatButton {
+            objectName: "mcpAdd"
+            text: "Add server"
+            font.pixelSize: Theme.px(12.5)
+            padding: 4
+            horizontalPadding: 10
+            onClicked: page.openNew()
         }
+    }
+    Label {
+        visible: page.editing === null
+        Layout.fillWidth: true
+        Layout.topMargin: 3
+        text: "Tool servers your agents can call, a local command or a remote URL. Open one to see its status and settings."
+        color: Theme.textMuted
+        font.pixelSize: Theme.px(12.5)
+        wrapMode: Text.Wrap
+    }
+    RowLayout {
+        Layout.fillWidth: true
+        Layout.topMargin: page.editing === null ? 12 : 0
+        spacing: 8
+        Label { text: "For"; color: Theme.muted; font.pixelSize: Theme.px(12.5) }
         ComboField {
             objectName: "mcpScope"
             implicitWidth: 220
@@ -196,6 +215,7 @@ ColumnLayout {
             ToolTip.visible: hovered
             ToolTip.text: "Test the servers again"
         }
+        Item { Layout.fillWidth: true }
     }
     Hint_ {
         Layout.topMargin: 6
@@ -209,37 +229,12 @@ ColumnLayout {
 
     // ---- grid ----------------------------------------------------------------
     GridLayout {
-        visible: page.editing === null
+        visible: page.editing === null && page.listing.servers.length > 0
         Layout.fillWidth: true
         Layout.topMargin: 14
         columns: page.compact ? 1 : 2
         columnSpacing: 12
         rowSpacing: 12
-        // Add
-        Rectangle {
-            objectName: "mcpAdd"
-            Layout.fillWidth: true
-            Layout.preferredWidth: 1
-            implicitHeight: 96
-            radius: 10
-            color: addHover.hovered ? Theme.hover : "transparent"
-            border.color: Theme.border
-            border.width: 1
-            HoverHandler { id: addHover; cursorShape: Qt.PointingHandCursor }
-            TapHandler { onTapped: page.openNew() }
-            Column {
-                anchors.centerIn: parent
-                spacing: 6
-                Rectangle {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    width: 30; height: 30; radius: 8
-                    color: Theme.subtle
-                    Icon { anchors.centerIn: parent; name: "add"; color: Theme.foreground; implicitWidth: 16; implicitHeight: 16 }
-                }
-                Label { anchors.horizontalCenter: parent.horizontalCenter; text: "Add MCP server"; color: Theme.foreground; font.pixelSize: Theme.px(13) }
-                Label { anchors.horizontalCenter: parent.horizontalCenter; text: "Local command or remote URL"; color: Theme.muted; font.pixelSize: Theme.px(11.5) }
-            }
-        }
         Repeater {
             model: page.listing.servers
             Rectangle {
@@ -306,7 +301,17 @@ ColumnLayout {
             }
         }
     }
-    Hint_ { visible: page.editing === null && page.listing.servers.length === 0; Layout.topMargin: 10; text: "No MCP servers here yet." }
+    // (None yet: said inside a card, as the other pages' empty sections.)
+    Rectangle {
+        visible: page.editing === null && page.listing.servers.length === 0
+        Layout.fillWidth: true
+        Layout.topMargin: 12
+        implicitHeight: emptyLabel.implicitHeight + 32
+        radius: 12
+        color: Theme.raised
+        border.color: Theme.hairline
+        Label { id: emptyLabel; x: 16; y: 16; width: parent.width - 32; text: "No MCP servers here yet."; color: Theme.textMuted; font.pixelSize: Theme.px(12.5); wrapMode: Text.Wrap }
+    }
 
     // ---- one server ----------------------------------------------------------
     ColumnLayout {
