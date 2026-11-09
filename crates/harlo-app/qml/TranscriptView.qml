@@ -283,10 +283,11 @@ Item {
     }
     // A tool's name, the same for every agent: "bash" and "Bash" both
     // "Bash", "web_search" "Web search" (an MCP tool's as Theme says).
-    // The shared plan's tools, by what they do.
-    readonly property var planTools: ({ plan_set: "Plan", plan_read: "Read the plan", plan_start: "Start a step", plan_done: "Finish a step" })
+    // The shared plan's tools and the specs', by what they do.
+    readonly property var planTools: ({ plan_set: "Plan", plan_read: "Read the plan", plan_start: "Start a step", plan_done: "Finish a step",
+                                        spec_graph: "Look at the specs", spec_list: "List the specs", spec_search: "Search the specs", spec_read: "Read a spec", spec_validate: "Check the specs" })
     function toolName(t) {
-        const p = /^(?:mcp__harlo__|harlo_)?(plan_[a-z]+)$/.exec(t || "")
+        const p = /^(?:mcp__harlo__|harlo_)?((?:plan|spec)_[a-z]+)$/.exec(t || "")
         if (p && planTools[p[1]]) return planTools[p[1]]
         const l = Theme.toolLabel(t)
         return /^[a-z][a-z_]*$/.test(l) ? (l.charAt(0).toUpperCase() + l.slice(1)).replace(/_/g, " ") : l

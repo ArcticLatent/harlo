@@ -182,35 +182,53 @@ public enum PlanEdit: Sendable {
     }
 }
 
-/// A spec of the session's repository (SPEC.md and the like).
+/// A spec of the session's repository (SPEC.md and the like), where it
+/// sits in their tree.
 public struct Spec: Equatable, Sendable, Identifiable {
     /// From the repository's root.
     public var path: String
     public var title: String
     public var summary: String
+    /// Its type ("product", "module", …; "" when it doesn't say).
+    public var kind: String
+    /// Its status (draft, active, stale, done, deprecated; "" when it
+    /// doesn't say).
+    public var status: String
+    /// How deep in the tree: under its parent.
+    public var depth: Int
     public var id: String { path }
 
-    public init(path: String, title: String, summary: String = "") {
+    public init(path: String, title: String, summary: String = "", kind: String = "", status: String = "", depth: Int = 0) {
         self.path = path
         self.title = title
         self.summary = summary
+        self.kind = kind
+        self.status = status
+        self.depth = depth
     }
 }
 
-/// The specs of a session's repository.
+/// The specs of a session's repository, in tree order.
 public struct Specs: Equatable, Sendable {
     /// Specs are on for its project.
     public var enabled: Bool
     public var specs: [Spec]
+    /// What doesn't hold in their links ("web/SPEC.md: its parent `x`
+    /// isn't a spec").
+    public var problems: [String]
 
     public init(_ v: JSON) {
         enabled = v["enabled"].bool ?? false
-        specs = (v["specs"].array ?? []).map { Spec(path: $0["path"].text, title: $0["title"].text, summary: $0["summary"].text) }
+        specs = (v["specs"].array ?? []).map {
+            Spec(path: $0["path"].text, title: $0["title"].text, summary: $0["summary"].text, kind: $0["type"].text, status: $0["status"].text, depth: $0["depth"].int.map(Int.init) ?? 0)
+        }
+        problems = (v["problems"].array ?? []).map(\.text)
     }
 
-    public init(specs: [Spec] = [], enabled: Bool = true) {
+    public init(specs: [Spec] = [], enabled: Bool = true, problems: [String] = []) {
         self.enabled = enabled
         self.specs = specs
+        self.problems = problems
     }
 }
 

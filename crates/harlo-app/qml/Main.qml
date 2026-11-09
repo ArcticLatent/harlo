@@ -6927,6 +6927,116 @@ ApplicationWindow {
             win.summary(); Qt.quit() } }
     }
 
+    // Specs with a Harlo session: on for its project, the spec tools and
+    // what they're for reach harlo-agent; it looks at the specs' graph,
+    // searches and reads them, finds a link to a spec that isn't there and
+    // fixes it with its file tools; the Specs panel shows the tree, the
+    // stale one and the problem until it's fixed; with specs off they're
+    // gone from its next request.
+    property int specProject: -1
+    property int specDone: 0
+    function doneCount() { return win.chatText().split("Done:").length - 1 }
+    function sendSpec(text) { win.specDone = win.doneCount(); win.sendByKeys(text) }
+    function specAnswered() { return win.doneCount() > win.specDone && chat.session.status === "idle" }
+    // What the last tool said, as the model got it.
+    function lastToolResult() {
+        const reqs = win.modelRequests()
+        const msgs = (reqs[reqs.length - 1] || {}).messages || []
+        const tools = msgs.filter(m => m.role === "tool")
+        const last = tools[tools.length - 1]
+        return last ? (typeof last.content === "string" ? last.content : JSON.stringify(last.content)) : ""
+    }
+    SequentialAnimation {
+        id: harloSpecSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlospecs"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            win.specProject = JSON.parse(Workspace.projectsJson())[0].id
+            Workspace.setSetting("specs_" + win.specProject, "1")
+            win.harloKey = Workspace.newSession(win.specProject, "harlo")
+            Workspace.setApprovalMode(win.harloKey, "yolo") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloSpecSteps, () => chat.session.modelName !== "", 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: win.sendSpec("show the spec graph") }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloSpecSteps, () => win.specAnswered(), 15000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const first = win.modelRequests()[0] || {}
+            const names = (first.tools || []).map(t => t.function.name)
+            win.check(["spec_graph", "spec_search", "spec_read", "spec_validate"].every(n => names.indexOf(n) >= 0), "specs on: the spec tools reach Harlo (" + names.filter(n => n.indexOf("spec") >= 0).join(", ") + ")")
+            const said = JSON.stringify((first.messages || []).filter(m => m.role === "system"))
+            win.check(said.indexOf("This project keeps specs") >= 0 && said.indexOf("needn't read specs") >= 0, "and what they're for, in its instructions: only the spec that governs the work")
+            const t = win.lastToolResult()
+            win.check(t.indexOf("- Notes app (product) SPEC.md: Keeps short notes") >= 0 && t.indexOf("\n  - Sidebar (module) src/SPEC.md") >= 0 && t.indexOf("  - Store (module, stale) store/SPEC.md") >= 0 && t.indexOf("depends-on: store") >= 0,
+                "spec_graph answers with the tree, types, statuses and links (" + t.slice(0, 300) + ")")
+            win.check(win.findText("Look at the specs", chat.transcript) !== null, "its card says what it did")
+            win.sendSpec("search the specs for rebuilt") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloSpecSteps, () => win.specAnswered(), 15000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const t = win.lastToolResult()
+            win.check(t.indexOf("src/SPEC.md:11 (Decisions): Rows are rebuilt on every change.") >= 0, "spec_search finds the line, with its spec and section (" + t + ")")
+            win.sendSpec("read the spec of src") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloSpecSteps, () => win.specAnswered(), 15000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const t = win.lastToolResult()
+            win.check(t.indexOf("[Sidebar src/SPEC.md · under: Notes app (SPEC.md) · depends-on: store]") === 0 && t.indexOf("newest first") >= 0, "spec_read gives where it sits, then its text (" + t.slice(0, 160) + ")")
+            win.sendSpec("validate the specs") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloSpecSteps, () => win.specAnswered(), 15000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const t = win.lastToolResult()
+            win.check(t.indexOf("src/SPEC.md: depends-on `sync` isn't a spec") >= 0, "spec_validate finds the link to a spec that isn't there (" + t + ")")
+            win.shotWindow("clicks-harlo-specs")
+            windowSettings.rightMode = "specs" } }
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: {
+            const panel = win.findName("specsProblems")
+            win.check(panel && panel.visible && win.findContaining("depends-on `sync` isn't a spec", panel) !== null, "the Specs panel shows the problem")
+            const status = win.findAllNames("specStatus", panel.parent).map(l => l.text)
+            win.check(JSON.stringify(status) === JSON.stringify(["stale"]), "and the stale spec (" + JSON.stringify(status) + ")")
+            const titles = ["Notes app", "Sidebar", "Store"].map(t => win.findText(t, panel.parent))
+            win.check(titles.every(t => t !== null) && titles[1].mapToItem(null, 0, 0).x > titles[0].mapToItem(null, 0, 0).x, "the tree: the parts under the product")
+            win.shotWindow("clicks-harlo-specs-panel")
+            win.sendSpec("fix the spec link") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloSpecSteps, () => win.specAnswered(), 15000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const spec = TestInput.readFile(win.argValue("--cwd=") + "/src/SPEC.md") || ""
+            win.check(spec.indexOf("depends-on: [store]\n") >= 0, "it fixes the link with its file tools")
+            win.clickItem(win.findName("specsRefresh"), "refresh the specs") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const left = win.findName("specsProblems")
+            win.check(!left || !left.visible, "and the problem goes")
+            windowSettings.rightMode = ""
+            // Off: gone from the next request.
+            Workspace.setSetting("specs_" + win.specProject, "0")
+            win.specRequests = win.modelRequests().length
+            win.sendSpec("show the spec graph") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloSpecSteps, () => win.specAnswered(), 15000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const next = win.modelRequests()[win.specRequests] || {}
+            const names = (next.tools || []).map(t => t.function.name)
+            win.check(next.tools && names.every(n => n.indexOf("spec_") !== 0), "specs off: no spec tools in its next request (" + names.join(", ") + ")")
+            win.check(JSON.stringify((next.messages || []).filter(m => m.role === "system")).indexOf("This project keeps specs") < 0, "nor their instructions")
+            win.summary(); Qt.quit() } }
+    }
+    property int specRequests: 0
+
     // A split: Harlo offers a helper in a worktree, Start helpers starts it,
     // it writes a file and reports, and Harlo brings its work over
     // (bring_over) to the project as an uncommitted change.

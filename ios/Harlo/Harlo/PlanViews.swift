@@ -174,7 +174,17 @@ struct PlanSheet: View {
                         HStack(spacing: 12) {
                             Image(systemName: "doc.text").foregroundStyle(Color(p.primary))
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(spec.title.isEmpty ? spec.path : spec.title).font(.system(size: 15.5, weight: .medium))
+                                HStack(spacing: 6) {
+                                    Text(spec.title.isEmpty ? spec.path : spec.title).font(.system(size: 15.5, weight: .medium))
+                                    // Its status, when it isn't simply in force; its type.
+                                    if !spec.status.isEmpty && spec.status != "active" {
+                                        Text(spec.status).font(.system(size: 12)).foregroundStyle(Color(spec.status == "stale" ? p.warning : p.faint))
+                                            .strikethrough(spec.status == "deprecated")
+                                    }
+                                    if !spec.kind.isEmpty {
+                                        Text(spec.kind).font(.system(size: 12)).foregroundStyle(Color(p.faint))
+                                    }
+                                }
                                 if !spec.summary.isEmpty {
                                     Text(spec.summary).font(.system(size: 13)).foregroundStyle(Color(p.muted)).lineLimit(2)
                                 }
@@ -183,14 +193,23 @@ struct PlanSheet: View {
                             Spacer(minLength: 0)
                             Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Color(p.muted))
                         }
+                        // (Under its parent.)
+                        .padding(.leading, CGFloat(min(spec.depth, 4)) * 14)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
+                if !s.problems.isEmpty {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(s.problems.count == 1 ? "1 problem in the specs' links" : "\(s.problems.count) problems in the specs' links")
+                            .font(.system(size: 13, weight: .medium)).foregroundStyle(Color(p.warning))
+                        ForEach(s.problems.prefix(4), id: \.self) { Text($0).font(.system(size: 12)).foregroundStyle(Color(p.muted)) }
+                    }
+                }
             } header: {
                 Text("Specs")
             } footer: {
-                Text(s.enabled ? "The agent reads these before it changes what they describe." : "The repository's specs. harlo's Settings → Projects has the agent read them.")
+                Text(s.enabled ? "The agent looks up the spec that governs its work and keeps it true." : "The repository's specs. harlo's Settings → Projects has the agent read them.")
             }
         }
     }

@@ -446,6 +446,10 @@ final class ModelPartsTests: XCTestCase {
         XCTAssertEqual(ToolName.symbol("bring_over"), "person.2")
         XCTAssertEqual(ToolName.words("mcp__harlo__plan_done", running: false), "Finish a step")
         XCTAssertEqual(ToolName.words("plan_set", running: false), "Plan")
+        // The specs' tools, by Harlo's names and Claude's.
+        XCTAssertEqual(ToolName.words("spec_read", running: false), "Read a spec")
+        XCTAssertEqual(ToolName.words("mcp__harlo__spec_graph", running: false), "Look at the specs")
+        XCTAssertEqual(ToolName.symbol("spec_search"), "doc.text.magnifyingglass")
         // An MCP server's.
         XCTAssertEqual(ToolName.words("mcp__context-mode__ctx_execute", running: false), "context-mode ctx execute")
         XCTAssertEqual(ToolName.symbol("mcp__context-mode__ctx_execute"), "puzzlepiece.extension")
@@ -975,6 +979,14 @@ final class PlanTests: XCTestCase {
 
     func testSpecsAndThePlanEvent() {
         let specs = Specs(["enabled": true, "specs": [["path": "SPEC.md", "title": "harlo", "summary": "s"]]])
+        // The tree: depth, type, status; what's wrong in the links.
+        let tree = Specs(["enabled": true, "specs": [["path": "SPEC.md", "title": "harlo", "type": "product", "depth": 0],
+                                                     ["path": "core/SPEC.md", "title": "core", "status": "stale", "depth": 1]],
+                          "problems": ["core/SPEC.md: depends-on `x` isn't a spec"]])
+        XCTAssertEqual(tree.specs.map(\.depth), [0, 1])
+        XCTAssertEqual(tree.specs[0].kind, "product")
+        XCTAssertEqual(tree.specs[1].status, "stale")
+        XCTAssertEqual(tree.problems, ["core/SPEC.md: depends-on `x` isn't a spec"])
         XCTAssertEqual(specs.specs.first?.path, "SPEC.md")
         if case .plan(let key)? = Event(["ev": "plan", "key": "live:1"]) { XCTAssertEqual(key, "live:1") } else { XCTFail("a plan event") }
     }

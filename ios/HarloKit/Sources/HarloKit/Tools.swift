@@ -26,6 +26,12 @@ public enum ToolName {
         "plan_set": "Plan", "plan_read": "Read the plan", "plan_start": "Start a step", "plan_done": "Finish a step",
     ]
 
+    /// The project's specs' tools.
+    static let specs: [String: String] = [
+        "spec_graph": "Look at the specs", "spec_list": "List the specs", "spec_search": "Search the specs", "spec_read": "Read a spec",
+        "spec_validate": "Check the specs",
+    ]
+
     /// A tool's name without harlo's prefix (`mcp__harlo__x`, `harlo_x`;
     /// Harlo calls them by their own names).
     static func harloTool(_ name: String) -> String {
@@ -49,7 +55,7 @@ public enum ToolName {
     /// "context-mode ctx execute", "harlo: start a session".
     public static func words(_ tool: String, running: Bool) -> String {
         let h = harloTool(tool)
-        if let said = plan[h] ?? harlo[h] { return said }
+        if let said = plan[h] ?? specs[h] ?? harlo[h] { return said }
         if let m = mcp(tool) { return m.server + " " + m.tool.replacingOccurrences(of: "_", with: " ") }
         let pick = { (now: String, done: String) in running ? now : done }
         switch tool.lowercased() {
@@ -86,6 +92,7 @@ public enum ToolName {
     public static func symbol(_ tool: String) -> String {
         let h = harloTool(tool)
         if plan[h] != nil { return "checklist" }
+        if specs[h] != nil { return "doc.text.magnifyingglass" }
         if harlo[h] != nil { return "person.2" }
         if mcp(tool) != nil { return "puzzlepiece.extension" }
         switch tool.lowercased() {

@@ -160,8 +160,8 @@ extension HarloModel {
     }
 
     nonisolated static let sampleSpecs = Specs(specs: [
-        Spec(path: "SPEC.md", title: "harlo", summary: "What harlo is and how its parts fit."),
-        Spec(path: "crates/harlo-core/SPEC.md", title: "harlo-core", summary: "Sessions, transcripts and the sidebar."),
+        Spec(path: "SPEC.md", title: "harlo", summary: "What harlo is and how its parts fit.", kind: "product"),
+        Spec(path: "crates/harlo-core/SPEC.md", title: "harlo-core", summary: "Sessions, transcripts and the sidebar.", kind: "module", depth: 1),
     ])
 
     nonisolated static func samplePlan() -> Plan {

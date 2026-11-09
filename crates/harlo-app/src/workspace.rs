@@ -2775,12 +2775,18 @@ impl Workspace {
             .unwrap_or(-1);
         let read = |cwd: &Path| {
             let root = harlo_core::specs::root_of(cwd);
-            let specs: Vec<serde_json::Value> = harlo_core::specs::find(&root).into_iter().map(|s| json!({ "path": s.path, "title": s.title, "summary": s.summary })).collect();
-            json!({ "root": root.to_string_lossy(), "specs": specs })
+            let g = harlo_core::specs::graph(&root);
+            let specs: Vec<serde_json::Value> = g
+                .specs
+                .iter()
+                .zip(&g.depths)
+                .map(|(s, depth)| json!({ "path": s.path, "id": s.id, "title": s.title, "summary": s.summary, "type": s.kind, "status": s.status, "depth": depth, "links": s.links.len() }))
+                .collect();
+            json!({ "root": root.to_string_lossy(), "specs": specs, "problems": g.problems })
         };
         if !harlo_core::remote::is_remote(&cwd) {
             let found = read(&cwd);
-            return QString::from(&json!({ "root": found["root"], "project": project, "enabled": enabled, "specs": found["specs"] }).to_string());
+            return QString::from(&json!({ "root": found["root"], "project": project, "enabled": enabled, "specs": found["specs"], "problems": found["problems"] }).to_string());
         }
         // Another machine's: what was read of them, read again in the
         // background (specsReady says when).
@@ -2805,6 +2811,7 @@ impl Workspace {
                 "project": project,
                 "enabled": enabled,
                 "specs": cached.as_ref().map_or(json!([]), |c| c["specs"].clone()),
+                "problems": cached.as_ref().map_or(json!([]), |c| c["problems"].clone()),
                 "loading": cached.is_none(),
                 "host": host,
             })
