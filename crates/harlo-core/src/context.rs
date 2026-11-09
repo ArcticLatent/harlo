@@ -51,6 +51,26 @@ fn first_text(content: &Value) -> String {
     line.chars().take(160).collect()
 }
 
+/// What an assistant message said (its text's first line) or else did
+/// (its first tool call and what on: "bash: ls", "and 2 more"), else
+/// "Thought".
+fn reply_label(content: &Value) -> String {
+    let text = first_text(content);
+    let text = text.trim_start_matches(['#', '>', '-', '*', ' ']).trim();
+    if !text.is_empty() {
+        return text.to_owned();
+    }
+    let calls: Vec<&Value> = content.as_array().into_iter().flatten().filter(|b| b["type"] == "toolCall").collect();
+    if let Some(first) = calls.first() {
+        let name = first["name"].as_str().unwrap_or("tool");
+        let target = crate::actions::target(crate::actions::kind(name), &first["arguments"]);
+        let target: String = target.lines().next().unwrap_or("").chars().take(120).collect();
+        let more = calls.len() - 1;
+        return format!("{name}{}{}", if target.is_empty() { String::new() } else { format!(": {target}") }, if more > 0 { format!(" and {more} more") } else { String::new() });
+    }
+    if content.as_array().into_iter().flatten().any(|b| b["type"] == "thinking") { "Thought".to_owned() } else { parts_summary(content) }
+}
+
 /// "reasoning + text + bash": what an assistant message did, in order.
 fn parts_summary(content: &Value) -> String {
     let mut parts: Vec<String> = Vec::new();
@@ -111,7 +131,7 @@ pub fn report(messages: &[Value], live: Option<(u64, u64, f64)>) -> Value {
                 }
                 rows.push(json!({
                     "kind": "assistant",
-                    "label": parts_summary(&m["content"]),
+                    "label": reply_label(&m["content"]),
                     "input": usage.map(|u| u.input),
                     "output": usage.map(|u| u.output),
                     "ts": ts,
@@ -263,7 +283,7 @@ mod tests {
         let rows = r["rows"].as_array().unwrap();
         // Newest first: idle, the final text, the tool turn, the prompt.
         let labels: Vec<&str> = rows.iter().map(|r| r["label"].as_str().unwrap()).collect();
-        assert_eq!(labels, ["idle", "text", "reasoning + bash", "Install Unreal"]);
+        assert_eq!(labels, ["idle", "Done.", "bash: ls", "Install Unreal"]);
         assert_eq!(r["model"], "gpt-6.1-sol");
 
         let live = report(&messages, Some((5000, 272_000, 0.5)));

@@ -56,7 +56,7 @@ fn ask_result(output: &str) -> String {
     let mut said: Vec<String> = Vec::new();
     if let Some(rest) = output.strip_prefix("The user answered:") {
         said = rest.lines().filter(|l| l.starts_with("  ")).map(|l| l.trim().replace("(in their words) ", "")).filter(|a| a != "(nothing picked)").collect();
-    } else if output.contains("answered your questions") {
+    } else if output.contains("answered") && output.contains("\"=\"") {
         // "Q"="A" pairs: the answer is the quoted text after each "=".
         let mut rest = output;
         while let Some(at) = rest.find("\"=\"") {
@@ -195,6 +195,7 @@ mod tests {
         assert_eq!(facts("ask", &none, "The user answered:\n- Which colour?\n  Red\n- Which parts?\n  (in their words) only the api", false).0, "Red; only the api");
         assert_eq!(facts("AskUserQuestion", &none, "User has answered your questions: \"Which colour?\"=\"Blue\", \"Size?\"=\"Large\". You can now continue with the user's answers in mind.", false).0, "Blue; Large");
         assert_eq!(facts("ask", &none, "The user dismissed the questions without answering.", false).0, "dismissed");
+        assert_eq!(facts("AskUserQuestion", &none, "Your questions have been answered: \"Which database?\"=\"SQLite\".", false).0, "SQLite");
         let long = format!("The user answered:\n- Q\n  {}", "word ".repeat(20));
         assert!(facts("ask", &none, &long, false).0.ends_with('…'));
         // A big file's read: its whole length, from the note.

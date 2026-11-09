@@ -192,12 +192,16 @@ QtObject {
         return quant !== "" ? name + " · " + quant : name
     }
     /// A helper (a subagent or a helper session), in words: who or what
-    /// kind it is ("Claude Code", "explores"), its model as the picker
+    /// kind it is ("Claude Code", "Explore"), its model as the picker
     /// names it, and its status as the sidebar says it.
     function helperKind(k) {
+        // (One form for all: a name, in sentence case: "Explore", "Web fetch".)
         const l = String(k || "task").toLowerCase()
-        return ({ harlo: "Harlo", claude: "Claude Code", pi: "pi", scout: "explores", explore: "explores", task: "does a task",
-                  general: "does a task", "general-purpose": "does a task", plan: "plans", review: "reviews", reviewer: "reviews" })[l] || String(k)
+        const named = ({ harlo: "Harlo", claude: "Claude Code", pi: "pi", scout: "Explore", task: "Task", general: "Task",
+                         "general-purpose": "Task", reviewer: "Review" })[l]
+        if (named) return named
+        const words = String(k).replace(/[-_]+/g, " ").trim()
+        return words.charAt(0).toUpperCase() + words.slice(1)
     }
     function helperModel(agent, model) {
         if (!model) return ""
@@ -307,11 +311,26 @@ QtObject {
             + "p,li{line-height:115%;}"
             // A reply's paragraphs, lists and headings are one text (to
             // select across): 8px between them, as between rows.
-            + "p,ul,ol,h1,h2,h3,h4,h5,h6,blockquote,table,hr{margin-top:8px;margin-bottom:8px;}"
-            // Tables: hairlines, as the rest of the interface.
-            + "table{border-color:" + rgb(hairline) + ";border-style:solid;}"
-            + "td,th{border-color:" + rgb(hairline) + ";border-style:solid;padding:6px 10px;}"
-            + "th{color:" + rgb(text) + ";}"
+            + "p,ul,ol,blockquote,table{margin-top:8px;margin-bottom:8px;}"
+            // A list inside a list: no gap above or below it.
+            + "li ul,li ol{margin-top:0px;margin-bottom:0px;}"
+            // Headings step down in size; each has more room above than
+            // below, so it belongs to the text under it. The fourth level is
+            // a little larger than the text, never only bold text.
+            + "h1,h2,h3,h4,h5,h6{font-weight:600;color:" + rgb(text) + ";}"
+            + "h1{font-size:" + px(23) + "px;margin-top:24px;margin-bottom:8px;}"
+            + "h2{font-size:" + px(19) + "px;margin-top:22px;margin-bottom:6px;}"
+            + "h3{font-size:" + px(16.5) + "px;margin-top:18px;margin-bottom:4px;}"
+            + "h4{font-size:" + px(15.5) + "px;margin-top:16px;margin-bottom:2px;}"
+            + "h5,h6{font-size:" + px(14) + "px;margin-top:14px;margin-bottom:2px;color:" + rgb(textMuted) + ";}"
+            // Tables: no grid (Qt draws a cell's borders all or none); a
+            // hairline under the header row (see `proseHtml`), the names
+            // left as the cells.
+            + "table{border-style:none;}"
+            + "td,th{border-style:none;padding:6px 12px 6px 0px;}"
+            + "th{color:" + rgb(text) + ";text-align:left;font-weight:600;}"
+            // A rule (see `proseHtml`): a faint hairline.
+            + "table.rule{border-style:none;}td.rule{border-style:none;padding:0px;}"
             // A code block inside a list or a quote (see `proseHtml`): a
             // shaded box, its lines wrapped to the column.
             + "table.code{border-style:none;}td.code{border-style:none;}"
@@ -333,7 +352,21 @@ QtObject {
     /// none). (One paragraph, its lines joined with breaks: Qt shades a
     /// table cell behind each paragraph alone, so a <pre>'s lines, or a
     /// paragraph above it, leave gaps.)
-    function proseHtml(html, copied) {
+    function proseHtml(html, copied, atTop) {
+        // A heading that opens a reply: no room above it (the reply's
+        // name is there).
+        if (atTop)
+            html = html.replace(/^<h([1-6])>/, '<h$1 style="margin-top:0px;">')
+        // A rule: a hairline the width of the text (Qt draws <hr> in the
+        // text colour, the loudest line in a reply). A one-cell table
+        // with a 1px font is one pixel high.
+        html = html.replace(/<hr\s*\/?>/g, '<table class="rule" width="100%" cellspacing="0" cellpadding="0" style="margin-top:14px;margin-bottom:14px;"><tr>'
+            + '<td class="rule" bgcolor="' + rgb(hairline) + '" style="font-size:1px;line-height:100%;">&nbsp;</td></tr></table>')
+        // A table's header: a hairline row under it, across its columns.
+        // (No frame: Qt keeps room for one, even unstyled.)
+        html = html.replace(/<table border="1"/g, '<table border="0"').replace(/(<thead>\s*<tr>([\s\S]*?)<\/tr>\s*<\/thead>\s*<tbody>)/g, (all, head, cells) =>
+            all + '<tr><td class="rule" colspan="' + Math.max(1, (cells.match(/<th[\s>]/g) || []).length) + '" bgcolor="' + rgb(hairline)
+                + '" style="font-size:1px;line-height:100%;">&nbsp;</td></tr>')
         // A quote: a rule down its left (Qt draws no side borders, so a
         // two-cell table: a thin shaded cell, then the quote), innermost
         // first.

@@ -43,16 +43,18 @@ Rectangle {
             anchors.verticalCenter: parent.verticalCenter
             x: 14
             spacing: 5
-            Label { text: parent.parent.label.toUpperCase(); color: Theme.label; font.pixelSize: Theme.px(11); font.weight: Font.Medium; font.letterSpacing: Theme.px(11) * 0.07 }
+            Caption { text: parent.parent.label }
             Label { text: parent.parent.value; color: Theme.text; font.pixelSize: Theme.px(18); font.weight: Font.DemiBold }
         }
     }
-    // A section label: small, uppercase, spaced (as the sidebar's).
-    component SectionLabel: Label {
+    // A card's label: small, in sentence case, quieter than its value.
+    component Caption: Label {
         color: Theme.label
-        font.pixelSize: Theme.px(11.5)
+        font.pixelSize: Theme.px(12)
         font.weight: Font.Medium
-        font.letterSpacing: Theme.px(11.5) * 0.07
+    }
+    // A section's label: as a card's, with room above.
+    component SectionLabel: Caption {
         Layout.topMargin: 10
     }
 
@@ -112,11 +114,12 @@ Rectangle {
                         y: 14
                         width: parent.width - 28
                         spacing: 4
-                        Label { text: "MODEL"; color: Theme.label; font.pixelSize: Theme.px(11); font.weight: Font.Medium; font.letterSpacing: Theme.px(11) * 0.07 }
+                        Caption { text: "Model" }
                         Label {
                             Layout.fillWidth: true
                             Layout.topMargin: 2
-                            text: Theme.modelLabel(body.r.model || "")
+                            // (As the composer's picker names it: "Sonnet 5".)
+                            text: Theme.helperModel(root.session.harness, body.r.model || "") || (body.r.model || "")
                             color: Theme.text
                             font.pixelSize: Theme.px(15)
                             font.weight: Font.Medium
@@ -167,7 +170,7 @@ Rectangle {
                         spacing: 10
                         RowLayout {
                             Layout.fillWidth: true
-                            Label { text: "CONTEXT WINDOW"; color: Theme.label; font.pixelSize: Theme.px(11); font.weight: Font.Medium; font.letterSpacing: Theme.px(11) * 0.07; Layout.fillWidth: true }
+                            Caption { text: "Context window"; Layout.fillWidth: true }
                             Label {
                                 text: root.fmt(body.r.contextTokens) + (body.r.contextWindow > 0 ? " / " + root.fmt(body.r.contextWindow) : " tokens")
                                 color: Theme.textMuted
@@ -225,7 +228,7 @@ Rectangle {
                         y: 14
                         width: parent.width - 28
                         spacing: 10
-                        Label { text: "LAST REPLY"; color: Theme.label; font.pixelSize: Theme.px(11); font.weight: Font.Medium; font.letterSpacing: Theme.px(11) * 0.07 }
+                        Caption { text: "Last reply" }
                         GridLayout {
                             Layout.fillWidth: true
                             columns: 3
@@ -235,9 +238,9 @@ Rectangle {
                                     ["Input", root.fmt(body.r.last.input)],
                                     ["Output", root.fmt(body.r.last.output)],
                                     ["Reasoning", root.fmt(body.r.last.reasoning)],
-                                    ["Cache Read", root.fmt(body.r.last.cacheRead)],
-                                    ["Cache Write", root.fmt(body.r.last.cacheWrite)],
-                                    ["Cache Hit", body.r.last.cacheHit === null ? "–" : body.r.last.cacheHit.toFixed(1) + "%"],
+                                    ["Cache read", root.fmt(body.r.last.cacheRead)],
+                                    ["Cache write", root.fmt(body.r.last.cacheWrite)],
+                                    ["Cache hit", body.r.last.cacheHit === null ? "–" : body.r.last.cacheHit.toFixed(1) + "%"],
                                 ] : []
                                 Column {
                                     required property var modelData
@@ -259,10 +262,10 @@ Rectangle {
                     readonly property var parts: [
                         { label: "User", pct: b.user, color: Theme.success },
                         { label: "Assistant", pct: b.assistant, color: "#b48ead" },
-                        { label: "Tool Calls", pct: b.tools, color: Theme.primary },
+                        { label: "Tool calls", pct: b.tools, color: Theme.primary },
                         { label: "Other", pct: b.other, color: Theme.muted },
                     ]
-                    SectionLabel { text: "WHERE THE TEXT WENT" }
+                    SectionLabel { text: "Where the text went" }
                     // One bar, rounded, in parts.
                     Rectangle {
                         Layout.fillWidth: true
@@ -294,7 +297,7 @@ Rectangle {
                     }
                 }
 
-                SectionLabel { text: "MESSAGES" }
+                SectionLabel { text: "Messages" }
                 // A plain list: a hairline between rows.
                 Repeater {
                     // The newest 300 are plenty here.

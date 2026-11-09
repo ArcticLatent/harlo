@@ -459,6 +459,20 @@ Rectangle {
                 onPromptRailFinished: composer.focusInput()
                 visible: root.hasSession
             }
+            // Scrolled back: the text fades out under the Latest button
+            // rather than running into it.
+            Rectangle {
+                objectName: "latestFade"
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: 28
+                visible: latestButton.visible
+                gradient: Gradient {
+                    GradientStop { position: 0; color: Qt.rgba(Theme.canvas.r, Theme.canvas.g, Theme.canvas.b, 0) }
+                    GradientStop { position: 1; color: Theme.canvas }
+                }
+            }
 
             Column {
                 anchors.centerIn: parent
@@ -1088,14 +1102,37 @@ Rectangle {
         return transcriptBox.y + transcriptBox.height
     }
     FlatButton {
+        id: latestButton
         objectName: "latestButton"
         z: 5
         x: transcriptBox.x + transcript.columnX + (transcript.columnWidth - width) / 2
         y: root.dockEdge - height / 2
         visible: transcriptBox.visible && !transcript.follow && root.hasSession
-        // (Narrow: the arrow alone.)
-        text: transcript.width < 600 ? "↓" : "↓ Latest"
-        ToolTip.visible: hovered && transcript.width < 600
+        readonly property bool narrow: transcript.width < 600
+        // (Narrow: the arrow alone, in a round button.)
+        text: "Latest"
+        Accessible.name: "Latest"
+        implicitWidth: narrow ? implicitHeight : implicitContentWidth + leftPadding + rightPadding
+        contentItem: Row {
+            spacing: 4
+            Icon {
+                anchors.verticalCenter: parent.verticalCenter
+                name: "arrow-down-s"
+                color: Theme.primary
+                implicitWidth: 16
+                implicitHeight: 16
+            }
+            Label {
+                visible: !latestButton.narrow
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Latest"
+                color: Theme.primary
+                font: latestButton.font
+            }
+        }
+        leftPadding: narrow ? (implicitHeight - 16) / 2 : 9
+        rightPadding: narrow ? (implicitHeight - 16) / 2 : 11
+        ToolTip.visible: hovered && narrow
         ToolTip.text: "Latest"
         ToolTip.delay: 400
         accent: Theme.primary

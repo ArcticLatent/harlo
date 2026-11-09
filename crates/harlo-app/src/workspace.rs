@@ -5834,9 +5834,24 @@ impl Workspace {
         let parents = self.helper_parents();
         sidebar::nest_helpers(&mut new_rows, &parents);
         let mut unchecked = false;
+        // A project's uncommitted changes show once, on its header; a session
+        // shows its own only when it works somewhere else (a worktree, another
+        // folder), so the same count isn't repeated down the list.
+        let project_paths: HashMap<i64, PathBuf> =
+            new_rows.iter().filter(|r| r.kind == SidebarKind::Project).map(|r| (r.project_id, PathBuf::from(&r.path))).collect();
+        let mut project_changes: HashMap<i64, usize> = HashMap::new();
         for r in new_rows.iter_mut().filter(|r| r.kind == SidebarKind::Session) {
-            r.changes = self.change_counts.get(&r.cwd).copied().unwrap_or(0);
+            let n = self.change_counts.get(&r.cwd).copied().unwrap_or(0);
+            if r.branch.is_empty() && project_paths.get(&r.project_id) == Some(&r.cwd) {
+                project_changes.insert(r.project_id, n);
+                r.changes = 0;
+            } else {
+                r.changes = n;
+            }
             unchecked |= !r.cwd.as_os_str().is_empty() && !self.change_checked.contains(&r.cwd);
+        }
+        for r in new_rows.iter_mut().filter(|r| r.kind == SidebarKind::Project) {
+            r.changes = project_changes.get(&r.project_id).copied().unwrap_or(0);
         }
         if unchecked {
             self.change_kick.notify_one();

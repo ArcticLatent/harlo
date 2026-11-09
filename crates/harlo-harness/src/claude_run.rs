@@ -869,11 +869,16 @@ async fn incoming(shared: &Arc<Shared>, frame: Value) {
                 let call_id = b["tool_use_id"].as_str().unwrap_or_default().to_owned();
                 let text = result_text(&b["content"]);
                 let is_error = b["is_error"].as_bool().unwrap_or(false);
-                shared.state.lock().unwrap().messages.push(json!({
+                let message = json!({
                     "role": "toolResult", "toolCallId": call_id, "content": [{ "type": "text", "text": text }], "isError": is_error
-                }));
+                });
+                shared.state.lock().unwrap().messages.push(message.clone());
                 subagent_result(shared, &call_id, &text, is_error);
-                shared.emit(HarnessEvent::ToolEnd { call_id, result: json!({ "content": [{ "type": "text", "text": text }] }), is_error });
+                shared.emit(HarnessEvent::ToolEnd { call_id: call_id.clone(), result: json!({ "content": [{ "type": "text", "text": text }] }), is_error });
+                // As a message too, as the other agents send it: the session's
+                // messages (Activity, Context) then know the call ended
+                // without waiting for a reload.
+                shared.emit(HarnessEvent::MessageEnd { id: format!("result-{call_id}"), message });
             }
         }
         "result" => {
@@ -1584,7 +1589,9 @@ mod tests {
             events.push(e);
         }
         let ends: Vec<&Value> = events.iter().filter_map(|e| if let HarnessEvent::MessageEnd { message, .. } = e { Some(message) } else { None }).collect();
-        let texts: Vec<String> = ends.iter().flat_map(|m| m["content"].as_array().cloned().unwrap_or_default()).filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str().map(str::to_owned)).collect();
+        // A tool's result is a message too (Activity and Context read them).
+        assert!(ends.iter().any(|m| m["role"] == "toolResult" && m["content"][0]["text"] == "hello from harlo"), "{ends:#?}");
+        let texts: Vec<String> = ends.iter().filter(|m| m["role"] == "assistant").flat_map(|m| m["content"].as_array().cloned().unwrap_or_default()).filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str().map(str::to_owned)).collect();
         assert_eq!(texts, ["hello from harlo", "OK"], "{ends:#?}");
         assert!(events.iter().any(|e| matches!(e, HarnessEvent::ToolStart { name, .. } if name == "Bash")));
         assert!(events.iter().any(|e| matches!(e, HarnessEvent::ToolEnd { result, .. } if result["content"][0]["text"] == "hello from harlo")));

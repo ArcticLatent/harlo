@@ -46,7 +46,8 @@ Rectangle {
         // Status: pulsing while running.
         Rectangle {
             Layout.alignment: Qt.AlignTop
-            Layout.topMargin: 6
+            // (Centred on the name's line.)
+            Layout.topMargin: Math.max(0, Math.round((nameLabel.implicitHeight - 8) / 2))
             implicitWidth: 8
             implicitHeight: 8
             radius: 4
@@ -69,6 +70,7 @@ Rectangle {
                 Layout.fillWidth: true
                 spacing: 6
                 Label {
+                    id: nameLabel
                     Layout.maximumWidth: agentRow.width * 0.45
                     text: agentRow.a.name || agentRow.a.id
                     color: Theme.foreground
@@ -83,6 +85,12 @@ Rectangle {
                     text: Theme.helperKind(agentRow.a.agent) + (agentRow.a.model ? " · " + Theme.helperModel(agentRow.a.agent, agentRow.a.model) : "")
                     color: Theme.textMuted
                     font.pixelSize: Theme.px(11.5)
+                    // (Narrow: shortened, never under the buttons; it
+                    // keeps its whole width while there's room.)
+                    Layout.maximumWidth: implicitWidth
+                    Layout.minimumWidth: Math.min(implicitWidth, Theme.px(40))
+                    Layout.preferredWidth: implicitWidth
+                    elide: Text.ElideRight
                 }
                 Label {
                     Layout.fillWidth: true
@@ -134,8 +142,13 @@ Rectangle {
             // Narrow and running: Steer opens the same view, and Cancel
             // must stay in reach.
             // (A harlo session an agent started: opens as its tab.)
+            id: viewButton
             objectName: "subagentView"
             visible: (!!agentRow.a.sessionFile || !!agentRow.a.openKey) && !(agentRow.live && agentRow.width < 380)
+            // (A finished helper's View shows on its row's hover or the
+            // keyboard's focus: a column of the same button is noise.
+            // It keeps its place, so nothing moves.)
+            opacity: agentRow.live || agentRow.asks || rowHover.hovered || activeFocus ? 1 : 0
             text: "View"
             font.pixelSize: Theme.px(11)
             padding: 4

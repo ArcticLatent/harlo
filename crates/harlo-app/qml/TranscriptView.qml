@@ -14,6 +14,9 @@ Item {
     // The reading column, for what floats over it (the Latest button).
     readonly property real columnX: view.columnX
     readonly property real columnWidth: view.columnWidth
+    // A reply's prose: about 80 characters a line at most.
+    FontMetrics { id: proseMetrics; font.family: Theme.uiFont; font.pixelSize: Theme.px(15) }
+    readonly property real proseMeasure: Math.round(proseMetrics.averageCharacterWidth * 66)
     property alias count: view.count
     /// Side margin of the rows; the composer below uses it too so edges align.
     readonly property alias gutter: view.gutter
@@ -1792,9 +1795,11 @@ Item {
                         id: md
                         x: view.columnX
                         y: mdRow.gap
-                        width: view.columnWidth
+                        // (Prose reads best at about 80 characters a line:
+                        // a wide column keeps its text to that.)
+                        width: Math.min(view.columnWidth, root.proseMeasure)
                         textFormat: TextEdit.RichText
-                        text: Theme.htmlStyle + Theme.proseHtml(parent.html, mdRow.copiedBlock)
+                        text: Theme.htmlStyle + Theme.proseHtml(parent.html, mdRow.copiedBlock, root.opensTurn(mdRow.ListView.previousSection))
                         color: Theme.foreground
                         selectionColor: Theme.selection
                         selectedTextColor: Theme.foreground

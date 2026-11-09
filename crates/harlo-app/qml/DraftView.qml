@@ -409,10 +409,24 @@ Rectangle {
                 wrapMode: Text.Wrap
             }
 
-            // Project, where, harness
+            // Project, where, harness: centred line by line, as the title
+            // above and the starters below.
             Flow {
+                id: pickerFlow
+                objectName: "draftPickers"
                 Layout.fillWidth: true
                 spacing: 4
+                leftPadding: Math.max(0, (width - pickerRowWidth) / 2)
+                readonly property real pickerRowWidth: {
+                    let w = 0
+                    for (let i = 0; i < children.length; i++) {
+                        const it = children[i]
+                        if (!it.visible || it.width === 0) continue
+                        if (w + it.width > width) break
+                        w += it.width + spacing
+                    }
+                    return Math.max(0, w - spacing)
+                }
                 Chip {
                     iconName: "home"
                     iconColor: Theme.info
@@ -898,11 +912,16 @@ Rectangle {
                         }
                         // Fills the gap; shortens (then vanishes) before Send moves.
                         Label {
+                            id: startHint
                             Layout.fillWidth: true
                             Layout.minimumWidth: 0
+                            Layout.preferredWidth: 0
                             horizontalAlignment: Text.AlignRight
                             elide: Text.ElideRight
-                            text: root.parallel ? "Enter starts " + root.lanes.length + " lanes" : "Enter to start · Shift+Enter for a new line"
+                            // (Narrow: the short form, rather than one cut mid-word.)
+                            readonly property string full: root.parallel ? "Enter starts " + root.lanes.length + " lanes" : "Enter to start · Shift+Enter for a new line"
+                            TextMetrics { id: startHintFull; font: startHint.font; text: startHint.full }
+                            text: root.parallel || width >= startHintFull.advanceWidth ? full : "Enter to start"
                             color: Theme.muted
                             font.pixelSize: Theme.px(11)
                         }

@@ -229,7 +229,8 @@ Item {
                 if (off > highest) off = highest
                 else if (off < lowest) off = lowest
             }
-            off = Math.max(0, Math.min(maxOffset, off))
+            // (Whole rows: a row half under an edge reads as cut off.)
+            off = Math.max(0, Math.min(maxOffset, Math.round(off / rowH) * rowH))
             if (fresh) { snap = true; offset = off; snap = false } else offset = off
         }
         Connections { target: rail; function onHighlightedChanged() { panel.follow() } }
@@ -263,7 +264,6 @@ Item {
                             anchors.fill: parent
                             radius: 8
                             color: entry.active ? Qt.tint(Theme.elevated, Theme.selection) : entry.lit ? Theme.hover : "transparent"
-                            border.color: entry.active ? "transparent" : Qt.rgba(Theme.border.r, Theme.border.g, Theme.border.b, entry.lit ? 1 : 0.6)
                         }
                         Label {
                             anchors.fill: parent
@@ -272,7 +272,8 @@ Item {
                             verticalAlignment: Text.AlignVCenter
                             text: rail.prompts[entry.index] && rail.prompts[entry.index].text !== "" ? rail.prompts[entry.index].text : "No text"
                             textFormat: Text.PlainText
-                            wrapMode: Text.WrapAnywhere
+                            // (At spaces: a word is split only when it is longer than the line.)
+                            wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                             maximumLineCount: 2
                             elide: Text.ElideRight
                             font.pixelSize: Theme.px(12)

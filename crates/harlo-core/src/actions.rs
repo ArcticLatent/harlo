@@ -38,7 +38,7 @@ fn arg<'a>(args: &'a Value, keys: &[&str]) -> &'a str {
 }
 
 /// What it acted on: the command, the file, the search, the address.
-fn target(kind: &str, args: &Value) -> String {
+pub(crate) fn target(kind: &str, args: &Value) -> String {
     const PATH: [&str; 7] = ["path", "file_path", "filePath", "file", "filename", "notebook_path", "target"];
     let s = match kind {
         "command" => arg(args, &["command", "cmd", "script"]),

@@ -423,25 +423,13 @@ Rectangle {
                                 implicitWidth: 12
                                 implicitHeight: 12
                             }
-                            // Uncommitted changes in the session's repository.
-                            Rectangle {
+                            // Uncommitted changes where the session works, when that
+                            // isn't its project's folder (a worktree): the
+                            // project's own show on its header.
+                            ChangesPill {
                                 id: changesPill
-                                visible: sessionRow.changes > 0
-                                implicitWidth: pillRow.implicitWidth + 10
-                                implicitHeight: 16
-                                radius: 8
-                                color: Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, 0.16)
-                                Row {
-                                    id: pillRow
-                                    anchors.centerIn: parent
-                                    spacing: 3
-                                    Rectangle { width: 5; height: 5; radius: 2.5; color: Theme.warning; anchors.verticalCenter: parent.verticalCenter }
-                                    Label { text: sessionRow.changes > 99 ? "99+" : sessionRow.changes; color: Theme.warning; font.pixelSize: Theme.px(10); font.bold: true }
-                                }
-                                HoverHandler { id: pillHover }
-                                ToolTip.visible: pillHover.hovered
-                                ToolTip.text: sessionRow.changes + (sessionRow.changes === 1 ? " uncommitted change" : " uncommitted changes") + " in this session's repository"
-                                ToolTip.delay: 400
+                                changes: sessionRow.changes
+                                tip: " in this session's repository"
                             }
                             Label { visible: !sessionRow.tight; text: Theme.ago(sessionRow.modified, root.now); color: Theme.textFaint; font.pixelSize: Theme.px(12) }
                         }
@@ -525,6 +513,29 @@ Rectangle {
         }
     }
 
+    // Uncommitted changes: a small warning-tinted count.
+    component ChangesPill: Rectangle {
+        id: pill
+        property int changes: 0
+        property string tip: ""
+        visible: changes > 0
+        implicitWidth: pillRow.implicitWidth + 10
+        implicitHeight: 16
+        radius: 8
+        color: Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, 0.16)
+        Row {
+            id: pillRow
+            anchors.centerIn: parent
+            spacing: 3
+            Rectangle { width: 5; height: 5; radius: 2.5; color: Theme.warning; anchors.verticalCenter: parent.verticalCenter }
+            Label { text: pill.changes > 99 ? "99+" : pill.changes; color: Theme.warning; font.pixelSize: Theme.px(10); font.bold: true }
+        }
+        HoverHandler { id: pillHover }
+        ToolTip.visible: pillHover.hovered
+        ToolTip.text: pill.changes + (pill.changes === 1 ? " uncommitted change" : " uncommitted changes") + pill.tip
+        ToolTip.delay: 400
+    }
+
     // Project header or the "Other sessions" group.
     component GroupRow: ItemDelegate {
         id: groupRow
@@ -537,6 +548,9 @@ Rectangle {
         required property string status
         required property bool collapsed
         required property int count
+        // Uncommitted changes in the project's folder (its sessions there
+        // don't repeat it).
+        required property int changes
         required property string projectIcon
         required property string projectColor
         required property int index
@@ -576,18 +590,23 @@ Rectangle {
                     font.pixelSize: Theme.px(12)
                 }
             }
-            // A section label: small, uppercase, spaced; set apart from the
-            // sessions in the theme's accent, toned down (as Settings' sections).
+            // The project's name as it is written, a step quieter than its
+            // sessions' titles but heavier: its icon, weight and the room
+            // above set it apart.
             Label {
+                objectName: "projectTitle-" + groupRow.title
                 Layout.fillWidth: true
                 Layout.leftMargin: 2
                 text: groupRow.title
-                color: groupRow.hovered ? Theme.blend(Theme.text, Theme.accent, 0.5) : Theme.blend(Theme.textMuted, Theme.accent, 0.7)
-                font.pixelSize: Theme.px(12)
+                color: groupRow.hovered ? Theme.text : Theme.textMuted
+                font.pixelSize: Theme.px(13)
                 font.weight: Font.DemiBold
-                font.capitalization: Font.AllUppercase
-                font.letterSpacing: Theme.px(12) * 0.07
                 elide: Text.ElideRight
+            }
+            ChangesPill {
+                objectName: "projectChanges-" + groupRow.title
+                changes: groupRow.changes
+                tip: " in this project's folder"
             }
             // A project on a remote host: the host's name.
             Rectangle {

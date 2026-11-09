@@ -96,8 +96,10 @@ Rectangle {
                     anchors.horizontalCenter: parent.horizontalCenter
                     width: 26
                     height: 26
-                    // The ring: the track, then the part used.
+                    // The ring: the track, then the part used. (A provider
+                    // with no limits to read: its logo alone, no empty ring.)
                     Shape {
+                        visible: planMeter.lastOther === ""
                         anchors.fill: parent
                         preferredRendererType: Shape.CurveRenderer
                         ShapePath {
@@ -141,7 +143,10 @@ Rectangle {
                 Label {
                     objectName: "planMeterPercent"
                     anchors.horizontalCenter: parent.horizontalCenter
-                    text: planMeter.lastOther !== "" ? (planMeter.lastLocal ? "local" : "—") : planMeter.shown ? planMeter.percent(planMeter.shown) : planMeter.none ? "—" : ""
+                    // (Nothing to say, nothing shown: the tooltip tells why,
+                    // rather than a dash that reads as broken.)
+                    visible: text !== ""
+                    text: planMeter.lastOther !== "" ? (planMeter.lastLocal ? "local" : "") : planMeter.shown ? planMeter.percent(planMeter.shown) : ""
                     color: Theme.textMuted
                     font.pixelSize: Theme.px(10)
                 }

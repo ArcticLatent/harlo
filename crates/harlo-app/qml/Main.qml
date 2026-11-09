@@ -3146,7 +3146,12 @@ ApplicationWindow {
             const st = win.findName("subagentStatus", chat)
             win.check(st === null || !st.visible, "finished needs no word: its faint dot says it")
             win.shotWindow("clicks-orchestrate")
-            win.clickItem(win.findName("subagentView", chat.subagentDock), "View") } }
+            // A finished helper's View shows on its row's hover.
+            const row = win.findName("subagentWho", chat.subagentDock)
+            win.check(row !== null && win.findName("subagentView", chat.subagentDock) === null, "a finished helper's View waits for a hover")
+            if (row) { const p = row.mapToItem(null, row.width / 2, row.height / 2); TestInput.moveTo(p.x, p.y) } } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.clickItem(win.findName("subagentView", chat.subagentDock), "View") }
         PauseAnimation { duration: 1200 }
         ScriptAction { script: {
             const kids = JSON.parse(Workspace.orchestratedJson(win.orchestrator))
@@ -3394,6 +3399,117 @@ ApplicationWindow {
         ScriptAction { script: { win.shotWindow("site-new"); Workspace.chooseThemeMode("light") } }
         PauseAnimation { duration: 1000 }
         ScriptAction { script: { win.shotWindow("site-new-light"); Workspace.chooseThemeMode("dark") } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: { win.summary(); Qt.quit() } }
+    }
+
+    // Screenshots for a design critique (not a test: SCENARIOS=critiqueshots
+    // KEEP=1 scripts/click-tests.sh 1280 524): a Claude session of prose
+    // with headings and several prompts, its prompt list, a dozen helpers,
+    // each right-hand panel, the sidebar beside it, and the new-session page.
+    function critReplies() { const t = win.chatText(); return t.split("Hello from fake claude").length + t.split("What is left to do").length - 2 }
+    function critTop(item) {
+        if (!item) return
+        for (let f = item.parent; f; f = f.parent) {
+            if (f.contentY === undefined || f.contentItem === undefined || f.contentHeight === undefined || f.height <= 0) continue
+            f.contentY = Math.max(f.originY || 0, item.mapToItem(f.contentItem, 0, 0).y - 16)
+            return
+        }
+    }
+    // Brings a line inside a text to the top of its flickable (a reply's
+    // prose is one text: its later headings are inside it).
+    function critTopAt(item, text) {
+        if (!item || item.getText === undefined) return
+        const at = item.getText(0, item.length).indexOf(text)
+        if (at < 0) return
+        const r = item.positionToRectangle(at)
+        for (let f = item.parent; f; f = f.parent) {
+            if (f.contentY === undefined || f.contentItem === undefined || f.contentHeight === undefined || f.height <= 0) continue
+            f.contentY = Math.max(f.originY || 0, item.mapToItem(f.contentItem, 0, r.y).y - 16)
+            return
+        }
+    }
+    function critShot(name) { win.shotWindow("crit-" + name) }
+    readonly property var critPrompts: [
+        "write it up: how the transcript is put together, with headings, lists and a table please",
+        "I still don't like this look, it's confusing. any programming language output like this should have line numbers like an editor does",
+        "we should have more language support for the syntax highlighting, toml and qml at least",
+        "do you see the problem here? there is no separation between the shell command and line numbers, it looks like one block",
+        "start many helpers to look around the code",
+        "okay good, let's get a critique of all of it",
+        "write it up again"]
+    property int critSent: 0
+    SequentialAnimation {
+        id: critSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "critiqueshots"
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: {
+            Workspace.chooseThemeMode("dark")
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            win.height = 900
+            Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
+            const base = win.argValue("--cwd=").replace(/\/repo$/, "")
+            Workspace.addProject(base + "/webapp")
+            Workspace.addProject(base + "/api")
+            Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            const p = JSON.parse(Workspace.projectsJson()).find(p => p.path === win.argValue("--cwd="))
+            Workspace.newSession(p.id, "claude") } }
+        PauseAnimation { duration: 1500 }
+        SequentialAnimation {
+            loops: 7
+            ScriptAction { script: { win.sendByKeys(win.critPrompts[win.critSent]); win.critSent++ } }
+            ScriptAction { script: win.waitUntil(critSteps, () => win.critReplies() >= win.critSent && chat.session.status === "idle", 30000) }
+            PauseAnimation { duration: 400 }
+        }
+        // Prose: the first write-up from its title, then its end.
+        ScriptAction { script: { chat.transcript.follow = false; win.critTop(win.findContaining("The transcript, from events to rows", chat.transcript)) } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: win.critShot("prose-top") }
+        ScriptAction { script: { const t = win.findContaining("The transcript, from events to rows", chat.transcript); win.critTopAt(t && t.getText ? t : t && t.parent, "Reading it") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: { win.critShot("prose-end"); Workspace.chooseThemeMode("light") } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: { win.critTop(win.findContaining("The transcript, from events to rows", chat.transcript)) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: { win.critShot("prose-top-light"); Workspace.chooseThemeMode("dark") } }
+        PauseAnimation { duration: 800 }
+        // The prompt list (Ctrl+J), and the rail beside the session.
+        ScriptAction { script: chat.transcript.rail.openKeyboard() }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: { win.critShot("rail-list"); chat.transcript.rail.close() } }
+        PauseAnimation { duration: 400 }
+        // The helpers, opened.
+        ScriptAction { script: { chat.transcript.scrollToEnd(); const d = win.findName("subagentDock"); if (d) d.expanded = true } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: { win.critShot("helpers"); Workspace.chooseThemeMode("light") } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: { win.critShot("helpers-light"); Workspace.chooseThemeMode("dark"); const d = win.findName("subagentDock"); if (d) d.expanded = false } }
+        PauseAnimation { duration: 600 }
+        // Each right-hand panel.
+        ScriptAction { script: windowSettings.rightMode = "context" }
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: { win.critShot("right-context"); windowSettings.rightMode = "activity" } }
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: { win.critShot("right-activity"); windowSettings.rightMode = "changes"; git.refresh(true) } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: { win.critShot("right-changes"); windowSettings.rightMode = "files" } }
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: { win.critShot("right-files"); windowSettings.rightMode = "notes" } }
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: { win.critShot("right-notes"); windowSettings.rightMode = "specs" } }
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: { win.critShot("right-specs"); windowSettings.rightMode = "context"; Workspace.chooseThemeMode("light") } }
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: { win.critShot("right-context-light"); Workspace.chooseThemeMode("dark"); windowSettings.rightMode = "" } }
+        PauseAnimation { duration: 800 }
+        // The new-session page.
+        ScriptAction { script: win.openDraft(JSON.parse(Workspace.projectsJson()).find(p => p.path === win.argValue("--cwd=")).id) }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: { win.critShot("new"); Workspace.chooseThemeMode("light") } }
+        PauseAnimation { duration: 1000 }
+        ScriptAction { script: { win.critShot("new-light"); Workspace.chooseThemeMode("dark") } }
         PauseAnimation { duration: 800 }
         ScriptAction { script: { win.summary(); Qt.quit() } }
     }

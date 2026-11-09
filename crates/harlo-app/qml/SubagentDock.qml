@@ -8,6 +8,7 @@ import harlo
 // shows each subagent under the tool call that started it).
 Rectangle {
     id: root
+    objectName: "subagentDock"
     property ChatSession session
     signal viewRequested(var agent, bool steer)
 
@@ -22,6 +23,8 @@ Rectangle {
     // Collapsed to its summary line: the details sit under the task tool
     // row in the transcript; open it to manage them from here.
     property bool expanded: false
+    // The open list's order: waiting on you, then running, then the rest.
+    function rank(status) { return status === "asking" || status === "waiting" ? 0 : status === "running" || status === "pending" ? 1 : 2 }
 
     visible: agents.length > 0
     implicitHeight: col.implicitHeight + 16
@@ -77,14 +80,35 @@ Rectangle {
             }
         }
 
-        Repeater {
-            model: root.expanded ? root.agents : []
-            SubagentRow {
-                required property var modelData
-                Layout.fillWidth: true
-                a: modelData
-                session: root.session
-                onViewRequested: (agent, steer) => root.viewRequested(agent, steer)
+        // Open: the helpers that need you or still run first, then the
+        // rest; about six rows tall at most, the others a scroll away, so
+        // many helpers never bury the chat.
+        Flickable {
+            id: list
+            objectName: "subagentList"
+            visible: root.expanded
+            Layout.fillWidth: true
+            Layout.preferredHeight: Math.min(rows.implicitHeight, Theme.px(216))
+            contentWidth: width
+            contentHeight: rows.implicitHeight
+            clip: contentHeight > height
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: ScrollBar { policy: list.contentHeight > list.height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff }
+            Column {
+                id: rows
+                width: list.width
+                spacing: 6
+                Repeater {
+                    model: root.expanded ? root.agents.map((a, i) => ({ a: a, i: i }))
+                        .sort((x, y) => root.rank(x.a.status) - root.rank(y.a.status) || x.i - y.i).map(x => x.a) : []
+                    SubagentRow {
+                        required property var modelData
+                        width: rows.width
+                        a: modelData
+                        session: root.session
+                        onViewRequested: (agent, steer) => root.viewRequested(agent, steer)
+                    }
+                }
             }
         }
     }
