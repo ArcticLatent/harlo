@@ -994,11 +994,13 @@ Item {
             visible: card.asking
             spacing: 6
             Label {
+                objectName: "approvalQuestion"
                 Layout.fillWidth: true
                 text: root.approvalQuestion(card.title, card.askLines)
                 color: Theme.text
                 font.pixelSize: Theme.px(13)
-                elide: Text.ElideRight
+                // (The one thing to read before answering: wrapped, never cut.)
+                wrapMode: Text.Wrap
             }
             FlatButton { text: "Deny"; font.pixelSize: Theme.px(12.5); onClicked: root.session.answerValue("Deny") }
             FlatButton {

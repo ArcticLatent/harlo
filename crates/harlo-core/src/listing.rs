@@ -212,6 +212,51 @@ fn numbered_search(words: &[String]) -> bool {
         .any(|a| a == "--line-number" || (a.starts_with('-') && !a.starts_with("--") && a[1..].chars().all(|c| c.is_ascii_alphanumeric()) && a.contains('n')))
 }
 
+/// A read tool's plain lines (Harlo's: no numbers, to save tokens),
+/// numbered as a numbered read's are ("     7→text"): from `offset` (1
+/// without one), or from the range its note gives. Its notes (a big file's
+/// "[… These are lines 1-N …]" before them, "[Lines a-b of N …]" after)
+/// are left out; hash-anchored lines ("7#AB:text") keep their own numbers.
+/// None when it isn't a file's lines or is numbered already.
+pub fn number_read(offset: Option<u64>, output: &str) -> Option<String> {
+    let mut lines: Vec<&str> = output.lines().collect();
+    let first = *lines.first()?;
+    if numbered(&lines, 1).is_some() || first == "(empty file)" || first.starts_with("[Image: ") || (lines.len() == 1 && first.contains(" is a binary file (")) {
+        return None;
+    }
+    let mut start = offset.unwrap_or(1).max(1) as usize;
+    if first.starts_with('[') && first.ends_with(']') && first.contains("These are lines ") {
+        lines.remove(0);
+        start = 1;
+    }
+    if let Some(last) = lines.last().copied()
+        && let Some(range) = last.strip_prefix("[Lines ").filter(|_| last.ends_with(".]"))
+        && let Some(a) = range.split('-').next().and_then(|a| a.parse::<usize>().ok())
+    {
+        lines.pop();
+        if lines.last().is_some_and(|l| l.is_empty()) {
+            lines.pop();
+        }
+        start = a;
+    }
+    if lines.is_empty() {
+        return None;
+    }
+    // Hash-anchored: "12#AB:text".
+    fn anchored(l: &str) -> Option<(usize, &str)> {
+        let (n, rest) = l.split_once('#')?;
+        let n: usize = n.parse().ok()?;
+        let body = rest.get(2..)?.strip_prefix(':')?;
+        rest[..2].chars().all(|c| c.is_ascii_alphanumeric()).then_some((n, body))
+    }
+    let out: Vec<String> = if lines.iter().all(|l| anchored(l).is_some()) {
+        lines.iter().filter_map(|l| anchored(l)).map(|(n, b)| format!("{n:>6}→{b}")).collect()
+    } else {
+        lines.iter().enumerate().map(|(i, l)| format!("{:>6}→{l}", start + i)).collect()
+    };
+    Some(out.join("\n"))
+}
+
 /// How many lines `view` would give, unlimited (for "N more lines").
 pub fn line_count(output: &str) -> usize {
     let output = output.strip_prefix("…\n").unwrap_or(output);
@@ -578,6 +623,24 @@ mod tests {
         assert_eq!(diff_numbers(&diff, file), vec![None, Some(2), None, None, None, None]);
         // Not inside another line.
         assert_eq!(diff_numbers(&["+b"], "ab\nb\n"), vec![Some(2)]);
+    }
+
+    #[test]
+    fn harlos_plain_reads_are_numbered() {
+        assert_eq!(number_read(None, "a\nb").as_deref(), Some("     1→a\n     2→b"));
+        assert_eq!(number_read(Some(40), "x\ny").as_deref(), Some("    40→x\n    41→y"));
+        // Its notes: out, the range they give kept.
+        let big = "[src/x.rs is 900 lines (30 KB), more than one read shows. These are lines 1-2: grep it for what you need, or read a range with offset and limit (up to 400 lines).]\nfn a() {}\nfn b() {}";
+        assert_eq!(number_read(None, big).as_deref(), Some("     1→fn a() {}\n     2→fn b() {}"));
+        assert_eq!(number_read(Some(10), "p\nq\n\n[Lines 10-11 of 90. Read on with offset=12.]").as_deref(), Some("    10→p\n    11→q"));
+        assert_eq!(number_read(None, "7#AB:x\n8#Q2:y").as_deref(), Some("     7→x\n     8→y"));
+        // Numbered already, or not a file's lines.
+        assert_eq!(number_read(None, "     1→a"), None);
+        assert_eq!(number_read(None, "(empty file)"), None);
+        assert_eq!(number_read(None, "/x/a.png is a binary file (12 bytes)."), None);
+        // And as a listing: numbered, from its line.
+        let v = view("read", "", "src/a.rs", &number_read(Some(5), "fn a() {}").unwrap(), 400).unwrap();
+        assert_eq!(v.lines[0].num, "5");
     }
 
     #[test]

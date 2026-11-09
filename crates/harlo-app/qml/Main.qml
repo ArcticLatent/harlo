@@ -1152,6 +1152,8 @@ ApplicationWindow {
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
             win.check(chat.session.requestIsApproval && win.findText("Run this command?", chat.transcript) !== null, "the next one asks again")
+            const q = win.findAllNames("approvalQuestion", chat.transcript)[0]
+            win.check(q && !q.truncated && q.lineCount >= 1, "its question whole, wrapped when narrow (" + (q ? q.lineCount + " lines" : "none") + ")")
             win.shotWindow("clicks-approval-again") } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: win.clickText("Deny", chat.transcript) }
@@ -4883,6 +4885,13 @@ ApplicationWindow {
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
             win.check(win.findContaining("npm test -- auth", chat.transcript) !== null, "and again opens it")
+            chat.transcript.positionAt(0) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const t = chat.transcript
+            const read = win.findAllNames("codeView", t).find(v => v.lines.some(l => l.h.indexOf("guard") >= 0))
+            win.check(read && read.lines[0].n === "1" && read.lines[0].p.endsWith("/src/auth/guard.ts") && win.findAllNames("codeNumber", read).length === 1,
+                      "Harlo's plain read numbered from its first line, a link to the file (" + (read ? JSON.stringify(read.lines[0].n) : "none") + ")")
             win.summary(); Qt.quit() } }
     }
     // Glass menus and dialogs over a busy chat, for looking at (not in the

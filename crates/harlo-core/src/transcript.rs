@@ -672,9 +672,15 @@ impl Transcript {
                             // (A file's lines keep their start, the rest a click
                             // away in the file; other output keeps its end.)
                             let start = crate::listing::keeps_start(name, &r.command);
-                            r.text = if start { head_chars(&run.output, TOOL_OUTPUT_DISPLAY_CHARS) } else { tail_chars(&run.output, TOOL_OUTPUT_DISPLAY_CHARS) };
-                            if r.text.len() != run.output.len() {
-                                r.full = Some(FullOutput(run.output.clone()));
+                            // (A plain read, Harlo's, numbered as Claude's are.)
+                            let numbered = (name == "read" && run.ended && !run.is_error)
+                                .then(|| crate::listing::number_read(args["offset"].as_u64(), &run.output))
+                                .flatten()
+                                .map(Arc::<str>::from);
+                            let output = numbered.as_ref().unwrap_or(&run.output);
+                            r.text = if start { head_chars(output, TOOL_OUTPUT_DISPLAY_CHARS) } else { tail_chars(output, TOOL_OUTPUT_DISPLAY_CHARS) };
+                            if r.text.len() != output.len() {
+                                r.full = Some(FullOutput(output.clone()));
                             }
                             if run.started > 0 {
                                 r.time = run.started;
