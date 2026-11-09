@@ -3709,6 +3709,11 @@ ApplicationWindow {
                       "the commands under what they're for; a short one on its line, in the well too when its line cuts it short (" + cmds.length + ")")
             const grepCmd = cmds.find(c => c.text.indexOf("grep -n") >= 0)
             win.check(grepCmd && grepCmd.wrapMode === Text.WrapAtWordBoundaryOrAnywhere, "a command in the well breaks at a space")
+            const sedHead = win.findAllNames("toolWhat", box).find(l => l.plain.indexOf("sed -n") >= 0)
+            const sedWrap = sedHead ? win.findName("codeWrap", sedHead.parent) : null
+            const sedCard = sedHead ? sedHead.parent.parent.parent : null
+            const sedCode = sedCard ? win.findName("codeView", sedCard) : null
+            win.check(sedCode && (sedWrap !== null) === sedCode.cut && (win.width > 700 || sedCode.cut), "a call whose lines are cut offers Wrap on its line, only then (" + (sedWrap ? sedWrap.text : "none") + ")")
             win.check(win.chatText().indexOf("Running the full test suite\n") < 0 && win.findContaining("▸ cargo", t) === null, "no notice for a command in the foreground")
             // The wheel: the box first, then the session past its top.
             const f = win.findName("runBoxScroll", box)
@@ -3801,6 +3806,21 @@ ApplicationWindow {
             win.check(a !== null, "the reply's code blocks")
             if (a) win.scrollIntoView(a)
             win.shotWindow("listings-reply-code")
+            // Lines cut at the right: that box offers Wrap (only when cut).
+            const ts = win.findAllNames("replyCode", chat.transcript).find(b => win.findText("TypeScript", b) !== null)
+            const wrapBtn = ts ? win.findName("codeWrap", ts) : null
+            const tsCode = ts ? win.findName("replyCodeView", ts) : null
+            win.check(tsCode && (wrapBtn !== null) === tsCode.cut && (win.width > 1000 || tsCode.cut) && (!wrapBtn || wrapBtn.text === "Wrap"), "a code box whose lines are cut offers Wrap, one that fits doesn't (" + (wrapBtn ? wrapBtn.text : "none") + ")")
+            win.wrapBox = wrapBtn ? ts : null
+            if (wrapBtn) win.clickItem(wrapBtn, "Wrap") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            if (win.wrapBox) {
+                const ts = win.wrapBox, code = ts ? win.findName("replyCodeView", ts) : null, btn = ts ? win.findName("codeWrap", ts) : null
+                win.check(code && code.wrap && !code.cut && btn && btn.text === "No wrap" && !Theme.wrapCode, "Wrap wraps that box only, and says No wrap (" + (btn ? btn.text : "none") + ")")
+                win.shotWindow("listings-reply-wrapped")
+                if (btn) win.clickItem(btn, "No wrap")
+            }
             win.listingAt("qml/Badge.qml", 60) } }
         // (A press while the list still moves only stops it: a moment first.)
         PauseAnimation { duration: 400 }
@@ -4033,6 +4053,7 @@ ApplicationWindow {
     property real perfOpen: 0
     property real holdY: 0
     property var harloJobCard: null
+    property var wrapBox: null
 
     property var keyHead: null
     function listingBox() {

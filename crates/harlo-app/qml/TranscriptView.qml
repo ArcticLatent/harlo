@@ -496,6 +496,8 @@ Item {
         property real bottomPad: 0
         // (Numbers: 8 px either side in their column, then 6 px to the code.)
         readonly property real gutterWidth: numbers ? probe.implicitWidth + 22 : signs ? 22 : 10
+        // Unwrapped, some lines go past the right edge.
+        readonly property bool cut: !wrap && codeFlick.contentWidth > codeFlick.width + 1
         readonly property int count: lines ? lines.length : Math.max(1, starts.length - (edit.getText(Math.max(0, edit.length - 1), edit.length) === "\n" ? 1 : 0))
         readonly property string selectedText: edit.selectedText
         implicitHeight: edit.implicitHeight + topPad + bottomPad
@@ -672,6 +674,20 @@ Item {
                 }
             }
         }
+    }
+    // Wrap for one box whose lines are cut at the right (Word wrap off), and
+    // "No wrap" to undo it; `key` its row, `code` its CodeText.
+    component WrapButton: FlatButton {
+        property string key
+        property Item code: null
+        readonly property bool on: view.wraps[key] === true
+        objectName: "codeWrap"
+        visible: !Theme.wrapCode && !!code && code.visible && (code.cut || on)
+        text: on ? "No wrap" : "Wrap"
+        font.pixelSize: Theme.px(11)
+        padding: 2
+        onClicked: view.setWrap(key, !on)
+        Accessible.name: on ? "Don't wrap this code" : "Wrap this code's long lines"
     }
     // Copy, then "Copied" for a moment.
     component CopyButton: FlatButton {
@@ -888,6 +904,9 @@ Item {
                     accent: Theme.info
                     onClicked: root.openDiff(card.subtitle.replace(/…$/, ""))
                 }
+                // Its lines cut at the right: wrap them (always shown: it's
+                // what says they go on).
+                WrapButton { key: card.rowKey; code: wellCode }
                 // Copy: all of the listing (not just the lines shown), a
                 // write's file, an edit's new lines; on hover (or the keyboard).
                 CopyButton {
@@ -1128,6 +1147,7 @@ Item {
                         visible: toolWellBox.hasCode
                         width: wellCol.width
                         lines: visible ? card.codeLines : []
+                        wrap: Theme.wrapCode || view.wraps[card.rowKey] === true
                         numbers: toolWellBox.gutter
                         signs: card.preview && !card.newFile
                         onOpenAt: (p, line) => root.openFileAt(p, line)
@@ -1478,6 +1498,9 @@ Item {
         // survives delegate destruction while scrolling.
         property var expanded: ({})
         function toggle(key) { const e = Object.assign({}, view.expanded); e[key] = !e[key]; view.expanded = e }
+        // Boxes wrapped by hand (their Wrap), by row key.
+        property var wraps: ({})
+        function setWrap(key, on) { const w = Object.assign({}, view.wraps); if (on) w[key] = true; else delete w[key]; view.wraps = w }
         // Runs folded or opened by hand, keyed by run.
         property var runs: ({})
         function toggleRun(group, dflt) { const r = Object.assign({}, view.runs); r[group] = !root.runOpen(group, dflt); view.runs = r }
@@ -1798,6 +1821,7 @@ Item {
                 Item {
                     id: codeRow
                     required property string rowModel
+                    required property string rowKey
                     ListView.onAdd: if (Theme.motion > 0) codeRowFade.start()
                     AddFade { id: codeRowFade; target: codeRow }
                     required property string html
@@ -1848,12 +1872,14 @@ Item {
                                 onClicked: Diagrams.openInBrowser(codeRow.text, Theme.isLight)
                             }
                             CopyButton {
-                                Layout.rightMargin: 6
+                                Layout.rightMargin: wrapBlock.visible ? 0 : 6
                                 Layout.preferredHeight: 22
                                 // (On hover, as a tool's: the language stays.)
                                 opacity: blockHover.hovered || copied || activeFocus ? 1 : 0
                                 copyText: codeRow.text
                             }
+                            // (At the edge, so it never stands beside Copy's empty place.)
+                            WrapButton { id: wrapBlock; Layout.rightMargin: 6; Layout.preferredHeight: 22; key: codeRow.rowKey; code: blockCode }
                         }
                         Rectangle { id: codeRule; y: codeHeader.height; width: parent.width; height: 1; color: Theme.codeRule }
                         // Drawing it, or why it isn't drawn.
@@ -1914,6 +1940,7 @@ Item {
                             visible: !codeRow.drawn
                             width: parent.width
                             html: codeRow.html
+                            wrap: Theme.wrapCode || view.wraps[codeRow.rowKey] === true
                             fontSize: Theme.mpx(13)
                             topPad: 8
                             bottomPad: 8
