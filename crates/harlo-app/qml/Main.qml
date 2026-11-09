@@ -3678,6 +3678,7 @@ ApplicationWindow {
             win.check(code[3].n === "2" && code[5].n === "4" && code[3].h.indexOf("<span") >= 0 && /^    let/.test(code[3].h.replace(/<[^>]+>/g, "")),
                       "a printed file's lines numbered from where it starts, highlighted, indented (" + JSON.stringify(code.slice(3)) + ")")
             win.check(win.findAllNames("toolTail", box).every(l => !/^\d+[:-]|^    let/.test(l.text)), "a listing isn't shown again as plain lines")
+            win.check(win.findAllNames("toolCommandRule", box).length >= 1, "a rule between a command and its listing")
             win.check(win.findAllNames("toolCommand", box).length === 2, "the commands under what they're for (the other is on its line)")
             win.check(win.chatText().indexOf("Running the full test suite\n") < 0 && win.findContaining("▸ cargo", t) === null, "no notice for a command in the foreground")
             // The wheel: the box first, then the session past its top.

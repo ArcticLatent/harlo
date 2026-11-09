@@ -539,7 +539,8 @@ Item {
             readonly property bool gutter: (card.preview && card.newFile) || (card.codeShown && card.code.lines.some(l => l.n !== ""))
             Rectangle {
                 visible: parent.gutter
-                y: card.commandInWell ? 6 + cmdLabel.height + 3 : 0
+                // (Under the command's rule: the column is the code's, not the command's.)
+                y: card.commandInWell ? 6 + cmdLabel.height + 7 : 0
                 width: wellCol.numberWidth - 6
                 height: parent.height - y
                 color: Theme.codeGutter
@@ -580,7 +581,15 @@ Item {
                         font.family: Theme.mono
                         font.pixelSize: Theme.mpx(12)
                     }
-                    Item { visible: card.commandInWell && (card.outInWell || card.codeShown); width: 1; height: 6 }
+                    // The command is the well's header: a rule across the well
+                    // between it and what it printed.
+                    Item {
+                        objectName: "toolCommandRule"
+                        visible: card.commandInWell && (card.outInWell || card.codeShown)
+                        width: wellCol.width
+                        height: 13
+                        Rectangle { y: 6; width: parent.width; height: 1; color: Theme.codeRule }
+                    }
                     Repeater {
                         model: card.preview || card.codeShown ? card.lines : []
                         Rectangle {

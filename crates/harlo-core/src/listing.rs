@@ -258,8 +258,9 @@ struct Numbered<'a> {
 }
 
 /// Lines that carry their numbers: grep -n (one file; its context lines
-/// with `-`), cat -n and nl (a tab), a read tool's `N→`. None unless most
-/// lines do (and at least two, so one stray "3: …" stays text).
+/// with `-`), cat -n and nl (a tab), a read tool's `N→`. None unless every
+/// line does but grep's `--` between groups (so a command that printed
+/// something else too stays text), and at least two (one stray "3: …").
 fn numbered<'a>(lines: &[&'a str]) -> Option<Numbered<'a>> {
     let mut path: Option<String> = None;
     let mut several = false;
@@ -277,8 +278,8 @@ fn numbered<'a>(lines: &[&'a str]) -> Option<Numbered<'a>> {
         }));
     }
     let hits = rows.iter().filter(|r| r.is_some()).count();
-    let real = lines.iter().filter(|l| !l.trim().is_empty()).count();
-    if several || hits < 2 || (hits as f64) < real as f64 * 0.6 {
+    let real = lines.iter().filter(|l| !l.trim().is_empty() && l.trim() != "--").count();
+    if several || hits < 2 || hits < real {
         return None;
     }
     let mut out = Numbered { path, nums: Vec::new(), bodies: Vec::new(), context: Vec::new() };
@@ -376,6 +377,15 @@ mod tests {
         // A limit: the first lines.
         assert_eq!(view("bash", "cat a.rs", "", "a\nb\nc\nd", 2).unwrap().lines.len(), 2);
         assert_eq!(line_count("a\nb\nc\n\n"), 3);
+    }
+
+    #[test]
+    fn output_numbered_only_in_part_stays_text() {
+        // (The end of one file, then grep in another: not one listing.)
+        let out = "        assert_eq!(a, b);\n    }\n}\n\n402:    fn f() {\n403-        g();\n404-    }";
+        assert!(view("bash", "tail -3 a.rs; grep -n -A2 'fn f' b.rs", "", out, 400).is_none());
+        let grep = "3:    let a = 1;\n4-    b();\n--\n9:    let c = 2;";
+        assert_eq!(view("bash", "grep -n -A1 let a.rs", "", grep, 400).unwrap().lines.len(), 4);
     }
 
     #[test]
