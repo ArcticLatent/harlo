@@ -26,7 +26,7 @@ GridLayout {
             Layout.alignment: Qt.AlignTop
             implicitHeight: body.implicitHeight + 22
             radius: 6
-            color: Theme.background
+            color: Theme.raised
             border.width: 1
             border.color: modelData.recommended ? Theme.primary : Theme.hairline
             ColumnLayout {

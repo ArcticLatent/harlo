@@ -1985,7 +1985,11 @@ Item {
                         // (The same well as a tool's code: its header, a rule, the
                         // numbers on their own column.)
                         radius: 6
-                        color: Theme.codeBg
+                        // (Cards or a picture aren't code: on the page, in a
+                        // hairline frame; their code goes back in the well.)
+                        color: codeRow.visual ? "transparent" : Theme.codeBg
+                        border.width: codeRow.visual ? 1 : 0
+                        border.color: Theme.hairline
                         RowLayout {
                             id: codeHeader
                             width: parent.width
@@ -2017,7 +2021,7 @@ Item {
                             // (At the edge, so it never stands beside Copy's empty place.)
                             WrapButton { id: wrapBlock; Layout.rightMargin: 6; Layout.preferredHeight: 22; key: codeRow.rowKey; code: blockCode }
                         }
-                        Rectangle { id: codeRule; y: codeHeader.height; width: parent.width; height: 1; color: Theme.codeRule }
+                        Rectangle { id: codeRule; y: codeHeader.height; width: parent.width; height: 1; color: codeRow.visual ? Theme.hairline : Theme.codeRule }
                         // Drawing it, or why it isn't drawn.
                         Label {
                             id: diagramNote

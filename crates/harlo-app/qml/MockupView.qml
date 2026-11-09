@@ -23,9 +23,12 @@ Item {
         y: 10
         width: parent.width - 20
         spacing: 6
-        RowLayout {
+        // (Narrow, Before | After goes under the title, which keeps its width.)
+        GridLayout {
             Layout.fillWidth: true
-            spacing: 8
+            columns: col.width >= 420 ? 2 : 1
+            columnSpacing: 8
+            rowSpacing: 6
             visible: caption.text !== "" || beforeAfter.visible
             Label {
                 id: caption
@@ -34,6 +37,9 @@ Item {
                 text: !view.mock ? "" : view.mock.title || ""
                 color: Theme.textMuted
                 font.pixelSize: Theme.px(12)
+                visible: text !== ""
+                wrapMode: Text.Wrap
+                maximumLineCount: 2
                 elide: Text.ElideRight
             }
             SegmentedControl {
