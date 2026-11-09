@@ -811,7 +811,9 @@ Item {
             if (!last || Number(last.n) - Number(first.n) !== nums.length - 1) return null
             return { p: last.p, n: Number(last.n) + 1 }
         }
-        readonly property bool canOpen: (text !== "" && !shell && !preview) || hidden > 0 || (commandInWell && shownCommand.split("\n").length > 2)
+        // Its last lines cut short to the well (each one line): opened, all of it.
+        property int cutLines: 0
+        readonly property bool canOpen: (text !== "" && !shell && !preview) || hidden > 0 || cutLines > 0 || (commandInWell && shownCommand.split("\n").length > 2)
         // (harlo's tools about a session: its title, not its key.)
         readonly property bool aboutSession: /^(mcp__harlo__)?(bring_over|send_message|read_session|stop_session)$/.test(title) && /^[\w-]+:\S+$/.test(subtitle)
         readonly property string sessionTitle: aboutSession ? Workspace.sessionTitle(subtitle) : ""
@@ -987,13 +989,19 @@ Item {
                 textFormat: Text.PlainText
             }
         }
-        RowLayout {
+        // The question, and its answers beside it; under it when they'd
+        // leave it too little room.
+        GridLayout {
+            id: approvalRow
             Layout.fillWidth: true
             Layout.leftMargin: 22
             Layout.topMargin: 2
             visible: card.asking
-            spacing: 6
+            columns: approvalQ.implicitWidth + approvalButtons.implicitWidth + columnSpacing > width ? 1 : 2
+            columnSpacing: 6
+            rowSpacing: 6
             Label {
+                id: approvalQ
                 objectName: "approvalQuestion"
                 Layout.fillWidth: true
                 text: root.approvalQuestion(card.title, card.askLines)
@@ -1002,11 +1010,15 @@ Item {
                 // (The one thing to read before answering: wrapped, never cut.)
                 wrapMode: Text.Wrap
             }
+            RowLayout {
+            id: approvalButtons
+            Layout.alignment: Qt.AlignRight
+            spacing: 6
             FlatButton { text: "Deny"; font.pixelSize: Theme.px(12.5); onClicked: root.session.answerValue("Deny") }
             FlatButton {
                 objectName: "alwaysAllowInline"
                 visible: root.session.requestOptions.indexOf("Always allow") >= 0
-                text: parent.width < 420 ? "Always" : "Always allow"
+                text: approvalRow.width < 420 ? "Always" : "Always allow"
                 font.pixelSize: Theme.px(12.5)
                 ToolTip.visible: hovered
                 ToolTip.delay: 400
@@ -1020,6 +1032,7 @@ Item {
                 accent: card.destructive ? Theme.error : Theme.foreground
                 font.pixelSize: Theme.px(12.5)
                 onClicked: root.session.answerValue("Approve")
+            }
             }
         }
         // The well: a write's or an edit's lines; a command (when its line
@@ -1133,6 +1146,8 @@ Item {
                             text: row ? root.numberedHtml(row, true) : modelData
                             color: Theme.textMuted
                             elide: Text.ElideRight
+                            onTruncatedChanged: card.cutLines += truncated ? 1 : -1
+                            Component.onDestruction: if (truncated) card.cutLines--
                             textFormat: row ? Text.StyledText : Text.PlainText
                             font.family: Theme.mono
                             font.pixelSize: Theme.mpx(12)
@@ -1149,7 +1164,8 @@ Item {
                         color: Theme.muted
                         readOnly: true
                         selectByMouse: true
-                        wrapMode: TextEdit.WrapAnywhere
+                        // (At a space; a path too long for the line anywhere.)
+                        wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
                         font.family: Theme.mono
                         font.pixelSize: Theme.mpx(12)
                     }

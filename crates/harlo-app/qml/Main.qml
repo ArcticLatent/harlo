@@ -4032,6 +4032,7 @@ ApplicationWindow {
     }
     property real perfOpen: 0
     property real holdY: 0
+    property var harloJobCard: null
 
     property var keyHead: null
     function listingBox() {
@@ -6265,6 +6266,18 @@ ApplicationWindow {
             win.check(t.indexOf("The background job ended: built-ok") >= 0, "its end comes as a notice, with its output, and starts a run by itself")
             win.check(win.findContaining("Background job j1", chat.transcript) !== null, "the notice shows in the conversation")
             win.shotWindow("clicks-harlo-job")
+            // Its one line, cut short to the well: a click shows all of it.
+            const w = win.findAllNames("toolWhat", chat.transcript).find(l => l.plain.indexOf("echo built-ok") >= 0)
+            let card = w
+            while (card && card.cutLines === undefined) card = card.parent
+            win.harloJobCard = card
+            win.check(card && card.cutLines > 0 && card.canOpen, "a line cut short to its well opens the call (" + (card ? card.cutLines : "none") + ")")
+            if (w) win.clickItem(w, "the job's line") } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const card = win.harloJobCard
+            win.check(card && card.open && win.findAllNames("toolTail", card).length === 0 && win.findContaining("j1.log", card) !== null, "opened: all of it, the log's path too")
+            win.shotWindow("clicks-harlo-job-open")
             win.sendByKeys("now reset hard") } }
         PauseAnimation { duration: 300 }
         // A destructive command asks, even in yolo, without Always allow.
@@ -6275,6 +6288,9 @@ ApplicationWindow {
             win.check(win.findContaining("can't be undone", chat.transcript) !== null, "and says why")
             win.check(win.findAllNames("approveInline", chat.transcript).some(b => b.text === "Run anyway"), "its confirm names what it does, not Approve")
             win.check(win.findName("alwaysAllowInline", chat.transcript) === null && win.findText("Always allow") === null, "with no Always allow")
+            const q = win.findAllNames("approvalQuestion", chat.transcript)[0]
+            const grid = q ? q.parent : null
+            win.check(q && !q.truncated && (win.width < 700 ? grid.columns === 1 && q.lineCount === 1 : grid.columns === 2), "the question beside its answers, or over them when narrow (" + (grid ? grid.columns : "none") + ")")
             win.shotWindow("clicks-harlo-destructive")
             win.clickText("Deny", chat.transcript) } }
         PauseAnimation { duration: 300 }
