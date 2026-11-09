@@ -151,6 +151,41 @@ Item {
         return i < 0 ? esc(t) : "<font color='" + Theme.rgb(Theme.textFaint) + "'>" + esc(t.slice(0, i + 1)) + "</font>" + esc(t.slice(i + 1))
     }
     function seconds(ms) { return ms <= 0 ? "" : ms < 10000 ? (ms / 1000).toFixed(1) + "s" : ms < 60000 ? Math.round(ms / 1000) + "s" : Math.floor(ms / 60000) + "m " + Math.round(ms % 60000 / 1000) + "s" }
+    // A step on a run's line: a dot whose colour is how it went (a
+    // thought's is hollow). The ring in the canvas colour cuts the line.
+    component RunNode: Item {
+        id: node
+        property string step: "done"   // done, error, running, asking, thought
+        // (For tests: the old marks' names.)
+        readonly property string name: step === "error" ? "close" : step === "asking" ? "question" : step === "running" ? "loader-4" : "check"
+        implicitWidth: 14
+        implicitHeight: 14
+        Rectangle {
+            anchors.centerIn: parent
+            width: 11
+            height: 11
+            radius: 5.5
+            color: Theme.canvas
+            Rectangle {
+                id: dot
+                anchors.centerIn: parent
+                width: 7
+                height: width
+                radius: width / 2
+                color: node.step === "error" ? Theme.error : node.step === "asking" ? Theme.warning : node.step === "running" ? Theme.primary
+                     : node.step === "thought" ? Theme.canvas : Theme.textFaint
+                border.width: node.step === "thought" ? 1.25 : 0
+                border.color: Theme.textFaint
+                SequentialAnimation on opacity {
+                    running: node.step === "running" && Theme.motion > 0
+                    loops: Animation.Infinite
+                    onRunningChanged: if (!running) dot.opacity = 1
+                    NumberAnimation { to: 0.35; duration: 700; easing.type: Easing.InOutSine }
+                    NumberAnimation { to: 1; duration: 700; easing.type: Easing.InOutSine }
+                }
+            }
+        }
+    }
     // A run's summary line ("Thought, edited 1 file, ran 2 commands"):
     // folds and unfolds the run.
     component RunHeader: Item {
@@ -161,11 +196,9 @@ Item {
         readonly property bool isOpen: root.runOpen(group, dflt)
         objectName: "runHeader"
         implicitHeight: 30
-        Rectangle { anchors.fill: parent; radius: 8; color: runHover.hovered ? Theme.hover : "transparent" }
+        Rectangle { x: -6; width: parent.width + 12; height: parent.height; radius: 6; color: runHover.hovered ? Theme.hover : "transparent" }
         RowLayout {
             anchors.fill: parent
-            anchors.leftMargin: 8
-            anchors.rightMargin: 10
             spacing: 8
             Icon { name: runHead.isOpen ? "arrow-down-s" : "arrow-right-s"; implicitWidth: 14; implicitHeight: 14; color: Theme.textFaint }
             Label {
@@ -199,8 +232,8 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 width: parent.width
                 spacing: 8
-                Icon { name: "sparkling"; implicitWidth: 14; implicitHeight: 14; color: thought.rowState === "streaming" ? Theme.primary : Theme.textFaint }
-                Label { Layout.fillWidth: true; text: thought.rowState === "streaming" ? "Thinking…" : "Thought"; color: Theme.muted; font.italic: true; font.pixelSize: Theme.px(13) }
+                RunNode { step: thought.rowState === "streaming" ? "running" : "thought" }
+                Label { Layout.fillWidth: true; text: thought.rowState === "streaming" ? "Thinking…" : "Thought"; color: thoughtHover.hovered ? Theme.textMuted : Theme.textFaint; font.pixelSize: Theme.px(13) }
             }
             HoverHandler { id: thoughtHover; cursorShape: Qt.PointingHandCursor }
             TapHandler { onTapped: view.toggle(thought.rowKey) }
@@ -210,13 +243,12 @@ Item {
             Layout.leftMargin: 22
             visible: thought.open
             text: thought.text
-            color: Theme.muted
+            color: Theme.textMuted
             readOnly: true
             selectByMouse: true
             wrapMode: TextEdit.Wrap
             font.family: Theme.uiFont
             font.pixelSize: Theme.px(13)
-            font.italic: true
         }
     }
     // A tool call: one line (what it is, what it touched, what it came to)
@@ -273,15 +305,11 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 width: parent.width
                 spacing: 8
-                Icon {
+                RunNode {
                     objectName: "toolMark"
-                    implicitWidth: 14
-                    implicitHeight: 14
-                    name: card.asking ? "question" : card.rowState === "error" ? "close" : card.rowState === "done" ? "check" : "loader-4"
-                    color: card.asking ? Theme.warning : card.rowState === "error" ? Theme.error : card.rowState === "running" ? Theme.primary : Theme.textFaint
-                    RotationAnimator on rotation { from: 0; to: 360; duration: 1200; loops: Animation.Infinite; running: card.rowState === "running" && Theme.motion > 0 }
+                    step: card.asking ? "asking" : card.rowState === "error" || (card.failed && card.rowState === "done") ? "error" : card.rowState === "done" ? "done" : "running"
                 }
-                Label { text: Theme.toolLabel(card.title); color: Theme.foreground; font.weight: Font.Medium; font.pixelSize: Theme.px(13) }
+                Label { text: Theme.toolLabel(card.title); color: Theme.text; font.weight: Font.Medium; font.pixelSize: Theme.px(13) }
                 Label {
                     objectName: "toolWhat"
                     Layout.fillWidth: true
@@ -289,7 +317,7 @@ Item {
                     readonly property string plain: card.target
                     textFormat: card.isPath ? Text.StyledText : Text.PlainText
                     text: card.isPath ? root.pathHtml(card.target) : card.target
-                    color: Theme.muted
+                    color: Theme.textMuted
                     elide: Text.ElideRight
                     font.family: card.label !== "" ? Theme.uiFont : Theme.mono
                     font.pixelSize: card.label !== "" ? Theme.px(13) : Theme.mpx(12)
@@ -313,9 +341,9 @@ Item {
                         let r = card.newFile ? (card.lineCount === 1 ? "1 line" : card.lineCount + " lines")
                               : card.result.replace(/^\+(\d+) −(\d+)$/, "<font color='" + Theme.rgb(Theme.diffAdd) + "'>+$1</font> <font color='" + Theme.rgb(Theme.diffRemove) + "'>−$2</font>")
                         if (card.failed && r !== "") r = "<font color='" + Theme.rgb(Theme.error) + "'>" + r + "</font>"
-                        return [r, faint(root.seconds(card.took))].filter(x => x !== "").join("  ")
+                        return [r, faint(root.seconds(card.took))].filter(x => x !== "").join("&nbsp;&nbsp;")
                     }
-                    color: Theme.muted
+                    color: Theme.textMuted
                     font.pixelSize: Theme.px(12)
                 }
             }
@@ -407,20 +435,16 @@ Item {
             Layout.fillWidth: true
             Layout.leftMargin: 22
             visible: card.preview || card.commandInWell || card.outInWell
-            implicitHeight: Math.min(wellCol.implicitHeight, Theme.px(300)) + 12
+            // (As tall as it is: a run's box is what scrolls.)
+            implicitHeight: wellCol.implicitHeight + 12
             radius: 6
             color: Theme.codeBg
-            Flickable {
+            Item {
                 id: wellFlick
-                x: 0
                 y: 6
                 width: parent.width
                 height: parent.height - 12
-                contentHeight: wellCol.implicitHeight
                 clip: true
-                interactive: contentHeight > height
-                boundsBehavior: Flickable.StopAtBounds
-                ScrollBar.vertical: ScrollBar { policy: wellFlick.contentHeight > wellFlick.height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff }
                 Column {
                     id: wellCol
                     width: wellFlick.width
@@ -484,7 +508,7 @@ Item {
                             x: 10
                             width: wellCol.width - 20
                             text: modelData
-                            color: Theme.muted
+                            color: Theme.textMuted
                             elide: Text.ElideRight
                             textFormat: Text.PlainText
                             font.family: Theme.mono
@@ -533,11 +557,13 @@ Item {
         objectName: "runBox"
         spacing: 2
         RunHeader { Layout.fillWidth: true; group: box.group; summary: box.summary; dflt: box.dflt }
+        Item {
+        Layout.fillWidth: true
+        Layout.preferredHeight: Math.min(boxCol.implicitHeight + 6, box.maxHeight)
         Flickable {
             id: boxFlick
             objectName: "runBoxScroll"
-            Layout.fillWidth: true
-            Layout.preferredHeight: Math.min(boxCol.implicitHeight + 6, box.maxHeight)
+            anchors.fill: parent
             contentHeight: boxCol.implicitHeight + 6
             clip: true
             interactive: contentHeight > height
@@ -557,10 +583,17 @@ Item {
             onHeightChanged: place()
             onMovementStarted: pinned = false
             onMovementEnded: pinned = atEnd()
+            // The run's line, from its first step to its last.
+            Rectangle {
+                x: boxCol.x + 7
+                y: 4
+                width: 1
+                height: Math.max(0, boxCol.implicitHeight - 12)
+                color: Theme.border
+            }
             ColumnLayout {
                 id: boxCol
-                x: 8
-                width: boxFlick.width - 16 - (boxBar.visible ? 6 : 0)
+                width: boxFlick.width - (boxBar.visible ? 14 : 0)
                 spacing: 6
                 Repeater {
                     model: box.rows
@@ -593,6 +626,27 @@ Item {
                     }
                 }
             }
+        }
+        // More above or below: the edge fades out.
+        Rectangle {
+            width: parent.width - (boxBar.visible ? 10 : 0)
+            height: 22
+            visible: boxFlick.contentY > 1
+            gradient: Gradient {
+                GradientStop { position: 0; color: Theme.canvas }
+                GradientStop { position: 1; color: Qt.rgba(Theme.canvas.r, Theme.canvas.g, Theme.canvas.b, 0) }
+            }
+        }
+        Rectangle {
+            y: parent.height - height
+            width: parent.width - (boxBar.visible ? 10 : 0)
+            height: 22
+            visible: !boxFlick.atEnd()
+            gradient: Gradient {
+                GradientStop { position: 0; color: Qt.rgba(Theme.canvas.r, Theme.canvas.g, Theme.canvas.b, 0) }
+                GradientStop { position: 1; color: Theme.canvas }
+            }
+        }
         }
     }
     /// What an approval asks, in words (Harlo's request to run a command
@@ -1212,21 +1266,18 @@ Item {
                     readonly property real gap: root.gapAbove("thinking", ListView.previousSection)
                     readonly property real head: summary !== "" ? 30 : 0
                     AgentHead { replyModel: thinkRow.rowModel; visible: root.opensTurn(thinkRow.ListView.previousSection); y: thinkRow.gap - height - 10 }
-                    // A run sits on one card: rounded where it starts and ends.
+                    // A run's line through its rows, open (a box draws its own).
                     Rectangle {
                         readonly property bool first: !root.isActivity(thinkRow.ListView.previousSection)
-                        readonly property bool last: !root.isActivity(thinkRow.ListView.nextSection) || ((thinkRow.folded || thinkRow.boxed) && first)
-                        visible: thinkRow.implicitHeight > 0 && !((thinkRow.folded || thinkRow.boxed) && !first)
+                        readonly property bool last: !root.isActivity(thinkRow.ListView.nextSection)
+                        // (One step alone has no line.)
+                        visible: thinkRow.implicitHeight > 0 && !thinkRow.folded && !thinkRow.boxed && !(first && last)
                         z: -1
-                        x: view.columnX
-                        width: view.columnWidth
-                        y: first ? thinkRow.gap - 4 : 0
-                        height: thinkRow.implicitHeight - y + (last ? 4 : 0)
-                        color: Theme.raised
-                        topLeftRadius: first ? 12 : 0
-                        topRightRadius: first ? 12 : 0
-                        bottomLeftRadius: last ? 12 : 0
-                        bottomRightRadius: last ? 12 : 0
+                        x: view.columnX + 7
+                        width: 1
+                        y: first ? thinkRow.gap + thinkRow.head + 10 : 0
+                        height: Math.max(0, thinkRow.implicitHeight - y - (last ? 14 : 0))
+                        color: Theme.border
                     }
                     width: view.width
                     implicitHeight: thinkRow.boxed ? (head > 0 ? gap + thinkBox.implicitHeight + 4 : 0)
@@ -1235,9 +1286,9 @@ Item {
                     visible: implicitHeight > 0
                     RunHeader {
                         visible: thinkRow.head > 0 && !thinkRow.boxed
-                        x: view.columnX + 8
+                        x: view.columnX
                         y: thinkRow.gap
-                        width: view.columnWidth - 16
+                        width: view.columnWidth
                         group: thinkRow.group
                         summary: thinkRow.summary
                         dflt: thinkRow.groupOpen
@@ -1245,17 +1296,17 @@ Item {
                     Loader {
                         id: thinkBox
                         active: thinkRow.boxed && thinkRow.head > 0
-                        x: view.columnX + 8
+                        x: view.columnX
                         y: thinkRow.gap
-                        width: view.columnWidth - 16
+                        width: view.columnWidth
                         sourceComponent: RunBox { width: thinkBox.width; group: thinkRow.group; summary: thinkRow.summary; dflt: thinkRow.groupOpen }
                     }
                     ThoughtLine {
                         id: thinkLine
                         visible: !thinkRow.folded && !thinkRow.boxed
-                        x: view.columnX + 16
+                        x: view.columnX
                         y: thinkRow.gap + thinkRow.head + 5
-                        width: view.columnWidth - 32
+                        width: view.columnWidth
                         rowKey: thinkRow.rowKey
                         text: thinkRow.text
                         rowState: thinkRow.rowState
@@ -1297,21 +1348,18 @@ Item {
                     readonly property real gap: root.gapAbove("tool", ListView.previousSection)
                     readonly property real head: summary !== "" ? 30 : 0
                     AgentHead { replyModel: toolRow.rowModel; visible: root.opensTurn(toolRow.ListView.previousSection); y: toolRow.gap - height - 10 }
-                    // A run sits on one card: rounded where it starts and ends.
+                    // A run's line through its rows, open (a box draws its own).
                     Rectangle {
                         readonly property bool first: !root.isActivity(toolRow.ListView.previousSection)
-                        readonly property bool last: !root.isActivity(toolRow.ListView.nextSection) || ((toolRow.folded || toolRow.boxed) && first)
-                        visible: toolRow.implicitHeight > 0 && !((toolRow.folded || toolRow.boxed) && !first)
+                        readonly property bool last: !root.isActivity(toolRow.ListView.nextSection)
+                        // (One step alone has no line.)
+                        visible: toolRow.implicitHeight > 0 && !toolRow.folded && !toolRow.boxed && !(first && last)
                         z: -1
-                        x: view.columnX
-                        width: view.columnWidth
-                        y: first ? toolRow.gap - 4 : 0
-                        height: toolRow.implicitHeight - y + (last ? 4 : 0)
-                        color: Theme.raised
-                        topLeftRadius: first ? 12 : 0
-                        topRightRadius: first ? 12 : 0
-                        bottomLeftRadius: last ? 12 : 0
-                        bottomRightRadius: last ? 12 : 0
+                        x: view.columnX + 7
+                        width: 1
+                        y: first ? toolRow.gap + toolRow.head + 10 : 0
+                        height: Math.max(0, toolRow.implicitHeight - y - (last ? 14 : 0))
+                        color: Theme.border
                     }
                     width: view.width
                     implicitHeight: toolRow.boxed ? (head > 0 ? gap + toolRunBox.implicitHeight + 4 : 0)
@@ -1320,9 +1368,9 @@ Item {
                     visible: implicitHeight > 0
                     RunHeader {
                         visible: toolRow.head > 0 && !toolRow.boxed
-                        x: view.columnX + 8
+                        x: view.columnX
                         y: toolRow.gap
-                        width: view.columnWidth - 16
+                        width: view.columnWidth
                         group: toolRow.group
                         summary: toolRow.summary
                         dflt: toolRow.groupOpen
@@ -1330,17 +1378,17 @@ Item {
                     Loader {
                         id: toolRunBox
                         active: toolRow.boxed && toolRow.head > 0
-                        x: view.columnX + 8
+                        x: view.columnX
                         y: toolRow.gap
-                        width: view.columnWidth - 16
+                        width: view.columnWidth
                         sourceComponent: RunBox { width: toolRunBox.width; group: toolRow.group; summary: toolRow.summary; dflt: toolRow.groupOpen }
                     }
                     Rectangle {
                         id: toolBox
                         visible: !toolRow.folded && !toolRow.boxed
-                        x: view.columnX + 8
+                        x: view.columnX - 8
                         y: toolRow.gap + toolRow.head
-                        width: view.columnWidth - 16
+                        width: view.columnWidth + 8
                         height: toolCard.implicitHeight + (toolRow.asking ? 20 : 10)
                         radius: 8
                         // (Solid when it asks: a row under it doesn't show through.)
