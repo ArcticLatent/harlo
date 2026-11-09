@@ -1593,7 +1593,14 @@ ApplicationWindow {
         PauseAnimation { duration: 800 }
         ScriptAction { script: { win.check(chat.session.subagentMessage.indexOf("BuildOtter") >= 0, "Steer sends it (" + chat.session.subagentMessage + ")"); TestInput.key(Qt.Key_Escape, 0) } }
         PauseAnimation { duration: 600 }
-        ScriptAction { script: { win.check(!chat.subagentDialog.visible, "Esc closes the dialog"); win.shotWindow("clicks-subagent-tree"); win.clickText("Cancel", win.ancestorWith(win.findText("BuildOtter", chat.transcript), "viewRequested")) } }
+        ScriptAction { script: { win.check(!chat.subagentDialog.visible, "Esc closes the dialog"); win.shotWindow("clicks-subagent-tree")
+            {
+                // Each row's dot is level with its name.
+                const name = win.findText("ScoutLark", chat.transcript), row = win.ancestorWith(name, "viewRequested"), dot = win.findName("subagentDot", row)
+                const dy = Math.abs(dot.mapToItem(null, 0, dot.height / 2).y - name.mapToItem(null, 0, name.height / 2).y)
+                win.check(dy <= 1, "a helper's dot is level with its name (" + dy.toFixed(1) + " px off)")
+            }
+ win.clickText("Cancel", win.ancestorWith(win.findText("BuildOtter", chat.transcript), "viewRequested")) } }
         PauseAnimation { duration: 1200 }
         ScriptAction { script: { const a = chat.subagentDock.agents.find(x => x.id === "BuildOtter"); win.check(a && a.status === "aborted", "Cancel in the tree aborts it"); win.summary(); Qt.quit() } }
     }

@@ -42,11 +42,14 @@ Rectangle {
         anchors.fill: parent
         anchors.leftMargin: 6
         anchors.rightMargin: 4
+        anchors.topMargin: 6
+        anchors.bottomMargin: 6
         spacing: 10
         // Status: pulsing while running.
         Rectangle {
+            objectName: "subagentDot"
             Layout.alignment: Qt.AlignTop
-            // (Centred on the name's line.)
+            // (Centred on the name's line: the dot and the text share a top.)
             Layout.topMargin: Math.max(0, Math.round((nameLabel.implicitHeight - 8) / 2))
             implicitWidth: 8
             implicitHeight: 8
@@ -63,23 +66,27 @@ Rectangle {
         ColumnLayout {
             id: rowCol
             Layout.fillWidth: true
+            Layout.alignment: Qt.AlignTop
             // (What the buttons leave: they stay in reach.)
             Layout.preferredWidth: 0
+            Layout.minimumWidth: 0
             spacing: 2
-            RowLayout {
+            // The name line, placed by hand: its widths come from the
+            // line's own width, and nothing here feeds back into it (a
+            // layout did, and rearranged itself in a loop).
+            Item {
+                id: nameLine
                 Layout.fillWidth: true
-                spacing: 6
+                implicitWidth: 0
+                implicitHeight: nameLabel.implicitHeight
+                // The status and what it used, at the right.
+                readonly property real tailRoom: tail.width > 0 ? tail.width + 6 : 0
                 Label {
                     id: nameLabel
                     // (The name tells helpers apart: it keeps its whole
                     // width, the kind and the task give way first; cut only
-                    // when the row has no more room. Given outright: a
-                    // layout's share left it a few pixels short, cut.)
-                    readonly property real room: rowCol.width - (agentLabel.visible ? agentLabel.implicitWidth + 6 : 0)
-                        - (statusLabel.visible ? statusLabel.implicitWidth + 6 : 0) - (usedLabel.visible ? usedLabel.implicitWidth + 6 : 0)
-                    Layout.preferredWidth: Math.max(0, Math.min(Math.ceil(implicitWidth), Math.floor(room)))
-                    Layout.minimumWidth: Layout.preferredWidth
-                    Layout.maximumWidth: Layout.preferredWidth
+                    // when the line has no more room.)
+                    width: Math.max(0, Math.min(Math.ceil(implicitWidth), Math.floor(nameLine.width - nameLine.tailRoom)))
                     text: agentRow.a.name || agentRow.a.id
                     color: Theme.foreground
                     font.pixelSize: Theme.px(13)
@@ -90,23 +97,23 @@ Rectangle {
                 Label {
                     id: agentLabel
                     objectName: "subagentWho"
-                    // (Shown while the name fits beside it.)
-                    visible: rowCol.width - (statusLabel.visible ? statusLabel.implicitWidth + 6 : 0) - (usedLabel.visible ? usedLabel.implicitWidth + 6 : 0) >= nameLabel.implicitWidth + 6 + Math.min(implicitWidth, Theme.px(40))
+                    // (Shown while the name fits beside it; narrow, shortened.)
+                    readonly property real room: nameLine.width - nameLine.tailRoom - nameLabel.implicitWidth - 6
+                    visible: room >= Math.min(implicitWidth, Theme.px(40))
+                    x: nameLabel.width + 6
+                    anchors.baseline: nameLabel.baseline
+                    width: visible ? Math.min(implicitWidth, room) : 0
                     text: Theme.helperKind(agentRow.a.agent) + (agentRow.a.model ? " · " + Theme.helperModel(agentRow.a.agent, agentRow.a.model) : "")
                     color: Theme.textMuted
                     font.pixelSize: Theme.px(11.5)
-                    // (Narrow: shortened, never under the buttons; it
-                    // keeps its whole width while there's room.)
-                    Layout.maximumWidth: implicitWidth
-                    Layout.minimumWidth: Math.min(implicitWidth, Theme.px(40))
-                    Layout.preferredWidth: implicitWidth
                     elide: Text.ElideRight
                 }
                 Label {
-                    Layout.fillWidth: true
-                    Layout.minimumWidth: 0
                     // (Takes what's left, never more: a long task is cut.)
-                    Layout.preferredWidth: 0
+                    x: agentLabel.visible ? agentLabel.x + agentLabel.width + 6 : nameLabel.width + 6
+                    anchors.baseline: nameLabel.baseline
+                    width: Math.max(0, nameLine.width - nameLine.tailRoom - x)
+                    visible: width > 20
                     // (Named after its description: the task instead, on one
                     // line; nothing when that only repeats the name.)
                     readonly property string task: String((agentRow.a.name && agentRow.a.name === agentRow.a.description ? "" : agentRow.a.description) || agentRow.a.task || "").replace(/\s+/g, " ").trim().slice(0, 300)
@@ -118,24 +125,30 @@ Rectangle {
                     maximumLineCount: 1
                     wrapMode: Text.NoWrap
                 }
-                // What it used so far.
-                Label {
-                    id: usedLabel
-                    objectName: "subagentUsed"
-                    visible: text !== "" && agentRow.width >= 420
-                    text: Theme.usedLabel(agentRow.a.used)
-                    color: Theme.muted
-                    font.pixelSize: Theme.px(11)
-                }
-                Label {
-                    id: statusLabel
-                    objectName: "subagentStatus"
-                    // (Finished: the faint dot says it. A harlo session
-                    // waiting: on its parent, or on you.)
-                    visible: !agentRow.live && agentRow.a.status !== "completed"
-                    text: Theme.helperStatus(agentRow.a.status)
-                    color: agentRow.a.status === "stopped" ? Theme.textMuted : agentRow.statusColor(agentRow.a.status)
-                    font.pixelSize: Theme.px(11.5)
+                Row {
+                    id: tail
+                    anchors.right: parent.right
+                    anchors.verticalCenter: nameLabel.verticalCenter
+                    spacing: 6
+                    // What it used so far.
+                    Label {
+                        id: usedLabel
+                        objectName: "subagentUsed"
+                        visible: text !== "" && agentRow.width >= 420
+                        text: Theme.usedLabel(agentRow.a.used)
+                        color: Theme.muted
+                        font.pixelSize: Theme.px(11)
+                    }
+                    Label {
+                        id: statusLabel
+                        objectName: "subagentStatus"
+                        // (Finished: the faint dot says it. A harlo session
+                        // waiting: on its parent, or on you.)
+                        visible: !agentRow.live && agentRow.a.status !== "completed"
+                        text: Theme.helperStatus(agentRow.a.status)
+                        color: agentRow.a.status === "stopped" ? Theme.textMuted : agentRow.statusColor(agentRow.a.status)
+                        font.pixelSize: Theme.px(11.5)
+                    }
                 }
             }
             Label {
