@@ -895,6 +895,7 @@ ApplicationWindow {
         page.grabToImage(r => { r.saveToFile(path); console.log("selftest: saved", path) })
     }
     /// The whole window, popups and their shadows included.
+    property real hoverLineWidth: -1
     function shotWindow(name) {
         const path = selftestDir + "/" + name + ".png"
         console.log("selftest:", TestInput.grabWindow(path) ? "saved" : "grab failed", path)
@@ -4024,6 +4025,7 @@ ApplicationWindow {
             win.listingAt("Look at how")
             const sedCard = win.findAllNames("toolWhat", win.listingBox()).find(l => l.plain.indexOf("Look at how") >= 0)
             const at = sedCard.mapToItem(null, sedCard.width / 2, sedCard.height / 2)
+            win.hoverLineWidth = sedCard.width
             TestInput.moveTo(at.x, at.y + 30) } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
@@ -4031,6 +4033,8 @@ ApplicationWindow {
             const copy = win.findAllNames("copyCode", box).find(c => c.visible)
             const head = copy ? (function up(i) { return !i || i.objectName === "toolHead" ? i : up(i.parent) })(copy.parent) : null
             win.check(copy && head, "hovered: its Copy, in the call's line (" + (copy ? copy.parent : "none") + ")")
+            const sedWhat = win.findAllNames("toolWhat", box).find(l => l.plain.indexOf("Look at how") >= 0)
+            win.check(sedWhat && sedWhat.width === win.hoverLineWidth, "its Copy keeps its place: nothing in the line moves on hover (" + (sedWhat ? sedWhat.width : -1) + " vs " + win.hoverLineWidth + ")")
             const sed = win.findAllNames("codeView", box).find(v => v.lines.length && v.lines[0].n === "38")
             win.check(copy && sed && copy.mapToItem(null, 0, copy.height).y <= sed.mapToItem(null, 0, 0).y, "the Copy sits above the code")
             win.shotWindow("listings-copy-hover")

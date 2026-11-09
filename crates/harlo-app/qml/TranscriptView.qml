@@ -898,37 +898,9 @@ Item {
                     font.family: card.codeLike ? Theme.mono : Theme.uiFont
                     font.pixelSize: card.codeLike ? Theme.mpx(12) : Theme.px(13)
                 }
-                FlatButton {
-                    // An edit or a write: its file's diff, in the Changes panel.
-                    visible: headHover.hovered && /^(edit|multi_?edit|write|apply_?patch|patch|create)/i.test(card.title) && card.subtitle !== "" && card.rowState !== "error"
-                    text: "diff"
-                    font.pixelSize: Theme.px(11)
-                    padding: 2
-                    outlined: false
-                    accent: Theme.info
-                    onClicked: root.openDiff(card.subtitle.replace(/…$/, ""))
-                }
                 // Its lines cut at the right: wrap them (always shown: it's
                 // what says they go on).
                 WrapButton { key: card.rowKey; code: wellCode }
-                // Copy: all of the listing (not just the lines shown), a
-                // write's file, an edit's new lines; on hover (or the keyboard).
-                CopyButton {
-                    id: callCopy
-                    // (A folded read offers its lines instead; Ctrl+C still copies.)
-                    visible: (card.codeShown || card.preview) && (cardHover.hovered || copied || activeFocus || root.keyFocus(headBox))
-                    // (From the call's whole output: the row may keep only part.)
-                    copyFrom: () => card.code ? root.session.codeText(card.title, card.command, card.subtitle.replace(/…$/, ""), root.session.callOutput(card.rowKey))
-                                              : card.diff.split("\n").filter(l => !l.startsWith("-")).map(l => l.slice(1)).join("\n")
-                }
-                // An older read, folded to its line: what a click does.
-                Label {
-                    objectName: "showLines"
-                    visible: card.isRead && !!card.code && !card.codeShown && (headHover.hovered || root.keyFocus(headBox))
-                    text: "Show lines"
-                    color: Theme.foreground
-                    font.pixelSize: Theme.px(12)
-                }
                 Label {
                     objectName: "toolResult"
                     visible: text !== ""
@@ -941,6 +913,70 @@ Item {
                         return [r, faint(root.seconds(card.took))].filter(x => x !== "").join("&nbsp;&nbsp;")
                     }
                     color: Theme.textMuted
+                    font.pixelSize: Theme.px(12)
+                }
+            }
+            // (The line's colour under them, fading in over the words.)
+            Rectangle {
+                id: hoverBg
+                // (From the first one shown: a faded diff before Copy covers nothing.)
+                readonly property real skip: diffButton.visible && diffButton.opacity === 0 && callCopy.visible ? diffButton.width + hoverActions.spacing : 0
+                visible: hoverActions.lit && hoverActions.width > hoverActions.leftPadding
+                x: hoverActions.x + skip
+                width: hoverActions.width - skip
+                height: parent.height
+                readonly property color line: headHover.hovered && card.canOpen ? Qt.tint(Theme.canvas, Theme.hover) : Theme.canvas
+                gradient: Gradient {
+                    orientation: Gradient.Horizontal
+                    GradientStop { position: 0; color: Qt.rgba(hoverBg.line.r, hoverBg.line.g, hoverBg.line.b, 0) }
+                    GradientStop { position: Math.min(0.5, hoverActions.leftPadding / Math.max(1, hoverBg.width)); color: hoverBg.line }
+                    GradientStop { position: 1; color: hoverBg.line }
+                }
+            }
+            // What hovering offers (diff, Copy, Show lines): over the right
+            // end of the call's words, on the line's own colour, never in the
+            // line's layout, so nothing in it moves (or gives up room) on hover.
+            Row {
+                id: hoverActions
+                readonly property bool lit: diffButton.opacity > 0 || callCopy.opacity > 0 || showLinesLabel.opacity > 0
+                anchors.verticalCenter: parent.verticalCenter
+                x: head.x + whatLabel.x + whatLabel.width - width
+                spacing: 6
+                leftPadding: 16
+                FlatButton {
+                    id: diffButton
+                    anchors.verticalCenter: parent.verticalCenter
+                    // An edit or a write: its file's diff, in the Changes panel.
+                    visible: /^(edit|multi_?edit|write|apply_?patch|patch|create)/i.test(card.title) && card.subtitle !== "" && card.rowState !== "error"
+                    opacity: headHover.hovered || activeFocus ? 1 : 0
+                    text: "diff"
+                    font.pixelSize: Theme.px(11)
+                    padding: 2
+                    outlined: false
+                    accent: Theme.info
+                    onClicked: root.openDiff(card.subtitle.replace(/…$/, ""))
+                }
+                // Copy: all of the listing (not just the lines shown), a
+                // write's file, an edit's new lines; on hover (or the keyboard).
+                CopyButton {
+                    id: callCopy
+                    anchors.verticalCenter: parent.verticalCenter
+                    // (A folded read offers its lines instead; Ctrl+C still copies.)
+                    visible: card.codeShown || card.preview
+                    opacity: cardHover.hovered || copied || activeFocus || root.keyFocus(headBox) ? 1 : 0
+                    // (From the call's whole output: the row may keep only part.)
+                    copyFrom: () => card.code ? root.session.codeText(card.title, card.command, card.subtitle.replace(/…$/, ""), root.session.callOutput(card.rowKey))
+                                              : card.diff.split("\n").filter(l => !l.startsWith("-")).map(l => l.slice(1)).join("\n")
+                }
+                // An older read, folded to its line: what a click does.
+                Label {
+                    id: showLinesLabel
+                    objectName: "showLines"
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: card.isRead && !!card.code && !card.codeShown
+                    opacity: headHover.hovered || root.keyFocus(headBox) ? 1 : 0
+                    text: "Show lines"
+                    color: Theme.foreground
                     font.pixelSize: Theme.px(12)
                 }
             }
