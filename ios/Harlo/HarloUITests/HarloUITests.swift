@@ -191,8 +191,8 @@ final class HarloUITests: XCTestCase {
     func test09Plan() {
         launch("plan")
         openMain()
-        app.buttons["Session menu"].tap()
-        tap("Plan and specs")
+        // The plan's card above the composer, opened.
+        tap("0/3")
         see("Test with 200 sessions")
         shot("15-plan")
         audit("plan")
@@ -249,6 +249,8 @@ final class HarloUITests: XCTestCase {
     func test14ClaudeSession() {
         launch("end")
         tap("Have a subagent look over")
+        // Its run folded; opened, the subagent's call.
+        tap("started 1 subagent")
         see("Subagent")
         shot("23-claude-session")
     }
@@ -256,7 +258,7 @@ final class HarloUITests: XCTestCase {
     func test15OtherTabs() {
         launch("end")
         app.tabBars.buttons["New Session"].tap()
-        see("harlo")
+        see("What should the agent do?")
         shot("24-new-session")
         audit("new-session")
         app.tabBars.buttons["Settings"].tap()
