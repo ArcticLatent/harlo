@@ -2785,11 +2785,11 @@ impl Workspace {
                 .zip(&g.depths)
                 .map(|(s, depth)| json!({ "path": s.path, "id": s.id, "title": s.title, "summary": s.summary, "type": s.kind, "status": s.status, "depth": depth, "links": s.links.len() }))
                 .collect();
-            json!({ "root": root.to_string_lossy(), "specs": specs, "problems": g.problems })
+            json!({ "root": root.to_string_lossy(), "specs": specs, "problems": g.problems, "mermaid": if g.specs.len() > 1 { g.mermaid() } else { String::new() } })
         };
         if !harlo_core::remote::is_remote(&cwd) {
             let found = read(&cwd);
-            return QString::from(&json!({ "root": found["root"], "project": project, "enabled": enabled, "specs": found["specs"], "problems": found["problems"] }).to_string());
+            return QString::from(&json!({ "root": found["root"], "project": project, "enabled": enabled, "specs": found["specs"], "problems": found["problems"], "mermaid": found["mermaid"] }).to_string());
         }
         // Another machine's: what was read of them, read again in the
         // background (specsReady says when).
@@ -2815,6 +2815,7 @@ impl Workspace {
                 "enabled": enabled,
                 "specs": cached.as_ref().map_or(json!([]), |c| c["specs"].clone()),
                 "problems": cached.as_ref().map_or(json!([]), |c| c["problems"].clone()),
+                "mermaid": cached.as_ref().map_or(json!(""), |c| c["mermaid"].clone()),
                 "loading": cached.is_none(),
                 "host": host,
             })

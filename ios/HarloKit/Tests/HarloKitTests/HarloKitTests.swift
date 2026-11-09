@@ -982,11 +982,15 @@ final class PlanTests: XCTestCase {
         // The tree: depth, type, status; what's wrong in the links.
         let tree = Specs(["enabled": true, "specs": [["path": "SPEC.md", "title": "harlo", "type": "product", "depth": 0],
                                                      ["path": "core/SPEC.md", "title": "core", "status": "stale", "depth": 1]],
-                          "problems": ["core/SPEC.md: depends-on `x` isn't a spec"]])
+                          "problems": ["core/SPEC.md: depends-on `x` isn't a spec"], "mermaid": "flowchart TD\n  s0[\"harlo\"]\n"])
         XCTAssertEqual(tree.specs.map(\.depth), [0, 1])
         XCTAssertEqual(tree.specs[0].kind, "product")
         XCTAssertEqual(tree.specs[1].status, "stale")
         XCTAssertEqual(tree.problems, ["core/SPEC.md: depends-on `x` isn't a spec"])
+        XCTAssertEqual(tree.spec(of: tree.problems[0])?.title, "core", "a problem opens its spec")
+        XCTAssertNil(tree.spec(of: "parents go round in a circle"))
+        XCTAssertTrue(tree.mermaid.hasPrefix("flowchart TD"))
+        XCTAssertEqual(specs.mermaid, "", "an older harlo sends no graph")
         XCTAssertEqual(specs.specs.first?.path, "SPEC.md")
         if case .plan(let key)? = Event(["ev": "plan", "key": "live:1"]) { XCTAssertEqual(key, "live:1") } else { XCTFail("a plan event") }
     }

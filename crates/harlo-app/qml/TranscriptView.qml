@@ -47,6 +47,23 @@ Item {
     readonly property var subagents: session.subagentsJson !== "" ? JSON.parse(session.subagentsJson) : []
 
     function scrollToEnd() { view.follow = true; view.scrollToEnd() }
+    // A reply's picture full size, inside harlo.
+    PictureViewer { id: pictureViewer }
+    property alias pictureViewer: pictureViewer
+    function viewDiagram(d, source) {
+        pictureViewer.show("Diagram", [{ label: "Diagram", url: d.url, width: d.width, height: d.height }], 0, "Diagram",
+                           () => Diagrams.openInBrowser(source, Theme.isLight), 2)
+    }
+    function viewMockup(m, source, before) {
+        if (!m) return
+        const pics = []
+        if (m.before && m.before.state === "ready") pics.push({ label: "Before", url: m.before.url, width: m.before.width, height: m.before.height, before: true })
+        if (m.after && m.after.state === "ready") pics.push({ label: "After", url: m.after.url, width: m.after.width, height: m.after.height, before: false })
+        if (pics.length === 0) return
+        const at = Math.max(0, pics.findIndex(p => p.before === before))
+        pictureViewer.show(m.title || "Mockup", pics, at, "Mockup",
+                           i => Visuals.openMockup(source, root.session.cwd || "", pics[i].before))
+    }
     /// Space above a row, from its kind and the kind before it: a new turn
     /// stands apart, paragraphs breathe, and tool calls and thoughts in a
     /// run sit together as one timeline.
@@ -1975,15 +1992,6 @@ Item {
                             height: 28
                             Label { Layout.leftMargin: 10; text: codeRow.kind === "options" ? "Options" : codeRow.kind === "mockup" ? "Mockup" : root.session.languageName(codeRow.title); color: Theme.muted; font.pixelSize: Theme.px(12) }
                             Item { Layout.fillWidth: true }
-                            // A mockup with one of how it is now: either.
-                            FlatButton {
-                                objectName: "mockupBefore"
-                                visible: codeRow.visual && codeRow.mock !== null && !!codeRow.mock.before
-                                Layout.preferredHeight: 22
-                                text: codeRow.showBefore ? "After" : "Before"
-                                font.pixelSize: Theme.px(11)
-                                onClicked: codeRow.showBefore = !codeRow.showBefore
-                            }
                             FlatButton {
                                 visible: (codeRow.mermaid && codeRow.diagram !== null && codeRow.diagram.state === "ready") || codeRow.canShow
                                 Layout.preferredHeight: 22
@@ -1992,7 +2000,8 @@ Item {
                                 onClicked: codeRow.showCode = !codeRow.showCode
                             }
                             FlatButton {
-                                visible: codeRow.mermaid || (codeRow.mock !== null && !codeRow.mock.error)
+                                // (Narrow, it's in the full-size view the picture opens.)
+                                visible: (codeRow.mermaid || (codeRow.mock !== null && !codeRow.mock.error)) && codeHeader.width >= 480
                                 Layout.preferredHeight: 22
                                 text: "Open in browser"
                                 font.pixelSize: Theme.px(11)
@@ -2046,7 +2055,22 @@ Item {
                                 asynchronous: true
                                 cache: false
                                 HoverHandler { id: diagramHover; cursorShape: Qt.PointingHandCursor }
-                                TapHandler { onTapped: Qt.openUrlExternally(codeRow.diagram.url) }
+                                TapHandler { onTapped: root.viewDiagram(codeRow.diagram, codeRow.text) }
+                                // (From the keyboard too: Tab to it, Enter or Space.)
+                                activeFocusOnTab: true
+                                Keys.onReturnPressed: root.viewDiagram(codeRow.diagram, codeRow.text)
+                                Keys.onSpacePressed: root.viewDiagram(codeRow.diagram, codeRow.text)
+                                Accessible.role: Accessible.Button
+                                Accessible.name: "Diagram. Open full size"
+                                Rectangle {
+                                    anchors.fill: parent
+                                    anchors.margins: -3
+                                    visible: diagramImage.activeFocus
+                                    color: "transparent"
+                                    border.width: 2
+                                    border.color: Theme.primary
+                                    radius: 4
+                                }
                                 ToolTip.visible: diagramHover.hovered
                                 ToolTip.text: "Open full size"
                                 ToolTip.delay: 600
@@ -2070,11 +2094,13 @@ Item {
                             }
                             MockupView {
                                 id: mockupView
+                                objectName: "mockupView"
                                 visible: codeRow.mock !== null
                                 width: parent.width
                                 mock: codeRow.mock && !codeRow.mock.error ? codeRow.mock : null
                                 showBefore: codeRow.showBefore
-                                onOpenRequested: before => Visuals.openMockup(codeRow.text, root.session.cwd || "", before)
+                                onOpenRequested: before => root.viewMockup(codeRow.mock, codeRow.text, before)
+                                onBeforeChosen: before => codeRow.showBefore = before
                             }
                         }
                         Rectangle {

@@ -86,6 +86,37 @@ impl Graph {
         found.into_iter()
     }
 
+    /// The graph as a Mermaid flowchart, for a picture of it: each spec a
+    /// box (its title, and its status when it isn't simply in force), a line
+    /// from its parent, and a dashed arrow for each of its links, named.
+    pub fn mermaid(&self) -> String {
+        let label = |s: &Spec| {
+            let mut t = if s.title.is_empty() { s.id.clone() } else { s.title.clone() };
+            if !s.status.is_empty() && s.status != "active" {
+                t = format!("{t} ({})", s.status);
+            }
+            t.replace('"', "#quot;").replace(['[', ']', '{', '}', '<', '>'], " ")
+        };
+        let at = |id: &str| self.specs.iter().position(|s| s.id == id);
+        let mut out = String::from("flowchart TD\n");
+        for (i, s) in self.specs.iter().enumerate() {
+            out += &format!("  s{i}[\"{}\"]\n", label(s));
+        }
+        for (i, s) in self.specs.iter().enumerate() {
+            if let Some(p) = s.parent.as_deref().and_then(at) {
+                out += &format!("  s{p} --> s{i}\n");
+            }
+        }
+        for (i, s) in self.specs.iter().enumerate() {
+            for (how, to) in &s.links {
+                if let Some(j) = self.resolve(to).and_then(|t| at(&t.id)) {
+                    out += &format!("  s{i} -.->|{}| s{j}\n", how.replace('-', " "));
+                }
+            }
+        }
+        out
+    }
+
     /// The specs that link to `id`: `(their id, how)`.
     fn linked_from<'a>(&'a self, id: &'a str) -> impl Iterator<Item = (&'a str, &'a str)> + 'a {
         self.specs.iter().flat_map(move |s| s.links.iter().filter(move |(_, to)| to == id).map(move |(how, _)| (s.id.as_str(), how.as_str())))
@@ -665,6 +696,14 @@ mod tests {
         for p in ["server/SPEC.md: depends-on `payments` isn't a spec", "web/SPEC.md: its id `server` is another spec's too", "web/SPEC.md: status `shiny` isn't one of", "parents go round in a circle"] {
             assert!(problems.contains(p), "{p} in {problems}");
         }
+        // As a picture: boxes, parents' lines and named, dashed links.
+        let m = g.mermaid();
+        assert!(m.starts_with("flowchart TD\n"), "{m}");
+        let box_of = |path: &str| format!("s{}", g.specs.iter().position(|s| s.path == path).unwrap());
+        assert!(m.contains(&format!("{}[\"Store (stale)\"]", box_of("server/store/SPEC.md"))), "{m}");
+        assert!(m.contains(&format!("{} --> {}", box_of("server/SPEC.md"), box_of("server/store/SPEC.md"))), "{m}");
+        assert!(m.contains(&format!("{} -.->|depends on| {}", box_of("server/SPEC.md"), box_of("server/store/SPEC.md"))), "{m}");
+        assert!(m.contains(&format!("{} -.->|implements| {}", box_of("server/store/SPEC.md"), box_of("docs/arch/SPEC.md"))), "{m}");
         // Tree order, with depths.
         let order: Vec<(usize, &str)> = g.specs.iter().zip(&g.depths).map(|(s, d)| (*d, s.path.as_str())).collect();
         assert_eq!(&order[..4], &[(0, "SPEC.md"), (1, "docs/arch/SPEC.md"), (2, "server/SPEC.md"), (3, "server/store/SPEC.md")]);

@@ -4,14 +4,15 @@ import QtQuick.Layouts
 import harlo
 
 // A ```mockup block's picture (its HTML file, taken by a browser without a
-// window), fitted to the column; with one of how it is now, Before shows
-// that instead. Clicking it opens the file in the browser.
+// window), fitted to the column; with one of how it is now, Before and After
+// switch between them. Clicking it opens it full size.
 Item {
     id: view
     /// Visuals.mockup's.
     property var mock: null
     property bool showBefore: false
     signal openRequested(bool before)
+    signal beforeChosen(bool before)
     readonly property var pic: mock ? (showBefore && mock.before ? mock.before : mock.after) : null
     readonly property bool ready: pic !== null && pic.state === "ready"
     implicitHeight: col.implicitHeight + 20
@@ -22,14 +23,28 @@ Item {
         y: 10
         width: parent.width - 20
         spacing: 6
-        Label {
-            objectName: "mockupCaption"
+        RowLayout {
             Layout.fillWidth: true
-            visible: text !== ""
-            text: !view.mock ? "" : [view.mock.title || "", view.mock.before ? (view.showBefore ? "Before" : "After") : ""].filter(t => t !== "").join(" · ")
-            color: Theme.textMuted
-            font.pixelSize: Theme.px(12)
-            elide: Text.ElideRight
+            spacing: 8
+            visible: caption.text !== "" || beforeAfter.visible
+            Label {
+                id: caption
+                objectName: "mockupCaption"
+                Layout.fillWidth: true
+                text: !view.mock ? "" : view.mock.title || ""
+                color: Theme.textMuted
+                font.pixelSize: Theme.px(12)
+                elide: Text.ElideRight
+            }
+            SegmentedControl {
+                id: beforeAfter
+                objectName: "mockupBeforeAfter"
+                visible: !!view.mock && !!view.mock.before
+                labels: ["Before", "After"]
+                current: view.showBefore ? 0 : 1
+                namePrefix: "mockup"
+                onPicked: i => view.beforeChosen(i === 0)
+            }
         }
         Label {
             objectName: "mockupNote"
@@ -49,9 +64,15 @@ Item {
             Layout.preferredWidth: view.ready ? Math.round(view.pic.width * fit) + 2 : 0
             Layout.preferredHeight: view.ready ? Math.round(view.pic.height * fit) + 2 : 0
             color: "transparent"
-            border.width: 1
-            border.color: Theme.hairline
+            border.width: activeFocus ? 2 : 1
+            border.color: activeFocus ? Theme.primary : Theme.hairline
             radius: 3
+            // (From the keyboard too: Tab to it, Enter or Space.)
+            activeFocusOnTab: true
+            Keys.onReturnPressed: view.openRequested(view.showBefore && !!view.mock.before)
+            Keys.onSpacePressed: view.openRequested(view.showBefore && !!view.mock.before)
+            Accessible.role: Accessible.Button
+            Accessible.name: (view.mock && view.mock.title ? view.mock.title : "Mockup") + (view.mock && view.mock.before ? (view.showBefore ? ", before" : ", after") : "") + ". Open full size"
             Image {
                 x: 1
                 y: 1
@@ -67,7 +88,7 @@ Item {
             HoverHandler { id: picHover; cursorShape: Qt.PointingHandCursor }
             TapHandler { onTapped: view.openRequested(view.showBefore && !!view.mock.before) }
             ToolTip.visible: picHover.hovered
-            ToolTip.text: "Open in the browser"
+            ToolTip.text: "Open full size"
             ToolTip.delay: 600
         }
     }

@@ -216,19 +216,31 @@ public struct Specs: Equatable, Sendable {
     /// What doesn't hold in their links ("web/SPEC.md: its parent `x`
     /// isn't a spec").
     public var problems: [String]
+    /// The graph as a Mermaid flowchart, for a picture of it ("" with one
+    /// spec, or from an older harlo).
+    public var mermaid: String
 
     public init(_ v: JSON) {
         enabled = v["enabled"].bool ?? false
+        mermaid = v["mermaid"].text
         specs = (v["specs"].array ?? []).map {
             Spec(path: $0["path"].text, title: $0["title"].text, summary: $0["summary"].text, kind: $0["type"].text, status: $0["status"].text, depth: $0["depth"].int.map(Int.init) ?? 0)
         }
         problems = (v["problems"].array ?? []).map(\.text)
     }
 
-    public init(specs: [Spec] = [], enabled: Bool = true, problems: [String] = []) {
+    public init(specs: [Spec] = [], enabled: Bool = true, problems: [String] = [], mermaid: String = "") {
         self.enabled = enabled
         self.specs = specs
         self.problems = problems
+        self.mermaid = mermaid
+    }
+
+    /// The spec a problem is about ("src/SPEC.md: …"), if it's one of these.
+    public func spec(of problem: String) -> Spec? {
+        guard let colon = problem.range(of: ": ") else { return nil }
+        let path = String(problem[..<colon.lowerBound])
+        return specs.first { $0.path == path }
     }
 }
 

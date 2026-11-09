@@ -124,6 +124,8 @@ fn main() {
                 "qml/SpecsPanel.qml",
                 "qml/OptionsCards.qml",
                 "qml/MockupView.qml",
+                "qml/PictureViewer.qml",
+                "qml/SegmentedControl.qml",
                 "qml/PlanDock.qml",
                 "qml/InstanceSwitcher.qml",
                 "qml/SearchDialog.qml",

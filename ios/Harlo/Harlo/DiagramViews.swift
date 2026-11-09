@@ -79,10 +79,11 @@ struct DiagramBlock: View {
             withAnimation(.easeOut(duration: 0.15)) { showCode.toggle() }
         } label: {
             Label(title, systemImage: icon)
-                .font(.system(size: 13, weight: .medium))
+                .font(.footnote.weight(.medium))
                 .foregroundStyle(Color(p.primary))
-                .padding(.vertical, 6)
                 .padding(.horizontal, 4)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -127,5 +128,56 @@ struct DiagramZoom: View {
             }
         }
         .modifier(Themed())
+    }
+}
+
+/// The specs' graph, drawn by harlo (as a reply's diagram): fitted to the
+/// row, tap to zoom.
+struct SpecsGraph: View {
+    @Environment(HarloModel.self) private var model
+    @Environment(\.palette) private var p
+    let source: String
+    @State private var picture: DiagramPicture?
+    @State private var why = ""
+    @State private var loading = true
+    @State private var zoomed = false
+
+    var light: Bool { p.background.luminance > 0.5 }
+
+    var body: some View {
+        Group {
+            if let d = picture, let image = UIImage(data: d.png) {
+                Button { zoomed = true } label: {
+                    Image(uiImage: image)
+                        .resizable()
+                        .interpolation(.high)
+                        .aspectRatio(CGSize(width: max(d.width, 1), height: max(d.height, 1)), contentMode: .fit)
+                        .frame(maxWidth: d.width)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("The specs' graph")
+                .accessibilityHint("Opens it to zoom")
+                .fullScreenCover(isPresented: $zoomed) {
+                    DiagramZoom(image: image, size: CGSize(width: d.width, height: d.height), title: "Specs")
+                }
+            } else if loading {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text("Drawing the graph…").font(.subheadline).foregroundStyle(Color(p.muted))
+                }
+            } else {
+                Text(why.isEmpty ? "The graph couldn't be drawn." : why).font(.footnote).foregroundStyle(Color(p.muted))
+            }
+        }
+        .task(id: "\(light)|\(source)") {
+            loading = true
+            let colors = ["background": p.elevated.hex, "surface": p.raised.hex, "text": p.foreground.hex, "muted": p.muted.hex, "accent": p.primary.hex]
+            let r = await model.diagram(source, light: light, colors: colors)
+            picture = r.picture
+            why = r.why
+            loading = false
+        }
     }
 }

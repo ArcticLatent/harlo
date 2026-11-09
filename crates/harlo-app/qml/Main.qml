@@ -6952,6 +6952,7 @@ ApplicationWindow {
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            if (win.argValue("--theme-mode=")) Workspace.chooseThemeMode(win.argValue("--theme-mode="))
             Workspace.addProject(win.argValue("--cwd=")) } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
@@ -7002,13 +7003,25 @@ ApplicationWindow {
         PauseAnimation { duration: 1200 }
         ScriptAction { script: {
             const panel = win.findName("specsProblems")
-            win.check(panel && panel.visible && win.findContaining("depends-on `sync` isn't a spec", panel) !== null, "the Specs panel shows the problem")
+            const prob = win.findName("specsProblem")
+            win.check(panel && panel.visible && prob && prob.modelData.indexOf("depends-on `sync` isn't a spec") >= 0 && prob.file === "src/SPEC.md"
+                      && prob.contentItem.text.indexOf("src/SPEC.md depends on <font") === 0 && prob.contentItem.text.indexOf(">sync</font>, which isn't a spec") > 0 && win.findName("specsFix") !== null,
+                      "the Specs panel shows the problem, the name in the code font, opening its spec, with Ask the agent to fix them")
             const status = win.findAllNames("specStatus", panel.parent).map(l => l.text)
             win.check(JSON.stringify(status) === JSON.stringify(["stale"]), "and the stale spec (" + JSON.stringify(status) + ")")
             const titles = ["Notes app", "Sidebar", "Store"].map(t => win.findText(t, panel.parent))
             win.check(titles.every(t => t !== null) && titles[1].mapToItem(null, 0, 0).x > titles[0].mapToItem(null, 0, 0).x, "the tree: the parts under the product")
             win.shotWindow("clicks-harlo-specs-panel")
-            win.sendSpec("fix the spec link") } }
+            win.clickItem(win.findName("specsViewGraph"), "Graph") } }
+        ScriptAction { script: win.waitUntil(harloSpecSteps, () => { const p = win.findName("specsGraphPicture"); return p !== null && p.visible && p.status === Image.Ready }, 15000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const p = win.findName("specsGraphPicture")
+            win.check(p && p.width > 40 && p.height > 40 && win.findName("specsGraph").visible, "Graph draws the specs and their links (" + (p ? p.width + "x" + p.height : "none") + ")")
+            win.shotWindow("clicks-harlo-specs-graph")
+            win.clickItem(win.findName("specsViewTree"), "Tree") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.sendSpec("fix the spec link") }
         PauseAnimation { duration: 300 }
         ScriptAction { script: win.waitUntil(harloSpecSteps, () => win.specAnswered(), 15000) }
         PauseAnimation { duration: 100 }
@@ -7052,6 +7065,7 @@ ApplicationWindow {
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            if (win.argValue("--theme-mode=")) Workspace.chooseThemeMode(win.argValue("--theme-mode="))
             Workspace.addProject(win.argValue("--cwd=")) } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: win.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo") }
@@ -7070,6 +7084,14 @@ ApplicationWindow {
             win.check(pics.length >= 1, "the diagram sent again is drawn (" + pics.length + " pictures)")
             win.check(win.modelRequests().length === 2, "and harlo asks no more (" + win.modelRequests().length + " requests)")
             win.shotWindow("clicks-harlo-diagram")
+            win.clickItem(pics[pics.length - 1], "the diagram") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const v = chat.transcript.pictureViewer
+            win.check(v && v.opened && v.pictures.length === 1 && v.title === "Diagram" && v.fit > 1 && win.findName("viewerZoom") !== null,
+                      "clicking the diagram opens it full size in harlo, a small one enlarged (" + (v ? v.fit.toFixed(2) : "") + ")")
+            win.shotWindow("clicks-harlo-diagram-viewer")
+            v.close()
             win.diagramKey2 = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: win.waitUntil(diagramSteps, () => chat.session.modelName !== "", 10000) }
@@ -7096,6 +7118,7 @@ ApplicationWindow {
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            if (win.argValue("--theme-mode=")) Workspace.chooseThemeMode(win.argValue("--theme-mode="))
             Workspace.addProject(win.argValue("--cwd=")) } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
@@ -7133,20 +7156,45 @@ ApplicationWindow {
             const pic = win.findName("mockupPicture")
             win.check(pic && pic.visible && pic.width <= 642 && Math.abs((pic.width - 2) / (pic.height - 2) - 1.6) < 0.02, "the mockup is shown as its picture, in its window's proportions, fitted to the column (" + (pic ? pic.width + "x" + pic.height : "none") + ")")
             const cap = win.findName("mockupCaption")
-            win.check(cap && cap.text === "Settings with Sync now · After", "with its title (" + (cap ? cap.text : "") + ")")
+            const ba = win.findName("mockupBeforeAfter")
+            win.check(cap && cap.text === "Settings with Sync now" && ba && ba.visible && ba.current === 1, "with its title, After chosen of Before | After (" + (cap ? cap.text : "") + ")")
             win.mockUrl = pic.children[0].source.toString()
-            win.shotWindow("clicks-harlo-mockup")
-            win.clickItem(win.findName("mockupBefore"), "Before") } }
+            win.shotWindow("clicks-harlo-mockup") } }
+        // (Both pictures taken: a real browser takes a moment.)
+        ScriptAction { script: win.waitUntil(visualSteps, () => { const m = win.findName("mockupView"); return m && m.mock && m.mock.before && m.mock.before.state === "ready" && m.mock.after.state === "ready" }, 20000) }
+        ScriptAction { script: win.clickItem(win.findName("mockupPicture"), "the mockup's picture") }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const v = chat.transcript.pictureViewer
+            const frame = win.findName("viewerPictureFrame")
+            win.check(v && v.opened && v.pictures.length === 2 && v.pic.label === "After" && frame && frame.width > 0,
+                      "clicking it opens it full size in harlo, After shown, Before beside it (" + (v ? v.pictures.length : "none") + ")")
+            win.shotWindow("clicks-harlo-mockup-viewer")
+            // (Shown whole at its own size, there's nothing to switch.)
+            if (v.fit < 1) win.clickItem(win.findName("viewerZoom"), "100%")
+            else win.check(win.findName("viewerZoom") === null, "no 100% when it's shown at its own size") } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const v = chat.transcript.pictureViewer
+            win.check(Math.abs(v.scaleNow - 1) < 0.001 && Math.abs(win.findName("viewerPictureFrame").width - v.pic.width - 2) <= 1, "100% shows it at its own size (" + v.scaleNow + ", " + win.findName("viewerPictureFrame").width + " for " + v.pic.width + ")")
+            win.clickItem(win.findName("viewerPictureBefore"), "Before in the viewer") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const v = chat.transcript.pictureViewer
+            win.check(v.pic.label === "Before" && v.pic.url !== win.mockUrl, "Before | After switches the picture there too")
+            v.close() } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: win.clickItem(win.findName("mockupBefore"), "Before") }
         PauseAnimation { duration: 600 }
         ScriptAction { script: win.waitUntil(visualSteps, () => { const p = win.findName("mockupPicture"); return p !== null && p.visible }, 15000) }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             const pic = win.findName("mockupPicture")
-            win.check(win.findName("mockupCaption").text.indexOf("Before") >= 0 && pic.children[0].source.toString() !== win.mockUrl, "Before shows how it is now")
-            win.clickItem(win.findName("mockupBefore"), "After")
+            win.check(win.findName("mockupBeforeAfter").current === 0 && pic.children[0].source.toString() !== win.mockUrl, "Before shows how it is now")
+            win.clickItem(win.findName("mockupAfter"), "After")
             win.sendByKeys("change the mockup") } }
         PauseAnimation { duration: 300 }
-        ScriptAction { script: win.waitUntil(visualSteps, () => { const p = win.findName("mockupPicture"); return p !== null && p.visible && p.children[0].source.toString() !== win.mockUrl && win.findName("mockupCaption").text.indexOf("After") >= 0 }, 15000) }
+        ScriptAction { script: win.waitUntil(visualSteps, () => { const p = win.findName("mockupPicture"); return p !== null && p.visible && p.children[0].source.toString() !== win.mockUrl && win.findName("mockupBeforeAfter").current === 1 }, 15000) }
         PauseAnimation { duration: 200 }
         ScriptAction { script: {
             win.check(true, "the agent's edit of the file shows in the picture")

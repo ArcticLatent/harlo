@@ -28,18 +28,18 @@ struct OptionsBlock: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(c.name)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.body.weight(.semibold))
                     .foregroundStyle(Color(p.foreground))
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if c.recommended {
                     Text("Recommended")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.caption.weight(.medium))
                         .foregroundStyle(Color(p.primary))
                 }
             }
             if !c.about.isEmpty {
                 Text(c.about)
-                    .font(.system(size: 14))
+                    .font(.subheadline)
                     .foregroundStyle(Color(p.muted))
             }
             ForEach(Array(c.pros.enumerated()), id: \.offset) { _, t in point("+", t, p.success) }
@@ -57,11 +57,11 @@ struct OptionsBlock: View {
     func point(_ mark: String, _ text: String, _ color: RGBA) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(mark)
-                .font(.system(size: 14, weight: .semibold))
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Color(color))
                 .accessibilityLabel(mark == "+" ? "For:" : "Against:")
             Text(text)
-                .font(.system(size: 14))
+                .font(.subheadline)
                 .foregroundStyle(Color(p.foreground))
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -92,7 +92,7 @@ struct MockupBlock: View {
             if loading && pictures == nil {
                 HStack(spacing: 8) {
                     ProgressView()
-                    Text("Taking a picture of it…").font(.system(size: 13.5)).foregroundStyle(Color(p.muted))
+                    Text("Taking a picture of it…").font(.subheadline).foregroundStyle(Color(p.muted))
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -104,7 +104,7 @@ struct MockupBlock: View {
                         VisualToggle(title: "Show the picture", icon: "photo") { showCode = false }
                     } else if !pictureWhy.isEmpty {
                         Text(pictureWhy)
-                            .font(.system(size: 12.5))
+                            .font(.footnote)
                             .foregroundStyle(Color(p.muted))
                             .padding(.horizontal, 4)
                     }
@@ -113,7 +113,7 @@ struct MockupBlock: View {
                 VStack(alignment: .leading, spacing: 8) {
                     if let m = pictures, !m.title.isEmpty {
                         Text(m.title)
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.footnote.weight(.medium))
                             .foregroundStyle(Color(p.muted))
                             .padding(.horizontal, 2)
                     }
@@ -144,7 +144,7 @@ struct MockupBlock: View {
                         }
                     } else {
                         Text(pictureWhy.isEmpty ? "There's no picture of it." : pictureWhy)
-                            .font(.system(size: 13))
+                            .font(.footnote)
                             .foregroundStyle(Color(p.warning))
                             .padding(.vertical, 8)
                     }
@@ -177,10 +177,12 @@ struct VisualToggle: View {
             withAnimation(.easeOut(duration: 0.15)) { action() }
         } label: {
             Label(title, systemImage: icon)
-                .font(.system(size: 13, weight: .medium))
+                .font(.footnote.weight(.medium))
                 .foregroundStyle(Color(p.primary))
-                .padding(.vertical, 6)
                 .padding(.horizontal, 4)
+                // (A full-size target, whatever its text.)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

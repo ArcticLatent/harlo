@@ -46,6 +46,7 @@ struct PlanSheet: View {
     @State private var editing: StepDraft?
     @State private var reading: Spec?
     @State private var notice: String?
+    @State private var specsGraph = false
 
     struct StepDraft: Identifiable {
         /// nil: a new step (after `after`, else at the end).
@@ -169,49 +170,84 @@ struct PlanSheet: View {
     var specs: some View {
         if let s = session.specs, !s.specs.isEmpty {
             Section {
-                ForEach(s.specs) { spec in
-                    Button { reading = spec } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "doc.text").foregroundStyle(Color(p.primary))
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack(spacing: 6) {
-                                    Text(spec.title.isEmpty ? spec.path : spec.title).font(.system(size: 15.5, weight: .medium))
-                                    // Its status, when it isn't simply in force; its type.
-                                    if !spec.status.isEmpty && spec.status != "active" {
-                                        Text(spec.status).font(.system(size: 12)).foregroundStyle(Color(spec.status == "stale" ? p.warning : p.faint))
-                                            .strikethrough(spec.status == "deprecated")
-                                    }
-                                    if !spec.kind.isEmpty {
-                                        Text(spec.kind).font(.system(size: 12)).foregroundStyle(Color(p.faint))
-                                    }
-                                }
-                                if !spec.summary.isEmpty {
-                                    Text(spec.summary).font(.system(size: 13)).foregroundStyle(Color(p.muted)).lineLimit(2)
-                                }
-                                Text(spec.path).font(Style.mono(11)).foregroundStyle(Color(p.faint)).lineLimit(1).truncationMode(.head)
-                            }
-                            Spacer(minLength: 0)
-                            Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Color(p.muted))
-                        }
-                        // (Under its parent.)
-                        .padding(.leading, CGFloat(min(spec.depth, 4)) * 14)
-                        .contentShape(Rectangle())
+                if !s.mermaid.isEmpty && s.specs.count > 1 {
+                    Picker("Show", selection: $specsGraph) {
+                        Text("Tree").tag(false)
+                        Text("Graph").tag(true)
                     }
-                    .buttonStyle(.plain)
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("specsTreeGraph")
+                }
+                if specsGraph && !s.mermaid.isEmpty {
+                    SpecsGraph(source: s.mermaid)
+                } else {
+                    ForEach(s.specs) { spec in specRow(spec) }
                 }
                 if !s.problems.isEmpty {
-                    VStack(alignment: .leading, spacing: 3) {
+                    VStack(alignment: .leading, spacing: 4) {
                         Text(s.problems.count == 1 ? "1 problem in the specs' links" : "\(s.problems.count) problems in the specs' links")
-                            .font(.system(size: 13, weight: .medium)).foregroundStyle(Color(p.warning))
-                        ForEach(s.problems.prefix(4), id: \.self) { Text($0).font(.system(size: 12)).foregroundStyle(Color(p.muted)) }
+                            .font(.subheadline.weight(.medium)).foregroundStyle(Color(p.warning))
+                        ForEach(s.problems.prefix(4), id: \.self) { problem in
+                            // (Its `names` in the code font; it opens the spec it's in.)
+                            Button { reading = s.spec(of: problem) } label: {
+                                Text(.init(problem))
+                                    .font(.footnote)
+                                    .foregroundStyle(Color(p.muted))
+                                    .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(s.spec(of: problem) == nil)
+                        }
+                        if !session.liveKey.isEmpty {
+                            Button("Ask the agent to fix them") {
+                                let ask = "Fix the problems in this project's specs' links (spec_validate lists them): " + s.problems.joined(separator: "; ") + ". Point each link at the spec it means, or take it out if there's none."
+                                Task { if await model.send(ask) { notice = "Sent to the agent." } }
+                            }
+                            .font(.subheadline.weight(.medium))
+                            .frame(minHeight: 44)
+                        }
                     }
                 }
             } header: {
                 Text("Specs")
             } footer: {
-                Text(s.enabled ? "The agent looks up the spec that governs its work and keeps it true." : "The repository's specs. harlo's Settings → Projects has the agent read them.")
+                Text(specsGraph
+                     ? "A line joins a spec to the ones under it; a dashed arrow is a link (depends on, references, implements). Tap it to zoom; the tree opens each one."
+                     : s.enabled ? "The agent looks up the spec that governs its work and keeps it true." : "The repository's specs. harlo's Settings → Projects has the agent read them.")
             }
         }
+    }
+
+    func specRow(_ spec: Spec) -> some View {
+        Button { reading = spec } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "doc.text").foregroundStyle(Color(p.primary))
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(spec.title.isEmpty ? spec.path : spec.title).font(.body.weight(.medium))
+                        // Its status, when it isn't simply in force; its type.
+                        if !spec.status.isEmpty && spec.status != "active" {
+                            Text(spec.status).font(.caption).foregroundStyle(Color(spec.status == "stale" ? p.warning : p.faint))
+                                .strikethrough(spec.status == "deprecated")
+                        }
+                        if !spec.kind.isEmpty {
+                            Text(spec.kind).font(.caption).foregroundStyle(Color(p.faint))
+                        }
+                    }
+                    if !spec.summary.isEmpty {
+                        Text(spec.summary).font(.footnote).foregroundStyle(Color(p.muted)).lineLimit(2)
+                    }
+                    Text(spec.path).font(Style.mono(11)).foregroundStyle(Color(p.faint)).lineLimit(1).truncationMode(.head)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Color(p.muted))
+            }
+            // (Under its parent.)
+            .padding(.leading, CGFloat(min(spec.depth, 4)) * 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     func mark(_ status: String) -> (String, RGBA) {
