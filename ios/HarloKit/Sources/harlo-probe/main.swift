@@ -358,6 +358,24 @@ func features(_ model: HarloModel) async {
     // `@` mentions, and a file a reply names.
     let found = await model.files(matching: "note")
     check(found.first == "notes.txt", "@ finds the session folder's files (\(found))")
+    // `@session:`: another agent's session in the folder, and what it
+    // said goes to the agent with the message.
+    let others = await model.sessionMentions(matching: "plan")
+    check(model.features.contains("sessionMentions") && others.first?.title == "Plan the notes" && others.first?.mention == "@session:7c1e9a40" && others.first?.harness == "claude",
+          "@ finds the folder's other sessions (\(others.map { "\($0.mention) \($0.title)" }))")
+    let none = await model.sessionMentions(matching: "zzz")
+    check(none.isEmpty, "only those matching (\(none.count))")
+    _ = await waitFor(8) { !s.busy }
+    await model.send("fast: what did @session:7c1e9a40 find")
+    // (Read in as an attachment, as the desktop sends it.)
+    let sent = await waitFor(8) { s.rows.contains { $0.kind == "user" && $0.text.hasSuffix("@session:7c1e9a40 find") && $0.title.contains("session: Plan the notes") } }
+    check(sent, "a mentioned session goes with the message (\(s.rows.filter { $0.kind == "user" }.map { "\($0.text.prefix(60)) [\($0.title)]" }.suffix(1)))")
+    _ = await waitFor(8) { !s.busy }
+    // A shell call's whole command comes with it (the card shows it, and its
+    // output from the end).
+    let shell = s.rows.first { $0.kind == "tool" && $0.title == "bash" }
+    check(shell?.command == "ls -la", "a command's row has the command (\(shell?.command ?? "none"))")
+
     let text = await model.file("notes.txt")
     check(text?.lines.count == 3 && text.map { RichText.plain($0.spans(1)) } == "two, changed", "a file opens to read (\(text?.lines.count ?? 0) lines)")
     let outside = await model.file("../harlo.txt")

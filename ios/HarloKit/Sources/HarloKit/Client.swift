@@ -380,6 +380,12 @@ public actor HarloClient {
         (try check(await call("files", ["key": .string(key), "query": .string(query)]))["files"].array ?? []).compactMap(\.string)
     }
 
+    /// The folder's other sessions matching `query` (`@` mentions), newest
+    /// first (harlo with `sessionMentions` among its features).
+    public func sessionMentions(_ key: String, query: String) async throws -> [SessionMention] {
+        (try check(await call("sessionMentions", ["key": .string(key), "query": .string(query)]))["sessions"].array ?? []).map(SessionMention.init)
+    }
+
     /// A file of the session's folder, to read.
     public func file(_ key: String, path: String) async throws -> FileText {
         FileText(try check(await call("file", ["key": .string(key), "path": .string(path)])))

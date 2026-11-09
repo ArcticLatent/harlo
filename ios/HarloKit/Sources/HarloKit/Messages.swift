@@ -86,6 +86,13 @@ public struct Row: Equatable, Sendable, Identifiable {
     public var diff: String
     /// A finished run's first row: how long the run took (ms; 0 unknown).
     public var runMs: Int64
+    /// Tool rows: what the call is for, in the agent's words; harlo's
+    /// messages: their plain line.
+    public var label: String
+    /// Tool rows: the command a shell call ran ("" for other tools).
+    public var command: String
+    /// Replies: the model that wrote it ("" when it's the session's own).
+    public var model: String
 
     public var id: String { key }
 
@@ -105,12 +112,19 @@ public struct Row: Equatable, Sendable, Identifiable {
         result = v["result"].text
         diff = v["diff"].text
         runMs = v["runMs"].int ?? 0
+        label = v["label"].text
+        command = v["command"].text
+        model = v["model"].text
     }
 
     public init(key: String, kind: String, html: String = "", text: String = "", title: String = "", subtitle: String = "",
                 state: String = "", group: String = "", summary: String = "", groupOpen: Bool = false,
-                time: Int64 = 0, ended: Int64 = 0, result: String = "", diff: String = "", runMs: Int64 = 0)
+                time: Int64 = 0, ended: Int64 = 0, result: String = "", diff: String = "", runMs: Int64 = 0,
+                label: String = "", command: String = "", model: String = "")
     {
+        self.label = label
+        self.command = command
+        self.model = model
         self.time = time
         self.ended = ended
         self.result = result

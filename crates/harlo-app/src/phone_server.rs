@@ -180,10 +180,29 @@ fn clip(s: &str) -> String {
     format!("{}\n… (cut here; the rest is in harlo on your computer)", &s[..end])
 }
 
+/// A command's output cut to its end (where its result is), as the
+/// desktop shows it.
+fn clip_end(s: &str) -> String {
+    if s.len() <= ROW_BYTES {
+        return s.to_owned();
+    }
+    let mut start = s.len() - ROW_BYTES;
+    while !s.is_char_boundary(start) {
+        start += 1;
+    }
+    // (From a whole line.)
+    let start = s[start..].find('\n').map_or(start, |i| start + i + 1);
+    format!("… (its start is in harlo on your computer)\n{}", &s[start..])
+}
+
+/// A row for a phone: `label` is what a call is for in the agent's words
+/// (harlo's own messages: what happened, in a line), `command` a shell
+/// call's whole command, `model` the reply's model.
 fn row_json(r: &harlo_core::Row) -> Value {
-    json!({ "key": r.key, "kind": r.kind.as_str(), "html": clip(&r.html), "text": clip(&r.text), "title": r.title, "subtitle": r.subtitle, "state": r.state,
+    let text = if r.command.is_empty() { clip(&r.text) } else { clip_end(&r.text) };
+    json!({ "key": r.key, "kind": r.kind.as_str(), "html": clip(&r.html), "text": text, "title": r.title, "subtitle": r.subtitle, "state": r.state,
         "group": r.group, "summary": r.summary, "groupOpen": r.group_open, "time": r.time, "ended": r.ended, "result": r.result, "diff": clip(&r.diff),
-        "runMs": r.run_ms })
+        "runMs": r.run_ms, "label": r.label, "command": clip(&r.command), "model": r.model })
 }
 
 /// The part of a session's rows a phone has: everything after `skipped`.
@@ -308,11 +327,13 @@ fn event(key: &str, u: &SessionUpdate) -> Option<Value> {
 }
 
 /// What harlo can do for a phone, beyond the first app's (in `ready`):
+/// `sessionMentions` (the folder's other sessions for `@`, read in when a
+/// message names them),
 /// `serverStart` (a message starts its model's server first), `machines`
 /// (sessions say their machine), `settled` (settled sessions, for a phone
 /// that says it shows them), `limits` (plan limits: the `limits` call and
 /// event), `compaction` (a session's meta says where it compacts).
-const FEATURES: &[&str] = &["serverStart", "machines", "settled", "limits", "compaction", "connect", "modelServers", "putBack", "stoppedModels", "plan", "diagrams", "planRun", "helpers", "answerHelper", "team"];
+const FEATURES: &[&str] = &["sessionMentions", "serverStart", "machines", "settled", "limits", "compaction", "connect", "modelServers", "putBack", "stoppedModels", "plan", "diagrams", "planRun", "helpers", "answerHelper", "team"];
 
 /// The session list for one phone: settled sessions only for one that
 /// shows them.
@@ -970,7 +991,7 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
                         });
                         Value::Null
                     }
-                    "projects" | "limitOf" | "resumeAtReset" | "cancelResume" | "modes" | "setModes" | "rename" | "archive" | "pin" | "putBack" | "reviewStep" | "specs" | "theme" | "setAvatar" => crate::phone_bridge::call(msg.clone()).await,
+                    "projects" | "sessionMentions" | "limitOf" | "resumeAtReset" | "cancelResume" | "modes" | "setModes" | "rename" | "archive" | "pin" | "putBack" | "reviewStep" | "specs" | "theme" | "setAvatar" => crate::phone_bridge::call(msg.clone()).await,
                     "plan" | "planEdit" | "planRun" | "planStop" | "helpers" | "answerHelper" => {
                         wants_plans = true;
                         crate::phone_bridge::call(msg.clone()).await
@@ -1127,6 +1148,24 @@ fn undo_op(op: &str, cwd: &std::path::Path, prompts: &[(String, i64)], row: &str
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    /// A row says what its call is for, its whole command and its reply's
+    /// model; a long command's output keeps its end (its result), a long
+    /// read its start.
+    #[test]
+    fn rows_say_more_and_commands_keep_their_end() {
+        let long: String = (0..20_000).map(|i| format!("line {i}\n")).collect();
+        let mut r = harlo_core::Row { key: "c".into(), kind: harlo_core::transcript::RowKind::Tool, title: "bash".into(), text: long.clone(),
+            label: "Run the tests".into(), command: "cargo test".into(), model: "codex/gpt-6.1-sol".into(), ..Default::default() };
+        let v = row_json(&r);
+        assert_eq!((v["label"].as_str(), v["command"].as_str(), v["model"].as_str()), (Some("Run the tests"), Some("cargo test"), Some("codex/gpt-6.1-sol")));
+        let text = v["text"].as_str().unwrap();
+        assert!(text.ends_with("line 19999\n") && text.starts_with("… (its start is in harlo on your computer)\nline "), "{}", &text[..80]);
+        assert!(text.len() <= ROW_BYTES + 60);
+        r.command.clear();
+        let text = row_json(&r)["text"].as_str().unwrap().to_owned();
+        assert!(text.starts_with("line 0\n") && text.ends_with("(cut here; the rest is in harlo on your computer)"));
+    }
 
     /// A side question's answer goes to phones as it comes.
     #[test]

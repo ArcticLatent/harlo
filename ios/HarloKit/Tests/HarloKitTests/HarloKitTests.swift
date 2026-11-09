@@ -424,6 +424,50 @@ final class ModelPartsTests: XCTestCase {
         XCTAssertEqual(Mention.insert("src/main.rs", into: "look at @src/ma"), "look at @src/main.rs ")
     }
 
+    func testSessionMentions() {
+        let m = SessionMention(["mention": "@session:7c1e9a40", "title": "Find the jump", "harness": "claude", "modified": 1_759_990_000])
+        XCTAssertEqual(m.inserted, "session:7c1e9a40")
+        XCTAssertEqual(Mention.insert(m.inserted, into: "as @fin"), "as @session:7c1e9a40 ")
+        XCTAssertEqual(m.modified, 1_759_990_000)
+    }
+
+    func testToolsNamedAsTheDesktopNamesThem() {
+        // Harlo's and Claude Code's own.
+        XCTAssertEqual(ToolName.words("bash", running: false), "Ran command")
+        XCTAssertEqual(ToolName.words("Bash", running: true), "Running command")
+        XCTAssertEqual(ToolName.words("run_code", running: false), "Ran a program")
+        XCTAssertEqual(ToolName.words("hashline_edit", running: false), "Edited file")
+        XCTAssertEqual(ToolName.words("AskUserQuestion", running: false), "Asked you")
+        XCTAssertEqual(ToolName.words("web_search", running: false), "Searched the web")
+        // harlo's, under either agent's name for them, and the plan's.
+        XCTAssertEqual(ToolName.words("mcp__harlo__start_session", running: false), "harlo: start a session")
+        XCTAssertEqual(ToolName.words("harlo_bring_over", running: false), "harlo: bring over a helper's changes")
+        XCTAssertEqual(ToolName.words("mcp__harlo__plan_done", running: false), "Finish a step")
+        XCTAssertEqual(ToolName.words("plan_set", running: false), "Plan")
+        // An MCP server's.
+        XCTAssertEqual(ToolName.words("mcp__context-mode__ctx_execute", running: false), "context-mode ctx execute")
+        XCTAssertEqual(ToolName.symbol("mcp__context-mode__ctx_execute"), "puzzlepiece.extension")
+        XCTAssertNil(ToolName.mcp("mcp__x"))
+        // One it doesn't know.
+        XCTAssertEqual(ToolName.words("web_thing", running: false), "Web thing")
+        XCTAssertTrue(ToolName.isCommand("bash"))
+        XCTAssertFalse(ToolName.isCommand("read"))
+    }
+
+    func testRowsSayWhatACallIsForAndShowACommandsEnd() {
+        let lines = (1...3000).map { "line \($0)" }.joined(separator: "\n")
+        let r = Row(["key": "t", "kind": "tool", "title": "bash", "text": .string(lines), "label": "Run the tests", "command": "cargo test", "model": "codex/gpt-6.1-sol"])
+        XCTAssertEqual([r.label, r.command, r.model], ["Run the tests", "cargo test", "codex/gpt-6.1-sol"])
+        let shown = r.shownOutput()
+        XCTAssertTrue(shown.hasPrefix("…\nline "))
+        XCTAssertTrue(shown.hasSuffix("line 3000"))
+        XCTAssertLessThanOrEqual(shown.count, 6002)
+        let read = Row(key: "r", kind: "tool", text: lines, title: "read")
+        XCTAssertTrue(read.shownOutput().hasPrefix("line 1\n"))
+        XCTAssertTrue(read.shownOutput().hasSuffix("\n…"))
+        XCTAssertEqual(Row(key: "s", kind: "tool", text: "ok", title: "bash").shownOutput(), "ok")
+    }
+
     func testFilesAndBranchesAsHarloSendsThem() {
         let f = FileText(["path": "a.rs", "total": 9000, "cut": true, "lines": ["<span class=\"s2\">fn</span> main() {}"]])
         XCTAssertEqual(f.spans(0).first, Span("fn", code: true, token: 2))

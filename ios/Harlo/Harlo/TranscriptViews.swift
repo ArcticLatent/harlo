@@ -2,18 +2,36 @@ import HarloKit
 import SwiftUI
 import UIKit
 
-/// The agent at the top of its reply: its tile, its name, and when.
+/// The agent at the top of its reply: its tile, its name, the reply's
+/// model when it isn't the session's now (written before a switch, or by a
+/// fallback), and when.
 struct AgentHead: View {
     @Environment(\.palette) private var p
     let session: OpenSession
     /// When the reply started (unix ms; 0: unknown).
     var time: Int64 = 0
+    /// The model that wrote it ("" unknown).
+    var replyModel: String = ""
+
+    /// Its name, when it isn't the session's model.
+    var otherModel: String {
+        let name = replyModel.split(separator: "/").last.map(String.init) ?? ""
+        let now = session.model
+        guard !name.isEmpty, !now.isEmpty, replyModel != now, name != now, !now.hasSuffix("/" + name) else { return "" }
+        return name
+    }
 
     var body: some View {
         HStack(spacing: 8) {
             AgentTile(harness: session.harness, size: Transcript.tile)
             Text(Style.harnessLabel(session.harness))
                 .font(.system(size: 16.5, weight: .semibold))
+            if !otherModel.isEmpty {
+                Text(otherModel)
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(Color(p.muted))
+                    .lineLimit(1)
+            }
             if time > 0 {
                 Text(Style.clock(time))
                     .font(.system(size: 13.5))
@@ -170,7 +188,9 @@ struct ToolCard: View {
 
     var running: Bool { row.state == "running" }
     var symbol: String { Style.toolSymbol(row.title) }
-    var canOpen: Bool { !row.text.isEmpty || !row.diff.isEmpty }
+    var canOpen: Bool { !row.text.isEmpty || !row.diff.isEmpty || !shownCommand.isEmpty }
+    /// The command, shown opened when its line says what it's for instead.
+    var shownCommand: String { row.label.isEmpty ? "" : row.command }
     var diffResult: Bool { row.result.hasPrefix("+") }
     var took: String {
         row.time > 0 && row.ended > row.time ? Style.seconds(Double(row.ended - row.time)) : ""
@@ -187,7 +207,14 @@ struct ToolCard: View {
                         Text(Style.toolWords(row.title, running: running))
                             .font(.system(size: 16, weight: .medium))
                             .lineLimit(1)
-                        if !row.subtitle.isEmpty {
+                        if !row.label.isEmpty {
+                            // What it's for, in the agent's words (the
+                            // command itself is in it, opened).
+                            Text(row.label)
+                                .font(.system(size: 14))
+                                .foregroundStyle(Color(p.muted))
+                                .lineLimit(2)
+                        } else if !row.subtitle.isEmpty {
                             Text(row.subtitle)
                                 .font(Style.mono(13))
                                 .foregroundStyle(Color(p.muted))
@@ -212,12 +239,30 @@ struct ToolCard: View {
                 DiffLines(diff: row.diff, bare: true)
             } else if open {
                 Rectangle().fill(Color(p.hairline)).frame(height: 1)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    Text(row.text.count > 6000 ? String(row.text.prefix(6000)) + "\n…" : row.text)
-                        .font(Style.mono(12))
-                        .textSelection(.enabled)
-                        .padding(12)
+                // (Scrolling down too only when it's taller than its box: a
+                // vertical scroll view takes all the height it's given.)
+                let output = row.shownOutput()
+                let tall = output.reduce(into: shownCommand.isEmpty ? 1 : 2) { n, c in if c == "\n" { n += 1 } } > 18
+                let axes: Axis.Set = tall ? [.horizontal, .vertical] : [.horizontal]
+                ScrollView(axes, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if !shownCommand.isEmpty {
+                            Text("$ " + shownCommand)
+                                .font(Style.mono(12))
+                                .foregroundStyle(Color(p.muted))
+                                .textSelection(.enabled)
+                        }
+                        if !row.text.isEmpty {
+                            // A command's end (its result), anything else's start.
+                            Text(output)
+                                .font(Style.mono(12))
+                                .textSelection(.enabled)
+                        }
+                    }
+                    .padding(12)
                 }
+                .defaultScrollAnchor(ToolName.isCommand(row.title) || !row.command.isEmpty ? .bottomLeading : .topLeading)
+                .frame(height: tall ? 320 : nil)
                 .frame(maxHeight: 320)
                 .background(Color(p.codeBackground))
             }
@@ -323,7 +368,8 @@ struct HarloMessage: View {
             Button {
                 withAnimation(.easeOut(duration: 0.2)) { open.toggle() }
             } label: {
-                Text(row.text)
+                // Its plain line, folded; all of it opened.
+                Text(open || row.label.isEmpty ? row.text : row.label)
                     .font(.footnote)
                     .foregroundStyle(Color(p.muted))
                     .multilineTextAlignment(.leading)

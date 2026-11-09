@@ -197,6 +197,30 @@ public enum FileLinks {
 }
 
 /// `@` in the message box: the file being mentioned, as typed so far.
+/// Another session of the same folder, to mention with `@`: the agent gets
+/// what it said ("@session:1a2b3c4d").
+public struct SessionMention: Equatable, Sendable, Identifiable {
+    /// "@session:1a2b3c4d".
+    public var mention: String
+    public var title: String
+    /// "harlo", "claude".
+    public var harness: String
+    /// When it last changed (unix seconds).
+    public var modified: Int64
+    public var id: String { mention }
+
+    public init(_ v: JSON) {
+        mention = v["mention"].text
+        title = v["title"].text
+        harness = v["harness"].text
+        modified = v["modified"].int ?? 0
+    }
+
+    /// What the text gets in place of the `@` typed so far: the mention
+    /// without its `@` (as `Mention.insert` takes a file's path).
+    public var inserted: String { String(mention.dropFirst()) }
+}
+
 public enum Mention {
     /// What follows the `@` the text ends with (nil: not mentioning).
     public static func query(in text: String) -> String? {

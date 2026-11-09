@@ -141,6 +141,10 @@ public struct Samples: Sendable {
     ]])
     public var markdown = "# Fix the session list's scrolling\n\n*Harlo · GPT-5 · `~/Projects/harlo`*\n\n---\n\n## You\n\nThe session list jumps to the top when a session's status changes. Keep the scroll position.\n\n## Harlo\n\n- **read** `crates/harlo-core/src/sidebar.rs` → 214 lines\n- **edit** `crates/harlo-core/src/sidebar.rs` → +8 −2\n\nThe list is now updated in place, so it keeps its position.\n"
     public var files: [String] = ["crates/harlo-core/src/sidebar.rs", "crates/harlo-app/qml/Sidebar.qml", "crates/harlo-core/src/listdiff.rs", "README.md"]
+    public var sessionMentions: [SessionMention] = [
+        SessionMention(["mention": "@session:7c1e9a40", "title": "Find why the sidebar jumps", "harness": "claude", "modified": 1_759_990_000]),
+        SessionMention(["mention": "@session:2b84d0f3", "title": "Phone photos in the composer", "harness": "harlo", "modified": 1_759_900_000]),
+    ]
     public var file = FileText(["path": "crates/harlo-core/src/sidebar.rs", "total": 4, "lines": [
         "<span class=\"s2\">pub</span> <span class=\"s2\">fn</span> <span class=\"s5\">build</span>(input: <span class=\"s8\">&amp;</span><span class=\"s7\">SidebarInput</span>) -&gt; <span class=\"s7\">Vec</span>&lt;<span class=\"s7\">SidebarRow</span>&gt; {",
         "    <span class=\"s2\">let</span> <span class=\"s2\">mut</span> rows <span class=\"s8\">=</span> <span class=\"s7\">Vec</span>::<span class=\"s5\">new</span>();",

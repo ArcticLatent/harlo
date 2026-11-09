@@ -1042,6 +1042,16 @@ public final class HarloModel {
         return (try? await c.files(k, query: query)) ?? []
     }
 
+    /// The open session folder's other sessions matching what's typed after
+    /// `@` (none from a harlo too old to have them).
+    public func sessionMentions(matching query: String) async -> [SessionMention] {
+        if let s = samples {
+            return s.sessionMentions.filter { query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) || $0.mention.dropFirst(9).hasPrefix(query.lowercased()) }
+        }
+        guard features.contains("sessionMentions"), let c = client, let k = session?.liveKey, !k.isEmpty else { return [] }
+        return (try? await c.sessionMentions(k, query: query)) ?? []
+    }
+
     /// A file the open session's replies mention (nil: the alert says why).
     public func file(_ path: String) async -> FileText? {
         if let s = samples { return s.file }

@@ -5609,6 +5609,14 @@ impl Workspace {
             // (`limit` null: under 90%), and when it continues (`resumesAt`,
             // unix ms, 0 if it isn't going to).
             "limitOf" => json!({ "limit": self.limit_of(&key), "resumesAt": self.resume_at_for(&QString::from(&key)) as i64 }),
+            // The `@` list's sessions: the open session's folder's others.
+            "sessionMentions" => match self.live.get(&key) {
+                Some(e) => {
+                    let cwd = QString::from(&e.info.cwd.to_string_lossy().into_owned());
+                    json!({ "sessions": serde_json::from_str::<serde_json::Value>(&self.session_mentions(&cwd, &QString::from(&key), &QString::from(&text("query"))).to_string()).unwrap_or_default() })
+                }
+                None => fail("That session isn't running."),
+            },
             // Stop (when it works) and continue once its used-up limit resets.
             "resumeAtReset" => {
                 let at = self.limit_of(&key).and_then(|l| l["resetAt"].as_i64()).unwrap_or(0);
@@ -5657,6 +5665,22 @@ impl Workspace {
                 // Plan mode: a plan first, no changes (as the desktop sends).
                 if self.modes.get(&key).is_some_and(|m| m.plan) && mode == harlo_harness::SendMode::Normal {
                     text.push_str(harlo_harness::file_blocks::PLAN_NOTE);
+                }
+                // Sessions it mentions (picked from the `@` list): read in
+                // before it, off this thread, as the desktop sends them.
+                let mentioned: Vec<harlo_harness::SessionInfo> = harlo_core::session_ref::tokens(&text)
+                    .iter()
+                    .filter_map(|m| harlo_core::session_ref::find(self.sessions.values(), m).cloned())
+                    .collect();
+                if !mentioned.is_empty() {
+                    if let Some(held) = live.handle.held() {
+                        return fail(&held);
+                    }
+                    crate::runtime().spawn_blocking(move || {
+                        let text = harlo_core::session_ref::expand(&text, |m| harlo_core::session_ref::find(&mentioned, m).cloned());
+                        live.handle.prompt(&text, images, mode);
+                    });
+                    return json!({ "ok": true });
                 }
                 if !live.handle.prompt(&text, images, mode) {
                     return fail(&live.handle.held().unwrap_or_else(|| "harlo holds this session's messages.".into()));

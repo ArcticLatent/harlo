@@ -467,34 +467,11 @@ extension Style {
     }
 
     /// A tool call's kind, as an SF Symbol.
-    static func toolSymbol(_ tool: String) -> String {
-        switch tool.lowercased() {
-        case "read", "view", "cat", "glob", "ls", "find": return "doc.text"
-        case "edit", "multiedit", "write", "patch", "apply_patch", "str_replace": return "pencil.line"
-        case "bash", "shell", "exec", "run", "command": return "terminal"
-        case "grep", "search", "rg": return "magnifyingglass"
-        case "fetch", "webfetch", "web_search", "websearch": return "globe"
-        case "task", "agent", "subagent": return "person.2"
-        case "todo", "todowrite", "todoread": return "checklist"
-        default: return "wrench.and.screwdriver"
-        }
-    }
+    static func toolSymbol(_ tool: String) -> String { ToolName.symbol(tool) }
 
-    /// A tool call's name as words: "Read file", "Edited file", "Run command".
-    static func toolWords(_ tool: String, running: Bool) -> String {
-        switch tool.lowercased() {
-        case "read", "view", "cat": return running ? "Reading file" : "Read file"
-        case "edit", "multiedit", "str_replace", "patch", "apply_patch": return running ? "Editing file" : "Edited file"
-        case "write": return running ? "Writing file" : "Wrote file"
-        case "bash", "shell", "exec", "run", "command": return running ? "Running command" : "Ran command"
-        case "grep", "search", "rg": return "Searched"
-        case "glob", "find", "ls": return "Listed files"
-        case "fetch", "webfetch": return "Fetched"
-        case "web_search", "websearch": return "Searched the web"
-        case "task", "agent", "subagent": return "Subagent"
-        default: return tool.isEmpty ? "Tool" : tool.prefix(1).uppercased() + tool.dropFirst()
-        }
-    }
+    /// A tool call's name as words, as the desktop says it: "Read file",
+    /// "Ran command", "harlo: start a session", "context-mode ctx execute".
+    static func toolWords(_ tool: String, running: Bool) -> String { ToolName.words(tool, running: running) }
 
     /// A short duration in ms: "0.2s", "1.4s", "12s", "1m 20s".
     static func seconds(_ ms: Double) -> String {

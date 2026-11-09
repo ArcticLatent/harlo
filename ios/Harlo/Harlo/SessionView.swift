@@ -45,7 +45,7 @@ struct SessionContent: View {
     func row(_ i: Int, _ item: TranscriptItem, _ items: [TranscriptItem]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             if !Self.isSent(item), i == 0 || Self.isSent(items[i - 1]) {
-                AgentHead(session: session, time: Self.time(of: item))
+                AgentHead(session: session, time: Self.time(of: item), replyModel: Self.model(of: item))
                     .padding(.top, 6)
             }
             ItemView(item: item, session: session)
@@ -380,6 +380,14 @@ extension SessionContent {
         }
     }
 
+    /// The model that wrote it ("" unknown).
+    static func model(of item: TranscriptItem) -> String {
+        switch item {
+        case .row(let r): return r.model
+        case .run(_, _, let rows, _, _): return rows.first { !$0.model.isEmpty }?.model ?? ""
+        }
+    }
+
     /// A long press on a message: copy it; yours also edit & resend, or ask
     /// again with another model.
     @ViewBuilder func menu(for item: TranscriptItem) -> some View {
@@ -600,6 +608,8 @@ struct Composer: View {
     @State private var levels: [String] = []
     /// Files matching the `@` being typed.
     @State private var fileMatches: [String] = []
+    /// The folder's other sessions matching it (`@session:…`).
+    @State private var sessionMatches: [SessionMention] = []
     @FocusState private var focused: Bool
 
     var text: String { session.draft }
@@ -624,8 +634,9 @@ struct Composer: View {
                 SlashList(commands: Array(commands.prefix(6))) { c in
                     session.draft = "/" + c.name + " "
                 }
-            } else if focused && mention != nil && !fileMatches.isEmpty {
-                FileList(files: Array(fileMatches.prefix(6))) { f in
+            } else if focused && mention != nil && !(fileMatches.isEmpty && sessionMatches.isEmpty) {
+                let sessions = Array(sessionMatches.prefix(fileMatches.isEmpty ? 6 : 3))
+                FileList(files: Array(fileMatches.prefix(6 - sessions.count)), sessions: sessions) { f in
                     session.draft = Mention.insert(f, into: session.draft)
                 }
             }
@@ -666,16 +677,22 @@ struct Composer: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        // `@`: the session folder's files as you type.
+        // `@`: the session folder's files, and its other sessions (the
+        // agent gets what one said), as you type.
         .task(id: mention) {
             guard let q = mention else {
                 fileMatches = []
+                sessionMatches = []
                 return
             }
             try? await Task.sleep(nanoseconds: 150_000_000)
             guard !Task.isCancelled else { return }
-            let found = await model.files(matching: q)
-            if !Task.isCancelled { fileMatches = found }
+            let f = await model.files(matching: q)
+            let s = await model.sessionMentions(matching: q)
+            if !Task.isCancelled {
+                fileMatches = f
+                sessionMatches = s
+            }
         }
         // The thinking levels its model has (for the options menu).
         .task(id: session.liveKey + "|" + session.info.modelId) {
@@ -851,14 +868,36 @@ struct Composer: View {
     }
 }
 
-/// Files matching an `@` mention; tapping one puts it in the message.
+/// Files, and the folder's other sessions, matching an `@` mention;
+/// tapping one puts it in the message (a session as `@session:1a2b3c4d`).
 struct FileList: View {
     @Environment(\.palette) private var p
     let files: [String]
+    var sessions: [SessionMention] = []
     var pick: (String) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            ForEach(sessions) { s in
+                Button { pick(s.inserted) } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "bubble.left.and.text.bubble.right").font(.system(size: 12)).foregroundStyle(Color(p.muted))
+                        Text(s.title.isEmpty ? "Untitled session" : s.title).font(.system(size: 14.5, weight: .medium)).lineLimit(1)
+                        Text(Style.harnessLabel(s.harness))
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color(p.muted))
+                            .lineLimit(1)
+                            .fixedSize()
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Session: \(s.title)")
+                if s != sessions.last || !files.isEmpty { Divider().overlay(Color(p.border)) }
+            }
             ForEach(files, id: \.self) { f in
                 Button { pick(f) } label: {
                     HStack(spacing: 8) {

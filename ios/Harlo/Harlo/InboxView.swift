@@ -102,7 +102,10 @@ struct ApprovalCard: View {
         case "pencil.line": return "Wants to change a file"
         case "doc.text": return "Wants to read a file"
         case "globe": return "Wants to go online"
-        default: return "Wants to use \(tool)"
+        case "chevron.left.forwardslash.chevron.right": return "Wants to run a program"
+        default:
+            if let m = ToolName.mcp(tool) { return "Wants to use \(m.server)'s \(m.tool.replacingOccurrences(of: "_", with: " "))" }
+            return "Wants to use \(tool)"
         }
     }
 
