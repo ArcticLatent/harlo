@@ -603,7 +603,7 @@ Rectangle {
         // Each gives way at its own width (the reading column is about
         // 555px here): the thinking level's word first, then the context
         // meter, then the placeholder's / and @ hint.
-        readonly property bool roomForLevel: width >= 600
+        readonly property bool roomForLevel: width >= 540
         readonly property bool roomForMeter: width >= 500
         readonly property bool roomForHint: width >= 470
 

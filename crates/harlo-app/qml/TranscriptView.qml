@@ -2275,8 +2275,9 @@ Item {
         id: rail
         visible: root.promptRail && count >= 2
         anchors.right: parent.right
-        // Clear of the scrollbar.
-        anchors.rightMargin: 14
+        // Just outside the column's right edge, by the text it steps
+        // through; never under the scrollbar.
+        anchors.rightMargin: Math.max(14, root.gutter - 16 - width)
         anchors.verticalCenter: parent.verticalCenter
         width: Math.max(12, Math.min(28, root.gutter - 14))
         prompts: root.prompts

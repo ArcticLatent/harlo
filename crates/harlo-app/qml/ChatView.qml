@@ -361,6 +361,8 @@ Rectangle {
                     Layout.fillWidth: true
                     spacing: 3
                     Label {
+                        id: headerTitle
+                        objectName: "sessionHeaderTitle"
                         Layout.fillWidth: true
                         text: session.title || Workspace.activeTitle || "New session"
                         color: Theme.text
@@ -368,6 +370,11 @@ Rectangle {
                         font.weight: Font.DemiBold
                         font.letterSpacing: -0.2
                         elide: Text.ElideRight
+                        // Cut short: the whole title on hover.
+                        HoverHandler { id: headerTitleHover }
+                        ToolTip.visible: headerTitleHover.hovered && truncated
+                        ToolTip.text: text
+                        ToolTip.delay: 500
                     }
                     RowLayout {
                         Layout.fillWidth: true

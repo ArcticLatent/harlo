@@ -39,7 +39,7 @@ Rectangle {
     }
     // A section's label: as a card's, with room above.
     component SectionLabel: Caption {
-        Layout.topMargin: 10
+        Layout.topMargin: 4
     }
 
     ColumnLayout {
@@ -74,7 +74,7 @@ Rectangle {
                 x: 18
                 y: 14
                 width: parent.width - 36
-                spacing: 10
+                spacing: 16
                 readonly property var r: root.report || ({})
 
                 // The model: its name, what serves it (an engine on this
@@ -88,15 +88,13 @@ Rectangle {
                         : [server.engine || server.name,
                            server.place === "here" ? "on this computer (" + server.address + ")" : server.place === "network" ? "on your network (" + server.address + ")" : server.address].filter(s => s).join(" · ")
                     Layout.fillWidth: true
-                    implicitHeight: modelCol.implicitHeight + 28
-                    radius: 12
-                    color: Theme.raised
-                    border.color: Theme.hairline
+                    implicitHeight: modelCol.implicitHeight
+                    // (A plain section: a caption over its figures, as the counts and
+                    // the breakdown below; no box.)
+                    color: "transparent"
                     ColumnLayout {
                         id: modelCol
-                        x: 14
-                        y: 14
-                        width: parent.width - 28
+                        width: parent.width
                         spacing: 4
                         Caption { text: "Model" }
                         Label {
@@ -142,15 +140,13 @@ Rectangle {
                 // Context window
                 Rectangle {
                     Layout.fillWidth: true
-                    implicitHeight: ctxCol.implicitHeight + 28
-                    radius: 12
-                    color: Theme.raised
-                    border.color: Theme.hairline
+                    implicitHeight: ctxCol.implicitHeight
+                    // (A plain section: a caption over its figures, as the counts and
+                    // the breakdown below; no box.)
+                    color: "transparent"
                     ColumnLayout {
                         id: ctxCol
-                        x: 14
-                        y: 14
-                        width: parent.width - 28
+                        width: parent.width
                         spacing: 10
                         RowLayout {
                             Layout.fillWidth: true
@@ -192,8 +188,6 @@ Rectangle {
                 Label {
                     objectName: "contextCounts"
                     Layout.fillWidth: true
-                    Layout.leftMargin: 2
-                    Layout.topMargin: 2
                     wrapMode: Text.Wrap
                     textFormat: Text.StyledText
                     readonly property int results: body.r.toolResults || 0
@@ -209,15 +203,13 @@ Rectangle {
                 Rectangle {
                     Layout.fillWidth: true
                     visible: !!body.r.last
-                    implicitHeight: lastCol.implicitHeight + 28
-                    radius: 12
-                    color: Theme.raised
-                    border.color: Theme.hairline
+                    implicitHeight: lastCol.implicitHeight
+                    // (A plain section: a caption over its figures, as the counts and
+                    // the breakdown below; no box.)
+                    color: "transparent"
                     ColumnLayout {
                         id: lastCol
-                        x: 14
-                        y: 14
-                        width: parent.width - 28
+                        width: parent.width
                         spacing: 10
                         Caption { text: "Last reply" }
                         GridLayout {

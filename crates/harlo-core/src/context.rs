@@ -51,24 +51,28 @@ fn first_text(content: &Value) -> String {
     line.chars().take(160).collect()
 }
 
-/// What an assistant message said (its text's first line) or else did
-/// (its first tool call and what on: "bash: ls", "and 2 more"), else
-/// "Thought".
-fn reply_label(content: &Value) -> String {
+/// What an assistant message said (its text's first line), or else its
+/// first tool call and what on ("bash: ls") with how many calls it made
+/// (0 when it said something), else "Thought".
+fn reply_parts(content: &Value) -> (String, u64) {
     let text = first_text(content);
     let text = text.trim_start_matches(['#', '>', '-', '*', ' ']).trim();
     if !text.is_empty() {
-        return text.to_owned();
+        return (text.to_owned(), 0);
     }
     let calls: Vec<&Value> = content.as_array().into_iter().flatten().filter(|b| b["type"] == "toolCall").collect();
     if let Some(first) = calls.first() {
         let name = first["name"].as_str().unwrap_or("tool");
         let target = crate::actions::target(crate::actions::kind(name), &first["arguments"]);
         let target: String = target.lines().next().unwrap_or("").chars().take(120).collect();
-        let more = calls.len() - 1;
-        return format!("{name}{}{}", if target.is_empty() { String::new() } else { format!(": {target}") }, if more > 0 { format!(" and {more} more") } else { String::new() });
+        return (if target.is_empty() { name.to_owned() } else { format!("{name}: {target}") }, calls.len() as u64);
     }
-    if content.as_array().into_iter().flatten().any(|b| b["type"] == "thinking") { "Thought".to_owned() } else { parts_summary(content) }
+    (if content.as_array().into_iter().flatten().any(|b| b["type"] == "thinking") { "Thought".to_owned() } else { parts_summary(content) }, 0)
+}
+
+/// A row's label for calls that came to `calls`: the first, "and N more".
+fn calls_label(first: &str, calls: u64) -> String {
+    if calls > 1 { format!("{first} and {} more", calls - 1) } else { first.to_owned() }
 }
 
 /// "reasoning + text + bash": what an assistant message did, in order.
@@ -129,14 +133,34 @@ pub fn report(messages: &[Value], live: Option<(u64, u64, f64)>) -> Value {
                 if let Some(s) = m["provider"].as_str() {
                     provider = s.to_owned();
                 }
-                rows.push(json!({
-                    "kind": "assistant",
-                    "label": reply_label(&m["content"]),
-                    "input": usage.map(|u| u.input),
-                    "output": usage.map(|u| u.output),
-                    "ts": ts,
-                    "error": m["errorMessage"].as_str(),
-                }));
+                let (first, calls) = reply_parts(&m["content"]);
+                // Replies that only called tools, one after another (a dozen
+                // helpers started one by one): one row.
+                let run = rows.last_mut().filter(|r| r["calls"].as_u64().unwrap_or(0) > 0 && r["error"].is_null());
+                match run {
+                    Some(prev) if calls > 0 && m["errorMessage"].is_null() => {
+                        let total = prev["calls"].as_u64().unwrap_or(0) + calls;
+                        let add = |a: &Value, b: Option<u64>| match (a.as_u64(), b) {
+                            (Some(a), Some(b)) => json!(a + b),
+                            (a, b) => json!(a.or(b)),
+                        };
+                        prev["input"] = add(&prev["input"], usage.map(|u| u.input));
+                        prev["output"] = add(&prev["output"], usage.map(|u| u.output));
+                        prev["label"] = json!(calls_label(prev["first"].as_str().unwrap_or(""), total));
+                        prev["calls"] = json!(total);
+                        prev["ts"] = json!(ts);
+                    }
+                    _ => rows.push(json!({
+                        "kind": "assistant",
+                        "label": calls_label(&first, calls),
+                        "first": first,
+                        "calls": calls,
+                        "input": usage.map(|u| u.input),
+                        "output": usage.map(|u| u.output),
+                        "ts": ts,
+                        "error": m["errorMessage"].as_str(),
+                    })),
+                }
                 // A turn that ended without asking for tools: the agent went idle.
                 let stop = m["stopReason"].as_str().unwrap_or("");
                 if !stop.is_empty() && stop != "toolUse" {
@@ -275,6 +299,13 @@ mod tests {
         ];
         let r = report(&messages, None);
         assert_eq!((r["user"].as_u64(), r["assistant"].as_u64(), r["messages"].as_u64()), (Some(1), Some(2), Some(4)));
+        // Replies that only call tools, one after another: one row.
+        let agent = |d: &str| json!({"role":"assistant","content":[{"type":"toolCall","name":"Agent","arguments":{"description":d}}],"stopReason":"toolUse","usage":{"input":10,"output":1}});
+        let folded = report(&[json!({"role":"user","content":"go"}), agent("Map the notifications"), agent("Plan the settings page"), agent("Read the docs"),
+                              json!({"role":"assistant","content":[{"type":"text","text":"Done."}],"stopReason":"stop"})], None);
+        let labels: Vec<&str> = folded["rows"].as_array().unwrap().iter().map(|r| r["label"].as_str().unwrap()).collect();
+        assert_eq!(labels, ["idle", "Done.", "Agent: Map the notifications and 2 more", "go"]);
+        assert_eq!(folded["rows"][2]["input"], 30);
         assert_eq!(r["contextTokens"], 1055);
         assert!((r["cost"].as_f64().unwrap() - 0.03).abs() < 1e-9);
         assert_eq!(r["last"]["cacheRead"], 1000);
