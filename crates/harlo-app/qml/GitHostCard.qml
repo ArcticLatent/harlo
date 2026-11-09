@@ -31,8 +31,8 @@ Rectangle {
     implicitHeight: col.implicitHeight + 28
     radius: 12
     color: Theme.raised
-    border.color: chosen ? Theme.accent : Theme.hairline
-    border.width: chosen ? 2 : 1
+    // (The default says so in words; an accent border read as focus.)
+    border.color: Theme.hairline
 
     // Copies through a hidden TextEdit (QML has no clipboard API).
     TextEdit {
@@ -143,7 +143,7 @@ Rectangle {
                 objectName: "gitHostSignIn-" + card.service
                 visible: !card.forgejo && !card.cliMissing
                 text: "Sign in with the browser"
-                accent: Theme.primary
+                variant: "primary"
                 font.pixelSize: Theme.px(12)
                 onClicked: Setup.gitSignIn(card.service)
             }

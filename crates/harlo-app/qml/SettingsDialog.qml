@@ -164,6 +164,15 @@ Popup {
         font.pixelSize: Theme.px(12.5)
         wrapMode: Text.Wrap
     }
+    // A section that waits for phone access says so once, under its heading.
+    component NeedsPhone: RowLayout {
+        objectName: "needsPhone"
+        visible: !Phone.enabled
+        Layout.topMargin: 8
+        spacing: 6
+        Icon { name: "information"; color: Theme.warning; implicitWidth: 14; implicitHeight: 14 }
+        Label { Layout.fillWidth: true; text: "Turn on phone access above first."; color: Theme.warning; font.pixelSize: Theme.px(12.5); wrapMode: Text.Wrap }
+    }
     component Rule: Rectangle { Layout.fillWidth: true; Layout.topMargin: 22; Layout.bottomMargin: 18; implicitHeight: 1; color: Theme.hairline }
     component Hint: Label { color: Theme.muted; font.pixelSize: Theme.px(12); wrapMode: Text.Wrap; Layout.fillWidth: true }
     component FieldLabel: Label { color: Theme.foreground; font.pixelSize: Theme.px(13); Layout.topMargin: 8 }
@@ -508,7 +517,8 @@ Popup {
             id: usageStats
             color: "transparent"
             columnX: root.pageX(width)
-            columnWidth: root.pageWidth(width, true)
+            // (As wide as the other pages, so the edge stays put between them.)
+            columnWidth: root.pageWidth(width, false)
             header: ColumnLayout {
                 id: usageColumn
                 spacing: 0
@@ -1295,7 +1305,7 @@ Popup {
             readonly property var eventRows: [
                 { name: "completion", title: "Agent completion", detail: "A run finishes.", icon: "checkbox-circle" },
                 { name: "subagent", title: "Helper finished", detail: "A helper finishes.", icon: "node-tree" },
-                { name: "error", title: "Agent errors", detail: "A reply fails, the harness stops unexpectedly, or a helper fails.", icon: "alert" },
+                { name: "error", title: "Agent errors", detail: "A reply fails, the agent stops unexpectedly, or a helper fails.", icon: "alert" },
                 { name: "question", title: "Agent questions", detail: "The agent asks you something or wants a tool approved.", icon: "question" },
                 { name: "limits", title: "Plan limits", detail: "A plan limit (Claude's, ChatGPT's) is used up, and when one you'd nearly or fully used resets, with a sound of its own.", icon: "speed", fixed: true },
             ]
@@ -1324,22 +1334,28 @@ Popup {
                     icon: "volume-up"
                     AppSwitch { objectName: "notifySound"; checked: notify.cfg.sound; onToggled: notify.setTop("sound", checked) }
                 }
-            }
-            RowLayout {
-                visible: notify.cfg.enabled
-                Layout.topMargin: 10
-                spacing: 10
-                FlatButton {
-                    objectName: "notifyTest"
-                    text: "Send test notification"
-                    font.pixelSize: Theme.px(12)
-                    onClicked: { Workspace.sendTestNotification(); notify.testNote = "Sent. If nothing appeared, check that notify-send (libnotify) is installed." }
+                // (A row, as Devices' Test.)
+                SettingRow {
+                    visible: notify.cfg.enabled
+                    divider: true
+                    title: "Test"
+                    detail: notify.testNote !== "" ? notify.testNote : "Shows one now, as the events below will."
+                    icon: "notification-3"
+                    FlatButton {
+                        objectName: "notifyTest"
+                        text: "Send a test notification"
+                        font.pixelSize: Theme.px(12)
+                        onClicked: { Workspace.sendTestNotification(); notify.testNote = "Sent. If nothing appeared, check that notify-send (libnotify) is installed." }
+                    }
                 }
-                Hint { text: notify.testNote; Layout.fillWidth: true }
             }
 
             Rule {}
-            SectionHeader { title: "Quiet hours"; subtitle: "At night, or whenever you want peace: no notifications here, and your iPhone gets its notifications silently (no sound, the screen stays dark; they wait in Notification Center)." }
+            SectionHeader {
+                title: "Quiet hours"
+                subtitle: "No notifications here, and silent ones on your iPhone."
+                more: "At night, or whenever you want peace. The iPhone's make no sound and leave the screen dark; they wait in Notification Center."
+            }
             Group {
                 id: quietGroup
                 readonly property var q: notify.cfg.quiet || ({ on: false, from: 1320, to: 480, asks: false })
@@ -1604,7 +1620,11 @@ Popup {
         ColumnLayout {
             id: voice
             spacing: 0
-            SectionHeader { title: "Dictation"; subtitle: "The microphone button in the composer (" + (Keymap.seq("dictate") || "no shortcut") + "): speak, then click it again or press Enter, and the text goes into your message. Speech is recognised on this computer (whisper.cpp, built in); nothing is sent anywhere. The first time, harlo downloads the model in use." }
+            SectionHeader {
+                title: "Dictation"
+                subtitle: "Speak into the composer's microphone (" + (Keymap.seq("dictate") || "no shortcut") + "); the text goes into your message."
+                more: "Click it again or press Enter to finish. Speech is recognised on this computer (whisper.cpp, built in); nothing is sent anywhere. The first time, harlo downloads the chosen model."
+            }
             // Re-checked when a model arrives.
             readonly property var models: Dictation.modelsRevision >= 0 ? JSON.parse(Dictation.modelsJson()) : []
             property string model: Workspace.setting("dictation_model") || "base"
@@ -1618,8 +1638,11 @@ Popup {
                         required property int index
                         readonly property bool busy: Dictation.downloading === modelData.name
                         divider: index > 0
-                        title: modelData.label.split(" · ")[0] + " model" + (voice.model === modelData.name ? " (in use)" : "")
-                        detail: busy ? "Downloading… " + Math.round(Dictation.downloadProgress * 100) + "%" : modelData.label.split(" · ").slice(1).join(" · ")
+                        readonly property bool chosen: voice.model === modelData.name
+                        // (In use only once it's here; chosen before that.)
+                        title: modelData.label.split(" · ")[0] + " model" + (chosen && modelData.ready ? " (in use)" : "")
+                        detail: busy ? "Downloading… " + Math.round(Dictation.downloadProgress * 100) + "%"
+                              : modelData.label.split(" · ").slice(1).join(" · ") + (chosen && !modelData.ready ? ". Chosen, not downloaded yet: it downloads the first time you dictate." : "")
                         icon: "archive-stack"
                         Row {
                             spacing: 6
@@ -2110,11 +2133,13 @@ Popup {
             }
             Rule { }
             SectionHeader { title: "From anywhere"; subtitle: "For phones away from home: mobile data, other Wi-Fi. Not needed if the phone has Tailscale (or another VPN) to this computer. Notifications arrive either way; these let the phone open sessions and send your answers back. Everything stays end-to-end encrypted." }
+            NeedsPhone { }
             Group {
+                // (Waiting for phone access: dimmed, said once above.)
+                opacity: Phone.enabled ? 1 : 0.6
                 SettingRow {
                     title: "Connect to harlo's relay"
-                    detail: !Phone.enabled ? "Turn on phone access first."
-                          : Phone.relayError !== "" ? Phone.relayError
+                    detail: Phone.relayError !== "" ? Phone.relayError
                           : Phone.relayState === "online" ? "Connected to " + Phone.relayAddress + ". Paired phones can reach harlo from anywhere."
                           : Phone.relayState === "connecting" ? "Connecting…"
                           : "Use your phone away from home without Tailscale or a VPN: harlo and your phones meet at " + Phone.relayAddress + ", which passes on messages it can't read and stores nothing."
@@ -2133,7 +2158,6 @@ Popup {
                     divider: true
                     title: "Tailscale Funnel"
                     detail: !Phone.funnelAvailable && !Phone.funnelOn ? "Needs Tailscale on this computer (not on the phone). Nothing hosted: Tailscale gives harlo a public HTTPS address."
-                          : !Phone.enabled ? "Turn on phone access first."
                           : Phone.funnelError !== "" ? Phone.funnelError
                           : Phone.funnelState === "online" ? "On at " + Phone.funnelUrl
                           : Phone.funnelState === "approval" ? "Tailscale needs you to allow Funnel for your tailnet (once)."
@@ -2162,15 +2186,16 @@ Popup {
             // The iOS app's push notifications: through harlo's relay (it has
             // the app's APNs key), whether or not harlo is connected to it.
             SectionHeader { title: "iPhone notifications"; subtitle: "While the harlo app is closed: questions and approvals (Allow or Deny from the lock screen) and finished runs. They always go through harlo's relay to Apple, with or without the switch above; what they say is encrypted for your phone, so the relay and Apple only carry a placeholder." }
+            NeedsPhone { }
             Group {
                 id: pushGroup
+                opacity: Phone.enabled ? 1 : 0.6
                 readonly property var cfg: Phone.revision >= 0 ? JSON.parse(Phone.pushJson()) : ({})
                 // (Also the left rail's phone button, once a phone is paired.)
                 SettingRow {
                     title: "Send notifications"
-                    // (Nothing goes with phone access off: as the relay's rows.)
-                    detail: !Phone.enabled ? "Turn on phone access first."
-                          : Phone.paused ? "Paused: nothing goes to your phones (the pairing stays). A test notification still does."
+                    // (Nothing goes with phone access off: said at the heading.)
+                    detail: Phone.paused ? "Paused: nothing goes to your phones (the pairing stays). A test notification still does."
                           : "Pause them while you work at the computer: click the phone button in the left rail, or here."
                     icon: "smartphone"
                     AppSwitch {
@@ -2186,7 +2211,6 @@ Popup {
                     detail: Phone.pushNote === "sending" ? "Sending…"
                           : Phone.pushNote !== "" ? Phone.pushNote
                           : pushGroup.cfg.error ? "The last one didn't go: " + pushGroup.cfg.error
-                          : !Phone.enabled ? "Turn on phone access first."
                           : "Sends one through " + Phone.relayAddress + " to every phone that allowed notifications in the harlo app."
                     detailColor: Phone.pushNote.startsWith("Sent") ? Theme.success
                                : (Phone.pushNote !== "" && Phone.pushNote !== "sending") || (Phone.pushNote === "" && pushGroup.cfg.error) ? Theme.error : Theme.muted
@@ -2495,7 +2519,8 @@ Popup {
                 SectionHeader {
                     visible: proj.p !== null
                     title: "Specs and plans"
-                    subtitle: "harlo's tools for this project's agents (every agent, through harlo's tools: Settings → Orchestration). Sessions started afterwards get them."
+                    subtitle: "Tools that help this project's agents plan and keep track."
+                    more: "Every agent gets them, through harlo's tools (Settings → Orchestration). Sessions started afterwards get them."
                 }
                 Group {
                     id: featureGroup
@@ -2519,7 +2544,8 @@ Popup {
                         id: planRow
                         divider: true
                         title: "Shared plan"
-                        detail: "For a bigger task the agent writes a plan of steps and works through it; you add, change, reorder or skip steps at any time (above the message box), and it reads them before each step. On by default in a git repository."
+                        detail: "For a bigger task the agent writes a plan of steps and works through it."
+                        more: "You add, change, reorder or skip steps at any time (above the message box), and it reads them before each step. On by default in a git repository."
                         icon: "list-check-2"
                         // (Unset: on in a git repository.)
                         readonly property bool on: featureGroup.rev >= 0 && featureGroup.pid >= 0 && Workspace.planOn(featureGroup.pid)
@@ -2548,7 +2574,8 @@ Popup {
                     visible: proj.p !== null && Workspace.orchestrationOn
                     Layout.topMargin: 22
                     title: "Team"
-                    subtitle: "Who does the work when a plan runs with helpers or an agent splits a task, and who reviews a plan's steps, so you can plan with one model, have another do the steps and a third check them. You can still choose others for one run, or one step."
+                    subtitle: "Who does the steps and who reviews them when a plan runs with helpers."
+                    more: "Also who works when an agent splits a task. You can plan with one model, have another do the steps and a third check them, and still choose others for one run, or one step."
                 }
                 Group {
                     id: team
@@ -4333,7 +4360,10 @@ Popup {
                 }
             }
             Rule { }
-            SectionHeader { title: "Harlo" }
+            SectionHeader {
+                title: "Harlo"
+                subtitle: harloModels.ids.length === 0 ? "Its model choices fill in once it's signed in (Sign in… above)." : ""
+            }
             Group {
                 SettingRow {
                     title: "Sandbox commands"
@@ -4380,11 +4410,13 @@ Popup {
                     property string saved: Workspace.setting("harlo_task_model")
                     readonly property var choices: harloModels.choices(saved)
                     title: "Its own helpers' model"
-                    detail: "What Harlo's own helpers run on when the task doesn't name a model." + harloModels.none
+                    detail: "What Harlo's own helpers run on when the task doesn't name a model."
                     more: "Its own helpers are its task tool's. A smaller model often does searches and simple edits as well, for less. Applies to Harlo sessions started afterwards."
                     icon: "robot-2"
                     ComboField {
                         objectName: "harloTaskModel"
+                        // (Nothing to pick before sign-in: said once, at the heading.)
+                        enabled: taskModelRow.choices.length > 0
                         width: 240
                         model: ["The session's model"].concat(harloModels.labels(taskModelRow.choices))
                         currentIndex: taskModelRow.choices.indexOf(taskModelRow.saved) + 1
@@ -4400,11 +4432,12 @@ Popup {
                     property string saved: Workspace.setting("harlo_fallback")
                     readonly property var choices: harloModels.choices(saved)
                     title: "When the plan's limit is reached"
-                    detail: "Stop, or go on with another model and say so." + harloModels.none
+                    detail: "Stop, or go on with another model and say so."
                     more: "When the model's plan says its usage limit is reached, or the server stays busy after its retries. Harlo tries the plan's model again after the limit resets. Applies to Harlo sessions started afterwards."
                     icon: "refresh"
                     ComboField {
                         objectName: "harloFallback"
+                        enabled: fallbackRow.choices.length > 0
                         width: 240
                         model: ["Stop"].concat(harloModels.labels(fallbackRow.choices).map(n => "Go on with " + n))
                         currentIndex: fallbackRow.choices.indexOf(fallbackRow.saved) + 1

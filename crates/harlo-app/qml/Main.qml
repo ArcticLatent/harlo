@@ -3503,6 +3503,15 @@ ApplicationWindow {
                 settingsDialog.openPage("general")
             })
             q.push(() => win.check(win.findName("defaultModelSignIn", settingsDialog.contentItem) !== null, "General's Model row says where to sign in"))
+            // Devices with phone access off: said once per section, not per row.
+            q.push(() => settingsDialog.openPage("devices"))
+            q.push(() => {
+                const notes = win.findAllNames("needsPhone", settingsDialog.contentItem)
+                win.check(Phone.enabled || (notes.length === 2 && win.findText("Turn on phone access first.", settingsDialog.contentItem) === null), "Devices says once per section that phone access is off (" + notes.length + ")")
+                settingsDialog.openPage("voice")
+            })
+            // Voice: a chosen model that isn't here isn't "in use".
+            q.push(() => win.check(win.findText("Base model (in use)", settingsDialog.contentItem) === null && win.findText("Base model", settingsDialog.contentItem) !== null, "Voice doesn't call a missing model in use"))
             for (const id of ["general", "appearance", "providers"]) {
                 q.push(() => { Workspace.chooseThemeMode("light"); settingsDialog.openPage(id) })
                 q.push(() => { win.shotWindow("set-" + id + "-light"); Workspace.chooseThemeMode("dark") })

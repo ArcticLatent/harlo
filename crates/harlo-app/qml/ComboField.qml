@@ -30,7 +30,8 @@ ComboBox {
         width: parent.width - x - parent.rightPadding
         height: parent.height
         text: box.displayText
-        color: Theme.foreground
+        // (Disabled: faint, as a disabled button's label.)
+        color: box.enabled ? Theme.foreground : Theme.muted
         font.pixelSize: box.font.pixelSize
         font.family: box.fontOf(box.currentIndex)
         verticalAlignment: Text.AlignVCenter
