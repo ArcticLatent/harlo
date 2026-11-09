@@ -27,7 +27,8 @@ Rectangle {
     implicitHeight: col.implicitHeight + 16
     radius: 10
     color: Theme.elevated
-    border.color: running > 0 ? Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.6) : Theme.border
+    // (Accent borders are for a panel that needs you; its icon says it runs.)
+    border.color: Theme.border
 
     ColumnLayout {
         id: col

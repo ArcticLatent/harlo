@@ -730,8 +730,19 @@ Rectangle {
             ToolTip.visible: ctxHover.hovered
             ToolTip.text: "Context: " + root.session.contextText
         }
+        // How full the context is, in words beside its bar.
+        Label {
+            objectName: "contextPercent"
+            visible: ctxBar.visible && root.session.contextFraction > 0
+            text: Math.round(root.session.contextFraction * 100) + "% context"
+            color: ctxBar.way > 0.85 ? Theme.error : ctxBar.way > 0.6 ? Theme.warning : Theme.textMuted
+            font.pixelSize: Theme.px(11)
+            font.features: { "tnum": 1 }
+        }
         Label {
             Layout.fillWidth: true
+            // (Only what's left over: the model's name comes first.)
+            Layout.preferredWidth: 0
             Layout.minimumWidth: 0
             text: root.dictationNote !== "" ? root.dictationNote : root.session.statusLine
             color: root.dictationNote !== "" ? Theme.warning : Theme.muted

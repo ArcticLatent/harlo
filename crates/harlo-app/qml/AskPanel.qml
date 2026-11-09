@@ -144,14 +144,14 @@ Rectangle {
                         spacing: 6
                         RowLayout {
                             spacing: 8
-                            Rectangle {
-                                visible: !!qBlock.q.header
-                                implicitWidth: headerLabel.implicitWidth + 12
-                                implicitHeight: 18
-                                radius: 4
-                                color: Theme.subtle
-                                border.color: Theme.border
-                                Label { id: headerLabel; anchors.centerIn: parent; text: (qBlock.q.header || "").toUpperCase(); color: Theme.muted; font.pixelSize: Theme.px(10); font.bold: true; font.letterSpacing: 0.6 }
+                            // Its short name, to tell several apart (one
+                            // question says it all itself).
+                            Label {
+                                visible: !!qBlock.q.header && root.questions.length > 1
+                                text: qBlock.q.header || ""
+                                color: Theme.textMuted
+                                font.pixelSize: Theme.px(12)
+                                font.weight: Font.Medium
                             }
                             Label {
                                 visible: root.questions.length > 1

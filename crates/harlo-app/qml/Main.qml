@@ -1885,6 +1885,10 @@ ApplicationWindow {
                 win.check(b !== null && b.height >= 26 && right <= win.width, name + " shown, ≥ 26 px, inside the window")
             }
             win.check(c.compactBar ? win.findName("modelButton", c).tip === "anthropic/claude-demo" : win.findText("Claude Demo", c) !== null, "the model's name shows (in its tooltip when narrow)")
+            const modelLabel = win.findName("modelButton", c).contentItem.children[1]
+            win.check(c.compactBar || !modelLabel.truncated, "the model's name isn't cut short when there's room")
+            const pct = win.findName("contextPercent", c)
+            win.check(pct === null || !pct.visible || /^\d+% context$/.test(pct.text), "the context bar says how full it is")
             const logo = win.findName("providerLogo", c)
             win.check(logo !== null && logo.url.startsWith("data:image/svg+xml"), "the provider's logo shows by it")
             win.check(!win.findName("sendButton", c).enabled, "Send is off with nothing typed")
@@ -3703,6 +3707,13 @@ ApplicationWindow {
         ScriptAction { script: {
             const t = chat.transcript
             win.check(win.findAllNames("runBox", t).length === win.toolBoxCount - 1, "its line folds the run")
+            win.check(Theme.contrastOf(Theme.textFaint, Theme.background) >= 4.49 && Theme.contrastOf(Theme.textMuted, Theme.background) > Theme.contrastOf(Theme.textFaint, Theme.background), "faint text is readable (4.5:1) and below muted, dark")
+            Workspace.chooseThemeMode("light") } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            win.check(Theme.contrastOf(Theme.textFaint, Theme.background) >= 4.49 && Theme.contrastOf(Theme.textFaint, Theme.sidebar) >= 4.49, "faint text is readable (4.5:1), light")
+            win.shotWindow("clicks-tool-cards-light")
+            Workspace.chooseThemeMode("dark")
             win.summary(); Qt.quit() } }
     }
     property var toolBoxStart: []
@@ -6187,7 +6198,7 @@ ApplicationWindow {
         PauseAnimation { duration: 600 }
         // The step to another model: chosen on the plan card.
         // (Its buttons show on hover.)
-        ScriptAction { script: { const t = win.findText("Write helper.txt", chat), p = t.mapToItem(null, t.width / 2, t.height / 2); TestInput.moveTo(p.x, p.y) } }
+        ScriptAction { script: { const t = win.findText("Write helper.txt", chat.planDock), p = t.mapToItem(null, t.width / 2, t.height / 2); TestInput.moveTo(p.x, p.y) } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: win.clickItem(win.findName("planStepHelper-1"), "Who does it") }
         PauseAnimation { duration: 500 }

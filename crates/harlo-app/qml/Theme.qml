@@ -52,6 +52,29 @@ QtObject {
     // the page and a border that stands out from it, in the theme's own
     // colours.
     function blend(a, b, t) { return Qt.rgba(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, 1) }
+    // WCAG contrast between two colours, and the colour moved from `from`
+    // toward `toward` just far enough to reach `target` against both the
+    // canvas and the chrome, so small text stays readable in every theme.
+    function relLuminance(c) {
+        const f = v => v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
+        return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b)
+    }
+    function contrastOf(a, b) {
+        const x = relLuminance(a), y = relLuminance(b)
+        return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05)
+    }
+    function reach(from, toward, target) {
+        const worst = c => Math.min(contrastOf(c, background), contrastOf(c, sidebar))
+        if (worst(from) >= target) return from
+        let lo = 0, hi = 1
+        for (let i = 0; i < 16; i++) {
+            const mid = (lo + hi) / 2
+            if (worst(blend(from, toward, mid)) >= target) hi = mid; else lo = mid
+        }
+        return blend(from, toward, hi)
+    }
+    // The floors scale down with Settings → Contrast below 100%.
+    readonly property real faintFloor: 4.5 * Math.min(1, Math.max(0.67, contrast))
     readonly property color controlFill: blend(background, foreground, (isLight ? 0.045 : 0.07) * contrast)
     readonly property color controlFillHover: blend(background, foreground, (isLight ? 0.08 : 0.11) * contrast)
     readonly property color controlFillDown: blend(background, foreground, (isLight ? 0.11 : 0.05) * contrast)
@@ -72,10 +95,10 @@ QtObject {
     readonly property color hairline: blend(background, foreground, (isLight ? 0.08 : 0.075) * contrast)
     /// Text: primary, secondary (names, metadata), faint (times, hints).
     readonly property color text: foreground
-    readonly property color textMuted: blend(foreground, muted, Math.min(1, contrast <= 1 ? 1 : 1 / contrast + 0.15))
-    readonly property color textFaint: blend(muted, background, Math.max(0, 0.32 / contrast))
+    readonly property color textMuted: reach(blend(foreground, muted, Math.min(1, contrast <= 1 ? 1 : 1 / contrast + 0.15)), foreground, faintFloor * 1.35)
+    readonly property color textFaint: reach(blend(muted, background, Math.max(0, 0.32 / contrast)), foreground, faintFloor)
     /// Section labels: small, uppercase, spaced.
-    readonly property color label: blend(muted, background, Math.max(0, 0.12 / contrast))
+    readonly property color label: reach(blend(muted, background, Math.max(0, 0.12 / contrast)), foreground, faintFloor)
     /// Sidebar rows: hovered, and the open one.
     readonly property color rowHover: blend(sidebar, foreground, (isLight ? 0.04 : 0.04) * contrast)
     readonly property color rowSelected: blend(sidebar, foreground, (isLight ? 0.075 : 0.085) * contrast)
@@ -266,6 +289,8 @@ QtObject {
             // A code block inside a list or a quote (see `proseHtml`): a
             // shaded box, its lines wrapped to the column.
             + "table.code{border-style:none;}td.code{border-style:none;}"
+            // A quote's rule and its text (see `proseHtml`): no table lines.
+            + "table.quote{border-style:none;}td.quote{border-style:none;padding:0px;}"
             + "td.code code{color:" + rgb(foreground) + ";}"
             + "a.copy{color:" + rgb(muted) + ";text-decoration:none;}"
             + css("a", m.link) + css("code", m.inlineCode) + css("blockquote", m.blockquote)
@@ -283,6 +308,17 @@ QtObject {
     /// table cell behind each paragraph alone, so a <pre>'s lines, or a
     /// paragraph above it, leave gaps.)
     function proseHtml(html, copied) {
+        // A quote: a rule down its left (Qt draws no side borders, so a
+        // two-cell table: a thin shaded cell, then the quote), innermost
+        // first.
+        while (html.indexOf("<blockquote>") >= 0) {
+            const before = html
+            html = html.replace(/<blockquote>((?:(?!<blockquote>)[\s\S])*?)<\/blockquote>/g, (_, inner) =>
+                '<table class="quote" width="100%" cellspacing="0" cellpadding="0" style="margin-top:8px;margin-bottom:8px;"><tr>'
+                + '<td class="quote" width="3" bgcolor="' + rgb(textFaint) + '"></td><td class="quote" width="12"></td>'
+                + '<td class="quote" style="color:' + rgb(Qt.color(c.markdown.blockquote || muted)) + ';">' + inner + "</td></tr></table>")
+            if (html === before) break
+        }
         if (html.indexOf("<pre>") < 0)
             return html
         let n = 0

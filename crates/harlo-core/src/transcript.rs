@@ -862,13 +862,28 @@ fn summarize_args(args: &Value) -> String {
             }
         }
     } else {
+        // In words, not as the call's fields: its one text (a reason, a
+        // name), else what its items are called (a plan's steps), else
+        // its plain values by name. Never "[1]" or "{…}".
+        let texts: Vec<&str> = obj.values().filter_map(Value::as_str).filter(|s| !s.trim().is_empty()).collect();
+        if texts.len() == 1 {
+            return first_line(texts[0], 200);
+        }
+        let titled: Vec<&str> = obj
+            .values()
+            .filter_map(Value::as_array)
+            .flatten()
+            .filter_map(|it| ["title", "name", "question", "description"].iter().find_map(|k| it[*k].as_str()))
+            .collect();
+        if let Some(first) = titled.first() {
+            let more = if titled.len() > 1 { format!(" (+{} more)", titled.len() - 1) } else { String::new() };
+            return first_line(&format!("{first}{more}"), 200);
+        }
         for (k, v) in obj {
             let value = match v {
                 Value::String(s) => first_line(s, 60),
                 Value::Number(_) | Value::Bool(_) => v.to_string(),
-                Value::Null => continue,
-                Value::Array(a) => format!("[{}]", a.len()),
-                Value::Object(_) => "{…}".to_owned(),
+                _ => continue,
             };
             parts.push(format!("{k}={value}"));
         }
@@ -1251,10 +1266,15 @@ mod tests {
         assert_eq!(summarize_args(&json!({"input":"*** Begin Patch\n*** Update File: a.rs\n@@\n-x\n+y\n*** Add File: b.rs\n+z\n*** End Patch"})), "a.rs, b.rs");
         assert_eq!(
             summarize_args(&json!({"tool":"set_node_flags","args":{"node_path":"/obj/a","display":true}})),
-            // In the order the model wrote them.
-            "set_node_flags  node_path=/obj/a  display=true"
+            // The inner tool, then its arguments in words.
+            "set_node_flags  /obj/a"
         );
         assert_eq!(summarize_args(&json!({})), "");
+        // Fields in words: a plan's steps, a reason, never "[1]".
+        assert_eq!(summarize_args(&json!({"steps":[{"id":1,"title":"Write helper.txt"},{"id":2,"title":"Test it"}]})), "Write helper.txt (+1 more)");
+        assert_eq!(summarize_args(&json!({"why":"The helper's part can go on beside mine.","helpers":[{"agent":"harlo"}]})), "The helper's part can go on beside mine.");
+        assert_eq!(summarize_args(&json!({"node":"/obj/a","depth":2,"flags":{"a":1}})), "/obj/a");
+        assert_eq!(summarize_args(&json!({"x":1,"y":true,"list":[1,2]})), "x=1  y=true");
     }
 
     #[test]

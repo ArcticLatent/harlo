@@ -16,6 +16,7 @@ Rectangle {
     property alias subagentDock: subagentDock
     property alias todoDock: todoDock
     property alias requestDock: requestDock
+    property alias planDock: planDock
     property alias branchDialog: branchDialog
     property alias subagentDialog: subagentDialog
     property alias statsView: statsView
@@ -580,15 +581,15 @@ Rectangle {
             readonly property bool detailed: session.requestMethod === "select" && details.some(d => d && d.description)
             // An approval shown on its tool row: just a reminder here.
             readonly property bool inlineApproval: session.requestIsApproval && session.approvalRow !== ""
-            implicitHeight: reqCol.implicitHeight + 20
-            radius: 8
+            implicitHeight: reqCol.implicitHeight + 24
+            radius: 10
             color: Theme.elevated
             border.color: session.requestIsApproval ? Theme.warning : Theme.primary
             ColumnLayout {
                 id: reqCol
-                x: 12
-                y: 10
-                width: parent.width - 24
+                x: 14
+                y: 12
+                width: parent.width - 28
                 spacing: 8
                 RowLayout {
                     Layout.fillWidth: true
@@ -602,17 +603,18 @@ Rectangle {
                         font.bold: true
                         elide: Text.ElideRight
                     }
-                    FlatButton { text: "Show"; onClicked: transcript.revealIndex(session.indexOfKey(session.approvalRow)) }
-                    FlatButton { text: "Deny"; accent: Theme.error; onClicked: session.answerValue("Deny") }
+                    FlatButton { text: "Show"; outlined: false; onClicked: transcript.revealIndex(session.indexOfKey(session.approvalRow)) }
+                    FlatButton { text: "Deny"; onClicked: session.answerValue("Deny") }
                     // (Always allow: on the tool row, which Show reaches.)
-                    FlatButton { text: "Approve"; accent: Theme.success; onClicked: session.answerValue("Approve") }
+                    FlatButton { text: "Approve"; variant: "primary"; onClicked: session.answerValue("Approve") }
                 }
                 Label {
                     Layout.fillWidth: true
                     visible: !requestDock.inlineApproval
                     text: session.requestTitle
-                    color: Theme.foreground
-                    font.bold: true
+                    color: Theme.text
+                    font.pixelSize: Theme.px(13.5)
+                    font.weight: Font.DemiBold
                     wrapMode: Text.Wrap
                 }
                 Label {
@@ -663,23 +665,31 @@ Rectangle {
                         }
                     }
                 }
+                // The answers, on the right: the agent's first choice solid
+                // (its suggestion), the others outlined, Dismiss quiet on
+                // the left. (Deny is never the solid one.)
                 Flow {
                     Layout.fillWidth: true
+                    Layout.topMargin: 2
                     visible: !requestDock.inlineApproval
                     spacing: 6
+                    layoutDirection: Qt.RightToLeft
                     Repeater {
                         model: session.requestMethod === "select" && !requestDock.detailed ? session.requestOptions : []
                         FlatButton {
                             required property string modelData
+                            required property int index
+                            // (Right to left: the first is rightmost.)
+                            readonly property bool first: index === 0
                             text: modelData
-                            accent: modelData === "Deny" ? Theme.error : modelData === "Approve" ? Theme.success : Theme.foreground
+                            variant: first && modelData !== "Deny" ? "primary" : "outline"
                             onClicked: session.answerValue(modelData)
                         }
                     }
-                    FlatButton { visible: session.requestMethod === "confirm"; text: "Yes"; accent: Theme.success; onClicked: session.answerConfirm(true) }
+                    FlatButton { visible: session.requestMethod === "confirm"; text: "Yes"; variant: "primary"; onClicked: session.answerConfirm(true) }
                     FlatButton { visible: session.requestMethod === "confirm"; text: "No"; onClicked: session.answerConfirm(false) }
-                    FlatButton { visible: reqInput.visible; text: "Submit"; accent: Theme.primary; onClicked: session.answerValue(reqInput.text) }
-                    FlatButton { text: "Dismiss"; accent: Theme.muted; onClicked: session.cancelRequest() }
+                    FlatButton { visible: reqInput.visible; text: "Submit"; variant: "primary"; onClicked: session.answerValue(reqInput.text) }
+                    FlatButton { text: "Dismiss"; outlined: false; accent: Theme.textMuted; onClicked: session.cancelRequest() }
                 }
             }
         }

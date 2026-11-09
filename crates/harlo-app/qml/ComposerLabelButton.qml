@@ -20,7 +20,9 @@ Button {
     implicitHeight: 30
     // Its natural width; in a layout that gives it less (Layout.minimumWidth
     // below this), the label elides to fit.
-    implicitWidth: leftPadding + rightPadding + leadHolder.implicitWidth + 6 + Math.min(label.implicitWidth, maxLabel)
+    // (Rounded up: a layout rounds widths down, and a label a fraction of a
+    // pixel short of its text elides.)
+    implicitWidth: Math.ceil(leftPadding + rightPadding + leadHolder.implicitWidth + 6 + Math.min(label.implicitWidth, maxLabel))
     contentItem: Row {
         spacing: 6
         opacity: lb.enabled ? 1 : 0.6

@@ -461,8 +461,6 @@ Rectangle {
                 objectName: "planStopRun"
                 visible: !!root.run
                 text: "Stop the run"
-                outlined: false
-                accent: Theme.muted
                 padding: 3
                 font.pixelSize: Theme.px(11.5)
                 onClicked: Workspace.stopPlanRun(root.session.key)
