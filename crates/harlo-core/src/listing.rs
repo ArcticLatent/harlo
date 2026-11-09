@@ -32,6 +32,8 @@ pub struct CodeView {
     pub path: String,
     pub lines: Vec<CodeLine>,
     pub total: usize,
+    /// The output was cut after these lines (it has more than is kept).
+    pub more: bool,
 }
 
 /// A line before it's highlighted: the file whose language it's in, its
@@ -52,6 +54,8 @@ fn rows<'a>(tool: &str, command: &str, path: &str, output: &'a str) -> Option<(S
         Some(rest) => (true, rest),
         None => (false, output),
     };
+    // (Kept to its start, it ends "\n…".)
+    let output = output.strip_suffix("\n…").unwrap_or(output);
     let mut lines: Vec<&str> = output.lines().collect();
     while lines.last().is_some_and(|l| l.trim().is_empty()) {
         lines.pop();
@@ -145,7 +149,7 @@ pub fn view(tool: &str, command: &str, path: &str, output: &str, limit: usize) -
         }
         i = j;
     }
-    Some(CodeView { path: file, lines: out, total })
+    Some(CodeView { path: file, lines: out, total, more: output.ends_with("\n…") })
 }
 
 /// How many lines `view` would give, unlimited (for "N more lines").
@@ -477,6 +481,20 @@ mod tests {
         // Not code: a test run, dates, one stray number.
         assert!(view("bash", "cargo test", "", "test a ... ok\ntest b ... ok", 400).is_none());
         assert!(view("bash", "ls -l", "", "2026-11-08 a\n2026-11-09 b", 400).is_none());
+    }
+
+    #[test]
+    fn a_listing_cut_after_its_start_says_so() {
+        let full: String = (1..=1200).map(|i| format!("{i:6}→fn f{i}() {{}}\n")).collect();
+        let kept = crate::transcript::head_chars(&full, 6000);
+        assert!(kept.ends_with("\n…") && kept.starts_with("     1→"));
+        let v = view("Read", "", "src/long.rs", &kept, 400).unwrap();
+        assert!(v.more);
+        assert_eq!(v.lines[0].num, "1");
+        assert_eq!(v.lines.len(), v.total);
+        let last: usize = v.lines.last().unwrap().num.parse().unwrap();
+        assert!(last > 100 && last < 1200, "{last}");
+        assert!(!view("Read", "", "src/a.rs", "     1→fn a() {}", 400).unwrap().more);
     }
 
     #[test]

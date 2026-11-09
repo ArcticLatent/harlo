@@ -954,7 +954,7 @@ impl ChatSession {
         match harlo_core::listing::view(&tool.to_string(), &command.to_string(), &path.to_string(), &output, limit.max(1) as usize) {
             Some(v) => {
                 let lines: Vec<serde_json::Value> = v.lines.iter().map(|l| serde_json::json!({ "n": l.num, "c": l.context, "h": l.html, "f": l.file })).collect();
-                QString::from(&serde_json::json!({ "path": v.path, "total": v.total, "lines": lines }).to_string())
+                QString::from(&serde_json::json!({ "path": v.path, "total": v.total, "more": v.more, "lines": lines }).to_string())
             }
             None => QString::default(),
         }

@@ -3673,7 +3673,7 @@ ApplicationWindow {
             const previews = win.findAllNames("toolPreview", box)
             win.check(previews.length === 2, "the write and the edit show their lines (" + previews.length + ")")
             const more = win.findAllNames("toolMoreLines", box)
-            win.check(more.length === 1 && more[0].text === "5 more lines", "the write's first 6 of 11 lines, and 5 more (" + more.map(b => b.text) + ")")
+            win.check(more.length === 1 && more[0].text === "↓ 5 more lines", "the write's first 6 of 11 lines, and 5 more (" + more.map(b => b.text) + ")")
             const results = win.findAllNames("toolResult", box).map(l => l.text)
             win.check(results.some(r => r.indexOf("11 lines") >= 0) && results.some(r => r.indexOf("+2") >= 0 && r.indexOf("−2") >= 0)
                       && results.some(r => r.indexOf("7 passed") >= 0) && results.some(r => r.indexOf("exit 101") >= 0), "what each came to (" + results.join(" | ") + ")")
@@ -3721,7 +3721,7 @@ ApplicationWindow {
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
             const t = chat.transcript, boxes = win.findAllNames("runBox", t), box = boxes[boxes.length - 1]
-            win.check(win.findAllNames("toolMoreLines", box).some(b => b.text === "Fewer lines"), "opened: all of it")
+            win.check(win.findAllNames("toolMoreLines", box).some(b => b.text === "↑ Fewer lines"), "opened: all of it")
             win.shotWindow("clicks-tool-cards-open")
             win.toolBoxCount = boxes.length
             win.clickItem(win.findName("runHeader", box), "the run's line") } }
@@ -3929,8 +3929,42 @@ ApplicationWindow {
             TestInput.moveTo(ap.x, ap.y)
             win.check(win.findAllNames("showLines", box).length === 1 && !win.findAllNames("copyCode", box).some(c => c.visible), "an older read, hovered: Show lines, no Copy")
             win.shotWindow("listings-five-reads")
+            win.sendByKeys("read a long file") } }
+        ScriptAction { script: win.waitUntil(listingSteps, () => win.chatText().indexOf("the long one") >= 0 && chat.session.status === "idle", 20000) }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            chat.transcript.follow = false
+            const r = win.findAllNames("toolResult", chat.transcript).find(l => l.text.indexOf("1200 lines") >= 0)
+            win.check(r !== undefined, "the long read")
+            const more = win.findAllNames("toolMoreLines", chat.transcript).find(l => l.text.indexOf("1194") >= 0)
+            win.check(more !== undefined, "its preview: 6 lines, ↓ 1194 more (the whole file's count)")
+            win.scrollIntoView(r)
+            const t0 = Date.now()
+            win.clickItem(r, "the long read's line")
+            win.perfOpen = Date.now() - t0 } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: {
+            const v = win.findAllNames("codeView", chat.transcript).find(c => c.lines.length === 400)
+            win.check(v !== undefined, "opened: 400 lines (" + win.findAllNames("codeView", chat.transcript).map(c => c.lines.length) + ")")
+            if (v) {
+                win.check(v.lines[0].n === "1" && v.lines[399].n === "400", "…from its first line")
+                // The numbers and tints placed again (as on a resize): ten times.
+                const t0 = Date.now()
+                for (let k = 0; k < 10; k++) v.laidOut++
+                console.log("PERF relayout x10 ms", Date.now() - t0, "open ms", win.perfOpen)
+            }
+            const beyond = win.findAllNames("toolBeyond", chat.transcript)[0], go = win.findAllNames("toolBeyondOpen", chat.transcript)[0]
+            win.check(beyond && beyond.text === "800 more lines" && go && go.text === "Open at line 401", "past 400: said, with a way on (" + (beyond ? beyond.text : "none") + " · " + (go ? go.text : "") + ")")
+            if (go) { win.scrollIntoView(go); win.shotWindow("listings-past-400"); win.clickItem(go, "Open at line 401") } } }
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            const ed = chat.fileEditor.editor
+            const line = ed ? ed.text.slice(0, ed.cursorPosition).split("\n").length : -1
+            win.check(chat.filePath.endsWith("/src/long.rs") && line === 401, "Open at line 401: the file there (" + chat.filePath + ", " + line + ")")
             win.summary(); Qt.quit() } }
     }
+    property real perfOpen: 0
+
     property var keyHead: null
     function listingBox() {
         const boxes = win.findAllNames("runBox", chat.transcript)

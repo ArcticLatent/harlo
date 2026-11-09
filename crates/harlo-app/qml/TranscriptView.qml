@@ -726,7 +726,25 @@ Item {
         readonly property bool codeShown: !!code && (!isRead || readsAfter < 3 || open)
         function absolute(p) { return root.fileAt(p, command) }
         readonly property bool failed: rowState === "error" || /^(exit|failed)|failed$/.test(result)
-        readonly property int hidden: preview ? lineCount - previewLines : code ? code.total - previewLines : shell ? outLines.length - tailLines : 0
+        // A listing's whole length: the call's own count ("1200 lines")
+        // when its output was cut, else what's kept.
+        readonly property int fullCount: {
+            if (!code) return 0
+            const m = /^(\d+) lines?$/.exec(result)
+            return m ? Math.max(Number(m[1]), code.total) : code.total
+        }
+        readonly property int hidden: preview ? lineCount - previewLines : code ? fullCount - previewLines : shell ? outLines.length - tailLines : 0
+        // Opened, what still isn't shown (-1: more, how many unknown), and
+        // where its file goes on ({p, n}), for "Open at line n".
+        readonly property int beyond: !open ? 0
+                                    : code ? (Math.max(0, fullCount - code.lines.length) || (code.more ? -1 : 0))
+                                    : preview ? Math.max(0, lineCount - 400) : 0
+        readonly property var beyondAt: {
+            if (beyond === 0 || (code && code.path === "")) return null
+            const nums = codeLines.filter(l => /^\d+$/.test(l.n) && l.p)
+            const last = nums[nums.length - 1]
+            return last ? { p: last.p, n: Number(last.n) + 1 } : null
+        }
         readonly property bool canOpen: (text !== "" && !shell && !preview) || hidden > 0 || (commandInWell && shownCommand.split("\n").length > 2)
         // (harlo's tools about a session: its title, not its key.)
         readonly property bool aboutSession: /^(mcp__harlo__)?(bring_over|send_message|read_session|stop_session)$/.test(title) && /^[\w-]+:\S+$/.test(subtitle)
@@ -1037,17 +1055,46 @@ Item {
                         font.family: Theme.mono
                         font.pixelSize: Theme.mpx(12)
                     }
-                    // What's left out, a click away.
-                    Label {
-                        objectName: "toolMoreLines"
-                        visible: card.hidden > 0
+                    // What's left out, a click away; opened, what's past the
+                    // lines shown, and where the file goes on (a second line
+                    // when narrow).
+                    Flow {
                         x: toolWellBox.gutter ? wellCode.gutterWidth : 10
+                        width: wellCol.width - x - 10
+                        visible: card.hidden > 0 || card.beyond !== 0
+                        spacing: 2
                         topPadding: 3
-                        text: card.open ? "Fewer lines" : card.hidden + (card.hidden === 1 ? " more line" : " more lines")
-                        color: moreHover.hovered ? Theme.muted : Theme.textFaint
-                        font.pixelSize: Theme.px(11.5)
-                        HoverHandler { id: moreHover; cursorShape: Qt.PointingHandCursor }
-                        TapHandler { onTapped: view.toggle(card.rowKey) }
+                        Label {
+                            objectName: "toolMoreLines"
+                            visible: card.hidden > 0
+                            rightPadding: 12
+                            text: card.open ? "↑ Fewer lines" : "↓ " + card.hidden + (card.hidden === 1 ? " more line" : " more lines")
+                            color: moreHover.hovered ? Theme.foreground : Theme.muted
+                            font.pixelSize: Theme.px(12)
+                            HoverHandler { id: moreHover; cursorShape: Qt.PointingHandCursor }
+                            TapHandler { onTapped: view.toggle(card.rowKey) }
+                        }
+                        Label {
+                            objectName: "toolBeyond"
+                            visible: card.beyond !== 0
+                            rightPadding: 12
+                            text: (card.beyond > 0 ? card.beyond + (card.beyond === 1 ? " more line" : " more lines") : "More lines")
+                                  + (card.beyondAt ? "" : " not shown here")
+                            color: Theme.textFaint
+                            font.pixelSize: Theme.px(12)
+                        }
+                            Label {
+                                objectName: "toolBeyondOpen"
+                                visible: !!card.beyondAt
+                                text: card.beyondAt ? "Open at line " + card.beyondAt.n : ""
+                                color: beyondHover.hovered ? Theme.primary : Theme.muted
+                                font.pixelSize: Theme.px(12)
+                                font.underline: beyondHover.hovered
+                                Accessible.role: Accessible.Link
+                                Accessible.name: text
+                                HoverHandler { id: beyondHover; cursorShape: Qt.PointingHandCursor }
+                                TapHandler { onTapped: root.openFileAt(card.beyondAt.p, card.beyondAt.n) }
+                            }
                     }
                 }
             }

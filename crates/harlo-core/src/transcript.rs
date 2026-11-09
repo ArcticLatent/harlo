@@ -655,7 +655,10 @@ impl Transcript {
                                 r.command = command.chars().take(COMMAND_DISPLAY_CHARS).collect();
                                 r.label = args["description"].as_str().map(|d| first_line(d, 200)).unwrap_or_default();
                             }
-                            r.text = tail_chars(&run.output, TOOL_OUTPUT_DISPLAY_CHARS);
+                            // (A file's lines keep their start, the rest a click
+                            // away in the file; other output keeps its end.)
+                            let listing = crate::listing::is_read(name) || (!r.command.is_empty() && crate::listing::file_print(&r.command).is_some());
+                            r.text = if listing { head_chars(&run.output, TOOL_OUTPUT_DISPLAY_CHARS) } else { tail_chars(&run.output, TOOL_OUTPUT_DISPLAY_CHARS) };
                             if run.started > 0 {
                                 r.time = run.started;
                             }
@@ -903,6 +906,17 @@ fn first_line(s: &str, max: usize) -> String {
         out.push('…');
     }
     out
+}
+
+/// The first `max` characters, cut at a line's end, then "\n…" (the rest
+/// left out); `s` itself when it fits.
+pub(crate) fn head_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_owned();
+    }
+    let end = s.char_indices().nth(max).map(|(i, _)| i).unwrap_or(s.len());
+    let end = s[..end].rfind('\n').unwrap_or(end);
+    format!("{}\n…", &s[..end])
 }
 
 fn tail_chars(s: &str, max: usize) -> String {
