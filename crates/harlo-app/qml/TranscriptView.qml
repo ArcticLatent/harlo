@@ -123,22 +123,34 @@ Item {
             Label { visible: head.shownModel !== ""; text: "· " + Theme.modelLabel(head.shownModel); color: Theme.textFaint; font.pixelSize: Theme.px(13); anchors.baseline: parent.children[1].baseline }
         }
     }
-    /// A run of tool calls and thoughts: folded or open as set by hand,
-    /// else open while it's going (`dflt`, from the session).
-    function runOpen(group, dflt) { const v = view.runs[group]; return v === undefined ? dflt : v }
-    // The line through a run of tool calls and thoughts: above and below
-    // the row's mark when the rows next to it are activity too (a row's
-    // gap is inside its top, so the segments meet).
-    component RailLine: Item {
-        property real markX
-        property real markY
-        property bool up
-        property bool down
-        // Where the line above starts (below a run's summary line).
-        property real from: 0
-        Rectangle { visible: parent.up; x: parent.markX; y: parent.from; width: 1; height: Math.max(0, parent.markY - 7 - parent.from); color: Theme.border }
-        Rectangle { visible: parent.down; x: parent.markX; y: parent.markY + 7; width: 1; height: Math.max(0, parent.height - parent.markY - 7); color: Theme.border }
+    /// How a run of tool calls and thoughts shows: "folded" (its summary
+    /// line, as folded by hand), "boxed" (finished: open in a box of its
+    /// own height that scrolls, so it doesn't cover the session) or "rows"
+    /// (still going, or opened in full by a search).
+    function runMode(group, dflt) {
+        if (group === "") return "rows"
+        const v = view.runs[group]
+        if (v === false) return "folded"
+        return dflt || v === "all" ? "rows" : "boxed"
     }
+    function runOpen(group, dflt) { return runMode(group, dflt) !== "folded" }
+    // Paths in the session's folder from there; a command's `cd <the
+    // folder> &&` left out.
+    readonly property string here: (session.cwd || "").replace(/^ssh:\/\/[^\/]+/, "").replace(/\/$/, "")
+    function local(t) {
+        if (here === "" || !t) return t || ""
+        const cd = "cd " + here + " && "
+        if (t.startsWith(cd)) return t.slice(cd.length)
+        if (t.startsWith("cd \"" + here + "\" && ")) return t.slice(here.length + 9)
+        return t.split(here + "/").join("")
+    }
+    // A path's folder faint, its name plain.
+    function pathHtml(t) {
+        const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;")
+        const i = t.lastIndexOf("/")
+        return i < 0 ? esc(t) : "<font color='" + Theme.rgb(Theme.textFaint) + "'>" + esc(t.slice(0, i + 1)) + "</font>" + esc(t.slice(i + 1))
+    }
+    function seconds(ms) { return ms <= 0 ? "" : ms < 10000 ? (ms / 1000).toFixed(1) + "s" : ms < 60000 ? Math.round(ms / 1000) + "s" : Math.floor(ms / 60000) + "m " + Math.round(ms % 60000 / 1000) + "s" }
     // A run's summary line ("Thought, edited 1 file, ran 2 commands"):
     // folds and unfolds the run.
     component RunHeader: Item {
@@ -155,7 +167,7 @@ Item {
             anchors.leftMargin: 8
             anchors.rightMargin: 10
             spacing: 8
-            Label { Layout.preferredWidth: 14; horizontalAlignment: Text.AlignHCenter; text: runHead.isOpen ? "▾" : "▸"; color: Theme.muted; font.pixelSize: Theme.px(12) }
+            Icon { name: runHead.isOpen ? "arrow-down-s" : "arrow-right-s"; implicitWidth: 14; implicitHeight: 14; color: Theme.textFaint }
             Label {
                 objectName: "runSummary"
                 Layout.fillWidth: true
@@ -165,10 +177,423 @@ Item {
                 font.pixelSize: Theme.px(13)
             }
             // Still going.
-            Label { visible: runHead.dflt; text: "●"; color: Theme.primary; font.pixelSize: Theme.px(9) }
+            Rectangle { visible: runHead.dflt; implicitWidth: 6; implicitHeight: 6; radius: 3; color: Theme.primary }
         }
         HoverHandler { id: runHover; cursorShape: Qt.PointingHandCursor }
         TapHandler { onTapped: view.toggleRun(runHead.group, runHead.dflt) }
+    }
+    // A thought in a run: one line, its text a click away.
+    component ThoughtLine: ColumnLayout {
+        id: thought
+        property string rowKey
+        property string text
+        property string rowState
+        readonly property bool open: view.expanded[rowKey] === true
+        spacing: 4
+        Item {
+            Layout.fillWidth: true
+            implicitHeight: thoughtHead.implicitHeight + 6
+            Rectangle { x: -6; width: parent.width + 12; height: parent.height; radius: 6; color: thoughtHover.hovered ? Theme.hover : "transparent" }
+            RowLayout {
+                id: thoughtHead
+                anchors.verticalCenter: parent.verticalCenter
+                width: parent.width
+                spacing: 8
+                Icon { name: "sparkling"; implicitWidth: 14; implicitHeight: 14; color: thought.rowState === "streaming" ? Theme.primary : Theme.textFaint }
+                Label { Layout.fillWidth: true; text: thought.rowState === "streaming" ? "Thinking…" : "Thought"; color: Theme.muted; font.italic: true; font.pixelSize: Theme.px(13) }
+            }
+            HoverHandler { id: thoughtHover; cursorShape: Qt.PointingHandCursor }
+            TapHandler { onTapped: view.toggle(thought.rowKey) }
+        }
+        TextEdit {
+            Layout.fillWidth: true
+            Layout.leftMargin: 22
+            visible: thought.open
+            text: thought.text
+            color: Theme.muted
+            readOnly: true
+            selectByMouse: true
+            wrapMode: TextEdit.Wrap
+            font.family: Theme.uiFont
+            font.pixelSize: Theme.px(13)
+            font.italic: true
+        }
+    }
+    // A tool call: one line (what it is, what it touched, what it came to)
+    // and, when there's something to see, one well under it: a write's or
+    // an edit's lines, a command's last lines.
+    component ToolCard: ColumnLayout {
+        id: card
+        property string rowKey
+        property string title
+        property string subtitle
+        property string text
+        property string rowState
+        property string callId
+        property string result
+        property string diff
+        property real took
+        property string label
+        property string command
+        // Waiting for your approval (the row's own).
+        property bool asking: false
+        property var askLines: []
+        readonly property bool open: view.expanded[rowKey] === true
+        readonly property var agents: callId !== "" ? root.subagents.filter(a => a.parentToolCallId === callId) : []
+        // A write: every line added, numbered; an edit: lines out and in.
+        readonly property bool preview: diff !== "" && !asking
+        readonly property bool newFile: preview && result.indexOf("−") < 0
+        readonly property int previewLines: 6
+        readonly property int diffCount: diff === "" ? 0 : diff.split("\n").length
+        // (A write's own count: its diff stops at 400 lines.)
+        readonly property int lineCount: newFile && /^\+\d+$/.test(result) ? Number(result.slice(1)) : diffCount
+        readonly property var lines: preview ? JSON.parse(root.session.diffLines(subtitle.replace(/…$/, ""), diff, open ? 400 : previewLines)) : []
+        readonly property bool shell: command !== "" && !asking
+        readonly property string shownCommand: shell ? root.local(command) : ""
+        // The command in the well when its line doesn't say it all.
+        readonly property bool commandInWell: shell && (label !== "" || shownCommand.indexOf("\n") >= 0 || shownCommand.length > 90)
+        readonly property var outLines: text === "" ? [] : text.split("\n").filter(l => l.trim() !== "")
+        readonly property int tailLines: 3
+        readonly property bool outInWell: shell ? outLines.length > 0 && rowState !== "running" : open && text !== "" && !preview
+        readonly property bool failed: rowState === "error" || /^(exit|failed)|failed$/.test(result)
+        readonly property int hidden: preview ? lineCount - previewLines : shell ? outLines.length - tailLines : 0
+        readonly property bool canOpen: (text !== "" && !shell && !preview) || hidden > 0 || (commandInWell && shownCommand.split("\n").length > 2)
+        readonly property string target: label !== "" ? label : subtitle !== "" || rowState !== "pending" ? root.local(subtitle) : Theme.toolWriting(title)
+        readonly property bool isPath: label === "" && !shell && /^[^\s]+$/.test(target) && /[\/.]/.test(target)
+        readonly property real headHeight: headBox.height
+        spacing: 4
+        Item {
+            id: headBox
+            objectName: "toolHead"
+            Layout.fillWidth: true
+            implicitHeight: head.implicitHeight + 6
+            Rectangle { x: -6; width: parent.width + 12; height: parent.height; radius: 6; color: headHover.hovered && card.canOpen ? Theme.hover : "transparent" }
+            RowLayout {
+                id: head
+                anchors.verticalCenter: parent.verticalCenter
+                width: parent.width
+                spacing: 8
+                Icon {
+                    objectName: "toolMark"
+                    implicitWidth: 14
+                    implicitHeight: 14
+                    name: card.asking ? "question" : card.rowState === "error" ? "close" : card.rowState === "done" ? "check" : "loader-4"
+                    color: card.asking ? Theme.warning : card.rowState === "error" ? Theme.error : card.rowState === "running" ? Theme.primary : Theme.textFaint
+                    RotationAnimator on rotation { from: 0; to: 360; duration: 1200; loops: Animation.Infinite; running: card.rowState === "running" && Theme.motion > 0 }
+                }
+                Label { text: Theme.toolLabel(card.title); color: Theme.foreground; font.weight: Font.Medium; font.pixelSize: Theme.px(13) }
+                Label {
+                    objectName: "toolWhat"
+                    Layout.fillWidth: true
+                    // (Plain, for tests and copying: the words shown.)
+                    readonly property string plain: card.target
+                    textFormat: card.isPath ? Text.StyledText : Text.PlainText
+                    text: card.isPath ? root.pathHtml(card.target) : card.target
+                    color: Theme.muted
+                    elide: Text.ElideRight
+                    font.family: card.label !== "" ? Theme.uiFont : Theme.mono
+                    font.pixelSize: card.label !== "" ? Theme.px(13) : Theme.mpx(12)
+                }
+                FlatButton {
+                    // An edit or a write: its file's diff, in the Changes panel.
+                    visible: headHover.hovered && /^(edit|multi_?edit|write|apply_?patch|patch|create)/i.test(card.title) && card.subtitle !== "" && card.rowState !== "error"
+                    text: "diff"
+                    font.pixelSize: Theme.px(11)
+                    padding: 2
+                    outlined: false
+                    accent: Theme.info
+                    onClicked: root.openDiff(card.subtitle.replace(/…$/, ""))
+                }
+                Label {
+                    objectName: "toolResult"
+                    visible: text !== ""
+                    textFormat: Text.StyledText
+                    text: {
+                        const faint = s => s === "" ? "" : "<font color='" + Theme.rgb(Theme.textFaint) + "'>" + s + "</font>"
+                        let r = card.newFile ? (card.lineCount === 1 ? "1 line" : card.lineCount + " lines")
+                              : card.result.replace(/^\+(\d+) −(\d+)$/, "<font color='" + Theme.rgb(Theme.diffAdd) + "'>+$1</font> <font color='" + Theme.rgb(Theme.diffRemove) + "'>−$2</font>")
+                        if (card.failed && r !== "") r = "<font color='" + Theme.rgb(Theme.error) + "'>" + r + "</font>"
+                        return [r, faint(root.seconds(card.took))].filter(x => x !== "").join("  ")
+                    }
+                    color: Theme.muted
+                    font.pixelSize: Theme.px(12)
+                }
+            }
+            HoverHandler { id: headHover; cursorShape: card.canOpen ? Qt.PointingHandCursor : Qt.ArrowCursor }
+            TapHandler { enabled: card.canOpen; onTapped: view.toggle(card.rowKey) }
+        }
+        // The subagents this call started (the task tool), as a tree.
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.leftMargin: 22
+            visible: card.agents.length > 0
+            spacing: 6
+            Rectangle { Layout.fillHeight: true; Layout.leftMargin: 4; implicitWidth: 2; radius: 1; color: Theme.border }
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 0
+                Repeater {
+                    model: card.agents
+                    SubagentRow {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        a: modelData
+                        session: root.session
+                        onViewRequested: (agent, steer) => root.subagentRequested(agent, steer)
+                    }
+                }
+            }
+        }
+        // The approval: its details (reason, command…) and the answer.
+        Label {
+            Layout.fillWidth: true
+            visible: text !== ""
+            text: card.askLines.filter(l => l.startsWith("Reason:")).join("\n")
+            color: Theme.warning
+            font.pixelSize: Theme.px(12)
+            wrapMode: Text.Wrap
+            textFormat: Text.PlainText
+        }
+        Rectangle {
+            Layout.fillWidth: true
+            readonly property string details: card.askLines.filter(l => !l.startsWith("Reason:") && l !== "Outside the sandbox").join("\n").trim()
+            visible: card.asking && details !== ""
+            implicitHeight: askDetails.implicitHeight + 12
+            radius: 4
+            color: Theme.codeBg
+            Label {
+                id: askDetails
+                x: 8
+                y: 6
+                width: parent.width - 16
+                text: parent.details
+                color: Theme.foreground
+                font.family: Theme.mono
+                font.pixelSize: Theme.mpx(12)
+                wrapMode: Text.WrapAnywhere
+                maximumLineCount: 14
+                elide: Text.ElideRight
+                textFormat: Text.PlainText
+            }
+        }
+        RowLayout {
+            Layout.fillWidth: true
+            visible: card.asking
+            spacing: 6
+            Label {
+                Layout.fillWidth: true
+                text: root.approvalQuestion(card.title, card.askLines)
+                color: Theme.foreground
+                font.pixelSize: Theme.px(12)
+                elide: Text.ElideRight
+            }
+            FlatButton { text: "Deny"; accent: Theme.error; font.pixelSize: Theme.px(12); onClicked: root.session.answerValue("Deny") }
+            FlatButton {
+                objectName: "alwaysAllowInline"
+                visible: root.session.requestOptions.indexOf("Always allow") >= 0
+                text: parent.width < 420 ? "Always" : "Always allow"
+                font.pixelSize: Theme.px(12)
+                ToolTip.visible: hovered
+                ToolTip.delay: 400
+                ToolTip.text: { try { return "Remember: " + (JSON.parse(root.session.requestJson).alwaysHint || "this") } catch (e) { return "" } }
+                onClicked: root.session.answerValue("Always allow")
+            }
+            FlatButton { text: "Approve"; accent: Theme.success; font.pixelSize: Theme.px(12); onClicked: root.session.answerValue("Approve") }
+        }
+        // The well: a write's or an edit's lines; a command (when its line
+        // doesn't say it) and its last lines; any call's output, opened.
+        Rectangle {
+            objectName: card.preview ? "toolPreview" : "toolWell"
+            Layout.fillWidth: true
+            Layout.leftMargin: 22
+            visible: card.preview || card.commandInWell || card.outInWell
+            implicitHeight: Math.min(wellCol.implicitHeight, Theme.px(300)) + 12
+            radius: 6
+            color: Theme.codeBg
+            Flickable {
+                id: wellFlick
+                x: 0
+                y: 6
+                width: parent.width
+                height: parent.height - 12
+                contentHeight: wellCol.implicitHeight
+                clip: true
+                interactive: contentHeight > height
+                boundsBehavior: Flickable.StopAtBounds
+                ScrollBar.vertical: ScrollBar { policy: wellFlick.contentHeight > wellFlick.height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff }
+                Column {
+                    id: wellCol
+                    width: wellFlick.width
+                    spacing: 0
+                    readonly property real numberWidth: card.newFile ? numberProbe.implicitWidth + 18 : 22
+                    Label { id: numberProbe; visible: false; text: String(card.lines.length); font.family: Theme.mono; font.pixelSize: Theme.mpx(12) }
+                    Repeater {
+                        model: card.lines
+                        Rectangle {
+                            required property var modelData
+                            required property int index
+                            width: wellCol.width
+                            implicitHeight: lineText.implicitHeight + 2
+                            readonly property bool added: !card.newFile && modelData.s === "+"
+                            readonly property bool removed: modelData.s === "-"
+                            color: added ? Qt.rgba(Theme.diffAdd.r, Theme.diffAdd.g, Theme.diffAdd.b, 0.10) : removed ? Qt.rgba(Theme.diffRemove.r, Theme.diffRemove.g, Theme.diffRemove.b, 0.10) : "transparent"
+                            Label {
+                                width: wellCol.numberWidth - 10
+                                horizontalAlignment: Text.AlignRight
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: card.newFile ? String(index + 1) : parent.added ? "+" : parent.removed ? "−" : ""
+                                color: parent.added ? Theme.diffAdd : parent.removed ? Theme.diffRemove : Theme.textFaint
+                                font.family: Theme.mono
+                                font.pixelSize: Theme.mpx(12)
+                            }
+                            Label {
+                                id: lineText
+                                x: wellCol.numberWidth
+                                width: parent.width - x - 10
+                                anchors.verticalCenter: parent.verticalCenter
+                                textFormat: Text.RichText
+                                text: Theme.htmlStyle + "<pre style=\"margin:0;\">" + (modelData.h === "" ? " " : modelData.h) + "</pre>"
+                                color: Theme.foreground
+                                font.family: Theme.mono
+                                font.pixelSize: Theme.mpx(12)
+                            }
+                        }
+                    }
+                    Label {
+                        objectName: "toolCommand"
+                        visible: card.commandInWell
+                        x: 10
+                        width: wellCol.width - 20
+                        text: "<font color='" + Theme.rgb(Theme.textFaint) + "'>$</font> " + card.shownCommand.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\n/g, "<br>")
+                        textFormat: Text.StyledText
+                        color: Theme.foreground
+                        wrapMode: Text.WrapAnywhere
+                        maximumLineCount: card.open ? 400 : 2
+                        elide: Text.ElideRight
+                        font.family: Theme.mono
+                        font.pixelSize: Theme.mpx(12)
+                    }
+                    Item { visible: card.commandInWell && card.outInWell; width: 1; height: 6 }
+                    // A command's last lines (each one shortened to the well), or
+                    // all of a call's output, opened.
+                    Repeater {
+                        model: card.outInWell && card.shell && !card.open ? card.outLines.slice(-card.tailLines) : []
+                        Label {
+                            required property string modelData
+                            objectName: "toolTail"
+                            x: 10
+                            width: wellCol.width - 20
+                            text: modelData
+                            color: Theme.muted
+                            elide: Text.ElideRight
+                            textFormat: Text.PlainText
+                            font.family: Theme.mono
+                            font.pixelSize: Theme.mpx(12)
+                        }
+                    }
+                    TextEdit {
+                        visible: card.outInWell && (card.open || !card.shell)
+                        x: 10
+                        width: wellCol.width - 20
+                        text: visible ? card.text : ""
+                        color: Theme.muted
+                        readOnly: true
+                        selectByMouse: true
+                        wrapMode: TextEdit.WrapAnywhere
+                        font.family: Theme.mono
+                        font.pixelSize: Theme.mpx(12)
+                    }
+                    // What's left out, a click away.
+                    Label {
+                        objectName: "toolMoreLines"
+                        visible: card.hidden > 0
+                        x: 10
+                        topPadding: 3
+                        text: card.open ? "Fewer lines" : card.hidden + (card.hidden === 1 ? " more line" : " more lines")
+                        color: moreHover.hovered ? Theme.muted : Theme.textFaint
+                        font.pixelSize: Theme.px(11.5)
+                        HoverHandler { id: moreHover; cursorShape: Qt.PointingHandCursor }
+                        TapHandler { onTapped: view.toggle(card.rowKey) }
+                    }
+                }
+            }
+        }
+    }
+    // A finished run, open: its summary line, then its thoughts and calls
+    // in a box of its own height that scrolls (starting at its end, next
+    // to the reply).
+    component RunBox: ColumnLayout {
+        id: box
+        property string group
+        property string summary
+        property bool dflt
+        // (Read again as the list changes: a finished run rarely does.)
+        readonly property var rows: (view.count, summary, JSON.parse(root.session.runJson(group)))
+        readonly property real maxHeight: Math.max(Theme.px(160), Math.min(Theme.px(380), view.height * 0.45))
+        objectName: "runBox"
+        spacing: 2
+        RunHeader { Layout.fillWidth: true; group: box.group; summary: box.summary; dflt: box.dflt }
+        Flickable {
+            id: boxFlick
+            objectName: "runBoxScroll"
+            Layout.fillWidth: true
+            Layout.preferredHeight: Math.min(boxCol.implicitHeight + 6, box.maxHeight)
+            contentHeight: boxCol.implicitHeight + 6
+            clip: true
+            interactive: contentHeight > height
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: ScrollBar {
+                id: boxBar
+                policy: boxFlick.contentHeight > boxFlick.height ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
+                onPressedChanged: boxFlick.pinned = !pressed && boxFlick.atEnd()
+            }
+            // At its end until scrolled by hand, and again once scrolled back
+            // there (its cards measure themselves after it's made, and a
+            // Flickable keeps its contentY when the content grows).
+            property bool pinned: true
+            function atEnd() { return contentY >= contentHeight - height - 2 }
+            function place() { if (pinned && height > 0) contentY = Math.max(0, contentHeight - height) }
+            onContentHeightChanged: place()
+            onHeightChanged: place()
+            onMovementStarted: pinned = false
+            onMovementEnded: pinned = atEnd()
+            ColumnLayout {
+                id: boxCol
+                x: 8
+                width: boxFlick.width - 16 - (boxBar.visible ? 6 : 0)
+                spacing: 6
+                Repeater {
+                    model: box.rows
+                    Loader {
+                        id: cell
+                        required property var modelData
+                        Layout.fillWidth: true
+                        sourceComponent: modelData.kind === "thinking" ? thoughtCell : toolCell
+                        Component {
+                            id: thoughtCell
+                            ThoughtLine { width: cell.width; rowKey: cell.modelData.rowKey; text: cell.modelData.text; rowState: cell.modelData.rowState }
+                        }
+                        Component {
+                            id: toolCell
+                            ToolCard {
+                                width: cell.width
+                                rowKey: cell.modelData.rowKey
+                                title: cell.modelData.title
+                                subtitle: cell.modelData.subtitle
+                                text: cell.modelData.text
+                                rowState: cell.modelData.rowState
+                                callId: cell.modelData.callId
+                                result: cell.modelData.result
+                                diff: cell.modelData.diff
+                                took: cell.modelData.took
+                                label: cell.modelData.label
+                                command: cell.modelData.command
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
     /// What an approval asks, in words (Harlo's request to run a command
     /// outside its sandbox says so).
@@ -192,10 +617,10 @@ Item {
         Qt.callLater(() => {
             let item = view.itemAtIndex(i)
             if (!item) return
-            // In a folded run: open it first.
-            if (item.folded) {
+            // In a folded run, or its box: open it in full first.
+            if (item.folded || item.boxed) {
                 const r = Object.assign({}, view.runs)
-                r[item.group] = true
+                r[item.group] = "all"
                 view.runs = r
                 view.forceLayout()
                 view.positionViewAtIndex(i, ListView.Center)
@@ -217,6 +642,8 @@ Item {
     /// [row index, its y within the viewport] for the row at the viewport's middle (tests).
     /// How far past the bottom limit the view sits (positive = out of bounds; tests).
     function overscroll() { return view.contentY - (view.originY + view.contentHeight + view.bottomMargin - view.height) }
+    // How many runs were folded by hand (for the click tests).
+    function debugFoldedRuns() { return Object.keys(view.runs).filter(k => view.runs[k] === false).length }
     function debugContentY() { return view.contentY.toFixed(1) + " originY " + view.originY.toFixed(1) + " h " + view.contentHeight.toFixed(0) }
     function probe() {
         const idx = view.indexAt(view.width / 2, view.contentY + view.height / 2)
@@ -777,14 +1204,19 @@ Item {
                     required property string group
                     required property string summary
                     required property bool groupOpen
-                    readonly property bool open: view.expanded[rowKey] === true
+                    readonly property string mode: root.runMode(group, groupOpen)
+                    // Folded, or in its run's box (the run's first row draws
+                    // its summary line or the box; the others take no room).
+                    readonly property bool folded: mode === "folded"
+                    readonly property bool boxed: mode === "boxed"
                     readonly property real gap: root.gapAbove("thinking", ListView.previousSection)
+                    readonly property real head: summary !== "" ? 30 : 0
                     AgentHead { replyModel: thinkRow.rowModel; visible: root.opensTurn(thinkRow.ListView.previousSection); y: thinkRow.gap - height - 10 }
                     // A run sits on one card: rounded where it starts and ends.
                     Rectangle {
                         readonly property bool first: !root.isActivity(thinkRow.ListView.previousSection)
-                        readonly property bool last: !root.isActivity(thinkRow.ListView.nextSection) || (thinkRow.folded && first)
-                        visible: thinkRow.implicitHeight > 0 && !(thinkRow.folded && !first)
+                        readonly property bool last: !root.isActivity(thinkRow.ListView.nextSection) || ((thinkRow.folded || thinkRow.boxed) && first)
+                        visible: thinkRow.implicitHeight > 0 && !((thinkRow.folded || thinkRow.boxed) && !first)
                         z: -1
                         x: view.columnX
                         width: view.columnWidth
@@ -796,14 +1228,13 @@ Item {
                         bottomLeftRadius: last ? 12 : 0
                         bottomRightRadius: last ? 12 : 0
                     }
-                    // In a folded run (the run's first row keeps its summary line).
-                    readonly property bool folded: group !== "" && !root.runOpen(group, groupOpen)
-                    readonly property real head: summary !== "" ? 30 : 0
                     width: view.width
-                    implicitHeight: folded ? (head > 0 ? gap + head : 0) : thinkCol.implicitHeight + gap + head + 10
+                    implicitHeight: thinkRow.boxed ? (head > 0 ? gap + thinkBox.implicitHeight + 4 : 0)
+                                  : thinkRow.folded ? (head > 0 ? gap + head : 0)
+                                  : thinkLine.implicitHeight + gap + head + 10
                     visible: implicitHeight > 0
                     RunHeader {
-                        visible: thinkRow.head > 0
+                        visible: thinkRow.head > 0 && !thinkRow.boxed
                         x: view.columnX + 8
                         y: thinkRow.gap
                         width: view.columnWidth - 16
@@ -811,49 +1242,23 @@ Item {
                         summary: thinkRow.summary
                         dflt: thinkRow.groupOpen
                     }
-                    RailLine {
-                        anchors.fill: parent
-                        visible: !thinkRow.folded
-                        markX: thinkCol.x + 8 + 7
-                        markY: thinkCol.y + thinkHead.height / 2
-                        from: thinkRow.head > 0 ? thinkRow.gap + 26 : 0
-                        up: thinkRow.head > 0 || root.isActivity(thinkRow.ListView.previousSection)
-                        down: root.isActivity(thinkRow.ListView.nextSection)
-                    }
-                    ColumnLayout {
-                        id: thinkCol
-                        visible: !thinkRow.folded
+                    Loader {
+                        id: thinkBox
+                        active: thinkRow.boxed && thinkRow.head > 0
                         x: view.columnX + 8
-                        y: thinkRow.gap + thinkRow.head + 5
+                        y: thinkRow.gap
                         width: view.columnWidth - 16
-                        spacing: 4
-                        RowLayout {
-                            id: thinkHead
-                            Layout.leftMargin: 8
-                            spacing: 8
-                            Label { Layout.preferredWidth: 14; horizontalAlignment: Text.AlignHCenter; text: "✦"; color: thinkRow.rowState === "streaming" ? Theme.primary : Theme.muted; font.pixelSize: Theme.px(12) }
-                            Label {
-                                text: (thinkRow.rowState === "streaming" ? "Thinking…" : "Thought") + (thinkRow.open ? "  ▾" : "  ▸")
-                                color: Theme.muted
-                                font.italic: true
-                                font.pixelSize: Theme.px(13)
-                            }
-                            TapHandler { onTapped: view.toggle(thinkRow.rowKey) }
-                            HoverHandler { cursorShape: Qt.PointingHandCursor }
-                        }
-                        TextEdit {
-                            font.family: Theme.uiFont
-                            Layout.fillWidth: true
-                            Layout.leftMargin: 30
-                            visible: thinkRow.open
-                            text: thinkRow.text
-                            color: Theme.muted
-                            readOnly: true
-                            selectByMouse: true
-                            wrapMode: TextEdit.Wrap
-                            font.pixelSize: Theme.px(13)
-                            font.italic: true
-                        }
+                        sourceComponent: RunBox { width: thinkBox.width; group: thinkRow.group; summary: thinkRow.summary; dflt: thinkRow.groupOpen }
+                    }
+                    ThoughtLine {
+                        id: thinkLine
+                        visible: !thinkRow.folded && !thinkRow.boxed
+                        x: view.columnX + 16
+                        y: thinkRow.gap + thinkRow.head + 5
+                        width: view.columnWidth - 32
+                        rowKey: thinkRow.rowKey
+                        text: thinkRow.text
+                        rowState: thinkRow.rowState
                     }
                 }
             }
@@ -879,47 +1284,24 @@ Item {
                     required property real took
                     required property string label
                     required property string command
-                    // An edit's or a write's lines under it (a write: every
-                    // line added, numbered; an edit: what it took out and put in).
-                    readonly property bool preview: diff !== "" && !asking
-                    readonly property bool newFile: preview && result.indexOf("−") < 0
-                    readonly property int previewLines: 8
-                    readonly property int diffCount: diff === "" ? 0 : diff.split("\n").length
-                    // (A write's own count: its diff stops at 400 lines.)
-                    readonly property int lineCount: newFile && /^\+\d+$/.test(result) ? Number(result.slice(1)) : diffCount
-                    readonly property var lines: preview ? JSON.parse(root.session.diffLines(subtitle.replace(/…$/, ""), diff, open ? 400 : previewLines)) : []
-                    readonly property bool shell: command !== "" && !asking
-                    // The command under its line when the line doesn't say it all.
-                    readonly property bool commandBox: shell && (label !== "" || command.indexOf("\n") >= 0 || local(command).length > 90)
-                    // A finished command's last lines (all of it, opened).
-                    readonly property string tail: shell && !open ? text.split("\n").filter(l => l.trim() !== "").slice(-3).join("\n") : ""
-                    readonly property bool failed: rowState === "error" || /^(exit|failed)|failed$/.test(result)
-                    readonly property bool canOpen: text !== "" || (preview && lineCount > previewLines)
-                    // Paths in the session's folder from there; a command's
-                    // `cd <the folder> &&` left out.
-                    readonly property string here: (root.session.cwd || "").replace(/^ssh:\/\/[^\/]+/, "").replace(/\/$/, "")
-                    function local(t) {
-                        if (here === "") return t
-                        const cd = "cd " + here + " && "
-                        if (t.startsWith(cd)) return t.slice(cd.length)
-                        if (t.startsWith("cd \"" + here + "\" && ")) return t.slice(here.length + 9)
-                        return t.split(here + "/").join("")
-                    }
-                    function seconds(ms) { return ms <= 0 ? "" : ms < 10000 ? (ms / 1000).toFixed(1) + "s" : ms < 60000 ? Math.round(ms / 1000) + "s" : Math.floor(ms / 60000) + "m " + Math.round(ms % 60000 / 1000) + "s" }
-                    readonly property bool open: view.expanded[rowKey] === true
-                    readonly property var agents: callId !== "" ? root.subagents.filter(a => a.parentToolCallId === callId) : []
                     // The agent waits for your approval to run this call.
                     readonly property bool asking: root.session.hasRequest && root.session.requestIsApproval && root.session.approvalRow === rowKey
                     // (Over the rows after it: its buttons are never covered.)
                     z: asking ? 2 : 0
                     readonly property var askLines: asking ? root.session.requestTitle.split("\n").slice(1) : []
+                    // Folded, or in its run's box (see the thinking row); a
+                    // call that asks always shows.
+                    readonly property string mode: asking ? "rows" : root.runMode(group, groupOpen)
+                    readonly property bool folded: mode === "folded"
+                    readonly property bool boxed: mode === "boxed"
                     readonly property real gap: root.gapAbove("tool", ListView.previousSection)
+                    readonly property real head: summary !== "" ? 30 : 0
                     AgentHead { replyModel: toolRow.rowModel; visible: root.opensTurn(toolRow.ListView.previousSection); y: toolRow.gap - height - 10 }
                     // A run sits on one card: rounded where it starts and ends.
                     Rectangle {
                         readonly property bool first: !root.isActivity(toolRow.ListView.previousSection)
-                        readonly property bool last: !root.isActivity(toolRow.ListView.nextSection) || (toolRow.folded && first)
-                        visible: toolRow.implicitHeight > 0 && !(toolRow.folded && !first)
+                        readonly property bool last: !root.isActivity(toolRow.ListView.nextSection) || ((toolRow.folded || toolRow.boxed) && first)
+                        visible: toolRow.implicitHeight > 0 && !((toolRow.folded || toolRow.boxed) && !first)
                         z: -1
                         x: view.columnX
                         width: view.columnWidth
@@ -931,15 +1313,13 @@ Item {
                         bottomLeftRadius: last ? 12 : 0
                         bottomRightRadius: last ? 12 : 0
                     }
-                    // In a folded run (the run's first row keeps its summary
-                    // line); a call that asks always shows.
-                    readonly property bool folded: group !== "" && !root.runOpen(group, groupOpen) && !asking
-                    readonly property real head: summary !== "" ? 30 : 0
                     width: view.width
-                    implicitHeight: folded ? (head > 0 ? gap + head : 0) : toolBox.height + gap + head
+                    implicitHeight: toolRow.boxed ? (head > 0 ? gap + toolRunBox.implicitHeight + 4 : 0)
+                                  : toolRow.folded ? (head > 0 ? gap + head : 0)
+                                  : toolBox.height + gap + head
                     visible: implicitHeight > 0
                     RunHeader {
-                        visible: toolRow.head > 0
+                        visible: toolRow.head > 0 && !toolRow.boxed
                         x: view.columnX + 8
                         y: toolRow.gap
                         width: view.columnWidth - 16
@@ -947,325 +1327,44 @@ Item {
                         summary: toolRow.summary
                         dflt: toolRow.groupOpen
                     }
-                    // No box of its own (unless it asks): a line in the run's timeline.
-                    RailLine {
-                        anchors.fill: parent
-                        visible: !toolRow.asking && !toolRow.folded
-                        markX: toolBox.x + toolCol.x + 7
-                        markY: toolBox.y + toolCol.y + toolHead.height / 2
-                        from: toolRow.head > 0 ? toolRow.gap + 26 : 0
-                        up: toolRow.head > 0 || root.isActivity(toolRow.ListView.previousSection)
-                        down: root.isActivity(toolRow.ListView.nextSection)
+                    Loader {
+                        id: toolRunBox
+                        active: toolRow.boxed && toolRow.head > 0
+                        x: view.columnX + 8
+                        y: toolRow.gap
+                        width: view.columnWidth - 16
+                        sourceComponent: RunBox { width: toolRunBox.width; group: toolRow.group; summary: toolRow.summary; dflt: toolRow.groupOpen }
                     }
                     Rectangle {
                         id: toolBox
-                        visible: !toolRow.folded
+                        visible: !toolRow.folded && !toolRow.boxed
                         x: view.columnX + 8
                         y: toolRow.gap + toolRow.head
                         width: view.columnWidth - 16
-                        height: toolCol.implicitHeight + (toolRow.asking ? 20 : 10)
+                        height: toolCard.implicitHeight + (toolRow.asking ? 20 : 10)
                         radius: 8
                         // (Solid when it asks: a row under it doesn't show through.)
-                        color: toolRow.asking ? Qt.tint(Theme.raised, Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, 0.06))
-                             : toolHover.hovered && toolRow.canOpen ? Theme.hover : "transparent"
+                        color: toolRow.asking ? Qt.tint(Theme.raised, Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, 0.06)) : "transparent"
                         border.color: toolRow.asking ? Theme.warning : "transparent"
-                        HoverHandler { id: toolHover }
-                        ColumnLayout {
-                            id: toolCol
+                        ToolCard {
+                            id: toolCard
                             x: 8
                             y: toolRow.asking ? 10 : 5
-                            width: parent.width - 18
-                            spacing: 6
-                            RowLayout {
-                                id: toolHead
-                                Layout.fillWidth: true
-                                spacing: 8
-                                Label {
-                                    Layout.preferredWidth: 14
-                                    horizontalAlignment: Text.AlignHCenter
-                                    text: toolRow.asking ? "?" : toolRow.rowState === "running" ? "●" : toolRow.rowState === "error" ? "✗" : toolRow.rowState === "done" ? "✓" : "○"
-                                    color: toolRow.asking ? Theme.warning : toolRow.rowState === "running" ? Theme.primary : toolRow.rowState === "error" ? Theme.error : Theme.success
-                                    font.bold: toolRow.asking
-                                    font.pixelSize: Theme.px(12)
-                                }
-                                Label { text: Theme.toolLabel(toolRow.title); color: Theme.foreground; font.bold: true; font.pixelSize: Theme.px(13) }
-                                // What it's for, when the agent said; else its
-                                // file (as a chip) or its arguments.
-                                Item {
-                                    Layout.fillWidth: true
-                                    implicitHeight: toolWhat.implicitHeight + (toolRow.preview ? 4 : 0)
-                                    Rectangle {
-                                        visible: toolRow.preview && toolRow.label === ""
-                                        width: Math.min(toolWhat.implicitWidth + 12, parent.width)
-                                        height: parent.height
-                                        radius: 5
-                                        color: Theme.codeBg
-                                        border.color: Theme.hairline
-                                    }
-                                    Label {
-                                        id: toolWhat
-                                        objectName: "toolWhat"
-                                        x: toolRow.preview && toolRow.label === "" ? 6 : 0
-                                        width: Math.min(implicitWidth, parent.width - x * 2)
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        text: toolRow.label !== "" ? toolRow.label : toolRow.subtitle !== "" || toolRow.rowState !== "pending" ? toolRow.local(toolRow.subtitle) : Theme.toolWriting(toolRow.title)
-                                        color: toolRow.label !== "" ? Theme.foreground : Theme.muted
-                                        elide: Text.ElideRight
-                                        font.family: toolRow.label !== "" ? Theme.uiFont : Theme.mono
-                                        font.pixelSize: toolRow.label !== "" ? Theme.px(12.5) : Theme.mpx(12)
-                                    }
-                                }
-                                // What it came to and how long it took (a command's
-                                // under it).
-                                Label {
-                                    objectName: "toolResult"
-                                    visible: text !== "" && !toolRow.shell
-                                    textFormat: Text.StyledText
-                                    text: {
-                                        const r = toolRow.result.replace(/^\+(\d+) −(\d+)$/, "<font color='" + Theme.rgb(Theme.diffAdd) + "'>+$1</font> <font color='" + Theme.rgb(Theme.diffRemove) + "'>−$2</font>")
-                                        const r2 = toolRow.newFile ? (toolRow.lineCount === 1 ? "1 line" : toolRow.lineCount + " lines") : r
-                                        return [r2, toolRow.seconds(toolRow.took)].filter(x => x !== "").join(" · ")
-                                    }
-                                    color: toolRow.failed ? Theme.error : Theme.textMuted
-                                    font.pixelSize: Theme.px(11.5)
-                                }
-                                FlatButton {
-                                    // edit/write/patch tools: jump to the file's diff.
-                                    visible: /^(edit|multi_?edit|write|apply_?patch|patch|create)/i.test(toolRow.title)
-                                             && toolRow.subtitle !== "" && toolRow.rowState !== "error"
-                                    text: "diff"
-                                    font.pixelSize: Theme.px(11)
-                                    padding: 2
-                                    outlined: false
-                                    accent: Theme.info
-                                    onClicked: root.openDiff(toolRow.subtitle.replace(/…$/, ""))
-                                }
-                                Label { text: toolRow.open ? "▾" : "▸"; color: Theme.muted; visible: toolRow.canOpen }
-                            }
-                            // An edit's or a write's lines.
-                            Rectangle {
-                                objectName: "toolPreview"
-                                Layout.fillWidth: true
-                                Layout.leftMargin: 22
-                                visible: toolRow.preview
-                                implicitHeight: previewCol.implicitHeight + 10
-                                radius: 6
-                                color: Theme.codeBg
-                                border.color: Theme.hairline
-                                clip: true
-                                Column {
-                                    id: previewCol
-                                    x: 1
-                                    y: 5
-                                    width: parent.width - 2
-                                    // (Numbers as wide as the last one.)
-                                    readonly property real numberWidth: toolRow.newFile ? numberProbe.implicitWidth + 16 : 20
-                                    Label { id: numberProbe; visible: false; text: String(toolRow.lines.length); font.family: Theme.mono; font.pixelSize: Theme.mpx(12) }
-                                    Repeater {
-                                        model: toolRow.lines
-                                        Rectangle {
-                                            required property var modelData
-                                            required property int index
-                                            width: previewCol.width
-                                            implicitHeight: lineText.implicitHeight + 2
-                                            readonly property bool added: !toolRow.newFile && modelData.s === "+"
-                                            readonly property bool removed: modelData.s === "-"
-                                            color: added ? Qt.rgba(Theme.diffAdd.r, Theme.diffAdd.g, Theme.diffAdd.b, 0.13) : removed ? Qt.rgba(Theme.diffRemove.r, Theme.diffRemove.g, Theme.diffRemove.b, 0.13) : "transparent"
-                                            Label {
-                                                width: previewCol.numberWidth - 8
-                                                horizontalAlignment: Text.AlignRight
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                text: toolRow.newFile ? String(index + 1) : parent.added ? "+" : parent.removed ? "−" : ""
-                                                color: parent.added ? Theme.diffAdd : parent.removed ? Theme.diffRemove : Theme.textFaint
-                                                font.family: Theme.mono
-                                                font.pixelSize: Theme.mpx(12)
-                                            }
-                                            Label {
-                                                id: lineText
-                                                x: previewCol.numberWidth
-                                                width: parent.width - x - 8
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                textFormat: Text.RichText
-                                                text: Theme.htmlStyle + "<pre style=\"margin:0;\">" + (modelData.h === "" ? " " : modelData.h) + "</pre>"
-                                                color: Theme.foreground
-                                                elide: Text.ElideRight
-                                                font.family: Theme.mono
-                                                font.pixelSize: Theme.mpx(12)
-                                            }
-                                        }
-                                    }
-                                    FlatButton {
-                                        objectName: "toolMoreLines"
-                                        x: 6
-                                        visible: toolRow.lineCount > toolRow.previewLines
-                                        text: toolRow.open ? "Fewer lines" : "▾ " + (toolRow.lineCount - toolRow.previewLines) + (toolRow.lineCount - toolRow.previewLines === 1 ? " more line" : " more lines")
-                                        padding: 2
-                                        font.pixelSize: Theme.px(11)
-                                        onClicked: view.toggle(toolRow.rowKey)
-                                    }
-                                }
-                            }
-                            // A command: all of it, its last lines, and how it went.
-                            Rectangle {
-                                objectName: "toolCommand"
-                                Layout.fillWidth: true
-                                Layout.leftMargin: 22
-                                visible: toolRow.commandBox
-                                implicitHeight: commandText.implicitHeight + 12
-                                radius: 6
-                                color: Theme.codeBg
-                                border.color: Theme.hairline
-                                Label {
-                                    id: commandText
-                                    x: 8
-                                    y: 6
-                                    width: parent.width - 16
-                                    text: toolRow.local(toolRow.command)
-                                    color: Theme.foreground
-                                    wrapMode: Text.WrapAnywhere
-                                    maximumLineCount: toolRow.open ? 400 : 6
-                                    elide: Text.ElideRight
-                                    textFormat: Text.PlainText
-                                    font.family: Theme.mono
-                                    font.pixelSize: Theme.mpx(12)
-                                }
-                            }
-                            // (A line each: each one shortened to the column.)
-                            Column {
-                                objectName: "toolTail"
-                                readonly property string text: toolRow.tail
-                                Layout.fillWidth: true
-                                Layout.leftMargin: 22
-                                visible: toolRow.tail !== ""
-                                Repeater {
-                                    model: toolRow.tail === "" ? [] : toolRow.tail.split("\n")
-                                    Label {
-                                        required property string modelData
-                                        width: parent.width
-                                        text: modelData
-                                        color: Theme.muted
-                                        elide: Text.ElideRight
-                                        textFormat: Text.PlainText
-                                        font.family: Theme.mono
-                                        font.pixelSize: Theme.mpx(12)
-                                    }
-                                }
-                            }
-                            Label {
-                                objectName: "toolStatus"
-                                Layout.leftMargin: 22
-                                visible: toolRow.shell && toolRow.rowState !== "pending"
-                                textFormat: Text.StyledText
-                                text: {
-                                    const word = toolRow.rowState === "running" ? "Running…" : toolRow.failed ? "Failed" : "Done"
-                                    const col = Theme.rgb(toolRow.rowState === "running" ? Theme.primary : toolRow.failed ? Theme.error : Theme.success)
-                                    const more = [toolRow.result, toolRow.seconds(toolRow.took)].filter(x => x !== "").join(" · ")
-                                    return "<font color='" + col + "'>" + word + "</font>" + (more !== "" ? "  <font color='" + Theme.rgb(Theme.textMuted) + "'>" + more + "</font>" : "")
-                                }
-                                font.pixelSize: Theme.px(12)
-                            }
-                            // The subagents this call started (the task tool), as a tree.
-                            RowLayout {
-                                Layout.fillWidth: true
-                                Layout.leftMargin: 22
-                                visible: toolRow.agents.length > 0
-                                spacing: 6
-                                Rectangle { Layout.fillHeight: true; Layout.leftMargin: 4; implicitWidth: 2; radius: 1; color: Theme.border }
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 0
-                                    Repeater {
-                                        model: toolRow.agents
-                                        SubagentRow {
-                                            required property var modelData
-                                            Layout.fillWidth: true
-                                            a: modelData
-                                            session: root.session
-                                            onViewRequested: (agent, steer) => root.subagentRequested(agent, steer)
-                                        }
-                                    }
-                                }
-                            }
-                            // The approval: its details (reason, command…) and the answer.
-                            Label {
-                                Layout.fillWidth: true
-                                visible: text !== ""
-                                text: toolRow.askLines.filter(l => l.startsWith("Reason:")).join("\n")
-                                color: Theme.warning
-                                font.pixelSize: Theme.px(12)
-                                wrapMode: Text.Wrap
-                                textFormat: Text.PlainText
-                            }
-                            Rectangle {
-                                Layout.fillWidth: true
-                                readonly property string details: toolRow.askLines.filter(l => !l.startsWith("Reason:") && l !== "Outside the sandbox").join("\n").trim()
-                                visible: toolRow.asking && details !== ""
-                                implicitHeight: askDetails.implicitHeight + 12
-                                radius: 4
-                                color: Theme.codeBg
-                                Label {
-                                    id: askDetails
-                                    x: 8
-                                    y: 6
-                                    width: parent.width - 16
-                                    text: parent.details
-                                    color: Theme.foreground
-                                    font.family: Theme.mono
-                                    font.pixelSize: Theme.mpx(12)
-                                    wrapMode: Text.WrapAnywhere
-                                    maximumLineCount: 14
-                                    elide: Text.ElideRight
-                                    textFormat: Text.PlainText
-                                }
-                            }
-                            RowLayout {
-                                Layout.fillWidth: true
-                                visible: toolRow.asking
-                                spacing: 6
-                                Label {
-                                    Layout.fillWidth: true
-                                    text: root.approvalQuestion(toolRow.title, toolRow.askLines)
-                                    color: Theme.foreground
-                                    font.pixelSize: Theme.px(12)
-                                    elide: Text.ElideRight
-                                }
-                                FlatButton { text: "Deny"; accent: Theme.error; font.pixelSize: Theme.px(12); onClicked: root.session.answerValue("Deny") }
-                                FlatButton {
-                                    objectName: "alwaysAllowInline"
-                                    visible: root.session.requestOptions.indexOf("Always allow") >= 0
-                                    text: parent.width < 420 ? "Always" : "Always allow"
-                                    font.pixelSize: Theme.px(12)
-                                    ToolTip.visible: hovered
-                                    ToolTip.delay: 400
-                                    ToolTip.text: { try { return "Remember: " + (JSON.parse(root.session.requestJson).alwaysHint || "this") } catch (e) { return "" } }
-                                    onClicked: root.session.answerValue("Always allow")
-                                }
-                                FlatButton { text: "Approve"; accent: Theme.success; font.pixelSize: Theme.px(12); onClicked: root.session.answerValue("Approve") }
-                            }
-                            Rectangle {
-                                Layout.fillWidth: true
-                                Layout.leftMargin: 22
-                                visible: toolRow.open && toolRow.text !== "" && !toolRow.preview
-                                implicitHeight: Math.min(outText.implicitHeight + 12, 320)
-                                color: Theme.codeBg
-                                radius: 4
-                                ScrollView {
-                                    anchors.fill: parent
-                                    anchors.margins: 6
-                                    clip: true
-                                    TextEdit {
-                                        id: outText
-                                        text: toolRow.text
-                                        color: Theme.foreground
-                                        readOnly: true
-                                        selectByMouse: true
-                                        font.family: Theme.mono
-                                        font.pixelSize: Theme.mpx(12)
-                                    }
-                                }
-                            }
+                            width: parent.width - 16
+                            rowKey: toolRow.rowKey
+                            title: toolRow.title
+                            subtitle: toolRow.subtitle
+                            text: toolRow.text
+                            rowState: toolRow.rowState
+                            callId: toolRow.callId
+                            result: toolRow.result
+                            diff: toolRow.diff
+                            took: toolRow.took
+                            label: toolRow.label
+                            command: toolRow.command
+                            asking: toolRow.asking
+                            askLines: toolRow.askLines
                         }
-                        TapHandler { enabled: toolRow.canOpen; onTapped: view.toggle(toolRow.rowKey) }
                     }
                 }
             }

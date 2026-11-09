@@ -15,6 +15,8 @@ pub mod qobject {
         #[namespace = "harlo"]
         fn test_key(key: i32, modifiers: i32);
         #[namespace = "harlo"]
+        fn test_wheel(x: f64, y: f64, dy: i32);
+        #[namespace = "harlo"]
         fn test_type(text: &QString);
         #[namespace = "harlo"]
         fn test_grab_window(path: &QString) -> bool;
@@ -33,6 +35,10 @@ pub mod qobject {
         /// Left click at window coordinates.
         #[qinvokable]
         fn click(self: &TestInput, x: f64, y: f64);
+        /// The mouse wheel turned `dy` (120 a notch; negative: down) at
+        /// window coordinates.
+        #[qinvokable]
+        fn wheel(self: &TestInput, x: f64, y: f64, dy: i32);
         /// A key press and release (`Qt.Key_*`, `Qt.*Modifier` flags).
         #[qinvokable]
         fn key(self: &TestInput, key: i32, modifiers: i32);
@@ -68,6 +74,10 @@ impl qobject::TestInput {
 
     pub fn click(&self, x: f64, y: f64) {
         qobject::test_click(x, y, 1);
+    }
+
+    pub fn wheel(&self, x: f64, y: f64, dy: i32) {
+        qobject::test_wheel(x, y, dy);
     }
 
     pub fn key(&self, key: i32, modifiers: i32) {

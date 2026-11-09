@@ -127,6 +127,10 @@ pub mod qobject {
         /// first `limit` lines.
         #[qinvokable]
         fn diff_lines(self: &ChatSession, path: &QString, diff: &QString, limit: i32) -> QString;
+        /// A run's rows (see `Row::group`), as the list's roles, JSON (a
+        /// finished run shows in one box).
+        #[qinvokable]
+        fn run_json(self: &ChatSession, group: &QString) -> QString;
         /// Answers the current dialog with a value (select/input/editor).
         #[qinvokable]
         fn answer_value(self: Pin<&mut ChatSession>, value: &QString);
@@ -901,6 +905,23 @@ impl ChatSession {
         if let Some(h) = self.handle() {
             h.abort();
         }
+    }
+
+    pub fn run_json(&self, group: &QString) -> QString {
+        let group = group.to_string();
+        let rows: Vec<serde_json::Value> = self
+            .rows
+            .iter()
+            .filter(|r| !group.is_empty() && r.group == group)
+            .map(|r| {
+                let took = if r.time > 0 && r.ended >= r.time { r.ended - r.time } else { 0 };
+                serde_json::json!({
+                    "rowKey": r.key, "kind": r.kind.as_str(), "text": r.text, "title": r.title, "subtitle": r.subtitle, "rowState": r.state,
+                    "callId": r.call_id, "result": r.result, "diff": r.diff, "took": took, "label": r.label, "command": r.command,
+                })
+            })
+            .collect();
+        QString::from(&serde_json::Value::from(rows).to_string())
     }
 
     pub fn diff_lines(&self, path: &QString, diff: &QString, limit: i32) -> QString {

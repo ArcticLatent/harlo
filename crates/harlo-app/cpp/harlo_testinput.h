@@ -3,11 +3,14 @@
 // a user's (hover, press/release, focus, popups).
 #pragma once
 
+#include <QtCore/QElapsedTimer>
+#include <algorithm>
 #include <QtCore/QPoint>
 #include <QtCore/QString>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QWindow>
 #include <QtGui/QImage>
+#include <QtGui/QWheelEvent>
 #include <QtQuick/QQuickWindow>
 // The mouse and keyboard helpers are declared for GUI builds only.
 #ifndef QT_GUI_LIB
@@ -62,6 +65,25 @@ inline void test_type(const QString &text)
         else
             QTest::sendKeyEvent(QTest::Click, w, Qt::Key_unknown, QString(c), Qt::NoModifier);
     }
+}
+
+// A mouse wheel turned `dy` (120 a notch; negative: down) at a point.
+inline void test_wheel(double x, double y, int dy)
+{
+    QWindow *w = test_window();
+    if (!w)
+        return;
+    const QPointF p(x, y);
+    QWheelEvent ev(p, w->mapToGlobal(p), QPoint(0, 0), QPoint(0, dy), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+    // A clock of its own, a notch every 40 ms as a hand turns it: one
+    // timestamp for them all reads as a single endless spin.
+    static QElapsedTimer clock;
+    static qint64 last = 0;
+    if (!clock.isValid())
+        clock.start();
+    last = std::max(last + 40, clock.elapsed());
+    ev.setTimestamp(ulong(last));
+    QCoreApplication::sendEvent(w, &ev);
 }
 
 // The whole window as the user sees it, popups and shadows included.
