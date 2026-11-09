@@ -1133,8 +1133,8 @@ ApplicationWindow {
         ScriptAction { script: {
             win.check(Workspace.approvalMode(chat.session.key) === win.approvalNext, "the session starts in that mode (" + Workspace.approvalMode(chat.session.key) + ")")
             win.check(chat.session.requestIsApproval, "the prompt asks for approval")
-            win.check(win.findText("Allow bash to run?", chat.transcript) !== null, "the bash row asks 'Allow bash to run?'")
-            win.check(win.findText("Waiting for your approval", chat.transcript) !== null, "footer says 'Waiting for your approval'")
+            win.check(win.findText("Run this command?", chat.transcript) !== null, "the bash row asks 'Run this command?'")
+            win.check(win.findText("Waiting for your approval", chat.transcript) === null, "the footer doesn't say it again")
             // (The bar only when the row is out of view.)
             win.check(!win.shown(chat.requestDock), "with its row in view, no bar besides")
             win.clickText("Approve", chat.transcript) } }
@@ -1142,7 +1142,7 @@ ApplicationWindow {
         ScriptAction { script: { win.check(!chat.session.hasRequest && win.findText("Waiting for your approval", chat.transcript) === null, "Approve on the row runs it"); win.sendByKeys("fast: approve again") } }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
-            win.check(chat.session.requestIsApproval && win.findText("Allow bash to run?", chat.transcript) !== null, "the next one asks again")
+            win.check(chat.session.requestIsApproval && win.findText("Run this command?", chat.transcript) !== null, "the next one asks again")
             win.shotWindow("clicks-approval-again") } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: win.clickText("Deny", chat.transcript) }
@@ -4093,7 +4093,7 @@ ApplicationWindow {
             const i = chat.session.indexOfKey(key)
             win.shot("clicks-undo-button")
             const latest = win.findName("undoLatest")
-            win.check(i >= 0 && chat.transcript.latestUndo === key && latest !== null && latest.visible && latest.text === "↶ Undo these changes (1 file)",
+            win.check(i >= 0 && chat.transcript.latestUndo === key && latest !== null && latest.visible && latest.text === "Undo these changes (1 file)",
                       "under the reply: Undo these changes (1 file) (" + (latest ? latest.text : "none") + ")")
             chat.undoDialog.show(key) } }
         PauseAnimation { duration: 1500 }
@@ -4120,6 +4120,14 @@ ApplicationWindow {
             chat.composerItem.focusInput()
             TestInput.key(Qt.Key_Return, 0) } }
         PauseAnimation { duration: 6000 }
+        // (It shows while you point at the turn's start.)
+        ScriptAction { script: {
+            const first = Object.keys(JSON.parse(chat.session.undoJson || "{}")).find(k => JSON.parse(chat.session.undoJson)[k].next !== "")
+            const second = chat.session.indexOfKey(JSON.parse(chat.session.undoJson)[first || ""] ? JSON.parse(chat.session.undoJson)[first].next : "")
+            chat.transcript.positionAt(second)
+            const p = chat.transcript.mapToItem(null, chat.transcript.width / 2, chat.transcript.height / 2)
+            TestInput.moveTo(p.x, p.y) } }
+        PauseAnimation { duration: 400 }
         ScriptAction { script: {
             const first = Object.keys(JSON.parse(chat.session.undoJson || "{}")).find(k => JSON.parse(chat.session.undoJson)[k].next !== "")
             const second = chat.session.indexOfKey(JSON.parse(chat.session.undoJson)[first || ""] ? JSON.parse(chat.session.undoJson)[first].next : "")
@@ -5903,6 +5911,7 @@ ApplicationWindow {
         ScriptAction { script: {
             win.check(Workspace.approvalMode(win.harloKey) === "yolo" && chat.session.requestIsApproval, "git reset --hard asks in yolo")
             win.check(win.findContaining("can't be undone", chat.transcript) !== null, "and says why")
+            win.check(win.findAllNames("approveInline", chat.transcript).some(b => b.text === "Run anyway"), "its confirm names what it does, not Approve")
             win.check(win.findName("alwaysAllowInline", chat.transcript) === null && win.findText("Always allow") === null, "with no Always allow")
             win.shotWindow("clicks-harlo-destructive")
             win.clickText("Deny", chat.transcript) } }

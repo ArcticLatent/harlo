@@ -1869,7 +1869,7 @@ Popup {
             Group {
                 SettingRow {
                     title: "Undo a turn"
-                    detail: "Before each message, harlo keeps a snapshot of the project's files (in git, off your branches), so a turn can be undone: click ↶ Undo under the agent's reply (earlier turns: ↶ Undo from here, where your next message starts; on the phone, long-press the reply). Off: no snapshots, and no Undo. Snapshots older than a month are removed; turn it off for a repository with very large untracked files."
+                    detail: "Before each message, harlo keeps a snapshot of the project's files (in git, off your branches), so a turn can be undone: click Undo under the agent's reply (earlier turns: Undo from here, on the line before your next message when you point at it; on the phone, long-press the reply). Off: no snapshots, and no Undo. Snapshots older than a month are removed; turn it off for a repository with very large untracked files."
                     icon: "history"
                     AppSwitch {
                         objectName: "undoSnapshotsSwitch"

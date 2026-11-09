@@ -255,7 +255,7 @@ QtObject {
         const css = (sel, col) => col ? sel + "{color:" + rgb(Qt.color(col)) + ";}" : ""
         return "<style>"
             // Room between the lines of prose (not code).
-            + "p,li{line-height:150%;}"
+            + "p,li{line-height:115%;}"
             // A reply's paragraphs, lists and headings are one text (to
             // select across): 8px between them, as between rows.
             + "p,ul,ol,h1,h2,h3,h4,h5,h6,blockquote,table,hr{margin-top:8px;margin-bottom:8px;}"

@@ -837,6 +837,13 @@ fn summarize_args(args: &Value) -> String {
             .collect();
         return first_line(&files.join(", "), 200);
     }
+    // (Questions for the user: the first one, and how many more.)
+    if let Some(qs) = args["questions"].as_array()
+        && let Some(q) = qs.first().and_then(|q| q["question"].as_str())
+    {
+        let more = if qs.len() > 1 { format!(" (+{} more)", qs.len() - 1) } else { String::new() };
+        return first_line(&format!("{q}{more}"), 200);
+    }
     for key in ["command", "path", "file_path", "filePath", "pattern", "query", "url", "description"] {
         if let Some(s) = args[key].as_str() {
             return first_line(s, 200);
@@ -1227,6 +1234,14 @@ mod tests {
         let rows = t.rows();
         assert_eq!(rows.len(), 2, "the next is a line of its own");
         assert!(format!("{:?}", rows[1]).contains("Compaction failed: too long"), "{rows:?}");
+    }
+
+    #[test]
+    fn summarizes_questions() {
+        let one = json!({"questions": [{"question": "Which colour should the button be?", "options": []}]});
+        assert_eq!(summarize_args(&one), "Which colour should the button be?");
+        let two = json!({"questions": [{"question": "Which colour?"}, {"question": "How big?"}]});
+        assert_eq!(summarize_args(&two), "Which colour? (+1 more)");
     }
 
     #[test]

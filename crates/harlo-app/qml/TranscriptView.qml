@@ -113,14 +113,16 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             spacing: 8
             AgentAvatar {
-                implicitWidth: Theme.px(24)
-                implicitHeight: Theme.px(24)
+                implicitWidth: Theme.px(20)
+                implicitHeight: Theme.px(20)
                 anchors.verticalCenter: parent.verticalCenter
                 provider: root.session.harness
                 ring: Theme.canvas
             }
-            Label { text: Theme.harnessLabel(root.session.harness); color: Theme.text; font.pixelSize: Theme.px(14.5); font.weight: Font.DemiBold }
-            Label { visible: head.shownModel !== ""; text: "· " + Theme.modelLabel(head.shownModel); color: Theme.textFaint; font.pixelSize: Theme.px(13); anchors.baseline: parent.children[1].baseline }
+            Label { text: Theme.harnessLabel(root.session.harness); color: Theme.text; font.pixelSize: Theme.px(13.5); font.weight: Font.DemiBold }
+            // The model only when the reply's isn't the session's (the
+            // header names that one).
+            Label { visible: head.shownModel !== "" && head.shownModel !== root.session.modelName; text: Theme.modelLabel(head.shownModel); color: Theme.textMuted; font.pixelSize: Theme.px(12.5); anchors.baseline: parent.children[1].baseline }
         }
     }
     /// How a run of tool calls and thoughts shows: "folded" (its summary
@@ -144,13 +146,20 @@ Item {
         if (t.startsWith("cd \"" + here + "\" && ")) return t.slice(here.length + 9)
         return t.split(here + "/").join("")
     }
+    // A tool's name, the same for every agent: "bash" and "Bash" both
+    // "Bash", "web_search" "Web search" (an MCP tool's as Theme says).
+    function toolName(t) {
+        const l = Theme.toolLabel(t)
+        return /^[a-z][a-z_]*$/.test(l) ? (l.charAt(0).toUpperCase() + l.slice(1)).replace(/_/g, " ") : l
+    }
     // A path's folder faint, its name plain.
     function pathHtml(t) {
         const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;")
         const i = t.lastIndexOf("/")
         return i < 0 ? esc(t) : "<font color='" + Theme.rgb(Theme.textFaint) + "'>" + esc(t.slice(0, i + 1)) + "</font>" + esc(t.slice(i + 1))
     }
-    function seconds(ms) { return ms <= 0 ? "" : ms < 10000 ? (ms / 1000).toFixed(1) + "s" : ms < 60000 ? Math.round(ms / 1000) + "s" : Math.floor(ms / 60000) + "m " + Math.round(ms % 60000 / 1000) + "s" }
+    // (Under a second: not worth a word.)
+    function seconds(ms) { return ms < 1000 ? "" : ms < 10000 ? (ms / 1000).toFixed(1) + "s" : ms < 60000 ? Math.round(ms / 1000) + "s" : Math.floor(ms / 60000) + "m " + Math.round(ms % 60000 / 1000) + "s" }
     // A step on a run's line: a dot whose colour is how it went (a
     // thought's is hollow). The ring in the canvas colour cuts the line.
     component RunNode: Item {
@@ -233,7 +242,19 @@ Item {
                 width: parent.width
                 spacing: 8
                 RunNode { step: thought.rowState === "streaming" ? "running" : "thought" }
-                Label { Layout.fillWidth: true; text: thought.rowState === "streaming" ? "Thinking…" : "Thought"; color: thoughtHover.hovered ? Theme.textMuted : Theme.textFaint; font.pixelSize: Theme.px(13) }
+                Label { text: thought.rowState === "streaming" ? "Thinking…" : "Thought"; color: Theme.textMuted; font.pixelSize: Theme.px(13) }
+                // Its first line, folded: what it was about at a glance.
+                Label {
+                    objectName: "thoughtPreview"
+                    Layout.fillWidth: true
+                    visible: !thought.open
+                    text: thought.text.trim().split("\n")[0].replace(/^[#*_>\s-]+/, "")
+                    color: thoughtHover.hovered ? Theme.textMuted : Theme.textFaint
+                    elide: Text.ElideRight
+                    textFormat: Text.PlainText
+                    font.pixelSize: Theme.px(13)
+                }
+                Item { Layout.fillWidth: true; visible: thought.open }
             }
             HoverHandler { id: thoughtHover; cursorShape: Qt.PointingHandCursor }
             TapHandler { onTapped: view.toggle(thought.rowKey) }
@@ -309,7 +330,7 @@ Item {
                     objectName: "toolMark"
                     step: card.asking ? "asking" : card.rowState === "error" || (card.failed && card.rowState === "done") ? "error" : card.rowState === "done" ? "done" : "running"
                 }
-                Label { text: Theme.toolLabel(card.title); color: Theme.text; font.weight: Font.Medium; font.pixelSize: Theme.px(13) }
+                Label { text: root.toolName(card.title); color: Theme.text; font.weight: Font.Medium; font.pixelSize: Theme.px(13) }
                 Label {
                     objectName: "toolWhat"
                     Layout.fillWidth: true
@@ -373,10 +394,17 @@ Item {
             }
         }
         // The approval: its details (reason, command…) and the answer.
+        // A command that can't be undone says so, and its confirm names
+        // what it does rather than looking like good news.
+        readonly property bool destructive: askLines.some(l => l.startsWith("Reason: this can't be undone"))
         Label {
             Layout.fillWidth: true
+            Layout.leftMargin: 22
             visible: text !== ""
-            text: card.askLines.filter(l => l.startsWith("Reason:")).join("\n")
+            text: card.askLines.filter(l => l.startsWith("Reason:")).map(l => {
+                const r = l.slice(7).trim()
+                return r.charAt(0).toUpperCase() + r.slice(1)
+            }).join("\n")
             color: Theme.warning
             font.pixelSize: Theme.px(12)
             wrapMode: Text.Wrap
@@ -384,7 +412,10 @@ Item {
         }
         Rectangle {
             Layout.fillWidth: true
-            readonly property string details: card.askLines.filter(l => !l.startsWith("Reason:") && l !== "Outside the sandbox").join("\n").trim()
+            Layout.leftMargin: 22
+            // (Not the command again when the line above shows it.)
+            readonly property string details: card.askLines.filter(l => !l.startsWith("Reason:") && l !== "Outside the sandbox"
+                && l.replace(/^Command:\s*/, "").trim() !== root.local(card.subtitle).replace(/…$/, "").trim()).join("\n").trim()
             visible: card.asking && details !== ""
             implicitHeight: askDetails.implicitHeight + 12
             radius: 4
@@ -406,27 +437,36 @@ Item {
         }
         RowLayout {
             Layout.fillWidth: true
+            Layout.leftMargin: 22
+            Layout.topMargin: 2
             visible: card.asking
             spacing: 6
             Label {
                 Layout.fillWidth: true
                 text: root.approvalQuestion(card.title, card.askLines)
-                color: Theme.foreground
-                font.pixelSize: Theme.px(12)
+                color: Theme.text
+                font.pixelSize: Theme.px(13)
                 elide: Text.ElideRight
             }
-            FlatButton { text: "Deny"; accent: Theme.error; font.pixelSize: Theme.px(12); onClicked: root.session.answerValue("Deny") }
+            FlatButton { text: "Deny"; font.pixelSize: Theme.px(12.5); onClicked: root.session.answerValue("Deny") }
             FlatButton {
                 objectName: "alwaysAllowInline"
                 visible: root.session.requestOptions.indexOf("Always allow") >= 0
                 text: parent.width < 420 ? "Always" : "Always allow"
-                font.pixelSize: Theme.px(12)
+                font.pixelSize: Theme.px(12.5)
                 ToolTip.visible: hovered
                 ToolTip.delay: 400
                 ToolTip.text: { try { return "Remember: " + (JSON.parse(root.session.requestJson).alwaysHint || "this") } catch (e) { return "" } }
                 onClicked: root.session.answerValue("Always allow")
             }
-            FlatButton { text: "Approve"; accent: Theme.success; font.pixelSize: Theme.px(12); onClicked: root.session.answerValue("Approve") }
+            FlatButton {
+                objectName: "approveInline"
+                text: card.destructive ? "Run anyway" : "Approve"
+                variant: card.destructive ? "danger" : "primary"
+                accent: card.destructive ? Theme.error : Theme.foreground
+                font.pixelSize: Theme.px(12.5)
+                onClicked: root.session.answerValue("Approve")
+            }
         }
         // The well: a write's or an edit's lines; a command (when its line
         // doesn't say it) and its last lines; any call's output, opened.
@@ -652,7 +692,9 @@ Item {
     /// What an approval asks, in words (Harlo's request to run a command
     /// outside its sandbox says so).
     function approvalQuestion(tool, askLines) {
-        return askLines.indexOf("Outside the sandbox") >= 0 ? "Run " + tool + " outside the sandbox?" : "Allow " + tool + " to run?"
+        const shell = /^(bash|shell|exec|command|run|terminal|local_bash)$/i.test(tool)
+        const what = shell ? "this command" : Theme.toolLabel(tool).replace(/^\w/, c => c.toUpperCase())
+        return askLines.indexOf("Outside the sandbox") >= 0 ? "Run " + what + " outside the sandbox?" : shell ? "Run this command?" : "Allow " + what + " to run?"
     }
     /// Brings row `i` to the middle and flashes it (search results).
     /// Row `i`'s end is on screen (an approval's buttons are there), its
@@ -891,7 +933,7 @@ Item {
                 visible: root.session.status !== "busy" && turn !== null
                 x: view.columnX
                 anchors.verticalCenter: parent.verticalCenter
-                text: turn ? "↶ Undo these changes (" + (turn.files === 1 ? "1 file" : turn.files + " files") + ")" : ""
+                text: turn ? "Undo these changes (" + (turn.files === 1 ? "1 file" : turn.files + " files") + ")" : ""
                 font.pixelSize: Theme.px(12.5)
                 ToolTip.visible: hovered
                 ToolTip.delay: 400
@@ -902,7 +944,10 @@ Item {
                 id: workingLabel
                 // The run is paused on you: say so rather than "Working…".
                 readonly property bool waiting: root.session.hasRequest
-                visible: root.session.status === "busy"
+                // (Not when the request is on screen: its card or the
+                // question panel says it.)
+                readonly property bool shownElsewhere: waiting && (!root.session.requestIsApproval || root.session.approvalRow !== "")
+                visible: root.session.status === "busy" && !shownElsewhere
                 x: view.columnX
                 anchors.verticalCenter: parent.verticalCenter
                 text: !waiting ? "Working…" : root.session.requestIsApproval ? "Waiting for your approval" : "Waiting for your answer"
@@ -969,9 +1014,13 @@ Item {
                         readonly property string turn: root.undoBefore(userRow.rowKey)
                         objectName: "undoTurn-" + userRow.index
                         visible: turn !== ""
+                        // (On the line between turns while you point at it.)
+                        readonly property bool shown: userHover.hovered || hovered || activeFocus
+                        opacity: shown ? 1 : 0
+                        Behavior on opacity { NumberAnimation { duration: Theme.hoverMotion } }
                         x: view.columnX - 2
                         y: Math.round(userRow.gap / 2) - 6 - height / 2
-                        text: "↶ Undo from here"
+                        text: "Undo from here"
                         outlined: false
                         padding: 2
                         accent: Theme.textFaint
@@ -999,14 +1048,14 @@ Item {
                                 // Your avatar (picked from the left rail).
                                 UserAvatar {
                                     objectName: "turnAvatar"
-                                    width: Theme.px(24)
+                                    width: Theme.px(20)
                                     height: width
                                 }
                                 Label {
                                     anchors.verticalCenter: parent.verticalCenter
                                     text: "You"
                                     color: Theme.text
-                                    font.pixelSize: Theme.px(14.5)
+                                    font.pixelSize: Theme.px(13.5)
                                     font.weight: Font.DemiBold
                                 }
                             }
@@ -1456,6 +1505,7 @@ Item {
                         TapHandler { enabled: noticeRow.long && !noticeRow.harlo; onTapped: view.toggle(noticeRow.rowKey) }
                         HoverHandler { enabled: noticeRow.long && !noticeRow.harlo; cursorShape: Qt.PointingHandCursor }
                     }
+                    HoverHandler { id: noticeHover }
                     // harlo's: a line between turns, as before yours.
                     Rectangle {
                         visible: noticeRow.harlo && noticeRow.index > 0
@@ -1469,9 +1519,12 @@ Item {
                     FlatButton {
                         readonly property string turn: noticeRow.harlo ? root.undoBefore(noticeRow.rowKey) : ""
                         visible: turn !== ""
+                        readonly property bool shown: noticeHover.hovered || hovered || activeFocus
+                        opacity: shown ? 1 : 0
+                        Behavior on opacity { NumberAnimation { duration: Theme.hoverMotion } }
                         x: view.columnX - 2
                         y: Math.round(noticeRow.gap / 2) - 6 - height / 2
-                        text: "↶ Undo from here"
+                        text: "Undo from here"
                         outlined: false
                         padding: 2
                         accent: Theme.textFaint
@@ -1494,13 +1547,13 @@ Item {
                             spacing: 8
                             Image {
                                 source: "qrc:/qt/qml/harlo/icons/app/harlo.svg"
-                                width: Theme.px(22)
+                                width: Theme.px(20)
                                 height: width
                                 sourceSize: Qt.size(width * 2, height * 2)
                                 anchors.verticalCenter: parent.verticalCenter
                             }
-                            Label { text: "harlo"; color: Theme.text; font.pixelSize: Theme.px(14.5); font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
-                            Label { text: "· to the agent"; color: Theme.textFaint; font.pixelSize: Theme.px(13); anchors.verticalCenter: parent.verticalCenter }
+                            Label { text: "harlo"; color: Theme.text; font.pixelSize: Theme.px(13.5); font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
+                            Label { text: "to the agent"; color: Theme.textMuted; font.pixelSize: Theme.px(12.5); anchors.verticalCenter: parent.verticalCenter }
                         }
                         Label {
                             id: harloText
