@@ -42,6 +42,41 @@ Popup {
         return i === needle.length
     }
 
+    // The words typed: a session's or action's title with the letters that
+    // matched marked (a word found whole, else its letters in order).
+    readonly property string words: input.text.startsWith(">") || input.text.startsWith("@") ? input.text.substring(1).trim() : input.text.trim()
+    function marks(title, query) {
+        const lower = title.toLowerCase()
+        const on = new Array(title.length).fill(false)
+        for (const w of query.toLowerCase().split(/\s+/).filter(x => x)) {
+            const at = lower.indexOf(w)
+            if (at >= 0) {
+                for (let i = at; i < at + w.length; i++) on[i] = true
+                continue
+            }
+            let i = 0
+            for (const c of w) {
+                while (i < lower.length && lower[i] !== c) i++
+                if (i < lower.length) on[i++] = true
+            }
+        }
+        return on
+    }
+    function marked(title, query) {
+        const esc = c => c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c
+        if (!query) return title.split("").map(esc).join("")
+        const on = marks(title, query)
+        let out = "", open = false
+        for (let i = 0; i < title.length; i++) {
+            if (on[i] !== open) {
+                out += on[i] ? "<b><font color='" + Theme.rgb(Theme.accent) + "'>" : "</font></b>"
+                open = on[i]
+            }
+            out += esc(title[i])
+        }
+        return out + (open ? "</font></b>" : "")
+    }
+
     function refresh() {
         const q = input.text
         const out = []
@@ -73,6 +108,9 @@ Popup {
                         projects.push({ kind: "project", title: title, subtitle: p[3], run: () => root.newSessionRequested(id) })
                     }
                 }
+                // (All in one project: it needn't be said on every row.)
+                if (sessions.length > 1 && sessions.every(r => r.subtitle === sessions[0].subtitle))
+                    for (const r of sessions) r.subtitle = ""
                 if (query === "") {
                     section("Recent sessions", sessions)
                     section("Actions", acts)
@@ -215,7 +253,8 @@ Popup {
                                 spacing: 1
                                 Label {
                                     Layout.fillWidth: true
-                                    text: row.item.title
+                                    text: row.item.kind === "file" ? row.item.title : root.marked(row.item.title, root.words)
+                                    textFormat: row.item.kind === "file" ? Text.PlainText : Text.StyledText
                                     color: Theme.foreground
                                     elide: Text.ElideRight
                                     font.pixelSize: Theme.px(13)

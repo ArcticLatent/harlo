@@ -90,6 +90,24 @@ Popup {
                         width: flick.width - 40
                         shortcuts: root.shortcuts
                         twoColumns: root.width > 640
+                        onActivated: run => { root.close(); Qt.callLater(run) }
+                    }
+                }
+                // More below: the list fades into the footer.
+                Item {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 0
+                    z: 1
+                    visible: flick.contentY < flick.contentHeight - flick.height - 2
+                    Rectangle {
+                        objectName: "shortcutsMore"
+                        anchors.bottom: parent.top
+                        width: parent.width
+                        height: 28
+                        gradient: Gradient {
+                            GradientStop { position: 0; color: "transparent" }
+                            GradientStop { position: 1; color: Qt.rgba(Theme.background.r, Theme.background.g, Theme.background.b, 0.85) }
+                        }
                     }
                 }
 

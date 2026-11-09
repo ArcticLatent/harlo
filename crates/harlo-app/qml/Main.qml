@@ -617,7 +617,7 @@ ApplicationWindow {
             { id: "goToSession", seq: Keymap.seq("goToSession"), label: "Go to a session or action", group: nav, icon: "command", run: () => palette.openWith("") },
             { id: "searchAll", seq: Keymap.seq("searchAll"), label: "Search all sessions", group: nav, icon: "search", run: () => searchDialog.openSearch() },
             { id: "findInSession", seq: Keymap.seq("findInSession"), label: "Find in this session", group: nav, icon: "search-eye", run: () => chat.openFind() },
-            { id: "actions", seq: Keymap.seq("actions"), label: "Actions only", group: nav, icon: "arrow-right-s", run: () => palette.openWith(">") },
+            { id: "actions", seq: Keymap.seq("actions"), label: "Actions only", group: nav, icon: "play-circle", run: () => palette.openWith(">") },
             { id: "jumpPrompt", seq: Keymap.seq("jumpPrompt"), label: "Jump to a prompt", group: nav, icon: "bookmark", run: () => { if (chat.transcript.visible) chat.transcript.openPromptRail() } },
             { id: "prevPrompt", seq: Keymap.seq("prevPrompt"), label: "Previous prompt in the session", group: nav, icon: "arrow-up-s", run: () => { if (chat.transcript.visible) chat.transcript.stepPrompt(-1) } },
             { id: "nextPrompt", seq: Keymap.seq("nextPrompt"), label: "Next prompt in the session", group: nav, icon: "arrow-down-s", run: () => { if (chat.transcript.visible) chat.transcript.stepPrompt(1) } },
@@ -641,10 +641,10 @@ ApplicationWindow {
             { id: "notesPanel", seq: Keymap.seq("notesPanel"), label: "Notes panel", group: panels, icon: "note", run: () => win.togglePanel("notes") },
             { id: "terminal", seq: Keymap.seq("terminal"), label: "Terminal", group: panels, icon: "terminal-box", run: () => win.toggleTerminal() },
             { id: "newTerminalTab", seq: Keymap.seq("newTerminalTab"), label: "New terminal tab", group: panels, icon: "add", run: () => win.newTerminalTab() },
-            { id: "closeTerminalTab", seq: Keymap.seq("closeTerminalTab"), label: "Close terminal tab (in the terminal)", group: panels, icon: "close", run: () => win.closeTerminalTab() },
+            { id: "closeTerminalTab", seq: Keymap.seq("closeTerminalTab"), label: "Close the terminal tab", group: panels, icon: "close", run: () => win.closeTerminalTab() },
             { id: "miniChat", seq: Keymap.seq("miniChat"), label: "Mini chat window", group: ui, icon: "chat-thread", run: () => win.toggleMiniChat() },
             { id: "expandComposer", seq: Keymap.seq("expandComposer"), label: "Expand the composer", group: "Composer", icon: "fullscreen", run: () => { if (chat.composerItem.visible) chat.composerItem.toggleExpanded() } },
-            { id: "dictate", seq: Keymap.seq("dictate"), label: "Dictate (again: insert the text)", group: "Composer", icon: "mic", run: () => { if (chat.composerItem.visible) chat.composerItem.toggleDictation() } },
+            { id: "dictate", seq: Keymap.seq("dictate"), label: "Start or stop dictating", group: "Composer", icon: "mic", run: () => { if (chat.composerItem.visible) chat.composerItem.toggleDictation() } },
         ]
         list.push({ seq: "Ctrl+1…9", label: "Go to tab 1–9", group: sess, icon: "layout-row" })
         for (let i = 1; i <= 9; i++)
@@ -658,16 +658,17 @@ ApplicationWindow {
         { seq: "Ctrl+Enter", label: "Steer the running agent", group: "Composer", icon: "compass-3" },
         { seq: "Esc", label: "Stop the run", group: "Composer", icon: "stop" },
         { seq: "Esc", label: "Leave the expanded composer", group: "Composer", icon: "fullscreen-exit" },
-        { seq: "↑", label: "Recall an earlier prompt (when empty)", group: "Composer", icon: "history" },
-        { seq: "↓", label: "Recall an earlier prompt (when empty)", group: "Composer", icon: "history" },
+        { seq: "↑", label: "Recall an earlier prompt", group: "Composer", icon: "history" },
+        { seq: "↓", label: "Recall an earlier prompt", group: "Composer", icon: "history" },
         { seq: "Tab", label: "Build / Plan", group: "Composer", icon: "target" },
         { seq: "/", label: "Commands", group: "Composer", icon: "code-box" },
         { seq: "@", label: "Mention a file", group: "Composer", icon: "attachment-2" },
         // In a run (reached with "Go to the session's runs", or a click).
-        { seq: "↓", label: "Into a run, then step by step", group: "Runs in a session", icon: "expand-up-down" },
+        { seq: "↓", label: "Step through a run", group: "Runs in a session", icon: "expand-up-down" },
+        { seq: "↑", label: "Step through a run", group: "Runs in a session", icon: "expand-up-down" },
         { seq: "Enter", label: "Open or fold the run or step", group: "Runs in a session", icon: "arrow-down-s" },
         { seq: "Esc", label: "Back to the run, then to the composer", group: "Runs in a session", icon: "arrow-go-back" },
-        { seq: "Ctrl+C", label: "Copy a call's listing", group: "Runs in a session", icon: "file-text" },
+        { seq: "Ctrl+C", label: "Copy a call's listing", group: "Runs in a session", icon: "file-copy" },
         { seq: "Tab", label: "Next run", group: "Runs in a session", icon: "arrow-right-s" },
     ]
     Instantiator {
@@ -690,12 +691,12 @@ ApplicationWindow {
         const here = projects.find(p => p.id === pid)
         if (here) {
             acts.push({ title: "New session in " + here.name, icon: "chat-new", hint: Keymap.seq("newSession"), run: () => win.openDraft(here.id) })
-            acts.push({ title: "New worktree session in " + here.name + "…", icon: "git-branch", run: () => sidebar.openNewWorktree(here.id, here.name, here.harness) })
+            acts.push({ title: "New worktree session in " + here.name + "…", icon: "node-tree", run: () => sidebar.openNewWorktree(here.id, here.name, here.harness) })
         }
         acts.push({ title: "New session in home folder", icon: "home", run: () => win.openDraft(-1) })
         for (const p of projects)
             if (p.id !== pid)
-                acts.push({ title: "New worktree session in " + p.name + "…", icon: "git-branch", run: () => sidebar.openNewWorktree(p.id, p.name, p.harness) })
+                acts.push({ title: "New worktree session in " + p.name + "…", icon: "node-tree", run: () => sidebar.openNewWorktree(p.id, p.name, p.harness) })
         acts.push({ title: "Add project…", icon: "add", run: () => sidebar.openAddProject() })
         acts.push({ title: "Changes panel", icon: "git-branch", hint: Keymap.seq("changesPanel"), run: () => win.togglePanel("changes") })
         acts.push({ title: "Context panel", icon: "pie", hint: Keymap.seq("contextPanel"), run: () => win.togglePanel("context") })
@@ -704,7 +705,7 @@ ApplicationWindow {
         acts.push({ title: "Notes panel", icon: "note", hint: Keymap.seq("notesPanel"), run: () => win.togglePanel("notes") })
         if (chat.session.key !== "") {
             acts.push({ title: "Export session as Markdown…", icon: "file-text", run: () => win.exportMarkdown(chat.session.key, chat.session.title) })
-            acts.push({ title: "Copy session as Markdown", icon: "file-text", run: () => Workspace.copyMarkdown(chat.session.key) })
+            acts.push({ title: "Copy session as Markdown", icon: "file-copy", run: () => Workspace.copyMarkdown(chat.session.key) })
         }
         acts.push({ title: "Terminal", icon: "terminal-box", hint: Keymap.seq("terminal"), run: () => win.toggleTerminal() })
         acts.push({ title: "Toggle sidebar", icon: "layout-column", hint: Keymap.seq("toggleSidebar"), run: () => win.toggleSidebar() })
@@ -715,7 +716,7 @@ ApplicationWindow {
             if (Workspace.activeKey.startsWith("live:") && chat.session.status !== "offline")
                 acts.push({ title: "Stop this session's agent process", icon: "close-circle", run: () => Workspace.closeSession(Workspace.activeKey) })
             if (Workspace.inWorktree(Workspace.activeKey))
-                acts.push({ title: "Worktree: merge or remove…", icon: "git-branch", run: () => sidebar.openWorktree(Workspace.activeKey) })
+                acts.push({ title: "Worktree: merge or remove…", icon: "node-tree", run: () => sidebar.openWorktree(Workspace.activeKey) })
         }
         acts.push({ title: "Search all sessions", icon: "search", hint: Keymap.seq("searchAll"), run: () => searchDialog.openSearch() })
         acts.push({ title: "Drop-down window", icon: "window", run: () => win.toggleDropDown() })
@@ -724,7 +725,7 @@ ApplicationWindow {
             acts.push({ title: "Run: " + r.title + (r.kept !== null && r.kept !== undefined ? " (kept)" : ""), icon: "terminal-box", run: () => Workspace.open("view:run:" + r.id) })
         acts.push({ title: "Usage", icon: "stats", run: () => Workspace.open("view:stats") })
         acts.push({ title: "Settings", icon: "settings", hint: Keymap.seq("settings"), run: () => settingsDialog.open() })
-        acts.push({ title: "Setup guide…", icon: "compass-3", run: () => win.openSetupGuide() })
+        acts.push({ title: "Setup guide…", icon: "book-open", run: () => win.openSetupGuide() })
         acts.push({ title: "Keyboard shortcuts", icon: "keyboard", hint: Keymap.seq("shortcuts"), run: () => shortcutsDialog.open() })
         return acts
     }
@@ -6112,7 +6113,15 @@ ApplicationWindow {
         PauseAnimation { duration: 800 }
         ScriptAction { script: shortcutsDialog.open() }
         PauseAnimation { duration: 600 }
-        ScriptAction { script: { win.shotWindow("kb-shortcuts-light"); shortcutsDialog.close(); palette.openWith("") } }
+        ScriptAction { script: {
+            win.shotWindow("kb-shortcuts-light")
+            win.check(!!win.findName("shortcutsMore", shortcutsDialog.contentItem), "a fade says more is below")
+            { const cap = win.findText("Up", shortcutsDialog.contentItem); win.check(!!cap && cap.children.some(c => c.text === "↑"), "arrow keys are shown as arrows") }
+            win.clickItem(win.findText("Search all sessions", shortcutsDialog.contentItem), "the Search all sessions row") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            win.check(!shortcutsDialog.visible && searchDialog.visible, "clicking a row runs it")
+            searchDialog.close(); palette.openWith("") } }
         PauseAnimation { duration: 600 }
         ScriptAction { script: { win.shotWindow("pal-empty-light"); palette.close(); Workspace.chooseThemeMode("dark") } }
         PauseAnimation { duration: 800 }
@@ -6135,7 +6144,12 @@ ApplicationWindow {
         PauseAnimation { duration: 600 }
         ScriptAction { script: { win.shotWindow("pal-query"); palette.openWith("set") } }
         PauseAnimation { duration: 600 }
-        ScriptAction { script: { win.shotWindow("pal-query-action"); palette.openWith(">") } }
+        ScriptAction { script: {
+            win.shotWindow("pal-query-action")
+            win.check(palette.marked("Settings", "set") === "<b><font color='" + Theme.rgb(Theme.accent) + "'>Set</font></b>tings", "matched letters are marked")
+            win.check(palette.marked("Close tab", "set").split("<b>").length === 3, "letters in order when no word matches")
+            win.check(palette.choices.filter(i => i.kind === "session").every(i => i.subtitle === ""), "one project: not said on every row")
+            palette.openWith(">") } }
         PauseAnimation { duration: 600 }
         ScriptAction { script: {
             win.shotWindow("pal-actions")
@@ -6163,6 +6177,9 @@ ApplicationWindow {
             win.check(!Qt.colorEqual(sv.cInput, sv.cCacheWrite) && !Qt.colorEqual(sv.cCacheRead, sv.cCacheWrite) && !Qt.colorEqual(sv.cInput, sv.cOutput), "the four token kinds have their own colours")
             win.check(!win.findText("unknown", sv), "no unknown model row")
             win.check(!!win.findName("statsRefresh", sv), "refresh is an icon button")
+            win.check(!Qt.colorEqual(sv.cCount, Theme.info) && !Qt.colorEqual(sv.cCount, Theme.primary), "counts aren't drawn in the input blue")
+            win.check(!!win.findName("statsModelLegend", sv), "the models' colours have a legend")
+            if (sv.width > 500) { const pr = win.findName("statsProject", sv); win.check(pr.y === 0, "the project picker sits beside the periods (y " + pr.y + ")") }
             chat.statsView.scrollToEnd() } }
         PauseAnimation { duration: 600 }
         ScriptAction { script: { win.shotWindow("stats-bottom"); Workspace.chooseThemeMode("light") } }

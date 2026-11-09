@@ -51,7 +51,11 @@ Rectangle {
     readonly property color cInput: Theme.info
     readonly property color cOutput: Theme.success
     readonly property color cCacheRead: Theme.isLight ? "#b8901a" : "#c9a227"
-    readonly property color cCacheWrite: Qt.rgba(cCacheRead.r, cCacheRead.g, cCacheRead.b, 0.45)
+    readonly property color cCacheWrite: Theme.blend(cCacheRead, Theme.isLight ? Qt.rgba(1, 1, 1, 1) : Qt.rgba(1, 0.965, 0.86, 1), Theme.isLight ? 0.45 : 0.5)
+    // Counts that aren't tokens (steps, tool calls, cost): a neutral bar,
+    // so blue keeps meaning input.
+    readonly property color cCount: Theme.blend(Theme.elevated, Theme.text, Theme.isLight ? 0.42 : 0.5)
+    readonly property color cCountHover: Theme.blend(Theme.elevated, Theme.text, Theme.isLight ? 0.62 : 0.72)
     readonly property var tokenKinds: [
         { key: "input", label: "Input", color: cInput },
         { key: "output", label: "Output (with reasoning)", color: cOutput },
@@ -116,22 +120,29 @@ Rectangle {
                 spacing: 6
                 // Period and project; wraps on narrow windows.
                 Flow {
+                    id: filters
                     Layout.fillWidth: true
                     Layout.minimumWidth: 0
-                    spacing: 6
-                    Repeater {
-                        model: [[7, "7 days"], [30, "30 days"], [90, "90 days"], [0, "All time"]]
-                        Pill {
-                            required property var modelData
-                            text: modelData[1]
-                            selected: root.days === modelData[0]
-                            onClicked: root.days = modelData[0]
+                    spacing: 10
+                    Row {
+                        id: periods
+                        spacing: 6
+                        Repeater {
+                            model: [[7, "7 days"], [30, "30 days"], [90, "90 days"], [0, "All time"]]
+                            Pill {
+                                required property var modelData
+                                text: modelData[1]
+                                selected: root.days === modelData[0]
+                                onClicked: root.days = modelData[0]
+                            }
                         }
                     }
-                    Item { width: 4; height: 1 }
                     ComboField {
                         id: projectBox
-                        width: Math.min(200, body.width)
+                        objectName: "statsProject"
+                        // Beside the periods when 150px or more is left there.
+                        readonly property real room: filters.width - periods.width - filters.spacing
+                        width: room >= 150 ? Math.min(200, room) : Math.min(200, filters.width)
                         readonly property var projects: [{ id: -1, name: "All projects" }].concat(
                             Workspace.projectList().map(l => { const p = l.split("\t"); return { id: Number(p[0]), name: p[1] } }))
                         model: projects.map(p => p.name)
@@ -239,10 +250,14 @@ Rectangle {
                             content.hasCost ? [root.compact(content.r.tokens.total), "tokens"] : null,
                             [root.compact(content.r.steps), content.r.steps === 1 ? "model step" : "model steps"],
                             [String(content.r.activeDays || 0), content.r.activeDays === 1 ? "day active" : "days active"],
-                            (content.r.longestStreak || 0) > 1 ? [String(content.r.longestStreak), "days in a row at most"] : null,
+                            (content.r.longestStreak || 0) > 1 ? [String(content.r.longestStreak) + " days", "", "longest run"] : null,
                             (content.r.subagents || 0) > 0 ? [String(content.r.subagents), content.r.subagents === 1 ? "helper session" : "helper sessions"] : null,
                         ].filter(f => f)
-                        text: figures.map(f => "<b><font color='" + Theme.rgb(Theme.text) + "'>" + f[0] + "</font></b>&nbsp;" + f[1].replace(/ /g, "&nbsp;")).join("&nbsp;&nbsp;&nbsp;&nbsp; ")
+                        // [value, after] or [value, "", before].
+                        text: figures.map(f => {
+                            const v = "<b><font color='" + Theme.rgb(Theme.text) + "'>" + f[0].replace(/ /g, "&nbsp;") + "</font></b>"
+                            return f[2] ? f[2].replace(/ /g, "&nbsp;") + "&nbsp;" + v : v + "&nbsp;" + f[1].replace(/ /g, "&nbsp;")
+                        }).join("&nbsp;&nbsp;&nbsp;&nbsp; ")
                     }
                 }
 
@@ -307,7 +322,7 @@ Rectangle {
                                     width: parent.width
                                     height: Math.max(2, parent.height * modelData.steps / chart.peak)
                                     radius: Math.min(2, width / 2)
-                                    color: barHover.hovered ? Qt.lighter(Theme.info, 1.25) : Theme.info
+                                    color: barHover.hovered ? root.cCountHover : root.cCount
                                 }
                                 HoverHandler { id: barHover }
                                 ToolTip.visible: barHover.hovered
@@ -455,12 +470,22 @@ Rectangle {
                         }
                     }
                 }
-                Label {
+                // Tokens: what the bars' colours are.
+                Flow {
+                    objectName: "statsModelLegend"
                     visible: root.modelMetric === "tokens"
-                    text: "Coloured as in Token composition."
-                    color: Theme.textFaint
-                    font.pixelSize: Theme.px(11.5)
-                    Layout.topMargin: -4
+                    Layout.fillWidth: true
+                    Layout.topMargin: -2
+                    spacing: 14
+                    Repeater {
+                        model: root.tokenKinds
+                        Row {
+                            required property var modelData
+                            spacing: 6
+                            Swatch { color: modelData.color; anchors.verticalCenter: parent.verticalCenter }
+                            Label { text: modelData.key === "output" ? "Output" : modelData.label; color: Theme.textMuted; font.pixelSize: Theme.px(11.5) }
+                        }
+                    }
                 }
                 Repeater {
                     id: modelRows
@@ -536,7 +561,7 @@ Rectangle {
                                     visible: root.modelMetric !== "tokens"
                                     anchors.fill: parent
                                     radius: 3
-                                    color: root.modelMetric === "cost" ? Theme.primary : Theme.info
+                                    color: root.cCount
                                 }
                                 Row {
                                     id: kindsRow
@@ -585,7 +610,7 @@ Rectangle {
                             implicitHeight: 6
                             radius: 3
                             color: Theme.subtle
-                            Rectangle { width: parent.width * modelData.count / toolRows.peak; height: parent.height; radius: 3; color: Theme.primary }
+                            Rectangle { width: parent.width * modelData.count / toolRows.peak; height: parent.height; radius: 3; color: root.cCount }
                         }
                         Label { text: root.compact(modelData.count); color: Theme.textMuted; font.pixelSize: Theme.px(12); Layout.preferredWidth: 32; horizontalAlignment: Text.AlignRight }
                     }

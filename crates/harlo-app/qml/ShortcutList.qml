@@ -13,6 +13,8 @@ RowLayout {
     property var shortcuts: []
     property bool editable: false
     property bool twoColumns: width > 600
+    // A row clicked outside Settings: its action, to run.
+    signal activated(var run)
     readonly property var groupOrder: ["Navigation", "Sessions and tabs", "Window", "Panels", "Composer", "Runs in a session"]
 
     readonly property var sections: {
@@ -24,10 +26,12 @@ RowLayout {
                     continue
                 const key = { seq: s.seq, id: s.id || "" }
                 const same = rows.find(r => r.label === s.label)
-                if (same)
+                if (same) {
                     same.keys.push(key)
-                else
-                    rows.push({ label: s.label, icon: s.icon || "", keys: [key] })
+                    if (!same.run && s.run) same.run = s.run
+                } else {
+                    rows.push({ label: s.label, icon: s.icon || "", keys: [key], run: s.run || null })
+                }
             }
             if (rows.length)
                 out.push({ title: g, rows: rows })
@@ -177,11 +181,15 @@ RowLayout {
                 Layout.fillWidth: true
                 spacing: 0
                 Rectangle {
+                    // Outside Settings a row with an action runs it; the
+                    // others don't light up.
+                    readonly property bool acts: !root.editable && !!row.modelData.run
                     Layout.fillWidth: true
                     implicitHeight: 34
                     radius: 6
-                    color: rowHover.hovered ? Theme.hover : "transparent"
-                    HoverHandler { id: rowHover }
+                    color: acts && rowHover.hovered ? Theme.hover : "transparent"
+                    HoverHandler { id: rowHover; enabled: parent.acts; cursorShape: Qt.PointingHandCursor }
+                    TapHandler { enabled: parent.acts; onTapped: root.activated(row.modelData.run) }
                     RowLayout {
                         anchors.fill: parent
                         anchors.leftMargin: 8

@@ -12,5 +12,7 @@ Rectangle {
     border.color: Theme.border
     // A darker bottom edge, like a physical key.
     Rectangle { anchors.bottom: parent.bottom; anchors.horizontalCenter: parent.horizontalCenter; width: parent.width - 4; height: 1; color: "#40000000" }
-    Label { id: capLabel; anchors.centerIn: parent; text: parent.text; color: Theme.foreground; font.family: Theme.mono; font.pixelSize: Theme.px(11) }
+    // Arrow keys as arrows, wherever they're shown.
+    readonly property var arrows: ({ "Up": "↑", "Down": "↓", "Left": "←", "Right": "→" })
+    Label { id: capLabel; anchors.centerIn: parent; text: parent.arrows[parent.text] || parent.text; color: Theme.foreground; font.family: Theme.mono; font.pixelSize: Theme.px(11) }
 }
