@@ -26,7 +26,11 @@ struct PlanLine: View {
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.up").font(.system(size: 10, weight: .semibold)).foregroundStyle(Color(p.muted))
             }
+            // (A full-size target: it reaches 13 pt above and below the
+            // line without making the card any taller.)
+            .padding(.vertical, 13)
             .contentShape(Rectangle())
+            .padding(.vertical, -13)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Plan, \(plan.finished) of \(plan.steps.count) done\(plan.current.map { ", now: \($0.title)" } ?? "")")

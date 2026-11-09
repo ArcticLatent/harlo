@@ -191,8 +191,15 @@ final class HarloUITests: XCTestCase {
     func test09Plan() {
         launch("plan")
         openMain()
-        // The plan's card above the composer, opened.
-        tap("0/3")
+        // The plan's line above the composer, opened (once more if the
+        // first tap came while the transcript was still settling).
+        let line = element("of 3 done")
+        XCTAssertTrue(line.waitForExistence(timeout: 8), "the plan's line")
+        for _ in 0..<2 {
+            line.tap()
+            if app.navigationBars["Plan"].waitForExistence(timeout: 4) { break }
+        }
+        XCTAssertTrue(app.navigationBars["Plan"].exists, "the plan opens")
         see("Test with 200 sessions")
         shot("15-plan")
         audit("plan")
