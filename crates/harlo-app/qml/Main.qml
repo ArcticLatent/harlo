@@ -612,6 +612,7 @@ ApplicationWindow {
             { id: "actions", seq: Keymap.seq("actions"), label: "Run an action", group: nav, glyph: "›", run: () => palette.openWith(">") },
             { id: "jumpPrompt", seq: Keymap.seq("jumpPrompt"), label: "Jump to a prompt", group: nav, glyph: "≡", run: () => { if (chat.transcript.visible) chat.transcript.openPromptRail() } },
             { id: "prevPrompt", seq: Keymap.seq("prevPrompt"), label: "Previous prompt", group: nav, glyph: "↑", run: () => { if (chat.transcript.visible) chat.transcript.stepPrompt(-1) } },
+            { id: "focusRuns", seq: Keymap.seq("focusRuns"), label: "Go to the session's runs", group: nav, glyph: "⤒", run: () => { if (chat.transcript.visible) chat.transcript.focusLastRun() } },
             { id: "nextPrompt", seq: Keymap.seq("nextPrompt"), label: "Next prompt", group: nav, glyph: "↓", run: () => { if (chat.transcript.visible) chat.transcript.stepPrompt(1) } },
             { id: "nextTab", seq: Keymap.seq("nextTab"), label: "Next tab", group: nav, glyph: "→", run: () => Workspace.nextTab(1) },
             { id: "nextTabAlt", seq: Keymap.seq("nextTabAlt"), label: "Next tab", group: nav, glyph: "→", run: () => Workspace.nextTab(1) },
@@ -654,6 +655,12 @@ ApplicationWindow {
         { seq: "Tab", label: "Build / Plan", group: "Composer", glyph: "⇥" },
         { seq: "/", label: "Commands", group: "Composer", glyph: "/" },
         { seq: "@", label: "Mention a file", group: "Composer", glyph: "@" },
+        // In a run (reached with "Go to the session's runs", or a click).
+        { seq: "↓ / ↑", label: "Into a run, then step by step", group: "Session", glyph: "↕" },
+        { seq: "Enter", label: "Open or fold the run or step", group: "Session", glyph: "↵" },
+        { seq: "Esc", label: "Back to the run, then to the composer", group: "Session", glyph: "⤺" },
+        { seq: "Ctrl+C", label: "Copy a call's listing", group: "Session", glyph: "⧉" },
+        { seq: "Tab", label: "Next run", group: "Session", glyph: "⇥" },
     ]
     Instantiator {
         model: win.shortcutList.filter(s => s.run)
@@ -3797,6 +3804,14 @@ ApplicationWindow {
             const sed = win.findAllNames("codeView", win.listingBox()).find(v => v.lines.length && v.lines[0].n === "38")
             const one = sed.lineHeight(0), long = sed.lineHeight(4)
             win.check(Theme.wrapCode && long > one * 1.5 && Math.abs(sed.lineTop(5) - (sed.lineTop(4) + long)) < 1, "wrapped: the long line takes " + Math.round(long / one) + " rows, 43 below it (" + [one, long, sed.lineTop(4), sed.lineTop(5)] + ")")
+            // Its second row hangs under its indentation and 2 more.
+            const ed = win.findName("codeText", sed), s4 = sed.starts[4], y0 = ed.positionToRectangle(s4).y
+            let at = s4
+            while (at < ed.length && ed.positionToRectangle(at).y <= y0 + 1) at++
+            const x2 = ed.positionToRectangle(at).x, want = ed.positionToRectangle(s4 + 6).x
+            win.check(x2 > 0 && Math.abs(x2 - want) < 2, "…its next row under its indentation and 2 (" + [x2, want] + ")")
+            const blocks = win.findAllNames("replyCodeView", chat.transcript)
+            win.check(blocks.length === 3 && blocks[0].count === 4 && blocks[2].count === 2, "a reply's code blocks, wrapped: still numbered (" + blocks.map(b => b.count) + ")")
             win.listingAt("Look at how")
             win.shotWindow("listings-wrap")
             Workspace.chooseLook("wrap", "null")
@@ -3822,7 +3837,8 @@ ApplicationWindow {
                 win.check(win.findAllNames("copyCode", block).length === 1, "…and shown on hover")
             }
             TestInput.moveTo(4, 4)
-            win.check(win.findAllNames("copyCode", win.listingBox()).every(c => !c.visible), "a tool's Copy: hidden until hovered")
+            win.check(win.findAllNames("copyCode", win.listingBox()).every(c => !c.visible), "a tool's Copy: hidden until hovered ("
+                      + win.findAllNames("copyCode", win.listingBox()).map(c => [c.copied, c.activeFocus, win.activeFocusItem ? win.activeFocusItem.objectName + ":" + win.activeFocusItem.focusReason : "-"]) + ")")
             win.listingAt("Look at how")
             const sedCard = win.findAllNames("toolWhat", win.listingBox()).find(l => l.plain.indexOf("Look at how") >= 0)
             const at = sedCard.mapToItem(null, sedCard.width / 2, sedCard.height / 2)
@@ -3870,7 +3886,11 @@ ApplicationWindow {
             const box = win.listingBox(), runHead = win.findName("runHeader", box)
             const heads = win.findAllNames("toolHead", box)
             win.check(runHead && runHead.activeFocusOnTab && heads.every(h => !h.activeFocusOnTab), "Tab: the run's line, not each call")
-            runHead.forceActiveFocus(Qt.TabFocusReason)
+            // (From the composer, by keys only.)
+            win.clickItem(win.findName("composerInput"), "composer")
+            TestInput.key(Qt.Key_Up, Qt.ControlModifier | Qt.ShiftModifier)
+            win.check(win.activeFocusItem === runHead, "Ctrl+Shift+Up: from the composer to the run's line (" + (win.activeFocusItem ? win.activeFocusItem.objectName : "") + ")")
+            win.check(runHead.Accessible.name.indexOf("Run: ") === 0, "the run's line has a name for screen readers (" + runHead.Accessible.name + ")")
             TestInput.key(Qt.Key_Down, 0)
             const first = win.activeFocusItem
             win.check(first && first.objectName === "toolHead" && win.findAllNames("toolWhat", first)[0].plain.indexOf("cat -n") >= 0, "Down: its first step")
@@ -3889,6 +3909,13 @@ ApplicationWindow {
             win.shotWindow("listings-keyboard")
             TestInput.key(Qt.Key_Escape, 0)
             win.check(win.activeFocusItem && win.activeFocusItem.objectName === "runHeader", "Escape: back to the run's line")
+            TestInput.key(Qt.Key_Escape, 0)
+            win.check(win.activeFocusItem && win.activeFocusItem.objectName === "composerInput", "Escape again: the composer")
+            // Typing on a run goes to the composer.
+            TestInput.key(Qt.Key_Up, Qt.ControlModifier | Qt.ShiftModifier)
+            TestInput.typeText("hi")
+            win.check(chat.composerItem.text === "hi" && win.activeFocusItem.objectName === "composerInput", "typing on a run: into the composer (" + chat.composerItem.text + ")")
+            TestInput.key(Qt.Key_Backspace, 0); TestInput.key(Qt.Key_Backspace, 0)
             win.sendByKeys("read five files") } }
         ScriptAction { script: win.waitUntil(listingSteps, () => win.chatText().indexOf("Read them all") >= 0 && chat.session.status === "idle", 20000) }
         PauseAnimation { duration: 600 }

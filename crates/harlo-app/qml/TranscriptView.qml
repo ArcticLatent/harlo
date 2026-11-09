@@ -21,6 +21,9 @@ Item {
     signal openDiff(string path)
     // A file at a line (a listing's line number, or a file's name in it).
     signal openFileAt(string path, int line)
+    // Escape from a run's line, or typing in a run: back to the composer
+    // (with what was typed).
+    signal leaveRuns(string text)
     /// Your message at row `index`: edit and resend it (the session forks there).
     signal editRequested(int index)
     /// Undo the turn of one of your messages (its row key).
@@ -200,6 +203,35 @@ Item {
             if (f.objectName === "runBoxScroll") f.contentY = Math.max(0, Math.min(f.contentY, f.contentHeight - f.height))
         }
     }
+    // Into the runs from elsewhere (a key): the last run's line in view, or
+    // a call on its own.
+    function focusLastRun() {
+        const all = []
+        const walk = it => {
+            for (const c of it.children) {
+                if (!c.visible) continue
+                if (c.objectName === "runHeader" || (c.objectName === "toolHead" && c.activeFocusOnTab)) all.push(c)
+                else walk(c)
+            }
+        }
+        walk(view.contentItem)
+        const at = all.map(c => ({ c, y: c.mapToItem(view.contentItem, 0, 0).y })).sort((a, b) => a.y - b.y)
+        const seen = at.filter(o => o.y + o.c.height > view.contentY && o.y < view.contentY + view.height)
+        const pick = (seen.length ? seen : at).pop()
+        if (pick) focusStep(pick.c)
+        return !!pick
+    }
+    // Focus from the keyboard (not a click): what shows its ring.
+    // (The step last focused by a click; a key, any key, clears it.)
+    property Item clickedStep: null
+    function keyFocus(item) { return item.activeFocus && clickedStep !== item }
+    function clickFocus(item) { clickedStep = item; item.forceActiveFocus(Qt.MouseFocusReason) }
+    // Typing in a run goes on to the composer.
+    function typedOn(e) {
+        if (e.text === "" || e.text < " " || (e.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) return false
+        root.leaveRuns(e.text)
+        return true
+    }
     // A step's keys (Up, Down, Escape); true when it moved.
     function stepKey(step, key) {
         const steps = runSteps(step.stepGroup), i = steps.indexOf(step)
@@ -310,14 +342,19 @@ Item {
         // The keyboard: Tab to a run; Enter or Space folds it, Down goes
         // into its steps.
         activeFocusOnTab: true
+        Accessible.role: Accessible.Button
+        Accessible.name: "Run: " + runHead.summary + (runHead.isOpen ? ", open" : ", folded")
         Keys.onPressed: e => {
+            root.clickedStep = null
             if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter || e.key === Qt.Key_Space) { view.toggleRun(runHead.group, runHead.dflt); e.accepted = true }
             else if (e.key === Qt.Key_Down && runHead.isOpen) { const s = root.runSteps(runHead.group); if (s.length) { root.focusStep(s[0]); e.accepted = true } }
+            else if (e.key === Qt.Key_Escape) { root.leaveRuns(""); e.accepted = true }
+            else e.accepted = root.typedOn(e)
         }
         Rectangle {
             x: -6; width: parent.width + 12; height: parent.height; radius: 6
             color: runHover.hovered ? Theme.hover : "transparent"
-            border.width: runHead.activeFocus ? 1 : 0
+            border.width: root.keyFocus(runHead) ? 1 : 0
             border.color: Theme.accent
         }
         RowLayout {
@@ -336,7 +373,7 @@ Item {
             Rectangle { objectName: "runLive"; visible: runHead.dflt; implicitWidth: 6; implicitHeight: 6; radius: 3; color: root.session.hasRequest ? Theme.warning : Theme.primary }
         }
         HoverHandler { id: runHover; cursorShape: Qt.PointingHandCursor }
-        TapHandler { onTapped: view.toggleRun(runHead.group, runHead.dflt) }
+        TapHandler { onTapped: { root.clickFocus(runHead); view.toggleRun(runHead.group, runHead.dflt) } }
     }
     // A thought in a run: one line, its text a click away.
     component ThoughtLine: ColumnLayout {
@@ -353,14 +390,17 @@ Item {
             readonly property string stepGroup: thought.group
             Layout.fillWidth: true
             implicitHeight: thoughtHead.implicitHeight + 6
+            Accessible.role: Accessible.Button
+            Accessible.name: "Thought: " + thought.text.trim().split("\n")[0] + (thought.open ? ", open" : "")
             Keys.onPressed: e => {
+                root.clickedStep = null
                 if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter || e.key === Qt.Key_Space) { view.toggle(thought.rowKey); e.accepted = true }
-                else e.accepted = root.stepKey(thoughtBox, e.key)
+                else e.accepted = root.stepKey(thoughtBox, e.key) || root.typedOn(e)
             }
             Rectangle { x: -6; width: parent.width + 12; height: parent.height; radius: 6; color: thoughtHover.hovered ? Theme.hover : "transparent" }
             // (Focused: ringed from its word, the run's line left clear.)
             Rectangle {
-                visible: thoughtBox.activeFocus
+                visible: root.keyFocus(thoughtBox)
                 x: thoughtWord.x - 6; width: parent.width - x + 6; height: parent.height; radius: 6
                 color: "transparent"; border.width: 1; border.color: Theme.accent
             }
@@ -385,7 +425,7 @@ Item {
                 Item { Layout.fillWidth: true; visible: thought.open }
             }
             HoverHandler { id: thoughtHover; cursorShape: Qt.PointingHandCursor }
-            TapHandler { onTapped: view.toggle(thought.rowKey) }
+            TapHandler { onTapped: { root.clickFocus(thoughtBox); view.toggle(thought.rowKey) } }
         }
         TextEdit {
             Layout.fillWidth: true
@@ -429,6 +469,24 @@ Item {
             if (!lines) return String(i + 1)
             const l = lines[i]
             return !l ? "" : signs ? (l.mark === "add" ? "+" : l.mark === "remove" ? "−" : "") : l.n
+        }
+        // Wrapped lines: each its own block, hanging from its indentation.
+        FontMetrics { id: monoMetrics; font.family: Theme.mono; font.pixelSize: ct.fontSize }
+        function htmlLines(h) {
+            const inner = h.replace(/^<pre[^>]*>/, "").replace(/<\/pre>\s*$/, "")
+            const out = inner.split("\n")
+            if (out.length > 1 && out[out.length - 1] === "") out.pop()
+            return out
+        }
+        function hanging(lines) {
+            const ch = monoMetrics.advanceWidth(" ")
+            return lines.map(h => {
+                const plain = h.replace(/<[^>]*>/g, "")
+                const lead = /^[ \t]*/.exec(plain)[0].replace(/\t/g, "    ").length
+                const hang = Math.round((lead + 2) * ch)
+                // (Each its own <pre>: a <p> lets the font join "=>" into an arrow.)
+                return "<pre style=\"margin:0; margin-left:" + hang + "px; text-indent:-" + hang + "px; white-space:pre-wrap;\">" + (h === "" ? " " : h) + "</pre>"
+            }).join("")
         }
         Label {
             id: probe
@@ -487,6 +545,8 @@ Item {
                 font.underline: opens && numberHover.hovered
                 HoverHandler { id: numberHover; enabled: parent.opens; cursorShape: Qt.PointingHandCursor }
                 TapHandler { enabled: parent.opens; onTapped: ct.openAt(ct.lines[index].p, Number(ct.number(index))) }
+                Accessible.role: opens ? Accessible.Link : Accessible.StaticText
+                Accessible.name: opens ? "Open " + ct.lines[index].p.split("/").pop() + " at line " + text : text
                 ToolTip.visible: opens && numberHover.hovered
                 ToolTip.text: "Open at line " + text
                 ToolTip.delay: 600
@@ -522,15 +582,18 @@ Item {
                     objectName: "codeText"
                     width: ct.wrap ? codeFlick.width - 10 : implicitWidth
                     textFormat: TextEdit.RichText
-                    // (A <pre> never wraps: with Word wrap, one that does.)
-                    readonly property string pre: "<pre style=\"margin:0;" + (ct.wrap ? "white-space:pre-wrap;" : "") + "\">"
-                    text: Theme.htmlStyle + (ct.lines ? pre + ct.lines.map(l => l.h === "" ? " " : l.h).join("\n") + "</pre>" : ct.html.replace("<pre style=\"margin:0;\">", pre))
+                    // (Unwrapped, one <pre>. Wrapped, a block per line, its
+                    // rows after the first under its indentation and 2 more,
+                    // so the rest of a line never reads as a line of its own.)
+                    text: Theme.htmlStyle + (!ct.wrap ? (ct.lines ? "<pre style=\"margin:0;\">" + ct.lines.map(l => l.h === "" ? " " : l.h).join("\n") + "</pre>" : ct.html)
+                                                     : ct.hanging(ct.lines ? ct.lines.map(l => l.h) : ct.htmlLines(ct.html)))
                     color: Theme.foreground
                     selectionColor: Theme.selection
                     selectedTextColor: Theme.foreground
                     readOnly: true
                     selectByMouse: true
-                    wrapMode: ct.wrap ? TextEdit.WrapAnywhere : TextEdit.NoWrap
+                    // (At a space where there is one; a long word breaks anywhere.)
+                    wrapMode: ct.wrap ? TextEdit.Wrap : TextEdit.NoWrap
                     font.family: Theme.mono
                     font.pixelSize: ct.fontSize
                     // (A file's name in it: a link to the file.)
@@ -686,10 +749,14 @@ Item {
             // (Up and Down); one on its own takes Tab. Enter or Space opens
             // it, Ctrl+C copies its listing.
             activeFocusOnTab: card.group === "" && (card.canOpen || !!card.code || card.preview)
+            Accessible.role: Accessible.Button
+            Accessible.name: root.toolName(card.title) + ", " + card.target + (card.result !== "" ? ", " + card.result.replace(/<[^>]+>/g, "") : "") + (card.canOpen ? (card.open ? ", open" : ", folded") : "")
             Keys.onPressed: e => {
+                root.clickedStep = null
                 if (card.canOpen && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter || e.key === Qt.Key_Space)) { view.toggle(card.rowKey); e.accepted = true }
                 else if (e.key === Qt.Key_C && (e.modifiers & Qt.ControlModifier) && (!!card.code || card.preview)) { callCopy.clicked(); e.accepted = true }
-                else e.accepted = card.group !== "" && root.stepKey(headBox, e.key)
+                else if (e.key === Qt.Key_Escape && card.group === "") { root.leaveRuns(""); e.accepted = true }
+                else e.accepted = (card.group !== "" && root.stepKey(headBox, e.key)) || root.typedOn(e)
             }
             Rectangle {
                 x: -6; width: parent.width + 12; height: parent.height; radius: 6
@@ -697,7 +764,7 @@ Item {
             }
             // (Focused: ringed from its name, the run's line left clear.)
             Rectangle {
-                visible: headBox.activeFocus
+                visible: root.keyFocus(headBox)
                 x: toolNameLabel.x - 6; width: parent.width - x + 6; height: parent.height; radius: 6
                 color: "transparent"; border.width: 1; border.color: Theme.accent
             }
@@ -738,14 +805,14 @@ Item {
                 CopyButton {
                     id: callCopy
                     // (A folded read offers its lines instead; Ctrl+C still copies.)
-                    visible: (card.codeShown || card.preview) && (cardHover.hovered || copied || activeFocus || headBox.activeFocus)
+                    visible: (card.codeShown || card.preview) && (cardHover.hovered || copied || activeFocus || root.keyFocus(headBox))
                     copyFrom: () => card.code ? root.session.codeText(card.title, card.command, card.subtitle.replace(/…$/, ""), card.text)
                                               : card.diff.split("\n").filter(l => !l.startsWith("-")).map(l => l.slice(1)).join("\n")
                 }
                 // An older read, folded to its line: what a click does.
                 Label {
                     objectName: "showLines"
-                    visible: card.isRead && !!card.code && !card.codeShown && (headHover.hovered || headBox.activeFocus)
+                    visible: card.isRead && !!card.code && !card.codeShown && (headHover.hovered || root.keyFocus(headBox))
                     text: "Show lines"
                     color: Theme.textMuted
                     font.pixelSize: Theme.px(12)
@@ -766,7 +833,7 @@ Item {
                 }
             }
             HoverHandler { id: headHover; cursorShape: card.canOpen ? Qt.PointingHandCursor : Qt.ArrowCursor }
-            TapHandler { enabled: card.canOpen; onTapped: view.toggle(card.rowKey) }
+            TapHandler { enabled: card.canOpen; onTapped: { root.clickFocus(headBox); view.toggle(card.rowKey) } }
         }
         // The subagents this call started (the task tool), as a tree.
         RowLayout {

@@ -179,13 +179,17 @@ fn highlighter() -> &'static Highlighter {
 
 /// Appends a highlighted piece: plain text for the default class.
 fn push_token(html: &mut String, class: u8, piece: &str) {
-    if class == 0 {
-        escape_into(html, piece);
+    // (A line's newline stays outside its span: each line closes its own,
+    // so the lines can be split into blocks.)
+    let (body, newline) = piece.strip_suffix('\n').map_or((piece, ""), |b| (b, "\n"));
+    if class == 0 || body.is_empty() {
+        escape_into(html, body);
     } else {
         html.push_str(&format!("<span class=\"s{class}\">"));
-        escape_into(html, piece);
+        escape_into(html, body);
         html.push_str("</span>");
     }
+    html.push_str(newline);
 }
 
 /// Loads the syntax definitions ahead of time (they take a moment to parse).
@@ -409,6 +413,15 @@ mod tests {
         assert_eq!(plain_text("<p>Hello <b>world</b> &amp; you</p><ul><li>one</li><li>two&nbsp;x</li></ul>"), "Hello world & you\none\ntwo x");
         assert_eq!(plain_text("<table><tr><th>A</th><th>B</th></tr></table>"), "A, B");
         assert_eq!(plain_text("a &lt;b&gt; c"), "a <b> c");
+    }
+
+    #[test]
+    fn lines_close_their_spans() {
+        let html = highlight("fn main() {\n    let s = \"a\";\n}\n", "rs");
+        let inner = html.trim_start_matches("<pre style=\"margin:0;\">").trim_end_matches("</pre>");
+        for line in inner.split('\n') {
+            assert_eq!(line.matches("<span").count(), line.matches("</span>").count(), "{line}");
+        }
     }
 
     #[test]

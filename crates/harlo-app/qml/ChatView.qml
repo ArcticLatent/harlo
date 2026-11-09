@@ -450,6 +450,8 @@ Rectangle {
                 session: root.session
                 onOpenDiff: path => root.openDiff(path)
                 onOpenFileAt: (path, line) => { fileEditor.showLine(path, line); root.requestOpenFile(path) }
+                // Leaving the runs (Escape), or typing there: the composer.
+                onLeaveRuns: text => { if (text !== "") composer.insertText(text); else composer.focusInput() }
                 onEditRequested: row => root.session.editAndResend(row)
                 onUndoRequested: key => undoDialog.show(key)
                 onSubagentRequested: (agent, steer) => subagentDialog.show(agent, steer)

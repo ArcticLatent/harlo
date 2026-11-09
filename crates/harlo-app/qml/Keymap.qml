@@ -11,7 +11,7 @@ QtObject {
     readonly property var defaults: ({
         palette: "Ctrl+K", goToSession: "Ctrl+P", searchAll: "Ctrl+Shift+F", actions: "Ctrl+Shift+P",
         nextTab: "Ctrl+Tab", nextTabAlt: "Ctrl+PgDown", prevTab: "Ctrl+Shift+Tab", prevTabAlt: "Ctrl+PgUp",
-        jumpPrompt: "Ctrl+J", prevPrompt: "Alt+Up", nextPrompt: "Alt+Down",
+        jumpPrompt: "Ctrl+J", prevPrompt: "Alt+Up", nextPrompt: "Alt+Down", focusRuns: "Ctrl+Shift+Up",
         newSession: "Ctrl+N", closeTab: "Ctrl+W",
         toggleSidebar: "Ctrl+B", settings: "Ctrl+,", shortcuts: "Ctrl+/", quit: "Ctrl+Q",
         contextPanel: "Ctrl+Shift+I", activityPanel: "Ctrl+Shift+A", changesPanel: "Ctrl+Shift+G", filesPanel: "Ctrl+Shift+E", notesPanel: "Ctrl+Shift+N",
