@@ -279,29 +279,7 @@ impl Diagrams {
 
 /// The ```mermaid blocks of a reply, in order.
 pub fn blocks(text: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut open: Option<(String, Vec<&str>)> = None;
-    for line in text.lines() {
-        let t = line.trim();
-        match &mut open {
-            None => {
-                if let Some(rest) = t.strip_prefix("```").or_else(|| t.strip_prefix("~~~")) {
-                    if rest.trim().eq_ignore_ascii_case("mermaid") {
-                        open = Some((t[..3].to_owned(), Vec::new()));
-                    }
-                }
-            }
-            Some((fence, lines)) => {
-                if t.starts_with(fence.as_str()) && t.trim_start_matches(fence.chars().next().unwrap_or('`')).is_empty() {
-                    out.push(lines.join("\n"));
-                    open = None;
-                } else {
-                    lines.push(line);
-                }
-            }
-        }
-    }
-    out
+    harlo_core::visuals::blocks(text, "mermaid")
 }
 
 /// What's wrong in a diagram's source, as Mermaid would see it: None when
@@ -329,26 +307,28 @@ pub fn problem(source: &str) -> Option<String> {
     }
 }
 
-/// What harlo tells an agent whose reply has diagrams that don't parse
-/// (None: they all do).
-pub fn fix_message(reply: &str) -> Option<String> {
+/// What harlo tells an agent whose reply has blocks it can't show: a
+/// diagram that doesn't parse, an options block without choices, a
+/// mockup of a file that isn't there (looked for in `cwd`). None: all
+/// can be.
+pub fn fix_message(reply: &str, cwd: Option<&std::path::Path>) -> Option<String> {
     let found = blocks(reply);
-    let bad: Vec<String> = found
+    let mut bad: Vec<String> = found
         .iter()
         .enumerate()
-        .filter_map(|(i, b)| problem(b).map(|p| if found.len() > 1 { format!("diagram {} of {}: {p}", i + 1, found.len()) } else { p }))
-        .take(3)
+        .filter_map(|(i, b)| problem(b).map(|p| if found.len() > 1 { format!("diagram {} of {} doesn't parse ({p})", i + 1, found.len()) } else { format!("a diagram doesn't parse ({p})") }))
         .collect();
+    bad.extend(harlo_core::visuals::problems(reply, cwd));
+    bad.truncate(3);
     if bad.is_empty() {
         return None;
     }
     let one = bad.len() == 1;
     Some(format!(
-        "[harlo] {} in your last reply didn't parse, so it shows as code instead of a picture: {}. Send {} again, fixed, in a ```mermaid block (only the diagram{}; no need to repeat the rest).",
-        if one { "A diagram" } else { "Diagrams" },
+        "[harlo] In your last reply, {}, so it shows as code. Send {} again, fixed (only {}; no need to repeat the rest).",
         bad.join("; "),
         if one { "it" } else { "them" },
-        if one { "" } else { "s" }
+        if one { "that block" } else { "those blocks" }
     ))
 }
 
@@ -424,10 +404,12 @@ mod tests {
         assert!(bad.starts_with("line 3: ") || bad.starts_with("line 4: "), "{bad}");
         assert!(problem("flowchar TD\n A --> B").unwrap().starts_with("no diagram type"));
         assert_eq!(problem("  "), Some("it's empty".into()));
-        let said = fix_message(reply).unwrap();
-        assert!(said.starts_with("[harlo] A diagram in your last reply didn't parse, so it shows as code instead of a picture: diagram 2 of 2: line "), "{said}");
-        assert!(said.ends_with("Send it again, fixed, in a ```mermaid block (only the diagram; no need to repeat the rest)."), "{said}");
-        assert_eq!(fix_message("No diagrams here.\n```mermaid\nsequenceDiagram\n  A->>B: hi\n```"), None);
+        let said = fix_message(reply, None).unwrap();
+        assert!(said.starts_with("[harlo] In your last reply, diagram 2 of 2 doesn't parse (line "), "{said}");
+        assert!(said.ends_with("), so it shows as code. Send it again, fixed (only that block; no need to repeat the rest)."), "{said}");
+        assert_eq!(fix_message("No diagrams here.\n```mermaid\nsequenceDiagram\n  A->>B: hi\n```", None), None);
+        let two = fix_message("```options\n## Only\n```\n```mermaid\nflowchar TD\n```", None).unwrap();
+        assert!(two.contains("a diagram doesn't parse (no diagram type") && two.contains("; an options block can't be drawn: it has only one choice") && two.contains("Send them again, fixed (only those blocks;"), "{two}");
     }
 
     #[test]

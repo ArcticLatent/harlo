@@ -94,6 +94,7 @@ struct DiagramZoom: View {
     @Environment(\.palette) private var p
     let image: UIImage
     let size: CGSize
+    var title = "Diagram"
     @State private var scale: CGFloat = 1
     @State private var last: CGFloat = 1
 
@@ -119,7 +120,7 @@ struct DiagramZoom: View {
                 }
             }
             .background(Color(p.codeBackground).ignoresSafeArea())
-            .navigationTitle("Diagram")
+            .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }

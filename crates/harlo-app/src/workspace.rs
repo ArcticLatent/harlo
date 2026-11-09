@@ -5498,20 +5498,22 @@ impl Workspace {
         }
     }
 
-    /// A finished reply's Mermaid diagrams, checked off this thread: when
-    /// one doesn't parse (it shows as code), the agent is told what's
-    /// wrong and sends it again, once; not for a helper (its report has
+    /// A finished reply's diagrams, options and mockups, checked off this
+    /// thread: when one can't be shown (a diagram that doesn't parse, a
+    /// mockup of no file), the agent is told what's wrong and sends it
+    /// again, once; not for a helper (its report has
     /// gone to its parent) nor when you've written to it since.
     fn check_diagrams(mut self: Pin<&mut Self>, key: &str, reply: &str) {
-        if self.as_mut().rust_mut().diagram_asked.remove(key) || !self.orchestration_on || !reply.contains("mermaid") {
+        if self.as_mut().rust_mut().diagram_asked.remove(key) || !self.orchestration_on || !["```", "~~~"].iter().any(|f| reply.contains(f)) {
             return;
         }
         if self.orch_children.get(key).is_some_and(|c| c.notify) {
             return;
         }
+        let cwd = self.live.get(key).map(|e| e.info.cwd.clone());
         let (thread, key, reply) = (self.qt_thread(), key.to_owned(), reply.to_owned());
         crate::runtime().spawn_blocking(move || {
-            let Some(message) = crate::diagrams::fix_message(&reply) else { return };
+            let Some(message) = crate::diagrams::fix_message(&reply, cwd.as_deref()) else { return };
             let _ = thread.queue(move |mut this| {
                 if this.live.get(&key).is_none_or(|e| e.info.status == SessionStatus::Busy) {
                     return;
@@ -5537,6 +5539,11 @@ impl Workspace {
             "publish" => {
                 self.publish_phone_sessions();
                 json!({})
+            }
+            // (A session's folder, for its mockups.)
+            "sessionCwd" => {
+                let cwd = self.live.get(&key).map(|e| e.info.cwd.clone()).or_else(|| self.sessions.get(Path::new(&key)).map(|s| s.cwd.clone()));
+                json!({ "cwd": cwd.map(|c| c.to_string_lossy().into_owned()).unwrap_or_default() })
             }
             "open" => {
                 let live = self.as_mut().make_live(&key);

@@ -320,6 +320,10 @@ struct RowView: View {
         case "code":
             if row.title.lowercased() == "mermaid" && model.drawsDiagrams {
                 DiagramBlock(source: row.text, code: CodeBlock(spans: codeSpans, language: row.title, raw: row.text))
+            } else if row.title.lowercased() == "options", let choices = Visuals.options(row.text) {
+                OptionsBlock(choices: choices, code: CodeBlock(spans: codeSpans, language: row.title, raw: row.text))
+            } else if row.title.lowercased() == "mockup" && model.showsMockups {
+                MockupBlock(source: row.text, code: CodeBlock(spans: codeSpans, language: row.title, raw: row.text))
             } else {
                 CodeBlock(spans: codeSpans, language: row.title, raw: row.text)
             }

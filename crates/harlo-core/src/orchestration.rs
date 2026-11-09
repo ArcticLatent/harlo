@@ -587,7 +587,7 @@ pub fn call_line(session: &str, tool: &str, args: &Value) -> String {
 }
 
 /// harlo draws Mermaid: told to every session with harlo's tools.
-pub const DIAGRAMS: &str = "harlo shows Mermaid diagrams in your replies (```mermaid blocks) as pictures, on the desktop and on the phone: draw one when a flow, a structure or a sequence of steps is clearer as a picture than in words.";
+pub const DIAGRAMS: &str = crate::visuals::INSTRUCTIONS;
 
 /// The socket the bridge reaches harlo on: `--socket <path>` (agents start
 /// MCP servers with few environment variables), else `socket_path()`.

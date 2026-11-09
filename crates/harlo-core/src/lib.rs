@@ -55,6 +55,7 @@ pub mod splitdiff;
 pub mod starters;
 pub mod subagents;
 pub mod templates;
+pub mod visuals;
 pub mod stats;
 pub mod terminal;
 pub mod tool_facts;

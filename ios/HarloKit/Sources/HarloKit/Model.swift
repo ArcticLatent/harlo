@@ -868,6 +868,30 @@ public final class HarloModel {
         }
     }
 
+    /// harlo shows mockups to the phone (an older one doesn't).
+    public var showsMockups: Bool { features.contains("visuals") }
+
+    /// Mockups' pictures taken lately (by session and source): looked at
+    /// again after a while, since the agent may have changed the file.
+    @ObservationIgnored var mockups: [String: (at: Date, pictures: MockupPictures)] = [:]
+
+    /// A ```mockup block of the open session, as harlo shows it (nil: it
+    /// can't, `why` says why).
+    public func mockup(_ source: String) async -> (pictures: MockupPictures?, why: String) {
+        if demo || samples != nil { return (nil, "harlo shows mockups on your computer.") }
+        guard showsMockups else { return (nil, "This harlo doesn't show mockups on the phone.") }
+        guard let c = client, let key = session?.liveKey, !key.isEmpty else { return (nil, "Not connected to harlo.") }
+        let id = key + "|" + source
+        if let m = mockups[id], Date().timeIntervalSince(m.at) < 10 { return (m.pictures, "") }
+        do {
+            let m = try await c.mockup(source, of: key)
+            mockups[id] = (Date(), m)
+            return (m, "")
+        } catch {
+            return (nil, Self.describe(error))
+        }
+    }
+
     // ---- plan limits ------------------------------------------------------------
 
     /// The open session's plan limit, as harlo works it out.

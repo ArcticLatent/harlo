@@ -7043,7 +7043,7 @@ ApplicationWindow {
     function harloNotes() {
         const reqs = win.modelRequests()
         const msgs = (reqs[reqs.length - 1] || {}).messages || []
-        return msgs.filter(m => m.role === "user" && JSON.stringify(m.content).indexOf("A diagram in your last reply didn't parse") >= 0)
+        return msgs.filter(m => m.role === "user" && JSON.stringify(m.content).indexOf("In your last reply, a diagram doesn't parse") >= 0)
     }
     property string diagramKey2: ""
     SequentialAnimation {
@@ -7081,6 +7081,82 @@ ApplicationWindow {
         ScriptAction { script: {
             const reqs = win.modelRequests()
             win.check(reqs.length === 4, "broken again: harlo asks only once (" + reqs.length + " requests)")
+            win.summary(); Qt.quit() } }
+    }
+
+    // Options and mockups in a reply: a comparison drawn as cards (its code
+    // a click away), mockups the agent wrote shown as pictures with the one
+    // before them, taken again when it edits the file, and a mockup of a
+    // file that isn't there sent back to the agent.
+    property string mockUrl: ""
+    function visualRows() { return win.findAllNames("replyVisual", chat.transcript) }
+    SequentialAnimation {
+        id: visualSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlovisuals"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            win.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo")
+            Workspace.setApprovalMode(win.harloKey, "yolo") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(visualSteps, () => chat.session.modelName !== "", 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            const said = JSON.stringify(((win.modelRequests()[0] || {}).messages || []).filter(m => m.role === "system"))
+            win.sendByKeys("compare the approaches") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(visualSteps, () => win.chatText().indexOf("I'd match by key") >= 0 && chat.session.status === "idle", 15000) }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const said = JSON.stringify(((win.modelRequests()[0] || {}).messages || []).filter(m => m.role === "system"))
+            win.check(said.indexOf("```options") >= 0 && said.indexOf("```mockup") >= 0, "the agent is told about options and mockups")
+            const cards = win.findAllNames("optionCard", chat.transcript)
+            const marked = win.findAllNames("optionRecommended", chat.transcript)
+            win.check(cards.length === 2 && marked.length === 1, "the options are drawn as cards, the recommended one marked (" + cards.length + ", " + marked.length + ")")
+            win.check(win.findText("nothing to restore", chat.transcript) !== null && win.findText("the list still redraws", chat.transcript) !== null, "with their pros and cons")
+            win.shotWindow("clicks-harlo-options")
+            win.clickText("Code", chat.transcript) } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            win.check(win.findAllNames("optionCard", chat.transcript).length === 0 && win.findText("Cards", chat.transcript) !== null, "Code shows the block's text, Cards the cards again")
+            win.clickText("Cards", chat.transcript)
+            win.sendByKeys("mock up the settings") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(visualSteps, () => win.chatText().indexOf("That's the change") >= 0 && chat.session.status === "idle", 15000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(visualSteps, () => { const p = win.findName("mockupPicture"); return p !== null && p.visible }, 15000) }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const pic = win.findName("mockupPicture")
+            win.check(pic && pic.visible && pic.width <= 642 && Math.abs((pic.width - 2) / (pic.height - 2) - 1.6) < 0.02, "the mockup is shown as its picture, in its window's proportions, fitted to the column (" + (pic ? pic.width + "x" + pic.height : "none") + ")")
+            const cap = win.findName("mockupCaption")
+            win.check(cap && cap.text === "Settings with Sync now · After", "with its title (" + (cap ? cap.text : "") + ")")
+            win.mockUrl = pic.children[0].source.toString()
+            win.shotWindow("clicks-harlo-mockup")
+            win.clickItem(win.findName("mockupBefore"), "Before") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: win.waitUntil(visualSteps, () => { const p = win.findName("mockupPicture"); return p !== null && p.visible }, 15000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const pic = win.findName("mockupPicture")
+            win.check(win.findName("mockupCaption").text.indexOf("Before") >= 0 && pic.children[0].source.toString() !== win.mockUrl, "Before shows how it is now")
+            win.clickItem(win.findName("mockupBefore"), "After")
+            win.sendByKeys("change the mockup") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(visualSteps, () => { const p = win.findName("mockupPicture"); return p !== null && p.visible && p.children[0].source.toString() !== win.mockUrl && win.findName("mockupCaption").text.indexOf("After") >= 0 }, 15000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            win.check(true, "the agent's edit of the file shows in the picture")
+            win.sendByKeys("mock up a missing file") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(visualSteps, () => win.chatText().split("That's the change").length >= 3 && chat.session.status === "idle", 15000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const notes = win.modelRequests().reduce((all, b) => all.concat(b.messages || []), []).filter(m => m.role === "user" && JSON.stringify(m.content).indexOf("a mockup names `mockups/none.html`, which isn't there") >= 0)
+            win.check(notes.length >= 1, "a mockup of a file that isn't there goes back to the agent, which shows the right one")
             win.summary(); Qt.quit() } }
     }
 

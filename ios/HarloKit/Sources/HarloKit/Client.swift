@@ -53,16 +53,9 @@ public actor HarloClient {
 
     /// A connection to a recording: it answers as harlo did, and opening a
     /// session sends that session's events up to the scene.
+    /// (Replaying from the start: the model's first calls are answered.)
     public static func replaying(_ replay: Replay) -> HarloClient {
-        let c = HarloClient(endpoint: URL(string: "ws://127.0.0.1:9/replay")!, identity: KeyPair.generate(), harloKey: Data(repeating: 7, count: 32))
-        Task { await c.startReplay(replay) }
-        return c
-    }
-
-    private func startReplay(_ r: Replay) {
-        replay = r
-        isConnected = true
-        for e in r.latestShared() { if let ev = Event(e) { continuation.yield(ev) } }
+        HarloClient(endpoint: URL(string: "ws://127.0.0.1:9/replay")!, identity: KeyPair.generate(), harloKey: Data(repeating: 7, count: 32), replay: replay)
     }
 
     /// What a recording answers, with what harlo would send after it.
@@ -79,9 +72,11 @@ public actor HarloClient {
         return reply
     }
 
-    private init(endpoint: URL, identity: KeyPair, harloKey: Data) {
+    private init(endpoint: URL, identity: KeyPair, harloKey: Data, replay: Replay? = nil) {
         self.identity = identity
         self.harloKey = harloKey
+        self.replay = replay
+        isConnected = replay != nil
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 30
         session = URLSession(configuration: config)
@@ -90,6 +85,7 @@ public actor HarloClient {
         // (1 MB) is tight for a big row.
         task.maximumMessageSize = 16 << 20
         (events, continuation) = AsyncStream.makeStream(of: Event.self, bufferingPolicy: .unbounded)
+        for e in replay?.latestShared() ?? [] { if let ev = Event(e) { continuation.yield(ev) } }
     }
 
     private func hello(code: String?, deviceName: String, timeout: TimeInterval, endpoint: URL) async throws -> Ready {
@@ -355,6 +351,12 @@ public actor HarloClient {
         let r = try check(await call("diagram", ["source": .string(source), "light": .bool(light), "colors": .object(colors.mapValues { .string($0) })]))
         guard let png = Data(base64Encoded: r["png"].text), !png.isEmpty else { throw HarloError.closed("harlo sent no picture.") }
         return DiagramPicture(png: png, width: r["width"].double ?? 0, height: r["height"].double ?? 0)
+    }
+
+    /// A ```mockup block of a session: its pictures, taken by harlo.
+    public func mockup(_ source: String, of key: String) async throws -> MockupPictures {
+        let r = try check(await call("mockup", ["source": .string(source), "key": .string(key)]))
+        return MockupPictures(r)
     }
 
     /// A settled session back among its project's others.

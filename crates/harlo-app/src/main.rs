@@ -7,6 +7,7 @@ mod chat_session;
 mod ci;
 mod diagnostics;
 mod diagrams;
+mod visuals;
 mod dictation;
 mod terminal_session;
 mod test_input;

@@ -1943,6 +1943,17 @@ Item {
                                                                                              muted: String(Theme.muted), accent: String(Theme.primary), font: Theme.uiFont })))
                         : null
                     readonly property bool drawn: diagram !== null && diagram.state === "ready" && !showCode
+                    // Options drawn as cards, a mockup as its picture (Visuals);
+                    // their code a click away too. (A mockup's file is looked
+                    // at again every few seconds: an edit shows.)
+                    readonly property string kind: title.toLowerCase()
+                    readonly property var options: kind === "options" ? JSON.parse(Visuals.options(text)) : null
+                    property int mockTick: 0
+                    readonly property var mock: kind === "mockup" && Visuals.revision >= 0 && mockTick >= 0 ? JSON.parse(Visuals.mockup(text, root.session.cwd || "")) : null
+                    readonly property bool canShow: (options !== null && !options.error) || (mock !== null && !mock.error)
+                    readonly property bool visual: canShow && !showCode
+                    property bool showBefore: false
+                    Timer { interval: 2500; repeat: true; running: codeRow.mock !== null && codeRow.visual; onTriggered: codeRow.mockTick++ }
                     AgentHead { replyModel: codeRow.rowModel; visible: root.opensTurn(codeRow.ListView.previousSection); y: codeRow.gap - height - 10 }
                     width: view.width
                     implicitHeight: codeBox.height + gap
@@ -1953,7 +1964,7 @@ Item {
                         width: view.columnWidth
                         objectName: "replyCode"
                         HoverHandler { id: blockHover }
-                        height: codeRule.y + 1 + (codeRow.drawn ? diagramBox.height : blockCode.height) + (diagramNote.visible ? diagramNote.height : 0)
+                        height: codeRule.y + 1 + (codeRow.drawn ? diagramBox.height : codeRow.visual ? visualBox.height : blockCode.height) + (diagramNote.visible ? diagramNote.height : 0)
                         // (The same well as a tool's code: its header, a rule, the
                         // numbers on their own column.)
                         radius: 6
@@ -1962,21 +1973,30 @@ Item {
                             id: codeHeader
                             width: parent.width
                             height: 28
-                            Label { Layout.leftMargin: 10; text: root.session.languageName(codeRow.title); color: Theme.muted; font.pixelSize: Theme.px(12) }
+                            Label { Layout.leftMargin: 10; text: codeRow.kind === "options" ? "Options" : codeRow.kind === "mockup" ? "Mockup" : root.session.languageName(codeRow.title); color: Theme.muted; font.pixelSize: Theme.px(12) }
                             Item { Layout.fillWidth: true }
+                            // A mockup with one of how it is now: either.
                             FlatButton {
-                                visible: codeRow.mermaid && codeRow.diagram !== null && codeRow.diagram.state === "ready"
+                                objectName: "mockupBefore"
+                                visible: codeRow.visual && codeRow.mock !== null && !!codeRow.mock.before
                                 Layout.preferredHeight: 22
-                                text: codeRow.showCode ? "Diagram" : "Code"
+                                text: codeRow.showBefore ? "After" : "Before"
+                                font.pixelSize: Theme.px(11)
+                                onClicked: codeRow.showBefore = !codeRow.showBefore
+                            }
+                            FlatButton {
+                                visible: (codeRow.mermaid && codeRow.diagram !== null && codeRow.diagram.state === "ready") || codeRow.canShow
+                                Layout.preferredHeight: 22
+                                text: !codeRow.showCode ? "Code" : codeRow.mermaid ? "Diagram" : codeRow.options !== null ? "Cards" : "Picture"
                                 font.pixelSize: Theme.px(11)
                                 onClicked: codeRow.showCode = !codeRow.showCode
                             }
                             FlatButton {
-                                visible: codeRow.mermaid
+                                visible: codeRow.mermaid || (codeRow.mock !== null && !codeRow.mock.error)
                                 Layout.preferredHeight: 22
                                 text: "Open in browser"
                                 font.pixelSize: Theme.px(11)
-                                onClicked: Diagrams.openInBrowser(codeRow.text, Theme.isLight)
+                                onClicked: codeRow.mermaid ? Diagrams.openInBrowser(codeRow.text, Theme.isLight) : Visuals.openMockup(codeRow.text, root.session.cwd || "", codeRow.showBefore)
                             }
                             CopyButton {
                                 Layout.rightMargin: wrapBlock.visible ? 0 : 6
@@ -2032,8 +2052,33 @@ Item {
                                 ToolTip.delay: 600
                             }
                         }
+                        // The options' cards, or the mockup's picture.
+                        Item {
+                            id: visualBox
+                            objectName: "replyVisual"
+                            anchors.top: codeRule.bottom
+                            visible: codeRow.visual
+                            width: parent.width
+                            height: visible ? (codeRow.options !== null ? optionCards.implicitHeight + 20 : mockupView.implicitHeight) : 0
+                            OptionsCards {
+                                id: optionCards
+                                visible: codeRow.options !== null
+                                x: 10
+                                y: 10
+                                width: parent.width - 20
+                                choices: codeRow.options && codeRow.options.choices ? codeRow.options.choices : []
+                            }
+                            MockupView {
+                                id: mockupView
+                                visible: codeRow.mock !== null
+                                width: parent.width
+                                mock: codeRow.mock && !codeRow.mock.error ? codeRow.mock : null
+                                showBefore: codeRow.showBefore
+                                onOpenRequested: before => Visuals.openMockup(codeRow.text, root.session.cwd || "", before)
+                            }
+                        }
                         Rectangle {
-                            visible: !codeRow.drawn
+                            visible: !codeRow.drawn && !codeRow.visual
                             anchors.top: blockCode.top
                             width: blockCode.gutterWidth - 6
                             height: blockCode.height
@@ -2044,7 +2089,7 @@ Item {
                             id: blockCode
                             objectName: "replyCodeView"
                             anchors.top: diagramNote.visible ? diagramNote.bottom : codeRule.bottom
-                            visible: !codeRow.drawn
+                            visible: !codeRow.drawn && !codeRow.visual
                             width: parent.width
                             html: codeRow.html
                             wrap: Theme.wrapCode || view.wraps[codeRow.rowKey] === true

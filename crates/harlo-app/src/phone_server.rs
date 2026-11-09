@@ -333,7 +333,7 @@ fn event(key: &str, u: &SessionUpdate) -> Option<Value> {
 /// (sessions say their machine), `settled` (settled sessions, for a phone
 /// that says it shows them), `limits` (plan limits: the `limits` call and
 /// event), `compaction` (a session's meta says where it compacts).
-const FEATURES: &[&str] = &["sessionMentions", "serverStart", "machines", "settled", "limits", "compaction", "connect", "modelServers", "putBack", "stoppedModels", "plan", "diagrams", "planRun", "helpers", "answerHelper", "team"];
+const FEATURES: &[&str] = &["sessionMentions", "serverStart", "machines", "settled", "limits", "compaction", "connect", "modelServers", "putBack", "stoppedModels", "plan", "diagrams", "visuals", "planRun", "helpers", "answerHelper", "team"];
 
 /// The session list for one phone: settled sessions only for one that
 /// shows them.
@@ -461,6 +461,17 @@ async fn diagram(msg: &Value) -> Value {
         Ok(Err(e)) => json!({ "error": e }),
         Err(_) => json!({ "error": "merman couldn't draw this diagram." }),
     }
+}
+
+/// A mockup (a ```mockup block of the session `key`) for the phone: its
+/// pictures, as `visuals::for_phone` gives them.
+async fn mockup(msg: &Value) -> Value {
+    let cwd = crate::phone_bridge::call(json!({ "op": "sessionCwd", "key": msg["key"] })).await;
+    let Some(cwd) = cwd["cwd"].as_str().filter(|c| !c.is_empty()).map(std::path::PathBuf::from) else {
+        return json!({ "error": "That session isn't available." });
+    };
+    let source = msg["source"].as_str().unwrap_or_default().to_owned();
+    tokio::task::spawn_blocking(move || crate::visuals::for_phone(&source, &cwd)).await.unwrap_or_else(|_| json!({ "error": "harlo couldn't show this mockup." }))
 }
 
 /// A server as phones show it.
@@ -972,13 +983,14 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
                         Value::Null
                     }
                     // (Off the loop: machines and model servers are asked over SSH.)
-                    "connect" | "servers" | "stoppedModels" | "startServer" | "stopServer" | "diagram" => {
+                    "connect" | "servers" | "stoppedModels" | "startServer" | "stopServer" | "diagram" | "mockup" => {
                         let (msg, later, id) = (msg.clone(), later_tx.clone(), id.clone());
                         tokio::spawn(async move {
                             let mut reply = match msg["op"].as_str().unwrap_or_default() {
                                 "connect" => connect_machine(&msg).await,
                                 "servers" => model_servers().await,
                                 "diagram" => diagram(&msg).await,
+                                "mockup" => mockup(&msg).await,
                                 "stoppedModels" => {
                                     let models: Vec<String> = msg["models"].as_array().into_iter().flatten().filter_map(|m| m.as_str().map(str::to_owned)).collect();
                                     let (agent, host) = (msg["agent"].as_str().unwrap_or_default().to_owned(), msg["host"].as_str().unwrap_or_default().to_owned());

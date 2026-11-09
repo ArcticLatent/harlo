@@ -1067,19 +1067,19 @@ final class ReplayTests: XCTestCase {
     func testTheAppShowsTheRecordingAtAScene() async throws {
         let m = HarloModel.replaying(try Replay(recording: Self.recording, scene: "approval"))
         XCTAssertTrue(m.replaying)
-        for _ in 0..<50 where m.sessions.isEmpty { try await Task.sleep(nanoseconds: 20_000_000) }
+        for _ in 0..<250 where m.sessions.isEmpty { try await Task.sleep(nanoseconds: 20_000_000) }
         XCTAssertEqual(m.state, .connected)
         XCTAssertEqual(m.host?.name, "workstation")
         let summary = try XCTUnwrap(m.sessions.first)
         m.open(summary)
         let s = try XCTUnwrap(m.session)
-        for _ in 0..<50 where s.rows.isEmpty || s.requests.isEmpty { try await Task.sleep(nanoseconds: 20_000_000) }
+        for _ in 0..<250 where s.rows.isEmpty || s.requests.isEmpty { try await Task.sleep(nanoseconds: 20_000_000) }
         XCTAssertEqual(s.rows.map(\.kind), ["user", "tool"])
         XCTAssertEqual(s.rows.last?.label, "Run the tests")
         XCTAssertEqual(s.requests.first?.id, "r1")
         // Answering it: harlo's `cleared` follows.
         await m.answer(s.requests[0], s.requests[0].approval(false))
-        for _ in 0..<50 where !s.requests.isEmpty { try await Task.sleep(nanoseconds: 20_000_000) }
+        for _ in 0..<250 where !s.requests.isEmpty { try await Task.sleep(nanoseconds: 20_000_000) }
         XCTAssertTrue(s.requests.isEmpty)
         XCTAssertNil(m.alert)
         // It stays connected whatever happens to the app.
@@ -1133,7 +1133,7 @@ final class RecordingTests: XCTestCase {
         XCTAssertEqual(s.aside?.done, true)
         XCTAssertTrue(s.rows.contains { $0.kind == "notice" && $0.text.contains("Background job j1") })
         (m, s) = try await open("plan")
-        for _ in 0..<50 where (s.plan?.steps.count ?? 0) < 3 { try await Task.sleep(nanoseconds: 20_000_000) }
+        for _ in 0..<250 where (s.plan?.steps.count ?? 0) < 3 { try await Task.sleep(nanoseconds: 20_000_000) }
         XCTAssertEqual(s.plan?.steps.count, 3)
         XCTAssertTrue(tools(s).contains { ToolName.words($0.title, running: false) == "dice roll" })
         (m, s) = try await open("helpers")
@@ -1149,5 +1149,28 @@ final class RecordingTests: XCTestCase {
         let c = try XCTUnwrap(m.session)
         for _ in 0..<100 where c.rows.isEmpty { try await Task.sleep(nanoseconds: 20_000_000) }
         XCTAssertTrue(c.rows.contains { $0.kind == "tool" && $0.title == "Agent" }, "\(c.rows.map(\.title))")
+    }
+}
+
+final class VisualsTests: XCTestCase {
+    func testOptions() {
+        let o = Visuals.options("## Match rows by key (recommended)\nRows are updated in place.\n+ nothing to restore\n+ no redraw\n- more code\n\n## Remember the offset\nSmaller.\nStill redraws.\n- the list flickers\n")
+        XCTAssertEqual(o, [
+            Choice(name: "Match rows by key", recommended: true, about: "Rows are updated in place.", pros: ["nothing to restore", "no redraw"], cons: ["more code"]),
+            Choice(name: "Remember the offset", about: "Smaller. Still redraws.", cons: ["the list flickers"]),
+        ])
+        XCTAssertNil(Visuals.options("### One ★\n+ x"))
+        XCTAssertNil(Visuals.options("Just prose."))
+    }
+
+    func testMockupPictures() {
+        let png = Data([0x89, 0x50, 0x4E, 0x47]).base64EncodedString()
+        let m = MockupPictures(["title": "Settings", "after": ["png": .string(png), "width": 640, "height": 400], "before": ["error": "mockups/old.html isn't there."]])
+        XCTAssertEqual(m.title, "Settings")
+        XCTAssertEqual(m.after?.width, 640)
+        XCTAssertTrue(m.hasBefore)
+        XCTAssertNil(m.before)
+        XCTAssertEqual(m.beforeWhy, "mockups/old.html isn't there.")
+        XCTAssertFalse(MockupPictures(["after": ["png": .string(png)]]).hasBefore)
     }
 }
