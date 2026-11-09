@@ -148,8 +148,8 @@ const TOKEN_CLASSES: &[(u8, &str)] = &[
     (3, "string, punctuation.definition.string, markup.raw"),
     (4, "constant.numeric, constant.language, constant.character, constant.other, support.constant"),
     (5, "entity.name.function, support.function, variable.function, entity.other.attribute-name"),
-    (6, "variable.parameter, variable.other.member, support.variable, variable.language"),
-    (7, "entity.name.type, entity.name.class, entity.name.struct, entity.name.enum, support.type, support.class, storage.type, entity.other.inherited-class"),
+    (6, "variable.parameter, variable.other.member, support.variable, variable.language, entity.name.label"),
+    (7, "entity.name.type, entity.name.class, entity.name.struct, entity.name.enum, support.type, support.class, storage.type, entity.other.inherited-class, entity.name.table, entity.name.section, entity.section"),
     (8, "keyword.operator"),
     (9, "markup.inserted"),
     (10, "markup.deleted"),
@@ -389,4 +389,3 @@ mod tests {
         assert_eq!(plain_text("a &lt;b&gt; c"), "a <b> c");
     }
 }
-

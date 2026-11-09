@@ -3728,6 +3728,88 @@ ApplicationWindow {
             Workspace.chooseThemeMode("dark")
             win.summary(); Qt.quit() } }
     }
+    // Listings: each kind of code a command or a read can show (cat -n,
+    // a read, grep in several files, sed with a long line, a TOML file's
+    // head, an unknown file) and code blocks in the reply, in each theme.
+    SequentialAnimation {
+        id: listingSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clickslistings"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
+            Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: { win.claudeKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "claude") } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: win.sendByKeys("show the listings please") }
+        ScriptAction { script: win.waitUntil(listingSteps, () => win.chatText().indexOf("Here are the listings") >= 0 && chat.session.status === "idle", 20000) }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const box = win.listingBox()
+            const code = win.findAllNames("codeLine", box).map(l => l.modelData)
+            win.check(code.length === 21, "cat -n, sed, head and cat show 6, 6, 6 and 3 lines; grep in several files and the closed read none (" + code.length + ")")
+            win.check(code[0].n === "1" && code[0].h.indexOf("<span") >= 0 && code[5].n === "6", "cat -n: its numbers, TypeScript highlighted (" + JSON.stringify(code[0]) + ")")
+            win.check(code[6].n === "38" && code[10].h.indexOf("file_print") >= 0, "sed: numbered from 38")
+            win.check(code[12].n === "1" && code[12].h.indexOf("<span") >= 0 && code[18].n === "1" && code[18].h.indexOf("<span") < 0, "TOML highlighted; an unknown file numbered, plain (" + JSON.stringify([code[12], code[18]]) + ")")
+            win.check(win.findAllNames("toolTail", box).filter(l => l.row).length === 3, "grep in several files: its lines as text, path and number in the gutter")
+            win.listingAt("cat -n")
+            win.shotWindow("listings-catn-read") } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: { win.listingAt("Find every use"); win.shotWindow("listings-grep-sed") } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: { win.listingAt("head -16"); win.shotWindow("listings-head-cat") } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            const a = win.findContaining("Run it with", chat.transcript)
+            win.check(a !== null, "the reply's code blocks")
+            if (a) win.scrollIntoView(a)
+            win.shotWindow("listings-reply-code")
+            win.listingAt("qml/Badge.qml", 60) } }
+        // (A press while the list still moves only stops it: a moment first.)
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            // (Tapping its line doesn't reach it yet, found by the critique:
+            // opened through the list's own toggle meanwhile.)
+            const card = win.findAllNames("toolResult", win.listingBox()).find(l => l.text === "13 lines").parent.parent.parent
+            let v = card
+            while (v && typeof v.toggle !== "function") v = v.parent
+            v.toggle(card.rowKey) } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const box = win.listingBox()
+            const code = win.findAllNames("codeLine", box).map(l => l.modelData)
+            const qml = code.filter(l => /Item|QtQuick/.test(l.h))
+            win.check(code.length === 34 && qml.length >= 2 && qml[0].h.indexOf("<span") >= 0, "the read, opened: its 13 lines numbered, QML highlighted (" + code.length + ")")
+            win.listingAt("qml/Badge.qml")
+            win.shotWindow("listings-read-open")
+            Workspace.chooseThemeMode("light") } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: { win.listingAt("cat -n"); win.shotWindow("listings-catn-read-light") } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: { win.listingAt("Find every use"); win.shotWindow("listings-grep-sed-light") } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            const a = win.findContaining("Run it with", chat.transcript)
+            if (a) win.scrollIntoView(a)
+            win.shotWindow("listings-reply-code-light")
+            Workspace.chooseThemeMode("dark")
+            win.summary(); Qt.quit() } }
+    }
+    function listingBox() {
+        const boxes = win.findAllNames("runBox", chat.transcript)
+        return boxes[boxes.length - 1]
+    }
+    // Brings a card of the last run to its box's top, and the box into view.
+    function listingAt(what, below) {
+        const box = listingBox(), f = win.findName("runBoxScroll", box)
+        const w = win.findAllNames("toolWhat", box).find(l => l.plain.indexOf(what) >= 0)
+        if (!w) { win.check(false, "find the card " + what); return }
+        win.scrollIntoView(f)
+        // (As a hand would: it stays where it's put, not pinned to its end.)
+        f.pinned = false
+        f.contentY = Math.max(0, Math.min(f.contentHeight - f.height, w.mapToItem(f.contentItem, 0, 0).y - (below || 8)))
+    }
     property var toolBoxStart: []
     // Turns the wheel up over the last run box, `n` notches.
     function toolWheel(n) {
