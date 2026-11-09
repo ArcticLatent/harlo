@@ -36,6 +36,10 @@ pub mod qobject {
         /// Opens the diagram in the browser (a page in the cache folder).
         #[qinvokable]
         fn open_in_browser(self: &Diagrams, source: &QString, light: bool);
+        /// Where a flowchart's boxes are in its picture: `[{ id, x, y, w,
+        /// h }]`, as fractions of its width and height (to click on them).
+        #[qinvokable]
+        fn boxes(self: &Diagrams, source: &QString) -> QString;
     }
 }
 
@@ -256,6 +260,10 @@ impl Diagrams {
         });
     }
 
+    pub fn boxes(&self, source: &QString) -> QString {
+        QString::from(&Value::Array(node_boxes(&source.to_string())).to_string())
+    }
+
     pub fn open_in_browser(&self, source: &QString, light: bool) {
         if put_mermaid().is_err() {
             return;
@@ -278,6 +286,68 @@ impl Diagrams {
 }
 
 /// The ```mermaid blocks of a reply, in order.
+/// A flowchart's boxes in its picture (see `boxes`), laid out as merman
+/// lays out the picture, from its SVG: each node's place and its box's size,
+/// over the drawing's view box.
+pub fn node_boxes(source: &str) -> Vec<Value> {
+    static SEEN: OnceLock<std::sync::Mutex<HashMap<String, Vec<Value>>>> = OnceLock::new();
+    let seen = SEEN.get_or_init(Default::default);
+    if let Some(b) = seen.lock().unwrap().get(source) {
+        return b.clone();
+    }
+    let svg = (|| {
+        let environment = SvgEnvironment::deterministic().with_native_font_context(fonts().ok()?).ok()?;
+        let renderer = Renderer::new().with_engine(Engine::new().with_site_config(MermaidConfig::from_value(mermaid_config(false, &json!({})))));
+        let request = RenderRequest::svg(source, OperationControl::new(), SvgRequest { environment, ..Default::default() });
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| renderer.render(request))).ok()?.ok()? {
+            RenderOutput::Svg(Some(out)) => Some(out.svg().to_owned()),
+            _ => None,
+        }
+    })();
+    let found = svg.map(|svg| svg_boxes(&svg)).unwrap_or_default();
+    seen.lock().unwrap().insert(source.to_owned(), found.clone());
+    found
+}
+
+/// The boxes in a merman flowchart's SVG.
+fn svg_boxes(svg: &str) -> Vec<Value> {
+    let attr = |tag: &str, name: &str| -> Option<String> {
+        let at = tag.find(&format!(" {name}=\""))? + name.len() + 3;
+        Some(tag[at..].split('"').next()?.to_owned())
+    };
+    let nums = |s: &str| s.split(|c: char| c == ' ' || c == ',').filter(|t| !t.is_empty()).filter_map(|t| t.parse::<f64>().ok()).collect::<Vec<_>>();
+    let Some(view) = svg.find("<svg").and_then(|i| attr(&svg[i..svg[i..].find('>').map_or(svg.len(), |e| i + e)], "viewBox")).map(|v| nums(&v)) else { return vec![] };
+    let [vx, vy, vw, vh] = view[..] else { return vec![] };
+    if vw <= 0.0 || vh <= 0.0 {
+        return vec![];
+    }
+    let mut out = vec![];
+    let mut rest = svg;
+    while let Some(i) = rest.find("<g class=\"node") {
+        rest = &rest[i..];
+        let tag = &rest[..rest.find('>').unwrap_or(rest.len())];
+        let id = attr(tag, "id").and_then(|id| {
+            let core = id.rsplit_once('-')?.0.to_owned();
+            Some(core.rsplit_once("flowchart-")?.1.to_owned())
+        });
+        let at = attr(tag, "transform").and_then(|t| Some(nums(t.strip_prefix("translate(")?.trim_end_matches(')'))));
+        let next = rest[1..].find("<g class=\"node").map_or(rest.len(), |n| n + 1);
+        let body = &rest[..next];
+        let rect = body.find("label-container").and_then(|r| {
+            let start = body[..r].rfind('<')?;
+            let tag = &body[start..start + body[start..].find('>')?];
+            Some([attr(tag, "x")?, attr(tag, "y")?, attr(tag, "width")?, attr(tag, "height")?].map(|v| v.parse::<f64>().unwrap_or(0.0)))
+        });
+        if let (Some(id), Some(at), Some([x, y, w, h])) = (id, at, rect)
+            && at.len() >= 2
+        {
+            out.push(json!({ "id": id, "x": (at[0] + x - vx) / vw, "y": (at[1] + y - vy) / vh, "w": w / vw, "h": h / vh }));
+        }
+        rest = &rest[next..];
+    }
+    out
+}
+
 pub fn blocks(text: &str) -> Vec<String> {
     harlo_core::visuals::blocks(text, "mermaid")
 }
@@ -396,6 +466,19 @@ mod tests {
     }
 
     #[test]
+    fn finds_a_flowcharts_boxes() {
+        let b = node_boxes("flowchart TD\n  s0[\"Notes app\"]\n  s1[\"Sidebar\"]\n  s2[\"Store\"]\n  s0 --> s1\n  s0 --> s2\n  s1 -.->|depends on| s2\n");
+        let ids: Vec<&str> = b.iter().map(|v| v["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, ["s0", "s1", "s2"], "{b:?}");
+        for v in &b {
+            let (x, y, w, h) = (v["x"].as_f64().unwrap(), v["y"].as_f64().unwrap(), v["w"].as_f64().unwrap(), v["h"].as_f64().unwrap());
+            assert!(x >= 0.0 && y >= 0.0 && w > 0.05 && h > 0.05 && x + w <= 1.001 && y + h <= 1.001, "inside the picture: {v}");
+        }
+        // Top to bottom: the root above the others.
+        assert!(b[0]["y"].as_f64() < b[1]["y"].as_f64() && b[1]["y"].as_f64() < b[2]["y"].as_f64(), "{b:?}");
+    }
+
+    #[test]
     fn checks_diagrams_in_replies() {
         let reply = "Here:\n\n```mermaid\nflowchart TD\n  A --> B\n```\n\nand\n\n```mermaid\nflowchart TD\n  A --> B\n  C -->\n```\n\n```rust\nlet x = 1;\n```\n";
         assert_eq!(blocks(reply), ["flowchart TD\n  A --> B", "flowchart TD\n  A --> B\n  C -->"]);
@@ -431,3 +514,4 @@ mod tests {
         assert!(draw("not a diagram at all", true, &Value::Null).is_err());
     }
 }
+

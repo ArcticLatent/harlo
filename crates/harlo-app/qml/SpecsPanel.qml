@@ -246,17 +246,60 @@ Rectangle {
                     Accessible.name: "The specs' graph"
                     HoverHandler { id: graphHover; cursorShape: Qt.PointingHandCursor }
                     TapHandler {
-                        onTapped: graphViewer.show("Specs", [{ label: "Graph", url: root.graphPic.url, width: root.graphPic.width, height: root.graphPic.height }], 0, "Graph",
+                        onTapped: if (graphImage.hoveredBox < 0) graphViewer.show("Specs", [{ label: "Graph", url: root.graphPic.url, width: root.graphPic.width, height: root.graphPic.height }], 0, "Graph",
                                                    () => Diagrams.openInBrowser(root.st.mermaid, Theme.isLight), 2)
                     }
-                    ToolTip.visible: graphHover.hovered
+                    ToolTip.visible: graphHover.hovered && hoveredBox < 0
                     ToolTip.text: "Open full size"
                     ToolTip.delay: 600
+                    // Each spec's box opens it.
+                    property int hoveredBox: -1
+                    readonly property var boxes: ready ? JSON.parse(Diagrams.boxes(root.st.mermaid)) : []
+                    Repeater {
+                        model: graphImage.boxes
+                        Item {
+                            id: box
+                            required property var modelData
+                            required property int index
+                            readonly property int at: Number(String(modelData.id).replace(/^s/, ""))
+                            readonly property var spec: root.st.specs[at] || null
+                            objectName: "specsGraphBox"
+                            visible: spec !== null
+                            x: modelData.x * graphImage.width
+                            y: modelData.y * graphImage.height
+                            width: modelData.w * graphImage.width
+                            height: modelData.h * graphImage.height
+                            Accessible.role: Accessible.Button
+                            Accessible.name: spec ? "Open " + spec.title : ""
+                            activeFocusOnTab: true
+                            Keys.onReturnPressed: root.openRequested(root.st.root + "/" + spec.path)
+                            Keys.onSpacePressed: root.openRequested(root.st.root + "/" + spec.path)
+                            Rectangle {
+                                anchors.fill: parent
+                                anchors.margins: -2
+                                radius: 3
+                                color: "transparent"
+                                border.width: 2
+                                border.color: Theme.primary
+                                visible: boxHover.hovered || box.activeFocus
+                            }
+                            HoverHandler {
+                                id: boxHover
+                                cursorShape: Qt.PointingHandCursor
+                                onHoveredChanged: graphImage.hoveredBox = hovered ? box.index : (graphImage.hoveredBox === box.index ? -1 : graphImage.hoveredBox)
+                            }
+                            // (Its own: the picture's tap doesn't follow.)
+                            TapHandler { gesturePolicy: TapHandler.ReleaseWithinBounds; onTapped: root.openRequested(root.st.root + "/" + box.spec.path) }
+                            ToolTip.visible: boxHover.hovered
+                            ToolTip.text: box.spec ? "Open " + box.spec.path : ""
+                            ToolTip.delay: 400
+                        }
+                    }
                 }
                 Label {
                     Layout.fillWidth: true
                     visible: graphImage.visible
-                    text: "A line joins a spec to the ones under it; a dashed arrow is a link (depends on, references, implements). The tree opens each one."
+                    text: "A line joins a spec to the ones under it; a dashed arrow is a link (depends on, references, implements). Click a spec to open it, or the space around them to see the graph full size."
                     color: Theme.textFaint
                     font.pixelSize: Theme.px(11.5)
                     wrapMode: Text.Wrap

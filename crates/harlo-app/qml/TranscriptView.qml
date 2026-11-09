@@ -1956,7 +1956,7 @@ Item {
                     readonly property bool mermaid: title.toLowerCase() === "mermaid"
                     property bool showCode: false
                     readonly property var diagram: mermaid && Diagrams.revision >= 0
-                        ? JSON.parse(Diagrams.diagram(text, Theme.isLight, JSON.stringify({ background: String(Theme.codeBg), surface: String(Theme.elevated), text: String(Theme.foreground),
+                        ? JSON.parse(Diagrams.diagram(text, Theme.isLight, JSON.stringify({ background: String(Theme.canvas), surface: String(Theme.raised), text: String(Theme.foreground),
                                                                                              muted: String(Theme.muted), accent: String(Theme.primary), font: Theme.uiFont })))
                         : null
                     readonly property bool drawn: diagram !== null && diagram.state === "ready" && !showCode
@@ -1987,14 +1987,14 @@ Item {
                         radius: 6
                         // (Cards or a picture aren't code: on the page, in a
                         // hairline frame; their code goes back in the well.)
-                        color: codeRow.visual ? "transparent" : Theme.codeBg
-                        border.width: codeRow.visual ? 1 : 0
+                        color: codeRow.visual || codeRow.drawn ? "transparent" : Theme.codeBg
+                        border.width: codeRow.visual || codeRow.drawn ? 1 : 0
                         border.color: Theme.hairline
                         RowLayout {
                             id: codeHeader
                             width: parent.width
                             height: 28
-                            Label { Layout.leftMargin: 10; text: codeRow.kind === "options" ? "Options" : codeRow.kind === "mockup" ? "Mockup" : root.session.languageName(codeRow.title); color: Theme.muted; font.pixelSize: Theme.px(12) }
+                            Label { Layout.leftMargin: 10; text: codeRow.kind === "options" ? "Options" : codeRow.kind === "mockup" ? "Mockup" : codeRow.mermaid ? "Diagram" : root.session.languageName(codeRow.title); color: Theme.muted; font.pixelSize: Theme.px(12) }
                             Item { Layout.fillWidth: true }
                             FlatButton {
                                 visible: (codeRow.mermaid && codeRow.diagram !== null && codeRow.diagram.state === "ready") || codeRow.canShow
@@ -2021,7 +2021,7 @@ Item {
                             // (At the edge, so it never stands beside Copy's empty place.)
                             WrapButton { id: wrapBlock; Layout.rightMargin: 6; Layout.preferredHeight: 22; key: codeRow.rowKey; code: blockCode }
                         }
-                        Rectangle { id: codeRule; y: codeHeader.height; width: parent.width; height: 1; color: codeRow.visual ? Theme.hairline : Theme.codeRule }
+                        Rectangle { id: codeRule; y: codeHeader.height; width: parent.width; height: 1; color: codeRow.visual || codeRow.drawn ? Theme.hairline : Theme.codeRule }
                         // Drawing it, or why it isn't drawn.
                         Label {
                             id: diagramNote

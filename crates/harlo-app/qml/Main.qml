@@ -6934,6 +6934,7 @@ ApplicationWindow {
     // stale one and the problem until it's fixed; with specs off they're
     // gone from its next request.
     property int specProject: -1
+    property string specChatKey: ""
     property int specDone: 0
     function doneCount() { return win.chatText().split("Done:").length - 1 }
     function sendSpec(text) { win.specDone = win.doneCount(); win.sendByKeys(text) }
@@ -7019,7 +7020,18 @@ ApplicationWindow {
             const p = win.findName("specsGraphPicture")
             win.check(p && p.width > 40 && p.height > 40 && win.findName("specsGraph").visible, "Graph draws the specs and their links (" + (p ? p.width + "x" + p.height : "none") + ")")
             win.shotWindow("clicks-harlo-specs-graph")
-            win.clickItem(win.findName("specsViewTree"), "Tree") } }
+            const boxes = win.findAllNames("specsGraphBox", win.findName("specsGraph"))
+            const titles = boxes.map(b => b.spec.title)
+            const inside = boxes.every(b => b.x >= 0 && b.y >= 0 && b.x + b.width <= p.width + 1 && b.y + b.height <= p.height + 1 && b.width > 20)
+            win.check(JSON.stringify(titles) === JSON.stringify(["Notes app", "Sidebar", "Store"]) && inside, "each spec's box in the graph is a target over it (" + titles.join(", ") + ")")
+            win.specChatKey = chat.session.key
+            win.clickItem(boxes.find(b => b.spec.title === "Store"), "Store's box") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            win.check(Workspace.activeKey.endsWith("/store/SPEC.md"), "clicking a spec's box opens it (" + Workspace.activeKey + ")")
+            Workspace.open(win.specChatKey) } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: win.clickItem(win.findName("specsViewTree"), "Tree") }
         PauseAnimation { duration: 300 }
         ScriptAction { script: win.sendSpec("fix the spec link") }
         PauseAnimation { duration: 300 }

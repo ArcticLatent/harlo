@@ -18,7 +18,7 @@ struct DiagramBlock: View {
     var light: Bool { p.background.luminance > 0.5 }
 
     var colors: [String: String] {
-        ["background": p.codeBackground.hex, "surface": p.elevated.hex, "text": p.foreground.hex, "muted": p.muted.hex, "accent": p.primary.hex]
+        ["background": p.raised.hex, "surface": p.elevated.hex, "text": p.foreground.hex, "muted": p.muted.hex, "accent": p.primary.hex]
     }
 
     var body: some View {
@@ -53,7 +53,9 @@ struct DiagramBlock: View {
                         .padding(.horizontal, 6)
                         .padding(.bottom, 4)
                 }
-                .card(p, radius: 10, fill: p.codeBackground)
+                // (A picture, not code: on a card like the options' and a
+                // mockup's; its code goes in the code well.)
+                .card(p, radius: 10)
                 .fullScreenCover(isPresented: $zoomed) { DiagramZoom(image: image, size: CGSize(width: d.width, height: d.height)) }
             } else {
                 HStack(spacing: 8) {
