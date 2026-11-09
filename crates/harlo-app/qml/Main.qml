@@ -3836,9 +3836,18 @@ ApplicationWindow {
             const sed = win.findAllNames("codeView", box).find(v => v.lines.length && v.lines[0].n === "38")
             win.check(copy && sed && copy.mapToItem(null, 0, copy.height).y <= sed.mapToItem(null, 0, 0).y, "the Copy sits above the code")
             win.shotWindow("listings-copy-hover")
-            // The Latest pill: centred, off the column's controls.
-            const latest = win.findName("latestButton", chat.transcript)
-            win.check(latest && Math.abs(latest.x + latest.width / 2 - latest.parent.width / 2) < 2, "Latest: centred (" + (latest ? [latest.x, latest.width, latest.parent.width] : "") + ")")
+            // The Latest pill: on the composer's top edge, centred on the column.
+            const latest = win.findName("latestButton", chat)
+            const lp = latest ? latest.mapToItem(null, latest.width / 2, latest.height / 2) : null
+            const cp = chat.composerItem.mapToItem(null, chat.composerItem.width / 2, 0)
+            win.check(latest && Math.abs(lp.y - cp.y) < 2 && Math.abs(lp.x - cp.x) < 2, "Latest: on the composer's edge, centred (" + (lp ? [lp.x, lp.y, cp.x, cp.y] : "none") + ")")
+            // Paths a listing names: on a remote session's host.
+            const t = chat.transcript
+            win.check(t.fullPath("src/a.rs", "", "ssh://box/home/u/p") === "ssh://box/home/u/p/src/a.rs" && t.fullPath("/etc/hosts", "", "ssh://box/home/u/p") === "ssh://box/etc/hosts"
+                      && t.fullPath("x.rs", "cd sub && cat -n x.rs", "/home/u/p") === "/home/u/p/sub/x.rs" && t.fullPath("/a/b", "", "/home/u/p") === "/a/b",
+                      "paths: on the session's host, from a command's cd (" + [t.fullPath("src/a.rs", "", "ssh://box/home/u/p"), t.fullPath("/etc/hosts", "", "ssh://box/home/u/p")] + ")")
+            const grepHead = win.findAllNames("codeView", box).reduce((all, v) => all.concat(v.lines), []).find(l => l.mark === "file")
+            win.check(grepHead && grepHead.h.indexOf("harlo-open:3:") >= 0 && grepHead.h.indexOf("↗") >= 0, "a grep file's name: a link, marked ↗")
             // A line number: opens the file at that line.
             const n38 = win.findAllNames("codeNumber", sed).find(l => l.text === "38")
             win.check(n38 && sed.lines[0].p.endsWith("/src/listing.rs"), "sed's numbers: links to src/listing.rs (" + (sed ? sed.lines[0].p : "") + ")")
@@ -3850,24 +3859,36 @@ ApplicationWindow {
             win.check(chat.filePath.endsWith("/src/listing.rs") && line === 38, "line 38: the file opens at it (" + chat.filePath + ", line " + line + ")")
             const top = chat.fileEditor.editor.parent.parent.contentY, lh = chat.fileEditor.editor.contentHeight / chat.fileEditor.editor.lineCount
             win.check(top > 0 && top < 37 * lh - 2 * lh, "…with lines above it in view (" + Math.round(top / lh) + " lines scrolled)")
+            const band = win.findName("arrivalLine", chat.fileEditor)
+            win.check(band && Math.abs(band.y - ed.cursorRectangle.y) < 1, "…tinted where you arrived")
             win.shotWindow("listings-open-at-line")
             Workspace.open(chat.session.key) } }
         PauseAnimation { duration: 600 }
         ScriptAction { script: {
-            // The keyboard: a call's line takes focus; Enter opens it.
-            win.listingAt("head -16")
-            const w = win.findAllNames("toolWhat", win.listingBox()).find(l => l.plain.indexOf("head -16") >= 0)
-            const head = (function up(i) { return !i || i.objectName === "toolHead" ? i : up(i.parent) })(w)
+            // The keyboard: Tab reaches a run's line (not each call); Down
+            // goes into its steps, Enter opens one, Escape goes back.
+            const box = win.listingBox(), runHead = win.findName("runHeader", box)
+            const heads = win.findAllNames("toolHead", box)
+            win.check(runHead && runHead.activeFocusOnTab && heads.every(h => !h.activeFocusOnTab), "Tab: the run's line, not each call")
+            runHead.forceActiveFocus(Qt.TabFocusReason)
+            TestInput.key(Qt.Key_Down, 0)
+            const first = win.activeFocusItem
+            win.check(first && first.objectName === "toolHead" && win.findAllNames("toolWhat", first)[0].plain.indexOf("cat -n") >= 0, "Down: its first step")
+            for (let k = 0; k < 4; k++) TestInput.key(Qt.Key_Down, 0)
+            const head = win.activeFocusItem
             win.keyHead = head
-            win.check(head && head.activeFocusOnTab, "a call's line: reachable with Tab")
-            if (head) head.forceActiveFocus(Qt.TabFocusReason)
-            TestInput.key(Qt.Key_Return, 0) } }
+            win.check(head && win.findAllNames("toolWhat", head)[0].plain.indexOf("head -16") >= 0, "Down ×4: its fifth (" + (head ? head.objectName : "") + ")")
+            TestInput.key(Qt.Key_Return, 0)
+            TestInput.key(Qt.Key_C, Qt.ControlModifier) } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
             const head = win.keyHead
             win.check(head && head.activeFocus && head.parent.open, "Enter opens it, its line ringed (" + (head ? [head.activeFocus, head.parent.open] : "") + ")")
+            win.check(win.findAllNames("copyCode", head).some(c => c.copied), "Ctrl+C copies its listing")
             win.listingAt("head -16")
             win.shotWindow("listings-keyboard")
+            TestInput.key(Qt.Key_Escape, 0)
+            win.check(win.activeFocusItem && win.activeFocusItem.objectName === "runHeader", "Escape: back to the run's line")
             win.sendByKeys("read five files") } }
         ScriptAction { script: win.waitUntil(listingSteps, () => win.chatText().indexOf("Read them all") >= 0 && chat.session.status === "idle", 20000) }
         PauseAnimation { duration: 600 }
@@ -3876,6 +3897,10 @@ ApplicationWindow {
             const shown = win.findAllNames("codeView", box).filter(v => v.visible && v.lines.length)
             win.check(shown.length === 3 && shown[0].lines[0].h.indexOf("c.rs") >= 0, "five reads: the last 3 show their lines (" + shown.map(v => v.lines.length && v.lines[0].h.replace(/<[^>]+>/g, "")) + ")")
             win.listingAt("a.rs")
+            const aRead = win.findAllNames("toolWhat", box).find(l => l.plain.indexOf("a.rs") >= 0)
+            const ap = aRead.mapToItem(null, 4, aRead.height / 2)
+            TestInput.moveTo(ap.x, ap.y)
+            win.check(win.findAllNames("showLines", box).length === 1 && !win.findAllNames("copyCode", box).some(c => c.visible), "an older read, hovered: Show lines, no Copy")
             win.shotWindow("listings-five-reads")
             win.summary(); Qt.quit() } }
     }

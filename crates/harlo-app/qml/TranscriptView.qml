@@ -11,6 +11,9 @@ Item {
     // A row added to the transcript fades in.
     component AddFade: NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.paneMotion; easing.type: Easing.OutCubic }
     property alias follow: view.follow
+    // The reading column, for what floats over it (the Latest button).
+    readonly property real columnX: view.columnX
+    readonly property real columnWidth: view.columnWidth
     property alias count: view.count
     /// Side margin of the rows; the composer below uses it too so edges align.
     readonly property alias gutter: view.gutter
@@ -141,6 +144,71 @@ Item {
     // Paths in the session's folder from there; a command's `cd <the
     // folder> &&` left out.
     readonly property string here: (session.cwd || "").replace(/^ssh:\/\/[^\/]+/, "").replace(/\/$/, "")
+    // A remote session's host ("ssh://box"), put back on the paths it names.
+    readonly property string host: (/^ssh:\/\/[^\/]+/.exec(session.cwd || "") || [""])[0]
+    // A path a listing names, as a file to open: from the command's folder
+    // (`cd dir && …`), else the session's; on its host.
+    function fullPath(p, command, cwd) {
+        if (!p) return ""
+        const host = (/^ssh:\/\/[^\/]+/.exec(cwd || "") || [""])[0]
+        const here = (cwd || "").slice(host.length).replace(/\/$/, "")
+        if (p.startsWith("ssh://")) return p
+        if (p.startsWith("/")) return host + p
+        const cd = /^cd\s+("?)([^"&;]+?)\1\s*&&/.exec(command || "")
+        const dir = cd ? (cd[2].startsWith("/") ? cd[2] : here + "/" + cd[2]) : here
+        return host + dir.replace(/\/$/, "") + "/" + p.replace(/^\.\//, "")
+    }
+    function fileAt(p, command) { return fullPath(p, command, session.cwd || "") }
+
+    // ---- the keyboard in a run: its line takes Tab, Up and Down go
+    // through its steps, Escape back to its line.
+    function runSteps(group) {
+        const out = []
+        const walk = it => {
+            for (const c of it.children) {
+                if (!c.visible) continue
+                if ((c.objectName === "toolHead" || c.objectName === "thoughtHead") && c.stepGroup === group) out.push(c)
+                else walk(c)
+            }
+        }
+        walk(view.contentItem)
+        return out.map(s => ({ s, y: s.mapToItem(view.contentItem, 0, 0).y })).sort((a, b) => a.y - b.y).map(o => o.s)
+    }
+    function runHeaderOf(group) {
+        let found = null
+        const walk = it => {
+            for (const c of it.children) {
+                if (found || !c.visible) continue
+                if (c.objectName === "runHeader" && c.group === group) found = c
+                else walk(c)
+            }
+        }
+        walk(view.contentItem)
+        return found
+    }
+    function focusStep(item) {
+        if (!item) return
+        view.follow = false
+        item.forceActiveFocus(Qt.OtherFocusReason)
+        // Into view: its run's box, then the session.
+        for (let f = item.parent; f; f = f.parent) {
+            if (f.contentY === undefined || f.contentItem === undefined || f.height <= 0) continue
+            const y = item.mapToItem(f.contentItem, 0, 0).y
+            if (f.pinned !== undefined) f.pinned = false
+            if (y < f.contentY + 8) f.contentY = y - 8
+            else if (y + item.height > f.contentY + f.height - 8) f.contentY = y + item.height - f.height + 8
+            if (f.objectName === "runBoxScroll") f.contentY = Math.max(0, Math.min(f.contentY, f.contentHeight - f.height))
+        }
+    }
+    // A step's keys (Up, Down, Escape); true when it moved.
+    function stepKey(step, key) {
+        const steps = runSteps(step.stepGroup), i = steps.indexOf(step)
+        if (key === Qt.Key_Down && i >= 0 && i + 1 < steps.length) focusStep(steps[i + 1])
+        else if (key === Qt.Key_Up && i > 0) focusStep(steps[i - 1])
+        else if (key === Qt.Key_Up || key === Qt.Key_Escape) focusStep(runHeaderOf(step.stepGroup))
+        else return false
+        return true
+    }
     function local(t) {
         if (here === "" || !t) return t || ""
         const cd = "cd " + here + " && "
@@ -239,7 +307,19 @@ Item {
         readonly property bool isOpen: root.runOpen(group, dflt)
         objectName: "runHeader"
         implicitHeight: 30
-        Rectangle { x: -6; width: parent.width + 12; height: parent.height; radius: 6; color: runHover.hovered ? Theme.hover : "transparent" }
+        // The keyboard: Tab to a run; Enter or Space folds it, Down goes
+        // into its steps.
+        activeFocusOnTab: true
+        Keys.onPressed: e => {
+            if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter || e.key === Qt.Key_Space) { view.toggleRun(runHead.group, runHead.dflt); e.accepted = true }
+            else if (e.key === Qt.Key_Down && runHead.isOpen) { const s = root.runSteps(runHead.group); if (s.length) { root.focusStep(s[0]); e.accepted = true } }
+        }
+        Rectangle {
+            x: -6; width: parent.width + 12; height: parent.height; radius: 6
+            color: runHover.hovered ? Theme.hover : "transparent"
+            border.width: runHead.activeFocus ? 1 : 0
+            border.color: Theme.accent
+        }
         RowLayout {
             anchors.fill: parent
             spacing: 8
@@ -261,22 +341,36 @@ Item {
     // A thought in a run: one line, its text a click away.
     component ThoughtLine: ColumnLayout {
         id: thought
+        property string group
         property string rowKey
         property string text
         property string rowState
         readonly property bool open: view.expanded[rowKey] === true
         spacing: 4
         Item {
+            id: thoughtBox
+            objectName: "thoughtHead"
+            readonly property string stepGroup: thought.group
             Layout.fillWidth: true
             implicitHeight: thoughtHead.implicitHeight + 6
+            Keys.onPressed: e => {
+                if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter || e.key === Qt.Key_Space) { view.toggle(thought.rowKey); e.accepted = true }
+                else e.accepted = root.stepKey(thoughtBox, e.key)
+            }
             Rectangle { x: -6; width: parent.width + 12; height: parent.height; radius: 6; color: thoughtHover.hovered ? Theme.hover : "transparent" }
+            // (Focused: ringed from its word, the run's line left clear.)
+            Rectangle {
+                visible: thoughtBox.activeFocus
+                x: thoughtWord.x - 6; width: parent.width - x + 6; height: parent.height; radius: 6
+                color: "transparent"; border.width: 1; border.color: Theme.accent
+            }
             RowLayout {
                 id: thoughtHead
                 anchors.verticalCenter: parent.verticalCenter
                 width: parent.width
                 spacing: 8
                 RunNode { step: thought.rowState === "streaming" ? "running" : "thought" }
-                Label { text: thought.rowState === "streaming" ? "Thinking…" : "Thought"; color: Theme.textMuted; font.pixelSize: Theme.px(13) }
+                Label { id: thoughtWord; text: thought.rowState === "streaming" ? "Thinking…" : "Thought"; color: Theme.textMuted; font.pixelSize: Theme.px(13) }
                 // Its first line, folded: what it was about at a glance.
                 Label {
                     objectName: "thoughtPreview"
@@ -508,6 +602,8 @@ Item {
         property string command
         // Waiting for your approval (the row's own).
         property bool asking: false
+        // Its run ("" for a call on its own).
+        property string group
         // Reads after it in its run: only a run's last 3 reads show their
         // lines at once (the rest open on a click).
         property int readsAfter: 0
@@ -529,7 +625,7 @@ Item {
         readonly property var codeLines: {
             if (preview)
                 return JSON.parse(root.session.diffLines(subtitle.replace(/…$/, ""), diff, open ? 400 : previewLines))
-                    .map((l, i) => ({ n: newFile ? String(i + 1) : "", h: l.h, mark: newFile ? "" : l.s === "+" ? "add" : l.s === "-" ? "remove" : "", p: newFile ? subtitle.replace(/…$/, "") : "" }))
+                    .map((l, i) => ({ n: newFile ? String(i + 1) : "", h: l.h, mark: newFile ? "" : l.s === "+" ? "add" : l.s === "-" ? "remove" : "", p: newFile ? absolute(subtitle.replace(/…$/, "")) : "" }))
             if (!code) return []
             const out = []
             let file = code.path
@@ -540,7 +636,7 @@ Item {
                     // (Its name: a link to the file, at its first line here.)
                     const first = code.lines.find((x, i) => i > code.lines.indexOf(l) && x.n !== "")
                     out.push({ n: "", mark: "file", h: "<a href=\"harlo-open:" + (first ? first.n : 1) + ":" + encodeURIComponent(absolute(l.f)) + "\" style=\"color:"
-                               + Theme.rgb(Theme.textMuted) + "; text-decoration:none;\">" + root.local(l.f).replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</a>" })
+                               + Theme.rgb(Theme.textMuted) + "; text-decoration:none;\">" + root.local(l.f).replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</a><span style=\"color:" + Theme.rgb(Theme.textFaint) + ";\"> ↗</span>" })
                 } else out.push({ n: l.n, h: l.h, mark: l.c ? "context" : hasContext ? "match" : "", p: file !== "" ? absolute(file) : "" })
             }
             return out
@@ -565,14 +661,7 @@ Item {
         readonly property bool echoed: shell && outLines.length === 1 && result !== "" && outLines[0].trim() === result.trim()
         readonly property bool outInWell: shell ? outLines.length > 0 && rowState !== "running" && !echoed : open && text !== "" && !preview
         readonly property bool codeShown: !!code && (!isRead || readsAfter < 3 || open)
-        // A path a listing names, as a file to open: from the command's
-        // folder (`cd dir && …`), else the session's.
-        function absolute(p) {
-            if (p === "" || p.startsWith("/")) return p
-            const cd = /^cd\s+("?)([^"&;]+?)\1\s*&&/.exec(command)
-            const dir = cd ? (cd[2].startsWith("/") ? cd[2] : root.here + "/" + cd[2]) : root.here
-            return dir.replace(/\/$/, "") + "/" + p.replace(/^\.\//, "")
-        }
+        function absolute(p) { return root.fileAt(p, command) }
         readonly property bool failed: rowState === "error" || /^(exit|failed)|failed$/.test(result)
         readonly property int hidden: preview ? lineCount - previewLines : code ? code.total - previewLines : shell ? outLines.length - tailLines : 0
         readonly property bool canOpen: (text !== "" && !shell && !preview) || hidden > 0 || (commandInWell && shownCommand.split("\n").length > 2)
@@ -592,16 +681,25 @@ Item {
             objectName: "toolHead"
             Layout.fillWidth: true
             implicitHeight: head.implicitHeight + 6
-            // The keyboard: Tab to a call, Enter or Space opens it.
-            activeFocusOnTab: card.canOpen
+            readonly property string stepGroup: card.group
+            // The keyboard: a call in a run is reached from the run's line
+            // (Up and Down); one on its own takes Tab. Enter or Space opens
+            // it, Ctrl+C copies its listing.
+            activeFocusOnTab: card.group === "" && (card.canOpen || !!card.code || card.preview)
             Keys.onPressed: e => {
                 if (card.canOpen && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter || e.key === Qt.Key_Space)) { view.toggle(card.rowKey); e.accepted = true }
+                else if (e.key === Qt.Key_C && (e.modifiers & Qt.ControlModifier) && (!!card.code || card.preview)) { callCopy.clicked(); e.accepted = true }
+                else e.accepted = card.group !== "" && root.stepKey(headBox, e.key)
             }
             Rectangle {
                 x: -6; width: parent.width + 12; height: parent.height; radius: 6
                 color: headHover.hovered && card.canOpen ? Theme.hover : "transparent"
-                border.width: headBox.activeFocus ? 1 : 0
-                border.color: Theme.accent
+            }
+            // (Focused: ringed from its name, the run's line left clear.)
+            Rectangle {
+                visible: headBox.activeFocus
+                x: toolNameLabel.x - 6; width: parent.width - x + 6; height: parent.height; radius: 6
+                color: "transparent"; border.width: 1; border.color: Theme.accent
             }
             RowLayout {
                 id: head
@@ -612,7 +710,7 @@ Item {
                     objectName: "toolMark"
                     step: card.asking ? "asking" : card.rowState === "error" || (card.failed && card.rowState === "done") ? "error" : card.rowState === "done" ? "done" : "running"
                 }
-                Label { text: root.toolName(card.title); color: Theme.text; font.weight: Font.Medium; font.pixelSize: Theme.px(13) }
+                Label { id: toolNameLabel; text: root.toolName(card.title); color: Theme.text; font.weight: Font.Medium; font.pixelSize: Theme.px(13) }
                 Label {
                     objectName: "toolWhat"
                     Layout.fillWidth: true
@@ -639,9 +737,18 @@ Item {
                 // write's file, an edit's new lines; on hover (or the keyboard).
                 CopyButton {
                     id: callCopy
-                    visible: (!!card.code || card.preview) && (cardHover.hovered || copied || activeFocus || headBox.activeFocus)
+                    // (A folded read offers its lines instead; Ctrl+C still copies.)
+                    visible: (card.codeShown || card.preview) && (cardHover.hovered || copied || activeFocus || headBox.activeFocus)
                     copyFrom: () => card.code ? root.session.codeText(card.title, card.command, card.subtitle.replace(/…$/, ""), card.text)
                                               : card.diff.split("\n").filter(l => !l.startsWith("-")).map(l => l.slice(1)).join("\n")
+                }
+                // An older read, folded to its line: what a click does.
+                Label {
+                    objectName: "showLines"
+                    visible: card.isRead && !!card.code && !card.codeShown && (headHover.hovered || headBox.activeFocus)
+                    text: "Show lines"
+                    color: Theme.textMuted
+                    font.pixelSize: Theme.px(12)
                 }
                 Label {
                     objectName: "toolResult"
@@ -942,7 +1049,7 @@ Item {
                         sourceComponent: modelData.kind === "thinking" ? thoughtCell : toolCell
                         Component {
                             id: thoughtCell
-                            ThoughtLine { width: cell.width; rowKey: cell.modelData.rowKey; text: cell.modelData.text; rowState: cell.modelData.rowState }
+                            ThoughtLine { width: cell.width; group: box.group; rowKey: cell.modelData.rowKey; text: cell.modelData.text; rowState: cell.modelData.rowState }
                         }
                         Component {
                             id: toolCell
@@ -960,6 +1067,7 @@ Item {
                                 label: cell.modelData.label
                                 command: cell.modelData.command
                                 readsAfter: (view.count, root.session.readsAfter(box.group, cell.modelData.rowKey))
+                                group: box.group
                             }
                         }
                     }
@@ -1643,6 +1751,7 @@ Item {
                     }
                     ThoughtLine {
                         id: thinkLine
+                        group: thinkRow.group
                         visible: !thinkRow.folded && !thinkRow.boxed
                         x: view.columnX
                         y: thinkRow.gap + thinkRow.head + 5
@@ -1753,6 +1862,7 @@ Item {
                             asking: toolRow.asking
                             askLines: toolRow.askLines
                             readsAfter: (view.count, root.session.readsAfter(toolRow.group, toolRow.rowKey))
+                            group: toolRow.group
                         }
                     }
                 }
@@ -1903,22 +2013,6 @@ Item {
             }
         }
 
-        FlatButton {
-            // (Centred: the column's right edge has its controls, Copy among them.)
-            anchors.horizontalCenter: parent.horizontalCenter
-            anchors.bottom: parent.bottom
-            anchors.margins: 16
-            objectName: "latestButton"
-            visible: !view.follow
-            // (Narrow: the arrow alone, so it covers less of the text.)
-            text: view.width < 600 ? "↓" : "↓ Latest"
-            ToolTip.visible: hovered && view.width < 600
-            ToolTip.text: "Latest"
-            ToolTip.delay: 400
-            accent: Theme.primary
-            radius: 14
-            onClicked: { view.follow = true; view.scrollToEnd() }
-        }
     }
 
     PromptRail {

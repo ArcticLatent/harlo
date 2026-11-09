@@ -272,6 +272,7 @@ Rectangle {
     }
 
     ColumnLayout {
+        id: page
         anchors.fill: parent
         spacing: 0
 
@@ -437,6 +438,7 @@ Rectangle {
         }
 
         Item {
+            id: transcriptBox
             Layout.fillWidth: true
             Layout.fillHeight: true
             visible: !root.covered && !composer.expanded
@@ -1070,5 +1072,31 @@ Rectangle {
             onSubmitted: (text, mode) => root.submit(text, mode)
             onSignInOnHost: (agent, host) => root.signInOnHost(agent, host)
         }
+    }
+
+    // Back to the latest: on the top edge of what's under the session (the
+    // composer, or a panel above it), centred, so it never covers a line.
+    readonly property real dockEdge: {
+        let after = false
+        for (const k of page.children) {
+            if (k === transcriptBox) { after = true; continue }
+            if (after && k.visible && k.height > 0) return k.y
+        }
+        return transcriptBox.y + transcriptBox.height
+    }
+    FlatButton {
+        objectName: "latestButton"
+        z: 5
+        x: transcriptBox.x + transcript.columnX + (transcript.columnWidth - width) / 2
+        y: root.dockEdge - height / 2
+        visible: transcriptBox.visible && !transcript.follow && root.hasSession
+        // (Narrow: the arrow alone.)
+        text: transcript.width < 600 ? "↓" : "↓ Latest"
+        ToolTip.visible: hovered && transcript.width < 600
+        ToolTip.text: "Latest"
+        ToolTip.delay: 400
+        accent: Theme.primary
+        radius: 14
+        onClicked: transcript.scrollToEnd()
     }
 }

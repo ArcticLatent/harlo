@@ -373,7 +373,21 @@ Rectangle {
                     flick.contentX = 0
                     const y = editor.cursorRectangle.y
                     flick.contentY = Math.max(0, Math.min(y - flick.height / 3, flick.contentHeight - flick.height))
+                    // (Where you arrived: tinted a moment, its number primary.)
+                    area.arrivalY = y
+                    area.arrival = editor.text.slice(0, editor.cursorPosition).split("\n").length
+                    arrivalFade.restart()
                 }
+            }
+            property int arrival: 0
+            property real arrivalY: 0
+            property real arrivalGlow: 0
+            SequentialAnimation {
+                id: arrivalFade
+                PropertyAction { target: area; property: "arrivalGlow"; value: 1 }
+                PauseAnimation { duration: 1100 }
+                NumberAnimation { target: area; property: "arrivalGlow"; to: 0; duration: Math.max(1, Theme.motion * 2.5); easing.type: Easing.OutCubic }
+                PropertyAction { target: area; property: "arrival"; value: 0 }
             }
 
             Loader {
@@ -404,8 +418,9 @@ Rectangle {
                     text: index + 1
                     horizontalAlignment: Text.AlignRight
                     verticalAlignment: Text.AlignVCenter
-                    color: Theme.muted
-                    opacity: 0.55
+                    readonly property bool arrived: area.arrival === index + 1
+                    color: arrived ? Theme.primary : Theme.muted
+                    opacity: arrived ? 0.55 + 0.45 * area.arrivalGlow : 0.55
                     font.family: Theme.mono
                     font.pixelSize: Theme.mpx(12)
                 }
@@ -434,6 +449,16 @@ Rectangle {
                     else if (contentY + height <= r.y + r.height + 20) contentY = r.y + r.height + 20 - height
                 }
 
+                // The line you arrived at (a listing's line number, clicked).
+                Rectangle {
+                    objectName: "arrivalLine"
+                    visible: area.arrivalGlow > 0
+                    y: area.arrivalY
+                    width: flick.contentWidth
+                    height: area.lineHeight
+                    color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.16)
+                    opacity: area.arrivalGlow
+                }
                 TextArea {
                     id: editor
                     width: Math.max(flick.width, implicitWidth)
