@@ -2802,7 +2802,7 @@ ApplicationWindow {
         ScriptAction { script: {
             const t = chat.subagentDialog.transcriptSession.transcriptText()
             win.check(t.indexOf("List the files") >= 0 && t.indexOf("Found notes.md.") >= 0, "View: its own conversation (" + t.slice(0, 120).replace(/\n/g, " | ") + ")")
-            win.check(win.findName("steerField") === null && win.findText("Cancel subagent") === null, "no Steer or Cancel for Claude's")
+            win.check(win.findName("steerField") === null && win.findText("Stop helper") === null, "no Steer or Cancel for Claude's")
             win.shotWindow("clicks-delegate-claude")
             chat.subagentDialog.close()
             Workspace.closeSession(win.delegateKey) } }
@@ -3681,6 +3681,8 @@ ApplicationWindow {
             const f = win.findName("runBoxScroll", box)
             win.toolBoxStart = [f.contentY, parseFloat(t.debugContentY())]
             win.check(f.contentY > 0 && f.height < f.contentHeight, "taller than its box, it starts at its end (" + f.contentY + " of " + f.contentHeight + ")")
+            const rail = t.rail
+            win.check(!rail.visible || rail.mapToItem(t, 0, 0).x >= t.width - t.gutter, "the prompt rail sits in the gutter, never on the text (" + Math.round(rail.mapToItem(t, 0, 0).x) + " vs " + Math.round(t.width - t.gutter) + ")")
             win.shotWindow("clicks-tool-cards")
             const p = f.mapToItem(null, f.width / 2, f.height / 2)
             TestInput.wheel(p.x, p.y, 120) } }
@@ -6279,7 +6281,7 @@ ApplicationWindow {
             win.check(stepKid && stepKid.model === "fake/fake-helper" && reviews.every(k => k.model === "fake/fake-coder"), "the step's helper ran on the model chosen for it, its reviews on the run's (" + JSON.stringify(kids.map(k => [k.name, k.model])) + ")")
             win.check(kids.length === 3 && kids.every(k => k.used && k.used.tokens > 0), "each helper shows what it used (" + JSON.stringify(kids.map(k => k.used)) + ")")
             const total = kids.reduce((t, k) => t + k.used.tokens, 0)
-            win.check(win.findContaining("Subagents · all done · " + (total / 1000).toFixed(1) + "k tokens") !== null, "and the Subagents box")
+            win.check(win.findContaining("Helpers · all done · " + (total / 1000).toFixed(1) + "k tokens") !== null, "and the Subagents box")
             win.shotWindow("clicks-review-done") } }
         // The project's Team: its helpers' agent, and its reviewer on
         // another model (the next run's reviews use it).

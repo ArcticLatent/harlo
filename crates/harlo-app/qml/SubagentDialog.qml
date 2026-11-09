@@ -71,10 +71,10 @@ Popup {
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: 1
-                Label { text: (root.live.name || root.live.id || "") + "  ·  " + (root.live.agent || "task"); color: Theme.foreground; font.pixelSize: Theme.px(15); font.bold: true }
+                Label { text: (root.live.name || root.live.id || "") + "  ·  " + Theme.helperKind(root.live.agent); color: Theme.foreground; font.pixelSize: Theme.px(15); font.bold: true }
                 Label {
                     Layout.fillWidth: true
-                    text: [root.live.status, root.live.progress && root.live.progress.resolvedModel ? root.live.progress.resolvedModel : "", root.live.description || ""].filter(x => x).join("  ·  ")
+                    text: [Theme.helperStatus(root.live.status), root.live.progress && root.live.progress.resolvedModel ? Theme.helperModel(root.live.agent, root.live.progress.resolvedModel) : "", root.live.description || ""].filter(x => x).join("  ·  ")
                     color: Theme.muted
                     font.pixelSize: Theme.px(12)
                     elide: Text.ElideRight
@@ -82,7 +82,7 @@ Popup {
             }
             FlatButton {
                 visible: root.running && root.live.canCancel !== false
-                text: "Cancel subagent"
+                text: "Stop helper"
                 accent: Theme.error
                 font.pixelSize: Theme.px(12)
                 onClicked: root.parentSession.cancelSubagent(root.live.id)
@@ -125,7 +125,7 @@ Popup {
             Label {
                 anchors.centerIn: parent
                 visible: !root.agent.sessionFile
-                text: "This subagent has no saved transcript."
+                text: "This helper has no saved transcript."
                 color: Theme.muted
             }
         }
@@ -144,10 +144,10 @@ Popup {
                 // The placeholder may be wider than the dialog.
                 Layout.preferredWidth: 0
                 enabled: root.running
-                placeholderText: root.running ? "Message " + (root.live.id || "the subagent") + " (it reads it at its next step)…"
-                    : root.live.status === "failed" ? "The subagent failed."
-                    : root.live.status === "aborted" ? "The subagent was cancelled."
-                    : "The subagent has finished."
+                placeholderText: root.running ? "Message " + (root.live.name || root.live.id || "the helper") + " (it reads it at its next step)…"
+                    : root.live.status === "failed" ? "The helper failed."
+                    : root.live.status === "aborted" ? "The helper was stopped."
+                    : "The helper has finished."
                 onAccepted: send()
                 function send() {
                     if (text.trim() === "") return

@@ -216,10 +216,11 @@ pub fn proposal_question(why: &str, helpers: &[(String, String, String, String)]
         if !model.is_empty() {
             how.push(model.rsplit('/').next().unwrap_or(model).to_owned());
         }
+        // (A worktree, in words: its own copy of the project, on a branch.)
         if !worktree.is_empty() {
-            how.push(format!("worktree {worktree}"));
+            how.push(format!("on its own copy, branch {worktree}"));
         }
-        text.push_str(&format!("\n• {title} ({})", how.join(", ")));
+        text.push_str(&format!("\n• {title}: {}", how.join(" · ")));
     }
     text
 }
@@ -901,7 +902,7 @@ mod tests {
         let many: Vec<Value> = (0..=MAX_PROPOSED).map(|i| json!({ "title": i.to_string(), "prompt": "p" })).collect();
         assert!(parse_proposal(&json!({ "why": "x", "helpers": many })).is_err());
         let q = proposal_question("Two parts.", &[("API".into(), "Claude".into(), String::new(), "split/api".into()), ("UI".into(), "Harlo".into(), "openai/gpt-5".into(), String::new())]);
-        assert_eq!(q, "Two parts.\n\n• API (Claude, worktree split/api)\n• UI (Harlo, gpt-5)");
+        assert_eq!(q, "Two parts.\n\n• API: Claude · on its own copy, branch split/api\n• UI: Harlo · gpt-5");
         assert!(proposal_answer(None).contains("do the work yourself"));
         let a = proposal_answer(Some(&[("API".into(), Ok("k1".into())), ("UI".into(), Err("Harlo is turned off".into()))]));
         assert!(a.contains("started your helpers: \"API\" (k1).") && a.contains("These didn't start: \"UI\": Harlo is turned off."), "{a}");

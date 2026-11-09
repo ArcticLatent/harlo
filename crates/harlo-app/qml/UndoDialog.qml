@@ -69,8 +69,8 @@ AppDialog {
                 : "The folder's files go back to how they were before this message"
                   + ((dlg.plan.later || 0) > 0 ? ": this turn and the " + (dlg.plan.later === 1 ? "one" : dlg.plan.later) + " after it." : ".")
         }
-        PathList { visible: dlg.plan.state === "ready" && paths.length > 0; heading: "Brought back"; paths: dlg.plan.restore || [] }
-        PathList { visible: dlg.plan.state === "ready" && paths.length > 0; heading: "Removed (new since)"; paths: dlg.plan.remove || [] }
+        PathList { visible: dlg.plan.state === "ready" && paths.length > 0; heading: "Files put back"; paths: dlg.plan.restore || [] }
+        PathList { visible: dlg.plan.state === "ready" && paths.length > 0; heading: "Files removed (new since then)"; paths: dlg.plan.remove || [] }
         Label {
             visible: dlg.plan.state === "ready" && dlg.changes > 0
             Layout.fillWidth: true

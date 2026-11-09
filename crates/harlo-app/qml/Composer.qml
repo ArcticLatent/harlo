@@ -476,7 +476,9 @@ Rectangle {
             id: input
             objectName: "composerInput"
             focus: true
-            placeholderText: root.session.status === "busy"
+            // (Narrow: short enough for one line; the rest is in the help.)
+            placeholderText: bar.narrow ? (root.session.status === "busy" ? "Follow up, or steer (Ctrl+Enter)…" : root.planOn ? "Describe what to plan…" : "Ask anything…")
+                : root.session.status === "busy"
                 ? "Queue a follow-up (Enter) or steer now (Ctrl+Enter)…"
                 : root.session.status === "offline" || root.session.status === "exited"
                 ? "Send a message to resume this session with " + Theme.harnessLabel(root.session.harness) + "…"

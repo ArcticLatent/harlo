@@ -67,7 +67,8 @@ Rectangle {
     function edit(op) { Workspace.planEdit(session.key, JSON.stringify(op)) }
     function mark(status) {
         switch (status) {
-        case "done": return { icon: "checkbox-circle", color: Theme.success }
+        // (Done is the usual end: faint, like a run's finished steps.)
+        case "done": return { icon: "checkbox-circle", color: Theme.textFaint }
         case "active": return { icon: "arrow-right-s", color: Theme.primary }
         case "skipped": return { icon: "close", color: Theme.muted }
         default: return { icon: "", color: Theme.muted }
@@ -108,7 +109,7 @@ Rectangle {
                 implicitHeight: 4
                 radius: 2
                 color: Theme.subtle
-                Rectangle { width: parent.width * (root.steps.length ? root.finished / root.steps.length : 0); height: parent.height; radius: 2; color: Theme.success }
+                Rectangle { width: parent.width * (root.steps.length ? root.finished / root.steps.length : 0); height: parent.height; radius: 2; color: Theme.textMuted }
             }
             // Running with helpers (or paused, waiting for you); what they
             // used is in its tooltip.
@@ -226,7 +227,8 @@ Rectangle {
                                     visible: text !== ""
                                     // (A helper's report can run long: two lines, a click for all.)
                                     property bool full: false
-                                    text: stepRow.modelData.summary || stepRow.modelData.detail || ""
+                                    // (Its paragraphs as lines: no blank line in two.)
+                                    text: String(stepRow.modelData.summary || stepRow.modelData.detail || "").replace(/\n\s*\n/g, "\n").trim()
                                     // The step the run stopped at: what went wrong, once, here.
                                     color: stepRow.pausedHere ? Theme.warning : Theme.textFaint
                                     font.pixelSize: Theme.px(11.5)
@@ -276,30 +278,36 @@ Rectangle {
                                     Label {
                                         objectName: "planStepWho-" + stepRow.modelData.id
                                         Layout.fillWidth: true
+                                        Layout.maximumWidth: implicitWidth
+                                        Layout.minimumWidth: 0
                                         text: "Done by " + root.agentName(stepRow.modelData.agent || "") + (stepRow.modelData.model ? " · " + root.modelName(stepRow.modelData.agent, stepRow.modelData.model) : "")
                                         color: Theme.muted
-                                        font.pixelSize: Theme.px(11)
+                                        font.pixelSize: Theme.px(11.5)
                                         elide: Text.ElideRight
                                     }
-                                    StepButton {
+                                    // Undo the choice, right by it (on hover).
+                                    FlatButton {
                                         objectName: "planStepWhoClear-" + stepRow.modelData.id
-                                        implicitWidth: 18
-                                        implicitHeight: 18
-                                        iconName: "close"
-                                        tip: "Back to the run's helpers"
+                                        opacity: stepHover.hovered || hovered || activeFocus ? 1 : 0
+                                        text: "Use the run's helpers"
+                                        outlined: false
+                                        accent: Theme.textMuted
+                                        padding: 2
+                                        font.pixelSize: Theme.px(11.5)
                                         onClicked: root.edit({ op: "helper", id: stepRow.modelData.id, agent: "", model: "" })
                                     }
+                                    Item { Layout.fillWidth: true }
                                 }
                                 // Its commit, or why there isn't one.
                                 RowLayout {
                                     visible: (stepRow.modelData.commit || "") !== "" || (stepRow.modelData.commitNote || "") !== ""
                                     Layout.fillWidth: true
                                     spacing: 6
-                                    Icon { visible: (stepRow.modelData.commit || "") !== ""; name: "git-commit"; color: Theme.success; implicitWidth: 12; implicitHeight: 12 }
+                                    Icon { visible: (stepRow.modelData.commit || "") !== ""; name: "git-commit"; color: Theme.textMuted; implicitWidth: 12; implicitHeight: 12 }
                                     Label {
                                         Layout.fillWidth: true
                                         text: (stepRow.modelData.commit || "") !== "" ? "Committed " + stepRow.modelData.commit.substring(0, 8) : (stepRow.modelData.commitNote || "")
-                                        color: (stepRow.modelData.commit || "") !== "" ? Theme.success : (stepRow.modelData.commitNote || "").startsWith("Not committed") ? Theme.warning : Theme.muted
+                                        color: (stepRow.modelData.commit || "") !== "" ? Theme.textMuted : (stepRow.modelData.commitNote || "").startsWith("Not committed") ? Theme.warning : Theme.muted
                                         font.family: (stepRow.modelData.commit || "") !== "" ? Theme.mono : Theme.uiFont
                                         font.pixelSize: Theme.px(11)
                                         wrapMode: Text.Wrap

@@ -902,7 +902,8 @@ Item {
         // window (16 px narrow, up to 64 px wide), so the chat follows
         // resizes; wider than a comfortable reading width, the column stays
         // that wide, centred.
-        readonly property real gutter: Math.max(16, Math.min(64, width * 0.04), (width - Theme.px(Theme.chatMaxWidth)) / 2)
+        // (With the prompt rail at the right, room for it: it never sits on the text.)
+        readonly property real gutter: Math.max(rail.visible ? 36 : 16, Math.min(64, width * 0.04), (width - Theme.px(Theme.chatMaxWidth)) / 2)
         readonly property real contentWidthLimit: Math.max(120, width - 2 * gutter)
         // A turn's rows use the whole column (the avatars sit beside the
         // names), so they line up with the composer under them.
@@ -1663,8 +1664,13 @@ Item {
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             anchors.margins: 16
+            objectName: "latestButton"
             visible: !view.follow
-            text: "↓ Latest"
+            // (Narrow: the arrow alone, so it covers less of the text.)
+            text: view.width < 600 ? "↓" : "↓ Latest"
+            ToolTip.visible: hovered && view.width < 600
+            ToolTip.text: "Latest"
+            ToolTip.delay: 400
             accent: Theme.primary
             radius: 14
             onClicked: { view.follow = true; view.scrollToEnd() }

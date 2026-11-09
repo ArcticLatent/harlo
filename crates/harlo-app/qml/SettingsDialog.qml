@@ -1158,8 +1158,8 @@ Popup {
             }
             readonly property var eventRows: [
                 { name: "completion", title: "Agent completion", detail: "A run finishes." },
-                { name: "subagent", title: "Subagent completion", detail: "A subagent finishes." },
-                { name: "error", title: "Agent errors", detail: "A reply fails, the harness stops unexpectedly, or a subagent fails." },
+                { name: "subagent", title: "Helper finished", detail: "A helper finishes." },
+                { name: "error", title: "Agent errors", detail: "A reply fails, the harness stops unexpectedly, or a helper fails." },
                 { name: "question", title: "Agent questions", detail: "The agent asks you something or wants a tool approved." },
                 { name: "limits", title: "Plan limits", detail: "A plan limit (Claude's, ChatGPT's) is used up, and when one you'd nearly or fully used resets, with a sound of its own.", fixed: true },
             ]
@@ -4280,8 +4280,8 @@ Popup {
                     divider: true
                     property string saved: Workspace.setting("harlo_task_model")
                     readonly property var choices: harloModels.choices(saved)
-                    title: "Subagents' model"
-                    detail: "What Harlo's subagents (its task tool) run on when the task doesn't name a model. A smaller model often does searches and simple edits as well, for less. Applies to Harlo sessions started afterwards." + harloModels.none
+                    title: "Its own helpers' model"
+                    detail: "What Harlo's own helpers (its task tool) run on when the task doesn't name a model. A smaller model often does searches and simple edits as well, for less. Applies to Harlo sessions started afterwards." + harloModels.none
                     icon: "robot-2"
                     ComboField {
                         objectName: "harloTaskModel"
@@ -4320,7 +4320,7 @@ Popup {
                     // (A value set some other way is kept as a choice.)
                     readonly property var choices: ["", "500k", "1m", "2m", "5m", "10m"].concat(["", "500k", "1m", "2m", "5m", "10m"].indexOf(saved) >= 0 ? [] : [saved])
                     title: "Token budget per helper"
-                    detail: "The most a Harlo helper session (one another session starts) may use, in tokens sent and received, its subagents' included; a helper's coding task often takes a few hundred thousand. Past it, it makes no more requests and its parent is told."
+                    detail: "The most a Harlo helper session (one another session starts) may use, in tokens sent and received, its own helpers' included; a helper's coding task often takes a few hundred thousand. Past it, it makes no more requests and its parent is told."
                     icon: "scales-3"
                     ComboField {
                         objectName: "harloHelperBudget"

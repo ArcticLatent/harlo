@@ -28,17 +28,6 @@ Rectangle {
                    : /^write/.test(t) ? "Writing" : /^(grep|find|glob|search|ls)/.test(t) ? "Searching" : /^(fetch|web)/.test(t) ? "Looking up" : ""
         return verb !== "" ? verb + (args ? " " + args : "") : (String(p.currentTool).charAt(0).toUpperCase() + String(p.currentTool).slice(1)) + (args ? ": " + args : "")
     }
-    // Who it is, as the app names it elsewhere ("Claude Code · Sonnet 5").
-    function agentName(id) { return ({ harlo: "Harlo", claude: "Claude Code", pi: "pi" })[id] || id || "" }
-    function modelName(agent, model) {
-        const p = Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()).find(x => x.id === agent) : null
-        const i = p ? (p.modelIds || []).indexOf(model) : -1
-        if (i >= 0 && p.models[i]) return Theme.modelLabel(p.models[i])
-        // (Not listed: a Claude id reads as its picker names it, "claude-sonnet-5" → "Sonnet 5".)
-        const id = String(model).split("/").pop()
-        const c = /^claude-([a-z]+)-(\d+)(?:-(\d+))?(\[1m\])?$/.exec(id)
-        return c ? c[1].charAt(0).toUpperCase() + c[1].slice(1) + " " + c[2] + (c[3] ? "." + c[3] : "") + (c[4] ? " 1M" : "") : Theme.modelLabel(id)
-    }
     readonly property bool live: a.status === "running" || a.status === "pending"
     // A harlo helper waiting for you: what it asks (a tool's approval is
     // answered here).
@@ -91,7 +80,7 @@ Rectangle {
                 Label {
                     id: agentLabel
                     objectName: "subagentWho"
-                    text: agentRow.agentName(agentRow.a.agent || "task") + (agentRow.a.model ? " · " + agentRow.modelName(agentRow.a.agent, agentRow.a.model) : "")
+                    text: Theme.helperKind(agentRow.a.agent) + (agentRow.a.model ? " · " + Theme.helperModel(agentRow.a.agent, agentRow.a.model) : "")
                     color: Theme.textMuted
                     font.pixelSize: Theme.px(11.5)
                 }
@@ -121,7 +110,7 @@ Rectangle {
                     // (Finished: the faint dot says it. A harlo session
                     // waiting: on its parent, or on you.)
                     visible: !agentRow.live && agentRow.a.status !== "completed"
-                    text: agentRow.a.status === "waiting" ? qsTr("needs you") : agentRow.a.status
+                    text: Theme.helperStatus(agentRow.a.status)
                     color: agentRow.a.status === "stopped" ? Theme.textMuted : agentRow.statusColor(agentRow.a.status)
                     font.pixelSize: Theme.px(11.5)
                 }

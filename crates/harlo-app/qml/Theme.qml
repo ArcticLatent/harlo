@@ -187,6 +187,27 @@ QtObject {
         }
         return quant !== "" ? name + " · " + quant : name
     }
+    /// A helper (a subagent or a helper session), in words: who or what
+    /// kind it is ("Claude Code", "explores"), its model as the picker
+    /// names it, and its status as the sidebar says it.
+    function helperKind(k) {
+        const l = String(k || "task").toLowerCase()
+        return ({ harlo: "Harlo", claude: "Claude Code", pi: "pi", scout: "explores", explore: "explores", task: "does a task",
+                  general: "does a task", "general-purpose": "does a task", plan: "plans", review: "reviews", reviewer: "reviews" })[l] || String(k)
+    }
+    function helperModel(agent, model) {
+        if (!model) return ""
+        const p = Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()).find(x => x.id === agent) : null
+        const i = p ? (p.modelIds || []).indexOf(model) : -1
+        if (i >= 0 && p.models[i]) return modelLabel(p.models[i])
+        // (Not listed: a Claude id reads as its picker names it, "claude-sonnet-5" → "Sonnet 5".)
+        const id = String(model).split("/").pop()
+        const c = /^claude-([a-z]+)-(\d+)(?:-(\d+))?(\[1m\])?$/.exec(id)
+        return c ? c[1].charAt(0).toUpperCase() + c[1].slice(1) + " " + c[2] + (c[3] ? "." + c[3] : "") + (c[4] ? " 1M" : "") : modelLabel(id)
+    }
+    function helperStatus(st) {
+        return ({ running: "working", pending: "starting", completed: "finished", aborted: "stopped", waiting: "needs you", asking: "needs you" })[st] || st || ""
+    }
     /// Who serves a model, from its id: "provider/model".
     function providerOf(id) {
         return (id || "").split(/[\/:]/)[0]

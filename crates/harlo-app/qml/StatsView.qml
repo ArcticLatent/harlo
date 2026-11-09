@@ -150,7 +150,7 @@ Rectangle {
                     columns: body.cols
                     columnSpacing: 10
                     rowSpacing: 10
-                    Card { label: "Sessions"; value: root.compact(parent.parent.r.sessions); detail: "Subagents: " + (parent.parent.r.subagents || 0) }
+                    Card { label: "Sessions"; value: root.compact(parent.parent.r.sessions); detail: "Helpers: " + (parent.parent.r.subagents || 0) }
                     Card { label: "Prompts"; value: root.compact(parent.parent.r.prompts); detail: root.compact(parent.parent.r.steps) + " model steps" }
                     Card {
                         label: "Tokens"
