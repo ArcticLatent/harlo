@@ -91,7 +91,7 @@ pub fn spec(callable: &[&Value]) -> Value {
         "type": "function", "name": "run_code", "strict": false,
         "description": format!(
             "Run a short Python program that calls tools and prints only what matters: for steps that depend on each other (list, then look into what the list says), or many calls whose output you'd only filter. One call instead of several rounds, and what the tools return stays out of the conversation unless you print it. \
-             The program runs as a script (python3, in the working directory, the sandbox as bash's); call tools as tools.name(args) (positional or by name), each returns its text as a str (JSON text from an MCP tool: json.loads it), a failed call raises ToolError with its message. Only what you print comes back, so print a short, finished answer. \
+             The program runs as a script (python3, in the working directory, the sandbox as bash's); call tools as tools.name(args) (positional or by name), each returns its text as a str (an MCP tool's as its server sends it: JSON from some, plain lines from others, so json.loads it only where it starts with {{ or [), a failed call raises ToolError with its message. Only what you print comes back, so print a short, finished answer. \
              Not for changing files (use edit and write) or one plain call. Its tools:{sdk}"
         ),
         "parameters": { "type": "object", "properties": {
