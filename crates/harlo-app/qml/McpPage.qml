@@ -42,7 +42,7 @@ ColumnLayout {
     property var editing: null
     property string formError: ""
     property bool showSecrets: false
-    readonly property var emptyForm: ({ name: "", enabled: true, transport: "stdio", command: [], url: "", headers: [], env: [], cwd: "", timeoutSecs: null, exposure: "", description: "" })
+    readonly property var emptyForm: ({ name: "", enabled: true, transport: "stdio", command: [], url: "", headers: [], env: [], cwd: "", timeoutSecs: null, readOnlyAll: false, readOnly: [], exposure: "", description: "" })
     function freeName() {
         let n = "new-server", i = 1
         while (listing.servers.some(s => s.name === n)) n = "new-server-" + i++
@@ -323,6 +323,8 @@ ColumnLayout {
         readonly property var f: page.editing ? page.editing.form : page.emptyForm
         readonly property var st: page.editing ? page.status[page.editing.oldName] : undefined
         readonly property bool local: f.transport === "stdio"
+        /// The tools are listed, for Harlo: each can be marked as only looking.
+        readonly property bool marking: st !== undefined && st !== null && st.state === "connected" && st.tools.length > 0 && page.editing !== null && page.editing.harnesses.includes("harlo")
 
         RowLayout {
             Layout.fillWidth: true
@@ -507,16 +509,52 @@ ColumnLayout {
             }
             FlatButton { objectName: "mcpTest"; text: "Test"; font.pixelSize: Theme.px(12); enabled: !(detail.st && detail.st.state === "testing"); onClicked: Mcp.test(page.scope, page.editing.oldName) }
         }
+        // Which tools only look (Harlo's): those run without asking, side by
+        // side, and from its programs.
+        Hint_ {
+            objectName: "mcpLooksHint"
+            visible: detail.marking
+            Layout.topMargin: 4
+            text: detail.f.readOnlyAll ? "Harlo's file marks every tool of this server as only looking: it runs them without asking."
+                : "Tick the tools that only look and change nothing: Harlo runs them without asking, several at once, and its programs can call them. Those the server marks itself are ticked."
+        }
+        RowLayout {
+            visible: detail.marking
+            Layout.fillWidth: true
+            Layout.topMargin: 4
+            spacing: 8
+            Label { Layout.fillWidth: true; text: "Tool"; color: Theme.muted; font.pixelSize: Theme.px(12) }
+            Label { text: "Only looks"; color: Theme.muted; font.pixelSize: Theme.px(12) }
+        }
         Repeater {
             model: detail.st && detail.st.state === "connected" ? (page.showAllTools ? detail.st.tools : detail.st.tools.slice(0, 12)) : []
             RowLayout {
+                id: toolRow
                 required property var modelData
+                readonly property bool marked: (detail.f.readOnly || []).includes(modelData.name)
                 Layout.fillWidth: true
                 spacing: 8
-                Label { text: modelData.name; color: Theme.foreground; font.family: Theme.mono; font.pixelSize: Theme.px(12) }
-                Label { Layout.fillWidth: true; text: modelData.description.split("\n")[0]; color: Theme.muted; font.pixelSize: Theme.px(12); elide: Text.ElideRight }
+                Label { text: toolRow.modelData.name; color: Theme.foreground; font.family: Theme.mono; font.pixelSize: Theme.px(12) }
+                Label { Layout.fillWidth: true; text: toolRow.modelData.description.split("\n")[0]; color: Theme.muted; font.pixelSize: Theme.px(12); elide: Text.ElideRight }
+                AppCheckBox {
+                    objectName: "mcpLooks-" + toolRow.modelData.name
+                    visible: detail.marking
+                    // (Under the column's title.)
+                    Layout.preferredWidth: lookTitle.implicitWidth
+                    leftPadding: (lookTitle.implicitWidth - 16) / 2
+                    checked: toolRow.modelData.looks === true || detail.f.readOnlyAll || toolRow.marked
+                    enabled: toolRow.modelData.looks !== true && !detail.f.readOnlyAll
+                    opacity: enabled ? 1 : 0.55
+                    ToolTip.visible: hovered && !enabled
+                    ToolTip.text: detail.f.readOnlyAll ? "Every tool is marked in Harlo's file." : "The server says it only looks."
+                    onToggled: {
+                        const list = (detail.f.readOnly || []).filter(t => t !== toolRow.modelData.name)
+                        page.setField("readOnly", checked ? list.concat([toolRow.modelData.name]) : list)
+                    }
+                }
             }
         }
+        Label { id: lookTitle; visible: false; text: "Only looks"; font.pixelSize: Theme.px(12) }
 
         FlatButton {
             objectName: "mcpShowAllTools"

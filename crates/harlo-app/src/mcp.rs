@@ -87,6 +87,7 @@ fn form_json(f: &Form) -> Value {
     json!({
         "name": f.name, "enabled": f.enabled, "transport": f.transport, "command": f.command, "url": f.url,
         "headers": f.headers, "env": f.env, "cwd": f.cwd, "timeoutSecs": f.timeout_secs,
+        "readOnlyAll": f.read_only_all, "readOnly": f.read_only,
     })
 }
 
@@ -109,6 +110,8 @@ fn form_from(v: &Value) -> Form {
         env: pairs(&v["env"]),
         cwd: v["cwd"].as_str().unwrap_or_default().to_owned(),
         timeout_secs: v["timeoutSecs"].as_f64().filter(|t| *t > 0.0),
+        read_only_all: v["readOnlyAll"].as_bool().unwrap_or(false),
+        read_only: v["readOnly"].as_array().into_iter().flatten().filter_map(|t| t.as_str()).map(str::to_owned).collect(),
     }
 }
 
@@ -126,7 +129,7 @@ fn program(kind: HarnessKind) -> Option<PathBuf> {
 fn probe_json(p: &Probe) -> Value {
     json!({
         "state": p.state, "error": p.error, "server": p.server,
-        "tools": p.tools.iter().map(|(n, d)| json!({ "name": n, "description": d })).collect::<Vec<_>>(),
+        "tools": p.tools.iter().map(|(n, d)| json!({ "name": n, "description": d, "looks": p.looks.contains(n) })).collect::<Vec<_>>(),
     })
 }
 

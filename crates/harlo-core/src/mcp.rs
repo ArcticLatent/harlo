@@ -182,6 +182,11 @@ pub struct Form {
     pub env: Vec<(String, String)>,
     pub cwd: String,
     pub timeout_secs: Option<f64>,
+    /// Harlo's `readOnly`: every tool only looks…
+    pub read_only_all: bool,
+    /// …or these do (the server's names for them), besides those it says
+    /// do.
+    pub read_only: Vec<String>,
 }
 
 fn pairs(v: &Value) -> Vec<(String, String)> {
@@ -221,6 +226,8 @@ impl Form {
             env: pairs(&v["env"]),
             cwd: v["cwd"].as_str().unwrap_or_default().to_owned(),
             timeout_secs,
+            read_only_all: kind == HarnessKind::Harlo && v["readOnly"] == true,
+            read_only: if kind == HarnessKind::Harlo { v["readOnly"].as_array().into_iter().flatten().filter_map(|t| t.as_str().map(str::to_owned)).collect() } else { Vec::new() },
         }
     }
 
@@ -252,8 +259,9 @@ impl Form {
         set(&mut m, "headers", if !stdio && !self.headers.is_empty() { Some(object(&self.headers)) } else { None });
         set(&mut m, "env", if self.env.is_empty() { None } else { Some(object(&self.env)) });
         if kind == HarnessKind::Claude {
-            // No folder, timeout or switch in Claude's dialect.
-            for gone in ["cwd", "timeout", "enabled"] {
+            // No folder, timeout, switch or read-only tools in Claude's
+            // dialect.
+            for gone in ["cwd", "timeout", "enabled", "readOnly"] {
                 m.remove(gone);
             }
             return Value::Object(m);
@@ -261,6 +269,10 @@ impl Form {
         set(&mut m, "cwd", if stdio && !self.cwd.trim().is_empty() { Some(json!(self.cwd.trim())) } else { None });
         let timeout = self.timeout_secs.filter(|t| *t > 0.0).map(|t| if t.fract() == 0.0 { json!(t as u64) } else { json!(t) });
         set(&mut m, "timeout", timeout);
+        let mut tools: Vec<&String> = self.read_only.iter().filter(|t| !t.trim().is_empty()).collect();
+        tools.sort();
+        tools.dedup();
+        set(&mut m, "readOnly", if self.read_only_all { Some(json!(true)) } else if tools.is_empty() { None } else { Some(json!(tools)) });
         m.insert("enabled".into(), json!(self.enabled));
         Value::Object(m)
     }
@@ -418,6 +430,11 @@ pub fn load(scope: &Scope) -> Listing {
                 Some(s) => {
                     s.differs |= s.form.shared() != form.shared();
                     s.harnesses.push(kind);
+                    // (Harlo's alone.)
+                    if kind == HarnessKind::Harlo {
+                        s.form.read_only_all = form.read_only_all;
+                        s.form.read_only = form.read_only.clone();
+                    }
                 }
                 None => listing.servers.push(Listed { form, harnesses: vec![kind], differs: false }),
             }
@@ -735,6 +752,18 @@ pub(crate) mod tests {
         f.url = "https://h/mcp".into();
         let remote = f.to_entry(HarnessKind::Harlo, Some(&harlo));
         assert!(remote.get("command").is_none() && remote["url"] == "https://h/mcp" && remote["type"] == "http");
+        // Tools that only look: Harlo's alone, a sorted list or every one.
+        f.read_only = vec!["get_scene".into(), "".into(), "find".into(), "find".into()];
+        assert_eq!(f.to_entry(HarnessKind::Harlo, None)["readOnly"], json!(["find", "get_scene"]));
+        assert!(f.to_entry(HarnessKind::Claude, Some(&json!({"readOnly": true}))).get("readOnly").is_none());
+        let back = Form::from_entry(HarnessKind::Harlo, "s", &f.to_entry(HarnessKind::Harlo, None));
+        assert_eq!((back.read_only_all, back.read_only), (false, vec!["find".to_owned(), "get_scene".to_owned()]));
+        f.read_only_all = true;
+        assert_eq!(f.to_entry(HarnessKind::Harlo, None)["readOnly"], true);
+        assert!(Form::from_entry(HarnessKind::Harlo, "s", &f.to_entry(HarnessKind::Harlo, None)).read_only_all);
+        f.read_only_all = false;
+        f.read_only.clear();
+        assert!(f.to_entry(HarnessKind::Harlo, Some(&json!({"readOnly": ["x"]}))).get("readOnly").is_none(), "unticked: gone");
     }
 
     #[test]
@@ -754,6 +783,14 @@ pub(crate) mod tests {
         let files = l.servers.iter().find(|s| s.form.name == "files").unwrap();
         assert_eq!(files.harnesses, [HarnessKind::Claude, HarnessKind::Harlo]);
         assert!(!files.differs);
+        // Tools only Harlo's entry marks as looking: listed from it, and
+        // kept when saved for both.
+        save(&scope, "files", &Form { read_only: vec!["list".into()], ..form.clone() }, &[HarnessKind::Claude, HarnessKind::Harlo]).unwrap();
+        let files = load(&scope).servers.into_iter().find(|s| s.form.name == "files").unwrap();
+        assert_eq!((files.form.read_only.clone(), files.differs), (vec!["list".to_owned()], false));
+        save(&scope, "files", &files.form, &[HarnessKind::Claude, HarnessKind::Harlo]).unwrap();
+        let harlo: Value = serde_json::from_str(&std::fs::read_to_string(dir.join(".harlo/mcp.json")).unwrap()).unwrap();
+        assert_eq!(harlo["mcpServers"]["files"]["readOnly"], json!(["list"]));
         // Rename, and only for Harlo: gone from Claude's.
         let renamed = Form { name: "files2".into(), ..form.clone() };
         save(&scope, "files", &renamed, &[HarnessKind::Harlo]).unwrap();

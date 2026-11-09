@@ -26,6 +26,8 @@ pub struct Probe {
     pub server: String,
     /// (name, description).
     pub tools: Vec<(String, String)>,
+    /// The tools the server says only look (`readOnlyHint`).
+    pub looks: Vec<String>,
 }
 
 impl Probe {
@@ -51,6 +53,10 @@ fn tools_of(result: &Value) -> Vec<(String, String)> {
         .flatten()
         .map(|t| (t["name"].as_str().unwrap_or_default().to_owned(), t["description"].as_str().unwrap_or_default().trim().to_owned()))
         .collect()
+}
+
+fn looks_of(result: &Value) -> Vec<String> {
+    result["tools"].as_array().into_iter().flatten().filter(|t| t["annotations"]["readOnlyHint"] == true).filter_map(|t| t["name"].as_str().map(str::to_owned)).collect()
 }
 
 /// `${VAR}`, `${VAR:-default}` from the environment; a whole value of
@@ -208,6 +214,7 @@ fn probe_stdio(form: &Form, project: Option<&Path>, timeout: Duration) -> Probe 
             let id = 2 + page;
             let result = conn.request(id, json!({ "jsonrpc": "2.0", "id": id, "method": "tools/list", "params": params }))?;
             probe.tools.extend(tools_of(&result));
+            probe.looks.extend(looks_of(&result));
             cursor = result["nextCursor"].as_str().map(str::to_owned);
             if cursor.is_none() {
                 break;
@@ -323,6 +330,7 @@ fn probe_http(form: &Form, timeout: Duration) -> Probe {
             }
             let result = post(&json!({ "jsonrpc": "2.0", "id": 2 + page, "method": "tools/list", "params": params }))?.unwrap_or_default();
             probe.tools.extend(tools_of(&result));
+            probe.looks.extend(looks_of(&result));
             cursor = result["nextCursor"].as_str().map(str::to_owned);
             if cursor.is_none() {
                 break;
@@ -444,6 +452,7 @@ fn probe_sse(form: &Form, timeout: Duration) -> Probe {
             }
             let result = request(json!({ "jsonrpc": "2.0", "id": 2 + page, "method": "tools/list", "params": params }))?;
             probe.tools.extend(tools_of(&result));
+            probe.looks.extend(looks_of(&result));
             cursor = result["nextCursor"].as_str().map(str::to_owned);
             if cursor.is_none() {
                 break;
@@ -471,7 +480,7 @@ mod tests {
     const FAKE_SERVER: &str = r#"while read -r line; do
 case "$line" in
 *'"initialize"'*) echo '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"fake","version":"1.0"}}}' ;;
-*'"tools/list"'*) echo '{"jsonrpc":"2.0","method":"notifications/message","params":{}}'; echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"look","description":"Looks."},{"name":"cook"}]}}' ;;
+*'"tools/list"'*) echo '{"jsonrpc":"2.0","method":"notifications/message","params":{}}'; echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"look","description":"Looks.","annotations":{"readOnlyHint":true}},{"name":"cook"}]}}' ;;
 esac
 done"#;
 
@@ -482,6 +491,7 @@ done"#;
         assert_eq!(p.state, "connected", "{p:?}");
         assert_eq!(p.server, "fake 1.0");
         assert_eq!(p.tools, [("look".into(), "Looks.".into()), ("cook".into(), String::new())]);
+        assert_eq!(p.looks, ["look"], "the tools it says only look");
     }
 
     #[test]

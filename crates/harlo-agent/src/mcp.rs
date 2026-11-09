@@ -50,6 +50,11 @@ const WHOLE_MAX: usize = 4 << 20;
 /// What tool names may be (OpenAI's limit).
 const NAME_MAX: usize = 64;
 pub const PREFIX: &str = "mcp__";
+/// The tool that lists and reads servers' resources (offered when one has
+/// them).
+pub const RESOURCES: &str = "mcp_resources";
+/// Resources listed per server, at most.
+const RESOURCES_LISTED: usize = 200;
 
 /// A server as configured.
 #[derive(Debug, Clone, PartialEq)]
@@ -62,6 +67,37 @@ pub struct Config {
     /// The entry's `oauth` (`clientId`, `clientSecret`, `scopes`), for
     /// signing in (`mcp_auth`).
     pub oauth: Value,
+    /// Tools you said only look (the entry's `readOnly`), besides those
+    /// the server says do.
+    pub read_only: ReadOnly,
+}
+
+/// The entry's `readOnly`: `true` (every tool) or the tools' names (as the
+/// server calls them).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum ReadOnly {
+    #[default]
+    None,
+    All,
+    Tools(HashSet<String>),
+}
+
+impl ReadOnly {
+    fn from_entry(v: &Value) -> Self {
+        match v {
+            Value::Bool(true) => ReadOnly::All,
+            Value::Array(a) => ReadOnly::Tools(a.iter().filter_map(|t| t.as_str().map(str::to_owned)).collect()),
+            _ => ReadOnly::None,
+        }
+    }
+
+    fn covers(&self, tool: &str) -> bool {
+        match self {
+            ReadOnly::None => false,
+            ReadOnly::All => true,
+            ReadOnly::Tools(t) => t.contains(tool),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -195,7 +231,7 @@ fn parse(name: &str, v: &Value, project: &Path) -> Result<Config, String> {
         };
         Kind::Stdio { program, args: words.collect() }
     };
-    Ok(Config { name: name.to_owned(), kind, env, cwd, timeout, oauth: v["oauth"].clone() })
+    Ok(Config { name: name.to_owned(), kind, env, cwd, timeout, oauth: v["oauth"].clone(), read_only: ReadOnly::from_entry(&v["readOnly"]) })
 }
 
 /// `${VAR}`, `${VAR:-default}` from the environment; a whole value of
@@ -843,6 +879,9 @@ struct Server {
     tools: Vec<Value>,
     changed: Arc<AtomicBool>,
     timeout: Duration,
+    read_only: ReadOnly,
+    /// It offers resources (`resources/list`, `resources/read`).
+    resources: bool,
 }
 
 async fn list_tools(conn: &Conn, timeout: Duration) -> Result<Vec<Value>, String> {
@@ -878,10 +917,14 @@ async fn start(c: Config, project: PathBuf) -> Result<Server, String> {
             *h.protocol.lock().unwrap() = v.to_owned();
         }
         conn.notify("notifications/initialized").await;
-        list_tools(&conn, CALL_TIMEOUT).await
+        let caps = &r["capabilities"];
+        let resources = caps["resources"].is_object();
+        // (One with resources only has no tools to list.)
+        let tools = if resources && !caps["tools"].is_object() { Vec::new() } else { list_tools(&conn, CALL_TIMEOUT).await? };
+        Ok::<_, String>((tools, resources))
     };
-    let tools = tokio::time::timeout(c.timeout, ready).await.map_err(|_| format!("it didn't answer within {} s", c.timeout.as_secs()))??;
-    Ok(Server { name: c.name, conn, tools, changed, timeout: c.timeout })
+    let (tools, resources) = tokio::time::timeout(c.timeout, ready).await.map_err(|_| format!("it didn't answer within {} s", c.timeout.as_secs()))??;
+    Ok(Server { name: c.name, conn, tools, changed, timeout: c.timeout, read_only: c.read_only, resources })
 }
 
 /// The servers running, and their tools as the model has them.
@@ -930,11 +973,22 @@ impl Mcp {
                 }
                 let description = t["description"].as_str().or(t["title"].as_str()).unwrap_or_default().trim();
                 self.specs.push(json!({ "type": "function", "name": name, "description": format!("(MCP server {}) {description}", s.name).trim_end(), "parameters": parameters, "strict": false }));
-                if t["annotations"]["readOnlyHint"] == true {
+                if t["annotations"]["readOnlyHint"] == true || s.read_only.covers(tool) {
                     self.read_only.insert(name.clone());
                 }
                 self.by_name.insert(name, (i, tool.to_owned()));
             }
+        }
+        let with: Vec<&str> = self.servers.iter().filter(|s| s.resources).map(|s| s.name.as_str()).collect();
+        if !with.is_empty() {
+            self.specs.push(json!({
+                "type": "function", "name": RESOURCES, "strict": false,
+                "description": "List or read what MCP servers offer as resources (documents, files, records they expose by URI). Without uri: a server's resources (URIs, names, types) and the URI templates it fills in. With uri: that resource's contents.",
+                "parameters": { "type": "object", "properties": {
+                    "server": { "type": "string", "enum": with },
+                    "uri": { "type": "string" },
+                }, "additionalProperties": false },
+            }));
         }
     }
 
@@ -943,17 +997,17 @@ impl Mcp {
     }
 
     pub fn has(&self, name: &str) -> bool {
-        self.by_name.contains_key(name)
+        self.by_name.contains_key(name) || (name == RESOURCES && self.servers.iter().any(|s| s.resources))
     }
 
-    /// Whether its server says the tool only looks.
     /// Whether any server's tools only look.
     pub fn has_read_only(&self) -> bool {
-        !self.read_only.is_empty()
+        !self.read_only.is_empty() || self.has(RESOURCES)
     }
 
+    /// Whether the tool only looks: its server says so, or its entry does.
     pub fn read_only(&self, name: &str) -> bool {
-        self.read_only.contains(name)
+        self.read_only.contains(name) || (name == RESOURCES && self.has(RESOURCES))
     }
 
     /// Lists again the tools of servers that said they changed.
@@ -989,6 +1043,9 @@ impl Mcp {
     }
 
     async fn call_as(&self, name: &str, args: &Value, spill_dir: Option<&Path>) -> Outcome {
+        if name == RESOURCES && self.has(RESOURCES) {
+            return self.resources(args, spill_dir).await;
+        }
         let Some((i, tool)) = self.by_name.get(name) else {
             return Outcome::new(format!("No MCP tool {name}."), true);
         };
@@ -1009,6 +1066,99 @@ impl Mcp {
             Err(e) => Outcome::new(format!("MCP server {}: {e}", s.name), true),
         }
     }
+}
+
+impl Mcp {
+    /// `mcp_resources`: a server's resources listed, or one read.
+    async fn resources(&self, args: &Value, spill_dir: Option<&Path>) -> Outcome {
+        let fail = |t: String| Outcome::new(t, true);
+        let with: Vec<&Server> = self.servers.iter().filter(|s| s.resources).collect();
+        let named = args["server"].as_str().map(str::trim).filter(|n| !n.is_empty());
+        let uri = args["uri"].as_str().map(str::trim).filter(|u| !u.is_empty());
+        let chosen: Vec<&Server> = match named {
+            Some(n) => match with.iter().find(|s| s.name == n) {
+                Some(s) => vec![*s],
+                None => return fail(format!("No MCP server {n} with resources: {} have them.", with.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", "))),
+            },
+            None => with,
+        };
+        let shorten = |text: String| match spill_dir {
+            Some(dir) => bash::shorten(&text, text.len(), dir),
+            None => text,
+        };
+        if let Some(uri) = uri {
+            let [s] = chosen[..] else {
+                return fail(format!("Say which server's resource {uri} is: {}.", chosen.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", ")));
+            };
+            return match s.conn.request("resources/read", json!({ "uri": uri }), CALL_TIMEOUT).await {
+                Ok(r) => {
+                    // (Each part as a tool's embedded resource.)
+                    let parts: Vec<Value> = r["contents"].as_array().into_iter().flatten().map(|c| json!({ "type": "resource", "resource": c })).collect();
+                    let (text, _, images) = result_text(&json!({ "content": parts }));
+                    let mut out = Outcome::new(shorten(text), false);
+                    out.images = images;
+                    out
+                }
+                Err(e) => fail(format!("MCP server {}: {e}", s.name)),
+            };
+        }
+        let mut out = Vec::new();
+        for s in chosen {
+            let mut rows = Vec::new();
+            let mut cursor: Option<String> = None;
+            for _ in 0..20 {
+                let params = cursor.as_ref().map_or(json!({}), |c| json!({ "cursor": c }));
+                match s.conn.request("resources/list", params, s.timeout.max(Duration::from_secs(30))).await {
+                    Ok(r) => {
+                        for x in r["resources"].as_array().into_iter().flatten() {
+                            rows.push(resource_row(x, "uri"));
+                        }
+                        cursor = r["nextCursor"].as_str().filter(|c| !c.is_empty()).map(str::to_owned);
+                    }
+                    Err(e) => {
+                        rows.push(format!("(couldn't list them: {e})"));
+                        cursor = None;
+                    }
+                }
+                if cursor.is_none() || rows.len() >= RESOURCES_LISTED {
+                    break;
+                }
+            }
+            // (Templates: optional, so a server without them says nothing.)
+            if let Ok(r) = s.conn.request("resources/templates/list", json!({}), s.timeout.max(Duration::from_secs(30))).await {
+                let t: Vec<String> = r["resourceTemplates"].as_array().into_iter().flatten().map(|x| resource_row(x, "uriTemplate")).collect();
+                if !t.is_empty() {
+                    rows.push(format!("URI templates (fill in the {{…}} parts):\n{}", t.join("\n")));
+                }
+            }
+            let more = rows.len().saturating_sub(RESOURCES_LISTED);
+            rows.truncate(RESOURCES_LISTED);
+            if more > 0 {
+                rows.push(format!("[{more} more not shown]"));
+            }
+            out.push(format!("{}:\n{}", s.name, if rows.is_empty() { "(no resources)".to_owned() } else { rows.join("\n") }));
+        }
+        Outcome::new(shorten(out.join("\n\n")), false)
+    }
+}
+
+/// A listed resource (or template): `uri  name (type): description`.
+fn resource_row(x: &Value, key: &str) -> String {
+    let s = |k: &str| x[k].as_str().map(str::trim).unwrap_or_default();
+    let mut row = s(key).to_owned();
+    let name = if s("title").is_empty() { s("name") } else { s("title") };
+    if !name.is_empty() && name != s(key) {
+        row.push_str(&format!("  {name}"));
+    }
+    if !s("mimeType").is_empty() {
+        row.push_str(&format!(" ({})", s("mimeType")));
+    }
+    let about = s("description").lines().next().unwrap_or_default();
+    if !about.is_empty() {
+        let about: String = if about.chars().count() > 120 { format!("{}…", about.chars().take(120).collect::<String>()) } else { about.to_owned() };
+        row.push_str(&format!(": {about}"));
+    }
+    row
 }
 
 #[cfg(test)]
@@ -1043,6 +1193,13 @@ mod tests {
         assert_eq!(parse("s", &json!({ "type": "sse", "url": "http://h/sse" }), p).unwrap().kind, Kind::Sse { url: "http://h/sse".into(), headers: vec![] });
         assert!(parse("n", &json!({}), p).unwrap_err().contains("no command"));
         assert!(parse("b", &json!({ "type": "http", "url": "ftp://h" }), p).is_err());
+        // Tools said to only look: all, some, or none.
+        assert_eq!(parse("a", &json!({ "command": "srv", "readOnly": true }), p).unwrap().read_only, ReadOnly::All);
+        let some = parse("t", &json!({ "command": "srv", "readOnly": ["get_scene", "render_preview"] }), p).unwrap().read_only;
+        assert!(some.covers("get_scene") && !some.covers("execute_code"));
+        for none in [json!(false), json!("yes"), Value::Null] {
+            assert_eq!(parse("x", &json!({ "command": "srv", "readOnly": none }), p).unwrap().read_only, ReadOnly::None);
+        }
     }
 
     #[test]

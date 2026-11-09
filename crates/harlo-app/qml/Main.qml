@@ -7465,9 +7465,31 @@ ApplicationWindow {
             win.shotPopup(settingsDialog, "clicks-mcp-project")
             win.clickItem(win.findName("mcpServer-dice", d), "dice") } }
         PauseAnimation { duration: 500 }
+        // Its tool marked as only looking (the server doesn't say).
+        // (Pressed, not clicked: scrolled into view, it's under the floating
+        // Save bar.)
+        ScriptAction { script: win.findName("mcpTest", settingsDialog.contentItem).clicked() }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloMcpSteps, () => { const c = win.findName("mcpLooks-roll", settingsDialog.contentItem); return c !== null && c.visible }, 15000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const d = settingsDialog.contentItem, c = win.findName("mcpLooks-roll", d)
+            win.check(c !== null && c.visible && c.enabled && !c.checked, "a tested tool can be marked as only looking, for Harlo (unmarked: the server doesn't say)")
+            win.check(win.findName("mcpLooksHint", d) !== null && win.findName("mcpLooksHint", d).visible, "the page says what marking does")
+            c.click()
+            const f = win.ancestorWith(c, "contentHeight")
+            if (f) f.contentY = Math.max(0, f.contentHeight - f.height) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const c = win.findName("mcpLooks-roll", settingsDialog.contentItem)
+            win.check(c.checked, "ticked")
+            win.shotPopup(settingsDialog, "clicks-mcp-looks") } }
+        PauseAnimation { duration: 300 }
         ScriptAction { script: win.clickItem(win.findName("mcpSave", settingsDialog.contentItem), "Save") }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
+            const file = TestInput.readFile(win.argValue("--cwd=") + "/.harlo/mcp.json")
+            win.check(JSON.stringify((JSON.parse(file).mcpServers.dice || {}).readOnly) === JSON.stringify(["roll"]), "saved in Harlo's entry as readOnly (" + file.replace(/\s+/g, " ") + ")")
             win.check(win.findText("not allowed for Harlo", settingsDialog.contentItem) === null, "saved here, it's allowed")
             settingsDialog.close() } }
         PauseAnimation { duration: 400 }
