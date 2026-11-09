@@ -759,8 +759,11 @@ Item {
         }
         readonly property bool shell: command !== "" && !asking
         readonly property string shownCommand: shell ? root.local(command) : ""
-        // The command in the well when its line doesn't say it all.
-        readonly property bool commandInWell: shell && (label !== "" || shownCommand.indexOf("\n") >= 0 || shownCommand.length > 90)
+        // The command in the well when its line doesn't say it all (cut
+        // short there too, when narrow: measured as if no Copy showed, so
+        // hovering doesn't move it).
+        readonly property bool commandCut: shell && label === "" && whatLabel.implicitWidth > whatLabel.width + (callCopy.visible ? callCopy.width + head.spacing : 0) + 0.5
+        readonly property bool commandInWell: shell && (label !== "" || shownCommand.indexOf("\n") >= 0 || shownCommand.length > 90 || commandCut)
         readonly property var outLines: text === "" ? [] : text.split("\n").filter(l => l.trim() !== "")
         readonly property int tailLines: 3
         readonly property var tail: outInWell && shell && !open && !code ? outLines.slice(-tailLines) : []
@@ -861,6 +864,7 @@ Item {
                 }
                 Label { id: toolNameLabel; text: root.toolName(card.title); color: Theme.text; font.weight: Font.Medium; font.pixelSize: Theme.px(13) }
                 Label {
+                    id: whatLabel
                     objectName: "toolWhat"
                     Layout.fillWidth: true
                     // (Plain, for tests and copying: the words shown.)
@@ -1061,7 +1065,8 @@ Item {
                         text: "<font color='" + Theme.rgb(Theme.textFaint) + "'>$</font> " + card.shownCommand.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\n/g, "<br>")
                         textFormat: Text.StyledText
                         color: Theme.foreground
-                        wrapMode: Text.WrapAnywhere
+                        // (At a space; a word too long for the line anywhere.)
+                        wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                         maximumLineCount: card.open ? 400 : 2
                         elide: Text.ElideRight
                         font.family: Theme.mono

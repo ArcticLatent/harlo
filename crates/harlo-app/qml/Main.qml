@@ -3701,7 +3701,12 @@ ApplicationWindow {
             win.check(sel.length >= 2 && sel.every(e => e.selectByMouse && e.readOnly), "a listing's text can be selected")
             win.check(win.findAllNames("toolTail", box).every(l => !/^\d+[:-]|^    let/.test(l.text)), "a listing isn't shown again as plain lines")
             win.check(win.findAllNames("toolCommandRule", box).length >= 1, "a rule between a command and its listing")
-            win.check(win.findAllNames("toolCommand", box).length === 2, "the commands under what they're for (the other is on its line)")
+            const cmds = win.findAllNames("toolCommand", box)
+            const sedIn = cmds.some(c => c.text.indexOf("sed -n") >= 0)
+            win.check(win.width < 700 ? cmds.length >= 3 && sedIn : cmds.length === 2 && !sedIn,
+                      "the commands under what they're for; a short one on its line, in the well too when its line cuts it short (" + cmds.length + ")")
+            const grepCmd = cmds.find(c => c.text.indexOf("grep -n") >= 0)
+            win.check(grepCmd && grepCmd.wrapMode === Text.WrapAtWordBoundaryOrAnywhere, "a command in the well breaks at a space")
             win.check(win.chatText().indexOf("Running the full test suite\n") < 0 && win.findContaining("▸ cargo", t) === null, "no notice for a command in the foreground")
             // The wheel: the box first, then the session past its top.
             const f = win.findName("runBoxScroll", box)
