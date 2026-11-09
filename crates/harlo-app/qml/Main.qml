@@ -281,6 +281,12 @@ ApplicationWindow {
                 side = Math.max(160, avail - chatMinWidth - 260)
                 panel = Math.max(240, avail - side - chatMinWidth)
             }
+        }
+        // (Whole pixels: the chat beside them starts on one, so its text
+        // doesn't jump a pixel as things around it repaint.)
+        side = Math.round(side)
+        panel = Math.round(panel)
+        if (rightPanel.visible) {
             rightPanel.target = panel
             if (!rightPanel.sliding)
                 rightPanel.SplitView.preferredWidth = panel
@@ -3936,6 +3942,9 @@ ApplicationWindow {
         ScriptAction { script: { win.listingAt("head -16"); win.shotWindow("listings-head-cat") } }
         PauseAnimation { duration: 200 }
         ScriptAction { script: {
+            // Code and text start on whole pixels (at a fraction, text jumps a pixel as things around it repaint).
+            const xs = win.findAllNames("codeText", chat.transcript).map(e => e.mapToItem(null, 0, 0).x)
+            win.check(xs.length > 0 && xs.every(x => Math.abs(x - Math.round(x)) < 0.01), "code starts on whole pixels (" + xs.join(", ") + ")")
             const a = win.findContaining("Run it with", chat.transcript)
             win.check(a !== null, "the reply's code blocks")
             if (a) win.scrollIntoView(a)

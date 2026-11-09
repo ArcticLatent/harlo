@@ -114,7 +114,7 @@ Item {
         onUnnamedChanged: if (unnamed) root.wantModelNames = true
         Component.onCompleted: if (unnamed) root.wantModelNames = true
         visible: false
-        x: (view.width - view.contentWidthLimit) / 2
+        x: view.columnX
         width: view.contentWidthLimit
         height: root.headHeight
         Row {
@@ -495,7 +495,8 @@ Item {
         property real topPad: 0
         property real bottomPad: 0
         // (Numbers: 8 px either side in their column, then 6 px to the code.)
-        readonly property real gutterWidth: numbers ? probe.implicitWidth + 22 : signs ? 22 : 10
+        // (Whole pixels, so the code beside it starts on one.)
+        readonly property real gutterWidth: numbers ? Math.ceil(probe.implicitWidth) + 22 : signs ? 22 : 10
         // Unwrapped, some lines go past the right edge.
         readonly property bool cut: !wrap && codeFlick.contentWidth > codeFlick.width + 1
         readonly property int count: lines ? lines.length : Math.max(1, starts.length - (edit.getText(Math.max(0, edit.length - 1), edit.length) === "\n" ? 1 : 0))
@@ -1517,11 +1518,13 @@ Item {
         // resizes; wider than a comfortable reading width, the column stays
         // that wide, centred.
         // (With the prompt rail at the right, room for it: it never sits on the text.)
-        readonly property real gutter: Math.max(rail.visible ? 36 : 16, Math.min(64, width * 0.04), (width - Theme.px(Theme.chatMaxWidth)) / 2)
+        // (Whole pixels: text at a fractional x snaps to the pixel grid
+        // differently as things around it repaint, and jumps a pixel on hover.)
+        readonly property real gutter: Math.floor(Math.max(rail.visible ? 36 : 16, Math.min(64, width * 0.04), (width - Theme.px(Theme.chatMaxWidth)) / 2))
         readonly property real contentWidthLimit: Math.max(120, width - 2 * gutter)
         // A turn's rows use the whole column (the avatars sit beside the
         // names), so they line up with the composer under them.
-        readonly property real columnX: (width - contentWidthLimit) / 2
+        readonly property real columnX: Math.round((width - contentWidthLimit) / 2)
         readonly property real columnWidth: Math.max(80, contentWidthLimit)
         function scrollToEnd() {
             autoScrolling = true
@@ -1666,7 +1669,7 @@ Item {
                     // Between turns: a hairline.
                     Rectangle {
                         visible: userRow.index > 0
-                        x: (view.width - view.contentWidthLimit) / 2
+                        x: view.columnX
                         y: Math.round(userRow.gap / 2) - 6
                         width: view.contentWidthLimit
                         height: 1
@@ -2171,7 +2174,7 @@ Item {
                     // harlo's: a line between turns, as before yours.
                     Rectangle {
                         visible: noticeRow.harlo && noticeRow.index > 0
-                        x: (view.width - view.contentWidthLimit) / 2
+                        x: view.columnX
                         y: Math.round(noticeRow.gap / 2) - 6
                         width: view.contentWidthLimit
                         height: 1
