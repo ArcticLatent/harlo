@@ -781,6 +781,30 @@ fn where_on_host(path: &Path) -> String {
 }
 
 /// The penguins (Theme.qml's `avatars`; icons/avatars/).
+/// The folder a harlo writes branch previews in, by its process id.
+const BRANCH_PREVIEW: &str = "harlo-branch-preview-";
+
+/// Removes the branch previews of harlos no longer running (each writes
+/// them in its own folder and nothing else removes it). Elsewhere than
+/// Linux, ones a day old.
+pub fn sweep_branch_previews() {
+    let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else { return };
+    for e in entries.flatten() {
+        let Some(pid) = e.file_name().to_str().and_then(|n| n.strip_prefix(BRANCH_PREVIEW)).and_then(|p| p.parse::<u32>().ok()) else { continue };
+        if pid == std::process::id() {
+            continue;
+        }
+        let gone = if cfg!(target_os = "linux") {
+            !Path::new(&format!("/proc/{pid}")).exists()
+        } else {
+            e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > std::time::Duration::from_secs(86_400))
+        };
+        if gone {
+            let _ = std::fs::remove_dir_all(e.path());
+        }
+    }
+}
+
 const AVATARS: [&str; 6] = ["classic", "beanie", "glasses", "headphones", "jacket", "scarf"];
 
 const ROLE_KIND: i32 = 0x100;
@@ -4901,7 +4925,7 @@ impl Workspace {
     }
 
     pub fn branch_preview_file(&self, path: &QString, leaf: &QString) -> QString {
-        let dir = std::env::temp_dir().join(format!("harlo-branch-preview-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("{BRANCH_PREVIEW}{}", std::process::id()));
         // (A remote session: from its copy here.)
         if harlo_core::remote::is_remote(Path::new(&path.to_string())) {
             let Some(text) = harlo_core::remote::copy_of(Path::new(&path.to_string())).and_then(|c| std::fs::read_to_string(c).ok()) else { return QString::default() };
