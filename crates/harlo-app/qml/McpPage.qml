@@ -34,8 +34,8 @@ ColumnLayout {
     onGlobalScopeChanged: scope = globalScope
     readonly property var listing: Mcp.revision >= 0 ? JSON.parse(Mcp.listJson(scope)) : { servers: [], errors: [], files: {} }
     readonly property var status: Mcp.revision >= 0 ? JSON.parse(Mcp.statusJson(scope)) : ({})
-    onScopeChanged: { editing = null; Mcp.testAll(scope) }
-    Component.onCompleted: { Mcp.testAll(scope); if (showCatalog) Mcp.catalogRefresh(false) }
+    onScopeChanged: { editing = null; Mcp.testAll(scope); if (showCatalog) Mcp.catalogRefresh(scope, false) }
+    Component.onCompleted: { Mcp.testAll(scope); if (showCatalog) Mcp.catalogRefresh(page.scope, false) }
 
     // ---- the server being edited (null: the grid) ---------------------------
     /// { oldName, form, harnesses, isNew }
@@ -226,7 +226,7 @@ ColumnLayout {
             outlined: false
             implicitWidth: 30
             contentItem: Icon { name: "refresh"; color: Theme.muted; implicitWidth: 15; implicitHeight: 15 }
-            onClicked: { Mcp.testAll(page.scope); if (page.showCatalog) Mcp.catalogRefresh(true) }
+            onClicked: { Mcp.testAll(page.scope); if (page.showCatalog) Mcp.catalogRefresh(page.scope, true) }
             ToolTip.visible: hovered
             ToolTip.text: page.showCatalog ? "Test the servers again, and look for new releases" : "Test the servers again"
         }
@@ -244,11 +244,12 @@ ColumnLayout {
 
     // ---- servers harlo installs with a click (this computer's global ones):
     // a switch, the agents, the version and Update --------------------------
-    readonly property bool showCatalog: page.editing === null && page.scope === "global"
-    readonly property var catalog: Mcp.revision >= 0 ? JSON.parse(Mcp.catalogJson()) : []
-    onShowCatalogChanged: if (showCatalog) Mcp.catalogRefresh(false)
+    // (Global here or on the instance's host: harlo installs them there.)
+    readonly property bool showCatalog: page.editing === null && page.scope === page.globalScope
+    readonly property var catalog: Mcp.revision >= 0 ? JSON.parse(Mcp.catalogJson(page.scope)) : []
+    onShowCatalogChanged: if (showCatalog) Mcp.catalogRefresh(page.scope, false)
     SectionTitle_ { visible: page.showCatalog; text: "Ready to install" }
-    Hint_ { visible: page.showCatalog; Layout.topMargin: 2; text: "Turn one on and harlo downloads it from its project's releases and sets it up for the agents you tick." }
+    Hint_ { objectName: "mcpCatalogLede"; visible: page.showCatalog; Layout.topMargin: 2; text: "Turn one on and harlo downloads it from its project's releases and sets it up" + (Workspace.instance !== "" ? " on " + Workspace.instance : "") + " for the agents you tick." }
     Repeater {
         model: page.showCatalog ? page.catalog : []
         Rectangle {
@@ -264,7 +265,7 @@ ColumnLayout {
             /// Those of them turned on in Settings → Providers (it's set up
             /// for these).
             readonly property var shown: ticked.filter(a => page.agents.some(x => x.id === a))
-            readonly property bool newer: (b.latest || "") !== "" && b.version !== "" && page.newerVersion(b.latest, b.version)
+            readonly property bool newer: (b.latest || "") !== "" && (b.version || "") !== "" && page.newerVersion(b.latest, b.version)
             objectName: "mcpCatalog-" + b.id
             Layout.fillWidth: true
             Layout.topMargin: 10
@@ -293,7 +294,7 @@ ColumnLayout {
                         objectName: "mcpCatalogToggle-" + bcard.b.id
                         enabled: !bcard.busy && !bcard.b.loading && (bcard.on || bcard.shown.length > 0)
                         checked: bcard.on
-                        onToggled: Mcp.catalogSet(bcard.b.id, checked, JSON.stringify(checked ? bcard.shown : bcard.ticked))
+                        onToggled: Mcp.catalogSet(page.scope, bcard.b.id, checked, JSON.stringify(checked ? bcard.shown : bcard.ticked))
                         ToolTip.visible: hovered
                         ToolTip.text: checked ? "On: new sessions start it. Click to turn it off." : bcard.b.version === "" ? "Off. Click to download it and set it up for the agents ticked." : "Off. Click to set it up for the agents ticked."
                     }
@@ -317,8 +318,8 @@ ColumnLayout {
                                 const next = checked ? bcard.ticked.filter(x => x !== modelData.id).concat([modelData.id]) : bcard.ticked.filter(x => x !== modelData.id)
                                 // (On: set up again for these, or off when none
                                 // is left; off: remembered for turning it on.)
-                                if (bcard.on) Mcp.catalogSet(bcard.b.id, next.length > 0, JSON.stringify(next))
-                                else Mcp.catalogSet(bcard.b.id, false, JSON.stringify(next))
+                                if (bcard.on) Mcp.catalogSet(page.scope, bcard.b.id, next.length > 0, JSON.stringify(next))
+                                else Mcp.catalogSet(page.scope, bcard.b.id, false, JSON.stringify(next))
                             }
                         }
                     }
@@ -345,7 +346,7 @@ ColumnLayout {
                         enabled: !bcard.busy
                         // (Installed, and not up to date as far as anyone looked.)
                         visible: bcard.b.version !== "" && (bcard.newer || (bcard.b.latest || "") === "")
-                        onClicked: Mcp.catalogUpdate(bcard.b.id)
+                        onClicked: Mcp.catalogUpdate(page.scope, bcard.b.id)
                     }
                 }
                 Hint_ {

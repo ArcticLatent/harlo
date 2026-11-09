@@ -199,6 +199,111 @@ fn pick_node(found: Vec<Node>, at_least: Option<[u64; 3]>) -> Result<Node, Strin
     })
 }
 
+// ---- where: this computer or a host ----
+
+/// Where it's installed and set up: this computer, or a host (Settings →
+/// MCP on a remote instance), each with its own copy, Node and entries.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Place {
+    Here,
+    Host(String),
+}
+
+impl Place {
+    /// The place of a Settings → MCP scope (a project has none).
+    pub fn of(scope: &Scope) -> Option<Place> {
+        match scope {
+            Scope::Global => Some(Place::Here),
+            Scope::Host(h) => Some(Place::Host(h.clone())),
+            Scope::Project(_) => None,
+        }
+    }
+
+    fn scope(&self) -> Scope {
+        match self {
+            Place::Here => Scope::Global,
+            Place::Host(h) => Scope::Host(h.clone()),
+        }
+    }
+
+    /// Its copies' folder, as its agents name it: harlo's data folder here,
+    /// `~/.local/share/harlo/mcp` on a host.
+    pub fn root(&self) -> PathBuf {
+        match self {
+            Place::Here => root(),
+            Place::Host(h) => PathBuf::from(harlo_harness::on_host(&mcp::host_home(h))).join(".local/share/harlo/mcp"),
+        }
+    }
+
+    fn host(&self) -> Result<crate::remote::Host, String> {
+        match self {
+            Place::Here => Err("not a host".into()),
+            Place::Host(h) => crate::remote::host(h).ok_or_else(|| format!("There's no host called {h}.")),
+        }
+    }
+
+    /// " on <host>" (nothing here), for what it says.
+    fn on(&self) -> String {
+        match self {
+            Place::Here => String::new(),
+            Place::Host(h) => format!(" on {h}"),
+        }
+    }
+}
+
+/// The version in use there and the Node it needs (None: not installed).
+fn installed_at(place: &Place, b: &Offered) -> Result<Option<(String, Option<[u64; 3]>)>, String> {
+    if *place == Place::Here {
+        let root = root();
+        return Ok(installed_in(&root, b).map(|v| (v, needs_node(&current(&root, b)))));
+    }
+    let cur = place.root().join(b.id).join("current");
+    let q = |p: &Path| crate::remote::quote(&p.to_string_lossy());
+    let out = crate::remote::run_ok(&place.host()?, &format!("[ -f {} ] && cat {} || true", q(&cur.join(b.entry)), q(&cur.join("package.json"))), Duration::from_secs(30)).map_err(|e| format!("{e:#}"))?;
+    Ok(package_facts(&out))
+}
+
+/// A package.json's version and the Node it needs.
+fn package_facts(text: &str) -> Option<(String, Option<[u64; 3]>)> {
+    let v: Value = serde_json::from_str(text.trim()).ok()?;
+    Some((v["version"].as_str()?.to_owned(), v["engines"]["node"].as_str().and_then(parse_version)))
+}
+
+/// Lists a host's `node` programs (PATH, then version managers' folders and
+/// the usual places), each as `path<TAB>its real path<TAB>its --version`.
+const HOST_NODES: &str = r#"h="$HOME"
+c() { [ -f "$1" ] && [ -x "$1" ] || return 0; if command -v timeout >/dev/null 2>&1; then v=$(timeout 5 "$1" --version </dev/null 2>/dev/null | head -n 1); else v=$("$1" --version </dev/null 2>/dev/null | head -n 1); fi; printf '%s\t%s\t%s\n' "$1" "$(readlink -f "$1" 2>/dev/null || echo "$1")" "$v"; }
+IFS=:; for d in $PATH; do c "$d/node"; done; unset IFS
+for f in "$h"/.nvm/versions/node/*/bin/node "$h"/.local/share/fnm/node-versions/*/installation/bin/node "$h"/.fnm/node-versions/*/installation/bin/node "$h"/.local/share/mise/installs/node/*/bin/node "$h"/.asdf/installs/nodejs/*/bin/node /usr/local/n/versions/node/*/bin/node "$h"/.volta/bin/node "$h"/.local/bin/node /usr/local/bin/node /usr/bin/node; do c "$f"; done"#;
+
+/// A script for a host's `sh`, whatever its login shell (zsh refuses a
+/// pattern that matches nothing).
+fn in_sh(script: &str) -> String {
+    format!("sh -c {}", crate::remote::quote(script))
+}
+
+/// What HOST_NODES printed: the Nodes, in its order, each once.
+fn host_nodes(text: &str) -> Vec<Node> {
+    let mut seen = std::collections::HashSet::new();
+    text.lines()
+        .filter_map(|l| {
+            let mut f = l.split('\t');
+            let (path, real, version) = (f.next()?, f.next()?, f.next()?);
+            let version = parse_version(version)?;
+            seen.insert(real.to_owned()).then(|| Node { path: path.into(), version })
+        })
+        .collect()
+}
+
+/// The Node to run it with there (see [`find_node`]).
+fn find_node_at(place: &Place, at_least: Option<[u64; 3]>) -> Result<Node, String> {
+    if *place == Place::Here {
+        return find_node(at_least);
+    }
+    let out = crate::remote::run_ok(&place.host()?, &in_sh(HOST_NODES), Duration::from_secs(60)).map_err(|e| format!("{e:#}"))?;
+    pick_node(host_nodes(&out), at_least).map_err(|e| e.replace("installed", &format!("installed{}", place.on())))
+}
+
 // ---- the agents' entries ----
 
 /// Whether an entry (its command words) runs one of harlo's copies of `b`.
@@ -207,20 +312,20 @@ fn runs(b: &Offered, root: &Path, command: &[String]) -> bool {
     command.iter().any(|w| Path::new(w).starts_with(&dir))
 }
 
-/// Which offered server a configured one is, if it's one of harlo's.
-pub fn which(form: &Form) -> Option<Offered> {
-    let root = root();
+/// Which offered server a configured one is, if it's one of harlo's there.
+pub fn which(form: &Form, place: &Place) -> Option<Offered> {
+    let root = place.root();
     OFFERED.iter().copied().find(|b| form.name == b.id && runs(b, &root, &form.command))
 }
 
-/// The agents it's on for (global, this computer), and whether a server of
-/// its name that isn't harlo's is in the way.
-fn agents_on(b: &Offered) -> (Vec<HarnessKind>, bool) {
-    let root = root();
+/// The agents it's on for there (global), and whether a server of its name
+/// that isn't harlo's is in the way.
+fn agents_on(b: &Offered, place: &Place) -> (Vec<HarnessKind>, bool) {
+    let (root, scope) = (place.root(), place.scope());
     let mut on = Vec::new();
     let mut taken = false;
     for kind in mcp::HARNESSES {
-        if let Ok(Some(entry)) = mcp::entry(kind, &Scope::Global, b.id) {
+        if let Ok(Some(entry)) = mcp::entry(kind, &scope, b.id) {
             let form = Form::from_entry(kind, b.id, &entry);
             if !runs(b, &root, &form.command) {
                 taken = true;
@@ -232,80 +337,97 @@ fn agents_on(b: &Offered) -> (Vec<HarnessKind>, bool) {
     (on, taken)
 }
 
-fn agents_key(b: &Offered) -> String {
-    format!("settings.mcp_catalog.{}.agents", b.id)
+fn agents_key(b: &Offered, place: &Place) -> String {
+    match place {
+        Place::Here => format!("settings.mcp_catalog.{}.agents", b.id),
+        Place::Host(h) => format!("settings.mcp_catalog.{}.agents@{h}", b.id),
+    }
 }
 
 fn db() -> Option<crate::db::Db> {
     crate::db::Db::open(&crate::db::default_path()).ok()
 }
 
-/// The agents chosen for it last (kept while it's off; none yet: empty).
-fn chosen(b: &Offered) -> Vec<HarnessKind> {
-    let saved = db().and_then(|d| d.get(&agents_key(b)).ok().flatten()).unwrap_or_default();
+/// The agents chosen for it there last (kept while it's off; none yet:
+/// empty).
+fn chosen(b: &Offered, place: &Place) -> Vec<HarnessKind> {
+    let saved = db().and_then(|d| d.get(&agents_key(b, place)).ok().flatten()).unwrap_or_default();
     mcp::HARNESSES.into_iter().filter(|k| saved.split(',').any(|s| s == k.as_str())).collect()
 }
 
 /// Keeps the agents chosen (for when it's turned on again).
-pub fn choose(b: &Offered, kinds: &[HarnessKind]) {
+pub fn choose(b: &Offered, place: &Place, kinds: &[HarnessKind]) {
     if let Some(d) = db() {
-        let _ = d.set(&agents_key(b), &kinds.iter().map(|k| k.as_str()).collect::<Vec<_>>().join(","));
+        let _ = d.set(&agents_key(b, place), &kinds.iter().map(|k| k.as_str()).collect::<Vec<_>>().join(","));
     }
 }
 
-/// Its entries for `kinds` (global; removed from the others' files).
-fn write_entries(b: &Offered, node: &Path, copy: &Path, kinds: &[HarnessKind]) -> Result<(), String> {
+/// Its entries there for `kinds` (global; removed from the others' files).
+fn write_entries(b: &Offered, place: &Place, node: &Path, kinds: &[HarnessKind]) -> Result<(), String> {
+    let copy = current(&place.root(), b);
     let mut command = vec![node.to_string_lossy().into_owned(), copy.join(b.entry).to_string_lossy().into_owned()];
     command.extend(b.args.iter().map(|a| a.to_string()));
     let form = Form { name: b.id.into(), enabled: true, transport: "stdio".into(), command, ..Form::default() };
-    mcp::save(&Scope::Global, b.id, &form, kinds).map_err(|e| format!("{e:#}"))?;
+    let scope = place.scope();
+    mcp::save(&scope, b.id, &form, kinds).map_err(|e| format!("{e:#}"))?;
     if kinds.contains(&HarnessKind::Harlo) {
-        mcp::set_field(HarnessKind::Harlo, &Scope::Global, b.id, "hiddenTools", Some(json!(b.hidden_for_harlo))).map_err(|e| format!("{e:#}"))?;
+        mcp::set_field(HarnessKind::Harlo, &scope, b.id, "hiddenTools", Some(json!(b.hidden_for_harlo))).map_err(|e| format!("{e:#}"))?;
     }
     Ok(())
 }
 
-/// Turns it on for `kinds` (empty: the ones chosen before), downloading it
-/// first if it isn't yet (blocking; `progress`: bytes so far, of all).
-pub fn enable(b: &Offered, kinds: &[HarnessKind], progress: &mut dyn FnMut(u64, u64)) -> Result<(), String> {
-    let kinds = if kinds.is_empty() { chosen(b) } else { kinds.to_vec() };
-    let (_, taken) = agents_on(b);
+/// "your global servers" (here) or "the global servers on <host>".
+fn servers_there(place: &Place) -> String {
+    match place {
+        Place::Here => "your global servers".into(),
+        Place::Host(h) => format!("the global servers on {h}"),
+    }
+}
+
+/// Turns it on there for `kinds` (empty: the ones chosen before),
+/// downloading it first if it isn't yet (blocking; `progress`: bytes so far,
+/// of all).
+pub fn enable(b: &Offered, place: &Place, kinds: &[HarnessKind], progress: &mut dyn FnMut(u64, u64)) -> Result<(), String> {
+    let kinds = if kinds.is_empty() { chosen(b, place) } else { kinds.to_vec() };
+    let (_, taken) = agents_on(b, place);
     if taken {
-        return Err(format!("You already have a server called {} in your global servers: remove it first, so harlo's doesn't replace it.", b.id));
+        return Err(format!("You already have a server called {} in {}: remove it first, so harlo's doesn't replace it.", b.id, servers_there(place)));
     }
     if kinds.is_empty() {
         return Err("Tick at least one agent.".into());
     }
-    let root = root();
-    if installed_in(&root, b).is_none() {
-        install_latest(b, false, progress)?;
-    }
-    let node = find_node(needs_node(&current(&root, b)))?;
-    write_entries(b, &node.path, &current(&root, b), &kinds)?;
-    choose(b, &kinds);
+    let need = match installed_at(place, b)? {
+        Some((_, need)) => need,
+        None => install_latest_at(place, b, false, progress)?.2,
+    };
+    let node = find_node_at(place, need)?;
+    write_entries(b, place, &node.path, &kinds)?;
+    choose(b, place, &kinds);
     Ok(())
 }
 
-/// Turns it off: its entries go (its copy stays), and `kinds` are the
+/// Turns it off there: its entries go (its copy stays), and `kinds` are the
 /// agents chosen for turning it on again.
-pub fn disable(b: &Offered, kinds: &[HarnessKind]) -> Result<(), String> {
-    choose(b, kinds);
-    let (on, taken) = agents_on(b);
+pub fn disable(b: &Offered, place: &Place, kinds: &[HarnessKind]) -> Result<(), String> {
+    choose(b, place, kinds);
+    let (on, taken) = agents_on(b, place);
     if on.is_empty() && taken {
         return Err(format!("The server called {} isn't harlo's: change it in your servers below.", b.id));
     }
     for kind in on {
-        mcp::put_entry(kind, &Scope::Global, None, b.id).map_err(|e| format!("{e:#}"))?;
+        mcp::put_entry(kind, &place.scope(), None, b.id).map_err(|e| format!("{e:#}"))?;
     }
     Ok(())
 }
 
-/// On harlo's start: the entries of one that's on get a Node again if
-/// theirs is gone or now too old.
+/// On harlo's start: the entries of one that's on (here) get a Node again
+/// if theirs is gone or now too old. (A host's are looked at when its
+/// Settings → MCP is.)
 pub fn on_start() {
+    let place = Place::Here;
     for b in OFFERED {
         let root = root();
-        let (on, _) = agents_on(&b);
+        let (on, _) = agents_on(&b, &place);
         let Some(kind) = on.first() else { continue };
         let Ok(Some(entry)) = mcp::entry(*kind, &Scope::Global, b.id) else { continue };
         let node = Form::from_entry(*kind, b.id, &entry).command.first().map(PathBuf::from).unwrap_or_default();
@@ -315,7 +437,7 @@ pub fn on_start() {
         }
         match find_node(need) {
             Ok(n) => {
-                if let Err(e) = write_entries(&b, &n.path, &current(&root, &b), &on) {
+                if let Err(e) = write_entries(&b, &place, &n.path, &on) {
                     tracing::warn!("{}: {e}", b.name);
                 }
             }
@@ -345,14 +467,81 @@ pub fn stars(b: &Offered) -> Result<u64, String> {
     repo["stargazers_count"].as_u64().ok_or_else(|| "GitHub didn't say how many stars it has.".into())
 }
 
-/// Downloads its newest release when it's newer than the one in use (or
-/// there's none), checked against its published SHA-256, and makes it the
-/// one in use. With `node`, a release whose Node isn't installed is refused.
-/// (The version before, the version now.)
-fn install_latest(b: &Offered, node: bool, progress: &mut dyn FnMut(u64, u64)) -> Result<(Option<String>, String), String> {
-    install_latest_in(&root(), b, node, progress)
+/// Downloads its newest release here (checked against its published
+/// SHA-256) into `file` and unpacks it into `staged`: its version and the
+/// Node it needs.
+fn fetch(b: &Offered, tag: &str, asset: &crate::engines::Asset, file: &Path, staged: &Path, progress: &mut dyn FnMut(u64, u64)) -> Result<(String, Option<[u64; 3]>), String> {
+    crate::engines::download(&asset.url, file, Some(&asset.sha256), &mut |_, d, t| progress(d, t), &|| false)?;
+    crate::engines::unpack(file, staged)?;
+    if !staged.join(b.entry).is_file() {
+        return Err(format!("{} {tag}'s release has no {}.", b.name, b.entry));
+    }
+    Ok((version_in(staged).unwrap_or(tag.to_owned()), needs_node(staged)))
 }
 
+/// Puts a release (its archive) on a host as `<root>/<id>/<version>` and
+/// makes it the one in use there, as [`switch_to`] does here.
+fn put_on_host(place: &Place, b: &Offered, archive: &[u8], version: &str) -> Result<(), String> {
+    let dir = place.root().join(b.id);
+    let script = format!(
+        r#"set -e
+d={d}; v={v}; n="$d/.new-$v"
+mkdir -p "$d"; rm -rf "$n"; mkdir "$n"
+tar -xzf - -C "$n"
+[ -f "$n"/{entry} ] || {{ echo "Its release has no {entry_shown}." >&2; rm -rf "$n"; exit 1; }}
+before=$(readlink "$d/current" 2>/dev/null || true)
+rm -rf "$d/$v"; mv "$n" "$d/$v"
+rm -f "$d/.current-new"; ln -s "$v" "$d/.current-new"
+mv -fT "$d/.current-new" "$d/current" 2>/dev/null || {{ rm -f "$d/.current-new"; ln -sfn "$v" "$d/current"; }}
+for e in "$d"/* "$d"/.new-* "$d"/.current-new; do
+  [ -e "$e" ] || [ -L "$e" ] || continue
+  case "${{e##*/}}" in "$v"|current|"$before") ;; *) rm -rf "$e";; esac
+done"#,
+        d = crate::remote::quote(&dir.to_string_lossy()),
+        v = crate::remote::quote(version),
+        entry = crate::remote::quote(b.entry),
+        entry_shown = b.entry,
+    );
+    crate::remote::run_ok_with_input(&place.host()?, &in_sh(&script), archive, Duration::from_secs(180)).map_err(|e| format!("Couldn't copy it to {}: {e:#}", place.on().trim_start_matches(" on ")))
+}
+
+/// Downloads its newest release when it's newer than the one in use there
+/// (or there's none) and makes it the one in use. With `node`, a release
+/// whose Node isn't installed there is refused. (The version before, the
+/// version now, the Node it needs.)
+fn install_latest_at(place: &Place, b: &Offered, node: bool, progress: &mut dyn FnMut(u64, u64)) -> Result<(Option<String>, String, Option<[u64; 3]>), String> {
+    if *place == Place::Here {
+        let root = root();
+        let (before, now) = install_latest_in(&root, b, node, progress)?;
+        return Ok((before, now, needs_node(&current(&root, b))));
+    }
+    let (before, before_need) = installed_at(place, b)?.map_or((None, None), |(v, n)| (Some(v), n));
+    let (tag, asset) = latest(b)?;
+    if let Some(now) = before.clone().filter(|now| !newer(&tag, now)) {
+        return Ok((before, now, before_need));
+    }
+    // (Fetched and checked here, then copied there.)
+    let work = std::env::temp_dir().join(format!("harlo-mcp-{}-{}", b.id, std::process::id()));
+    let _ = std::fs::remove_dir_all(&work);
+    let file = work.join(b.asset);
+    let got = (|| -> Result<(String, Option<[u64; 3]>), String> {
+        let (version, need) = fetch(b, &tag, &asset, &file, &work.join("staged"), progress)?;
+        if node && let Some(need) = need {
+            find_node_at(place, Some(need)).map_err(|e| format!("{} {version} {}", b.name, e.trim_start_matches("It ").replace(", then turn it on again", " and update again")))?;
+        }
+        let archive = std::fs::read(&file).map_err(|e| e.to_string())?;
+        put_on_host(place, b, &archive, &version)?;
+        Ok((version, need))
+    })();
+    let _ = std::fs::remove_dir_all(&work);
+    let (version, need) = got?;
+    Ok((before, version, need))
+}
+
+/// Downloads its newest release here when it's newer than the one in use
+/// (or there's none), checked against its published SHA-256, and makes it
+/// the one in use. With `node`, a release whose Node isn't installed is
+/// refused. (The version before, the version now.)
 fn install_latest_in(root: &Path, b: &Offered, node: bool, progress: &mut dyn FnMut(u64, u64)) -> Result<(Option<String>, String), String> {
     let before = installed_in(root, b);
     let (tag, asset) = latest(b)?;
@@ -364,14 +553,9 @@ fn install_latest_in(root: &Path, b: &Offered, node: bool, progress: &mut dyn Fn
     let staged = dir.join(format!(".new-{tag}"));
     let _ = std::fs::remove_dir_all(&staged);
     let got = (|| {
-        crate::engines::download(&asset.url, &file, Some(&asset.sha256), &mut |_, d, t| progress(d, t), &|| false)?;
-        crate::engines::unpack(&file, &staged)?;
-        if !staged.join(b.entry).is_file() {
-            return Err(format!("{} {tag}'s release has no {}.", b.name, b.entry));
-        }
-        let version = version_in(&staged).unwrap_or(tag.clone());
+        let (version, need) = fetch(b, &tag, &asset, &file, &staged, progress)?;
         if node
-            && let Some(need) = needs_node(&staged)
+            && let Some(need) = need
             && let Err(e) = find_node(Some(need))
         {
             return Err(format!("{} {version} {}", b.name, e.trim_start_matches("It ").replace(", then turn it on again", " and update again")));
@@ -390,47 +574,51 @@ fn install_latest_in(root: &Path, b: &Offered, node: bool, progress: &mut dyn Fn
     Ok((before, version))
 }
 
-/// Updates it to its newest release (blocking), used when its Node is
+/// Updates it there to its newest release (blocking), used when its Node is
 /// there. New sessions use it; running ones keep theirs.
-pub fn update(b: &Offered, progress: &mut dyn FnMut(u64, u64)) -> Result<String, String> {
-    let (before, version) = install_latest(b, true, progress)?;
+pub fn update(b: &Offered, place: &Place, progress: &mut dyn FnMut(u64, u64)) -> Result<String, String> {
+    let (before, version, need) = install_latest_at(place, b, true, progress)?;
     if before.as_deref() == Some(version.as_str()) {
         return Ok(format!("{} {version} is the newest.", b.name));
     }
     // (Its entries name the Node it needs now.)
-    let root = root();
-    let (on, _) = agents_on(b);
+    let (on, _) = agents_on(b, place);
     if !on.is_empty()
-        && let Ok(node) = find_node(needs_node(&current(&root, b)))
+        && let Ok(node) = find_node_at(place, need)
     {
-        write_entries(b, &node.path, &current(&root, b), &on)?;
+        write_entries(b, place, &node.path, &on)?;
     }
     Ok(match before {
-        Some(old) => format!("{} is updated: {old} → {version}. New sessions use it.", b.name),
-        None => format!("{} {version} is downloaded.", b.name),
+        Some(old) => format!("{} is updated{}: {old} → {version}. New sessions use it.", b.name, place.on()),
+        None => format!("{} {version} is downloaded{}.", b.name, place.on()),
     })
 }
 
-/// What Settings → MCP shows for it: `{ id, name, about, license, repo,
-/// version ("": not installed), agents, chosen, taken, needs, node,
-/// nodeError }`.
-pub fn status(b: &Offered) -> Value {
-    let root = root();
-    let version = installed_in(&root, b);
-    let (on, taken) = agents_on(b);
+/// What Settings → MCP shows for it there: `{ id, name, about, license,
+/// repo, version ("": not installed), agents, chosen, taken, needs, node,
+/// nodeError }` (`error`: the host couldn't be reached).
+pub fn status(b: &Offered, place: &Place) -> Value {
+    let mut out = json!({ "id": b.id, "name": b.name, "about": b.about, "license": b.license, "repo": b.repo });
+    let installed = match installed_at(place, b) {
+        Ok(i) => i,
+        Err(e) => {
+            out["version"] = json!("");
+            out["error"] = json!(e);
+            return out;
+        }
+    };
+    let (on, taken) = agents_on(b, place);
     // (Not installed yet: any Node will do until its release says.)
-    let need = version.as_ref().and_then(|_| needs_node(&current(&root, b)));
-    let node = find_node(need);
-    json!({
-        "id": b.id, "name": b.name, "about": b.about, "license": b.license, "repo": b.repo,
-        "version": version.unwrap_or_default(),
-        "agents": on.iter().map(|k| k.as_str()).collect::<Vec<_>>(),
-        "chosen": chosen(b).iter().map(|k| k.as_str()).collect::<Vec<_>>(),
-        "taken": taken,
-        "needs": need.map(show_version).unwrap_or_default(),
-        "node": node.as_ref().map(|n| show_version(n.version)).unwrap_or_default(),
-        "nodeError": node.err().unwrap_or_default(),
-    })
+    let need = installed.as_ref().and_then(|(_, n)| *n);
+    let node = find_node_at(place, need);
+    out["version"] = json!(installed.map(|(v, _)| v).unwrap_or_default());
+    out["agents"] = json!(on.iter().map(|k| k.as_str()).collect::<Vec<_>>());
+    out["chosen"] = json!(chosen(b, place).iter().map(|k| k.as_str()).collect::<Vec<_>>());
+    out["taken"] = json!(taken);
+    out["needs"] = json!(need.map(show_version).unwrap_or_default());
+    out["node"] = json!(node.as_ref().map(|n| show_version(n.version)).unwrap_or_default());
+    out["nodeError"] = json!(node.err().unwrap_or_default());
+    out
 }
 
 #[cfg(test)]
@@ -484,6 +672,21 @@ mod tests {
         assert_eq!(pick_node(vec![n("/a", [22, 0, 0]), n("/b", [25, 1, 0]), n("/c", [26, 0, 0])], Some([24, 15, 0])).unwrap().path, PathBuf::from("/c"));
         assert_eq!(pick_node(vec![n("/a", [22, 3, 0])], Some([24, 15, 0])).unwrap_err(), "It needs Node 24.15 or newer; the newest installed is 22.3. Install a newer Node (nodejs.org, or your package manager), then turn it on again.");
         assert!(pick_node(vec![], Some([24, 15, 0])).unwrap_err().contains("which isn't installed"));
+    }
+
+    #[test]
+    fn reads_a_hosts_nodes_and_copy() {
+        // (The same Node by two names once; one that didn't answer left out.)
+        let text = "/usr/bin/node\t/usr/bin/node\tv22.3.0\n/home/u/.nvm/versions/node/v26.1.0/bin/node\t/home/u/.nvm/versions/node/v26.1.0/bin/node\tv26.1.0\n/usr/local/bin/node\t/usr/bin/node\tv22.3.0\n/opt/broken/node\t/opt/broken/node\t\n";
+        let found = host_nodes(text);
+        assert_eq!(found, vec![Node { path: "/usr/bin/node".into(), version: [22, 3, 0] }, Node { path: "/home/u/.nvm/versions/node/v26.1.0/bin/node".into(), version: [26, 1, 0] }]);
+        assert_eq!(pick_node(found, Some([24, 15, 0])).unwrap().version, [26, 1, 0]);
+        assert_eq!(package_facts(r#"{"version":"2.1.7","engines":{"node":">=24.15.0"}}"#), Some(("2.1.7".into(), Some([24, 15, 0]))));
+        assert_eq!(package_facts(""), None);
+        // A host's copies, as its agents name them.
+        assert_eq!(Place::of(&Scope::Global), Some(Place::Here));
+        assert_eq!(Place::of(&Scope::Project("/p".into())), None);
+        assert_eq!(agents_key(&B, &Place::Host("nas".into())), "settings.mcp_catalog.context-mode.agents@nas");
     }
 
     #[test]

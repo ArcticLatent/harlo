@@ -7535,7 +7535,7 @@ ApplicationWindow {
     SequentialAnimation {
         id: catalogSteps
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlocatalog"
-        function offered() { return JSON.parse(Mcp.catalogJson())[0] || {} }
+        function offered() { return JSON.parse(Mcp.catalogJson("global"))[0] || {} }
         function entry() {
             const text = TestInput.readFile(win.selftestDir + "/config/harlo-agent/mcp.json") || "{}"
             return (JSON.parse(text).mcpServers || {})["context-mode"] || null
@@ -7633,6 +7633,96 @@ ApplicationWindow {
             const d = settingsDialog.contentItem
             win.check(catalogSteps.entry() === null, "off: its entry is gone")
             win.check(win.findName("mcpCatalogStatus-context-mode", d).text === "Off" && win.findName("mcpCatalogFor-context-mode-harlo", d).checked, "Off, and Harlo stays ticked for next time")
+            win.summary(); Qt.quit() } }
+    }
+
+    // The same on a host (the test's SSH server, its home in the test
+    // folder): with box the instance shown, Ready to install downloads here,
+    // copies it there, finds box's Node, writes box's entries and tests it
+    // there; Update and off likewise; this computer's card is its own.
+    SequentialAnimation {
+        id: catalogHostSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlocataloghost"
+        readonly property string hostHome: win.selftestDir + "/host-home"
+        readonly property string copies: hostHome + "/.local/share/harlo/mcp/context-mode"
+        function offered(scope) { return JSON.parse(Mcp.catalogJson(scope || "host:box"))[0] || {} }
+        function entry() {
+            const text = TestInput.readFile(catalogHostSteps.hostHome + "/.config/harlo-agent/mcp.json") || "{}"
+            return (JSON.parse(text).mcpServers || {})["context-mode"] || null
+        }
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            Workspace.setProviderEnabled("claude", false)
+            win.check(Remotes.saveHost("", "box", "ssh " + win.argValue("--ssh=")) === "", "the host is saved")
+            Remotes.connectHost("box") } }
+        ScriptAction { script: win.waitUntil(catalogHostSteps, () => JSON.parse(Remotes.hostsJson())[0].state === "connected", 30000) }
+        ScriptAction { script: { Workspace.switchInstance("box"); settingsDialog.openPage("mcp") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(catalogHostSteps, () => catalogHostSteps.offered().loading === false && catalogHostSteps.offered().latest === "2.1.7", 30000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const d = settingsDialog.contentItem, b = catalogHostSteps.offered()
+            const card = win.findName("mcpCatalog-context-mode", d), sw = win.findName("mcpCatalogToggle-context-mode", d)
+            win.check(card !== null && card.visible && sw !== null && !sw.checked && sw.enabled, "box's global servers offer it too, off")
+            win.check(win.findName("mcpCatalogLede", d).text.indexOf("sets it up on box for the agents you tick") > 0, "it says it's set up on box (" + win.findName("mcpCatalogLede", d).text + ")")
+            win.check(win.findName("mcpCatalogVersion-context-mode", d).text === "Not installed · version 2.1.7 is the newest", "not installed there (" + win.findName("mcpCatalogVersion-context-mode", d).text + ")")
+            win.check(b.node !== "" && b.nodeError === "" && (b.error || "") === "", "box's Node found (" + JSON.stringify(b) + ")")
+            win.check(TestInput.readFile(catalogHostSteps.copies + "/current/package.json") === "" && catalogHostSteps.entry() === null, "nothing on box yet")
+            win.shotPopup(settingsDialog, "clicks-catalog-host-off")
+            win.clickItem(sw, "turn on") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(catalogHostSteps, () => catalogHostSteps.offered().busy === "" && ((catalogHostSteps.offered().agents || []).length > 0 || (catalogHostSteps.offered().error || "") !== ""), 60000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const b = catalogHostSteps.offered(), e = catalogHostSteps.entry() || {}, c = catalogHostSteps.copies
+            win.check(JSON.stringify(b.agents) === JSON.stringify(["harlo"]) && b.error === "" && b.version === "2.1.7", "downloaded and on for Harlo on box (" + JSON.stringify(b) + ")")
+            win.check(JSON.parse(TestInput.readFile(c + "/current/package.json") || "{}").version === "2.1.7" && TestInput.readFile(c + "/current/server.mjs") !== "", "copied to box, its current link there")
+            win.check(TestInput.readFile(win.selftestDir + "/data/harlo/mcp/context-mode/current/package.json") === "", "not installed on this computer")
+            win.check(e.command && e.command.startsWith("/") && e.command.endsWith("/node"), "box's entry runs box's Node by its path (" + e.command + ")")
+            win.check(JSON.stringify(e.args) === JSON.stringify([c + "/current/server.mjs", "--agent", "claude-code"]), "box's copy, through current (" + JSON.stringify(e.args) + ")")
+            win.check(JSON.stringify(e.hiddenTools) === JSON.stringify(["ctx_upgrade", "ctx_doctor"]) && e.enabled === true, "its own updating hidden from Harlo there") } }
+        ScriptAction { script: win.waitUntil(catalogHostSteps, () => (JSON.parse(Mcp.statusJson("host:box"))["context-mode"] || {}).state === "connected", 40000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const d = settingsDialog.contentItem
+            const pill = win.findName("mcpCatalogStatus-context-mode", d)
+            win.check(pill !== null && pill.text === "Connected · 9 tools", "tested on box: connected (" + (pill ? pill.text : "") + " " + Mcp.statusJson("host:box").slice(0, 600) + ")")
+            win.check(win.findName("mcpServer-context-mode", d) === null, "not listed again under Your servers")
+            win.shotPopup(settingsDialog, "clicks-catalog-host-on")
+            win.clickItem(win.findName("mcpRefresh", d), "refresh") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(catalogHostSteps, () => catalogHostSteps.offered().latest === "2.1.8" && catalogHostSteps.offered().version === "2.1.7", 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const d = settingsDialog.contentItem, u = win.findName("mcpCatalogUpdate-context-mode", d)
+            win.check(win.findName("mcpCatalogVersion-context-mode", d).text === "Version 2.1.7 · 2.1.8 is out" && u !== null && u.visible, "a newer release: Update (" + win.findName("mcpCatalogVersion-context-mode", d).text + ")")
+            win.clickItem(u, "Update") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(catalogHostSteps, () => catalogHostSteps.offered().busy === "" && ((catalogHostSteps.offered().message || "") !== "" || (catalogHostSteps.offered().error || "") !== ""), 60000) }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const d = settingsDialog.contentItem, b = catalogHostSteps.offered(), c = catalogHostSteps.copies
+            win.check(b.message === "context-mode is updated on box: 2.1.7 → 2.1.8. New sessions use it." && b.version === "2.1.8", "updated on box (" + b.message + b.error + ")")
+            win.check(JSON.parse(TestInput.readFile(c + "/current/package.json") || "{}").version === "2.1.8", "box's current is the new one")
+            win.check(TestInput.readFile(c + "/2.1.7/package.json") !== "", "the one before stays there")
+            win.check(win.findName("mcpCatalogVersion-context-mode", d).text === "Version 2.1.8 · up to date", "up to date")
+            win.shotPopup(settingsDialog, "clicks-catalog-host-updated")
+            win.clickItem(win.findName("mcpCatalogToggle-context-mode", d), "turn off") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(catalogHostSteps, () => catalogHostSteps.offered().busy === "" && (catalogHostSteps.offered().agents || []).length === 0, 30000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const d = settingsDialog.contentItem
+            win.check(catalogHostSteps.entry() === null && TestInput.readFile(catalogHostSteps.copies + "/current/package.json") !== "", "off: box's entry is gone, its copy stays")
+            win.check(win.findName("mcpCatalogStatus-context-mode", d).text === "Off", "Off")
+            Workspace.switchInstance("") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: win.waitUntil(catalogHostSteps, () => catalogHostSteps.offered("global").loading === false, 20000) }
+        ScriptAction { script: {
+            const b = catalogHostSteps.offered("global"), d = settingsDialog.contentItem
+            win.check(b.version === "" && (b.agents || []).length === 0, "this computer's own: not installed here (" + JSON.stringify(b) + ")")
+            win.check(win.findName("mcpCatalogVersion-context-mode", d).text === "Not installed · version 2.1.8 is the newest", "and its card says so (" + win.findName("mcpCatalogVersion-context-mode", d).text + ")")
             win.summary(); Qt.quit() } }
     }
 
