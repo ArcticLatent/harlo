@@ -104,6 +104,7 @@ fn main() {
                 "qml/AppSwitch.qml",
                 "qml/ShortcutList.qml",
                 "qml/KeyCap.qml",
+                "qml/RefreshButton.qml",
                 "qml/AskPanel.qml",
                 "qml/DraftView.qml",
                 "qml/TerminalView.qml",

@@ -572,7 +572,7 @@ Popup {
                     function save() { Workspace.setSpendLimits(amount(sessionLimit.text), amount(dayLimit.text)) }
                     SectionHeader {
                         title: "Spending limits"
-                        subtitle: "Today so far: $" + (spendLimits.spend.today || 0).toFixed(2) + " in harlo's sessions. Past a limit, harlo stops the run until you allow more."
+                        subtitle: "Today so far, since midnight: $" + (spendLimits.spend.today || 0).toFixed(2) + " in harlo's sessions. Past a limit, harlo stops the run until you allow more."
                         more: "Costs are what Claude Code reports, checked at the end of each turn. Harlo's sessions report none: Settings → Providers → Harlo has a token budget per helper instead. Empty: no limit."
                     }
                     Group {
@@ -609,7 +609,14 @@ Popup {
                         }
                     }
                 }
-                SectionHeader { title: "Activity"; Layout.bottomMargin: 6 }
+                SectionHeader {
+                    objectName: "usageActivity"
+                    title: "Activity"
+                    // (Its total is the period's, not today's, which the
+                    // spending limits count.)
+                    subtitle: "Every session over the period you pick, read from their files; the spending limits above count today only."
+                    Layout.bottomMargin: 6
+                }
             }
         }
     }

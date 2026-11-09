@@ -37,7 +37,8 @@ ColumnLayout {
     RowLayout {
         Layout.fillWidth: true
         spacing: 8
-        // (A section of Settings → Usage: its heading, Refresh at its right.)
+        // (A section of Settings → Usage: its heading, when it was read and
+        // refresh at its right, as Activity has.)
         Label { text: root.title; color: Theme.text; font.pixelSize: Theme.px(16); font.weight: Font.DemiBold; font.letterSpacing: -0.1 }
         Label {
             Layout.fillWidth: true
@@ -46,11 +47,9 @@ ColumnLayout {
             font.pixelSize: Theme.px(12.5)
             elide: Text.ElideRight
         }
-        FlatButton {
-            text: "Refresh"
-            font.pixelSize: Theme.px(12.5)
-            padding: 4
-            horizontalPadding: 10
+        RefreshButton {
+            objectName: "limitsRefresh"
+            tip: "Refresh the limits"
             enabled: !root.report.loading
             onClicked: root.host === "" ? Workspace.refreshQuota() : Workspace.refreshHostQuota(root.host)
         }

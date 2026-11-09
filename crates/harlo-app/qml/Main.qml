@@ -6148,6 +6148,10 @@ ApplicationWindow {
             win.shotWindow("pal-query-action")
             win.check(palette.marked("Settings", "set") === "<b><font color='" + Theme.rgb(Theme.accent) + "'>Set</font></b>tings", "matched letters are marked")
             win.check(palette.marked("Close tab", "set").split("<b>").length === 3, "letters in order when no word matches")
+            win.check(palette.marked("Add CSV export", "set").split("<b>").length === 2, "a loose match marks only where a word starts (" + palette.marked("Add CSV export", "set") + ")")
+            win.check(palette.choices[0].title === "Settings" && palette.choices[2].title === "Close tab", "whole-word matches come first (" + palette.choices.slice(0, 3).map(c => c.title).join(", ") + ")")
+            const firstLoose = palette.choices.findIndex(c => c.kind === "session" && palette.strength(c.title, "set") === 0)
+            win.check(firstLoose < 0 || palette.choices.slice(firstLoose).filter(c => c.kind === "session").every(c => palette.strength(c.title, "set") === 0), "strong sessions before loose ones")
             win.check(palette.choices.filter(i => i.kind === "session").every(i => i.subtitle === ""), "one project: not said on every row")
             palette.openWith(">") } }
         PauseAnimation { duration: 600 }
@@ -6164,6 +6168,7 @@ ApplicationWindow {
         ScriptAction { script: {
             win.shotWindow("pal-files")
             win.check(palette.choices.length === 2 && palette.choices[0].kind === "file", "@auth finds two files (" + palette.choices.length + ")")
+            win.check(win.findText("Insert", palette.contentItem) === null, "file rows don't each say Insert")
             palette.close(); Workspace.open("view:stats") } }
         PauseAnimation { duration: 2500 }
         ScriptAction { script: {
@@ -6179,6 +6184,7 @@ ApplicationWindow {
             win.check(!!win.findName("statsRefresh", sv), "refresh is an icon button")
             win.check(!Qt.colorEqual(sv.cCount, Theme.info) && !Qt.colorEqual(sv.cCount, Theme.primary), "counts aren't drawn in the input blue")
             win.check(!!win.findName("statsModelLegend", sv), "the models' colours have a legend")
+            win.check(win.findText("Output", sv) !== null && win.findText("Output (with reasoning)", sv) === null, "Output is called one thing")
             if (sv.width > 500) { const pr = win.findName("statsProject", sv); win.check(pr.y === 0, "the project picker sits beside the periods (y " + pr.y + ")") }
             chat.statsView.scrollToEnd() } }
         PauseAnimation { duration: 600 }
@@ -6186,7 +6192,12 @@ ApplicationWindow {
         PauseAnimation { duration: 900 }
         ScriptAction { script: { win.shotWindow("stats-bottom-light"); Workspace.chooseThemeMode("dark"); settingsDialog.openPage("usage") } }
         PauseAnimation { duration: 2000 }
-        ScriptAction { script: { win.shotWindow("usage-settings"); settingsDialog.close() } }
+        ScriptAction { script: {
+            win.shotWindow("usage-settings")
+            const sd = settingsDialog.contentItem
+            win.check(!!win.findName("limitsRefresh", sd) && !!win.findName("statsRefresh", sd) && win.findText("Refresh", sd) === null, "one refresh style on the page")
+            win.check(!!win.findText("Every session over the period you pick, read from their files; the spending limits above count today only.", sd), "Activity says it isn't today's spending")
+            settingsDialog.close() } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: { win.summary(); Qt.quit() } }
     }

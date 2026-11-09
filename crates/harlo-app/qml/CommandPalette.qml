@@ -43,24 +43,47 @@ Popup {
     }
 
     // The words typed: a session's or action's title with the letters that
-    // matched marked (a word found whole, else its letters in order).
+    // matched marked. A word found whole (at a word's start if it can be)
+    // is one mark; otherwise its letters in order, marked only where they
+    // start a word or run two or more, so a loose match isn't confetti.
     readonly property string words: input.text.startsWith(">") || input.text.startsWith("@") ? input.text.substring(1).trim() : input.text.trim()
+    function wordStart(lower, i) { return i === 0 || !/[a-z0-9]/.test(lower[i - 1]) }
+    function findWord(lower, w) {
+        let at = lower.indexOf(w), first = at
+        while (at >= 0 && !wordStart(lower, at)) at = lower.indexOf(w, at + 1)
+        if (at >= 0) return at
+        return w.length >= 2 ? first : -1
+    }
     function marks(title, query) {
         const lower = title.toLowerCase()
         const on = new Array(title.length).fill(false)
         for (const w of query.toLowerCase().split(/\s+/).filter(x => x)) {
-            const at = lower.indexOf(w)
+            const at = findWord(lower, w)
             if (at >= 0) {
                 for (let i = at; i < at + w.length; i++) on[i] = true
                 continue
             }
+            const hit = []
             let i = 0
             for (const c of w) {
                 while (i < lower.length && lower[i] !== c) i++
-                if (i < lower.length) on[i++] = true
+                if (i < lower.length) hit.push(i++)
+            }
+            for (let k = 0; k < hit.length;) {
+                let e = k
+                while (e + 1 < hit.length && hit[e + 1] === hit[e] + 1) e++
+                if (e > k || wordStart(lower, hit[k]))
+                    for (let j = k; j <= e; j++) on[hit[j]] = true
+                k = e + 1
             }
         }
         return on
+    }
+    // 1 when every word is found whole (or starts a word), else 0: the
+    // strong matches are listed first.
+    function strength(title, query) {
+        const lower = title.toLowerCase()
+        return query.toLowerCase().split(/\s+/).filter(x => x).every(w => findWord(lower, w) >= 0) ? 1 : 0
     }
     function marked(title, query) {
         const esc = c => c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c
@@ -86,7 +109,7 @@ Popup {
             for (const r of rows) out.push(r)
         }
         if (q.startsWith("@")) {
-            section("", root.session.fileMatches.map(f => ({ kind: "file", title: f, hint: "Insert", run: () => root.insertFile(f) })))
+            section("", root.session.fileMatches.map(f => ({ kind: "file", title: f, run: () => root.insertFile(f) })))
         } else {
             const actionOnly = q.startsWith(">")
             const query = actionOnly ? q.substring(1).trim() : q.trim()
@@ -111,6 +134,12 @@ Popup {
                 // (All in one project: it needn't be said on every row.)
                 if (sessions.length > 1 && sessions.every(r => r.subtitle === sessions[0].subtitle))
                     for (const r of sessions) r.subtitle = ""
+                if (query !== "") {
+                    // (Stable: within each, the ranking's order.)
+                    const strong = list => list.filter(r => strength(r.title, query) === 1).concat(list.filter(r => strength(r.title, query) === 0))
+                    sessions.splice(0, sessions.length, ...strong(sessions))
+                    acts.splice(0, acts.length, ...strong(acts))
+                }
                 if (query === "") {
                     section("Recent sessions", sessions)
                     section("Actions", acts)
@@ -272,8 +301,8 @@ Popup {
                             StatusDot { status: row.item.kind === "session" && row.item.status !== "live" ? (row.item.status || "") : "" }
                             // Sessions: when; actions: their keys.
                             Label {
-                                visible: row.item.kind === "session" || row.item.kind === "file"
-                                text: row.item.kind === "session" ? Theme.ago(row.item.modified, Date.now()) : (row.item.hint || "")
+                                visible: row.item.kind === "session"
+                                text: row.item.kind === "session" ? Theme.ago(row.item.modified, Date.now()) : ""
                                 color: Theme.textMuted
                                 font.pixelSize: Theme.px(11)
                             }

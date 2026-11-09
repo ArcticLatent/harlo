@@ -58,7 +58,7 @@ Rectangle {
     readonly property color cCountHover: Theme.blend(Theme.elevated, Theme.text, Theme.isLight ? 0.62 : 0.72)
     readonly property var tokenKinds: [
         { key: "input", label: "Input", color: cInput },
-        { key: "output", label: "Output (with reasoning)", color: cOutput },
+        { key: "output", label: "Output", color: cOutput },
         { key: "cacheRead", label: "Cache reads", color: cCacheRead },
         { key: "cacheWrite", label: "Cache writes", color: cCacheWrite },
     ]
@@ -153,25 +153,11 @@ Rectangle {
                 // (Narrow: the time goes to the button's tooltip, so the
                 // periods stay on one line.)
                 Label { visible: body.width >= 560; text: stats.updated ? "Updated " + stats.updated : ""; color: Theme.muted; font.pixelSize: Theme.px(12); Layout.alignment: Qt.AlignTop; Layout.topMargin: 7 }
-                Button {
-                    id: refreshButton
+                RefreshButton {
                     objectName: "statsRefresh"
-                    flat: true
-                    padding: 0
-                    implicitWidth: 28
-                    implicitHeight: 28
                     Layout.alignment: Qt.AlignTop
-                    Accessible.name: "Refresh"
+                    tip: stats.updated ? "Refresh (updated " + stats.updated + ")" : "Refresh"
                     onClicked: root.refresh()
-                    contentItem: Item { Icon { anchors.centerIn: parent; name: "refresh"; color: Theme.textMuted; implicitWidth: 15; implicitHeight: 15 } }
-                    background: Rectangle {
-                        radius: 6
-                        color: refreshButton.down ? Theme.pressed : refreshButton.hovered ? Theme.hover : "transparent"
-                        border.color: refreshButton.visualFocus ? Theme.accent : "transparent"
-                    }
-                    ToolTip.visible: hovered || visualFocus
-                    ToolTip.delay: 400
-                    ToolTip.text: stats.updated ? "Refresh (updated " + stats.updated + ")" : "Refresh"
                 }
             }
 
@@ -483,7 +469,7 @@ Rectangle {
                             required property var modelData
                             spacing: 6
                             Swatch { color: modelData.color; anchors.verticalCenter: parent.verticalCenter }
-                            Label { text: modelData.key === "output" ? "Output" : modelData.label; color: Theme.textMuted; font.pixelSize: Theme.px(11.5) }
+                            Label { text: modelData.label; color: Theme.textMuted; font.pixelSize: Theme.px(11.5) }
                         }
                     }
                 }
