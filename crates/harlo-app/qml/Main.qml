@@ -3662,7 +3662,10 @@ ApplicationWindow {
                       && results.some(r => r.indexOf("7 passed") >= 0) && results.some(r => r.indexOf("exit 101") >= 0), "what each came to (" + results.join(" | ") + ")")
             const tails = win.findAllNames("toolTail", box).map(l => l.text)
             win.check(tails.some(x => x.indexOf("7 passed") >= 0), "a command's last lines (" + tails.join(" | ") + ")")
-            win.check(win.findAllNames("toolCommand", box).length === 1, "the command under what it's for (the other is on its line)")
+            const numbered = win.findAllNames("toolTail", box).filter(l => l.row)
+            win.check(numbered.length === 3 && numbered[0].row.gutter === "3" && !numbered[0].row.context && numbered[2].row.context && numbered[2].row.body === "}",
+                      "grep's line numbers as a gutter, its context lines dimmer (" + numbered.map(l => JSON.stringify(l.row)).join(" ") + ")")
+            win.check(win.findAllNames("toolCommand", box).length === 2, "the commands under what they're for (the other is on its line)")
             win.check(win.chatText().indexOf("Running the full test suite\n") < 0 && win.findContaining("▸ cargo", t) === null, "no notice for a command in the foreground")
             // The wheel: the box first, then the session past its top.
             const f = win.findName("runBoxScroll", box)

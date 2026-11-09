@@ -152,6 +152,34 @@ Item {
         const l = Theme.toolLabel(t)
         return /^[a-z][a-z_]*$/.test(l) ? (l.charAt(0).toUpperCase() + l.slice(1)).replace(/_/g, " ") : l
     }
+    // Output whose lines start with line numbers (grep -n with its
+    // context lines, a path and a number, cat -n): each line as
+    // { gutter, body, context } with the gutters padded to one width, or
+    // null when it isn't (a few lines that only look like it stay text).
+    function numbered(lines) {
+        const grep = /^((?:[^\s:]*[\/.][^\s:]*:)?(?:\d+[:-])+)(.*)$/
+        const cat = /^\s*(\d+)\t(.*)$/
+        const rows = lines.map(l => {
+            const g = grep.exec(l)
+            // (Not a date or a time: "2026-11-08 …", "12:30:45 …".)
+            if (g && !/^\d/.test(g[2])) return { gutter: g[1].slice(0, -1), body: g[2], context: g[1].endsWith("-"), path: /[\/.]/.test(g[1].split(":")[0]) }
+            const c = cat.exec(l)
+            return c ? { gutter: c[1], body: c[2], context: false, path: false } : null
+        })
+        const hits = rows.filter(r => r !== null).length
+        const real = lines.filter(l => l.trim() !== "").length
+        if (hits === 0 || (hits < 2 && !rows.some(r => r && r.path)) || hits < real * 0.6) return null
+        const width = Math.max(...rows.map(r => r ? r.gutter.length : 0))
+        return rows.map((r, i) => r ? { gutter: r.gutter.padStart(width), body: r.body, context: r.context }
+                                     : { gutter: "".padStart(width), body: lines[i], context: true })
+    }
+    // One numbered line as rich text: the gutter faint, a context line's
+    // text dimmer than a matching one's. `nbsp`: spaces kept (StyledText).
+    function numberedHtml(r, nbsp) {
+        const esc = t => { const e = t.replace(/&/g, "&amp;").replace(/</g, "&lt;"); return nbsp ? e.replace(/ /g, "&nbsp;") : e }
+        return "<font color='" + Theme.rgb(Theme.textFaint) + "'>" + esc(r.gutter) + (nbsp ? "&nbsp;&nbsp;" : "  ") + "</font>"
+            + "<font color='" + Theme.rgb(r.context ? Theme.textMuted : Theme.text) + "'>" + esc(r.body) + "</font>"
+    }
     // A path's folder faint, its name plain.
     function pathHtml(t) {
         const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;")
@@ -307,6 +335,8 @@ Item {
         readonly property bool commandInWell: shell && (label !== "" || shownCommand.indexOf("\n") >= 0 || shownCommand.length > 90)
         readonly property var outLines: text === "" ? [] : text.split("\n").filter(l => l.trim() !== "")
         readonly property int tailLines: 3
+        readonly property var tail: outInWell && shell && !open ? outLines.slice(-tailLines) : []
+        readonly property var tailGutters: root.numbered(tail)
         readonly property bool outInWell: shell ? outLines.length > 0 && rowState !== "running" : open && text !== "" && !preview
         readonly property bool failed: rowState === "error" || /^(exit|failed)|failed$/.test(result)
         readonly property int hidden: preview ? lineCount - previewLines : shell ? outLines.length - tailLines : 0
@@ -541,16 +571,18 @@ Item {
                     // A command's last lines (each one shortened to the well), or
                     // all of a call's output, opened.
                     Repeater {
-                        model: card.outInWell && card.shell && !card.open ? card.outLines.slice(-card.tailLines) : []
+                        model: card.tail
                         Label {
                             required property string modelData
+                            required property int index
                             objectName: "toolTail"
                             x: 10
                             width: wellCol.width - 20
-                            text: modelData
+                            readonly property var row: card.tailGutters ? card.tailGutters[index] : null
+                            text: row ? root.numberedHtml(row, true) : modelData
                             color: Theme.textMuted
                             elide: Text.ElideRight
-                            textFormat: Text.PlainText
+                            textFormat: row ? Text.StyledText : Text.PlainText
                             font.family: Theme.mono
                             font.pixelSize: Theme.mpx(12)
                         }
@@ -559,7 +591,10 @@ Item {
                         visible: card.outInWell && (card.open || !card.shell)
                         x: 10
                         width: wellCol.width - 20
-                        text: visible ? card.text : ""
+                        // (Line numbers at the start of its lines as a gutter.)
+                        readonly property var gutters: visible ? root.numbered(card.text.split("\n")) : null
+                        textFormat: gutters ? TextEdit.RichText : TextEdit.PlainText
+                        text: !visible ? "" : gutters ? "<p style='margin:0;white-space:pre-wrap;'>" + gutters.map(r => root.numberedHtml(r, false)).join("<br>") + "</p>" : card.text
                         color: Theme.muted
                         readOnly: true
                         selectByMouse: true
