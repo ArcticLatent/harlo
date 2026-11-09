@@ -399,8 +399,11 @@ mod tests {
     }
 
     #[test]
-    fn languages_the_highlighter_lacks_borrow_a_near_one() {
-        assert!(has_language("Main.qml") && has_language("a.ts") && has_language("a.tsx"));
+    fn many_languages_are_highlighted() {
+        for f in ["Main.qml", "a.ts", "a.tsx", "Cargo.toml", "b.kt", "Dockerfile", "flake.nix", "c.zig", "d.svelte", "e.scss", "CMakeLists.txt", "x.service", "y.jsonc", "z.fs"] {
+            assert!(has_language(f), "{f}");
+        }
+        assert!(!has_language("notes.txt"));
         let v = view("bash", "sed -n 1,2p Main.qml", "", "import QtQuick\nItem { property string t: \"hi\"; width: 10 }", 400).unwrap();
         assert!(v.lines[1].html.contains("<span class="), "{}", v.lines[1].html);
     }

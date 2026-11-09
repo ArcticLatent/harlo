@@ -43,6 +43,8 @@ QtObject {
     readonly property color primaryHover: c.primary.hover
     readonly property color userBubble: c.chat.userMessageBackground
     readonly property color codeBg: (c.syntax.base.background) || c.markdown.inlineCodeBackground
+    // A code well's line-number column: a step off the well, toward the text.
+    readonly property color codeGutter: blend(codeBg, foreground, isLight ? 0.05 : 0.075)
     readonly property color selection: c.interactive.selection
     readonly property color error: c.status.error
     readonly property color warning: c.status.warning

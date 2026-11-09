@@ -174,7 +174,7 @@ fn class_theme() -> Theme {
 
 fn highlighter() -> &'static Highlighter {
     static H: OnceLock<Highlighter> = OnceLock::new();
-    H.get_or_init(|| Highlighter { syntaxes: SyntaxSet::load_defaults_newlines(), theme: class_theme() })
+    H.get_or_init(|| Highlighter { syntaxes: two_face::syntax::extra_newlines(), theme: class_theme() })
 }
 
 /// Appends a highlighted piece: plain text for the default class.
@@ -193,30 +193,29 @@ pub fn warm_up() {
     highlighter();
 }
 
-/// Languages the built-in set lacks, as the nearest one it has: QML and
-/// TypeScript read well as JavaScript, Kotlin as Java, and so on.
+/// Names the syntax set doesn't know, as the one it has: `jsx` and
+/// `mjs` are JavaScript, a shell session is shell, `jsonc` is JSON, a
+/// systemd unit is INI, and `.fs` is F# rather than a shader.
 fn alias(token: &str) -> &str {
     match token.to_ascii_lowercase().as_str() {
-        "qml" | "ts" | "tsx" | "mts" | "cts" | "jsx" | "mjs" | "cjs" | "typescript" | "typescriptreact" | "javascriptreact" => "js",
-        "kt" | "kts" | "kotlin" => "java",
-        "zsh" | "fish" | "bash" | "ksh" | "shell" | "console" => "sh",
-        "jsonc" | "json5" => "json",
-        "vue" | "svelte" => "html",
-        "scss" | "sass" | "less" => "css",
-        "hpp" | "hxx" | "hh" => "cpp",
+        "jsx" | "mjs" | "cjs" | "javascriptreact" => "js",
+        "ksh" | "shell" | "console" | "shellsession" | "terminal" => "sh",
+        "jsonc" | "json5" | "jsonl" | "ndjson" => "json",
+        "service" | "socket" | "timer" | "mount" | "target" | "path" | "network" | "netdev" | "container" => "ini",
+        "fs" | "fsharp" => "fsx",
         _ => token,
     }
 }
 
-/// The language of a file, by its extension (or name: a Makefile), if the
-/// highlighter has it (or a near one).
+/// The language of a file, by its extension, else its name (a Makefile,
+/// CMakeLists.txt), if the highlighter has one.
 pub fn language_of(path: &str) -> Option<&'static syntect::parsing::SyntaxReference> {
     let h = highlighter();
     let p = std::path::Path::new(path);
     let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
     let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    let found = if ext.is_empty() { h.syntaxes.find_syntax_by_extension(name) } else { h.syntaxes.find_syntax_by_extension(alias(ext)) };
-    found.filter(|s| s.name != "Plain Text")
+    let known = |s: Option<&'static syntect::parsing::SyntaxReference>| s.filter(|s| s.name != "Plain Text");
+    known(if ext.is_empty() { None } else { h.syntaxes.find_syntax_by_extension(alias(ext)) }).or_else(|| known(h.syntaxes.find_syntax_by_extension(name)))
 }
 
 /// Highlights code into a Qt rich-text `<pre>` block (token classes; see
@@ -390,3 +389,4 @@ mod tests {
         assert_eq!(plain_text("a &lt;b&gt; c"), "a <b> c");
     }
 }
+

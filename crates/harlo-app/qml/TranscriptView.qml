@@ -525,6 +525,7 @@ Item {
         // The well: a write's or an edit's lines; a command (when its line
         // doesn't say it) and its last lines; any call's output, opened.
         Rectangle {
+            id: toolWellBox
             objectName: card.preview ? "toolPreview" : "toolWell"
             Layout.fillWidth: true
             Layout.leftMargin: 22
@@ -533,6 +534,18 @@ Item {
             implicitHeight: wellCol.implicitHeight + 12
             radius: 6
             color: Theme.codeBg
+            // Line numbers on a column of their own, from the code's first
+            // line (under a command, if any) to the well's bottom.
+            readonly property bool gutter: (card.preview && card.newFile) || (card.codeShown && card.code.lines.some(l => l.n !== ""))
+            Rectangle {
+                visible: parent.gutter
+                y: card.commandInWell ? 6 + cmdLabel.height + 3 : 0
+                width: wellCol.numberWidth - 6
+                height: parent.height - y
+                color: Theme.codeGutter
+                topLeftRadius: y === 0 ? 6 : 0
+                bottomLeftRadius: 6
+            }
             Item {
                 id: wellFlick
                 y: 6
@@ -543,7 +556,8 @@ Item {
                     id: wellCol
                     width: wellFlick.width
                     spacing: 0
-                    readonly property real numberWidth: card.newFile || card.code ? numberProbe.implicitWidth + 18 : 22
+                    // (Numbers: 8 px either side in their column, then 6 px to the code.)
+                    readonly property real numberWidth: card.newFile || card.code ? numberProbe.implicitWidth + 22 : 22
                     Label {
                         id: numberProbe
                         visible: false
@@ -552,6 +566,7 @@ Item {
                         font.pixelSize: Theme.mpx(12)
                     }
                     Label {
+                        id: cmdLabel
                         objectName: "toolCommand"
                         visible: card.commandInWell
                         x: 10
@@ -578,7 +593,7 @@ Item {
                             readonly property bool removed: modelData.s === "-"
                             color: added ? Qt.rgba(Theme.diffAdd.r, Theme.diffAdd.g, Theme.diffAdd.b, 0.10) : removed ? Qt.rgba(Theme.diffRemove.r, Theme.diffRemove.g, Theme.diffRemove.b, 0.10) : "transparent"
                             Label {
-                                width: wellCol.numberWidth - 10
+                                width: wellCol.numberWidth - (card.newFile || card.code ? 14 : 10)
                                 horizontalAlignment: Text.AlignRight
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: card.code ? parent.modelData.n : card.newFile ? String(index + 1) : parent.added ? "+" : parent.removed ? "−" : ""
@@ -639,7 +654,7 @@ Item {
                     Label {
                         objectName: "toolMoreLines"
                         visible: card.hidden > 0
-                        x: 10
+                        x: toolWellBox.gutter ? wellCol.numberWidth : 10
                         topPadding: 3
                         text: card.open ? "Fewer lines" : card.hidden + (card.hidden === 1 ? " more line" : " more lines")
                         color: moreHover.hovered ? Theme.muted : Theme.textFaint
