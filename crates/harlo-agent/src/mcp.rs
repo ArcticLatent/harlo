@@ -55,6 +55,8 @@ pub const PREFIX: &str = "mcp__";
 pub const RESOURCES: &str = "mcp_resources";
 /// Resources listed per server, at most.
 const RESOURCES_LISTED: usize = 200;
+/// A server's instructions to the model, at most (bytes).
+const NOTE_MAX: usize = 2048;
 
 /// A server as configured.
 #[derive(Debug, Clone, PartialEq)]
@@ -70,6 +72,9 @@ pub struct Config {
     /// Tools you said only look (the entry's `readOnly`), besides those
     /// the server says do.
     pub read_only: ReadOnly,
+    /// Tools not offered to the model (the entry's `hiddenTools`, the
+    /// server's names for them).
+    pub hidden: HashSet<String>,
 }
 
 /// The entry's `readOnly`: `true` (every tool) or the tools' names (as the
@@ -231,7 +236,7 @@ fn parse(name: &str, v: &Value, project: &Path) -> Result<Config, String> {
         };
         Kind::Stdio { program, args: words.collect() }
     };
-    Ok(Config { name: name.to_owned(), kind, env, cwd, timeout, oauth: v["oauth"].clone(), read_only: ReadOnly::from_entry(&v["readOnly"]) })
+    Ok(Config { name: name.to_owned(), kind, env, cwd, timeout, oauth: v["oauth"].clone(), read_only: ReadOnly::from_entry(&v["readOnly"]), hidden: v["hiddenTools"].as_array().into_iter().flatten().filter_map(|t| t.as_str().map(str::to_owned)).collect() })
 }
 
 /// `${VAR}`, `${VAR:-default}` from the environment; a whole value of
@@ -882,6 +887,10 @@ struct Server {
     read_only: ReadOnly,
     /// It offers resources (`resources/list`, `resources/read`).
     resources: bool,
+    hidden: HashSet<String>,
+    /// What it says about using it (`initialize`'s `instructions`), cut at
+    /// [`NOTE_MAX`].
+    note: String,
 }
 
 async fn list_tools(conn: &Conn, timeout: Duration) -> Result<Vec<Value>, String> {
@@ -921,10 +930,12 @@ async fn start(c: Config, project: PathBuf) -> Result<Server, String> {
         let resources = caps["resources"].is_object();
         // (One with resources only has no tools to list.)
         let tools = if resources && !caps["tools"].is_object() { Vec::new() } else { list_tools(&conn, CALL_TIMEOUT).await? };
-        Ok::<_, String>((tools, resources))
+        let note = r["instructions"].as_str().unwrap_or_default().trim();
+        let note = if note.len() > NOTE_MAX { format!("{}…", &note[..note.floor_char_boundary(NOTE_MAX)]) } else { note.to_owned() };
+        Ok::<_, String>((tools, resources, note))
     };
-    let (tools, resources) = tokio::time::timeout(c.timeout, ready).await.map_err(|_| format!("it didn't answer within {} s", c.timeout.as_secs()))??;
-    Ok(Server { name: c.name, conn, tools, changed, timeout: c.timeout, read_only: c.read_only, resources })
+    let (tools, resources, note) = tokio::time::timeout(c.timeout, ready).await.map_err(|_| format!("it didn't answer within {} s", c.timeout.as_secs()))??;
+    Ok(Server { name: c.name, conn, tools, changed, timeout: c.timeout, read_only: c.read_only, resources, hidden: c.hidden, note })
 }
 
 /// The servers running, and their tools as the model has them.
@@ -962,6 +973,9 @@ impl Mcp {
         for (i, s) in self.servers.iter().enumerate() {
             for t in &s.tools {
                 let tool = t["name"].as_str().unwrap_or_default();
+                if s.hidden.contains(tool) {
+                    continue;
+                }
                 let name = tool_name(&s.name, tool, &taken);
                 taken.insert(name.clone());
                 let mut parameters = t["inputSchema"].clone();
@@ -994,6 +1008,16 @@ impl Mcp {
 
     pub fn specs(&self) -> &[Value] {
         &self.specs
+    }
+
+    /// What the servers say about using them, for the instructions ("" when
+    /// none says anything).
+    pub fn notes(&self) -> String {
+        let mut out = String::new();
+        for s in self.servers.iter().filter(|s| !s.note.is_empty()) {
+            out.push_str(&format!("\n<mcp_server name=\"{}\">\n{}\n</mcp_server>\n", s.name, s.note));
+        }
+        out
     }
 
     pub fn has(&self, name: &str) -> bool {

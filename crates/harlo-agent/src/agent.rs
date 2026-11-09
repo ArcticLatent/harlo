@@ -924,7 +924,11 @@ impl Agent {
         // (Asked which model it is, it can say: it changes when you switch.)
         let (provider, id) = self.model.split_once('/').unwrap_or((providers::CHATGPT, &self.model));
         let model = format!("\nYou run on the model {id} (from {provider}).\n");
-        let instructions = if crate::patch::on(&self.model) { crate::patch::reworded(&self.instructions) } else { self.instructions.clone() };
+        let mut instructions = if crate::patch::on(&self.model) { crate::patch::reworded(&self.instructions) } else { self.instructions.clone() };
+        // (What the MCP servers say about using them: theirs, as they say it.)
+        if let Some(m) = &self.mcp {
+            instructions.push_str(&m.notes());
+        }
         if self.harlo_text.is_empty() {
             return format!("{instructions}{model}");
         }
