@@ -2336,7 +2336,7 @@ impl Workspace {
             if let Some(view) = key.strip_prefix("view:") {
                 let run_title;
                 let title = match view {
-                    "stats" => "Stats",
+                    "stats" => "Usage",
                     "settings" => "Settings",
                     "new" => "New session",
                     v if v.starts_with("run:") => {
@@ -2532,7 +2532,7 @@ impl Workspace {
         let key = self.active_key.to_string();
         let title = match (key.strip_prefix("file:").or_else(|| diff_key(&key).map(|d| d.1)), key.strip_prefix("view:")) {
             (Some(path), _) => path.to_owned(),
-            (_, Some("stats")) => "Stats".to_owned(),
+            (_, Some("stats")) => "Usage".to_owned(),
             (_, Some("settings")) => "Settings".to_owned(),
             (_, Some("new")) => "New session".to_owned(),
             (_, Some(v)) if v.starts_with("run:") => format!("Run: {}", self.find_run(&v[4..]).map(|r| r.title).unwrap_or_default()),

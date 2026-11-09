@@ -4,7 +4,7 @@ import QtQuick.Layouts
 import harlo
 
 // Every keyboard shortcut, grouped into sections over two columns.
-// `shortcuts`: [{ seq, label, group, glyph, hidden }]; rows with the same
+// `shortcuts`: [{ seq, label, group, icon, hidden }]; rows with the same
 // label in a group merge into one row with alternative keys.
 Popup {
     id: root
@@ -56,7 +56,7 @@ Popup {
                     ColumnLayout {
                         Layout.fillWidth: true
                         spacing: 2
-                        Label { Layout.fillWidth: true; text: "Keyboard Shortcuts"; color: Theme.foreground; font.pixelSize: Theme.px(16); font.bold: true }
+                        Label { Layout.fillWidth: true; text: "Keyboard shortcuts"; color: Theme.foreground; font.pixelSize: Theme.px(16); font.weight: Font.DemiBold }
                         Label { text: "Get around harlo without leaving the keyboard"; color: Theme.muted; font.pixelSize: Theme.px(12) }
                     }
                     Button {
@@ -105,27 +105,35 @@ Popup {
                     radius: 12
                     // Square off the top corners.
                     Rectangle { width: parent.width; height: 12; color: parent.color }
+                    // The palette's two prefixes (the rest is in the list).
                     Flow {
                         id: tips
+                        objectName: "shortcutTips"
                         x: 20
                         y: 14
                         width: parent.width - 40
-                        spacing: 18
+                        spacing: 4
                         Repeater {
-                            model: [
-                                [Keymap.seq("palette"), "searches sessions; start with > for actions"],
-                                ["@", "in the composer mentions a file, or another session of this folder"],
-                                ["Esc", "stops a running agent"],
-                            ].filter(t => t[0] !== "")
-                            RowLayout {
+                            model: {
+                                const out = []
+                                const palette = Keymap.seq("palette")
+                                if (palette !== "")
+                                    for (const k of palette.split(/\+(?!$)/)) out.push({ key: k })
+                                for (const w of "opens on sessions and actions. Start with".split(" ")) out.push({ word: w })
+                                out.push({ key: ">" })
+                                for (const w of "for actions only, or".split(" ")) out.push({ word: w })
+                                out.push({ key: "@" })
+                                for (const w of "for a file in the session's folder.".split(" ")) out.push({ word: w })
+                                return out
+                            }
+                            Item {
                                 required property var modelData
-                                spacing: 6
-                                Label { text: "Tip"; color: Theme.primary; font.pixelSize: Theme.px(11); font.bold: true }
-                                Repeater {
-                                    model: modelData[0].split(/\+(?!$)/)
-                                    KeyCap { required property string modelData; text: modelData }
-                                }
-                                Label { text: modelData[1]; color: Theme.muted; font.pixelSize: Theme.px(12) }
+                                implicitWidth: modelData.key !== undefined ? cap.implicitWidth : word.implicitWidth
+                                implicitHeight: 22
+                                width: implicitWidth
+                                height: implicitHeight
+                                KeyCap { id: cap; visible: modelData.key !== undefined; text: modelData.key || ""; anchors.verticalCenter: parent.verticalCenter }
+                                Label { id: word; visible: modelData.word !== undefined; text: modelData.word || ""; color: Theme.textMuted; font.pixelSize: Theme.px(12); anchors.verticalCenter: parent.verticalCenter }
                             }
                         }
                     }

@@ -4,7 +4,7 @@ import QtQuick.Layouts
 import harlo
 
 // Keyboard shortcuts grouped into sections, in one or two columns.
-// `shortcuts`: [{ id, seq, label, group, glyph, hidden }]; rows with the
+// `shortcuts`: [{ id, seq, label, group, icon, hidden }]; rows with the
 // same label in a group merge into one row with alternative keys.
 // `editable` (Settings): click a key to record a new one; Esc cancels,
 // Backspace removes it; a key taken by another action offers Replace.
@@ -13,7 +13,7 @@ RowLayout {
     property var shortcuts: []
     property bool editable: false
     property bool twoColumns: width > 600
-    readonly property var groupOrder: ["Navigation & Commands", "Session Management", "Interface", "Panels", "Composer"]
+    readonly property var groupOrder: ["Navigation", "Sessions and tabs", "Window", "Panels", "Composer", "Runs in a session"]
 
     readonly property var sections: {
         const out = []
@@ -27,7 +27,7 @@ RowLayout {
                 if (same)
                     same.keys.push(key)
                 else
-                    rows.push({ label: s.label, glyph: s.glyph || "•", keys: [key] })
+                    rows.push({ label: s.label, icon: s.icon || "", keys: [key] })
             }
             if (rows.length)
                 out.push({ title: g, rows: rows })
@@ -69,7 +69,7 @@ RowLayout {
         if (event.key === Qt.Key_Escape && plain) { stopRecording(); return }
         if ((event.key === Qt.Key_Backspace || event.key === Qt.Key_Delete) && plain) {
             Keymap.set(id, "")
-            note = { id: id, text: "Removed; " + labelOf(id) + " has no shortcut now.", error: false }
+            note = { id: id, text: "Removed; “" + labelOf(id) + "” has no shortcut now.", error: false }
             stopRecording()
             return
         }
@@ -99,7 +99,7 @@ RowLayout {
         const p = pending
         Keymap.set(p.other, "")
         Keymap.set(p.id, p.key)
-        note = { id: p.id, text: labelOf(p.other) + " no longer has a shortcut.", error: false }
+        note = { id: p.id, text: p.key + " no longer does “" + labelOf(p.other) + "”.", error: false }
         pending = null
     }
 
@@ -147,7 +147,7 @@ RowLayout {
             implicitWidth: 20
             implicitHeight: 20
             onClicked: { Keymap.reset(keysRow.key.id); root.note = null }
-            contentItem: Label { text: "↺"; color: resetKey.hovered ? Theme.foreground : Theme.muted; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: Theme.px(13) }
+            contentItem: Item { Icon { anchors.centerIn: parent; name: "arrow-go-back"; color: resetKey.hovered ? Theme.foreground : Theme.muted; implicitWidth: 13; implicitHeight: 13 } }
             background: Rectangle { radius: 4; color: resetKey.hovered ? Theme.hover : "transparent" }
             ToolTip.visible: hovered
             ToolTip.text: "Reset to " + (Keymap.defaults[keysRow.key.id] || "none")
@@ -187,12 +187,12 @@ RowLayout {
                         anchors.leftMargin: 8
                         anchors.rightMargin: 8
                         spacing: 10
-                        Rectangle {
-                            implicitWidth: 24
-                            implicitHeight: 24
-                            radius: 6
-                            color: Theme.subtle
-                            Label { anchors.centerIn: parent; text: row.modelData.glyph; color: Theme.primary; font.pixelSize: Theme.px(12) }
+                        Icon {
+                            name: row.modelData.icon
+                            color: Theme.textMuted
+                            implicitWidth: 16
+                            implicitHeight: 16
+                            Layout.preferredWidth: 18
                         }
                         Label {
                             Layout.fillWidth: true
@@ -223,7 +223,7 @@ RowLayout {
                     spacing: 8
                     Label {
                         Layout.fillWidth: true
-                        text: row.hasPending ? root.pending.key + " is " + root.labelOf(root.pending.other) + "." : ""
+                        text: row.hasPending ? root.pending.key + " is taken by “" + root.labelOf(root.pending.other) + "”." : ""
                         color: Theme.warning
                         font.pixelSize: Theme.px(12)
                         wrapMode: Text.Wrap

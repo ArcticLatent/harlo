@@ -222,6 +222,9 @@ fn local_day(ts_ms: i64) -> Option<NaiveDate> {
 struct ModelAgg {
     tokens: u64,
     input: u64,
+    output: u64,
+    cache_read: u64,
+    cache_write: u64,
     cost: f64,
     steps: u64,
 }
@@ -275,6 +278,9 @@ pub fn report(files: &[Arc<FileStats>], days: u32, roots: &[PathBuf]) -> Value {
             let m = models.entry((s.model.clone(), s.thinking.clone(), s.provider.clone())).or_default();
             m.tokens += s.input + s.output + s.cache_read + s.cache_write;
             m.input += s.input;
+            m.output += s.output;
+            m.cache_read += s.cache_read;
+            m.cache_write += s.cache_write;
             m.cost += s.cost;
             m.steps += 1;
         }
@@ -315,7 +321,7 @@ pub fn report(files: &[Arc<FileStats>], days: u32, roots: &[PathBuf]) -> Value {
     let mut model_rows: Vec<Value> = models
         .into_iter()
         .map(|((model, thinking, provider), m)| {
-            json!({ "model": model, "thinking": thinking, "provider": provider, "tokens": m.tokens, "input": m.input, "cost": m.cost, "steps": m.steps })
+            json!({ "model": model, "thinking": thinking, "provider": provider, "tokens": m.tokens, "input": m.input, "output": m.output, "cacheRead": m.cache_read, "cacheWrite": m.cache_write, "cost": m.cost, "steps": m.steps })
         })
         .collect();
     model_rows.sort_by(|a, b| b["tokens"].as_u64().cmp(&a["tokens"].as_u64()));
@@ -389,6 +395,9 @@ mod tests {
         assert_eq!(r["daily"].as_array().unwrap().len(), 30);
         assert_eq!(r["tools"][0]["name"], "bash");
         assert_eq!(r["models"][0]["model"], "gpt");
+        // Each model's tokens by kind, for its bar.
+        let m = &r["models"][0];
+        assert_eq!((m["input"].as_u64(), m["output"].as_u64(), m["cacheRead"].as_u64(), m["cacheWrite"].as_u64()), (Some(110), Some(55), Some(935), Some(0)));
         // All time includes the 100-day-old step; another folder excludes everything.
         assert_eq!(report(std::slice::from_ref(&fs), 0, &[])["steps"], 3);
         assert_eq!(report(&[fs], 30, &[PathBuf::from("/other")])["sessions"], 0);

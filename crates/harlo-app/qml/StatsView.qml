@@ -46,36 +46,32 @@ Rectangle {
     function money(n) { return "$" + Number(n || 0).toFixed(2) }
     function pct(n) { return Number(n || 0).toFixed(1) + "%" }
 
+    // The four kinds of token, here and in each model's bar. Cache writes
+    // are a paler cache read: the two are one cache.
     readonly property color cInput: Theme.info
     readonly property color cOutput: Theme.success
-    readonly property color cCacheRead: "#c9a227"
-    readonly property color cCacheWrite: Theme.primary
-
-    component Card: Rectangle {
-        property string label
-        property string value
-        property string detail: ""
-        Layout.fillWidth: true
-        Layout.preferredWidth: 1
-        Layout.fillHeight: true
-        implicitHeight: detail !== "" ? 78 : 64
-        radius: 8
-        color: Theme.elevated
-        Column {
-            anchors.verticalCenter: parent.verticalCenter
-            x: 14
-            width: parent.width - 28
-            spacing: 4
-            Label { text: parent.parent.label; color: Theme.muted; font.pixelSize: Theme.px(12) }
-            Label { text: parent.parent.value; color: Theme.foreground; font.pixelSize: Theme.px(20); font.bold: true }
-            Label { visible: parent.parent.detail !== ""; text: parent.parent.detail; color: Theme.muted; font.pixelSize: Theme.px(11); elide: Text.ElideRight; width: parent.width }
-        }
+    readonly property color cCacheRead: Theme.isLight ? "#b8901a" : "#c9a227"
+    readonly property color cCacheWrite: Qt.rgba(cCacheRead.r, cCacheRead.g, cCacheRead.b, 0.45)
+    readonly property var tokenKinds: [
+        { key: "input", label: "Input", color: cInput },
+        { key: "output", label: "Output (with reasoning)", color: cOutput },
+        { key: "cacheRead", label: "Cache reads", color: cCacheRead },
+        { key: "cacheWrite", label: "Cache writes", color: cCacheWrite },
+    ]
+    // "2026-11-09" as "Nov 9" (with the year when the period spans years).
+    function day(iso, withYear) {
+        const p = String(iso || "").split("-").map(Number)
+        if (p.length < 3) return ""
+        return Qt.formatDate(new Date(p[0], p[1] - 1, p[2]), withYear ? "MMM d, yyyy" : "MMM d")
     }
+    function plural(n, one, many) { return n + " " + (n === 1 ? one : many) }
+    function modelName(m) { return m === "unknown" || m === "" ? "Model not recorded" : Theme.modelLabel(m) }
+
     component SectionTitle: Label {
         color: Theme.foreground
-        font.bold: true
+        font.weight: Font.DemiBold
         font.pixelSize: Theme.px(13)
-        Layout.topMargin: 10
+        Layout.topMargin: 14
     }
     component Pill: Button {
         id: pill
@@ -88,6 +84,12 @@ Rectangle {
         contentItem: Label { text: pill.text; color: pill.selected ? Theme.foreground : Theme.muted; font: pill.font; horizontalAlignment: Text.AlignHCenter }
         background: ControlSurface { control: pill; variant: pill.selected ? "selected" : "outline"; radius: 7 }
     }
+    // A legend's colour.
+    component Swatch: Rectangle {
+        implicitWidth: 8
+        implicitHeight: 8
+        radius: 4
+    }
 
     Flickable {
         id: flick
@@ -99,6 +101,7 @@ Rectangle {
 
         ColumnLayout {
             id: body
+            objectName: "statsBody"
             readonly property int cols: width > 720 ? 3 : 2
             x: root.columnX >= 0 ? root.columnX : Math.max(16, Math.round((flick.width - width) / 2))
             y: root.header ? 26 : 20
@@ -117,7 +120,7 @@ Rectangle {
                     Layout.minimumWidth: 0
                     spacing: 6
                     Repeater {
-                        model: [[7, "7 days"], [30, "30 days"], [90, "90 days"], [0, "all time"]]
+                        model: [[7, "7 days"], [30, "30 days"], [90, "90 days"], [0, "All time"]]
                         Pill {
                             required property var modelData
                             text: modelData[1]
@@ -128,7 +131,7 @@ Rectangle {
                     Item { width: 4; height: 1 }
                     ComboField {
                         id: projectBox
-                        width: 200
+                        width: Math.min(200, body.width)
                         readonly property var projects: [{ id: -1, name: "All projects" }].concat(
                             Workspace.projectList().map(l => { const p = l.split("\t"); return { id: Number(p[0]), name: p[1] } }))
                         model: projects.map(p => p.name)
@@ -139,13 +142,25 @@ Rectangle {
                 // (Narrow: the time goes to the button's tooltip, so the
                 // periods stay on one line.)
                 Label { visible: body.width >= 560; text: stats.updated ? "Updated " + stats.updated : ""; color: Theme.muted; font.pixelSize: Theme.px(12); Layout.alignment: Qt.AlignTop; Layout.topMargin: 7 }
-                FlatButton {
-                    text: "↻"
-                    outlined: false
+                Button {
+                    id: refreshButton
+                    objectName: "statsRefresh"
+                    flat: true
+                    padding: 0
+                    implicitWidth: 28
+                    implicitHeight: 28
                     Layout.alignment: Qt.AlignTop
+                    Accessible.name: "Refresh"
                     onClicked: root.refresh()
-                    ToolTip.visible: hovered && stats.updated !== ""
-                    ToolTip.text: "Updated " + stats.updated
+                    contentItem: Item { Icon { anchors.centerIn: parent; name: "refresh"; color: Theme.textMuted; implicitWidth: 15; implicitHeight: 15 } }
+                    background: Rectangle {
+                        radius: 6
+                        color: refreshButton.down ? Theme.pressed : refreshButton.hovered ? Theme.hover : "transparent"
+                        border.color: refreshButton.visualFocus ? Theme.accent : "transparent"
+                    }
+                    ToolTip.visible: hovered || visualFocus
+                    ToolTip.delay: 400
+                    ToolTip.text: stats.updated ? "Refresh (updated " + stats.updated + ")" : "Refresh"
                 }
             }
 
@@ -166,26 +181,69 @@ Rectangle {
                 Layout.topMargin: 14
             }
             ColumnLayout {
+                id: content
+                objectName: "statsInner"
                 visible: !!root.r && root.r.sessions > 0
                 Layout.fillWidth: true
                 spacing: 10
                 readonly property var r: root.r || ({ tokens: {}, efficiency: {}, daily: [], models: [], tools: [] })
+                readonly property bool hasCost: (r.cost || 0) > 0
+                readonly property string period: (root.days > 0 ? "in the last " + root.days + " days" : "so far") + (root.projectId >= 0 ? " in this project" : "")
 
-                GridLayout {
+                // The lead: what it cost (or, without prices, how many
+                // tokens), over how much work; then the other figures.
+                ColumnLayout {
+                    objectName: "statsLead"
                     Layout.fillWidth: true
-                    columns: body.cols
-                    columnSpacing: 10
-                    rowSpacing: 10
-                    Card { label: "Sessions"; value: root.compact(parent.parent.r.sessions); detail: "Helpers: " + (parent.parent.r.subagents || 0) }
-                    Card { label: "Prompts"; value: root.compact(parent.parent.r.prompts); detail: root.compact(parent.parent.r.steps) + " model steps" }
-                    Card {
-                        label: "Tokens"
-                        value: root.compact(parent.parent.r.tokens.total)
-                        detail: "In " + root.compact(parent.parent.r.tokens.input) + " · Out " + root.compact(parent.parent.r.tokens.output) + " · Cache " + root.compact(parent.parent.r.tokens.cacheRead)
+                    Layout.topMargin: 6
+                    spacing: 8
+                    // The figure, and beside it (below when it doesn't fit)
+                    // what it covers.
+                    Item {
+                        id: lead
+                        Layout.fillWidth: true
+                        readonly property bool beside: leadValue.implicitWidth + 10 + leadText.implicitWidth <= width
+                        implicitHeight: beside ? leadValue.implicitHeight : leadValue.implicitHeight + 2 + leadText.implicitHeight
+                        Label {
+                            id: leadValue
+                            objectName: "statsLeadValue"
+                            text: content.hasCost ? root.money(content.r.cost) : root.compact(content.r.tokens.total) + " tokens"
+                            color: Theme.text
+                            font.pixelSize: Theme.px(28)
+                            font.weight: Font.DemiBold
+                            font.letterSpacing: -0.3
+                        }
+                        Label {
+                            id: leadText
+                            objectName: "statsLeadText"
+                            x: lead.beside ? leadValue.implicitWidth + 10 : 0
+                            // On the figure's baseline.
+                            y: lead.beside ? leadValue.baselineOffset - baselineOffset : leadValue.implicitHeight + 2
+                            width: lead.beside ? implicitWidth : lead.width
+                            wrapMode: Text.Wrap
+                            text: "over " + root.plural(content.r.sessions || 0, "session", "sessions") + " and " + root.plural(content.r.prompts || 0, "prompt", "prompts") + " " + content.period
+                            color: Theme.textMuted
+                            font.pixelSize: Theme.px(14)
+                        }
                     }
-                    Card { label: "Cost"; value: root.money(parent.parent.r.cost) }
-                    Card { label: "Active days"; value: String(parent.parent.r.activeDays || 0) }
-                    Card { label: "Longest streak (days)"; value: String(parent.parent.r.longestStreak || 0) }
+                    // The other figures, wrapping between them.
+                    Label {
+                        objectName: "statsFigures"
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        textFormat: Text.StyledText
+                        lineHeight: 1.25
+                        color: Theme.textMuted
+                        font.pixelSize: Theme.px(13)
+                        readonly property var figures: [
+                            content.hasCost ? [root.compact(content.r.tokens.total), "tokens"] : null,
+                            [root.compact(content.r.steps), content.r.steps === 1 ? "model step" : "model steps"],
+                            [String(content.r.activeDays || 0), content.r.activeDays === 1 ? "day active" : "days active"],
+                            (content.r.longestStreak || 0) > 1 ? [String(content.r.longestStreak), "days in a row at most"] : null,
+                            (content.r.subagents || 0) > 0 ? [String(content.r.subagents), content.r.subagents === 1 ? "helper session" : "helper sessions"] : null,
+                        ].filter(f => f)
+                        text: figures.map(f => "<b><font color='" + Theme.rgb(Theme.text) + "'>" + f[0] + "</font></b>&nbsp;" + f[1].replace(/ /g, "&nbsp;")).join("&nbsp;&nbsp;&nbsp;&nbsp; ")
+                    }
                 }
 
                 // Daily activity
@@ -193,24 +251,49 @@ Rectangle {
                     Layout.fillWidth: true
                     SectionTitle { text: "Daily activity" }
                     Item { Layout.fillWidth: true }
-                    Label { text: "Model steps per day"; color: Theme.muted; font.pixelSize: Theme.px(12); Layout.topMargin: 10 }
+                    Label { text: "Model steps per day"; color: Theme.textMuted; font.pixelSize: Theme.px(12); Layout.topMargin: 14 }
                 }
                 Rectangle {
                     id: chart
+                    objectName: "statsChart"
                     Layout.fillWidth: true
                     implicitHeight: 190
                     radius: 8
                     color: Theme.elevated
-                    readonly property var daily: parent.r.daily || []
+                    readonly property var daily: content.r.daily || []
                     readonly property real peak: Math.max(1, ...daily.map(d => d.steps))
+                    readonly property bool years: daily.length > 0 && daily[0].date.slice(0, 4) !== daily[daily.length - 1].date.slice(0, 4)
+                    // The busiest day's line, with its count.
+                    Rectangle {
+                        x: bars.x
+                        y: bars.y
+                        width: bars.width
+                        height: 1
+                        color: Theme.hairline
+                    }
+                    Label {
+                        objectName: "statsPeak"
+                        x: bars.x
+                        y: bars.y - height - 2
+                        text: root.plural(chart.peak, "step", "steps")
+                        color: Theme.textFaint
+                        font.pixelSize: Theme.px(10.5)
+                    }
+                    Rectangle {
+                        x: bars.x
+                        y: bars.y + bars.height
+                        width: bars.width
+                        height: 1
+                        color: Theme.hairline
+                    }
                     Row {
                         id: bars
                         anchors.left: parent.left
                         anchors.right: parent.right
                         anchors.bottom: parent.bottom
                         anchors.margins: 14
-                        anchors.bottomMargin: 36
-                        height: parent.height - 50
+                        anchors.bottomMargin: 34
+                        height: parent.height - 66
                         spacing: chart.daily.length > 60 ? 1 : 3
                         Repeater {
                             model: chart.daily
@@ -219,68 +302,61 @@ Rectangle {
                                 width: Math.max(1, (bars.width - bars.spacing * (chart.daily.length - 1)) / Math.max(1, chart.daily.length))
                                 height: bars.height
                                 Rectangle {
+                                    visible: modelData.steps > 0
                                     anchors.bottom: parent.bottom
                                     width: parent.width
-                                    height: modelData.steps > 0 ? Math.max(2, parent.height * modelData.steps / chart.peak) : 1
+                                    height: Math.max(2, parent.height * modelData.steps / chart.peak)
                                     radius: Math.min(2, width / 2)
-                                    color: modelData.steps > 0 ? (barHover.hovered ? Qt.lighter(Theme.info, 1.25) : Theme.info) : Theme.border
+                                    color: barHover.hovered ? Qt.lighter(Theme.info, 1.25) : Theme.info
                                 }
                                 HoverHandler { id: barHover }
                                 ToolTip.visible: barHover.hovered
-                                ToolTip.text: modelData.date + ": " + modelData.steps + " steps"
+                                ToolTip.text: root.day(modelData.date, true) + ": " + (modelData.steps > 0 ? root.plural(modelData.steps, "model step", "model steps") : "nothing")
                                 ToolTip.delay: 100
                             }
                         }
                     }
-                    Label {
-                        anchors.left: parent.left
-                        anchors.bottom: parent.bottom
-                        anchors.margins: 14
-                        anchors.bottomMargin: 12
-                        text: chart.daily.length ? chart.daily[0].date : ""
-                        color: Theme.muted
-                        font.pixelSize: Theme.px(11)
-                    }
-                    Label {
-                        anchors.right: parent.right
-                        anchors.bottom: parent.bottom
-                        anchors.margins: 14
-                        anchors.bottomMargin: 12
-                        text: chart.daily.length ? chart.daily[chart.daily.length - 1].date : ""
-                        color: Theme.muted
-                        font.pixelSize: Theme.px(11)
+                    // First, middle and last day.
+                    Repeater {
+                        model: chart.daily.length > 2 ? [0, Math.floor((chart.daily.length - 1) / 2), chart.daily.length - 1] : chart.daily.map((d, i) => i)
+                        Label {
+                            required property int modelData
+                            required property int index
+                            readonly property real slot: bars.width / Math.max(1, chart.daily.length)
+                            x: Math.max(bars.x, Math.min(bars.x + bars.width - width, bars.x + slot * (modelData + 0.5) - width / 2))
+                            y: bars.y + bars.height + 8
+                            text: root.day(chart.daily[modelData].date, chart.years)
+                            color: Theme.textMuted
+                            font.pixelSize: Theme.px(11)
+                        }
                     }
                 }
 
                 // Token composition
                 SectionTitle { text: "Token composition" }
                 Rectangle {
+                    objectName: "statsComposition"
                     Layout.fillWidth: true
-                    implicitHeight: compCol.implicitHeight + 24
+                    implicitHeight: compCol.implicitHeight + 28
                     radius: 8
                     color: Theme.elevated
-                    readonly property var t: parent.r.tokens
-                    readonly property var parts: [
-                        { label: "Input", value: t.input || 0, color: root.cInput },
-                        { label: "Output + reasoning", value: t.output || 0, color: root.cOutput },
-                        { label: "Cache reads", value: t.cacheRead || 0, color: root.cCacheRead },
-                        { label: "Cache writes", value: t.cacheWrite || 0, color: root.cCacheWrite },
-                    ]
+                    readonly property var t: content.r.tokens
                     ColumnLayout {
                         id: compCol
-                        x: 12
-                        y: 12
-                        width: parent.width - 24
-                        spacing: 10
+                        x: 14
+                        y: 14
+                        width: parent.width - 28
+                        spacing: 12
                         Row {
                             id: compBar
                             Layout.fillWidth: true
                             height: 8
+                            spacing: 0
                             Repeater {
-                                model: compCol.parent.parts
+                                model: root.tokenKinds
                                 Rectangle {
                                     required property var modelData
-                                    width: compBar.width * modelData.value / Math.max(1, compCol.parent.t.total || 0)
+                                    width: compBar.width * (compCol.parent.t[modelData.key] || 0) / Math.max(1, compCol.parent.t.total || 0)
                                     height: 8
                                     color: modelData.color
                                 }
@@ -288,19 +364,23 @@ Rectangle {
                         }
                         GridLayout {
                             Layout.fillWidth: true
-                            columns: body.width > 720 ? 4 : 2
-                            columnSpacing: 16
+                            columns: body.width > 900 ? 4 : body.width > 400 ? 2 : 1
+                            columnSpacing: 20
+                            rowSpacing: 6
                             Repeater {
-                                model: compCol.parent.parts
+                                model: root.tokenKinds
                                 RowLayout {
                                     required property var modelData
+                                    readonly property real v: compCol.parent.t[modelData.key] || 0
                                     Layout.fillWidth: true
+                                    Layout.preferredWidth: 1
                                     Layout.minimumWidth: 0
-                                    Label { text: "●"; color: modelData.color; font.pixelSize: Theme.px(10) }
-                                    Label { text: modelData.label; color: Theme.muted; font.pixelSize: Theme.px(12); Layout.fillWidth: true; elide: Text.ElideRight }
+                                    spacing: 7
+                                    Swatch { color: modelData.color }
+                                    Label { text: modelData.label; color: Theme.textMuted; font.pixelSize: Theme.px(12); Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight }
                                     Label {
-                                        text: root.compact(modelData.value) + " · " + (100 * modelData.value / Math.max(1, compCol.parent.t.total || 0)).toFixed(1) + "%"
-                                        color: Theme.foreground
+                                        text: root.compact(v) + " · " + (100 * v / Math.max(1, compCol.parent.t.total || 0)).toFixed(1) + "%"
+                                        color: Theme.text
                                         font.pixelSize: Theme.px(12)
                                     }
                                 }
@@ -309,20 +389,54 @@ Rectangle {
                     }
                 }
 
-                // Efficiency
+                // Efficiency: one card of figures, not a card each.
                 SectionTitle { text: "Efficiency" }
-                GridLayout {
+                Rectangle {
+                    objectName: "statsEfficiency"
                     Layout.fillWidth: true
-                    columns: body.cols
-                    columnSpacing: 10
-                    rowSpacing: 10
-                    readonly property var e: parent.r.efficiency
-                    Card { label: "Cache hit rate"; value: root.pct(parent.e.cacheHit) }
-                    Card { label: "Cost / session"; value: root.money(parent.e.costPerSession) }
-                    Card { label: "Cost per 1M tokens"; value: root.money(parent.e.costPerMillion) }
-                    Card { label: "Tokens / session"; value: root.compact(parent.e.tokensPerSession) }
-                    Card { label: "Steps / session"; value: Number(parent.e.stepsPerSession || 0).toFixed(1) }
-                    Card { label: "Reasoning share"; value: root.pct(parent.e.reasoningShare) }
+                    implicitHeight: effGrid.implicitHeight + 24
+                    radius: 8
+                    color: Theme.elevated
+                    readonly property var e: content.r.efficiency
+                    GridLayout {
+                        id: effGrid
+                        x: 14
+                        y: 12
+                        width: parent.width - 28
+                        columns: body.width > 720 ? 3 : body.width > 440 ? 2 : 1
+                        columnSpacing: 28
+                        rowSpacing: 8
+                        Repeater {
+                            model: [
+                                ["Cache hit rate", root.pct(effGrid.parent.e.cacheHit), "Of the input the models read, the share that came from the cache"],
+                                ["Cost per session", root.money(effGrid.parent.e.costPerSession), ""],
+                                ["Cost per million tokens", root.money(effGrid.parent.e.costPerMillion), ""],
+                                ["Tokens per session", root.compact(effGrid.parent.e.tokensPerSession), ""],
+                                ["Model steps per session", Number(effGrid.parent.e.stepsPerSession || 0).toFixed(1), ""],
+                                ["Reasoning in output", root.pct(effGrid.parent.e.reasoningShare), "Of the output tokens, the share spent reasoning before answering"],
+                            ].filter(row => content.hasCost || row[0].indexOf("Cost") !== 0)
+                            RowLayout {
+                                required property var modelData
+                                Layout.fillWidth: true
+                                Layout.preferredWidth: 1
+                                Layout.minimumWidth: 0
+                                spacing: 8
+                                Label {
+                                    text: modelData[0]
+                                    color: Theme.textMuted
+                                    font.pixelSize: Theme.px(12.5)
+                                    Layout.fillWidth: true
+                                    Layout.minimumWidth: 0
+                                    elide: Text.ElideRight
+                                    HoverHandler { id: effHover }
+                                    ToolTip.visible: effHover.hovered && modelData[2] !== ""
+                                    ToolTip.delay: 400
+                                    ToolTip.text: modelData[2]
+                                }
+                                Label { text: modelData[1]; color: Theme.text; font.pixelSize: Theme.px(13); font.weight: Font.DemiBold }
+                            }
+                        }
+                    }
                 }
 
                 // Models
@@ -331,38 +445,78 @@ Rectangle {
                     SectionTitle { text: "Models" }
                     Item { Layout.fillWidth: true }
                     Repeater {
-                        model: ["tokens", "cost", "steps"]
+                        model: [["tokens", "Tokens"], ["cost", "Cost"], ["steps", "Steps"]]
                         Pill {
-                            required property string modelData
-                            Layout.topMargin: 10
-                            text: modelData
-                            selected: root.modelMetric === modelData
-                            onClicked: root.modelMetric = modelData
+                            required property var modelData
+                            Layout.topMargin: 14
+                            text: modelData[1]
+                            selected: root.modelMetric === modelData[0]
+                            onClicked: root.modelMetric = modelData[0]
                         }
                     }
                 }
+                Label {
+                    visible: root.modelMetric === "tokens"
+                    text: "Coloured as in Token composition."
+                    color: Theme.textFaint
+                    font.pixelSize: Theme.px(11.5)
+                    Layout.topMargin: -4
+                }
                 Repeater {
                     id: modelRows
-                    readonly property var rows: (parent.r.models || []).slice().sort((a, b) => b[root.modelMetric] - a[root.modelMetric])
+                    // (Models with none of what's measured are left out.)
+                    readonly property var rows: (content.r.models || []).filter(m => (m[root.modelMetric] || 0) > 0).sort((a, b) => b[root.modelMetric] - a[root.modelMetric])
                     readonly property real peak: Math.max(1e-9, ...rows.map(m => m[root.modelMetric]))
                     model: rows
                     ColumnLayout {
                         required property var modelData
                         Layout.fillWidth: true
-                        spacing: 4
-                        RowLayout {
+                        spacing: 5
+                        // The name, its effort and provider, then the numbers at
+                        // the right; the names give way on narrow windows.
+                        Item {
+                            id: modelHead
                             Layout.fillWidth: true
-                            spacing: 8
-                            // Names give way on narrow windows; the numbers stay.
-                            Label { text: Theme.modelLabel(modelData.model); color: Theme.foreground; font.pixelSize: Theme.px(13); elide: Text.ElideRight; Layout.minimumWidth: 0 }
-                            Label { visible: modelData.thinking !== ""; text: modelData.thinking; color: Theme.muted; font.pixelSize: Theme.px(12); elide: Text.ElideRight; Layout.minimumWidth: 0 }
-                            Label { text: modelData.provider; color: Theme.muted; font.pixelSize: Theme.px(12); opacity: 0.8; elide: Text.ElideRight; Layout.minimumWidth: 0 }
-                            Item { Layout.fillWidth: true; Layout.minimumWidth: 0 }
+                            implicitHeight: modelNum.implicitHeight
+                            readonly property real room: width - modelNum.implicitWidth - 12
                             Label {
+                                id: modelName
+                                width: Math.min(implicitWidth, modelHead.room)
+                                text: root.modelName(modelData.model)
+                                color: Theme.foreground
+                                font.pixelSize: Theme.px(13)
+                                elide: Text.ElideRight
+                            }
+                            Label {
+                                id: modelThinking
+                                x: modelName.width + 8
+                                anchors.baseline: modelName.baseline
+                                width: visible ? Math.max(0, Math.min(implicitWidth, modelHead.room - x)) : 0
+                                visible: modelData.thinking !== "" && modelHead.room - x > 24
+                                text: modelData.thinking
+                                color: Theme.textMuted
+                                font.pixelSize: Theme.px(12)
+                                elide: Text.ElideRight
+                            }
+                            Label {
+                                x: modelThinking.visible ? modelThinking.x + modelThinking.width + 8 : modelName.width + 8
+                                anchors.baseline: modelName.baseline
+                                width: Math.max(0, Math.min(implicitWidth, modelHead.room - x))
+                                visible: modelData.provider !== "" && modelHead.room - x > 24
+                                text: modelData.provider
+                                color: Theme.textFaint
+                                font.pixelSize: Theme.px(12)
+                                elide: Text.ElideRight
+                            }
+                            Label {
+                                id: modelNum
+                                anchors.right: parent.right
+                                anchors.baseline: modelName.baseline
                                 text: root.modelMetric === "steps"
-                                    ? modelData.steps + " steps · " + root.compact(modelData.tokens)
-                                    : root.compact(modelData.tokens) + " · " + root.money(modelData.cost)
-                                color: Theme.muted
+                                    ? root.plural(modelData.steps, "step", "steps")
+                                    : root.modelMetric === "cost" ? root.money(modelData.cost) + " · " + root.compact(modelData.tokens)
+                                    : root.compact(modelData.tokens) + (modelData.cost > 0 ? " · " + root.money(modelData.cost) : "")
+                                color: Theme.textMuted
                                 font.pixelSize: Theme.px(12)
                             }
                         }
@@ -372,19 +526,32 @@ Rectangle {
                             implicitHeight: 6
                             radius: 3
                             color: Theme.subtle
+                            clip: true
                             readonly property real frac: modelData[root.modelMetric] / modelRows.peak
-                            Rectangle {
+                            Item {
                                 width: track.width * track.frac
                                 height: parent.height
-                                radius: 3
-                                color: root.modelMetric === "cost" ? Theme.primary : root.modelMetric === "steps" ? Theme.info : root.cCacheRead
-                                // Input share of the tokens, like the composition bar.
+                                // Cost and steps: one colour. Tokens: the four kinds.
                                 Rectangle {
-                                    visible: root.modelMetric === "tokens"
-                                    width: parent.width * modelData.input / Math.max(1, modelData.tokens)
-                                    height: parent.height
+                                    visible: root.modelMetric !== "tokens"
+                                    anchors.fill: parent
                                     radius: 3
-                                    color: root.cInput
+                                    color: root.modelMetric === "cost" ? Theme.primary : Theme.info
+                                }
+                                Row {
+                                    id: kindsRow
+                                    visible: root.modelMetric === "tokens"
+                                    anchors.fill: parent
+                                    Repeater {
+                                        model: root.tokenKinds
+                                        Rectangle {
+                                            required property var modelData
+                                            readonly property var m: track.parent.modelData
+                                            width: kindsRow.width * (m[modelData.key] || 0) / Math.max(1, m.tokens)
+                                            height: kindsRow.height
+                                            color: modelData.color
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -394,29 +561,33 @@ Rectangle {
                 // Tool calls
                 SectionTitle { text: "Tool calls" }
                 Label {
-                    visible: (parent.r.tools || []).length === 0
+                    visible: (content.r.tools || []).length === 0
                     text: "No tool calls in this period."
-                    color: Theme.muted
+                    color: Theme.textMuted
                     font.pixelSize: Theme.px(12)
                 }
+                FontMetrics { id: toolFont; font.family: Theme.mono; font.pixelSize: Theme.px(12) }
                 Repeater {
                     id: toolRows
-                    readonly property var rows: (parent.r.tools || []).slice(0, 15)
+                    readonly property var rows: (content.r.tools || []).slice(0, 15)
                     readonly property real peak: Math.max(1, ...rows.map(t => t.count))
+                    // The names' column: as wide as the longest, up to a third.
+                    readonly property real nameWidth: Math.min(body.width * 0.34, Math.max(40, ...rows.map(t => toolFont.advanceWidth(t.name))) + 12)
                     model: rows
                     RowLayout {
                         required property var modelData
                         Layout.fillWidth: true
                         spacing: 10
-                        Label { text: modelData.name; color: Theme.foreground; font.family: Theme.mono; font.pixelSize: Theme.px(12); Layout.preferredWidth: 240; Layout.minimumWidth: 0; elide: Text.ElideRight }
+                        Label { text: modelData.name; color: Theme.foreground; font.family: Theme.mono; font.pixelSize: Theme.px(12); Layout.preferredWidth: toolRows.nameWidth; Layout.minimumWidth: 0; Layout.fillWidth: true; Layout.maximumWidth: toolRows.nameWidth; elide: Text.ElideRight }
                         Rectangle {
                             Layout.fillWidth: true
+                            Layout.preferredWidth: 1000
                             implicitHeight: 6
                             radius: 3
                             color: Theme.subtle
                             Rectangle { width: parent.width * modelData.count / toolRows.peak; height: parent.height; radius: 3; color: Theme.primary }
                         }
-                        Label { text: root.compact(modelData.count); color: Theme.muted; font.pixelSize: Theme.px(12); Layout.preferredWidth: 50; horizontalAlignment: Text.AlignRight }
+                        Label { text: root.compact(modelData.count); color: Theme.textMuted; font.pixelSize: Theme.px(12); Layout.preferredWidth: 32; horizontalAlignment: Text.AlignRight }
                     }
                 }
             }

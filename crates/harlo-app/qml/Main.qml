@@ -611,64 +611,64 @@ ApplicationWindow {
     }
     function toggleSidebar() { windowSettings.sidebarOpen = !windowSettings.sidebarOpen }
     readonly property var shortcutList: {
-        const nav = "Navigation & Commands", sess = "Session Management", ui = "Interface", panels = "Panels"
+        const nav = "Navigation", sess = "Sessions and tabs", ui = "Window", panels = "Panels"
         const list = [
-            { id: "palette", seq: Keymap.seq("palette"), label: "Command palette", group: nav, glyph: "⌕", run: () => palette.openWith("") },
-            { id: "goToSession", seq: Keymap.seq("goToSession"), label: "Go to session", group: nav, glyph: "↗", run: () => palette.openWith("") },
-            { id: "searchAll", seq: Keymap.seq("searchAll"), label: "Search all sessions", group: nav, glyph: "⌕", run: () => searchDialog.openSearch() },
-            { id: "findInSession", seq: Keymap.seq("findInSession"), label: "Find in this session", group: nav, glyph: "⌕", run: () => chat.openFind() },
-            { id: "actions", seq: Keymap.seq("actions"), label: "Run an action", group: nav, glyph: "›", run: () => palette.openWith(">") },
-            { id: "jumpPrompt", seq: Keymap.seq("jumpPrompt"), label: "Jump to a prompt", group: nav, glyph: "≡", run: () => { if (chat.transcript.visible) chat.transcript.openPromptRail() } },
-            { id: "prevPrompt", seq: Keymap.seq("prevPrompt"), label: "Previous prompt", group: nav, glyph: "↑", run: () => { if (chat.transcript.visible) chat.transcript.stepPrompt(-1) } },
-            { id: "focusRuns", seq: Keymap.seq("focusRuns"), label: "Go to the session's runs", group: nav, glyph: "⤒", run: () => { if (chat.transcript.visible) chat.transcript.focusLastRun() } },
-            { id: "nextPrompt", seq: Keymap.seq("nextPrompt"), label: "Next prompt", group: nav, glyph: "↓", run: () => { if (chat.transcript.visible) chat.transcript.stepPrompt(1) } },
-            { id: "nextTab", seq: Keymap.seq("nextTab"), label: "Next tab", group: nav, glyph: "→", run: () => Workspace.nextTab(1) },
-            { id: "nextTabAlt", seq: Keymap.seq("nextTabAlt"), label: "Next tab", group: nav, glyph: "→", run: () => Workspace.nextTab(1) },
-            { id: "prevTab", seq: Keymap.seq("prevTab"), label: "Previous tab", group: nav, glyph: "←", run: () => Workspace.nextTab(-1) },
-            { id: "prevTabAlt", seq: Keymap.seq("prevTabAlt"), label: "Previous tab", group: nav, glyph: "←", run: () => Workspace.nextTab(-1) },
-            { id: "newSession", seq: Keymap.seq("newSession"), label: "New session", group: sess, glyph: "+", run: () => win.newSessionHere() },
-            { id: "closeTab", seq: Keymap.seq("closeTab"), label: "Close tab", group: sess, glyph: "×", run: () => chat.requestCloseTab(Workspace.activeKey) },
-            { id: "toggleSidebar", seq: Keymap.seq("toggleSidebar"), label: "Toggle sidebar", group: ui, glyph: "◧", run: () => win.toggleSidebar() },
-            { id: "settings", seq: Keymap.seq("settings"), label: "Settings", group: ui, glyph: "⚙", run: () => settingsDialog.open() },
-            { id: "shortcuts", seq: Keymap.seq("shortcuts"), label: "Keyboard shortcuts", group: ui, glyph: "?", run: () => shortcutsDialog.open() },
+            { id: "palette", seq: Keymap.seq("palette"), label: "Go to a session or action", group: nav, icon: "command", run: () => palette.openWith("") },
+            { id: "goToSession", seq: Keymap.seq("goToSession"), label: "Go to a session or action", group: nav, icon: "command", run: () => palette.openWith("") },
+            { id: "searchAll", seq: Keymap.seq("searchAll"), label: "Search all sessions", group: nav, icon: "search", run: () => searchDialog.openSearch() },
+            { id: "findInSession", seq: Keymap.seq("findInSession"), label: "Find in this session", group: nav, icon: "search-eye", run: () => chat.openFind() },
+            { id: "actions", seq: Keymap.seq("actions"), label: "Actions only", group: nav, icon: "arrow-right-s", run: () => palette.openWith(">") },
+            { id: "jumpPrompt", seq: Keymap.seq("jumpPrompt"), label: "Jump to a prompt", group: nav, icon: "bookmark", run: () => { if (chat.transcript.visible) chat.transcript.openPromptRail() } },
+            { id: "prevPrompt", seq: Keymap.seq("prevPrompt"), label: "Previous prompt in the session", group: nav, icon: "arrow-up-s", run: () => { if (chat.transcript.visible) chat.transcript.stepPrompt(-1) } },
+            { id: "nextPrompt", seq: Keymap.seq("nextPrompt"), label: "Next prompt in the session", group: nav, icon: "arrow-down-s", run: () => { if (chat.transcript.visible) chat.transcript.stepPrompt(1) } },
+            { id: "focusRuns", seq: Keymap.seq("focusRuns"), label: "Go to the session's runs", group: nav, icon: "terminal-box", run: () => { if (chat.transcript.visible) chat.transcript.focusLastRun() } },
+            { id: "nextTab", seq: Keymap.seq("nextTab"), label: "Next tab", group: sess, icon: "arrow-right-s", run: () => Workspace.nextTab(1) },
+            { id: "nextTabAlt", seq: Keymap.seq("nextTabAlt"), label: "Next tab", group: sess, icon: "arrow-right-s", run: () => Workspace.nextTab(1) },
+            { id: "prevTab", seq: Keymap.seq("prevTab"), label: "Previous tab", group: sess, icon: "arrow-left-s", run: () => Workspace.nextTab(-1) },
+            { id: "prevTabAlt", seq: Keymap.seq("prevTabAlt"), label: "Previous tab", group: sess, icon: "arrow-left-s", run: () => Workspace.nextTab(-1) },
+            { id: "newSession", seq: Keymap.seq("newSession"), label: "New session", group: sess, icon: "chat-new", run: () => win.newSessionHere() },
+            { id: "closeTab", seq: Keymap.seq("closeTab"), label: "Close tab", group: sess, icon: "close", run: () => chat.requestCloseTab(Workspace.activeKey) },
+            { id: "toggleSidebar", seq: Keymap.seq("toggleSidebar"), label: "Toggle sidebar", group: ui, icon: "layout-column", run: () => win.toggleSidebar() },
+            { id: "settings", seq: Keymap.seq("settings"), label: "Settings", group: ui, icon: "settings", run: () => settingsDialog.open() },
+            { id: "shortcuts", seq: Keymap.seq("shortcuts"), label: "Keyboard shortcuts", group: ui, icon: "keyboard", run: () => shortcutsDialog.open() },
             // (Closing the window keeps harlo in the tray: this quits.)
-            { id: "quit", seq: Keymap.seq("quit"), label: "Quit harlo", group: ui, glyph: "⏻", run: () => Qt.quit() },
+            { id: "quit", seq: Keymap.seq("quit"), label: "Quit harlo", group: ui, icon: "close-circle", run: () => Qt.quit() },
             { seq: "Ctrl+Alt+L", label: "Layout readout", hidden: true, run: () => { layoutInfo.visible = !layoutInfo.visible; console.log("layout:", layoutInfo.text) } },
-            { id: "contextPanel", seq: Keymap.seq("contextPanel"), label: "Context panel", group: panels, glyph: "◔", run: () => win.togglePanel("context") },
-            { id: "activityPanel", seq: Keymap.seq("activityPanel"), label: "Activity panel", group: panels, glyph: "≡", run: () => win.togglePanel("activity") },
-            { id: "changesPanel", seq: Keymap.seq("changesPanel"), label: "Changes panel", group: panels, glyph: "⎇", run: () => win.togglePanel("changes") },
-            { id: "filesPanel", seq: Keymap.seq("filesPanel"), label: "Files panel", group: panels, glyph: "▤", run: () => win.togglePanel("files") },
-            { id: "notesPanel", seq: Keymap.seq("notesPanel"), label: "Notes panel", group: panels, glyph: "✎", run: () => win.togglePanel("notes") },
-            { id: "terminal", seq: Keymap.seq("terminal"), label: "Terminal", group: panels, glyph: ">", run: () => win.toggleTerminal() },
-            { id: "newTerminalTab", seq: Keymap.seq("newTerminalTab"), label: "New terminal tab", group: panels, glyph: "+", run: () => win.newTerminalTab() },
-            { id: "closeTerminalTab", seq: Keymap.seq("closeTerminalTab"), label: "Close terminal tab (in the terminal)", group: panels, glyph: "×", run: () => win.closeTerminalTab() },
-            { id: "miniChat", seq: Keymap.seq("miniChat"), label: "Mini chat window", group: ui, glyph: "▭", run: () => win.toggleMiniChat() },
-            { id: "expandComposer", seq: Keymap.seq("expandComposer"), label: "Expand the composer", group: "Composer", glyph: "⤢", run: () => { if (chat.composerItem.visible) chat.composerItem.toggleExpanded() } },
-            { id: "dictate", seq: Keymap.seq("dictate"), label: "Dictate (again: insert the text)", group: "Composer", glyph: "🎙", run: () => { if (chat.composerItem.visible) chat.composerItem.toggleDictation() } },
+            { id: "contextPanel", seq: Keymap.seq("contextPanel"), label: "Context panel", group: panels, icon: "pie", run: () => win.togglePanel("context") },
+            { id: "activityPanel", seq: Keymap.seq("activityPanel"), label: "Activity panel", group: panels, icon: "list-check-2", run: () => win.togglePanel("activity") },
+            { id: "changesPanel", seq: Keymap.seq("changesPanel"), label: "Changes panel", group: panels, icon: "git-branch", run: () => win.togglePanel("changes") },
+            { id: "filesPanel", seq: Keymap.seq("filesPanel"), label: "Files panel", group: panels, icon: "folders", run: () => win.togglePanel("files") },
+            { id: "notesPanel", seq: Keymap.seq("notesPanel"), label: "Notes panel", group: panels, icon: "note", run: () => win.togglePanel("notes") },
+            { id: "terminal", seq: Keymap.seq("terminal"), label: "Terminal", group: panels, icon: "terminal-box", run: () => win.toggleTerminal() },
+            { id: "newTerminalTab", seq: Keymap.seq("newTerminalTab"), label: "New terminal tab", group: panels, icon: "add", run: () => win.newTerminalTab() },
+            { id: "closeTerminalTab", seq: Keymap.seq("closeTerminalTab"), label: "Close terminal tab (in the terminal)", group: panels, icon: "close", run: () => win.closeTerminalTab() },
+            { id: "miniChat", seq: Keymap.seq("miniChat"), label: "Mini chat window", group: ui, icon: "chat-thread", run: () => win.toggleMiniChat() },
+            { id: "expandComposer", seq: Keymap.seq("expandComposer"), label: "Expand the composer", group: "Composer", icon: "fullscreen", run: () => { if (chat.composerItem.visible) chat.composerItem.toggleExpanded() } },
+            { id: "dictate", seq: Keymap.seq("dictate"), label: "Dictate (again: insert the text)", group: "Composer", icon: "mic", run: () => { if (chat.composerItem.visible) chat.composerItem.toggleDictation() } },
         ]
-        list.push({ seq: "Ctrl+1…9", label: "Go to tab 1–9", group: nav, glyph: "#" })
+        list.push({ seq: "Ctrl+1…9", label: "Go to tab 1–9", group: sess, icon: "layout-row" })
         for (let i = 1; i <= 9; i++)
             list.push({ seq: "Ctrl+" + i, label: "Go to tab " + i, hidden: true, run: () => Workspace.activateTab(i - 1) })
         return list
     }
     // Keys handled by the composer; listed in the shortcuts dialog only.
     readonly property var composerKeys: [
-        { seq: "Enter", label: "Send", group: "Composer", glyph: "↵" },
-        { seq: "Shift+Enter", label: "New line", group: "Composer", glyph: "¶" },
-        { seq: "Ctrl+Enter", label: "Steer the running agent", group: "Composer", glyph: "⇢" },
-        { seq: "Esc", label: "Stop the run", group: "Composer", glyph: "■" },
-        { seq: "Esc", label: "Leave the expanded composer", group: "Composer", glyph: "⤡" },
-        { seq: "↑", label: "Previous prompts (empty composer)", group: "Composer", glyph: "↕" },
-        { seq: "↓", label: "Previous prompts (empty composer)", group: "Composer", glyph: "↕" },
-        { seq: "Tab", label: "Build / Plan", group: "Composer", glyph: "⇥" },
-        { seq: "/", label: "Commands", group: "Composer", glyph: "/" },
-        { seq: "@", label: "Mention a file", group: "Composer", glyph: "@" },
+        { seq: "Enter", label: "Send", group: "Composer", icon: "send-plane" },
+        { seq: "Shift+Enter", label: "New line", group: "Composer", icon: "text-wrap" },
+        { seq: "Ctrl+Enter", label: "Steer the running agent", group: "Composer", icon: "compass-3" },
+        { seq: "Esc", label: "Stop the run", group: "Composer", icon: "stop" },
+        { seq: "Esc", label: "Leave the expanded composer", group: "Composer", icon: "fullscreen-exit" },
+        { seq: "↑", label: "Recall an earlier prompt (when empty)", group: "Composer", icon: "history" },
+        { seq: "↓", label: "Recall an earlier prompt (when empty)", group: "Composer", icon: "history" },
+        { seq: "Tab", label: "Build / Plan", group: "Composer", icon: "target" },
+        { seq: "/", label: "Commands", group: "Composer", icon: "code-box" },
+        { seq: "@", label: "Mention a file", group: "Composer", icon: "attachment-2" },
         // In a run (reached with "Go to the session's runs", or a click).
-        { seq: "↓ / ↑", label: "Into a run, then step by step", group: "Session", glyph: "↕" },
-        { seq: "Enter", label: "Open or fold the run or step", group: "Session", glyph: "↵" },
-        { seq: "Esc", label: "Back to the run, then to the composer", group: "Session", glyph: "⤺" },
-        { seq: "Ctrl+C", label: "Copy a call's listing", group: "Session", glyph: "⧉" },
-        { seq: "Tab", label: "Next run", group: "Session", glyph: "⇥" },
+        { seq: "↓", label: "Into a run, then step by step", group: "Runs in a session", icon: "expand-up-down" },
+        { seq: "Enter", label: "Open or fold the run or step", group: "Runs in a session", icon: "arrow-down-s" },
+        { seq: "Esc", label: "Back to the run, then to the composer", group: "Runs in a session", icon: "arrow-go-back" },
+        { seq: "Ctrl+C", label: "Copy a call's listing", group: "Runs in a session", icon: "file-text" },
+        { seq: "Tab", label: "Next run", group: "Runs in a session", icon: "arrow-right-s" },
     ]
     Instantiator {
         model: win.shortcutList.filter(s => s.run)
@@ -689,44 +689,43 @@ ApplicationWindow {
         const projects = Workspace.projectList().map(l => { const p = l.split("\t"); return { id: Number(p[0]), name: p[1], harness: p[2] } })
         const here = projects.find(p => p.id === pid)
         if (here) {
-            acts.push({ title: "New session in " + here.name, hint: Keymap.seq("newSession"), run: () => win.openDraft(here.id) })
-            acts.push({ title: "New worktree session in " + here.name + "…", run: () => sidebar.openNewWorktree(here.id, here.name, here.harness) })
+            acts.push({ title: "New session in " + here.name, icon: "chat-new", hint: Keymap.seq("newSession"), run: () => win.openDraft(here.id) })
+            acts.push({ title: "New worktree session in " + here.name + "…", icon: "git-branch", run: () => sidebar.openNewWorktree(here.id, here.name, here.harness) })
         }
-        acts.push({ title: "New session in home folder", run: () => win.openDraft(-1) })
+        acts.push({ title: "New session in home folder", icon: "home", run: () => win.openDraft(-1) })
         for (const p of projects)
             if (p.id !== pid)
-                acts.push({ title: "New worktree session in " + p.name + "…", run: () => sidebar.openNewWorktree(p.id, p.name, p.harness) })
-        acts.push({ title: "Add project…", run: () => sidebar.openAddProject() })
-        acts.push({ title: "Changes panel", hint: Keymap.seq("changesPanel"), run: () => win.togglePanel("changes") })
-        acts.push({ title: "Context panel", hint: Keymap.seq("contextPanel"), run: () => win.togglePanel("context") })
-        acts.push({ title: "Activity panel: what the agent ran and touched", hint: Keymap.seq("activityPanel"), run: () => win.togglePanel("activity") })
-        acts.push({ title: "Files panel", hint: Keymap.seq("filesPanel"), run: () => win.togglePanel("files") })
-        acts.push({ title: "Notes panel", hint: Keymap.seq("notesPanel"), run: () => win.togglePanel("notes") })
+                acts.push({ title: "New worktree session in " + p.name + "…", icon: "git-branch", run: () => sidebar.openNewWorktree(p.id, p.name, p.harness) })
+        acts.push({ title: "Add project…", icon: "add", run: () => sidebar.openAddProject() })
+        acts.push({ title: "Changes panel", icon: "git-branch", hint: Keymap.seq("changesPanel"), run: () => win.togglePanel("changes") })
+        acts.push({ title: "Context panel", icon: "pie", hint: Keymap.seq("contextPanel"), run: () => win.togglePanel("context") })
+        acts.push({ title: "Activity panel", icon: "list-check-2", hint: Keymap.seq("activityPanel"), run: () => win.togglePanel("activity") })
+        acts.push({ title: "Files panel", icon: "folders", hint: Keymap.seq("filesPanel"), run: () => win.togglePanel("files") })
+        acts.push({ title: "Notes panel", icon: "note", hint: Keymap.seq("notesPanel"), run: () => win.togglePanel("notes") })
         if (chat.session.key !== "") {
-            acts.push({ title: "Export session as Markdown…", run: () => win.exportMarkdown(chat.session.key, chat.session.title) })
-            acts.push({ title: "Copy session as Markdown", run: () => Workspace.copyMarkdown(chat.session.key) })
+            acts.push({ title: "Export session as Markdown…", icon: "file-text", run: () => win.exportMarkdown(chat.session.key, chat.session.title) })
+            acts.push({ title: "Copy session as Markdown", icon: "file-text", run: () => Workspace.copyMarkdown(chat.session.key) })
         }
-        acts.push({ title: "Terminal", hint: Keymap.seq("terminal"), run: () => win.toggleTerminal() })
-        acts.push({ title: "Toggle sidebar", hint: Keymap.seq("toggleSidebar"), run: () => win.toggleSidebar() })
+        acts.push({ title: "Terminal", icon: "terminal-box", hint: Keymap.seq("terminal"), run: () => win.toggleTerminal() })
+        acts.push({ title: "Toggle sidebar", icon: "layout-column", hint: Keymap.seq("toggleSidebar"), run: () => win.toggleSidebar() })
         if (chat.hasSession) {
-            acts.push({ title: "Close tab", hint: Keymap.seq("closeTab"), run: () => chat.requestCloseTab(Workspace.activeKey) })
+            acts.push({ title: "Close tab", icon: "close", hint: Keymap.seq("closeTab"), run: () => chat.requestCloseTab(Workspace.activeKey) })
             if (chat.session.status === "busy")
-                acts.push({ title: "Stop the current run", hint: "Esc", run: () => chat.session.abort() })
+                acts.push({ title: "Stop the current run", icon: "stop", hint: "Esc", run: () => chat.session.abort() })
             if (Workspace.activeKey.startsWith("live:") && chat.session.status !== "offline")
-                acts.push({ title: "Stop this session's agent process", run: () => Workspace.closeSession(Workspace.activeKey) })
+                acts.push({ title: "Stop this session's agent process", icon: "close-circle", run: () => Workspace.closeSession(Workspace.activeKey) })
             if (Workspace.inWorktree(Workspace.activeKey))
-                acts.push({ title: "Worktree: merge or remove…", run: () => sidebar.openWorktree(Workspace.activeKey) })
+                acts.push({ title: "Worktree: merge or remove…", icon: "git-branch", run: () => sidebar.openWorktree(Workspace.activeKey) })
         }
-        acts.push({ title: "New demo session", run: () => Workspace.newSession(-1, "demo") })
-        acts.push({ title: "Search all sessions", hint: Keymap.seq("searchAll"), run: () => searchDialog.openSearch() })
-        acts.push({ title: "Drop-down window", run: () => win.toggleDropDown() })
-        acts.push({ title: "Mini chat window", hint: Keymap.seq("miniChat"), run: () => win.toggleMiniChat() })
+        acts.push({ title: "Search all sessions", icon: "search", hint: Keymap.seq("searchAll"), run: () => searchDialog.openSearch() })
+        acts.push({ title: "Drop-down window", icon: "window", run: () => win.toggleDropDown() })
+        acts.push({ title: "Mini chat window", icon: "chat-thread", hint: Keymap.seq("miniChat"), run: () => win.toggleMiniChat() })
         for (const r of JSON.parse(Workspace.runsJson()).slice(0, 8))
-            acts.push({ title: "Run: " + r.title + (r.kept !== null && r.kept !== undefined ? " (kept)" : ""), run: () => Workspace.open("view:run:" + r.id) })
-        acts.push({ title: "Usage stats", run: () => Workspace.open("view:stats") })
-        acts.push({ title: "Settings", hint: Keymap.seq("settings"), run: () => settingsDialog.open() })
-        acts.push({ title: "Setup guide…", run: () => win.openSetupGuide() })
-        acts.push({ title: "Keyboard shortcuts", hint: Keymap.seq("shortcuts"), run: () => shortcutsDialog.open() })
+            acts.push({ title: "Run: " + r.title + (r.kept !== null && r.kept !== undefined ? " (kept)" : ""), icon: "terminal-box", run: () => Workspace.open("view:run:" + r.id) })
+        acts.push({ title: "Usage", icon: "stats", run: () => Workspace.open("view:stats") })
+        acts.push({ title: "Settings", icon: "settings", hint: Keymap.seq("settings"), run: () => settingsDialog.open() })
+        acts.push({ title: "Setup guide…", icon: "compass-3", run: () => win.openSetupGuide() })
+        acts.push({ title: "Keyboard shortcuts", icon: "keyboard", hint: Keymap.seq("shortcuts"), run: () => shortcutsDialog.open() })
         return acts
     }
 
@@ -1616,7 +1615,7 @@ ApplicationWindow {
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
             win.check(!palette.visible, "Ctrl+K while recording doesn't open the palette")
-            win.check(win.findText("Ctrl+K is Command palette.", settingsDialog.contentItem) !== null, "a taken key asks to replace")
+            win.check(win.findText("Ctrl+K is taken by “Go to a session or action”.", settingsDialog.contentItem) !== null, "a taken key asks to replace")
             win.shotPopup(settingsDialog, "clicks-keys-conflict") } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: win.clickText("Cancel", settingsDialog.contentItem) }
@@ -6083,6 +6082,96 @@ ApplicationWindow {
         ScriptAction { script: { win.log("opened:", Workspace.activeKey.split("/").pop(), "rows:", chat.transcript.count, "pending:", chat.pendingReveal); win.shot("search-opened") } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: Qt.quit() }
+    }
+
+    // Screenshots of the shortcuts sheet, the command palette and usage, for a
+    // design review (not a test: SCENARIOS=kbshots KEEP=1 scripts/click-tests.sh 1280).
+    SequentialAnimation {
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "kbshots"
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: {
+            Workspace.chooseThemeMode("dark")
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            win.height = 900
+            Workspace.addProject(win.argValue("--cwd=").replace(/\/repo$/, "/webapp")) } }
+        PauseAnimation { duration: 3000 }
+        ScriptAction { script: win.clickText("Fix the login redirect loop", sidebar) }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: shortcutsDialog.open() }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            win.shotWindow("kb-shortcuts")
+            const groups = win.shortcutList.concat(win.composerKeys).filter(s => !s.hidden).map(s => s.group)
+            win.check(groups.every(g => /^[A-Z][a-z ]*$/.test(g)), "shortcut groups are in sentence case")
+            win.check(win.shortcutList.concat(win.composerKeys).every(s => s.hidden || (s.icon && !s.glyph)), "every shortcut row has an icon, no glyph")
+            const go = win.shortcutList.filter(s => s.label === "Go to a session or action")
+            win.check(go.length === 2 && go[0].group === go[1].group, "Ctrl+K and Ctrl+P are one row")
+            win.check(win.composerKeys.some(s => s.group === "Runs in a session"), "the run keys are listed")
+            win.check(!!win.findName("shortcutTips", shortcutsDialog.contentItem), "the footer explains > and @")
+            shortcutsDialog.close(); Workspace.chooseThemeMode("light") } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: shortcutsDialog.open() }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: { win.shotWindow("kb-shortcuts-light"); shortcutsDialog.close(); palette.openWith("") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: { win.shotWindow("pal-empty-light"); palette.close(); Workspace.chooseThemeMode("dark") } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: palette.openWith("") }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            win.shotWindow("pal-empty")
+            const it = palette.items
+            win.check(it[0].kind === "header" && it[0].title === "Recent sessions", "empty palette starts with Recent sessions")
+            win.check(it.some(i => i.kind === "header" && i.title === "Actions"), "then Actions")
+            win.check(it.filter(i => i.title === "New session in webapp").length === 1, "one New session in webapp row (" + it.filter(i => i.title === "New session in webapp").length + ")")
+            win.check(!it.some(i => i.title === "New demo session"), "no demo action")
+            win.check(palette.current === 1, "the first session is chosen, not the heading")
+            const firstAction = it.findIndex(i => i.kind === "action")
+            for (let i = 1; i < firstAction - 2; i++) palette.move(1)
+            win.check(palette.current === firstAction - 2, "Down walks the sessions")
+            palette.move(1)
+            win.check(palette.current === firstAction, "Down skips the Actions heading (" + palette.current + " vs " + firstAction + ")")
+            palette.openWith("login") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: { win.shotWindow("pal-query"); palette.openWith("set") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: { win.shotWindow("pal-query-action"); palette.openWith(">") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            win.shotWindow("pal-actions")
+            win.check(palette.items.length > 0 && !palette.items.some(i => i.kind === "header"), "> lists actions without headings")
+            palette.openWith("zzqx") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            win.shotWindow("pal-none")
+            win.check(palette.items.length === 0 && !!win.findName("paletteNone", palette.contentItem), "no matches says so")
+            palette.openWith("@auth") } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            win.shotWindow("pal-files")
+            win.check(palette.choices.length === 2 && palette.choices[0].kind === "file", "@auth finds two files (" + palette.choices.length + ")")
+            palette.close(); Workspace.open("view:stats") } }
+        PauseAnimation { duration: 2500 }
+        ScriptAction { script: {
+            win.shotWindow("stats-top")
+            const sv = chat.statsView, inner = win.findName("statsInner", sv)
+            const right = inner.mapToItem(sv, inner.width, 0).x
+            win.check(right <= sv.width - 8, "Usage fits its tab (" + Math.round(right) + " of " + sv.width + ")")
+            win.check(win.findName("statsLeadValue", sv).text === "$11.69" || /^\$/.test(win.findName("statsLeadValue", sv).text), "the lead is the cost")
+            win.check(/over 11 sessions/.test(win.findName("statsLeadText", sv).text), "and says what it covers")
+            win.check(!/Helpers|helper/.test(win.findName("statsFigures", sv).text), "no helper count when there are none")
+            win.check(!Qt.colorEqual(sv.cInput, sv.cCacheWrite) && !Qt.colorEqual(sv.cCacheRead, sv.cCacheWrite) && !Qt.colorEqual(sv.cInput, sv.cOutput), "the four token kinds have their own colours")
+            win.check(!win.findText("unknown", sv), "no unknown model row")
+            win.check(!!win.findName("statsRefresh", sv), "refresh is an icon button")
+            chat.statsView.scrollToEnd() } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: { win.shotWindow("stats-bottom"); Workspace.chooseThemeMode("light") } }
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: { win.shotWindow("stats-bottom-light"); Workspace.chooseThemeMode("dark"); settingsDialog.openPage("usage") } }
+        PauseAnimation { duration: 2000 }
+        ScriptAction { script: { win.shotWindow("usage-settings"); settingsDialog.close() } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: { win.summary(); Qt.quit() } }
     }
 
     // Screenshots of the diff viewer and the session search, for a design
