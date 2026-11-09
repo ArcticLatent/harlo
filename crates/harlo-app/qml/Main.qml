@@ -6906,6 +6906,21 @@ ApplicationWindow {
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             win.check(win.findAllNames("toolMark", chat.transcript).some(m => m.name === "close"), "Deny: it isn't run (" + win.chatText().slice(-160) + ")")
+            // A file too big to read whole: its outline, each row its line.
+            const big = ["// The ledger.", "", "pub struct Ledger {", "    id: u32,", "}", "", "impl Ledger {", "    pub fn post(&self) {}", "}"]
+            for (let i = big.length; i < 2099; i++) big.push("// filler " + i)
+            big.push("fn last() {}")
+            TestInput.writeFile(win.argValue("--cwd=") + "/big.rs", big.join("\n") + "\n")
+            win.sendByKeys("read the big file") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloSteps, () => win.chatText().indexOf("Its outline follows") >= 0 && chat.session.status === "idle", 10000) }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            win.shotWindow("clicks-harlo-outline")
+            const views = win.findAllNames("codeView", chat.transcript)
+            const code = views.length ? views[views.length - 1].lines : []
+            win.check(JSON.stringify(code.map(l => l.n)) === JSON.stringify(["3", "7", "8", "2100"]) && code[1].h.indexOf("Ledger") >= 0, "a big file's read: its outline, each definition at its own line (" + JSON.stringify(code.map(l => l.n)) + ")")
+            win.check(win.findAllNames("toolResult", chat.transcript).some(l => l.text === "2100 lines, outline"), "its card says it's the outline of 2100 lines")
             win.summary(); Qt.quit() } }
     }
 

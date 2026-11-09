@@ -451,6 +451,17 @@ impl Tools {
             return fail(format!("The file has {} lines; offset {} is past its end.", lines.len(), start + 1));
         }
         let preview = offset.is_none() && limit.is_none() && (lines.len() > READ_LINES || text.len() > READ_BYTES);
+        if preview
+            && crate::outline::on()
+            && let Some(outline) = crate::outline::of(&path, &text)
+        {
+            return ok(format!(
+                "[{} is {} lines ({} KB), more than one read shows. Its outline follows (line: definition): read the parts you need with offset and limit (up to {READ_LINES} lines), or grep it.]\n{outline}",
+                path.display(),
+                lines.len(),
+                text.len().div_ceil(1024),
+            ));
+        }
         let (max, max_bytes) = if preview { (PREVIEW_LINES, PREVIEW_BYTES) } else { (limit.map_or(READ_LINES, |l| (l as usize).clamp(1, READ_LINES)), READ_BYTES) };
         let mut out = String::new();
         let mut n = 0;

@@ -216,8 +216,9 @@ fn numbered_search(words: &[String]) -> bool {
 /// numbered as a numbered read's are ("     7→text"): from `offset` (1
 /// without one), or from the range its note gives. Its notes (a big file's
 /// "[… These are lines 1-N …]" before them, "[Lines a-b of N …]" after)
-/// are left out; hash-anchored lines ("7#AB:text") keep their own numbers.
-/// None when it isn't a file's lines or is numbered already.
+/// are left out; hash-anchored lines ("7#AB:text") keep their own numbers,
+/// and so do a big file's outline rows ("7: text", after "[… Its outline
+/// follows …]"). None when it isn't a file's lines or is numbered already.
 pub fn number_read(offset: Option<u64>, output: &str) -> Option<String> {
     let mut lines: Vec<&str> = output.lines().collect();
     let first = *lines.first()?;
@@ -225,6 +226,18 @@ pub fn number_read(offset: Option<u64>, output: &str) -> Option<String> {
         return None;
     }
     let mut start = offset.unwrap_or(1).max(1) as usize;
+    if first.starts_with('[') && first.ends_with(']') && first.contains("Its outline follows") {
+        // Each row its own line's number; the notes after them left out.
+        let rows: Vec<String> = lines[1..]
+            .iter()
+            .filter(|l| !(l.starts_with('[') && l.ends_with(']')))
+            .map(|l| {
+                let (n, body) = l.split_once(": ").or_else(|| l.strip_suffix(':').map(|n| (n, "")))?;
+                Some(format!("{:>6}→{body}", n.parse::<usize>().ok()?))
+            })
+            .collect::<Option<_>>()?;
+        return (!rows.is_empty()).then(|| rows.join("\n"));
+    }
     if first.starts_with('[') && first.ends_with(']') && first.contains("These are lines ") {
         lines.remove(0);
         start = 1;
@@ -630,6 +643,8 @@ mod tests {
         assert_eq!(number_read(None, "a\nb").as_deref(), Some("     1→a\n     2→b"));
         assert_eq!(number_read(Some(40), "x\ny").as_deref(), Some("    40→x\n    41→y"));
         // Its notes: out, the range they give kept.
+        let outline = "[src/x.rs is 9000 lines (300 KB), more than one read shows. Its outline follows (line: definition): read the parts you need with offset and limit (up to 2000 lines), or grep it.]\n12: impl Ledger {\n14:     pub fn post(&self) {\n9000: fn last() {}\n[40 nested definitions not shown: read a part to see them]";
+        assert_eq!(number_read(None, outline).as_deref(), Some("    12→impl Ledger {\n    14→    pub fn post(&self) {\n  9000→fn last() {}"), "an outline: each row its own line");
         let big = "[src/x.rs is 900 lines (30 KB), more than one read shows. These are lines 1-2: grep it for what you need, or read a range with offset and limit (up to 400 lines).]\nfn a() {}\nfn b() {}";
         assert_eq!(number_read(None, big).as_deref(), Some("     1→fn a() {}\n     2→fn b() {}"));
         assert_eq!(number_read(Some(10), "p\nq\n\n[Lines 10-11 of 90. Read on with offset=12.]").as_deref(), Some("    10→p\n    11→q"));

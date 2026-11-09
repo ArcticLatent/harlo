@@ -41,6 +41,7 @@ mod jobs;
 mod lsp;
 mod mcp;
 mod mcp_auth;
+mod outline;
 mod patch;
 mod profiles;
 mod program;

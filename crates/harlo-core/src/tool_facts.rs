@@ -31,9 +31,9 @@ pub fn facts(name: &str, args: &Value, output: &str, is_error: bool) -> (String,
     } else if matches!(short.as_str(), "read" | "view" | "cat" | "readfile" | "file") && !is_error {
         // (A big file's read says its whole length in a note first.)
         if let Some(n) = output.strip_prefix('[').and_then(|o| o.split_once(" lines (")).and_then(|(head, _)| head.rsplit(' ').next()?.parse::<usize>().ok())
-            && output.lines().next().is_some_and(|l| l.contains("These are lines "))
+            && let Some(note) = output.lines().next().filter(|l| l.contains("These are lines ") || l.contains("Its outline follows"))
         {
-            return (format!("{n} lines"), String::new());
+            return (if note.contains("Its outline follows") { format!("{n} lines, outline") } else { format!("{n} lines") }, String::new());
         }
         let n = output.lines().count();
         return (if n == 1 { "1 line".into() } else { format!("{n} lines") }, String::new());
@@ -201,6 +201,8 @@ mod tests {
         // A big file's read: its whole length, from the note.
         let big = "[src/x.rs is 900 lines (30 KB), more than one read shows. These are lines 1-2: grep it.]\na\nb";
         assert_eq!(facts("read", &none, big, false).0, "900 lines");
+        let outline = "[src/x.rs is 9000 lines (300 KB), more than one read shows. Its outline follows (line: definition): read the parts you need with offset and limit (up to 2000 lines), or grep it.]\n12: impl Ledger {";
+        assert_eq!(facts("read", &none, outline, false).0, "9000 lines, outline");
     }
 
     #[test]
