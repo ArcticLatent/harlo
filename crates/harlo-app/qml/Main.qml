@@ -894,9 +894,13 @@ ApplicationWindow {
     // Run with QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1.
     readonly property string selftestDir: argValue("--selftest=")
     property real t0: 0
-    function shot(name) {
+    function shot(name) { grabItem(page, name) }
+    /// An item's rectangle of the window, taken now (what the test does
+    /// next isn't in it).
+    function grabItem(item, name) {
         const path = selftestDir + "/" + name + ".png"
-        page.grabToImage(r => { r.saveToFile(path); console.log("selftest: saved", path) })
+        const p = item.mapToItem(null, 0, 0)
+        console.log("selftest:", TestInput.grabArea(path, p.x, p.y, item.width, item.height) ? "saved" : "grab failed", path)
     }
     /// The whole window, popups and their shadows included.
     property real hoverLineWidth: -1
@@ -905,11 +909,7 @@ ApplicationWindow {
         console.log("selftest:", TestInput.grabWindow(path) ? "saved" : "grab failed", path)
     }
     // A popup (menu, dialog): its item is the background's parent.
-    function shotPopup(popup, name) {
-        const path = selftestDir + "/" + name + ".png"
-        const ok = popup.background.parent.grabToImage(r => { r.saveToFile(path); console.log("selftest: saved", path) })
-        if (!ok) console.log("selftest: grab failed", name)
-    }
+    function shotPopup(popup, name) { grabItem(popup.background.parent, name) }
     function log(...args) { console.log("selftest:", ...args) }
     // ---- synthetic input: real mouse/key events (TestInput, Qt Test) ----
     property int checksPassed: 0
@@ -982,6 +982,10 @@ ApplicationWindow {
         }
     }
     /// Clicks the middle of `item` with a real mouse event.
+    /// Every git service card under `root` done checking its sign-in.
+    function gitHostsChecked(root) {
+        return ["github", "gitlab", "forgejo"].every(s => { const c = findName("gitHost-" + s, root); return c !== null && c.st.state !== "checking" })
+    }
     function clickItem(item, what) {
         if (!item) { check(false, "find " + what); return }
         scrollIntoView(item)
@@ -1414,7 +1418,10 @@ ApplicationWindow {
             win.check(why === "This session has cost $0.50, over its $0.50 limit.", "at the limit it's held (" + why + ")")
             win.check(chat.session.status !== "busy", "and its run stopped (" + chat.session.status + ")")
             win.check(win.findName("spendBanner") !== null, "the chat says so")
-            win.shot("clicks-spend-banner")
+            win.shot("clicks-spend-banner") } }
+        // (A shot is taken at the next frame: nothing changes before it.)
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
             chat.composerItem.text = "fast: three"
             chat.composerItem.focusInput()
             TestInput.key(Qt.Key_Return, 0) } }
@@ -1538,8 +1545,12 @@ ApplicationWindow {
             win.railTarget = Math.max(0, r.highlighted - 1)
             const entry = win.findText(r.prompts[win.railTarget].text, r)
             win.check(entry !== null, "the hover list shows the prompts")
-            win.shot("clicks-rail-hover")
-            win.clickItem(entry, "list entry") } }
+            win.shot("clicks-rail-hover") } }
+        // (A shot is taken at the next frame: nothing changes before it.)
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const r = chat.transcript.rail
+            win.clickItem(win.findText(r.prompts[win.railTarget].text, r), "list entry") } }
         PauseAnimation { duration: 900 }
         ScriptAction { script: { win.check(chat.transcript.activePrompt === win.railTarget && !chat.transcript.follow, "clicking an entry jumps to it (" + chat.transcript.activePrompt + ")"); TestInput.moveTo(20, 20) } }
         PauseAnimation { duration: 500 }
@@ -1726,7 +1737,10 @@ ApplicationWindow {
         PauseAnimation { duration: 2500 }
         ScriptAction { script: {
             win.check(chat.transcript.count > win.rowsBefore && win.findText("fast: from the mini chat", chat.transcript) !== null, "a message sent there reaches the session")
-            win.miniChat.contentItem.grabToImage(r => r.saveToFile(win.selftestDir + "/clicks-minichat.png"))
+            // (Its own window: taken at its next frame, so nothing changes before.)
+            win.miniChat.contentItem.grabToImage(r => r.saveToFile(win.selftestDir + "/clicks-minichat.png")) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
             win.clickItem(win.findName("keepOnTop", win.miniChat.contentItem), "📌") } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: { win.check((win.miniChat.flags & Qt.WindowStaysOnTopHint) === 0 && !win.miniChat.stayOnTop && Workspace.setting("mini_chat_on_top") === "0", "📌 turns keep-on-top off (and on by default)"); TestInput.key(Qt.Key_Escape, 0) } }
@@ -1755,7 +1769,10 @@ ApplicationWindow {
         ScriptAction { script: {
             win.check(Workspace.projectNotes(1) === "Use SQLite for the cache\n- [x] write the migration", "ticking it marks the line done (saved)")
             win.check(win.findText("Todos · all done", notes) !== null, "the todo count follows")
-            win.shot("clicks-notes")
+            win.shot("clicks-notes") } }
+        // (A shot is taken at the next frame: nothing changes before it.)
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
             win.clickText("Insert into message", notes) } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: { win.check(chat.composerItem.text.startsWith("Project notes:\nUse SQLite for the cache"), "Insert into message fills the composer"); chat.composerItem.text = ""; Workspace.newSession(-1, "demo") } }
@@ -1923,7 +1940,10 @@ ApplicationWindow {
             const logo = win.findName("providerLogo", c)
             win.check(logo !== null && logo.url.startsWith("data:image/svg+xml"), "the provider's logo shows by it")
             win.check(!win.findName("sendButton", c).enabled, "Send is off with nothing typed")
-            win.shot("clicks-composer")
+            win.shot("clicks-composer") } }
+        // (A shot is taken at the next frame: nothing changes before it.)
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
             win.rowsBefore = chat.transcript.count
             win.clickItem(win.findName("composerInput"), "composer")
             TestInput.typeText("fast: hello from the bar") } }
@@ -1967,7 +1987,10 @@ ApplicationWindow {
         ScriptAction { script: {
             win.check(chat.session.planMode && (chat.composerItem.compactBar || win.findText("Plan", chat.composerItem) !== null) && Workspace.planMode(chat.session.key), "clicking Build switches to Plan")
             win.check(chat.composerItem.inputFocused, "the composer keeps the cursor")
-            win.shot("clicks-composer-plan")
+            win.shot("clicks-composer-plan") } }
+        // (A shot is taken at the next frame: nothing changes before it.)
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
             win.rowsBefore = chat.transcript.count
             TestInput.typeText("fast: plan the cache")
             TestInput.key(Qt.Key_Return, 0) } }
@@ -2153,7 +2176,10 @@ ApplicationWindow {
             win.check(chat.session.harness === "harlo" && chat.session.cwd === "ssh://box" + win.argValue("--cwd="), "a new session there runs Harlo in the remote folder")
             win.check(chat.session.modelName !== "", "Harlo answers over SSH (model " + chat.session.modelName + ")")
             win.check(Workspace.approvalMode(chat.session.key) === "always-ask", "it starts asking first")
-            win.shot("clicks-remote-session")
+            win.shot("clicks-remote-session") } }
+        // (A shot is taken at the next frame: nothing changes before it.)
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
             // Local again: box's projects, sessions and tabs are out of sight.
             win.instanceKey = chat.session.key
             win.clickItem(win.findName("instanceButton"), "the instance button") } }
@@ -2186,7 +2212,10 @@ ApplicationWindow {
             const find = it => { for (const c of it.children) { if (c.visible && c.html !== undefined && c.html.indexOf("Hi from the remote host") >= 0) return c; const f = find(c); if (f) return f } return null }
             win.check(win.findText("Remote hello", chat.transcript) !== null && find(chat.transcript) !== null, "opening it reads its transcript over SSH")
             win.check(chat.session.harness === "harlo" && chat.session.cwd === "ssh://box" + win.argValue("--cwd="), "as a Harlo session in the remote folder")
-            win.shot("clicks-remote-saved")
+            win.shot("clicks-remote-saved") } }
+        // (A shot is taken at the next frame: nothing changes before it.)
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
             // Stage 4: the Changes panel and a terminal on the host.
             windowSettings.rightMode = "changes"
             git.refresh(true) } }
@@ -2566,8 +2595,11 @@ ApplicationWindow {
             const d = settingsDialog.contentItem
             win.check(win.findName("phoneAccess", d).checked && win.findText("No phones paired yet.", d) !== null, "Settings → Devices: on, no phones yet")
             win.check(win.findName("relaySwitch", d).checked && win.findName("funnelSwitch", d).checked, "the relay and Funnel show as on")
-            win.shot("clicks-phone-settings")
-            win.clickItem(win.findName("funnelSwitch", d), "the Funnel switch") } }
+            win.shot("clicks-phone-settings") } }
+        // (A shot is taken at the next frame: nothing changes before it.)
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.clickItem(win.findName("funnelSwitch", settingsDialog.contentItem), "the Funnel switch") } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
             win.check(!Phone.funnelOn && Phone.funnelState === "off", "the switch turns Funnel off")
@@ -3766,6 +3798,8 @@ ApplicationWindow {
             win.check(dv.leftPane.editor.text.indexOf("line 10") >= 0 && dv.rightPane.editor.text.indexOf("line 10\n") < 0 && dv.rightPane.editor.text.indexOf("new B") >= 0, "old on the left, new on the right")
             win.check(win.findName("diffRuler") !== null && win.findName("hunk-stage-0") !== null, "the change map, and a hunk's buttons")
             win.check(dv.leftPane.width * 2 + 44 <= dv.width + 1, "the sides fit the view (" + dv.leftPane.width + " of " + dv.width + ")")
+            const f = dv.rightPane.flick, third = Math.max(0, Math.min(f.contentHeight - f.height, dv.blocks[0].start * dv.lineHeight - f.height / 3))
+            win.check(f.height > 0 && Math.abs(f.contentY - third) < 1, "it opens at the first change, a third of the way down (" + f.contentY + ", not " + third + ")")
             win.shotWindow("clicks-diff")
             win.clickItem(win.findName("diffNext"), "next change") } }
         PauseAnimation { duration: 400 }
@@ -4584,6 +4618,7 @@ ApplicationWindow {
     // server; no sign-in), the theme; Finish marks it done; Settings opens
     // it again.
     SequentialAnimation {
+        id: setupSteps
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clickssetup"
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
@@ -4625,6 +4660,9 @@ ApplicationWindow {
             server.text = "https://Git.Example.org/"
             server.editingFinished() } }
         PauseAnimation { duration: 2000 }
+        // (The services checked: on a busy computer that takes a while.)
+        ScriptAction { script: win.waitUntil(setupSteps, () => win.gitHostsChecked(setupGuide.contentItem), 15000) }
+        PauseAnimation { duration: 300 }
         ScriptAction { script: {
             win.check(Workspace.setting("git_host") === "gitlab" && win.findName("gitHost-gitlab").chosen, "the default service is saved")
             win.check(JSON.parse(Setup.gitStatus("forgejo")).host === "git.example.org", "Forgejo's server, as a host (" + Setup.gitStatus("forgejo") + ")")
@@ -4664,6 +4702,9 @@ ApplicationWindow {
             win.check(!setupGuide.visible && Workspace.setting("setup_done") === "1", "a harlo with projects doesn't get it")
             settingsDialog.openPage("git") } }
         PauseAnimation { duration: 1500 }
+        // (The services checked: on a busy computer that takes a while.)
+        ScriptAction { script: win.waitUntil(setupSteps, () => win.gitHostsChecked(settingsDialog.contentItem), 15000) }
+        PauseAnimation { duration: 300 }
         ScriptAction { script: {
             win.check(win.findName("gitHost-gitlab", settingsDialog.contentItem) !== null, "Settings → Git has the services")
             win.shotPopup(settingsDialog, "clicks-setup-settings-git") } }
@@ -4825,7 +4866,10 @@ ApplicationWindow {
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
             win.check(chat.transcript.latestUndo === "", "undone: nothing left to undo, the button goes")
-            win.shot("clicks-undo-after")
+            win.shot("clicks-undo-after") } }
+        // (A shot is taken at the next frame: nothing changes before it.)
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
             chat.undoDialog.close()
             // A second turn: the first one's end (where your next message starts) offers it.
             chat.composerItem.text = "And now the tests"
@@ -4908,7 +4952,10 @@ ApplicationWindow {
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
             win.check(win.findName("checksSummary").text === "Failed: lint", "the panel shows what failed")
-            win.shot("clicks-request-failed")
+            win.shot("clicks-request-failed") } }
+        // (A shot is taken at the next frame: nothing changes before it.)
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
             win.clickItem(win.findName("ciSend"), "Send to the agent") } }
         PauseAnimation { duration: 2500 }
         ScriptAction { script: {
@@ -5340,7 +5387,7 @@ ApplicationWindow {
             const tail = addresses.find(a => String(a.label).startsWith("Tailscale"))
             if (tail) win.check(win.findText("Your phone can't reach harlo over Tailscale") !== null, "the Tailscale one says so")
             // (The notices themselves: they sit above the page.)
-            win.findName("phoneFirewallToast").grabToImage(r => r.saveToFile(win.selftestDir + "/clicks-phone-firewall-toast.png"))
+            win.grabItem(win.findName("phoneFirewallToast"), "clicks-phone-firewall-toast")
             win.clickItem(win.findName("phoneFirewallAllow"), "Allow") } }
         PauseAnimation { duration: 1200 }
         ScriptAction { script: {
@@ -7176,6 +7223,7 @@ ApplicationWindow {
             win.shotWindow("clicks-harlo-mockup") } }
         // (Both pictures taken: a real browser takes a moment.)
         ScriptAction { script: win.waitUntil(visualSteps, () => { const m = win.findName("mockupView"); return m && m.mock && m.mock.before && m.mock.before.state === "ready" && m.mock.after.state === "ready" }, 20000) }
+        PauseAnimation { duration: 50 }
         ScriptAction { script: win.clickItem(win.findName("mockupPicture"), "the mockup's picture") }
         PauseAnimation { duration: 600 }
         ScriptAction { script: {
@@ -7955,6 +8003,7 @@ ApplicationWindow {
             win.check(Remotes.saveHost("", "box", "ssh " + win.argValue("--ssh=")) === "", "the host is saved")
             Remotes.connectHost("box") } }
         ScriptAction { script: win.waitUntil(catalogHostSteps, () => JSON.parse(Remotes.hostsJson())[0].state === "connected", 30000) }
+        PauseAnimation { duration: 50 }
         ScriptAction { script: { Workspace.switchInstance("box"); settingsDialog.openPage("mcp") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: win.waitUntil(catalogHostSteps, () => catalogHostSteps.offered().loading === false && catalogHostSteps.offered().latest === "2.1.7", 30000) }
@@ -8017,6 +8066,7 @@ ApplicationWindow {
             Workspace.switchInstance("") } }
         PauseAnimation { duration: 600 }
         ScriptAction { script: win.waitUntil(catalogHostSteps, () => catalogHostSteps.offered("global").loading === false, 20000) }
+        PauseAnimation { duration: 50 }
         ScriptAction { script: {
             const b = catalogHostSteps.offered("global"), d = settingsDialog.contentItem
             win.check(b.version === "" && (b.agents || []).length === 0, "this computer's own: not installed here (" + JSON.stringify(b) + ")")

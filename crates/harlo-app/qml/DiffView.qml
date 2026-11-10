@@ -323,7 +323,16 @@ Rectangle {
     readonly property real lineHeight: leftPane.lineHeight
     // The first time a file's changes show, they're scrolled into view.
     property bool jumped: false
-    onBlocksChanged: if (!jumped && blocks.length > 0 && leftPane.ready && rightPane.ready) { jumped = true; Qt.callLater(() => { if (blocks.length > 0) showRow(blocks[0].start) }) }
+    onBlocksChanged: if (!jumped && blocks.length > 0 && leftPane.ready && rightPane.ready) { jumped = true; jumpTries = 0; Qt.callLater(jumpToFirst) }
+    // The first change, a third of the way down, once the view has its
+    // height (a third of none put it at the very top).
+    property int jumpTries: 0
+    Timer { id: jumpLater; interval: 50; onTriggered: root.jumpToFirst() }
+    function jumpToFirst() {
+        if (blocks.length === 0) return
+        if (rightPane.flick.height <= 0 && ++jumpTries < 40) { jumpLater.start(); return }
+        showRow(blocks[0].start)
+    }
 
     function topRow() { return Math.floor(rightPane.flick.contentY / lineHeight) }
     function showRow(row) {

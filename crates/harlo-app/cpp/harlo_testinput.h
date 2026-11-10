@@ -93,4 +93,18 @@ inline bool test_grab_window(const QString &path)
     return w && w->grabWindow().save(path);
 }
 
+// Part of the window as it is now (an item's rectangle, in window
+// coordinates): taken at once, unlike an item's grabToImage, which waits
+// for the next frame and so caught whatever the test did after it.
+inline bool test_grab_area(const QString &path, double x, double y, double w, double h)
+{
+    auto *win = qobject_cast<QQuickWindow *>(test_window());
+    if (!win)
+        return false;
+    const QImage all = win->grabWindow();
+    const qreal r = all.devicePixelRatio();
+    const QRect area = QRectF(x * r, y * r, w * r, h * r).toAlignedRect().intersected(all.rect());
+    return !area.isEmpty() && all.copy(area).save(path);
+}
+
 } // namespace harlo

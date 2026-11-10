@@ -114,6 +114,9 @@ struct Entry {
     harness: String,
     status: String,
     modified: i64,
+    /// Its last activity exactly: the order (two sessions busy in the same
+    /// second would otherwise swap places between refreshes).
+    at: SystemTime,
     pinned: bool,
     /// On its project's Settled shelf: why.
     settled: String,
@@ -202,6 +205,7 @@ pub fn build(input: &SidebarInput<'_>) -> Vec<SidebarRow> {
             harness: s.harness.as_str().to_owned(),
             status,
             modified: unix(s.modified),
+            at: s.modified,
             pinned: meta.pinned,
             branch: String::new(),
             owner: None,
@@ -229,6 +233,7 @@ pub fn build(input: &SidebarInput<'_>) -> Vec<SidebarRow> {
             harness: l.harness.clone(),
             status: live_status(l),
             modified: unix(l.started_at),
+            at: l.started_at,
             pinned: false,
             branch: String::new(),
             owner: None,
@@ -239,7 +244,7 @@ pub fn build(input: &SidebarInput<'_>) -> Vec<SidebarRow> {
     if !filter.is_empty() {
         entries.retain(|e| e.title.to_lowercase().contains(&filter));
     }
-    entries.sort_by(|a, b| b.pinned.cmp(&a.pinned).then(b.modified.cmp(&a.modified)));
+    entries.sort_by(|a, b| b.pinned.cmp(&a.pinned).then(b.at.cmp(&a.at)).then_with(|| a.key.cmp(&b.key)));
 
     // Assign each session to a worktree's project, else to the deepest
     // project containing its cwd.
@@ -615,6 +620,25 @@ mod tests {
         assert!(got[3].worktree && !got[0].worktree);
         // The nested project's are its own; removing it leaves the others.
         assert_eq!(project_sessions(2, &input).iter().map(|s| s.key.as_str()).collect::<Vec<_>>(), ["/s/nested"]);
+    }
+
+    #[test]
+    fn sessions_in_the_same_second_keep_their_order() {
+        let projects = [project(1, "/w")];
+        let second = UNIX_EPOCH + Duration::from_secs(1_800_000_000);
+        let at = |path: &str, title: &str, ms: u64| SessionInfo { modified: second + Duration::from_millis(ms), ..session(path, "/w", title, 0) };
+        let meta = HashMap::new();
+        let order = |sessions: &[SessionInfo]| -> Vec<String> {
+            let input = SidebarInput { projects: &projects, worktrees: &[], sessions, live: &[], meta: &meta, filter: "", show_archived: false, other_collapsed: false, expanded: &[], shelves_open: &[] };
+            build(&input).into_iter().filter(|r| r.kind == SidebarKind::Session).map(|r| r.title).collect()
+        };
+        // The later one first, however they're listed; at the same instant,
+        // by key.
+        let (early, late) = (at("/s/b", "early", 100), at("/s/a", "late", 900));
+        assert_eq!(order(&[early.clone(), late.clone()]), ["late", "early"]);
+        assert_eq!(order(&[late, early]), ["late", "early"]);
+        let (b, a) = (at("/s/b", "b", 500), at("/s/a", "a", 500));
+        assert_eq!(order(&[b.clone(), a.clone()]), order(&[a, b]));
     }
 
     #[test]

@@ -20,6 +20,8 @@ pub mod qobject {
         fn test_type(text: &QString);
         #[namespace = "harlo"]
         fn test_grab_window(path: &QString) -> bool;
+        #[namespace = "harlo"]
+        fn test_grab_area(path: &QString, x: f64, y: f64, w: f64, h: f64) -> bool;
     }
 
     extern "RustQt" {
@@ -50,6 +52,11 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "grabWindow"]
         fn grab_window(self: &TestInput, path: &QString) -> bool;
+        /// Saves part of the window as it is now (x, y, width, height in
+        /// the window's coordinates).
+        #[qinvokable]
+        #[cxx_name = "grabArea"]
+        fn grab_area(self: &TestInput, path: &QString, x: f64, y: f64, w: f64, h: f64) -> bool;
         /// A text file's contents ("" if it can't be read): what a stand-in
         /// recorded.
         #[qinvokable]
@@ -86,6 +93,10 @@ impl qobject::TestInput {
 
     pub fn grab_window(&self, path: &QString) -> bool {
         qobject::test_grab_window(path)
+    }
+
+    pub fn grab_area(&self, path: &QString, x: f64, y: f64, w: f64, h: f64) -> bool {
+        qobject::test_grab_area(path, x, y, w, h)
     }
 
     pub fn write_file(&self, path: &QString, text: &QString) -> bool {
