@@ -23,7 +23,8 @@ fn by_file_name(name: &str) -> Option<&'static str> {
         "yarn.lock" | ".yarnrc" | ".yarnrc.yml" => "yarn",
         "pnpm-lock.yaml" | "pnpm-workspace.yaml" => "pnpm",
         "bun.lock" | "bun.lockb" | "bunfig.toml" => "bun",
-        "cargo.toml" | "cargo.lock" => "rust",
+        // (Cargo's files are TOML and a lock file, not Rust code.)
+        "cargo.lock" => "lock",
         "go.mod" | "go.sum" | "go.work" => "go-mod",
         "gemfile" | "gemfile.lock" => "gemfile",
         "rakefile" | "podfile" | "vagrantfile" | "brewfile" => "ruby",
@@ -225,7 +226,9 @@ mod tests {
     fn picks_icons() {
         assert!(ICONS.windows(2).all(|w| w[0] < w[1]), "ICONS must be sorted");
         assert_eq!(icon_for("src/main.rs"), "rust");
-        assert_eq!(icon_for("Cargo.toml"), "rust");
+        assert_eq!(icon_for("Cargo.toml"), "toml");
+        assert_eq!(icon_for("Cargo.lock"), "lock");
+        assert_eq!(icon_for("qml/Main.qml"), "qml");
         assert_eq!(icon_for("/a/b/README.md"), "readme");
         assert_eq!(icon_for("notes.md"), "markdown");
         assert_eq!(icon_for("Dockerfile"), "docker");
@@ -245,7 +248,7 @@ mod tests {
     #[test]
     fn every_mapping_has_an_svg() {
         // A typo in the tables would otherwise fall back silently.
-        let names = ["dockerfile", "makefile", "cmakelists.txt", "package.json", "yarn.lock", "pnpm-lock.yaml", "bun.lock", "cargo.toml", "go.mod", "gemfile", "pyproject.toml", "poetry.lock", "uv.lock", "tsconfig.json", "jsconfig.json", ".gitignore", ".editorconfig", ".prettierrc", ".eslintrc", ".babelrc", ".nvmrc", "license", "readme.md", "changelog.md", "contributing.md", "code_of_conduct.md", "authors", "codeowners", "security.md", "todo.md", "claude.md", "caddyfile", "procfile", "robots.txt", "flake.nix", "vite.config.ts", "vitest.config.ts", "tailwind.config.js", "postcss.config.js", "renovate.json", "biome.json", "turbo.json", "vercel.json", "netlify.toml", "deno.json", "knip.json", "meson.build", "justfile"];
+        let names = ["dockerfile", "makefile", "cmakelists.txt", "package.json", "yarn.lock", "pnpm-lock.yaml", "bun.lock", "cargo.lock", "go.mod", "gemfile", "pyproject.toml", "poetry.lock", "uv.lock", "tsconfig.json", "jsconfig.json", ".gitignore", ".editorconfig", ".prettierrc", ".eslintrc", ".babelrc", ".nvmrc", "license", "readme.md", "changelog.md", "contributing.md", "code_of_conduct.md", "authors", "codeowners", "security.md", "todo.md", "claude.md", "caddyfile", "procfile", "robots.txt", "flake.nix", "vite.config.ts", "vitest.config.ts", "tailwind.config.js", "postcss.config.js", "renovate.json", "biome.json", "turbo.json", "vercel.json", "netlify.toml", "deno.json", "knip.json", "meson.build", "justfile"];
         for n in names {
             let id = by_file_name(n).unwrap();
             assert!(known(id), "{n} → {id} has no svg");
