@@ -65,7 +65,7 @@ struct FileView: View {
     func lines(_ f: FileText) -> some View {
         let width = String(f.lines.count).count
         return ScrollViewReader { proxy in
-            ScrollView(wrap ? [.vertical] : [.vertical, .horizontal]) {
+            ScrollView(wrap ? Axis.Set.vertical : [.vertical, .horizontal]) {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     Text(f.path)
                         .font(Style.mono(11))

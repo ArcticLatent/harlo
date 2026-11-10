@@ -552,6 +552,7 @@ struct CodeBlock: View {
 
     var lines: Int { RichText.lineCount(spans) }
     var folded: Bool { !whole && lines > Self.long }
+    var visible: [Span] { folded ? RichText.firstLines(spans, Self.shown) : spans }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -577,24 +578,25 @@ struct CodeBlock: View {
                 .accessibilityLabel("Copy code")
             }
             .padding(.horizontal, 10)
-            let shown = folded ? RichText.firstLines(spans, Self.shown) : spans
-            if wrap {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(CodeLines.lines(shown).enumerated()), id: \.offset) { _, line in
-                        WrappedLine(indent: line.indent, font: Style.mono(13)) {
-                            Text(Style.attributed(line.spans.isEmpty ? [Span(" ")] : line.spans, p, size: 15, inCode: true))
+            Group {
+                if wrap {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(CodeLines.lines(visible).enumerated()), id: \.offset) { _, line in
+                            WrappedLine(indent: line.indent, font: Style.mono(13)) {
+                                Text(Style.attributed(line.spans.isEmpty ? [Span(" ")] : line.spans, p, size: 15, inCode: true))
+                            }
                         }
                     }
-                }
-                .textSelection(.enabled)
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    Text(Style.attributed(shown, p, size: 15, inCode: true))
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: true, vertical: false)
-                        .padding(10)
+                    .textSelection(.enabled)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        Text(Style.attributed(visible, p, size: 15, inCode: true))
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .padding(10)
+                    }
                 }
             }
             .mask {
