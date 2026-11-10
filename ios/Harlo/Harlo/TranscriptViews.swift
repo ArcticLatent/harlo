@@ -25,17 +25,17 @@ struct AgentHead: View {
         HStack(spacing: 8) {
             AgentTile(harness: session.harness, size: Transcript.tile)
             Text(Style.harnessLabel(session.harness))
-                .font(.system(size: 16.5, weight: .semibold))
+                .scaledFont(16.5, .semibold)
             if !otherModel.isEmpty {
                 Text(otherModel)
-                    .font(.system(size: 13.5))
+                    .scaledFont(13.5)
                     .foregroundStyle(Color(p.muted))
                     .lineLimit(1)
             }
             if time > 0 {
                 Text(Style.clock(time))
-                    .font(.system(size: 13.5))
-                    .foregroundStyle(Color(p.faint))
+                    .scaledFont(13.5)
+                    .foregroundStyle(Color(p.muted))
             }
         }
         .padding(.top, 4)
@@ -87,16 +87,16 @@ struct RunView: View {
                         .font(.caption2.weight(.semibold))
                         .frame(width: 12)
                     Text(summary.isEmpty ? "\(rows.count) steps" : summary)
-                        .font(.system(size: 14))
+                        .scaledFont(14)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                     // How long it took, or (still going) for how long.
                     if active, let start = rows.first?.time, start > 0 {
                         TimelineView(.periodic(from: .now, by: 1)) { ctx in
-                            Text("· " + Style.elapsed(since: start, now: ctx.date)).font(.system(size: 14)).monospacedDigit()
+                            Text("· " + Style.elapsed(since: start, now: ctx.date)).scaledFont(14).monospacedDigit()
                         }
                     } else if let ms = rows.first?.runMs, ms > 0 {
-                        Text("· " + Style.duration(Double(ms))).font(.system(size: 14))
+                        Text("· " + Style.duration(Double(ms))).scaledFont(14)
                     }
                     if active {
                         StatusDot(status: "busy")
@@ -205,13 +205,19 @@ struct ToolCard: View {
                     IconSquare(symbol: symbol, size: 38)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(Style.toolWords(row.title, running: running))
-                            .font(.system(size: 16, weight: .medium))
+                            .scaledFont(16, .medium)
                             .lineLimit(1)
                         if !row.label.isEmpty {
                             // What it's for, in the agent's words (the
                             // command itself is in it, opened).
                             Text(row.label)
-                                .font(.system(size: 14))
+                                .scaledFont(14)
+                                .foregroundStyle(Color(p.muted))
+                                .lineLimit(2)
+                        } else if !row.subtitle.isEmpty && ToolName.saysWords(row.title) {
+                            // (A question or a task: words, cut at the end.)
+                            Text(row.subtitle)
+                                .scaledFont(14)
                                 .foregroundStyle(Color(p.muted))
                                 .lineLimit(2)
                         } else if !row.subtitle.isEmpty {
@@ -226,7 +232,7 @@ struct ToolCard: View {
                     trailing
                     if canOpen {
                         Image(systemName: open ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 13, weight: .semibold))
+                            .scaledFont(13, .semibold)
                             .foregroundStyle(Color(p.muted))
                     }
                 }
@@ -290,14 +296,14 @@ struct ToolCard: View {
             EmptyView()
         } else if symbol != "terminal" && !row.result.isEmpty {
             Text(row.result)
-                .font(.system(size: 13))
+                .scaledFont(13)
                 .foregroundStyle(Color(failed ? p.error : p.muted))
                 .lineLimit(1)
                 .fixedSize()
         } else if !took.isEmpty {
             HStack(spacing: 5) {
                 Image(systemName: failed ? "xmark" : "checkmark")
-                    .font(.system(size: 13, weight: .bold))
+                    .scaledFont(13, .bold)
                     .foregroundStyle(Color(failed ? p.error : p.success))
                 Text(took).font(Style.mono(13)).foregroundStyle(Color(p.muted))
             }
@@ -364,28 +370,36 @@ struct HarloMessage: View {
                     .scaledToFit()
                     .frame(width: Transcript.tile, height: Transcript.tile)
                 Text("harlo")
-                    .font(.system(size: 16.5, weight: .semibold))
+                    .scaledFont(16.5, .semibold)
                 Text("to the agent")
-                    .font(.system(size: 13.5))
-                    .foregroundStyle(Color(p.faint))
+                    .scaledFont(13.5)
+                    .foregroundStyle(Color(p.muted))
             }
             Button {
                 withAnimation(.easeOut(duration: 0.2)) { open.toggle() }
             } label: {
-                // Its plain line, folded; all of it opened.
-                Text(open || row.label.isEmpty ? row.text : row.label)
-                    .font(.footnote)
-                    .foregroundStyle(Color(p.muted))
-                    .multilineTextAlignment(.leading)
-                    .lineLimit(open ? nil : 2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                // Its plain line, folded; all of it, as the agent got it,
+                // opened.
+                VStack(alignment: .leading, spacing: 4) {
+                    if open && !row.label.isEmpty {
+                        Text("What harlo told the agent")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color(p.muted))
+                    }
+                    Text(open || row.label.isEmpty ? row.text : row.label)
+                        .font(.footnote)
+                        .foregroundStyle(Color(p.muted))
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(open ? nil : 2)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
             if !row.subtitle.isEmpty, let helper = model.sessions.first(where: { $0.key == row.subtitle }) {
                 Button("Open helper") {
                     model.open(helper)
                 }
-                .font(.system(size: 14, weight: .medium))
+                .scaledFont(14, .medium)
                 .foregroundStyle(Color(p.primary))
                 .buttonStyle(.plain)
             }
@@ -424,7 +438,7 @@ struct ThinkingRow: View {
                     Text("Thought").italic()
                     Image(systemName: open ? "chevron.down" : "chevron.right").font(.caption2)
                 }
-                .font(.system(size: 13.5))
+                .scaledFont(13.5)
                 .foregroundStyle(Color(p.muted))
             }
             .buttonStyle(.plain)
@@ -460,22 +474,22 @@ struct UserBubble: View {
                             attachment(f)
                         }
                         if !row.subtitle.isEmpty {
-                            Text(row.subtitle).font(.system(size: 12.5, weight: .medium)).opacity(0.8)
+                            Text(row.subtitle).scaledFont(12.5, .medium).opacity(0.92)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if !row.text.isEmpty {
                     Text(row.text)
-                        .font(.system(size: 16.5))
+                        .scaledFont(16.5)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }
                 if row.time > 0 {
                     Text(Style.clock(row.time))
-                        .font(.system(size: 12))
-                        .opacity(0.7)
+                        .scaledFont(12, .medium)
+                        .opacity(0.92)
                 }
             }
             .foregroundStyle(Color(ink))
@@ -495,11 +509,11 @@ struct UserBubble: View {
         let ext = name.split(separator: ".").last.map { $0.lowercased() } ?? ""
         let photo = name.hasPrefix("Photo ") || ["png", "jpg", "jpeg", "gif", "webp", "heic"].contains(ext)
         return HStack(spacing: 5) {
-            Image(systemName: photo ? "photo" : "doc").font(.system(size: 12, weight: .semibold))
-            Text(name).font(.system(size: 13, weight: .medium)).lineLimit(1).truncationMode(.middle)
+            Image(systemName: photo ? "photo" : "doc").scaledFont(12, .semibold)
+            Text(name).scaledFont(13, .medium).lineLimit(1).truncationMode(.middle)
         }
         .padding(.horizontal, 9)
-        .frame(height: 26)
+        .frame(minHeight: 26)
         .background(Capsule().fill(.primary.opacity(0.15)))
     }
 }
@@ -523,11 +537,11 @@ struct CodeBlock: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(language.isEmpty ? "code" : language)
-                    .font(.system(size: 12.5))
+                    .scaledFont(12.5)
                     .foregroundStyle(Color(p.muted))
                 if lines > Self.long {
                     Text("· \(lines) lines")
-                        .font(.system(size: 12.5))
+                        .scaledFont(12.5)
                         .foregroundStyle(Color(p.muted))
                 }
                 Spacer()
@@ -535,11 +549,14 @@ struct CodeBlock: View {
                     UIPasteboard.general.string = raw.isEmpty ? RichText.plain(spans) : raw
                 } label: {
                     Image(systemName: "doc.on.doc").font(.caption)
+                        // (A full-size target in a small header.)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                        .padding(.trailing, -12)
                 }
                 .accessibilityLabel("Copy code")
             }
             .padding(.horizontal, 10)
-            .padding(.top, 7)
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(Style.attributed(folded ? RichText.firstLines(spans, Self.shown) : spans, p, size: 15, inCode: true))
                     .textSelection(.enabled)
@@ -557,8 +574,8 @@ struct CodeBlock: View {
                     withAnimation(.easeOut(duration: 0.15)) { whole.toggle() }
                 } label: {
                     HStack(spacing: 5) {
-                        Image(systemName: whole ? "chevron.up" : "chevron.down").font(.system(size: 10, weight: .semibold))
-                        Text(whole ? "Show less" : "Show all \(lines) lines").font(.system(size: 13, weight: .medium))
+                        Image(systemName: whole ? "chevron.up" : "chevron.down").scaledFont(10, .semibold)
+                        Text(whole ? "Show less" : "Show all \(lines) lines").scaledFont(13, .medium)
                     }
                     .foregroundStyle(Color(p.primary))
                     .frame(maxWidth: .infinity)
@@ -588,16 +605,17 @@ struct RichTextView: View {
 
 struct BlockView: View {
     @Environment(\.palette) private var p
+    @Environment(\.dynamicTypeSize) private var typeSize
     let block: RichBlock
 
     var body: some View {
         switch block {
         case .paragraph(let spans):
-            Text(Style.attributed(spans, p))
+            Text(Style.attributed(spans, p, typeSize: typeSize))
                 .lineSpacing(3)
                 .textSelection(.enabled)
         case .heading(let level, let spans):
-            Text(Style.attributed(spans, p, size: level <= 1 ? 21 : level == 2 ? 19 : 17))
+            Text(Style.attributed(spans, p, size: level <= 1 ? 21 : level == 2 ? 19 : 17, typeSize: typeSize))
                 .bold()
                 .padding(.top, 4)
         case .list(let ordered, let start, let items):
@@ -605,7 +623,7 @@ struct BlockView: View {
                 ForEach(items.indices, id: \.self) { i in
                     HStack(alignment: .firstTextBaseline, spacing: 7) {
                         Text(ordered ? "\(start + i)." : "•")
-                            .font(.system(size: 16).monospacedDigit())
+                            .scaledFont(16).monospacedDigit()
                             .foregroundStyle(Color(p.muted))
                         // (AnyView: lists hold blocks, which hold lists.)
                         AnyView(RichTextView(blocks: items[i]))
@@ -628,7 +646,7 @@ struct BlockView: View {
                     if !head.isEmpty {
                         GridRow {
                             ForEach(head.indices, id: \.self) { c in
-                                Text(Style.attributed(head[c], p, size: 15)).bold()
+                                Text(Style.attributed(head[c], p, size: 15, typeSize: typeSize)).bold()
                             }
                         }
                         Rectangle().fill(Color(p.border)).frame(height: 1)
@@ -636,7 +654,7 @@ struct BlockView: View {
                     ForEach(rows.indices, id: \.self) { r in
                         GridRow {
                             ForEach(rows[r].indices, id: \.self) { c in
-                                Text(Style.attributed(rows[r][c], p, size: 15))
+                                Text(Style.attributed(rows[r][c], p, size: 15, typeSize: typeSize))
                             }
                         }
                     }
@@ -666,7 +684,7 @@ struct ResultBadge: View {
                 Text(text).foregroundStyle(Color(bad ? p.error : text.hasSuffix("passed") ? p.success : p.muted))
             }
         }
-        .font(.system(size: 13, weight: .medium))
+        .scaledFont(13, .medium)
         .lineLimit(1)
         .fixedSize()
     }

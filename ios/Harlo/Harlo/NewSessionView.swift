@@ -93,7 +93,7 @@ struct NewSessionView: View {
                 .padding(.top, 72)
                 if choices == nil && !loading {
                     Label("Connect to harlo to start a session.", systemImage: "wifi.exclamationmark")
-                        .font(.system(size: 15))
+                        .scaledFont(15)
                         .foregroundStyle(Color(p.warning))
                         .padding(.top, 24)
                 }
@@ -130,7 +130,7 @@ struct NewSessionView: View {
         return (Text(Style.greeting() + (first.isEmpty ? "" : ", "))
             + Text(first).foregroundColor(Color(p.primary))
             + Text("\nWhat are we building today?"))
-            .font(.system(size: 32, weight: .medium))
+            .scaledFont(32, .medium)
             .tracking(-0.3)
             .lineSpacing(4)
             .fixedSize(horizontal: false, vertical: true)
@@ -148,7 +148,7 @@ struct NewSessionView: View {
                 if !photos.isEmpty { PhotoStrip(photos: $photos) }
                 TextField("What should the agent do?", text: $text, axis: .vertical)
                     .lineLimit(1...8)
-                    .font(.system(size: 17))
+                    .scaledFont(17)
                     .focused($focused)
                     .padding(.top, 2)
                 HStack(spacing: 6) {
@@ -182,7 +182,7 @@ struct NewSessionView: View {
                     Image(systemName: "pause.circle")
                     Text("\(server) is stopped: harlo starts it before your message")
                 }
-                .font(.system(size: 12.5))
+                .scaledFont(12.5)
                 .foregroundStyle(Color(p.warning))
                 .padding(.horizontal, 6)
             }
@@ -227,28 +227,28 @@ struct NewSessionView: View {
                         ProgressView().controlSize(.mini)
                     } else {
                         Image(systemName: !host.isEmpty ? "server.rack" : project == nil ? "house" : "folder")
-                            .font(.system(size: 14, weight: .medium))
+                            .scaledFont(14, .medium)
                             .foregroundStyle(Color(p.primary))
                     }
                 }
                 .frame(width: 20)
                 Text(placeText)
-                    .font(.system(size: 15, weight: .semibold))
+                    .scaledFont(15, .semibold)
                     .lineLimit(1)
                     .layoutPriority(1)
                 Text(placePath)
                     .font(Style.mono(12))
-                    .foregroundStyle(Color(p.faint))
+                    .foregroundStyle(Color(p.muted))
                     .lineLimit(1)
                     .truncationMode(.head)
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 11, weight: .semibold))
+                    .scaledFont(11, .semibold)
                     .foregroundStyle(Color(p.muted))
             }
             .foregroundStyle(Color(p.foreground))
             .padding(.horizontal, 4)
-            .frame(height: 32)
+            .frame(minHeight: 32)
             .contentShape(Rectangle())
         }
         .disabled(connecting != nil)
@@ -283,16 +283,16 @@ struct NewSessionView: View {
             HStack(spacing: 6) {
                 AgentTile(harness: agent, size: 20)
                 Text(modelName)
-                    .font(.system(size: 13.5, weight: .medium))
+                    .scaledFont(13.5, .medium)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .frame(maxWidth: 130, alignment: .leading)
                     .fixedSize(horizontal: true, vertical: false)
-                Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).foregroundStyle(Color(p.muted))
+                Image(systemName: "chevron.down").scaledFont(9, .bold).foregroundStyle(Color(p.muted))
             }
             .padding(.leading, 6)
             .padding(.trailing, 10)
-            .frame(height: 34)
+            .frame(minHeight: 34)
             .background(Capsule().fill(Color(p.raised.mix(p.foreground, 0.04))))
             .overlay(Capsule().strokeBorder(Color(p.hairline), lineWidth: 1))
             .foregroundStyle(Color(p.foreground))
@@ -340,11 +340,11 @@ struct NewSessionView: View {
                 ForEach(c.templates) { t in
                     Button { apply(t, c) } label: {
                         HStack(spacing: 6) {
-                            Image(systemName: "bookmark").font(.system(size: 12, weight: .semibold)).foregroundStyle(Color(p.primary))
-                            Text(t.name).font(.system(size: 14, weight: .medium)).lineLimit(1)
+                            Image(systemName: "bookmark").scaledFont(12, .semibold).foregroundStyle(Color(p.primary))
+                            Text(t.name).scaledFont(14, .medium).lineLimit(1)
                         }
                         .padding(.horizontal, 12)
-                        .frame(height: 32)
+                        .frame(minHeight: 32)
                         .background(Capsule().fill(Color(p.raised)))
                         .overlay(Capsule().strokeBorder(Color(p.hairline), lineWidth: 1))
                         .foregroundStyle(Color(p.foreground))

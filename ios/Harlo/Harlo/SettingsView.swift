@@ -78,7 +78,7 @@ struct SettingsView: View {
                         UserAvatar(size: 56)
                         VStack(alignment: .leading, spacing: 6) {
                             TextField("Your name", text: $name)
-                                .font(.system(size: 17, weight: .medium))
+                                .scaledFont(17, .medium)
                                 .textContentType(.givenName)
                         }
                     }

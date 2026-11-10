@@ -113,7 +113,7 @@ private struct EntryRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: symbol)
-                .font(.system(size: 13, weight: .semibold))
+                .scaledFont(13, .semibold)
                 .foregroundStyle(Color(entry.failed ? p.error : p.muted))
                 .frame(width: 20)
                 .padding(.top, 2)
@@ -123,14 +123,14 @@ private struct EntryRow: View {
                     .lineLimit(entry.isFile ? 1 : 3)
                     .truncationMode(entry.isFile ? .head : .tail)
                 Text(detail)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color(entry.failed ? p.error : p.faint))
+                    .scaledFont(12)
+                    .foregroundStyle(Color(entry.failed ? p.error : p.muted))
             }
             Spacer(minLength: 4)
             if let t = entry.time {
                 Text(Date(timeIntervalSince1970: Double(t) / 1000).formatted(date: .omitted, time: .shortened))
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Color(p.faint))
+                    .scaledFont(11.5)
+                    .foregroundStyle(Color(p.muted))
             }
         }
         .padding(.vertical, 2)

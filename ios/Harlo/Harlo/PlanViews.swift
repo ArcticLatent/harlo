@@ -13,18 +13,18 @@ struct PlanLine: View {
         Button(action: open) {
             HStack(spacing: 8) {
                 Image(systemName: "list.bullet.clipboard")
-                    .font(.system(size: 13))
+                    .scaledFont(13)
                     .foregroundStyle(Color(p.primary))
                     .frame(width: 14)
                 Text("\(plan.finished)/\(plan.steps.count)")
-                    .font(.system(size: 13, weight: .semibold))
+                    .scaledFont(13, .semibold)
                     .foregroundStyle(Color(p.muted))
                     .monospacedDigit()
                 Text(plan.current?.title ?? (plan.finished == plan.steps.count ? "All done" : "Plan"))
-                    .font(.system(size: 13))
+                    .scaledFont(13)
                     .lineLimit(1)
                 Spacer(minLength: 0)
-                Image(systemName: "chevron.up").font(.system(size: 10, weight: .semibold)).foregroundStyle(Color(p.muted))
+                Image(systemName: "chevron.up").scaledFont(10, .semibold).foregroundStyle(Color(p.muted))
             }
             // (A full-size target: it reaches 13 pt above and below the
             // line without making the card any taller.)
@@ -121,11 +121,11 @@ struct PlanSheet: View {
         Section {
             if let run = plan.run, !run.paused.isEmpty {
                 Label(run.paused, systemImage: "pause.circle")
-                    .font(.system(size: 14))
+                    .scaledFont(14)
                     .foregroundStyle(Color(p.warning))
             } else if let run = plan.run {
                 Label("Running with \(run.agentName) helpers", systemImage: "person.2")
-                    .font(.system(size: 14))
+                    .scaledFont(14)
                     .foregroundStyle(Color(p.primary))
             }
             if plan.canRun && !plan.reviewers.isEmpty {
@@ -232,17 +232,17 @@ struct PlanSheet: View {
                         Text(spec.title.isEmpty ? spec.path : spec.title).font(.body.weight(.medium))
                         // Its status, when it isn't simply in force; its type.
                         if !spec.status.isEmpty && spec.status != "active" {
-                            Text(spec.status).font(.caption).foregroundStyle(Color(spec.status == "stale" ? p.warning : p.faint))
+                            Text(spec.status).font(.caption).foregroundStyle(Color(spec.status == "stale" ? p.warning : p.muted))
                                 .strikethrough(spec.status == "deprecated")
                         }
                         if !spec.kind.isEmpty {
-                            Text(spec.kind).font(.caption).foregroundStyle(Color(p.faint))
+                            Text(spec.kind).font(.caption).foregroundStyle(Color(p.muted))
                         }
                     }
                     if !spec.summary.isEmpty {
                         Text(spec.summary).font(.footnote).foregroundStyle(Color(p.muted)).lineLimit(2)
                     }
-                    Text(spec.path).font(Style.mono(11)).foregroundStyle(Color(p.faint)).lineLimit(1).truncationMode(.head)
+                    Text(spec.path).font(Style.mono(11)).foregroundStyle(Color(p.muted)).lineLimit(1).truncationMode(.head)
                 }
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Color(p.muted))
@@ -267,43 +267,43 @@ struct PlanSheet: View {
         let (icon, color) = mark(step.status)
         return HStack(alignment: .top, spacing: 12) {
             Image(systemName: icon)
-                .font(.system(size: 16))
+                .scaledFont(16)
                 .foregroundStyle(Color(color))
                 .padding(.top, 1)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     Text(step.title)
-                        .font(.system(size: 15.5, weight: step.status == "active" ? .semibold : .regular))
+                        .scaledFont(15.5, step.status == "active" ? .semibold : .regular)
                         .foregroundStyle(Color(step.status == "skipped" ? p.muted : p.foreground))
                         .strikethrough(step.status == "skipped")
                     if step.editedByUser {
-                        Text("yours").font(.system(size: 11.5)).foregroundStyle(Color(p.muted))
+                        Text("yours").scaledFont(11.5).foregroundStyle(Color(p.muted))
                     }
                 }
                 let note = step.summary.isEmpty ? step.detail : step.summary
                 if !note.isEmpty {
-                    Text(note).font(.system(size: 13.5)).foregroundStyle(Color(p.muted))
+                    Text(note).scaledFont(13.5).foregroundStyle(Color(p.muted))
                 }
                 if step.alongside {
                     Label("With the step before", systemImage: "rectangle.split.2x1")
-                        .font(.system(size: 12))
+                        .scaledFont(12)
                         .foregroundStyle(Color(p.info))
                 }
                 if plan.run?.reviewing[step.id] != nil {
                     Label("Done, being reviewed", systemImage: "checkmark.seal")
-                        .font(.system(size: 12))
+                        .scaledFont(12)
                         .foregroundStyle(Color(p.info))
                         .lineLimit(1)
                 } else if !step.helper.isEmpty {
                     Label((step.status == "active" ? "A helper is on it" : "Done by a helper") + (step.branch.isEmpty ? "" : " · \(step.branch)"), systemImage: "person.2")
-                        .font(.system(size: 12))
+                        .scaledFont(12)
                         .foregroundStyle(Color(p.muted))
                         .lineLimit(1)
                 }
                 // Its own helper (chosen on the desktop's plan card).
                 if !step.agent.isEmpty, step.open {
                     Label("Done by \(Style.harnessLabel(step.agent))" + (step.model.isEmpty ? "" : " · \(step.model.split(separator: "/").last ?? "")"), systemImage: "person.crop.circle")
-                        .font(.system(size: 12))
+                        .scaledFont(12)
                         .foregroundStyle(Color(p.muted))
                         .lineLimit(1)
                 }
@@ -313,7 +313,7 @@ struct PlanSheet: View {
                         .foregroundStyle(Color(p.success))
                 } else if !step.commitNote.isEmpty {
                     Text(step.commitNote)
-                        .font(.system(size: 12))
+                        .scaledFont(12)
                         .foregroundStyle(Color(step.commitNote.hasPrefix("Not committed") ? p.warning : p.muted))
                 }
             }

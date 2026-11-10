@@ -91,17 +91,17 @@ struct DashboardView: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "checkmark.seal")
-                    .font(.system(size: 13))
+                    .scaledFont(13)
                 Text("Settled · \(g.settled.count)")
-                    .font(.system(size: 14.5, weight: .medium))
+                    .scaledFont(14.5, .medium)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
+                    .scaledFont(11, .semibold)
                     .rotationEffect(.degrees(open ? 90 : 0))
                 Spacer()
             }
             .foregroundStyle(Color(p.muted))
             .padding(.horizontal, 6)
-            .frame(height: 34)
+            .frame(minHeight: 34)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -137,27 +137,27 @@ struct DashboardView: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "arrow.triangle.branch")
-                    .font(.system(size: 12))
+                    .scaledFont(12)
                 Text("Helpers · \(kids.count)")
-                    .font(.system(size: 14.5, weight: .medium))
+                    .scaledFont(14.5, .medium)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
+                    .scaledFont(11, .semibold)
                     .rotationEffect(.degrees(open ? 90 : 0))
                 Spacer()
                 if waiting {
                     Text("Waiting for you")
-                        .font(.system(size: 13, weight: .medium))
+                        .scaledFont(13, .medium)
                         .foregroundStyle(Color(p.warning))
                 } else if working {
                     Text("Working")
-                        .font(.system(size: 13, weight: .medium))
+                        .scaledFont(13, .medium)
                         .foregroundStyle(Color(p.primary))
                 }
             }
             .foregroundStyle(Color(p.muted))
             .padding(.leading, 26)
             .padding(.trailing, 6)
-            .frame(height: 30)
+            .frame(minHeight: 30)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -185,14 +185,14 @@ struct DashboardView: View {
             // Plan limits (the header's gauge shows them): before the sessions.
             if showLimits && !all && !model.limits.isEmpty {
                 Text("Plan limits")
-                    .font(.system(size: 21, weight: .semibold))
+                    .scaledFont(21, .semibold)
                     .plainRow(top: 14, bottom: 4)
                 PlanLimitsCard(limits: model.limits)
                     .plainRow()
             }
             HStack {
                 Text(all ? "All sessions" : "Recent sessions")
-                    .font(.system(size: 21, weight: .semibold))
+                    .scaledFont(21, .semibold)
                 Spacer()
                 if all {
                     Menu {
@@ -215,9 +215,9 @@ struct DashboardView: View {
                     }
                 } label: {
                     Text(all ? "Recent" : "View All")
-                        .font(.system(size: 15, weight: .medium))
+                        .scaledFont(15, .medium)
                         .padding(.horizontal, 14)
-                        .frame(height: 38)
+                        .frame(minHeight: 38)
                         .card(p, radius: 12)
                 }
                 .buttonStyle(.plain)
@@ -387,22 +387,22 @@ struct SessionCard: View {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     if nested {
                         Image(systemName: "arrow.turn.down.right")
-                            .font(.system(size: 11, weight: .semibold))
+                            .scaledFont(11, .semibold)
                             .foregroundStyle(Color(p.muted))
                             .accessibilityLabel("Helper of \(session.helperOf)")
                     }
                     if session.pinned {
                         Image(systemName: "pin.fill")
-                            .font(.system(size: 10))
+                            .scaledFont(10)
                             .foregroundStyle(Color(p.muted))
                     }
                     Text(session.title.isEmpty ? "New session" : session.title)
-                        .font(.system(size: 17, weight: unread ? .semibold : .medium))
+                        .scaledFont(17, unread ? .semibold : .medium)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                 }
                 Text(detail)
-                    .font(.system(size: 14.5))
+                    .scaledFont(14.5)
                     .foregroundStyle(Color(p.muted))
                     .lineLimit(1)
             }
@@ -411,11 +411,11 @@ struct SessionCard: View {
                 StatusPill(status: session.status, unread: unread)
             } else {
                 Text(Style.ago(session.modified, now: now))
-                    .font(.system(size: 13.5))
-                    .foregroundStyle(Color(p.faint))
+                    .scaledFont(13.5)
+                    .foregroundStyle(Color(p.muted))
             }
             Image(systemName: "chevron.right")
-                .font(.system(size: 14, weight: .semibold))
+                .scaledFont(14, .semibold)
                 .foregroundStyle(Color(p.muted))
         }
         .padding(.horizontal, 14)
@@ -434,17 +434,17 @@ struct DemoBanner: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "sparkles")
-                .font(.system(size: 18))
+                .scaledFont(18)
                 .foregroundStyle(Color(p.primary))
             VStack(alignment: .leading, spacing: 4) {
                 Text("This is the demo")
-                    .font(.system(size: 16, weight: .semibold))
+                    .scaledFont(16, .semibold)
                 Text("Sample sessions, nothing connected. Install harlo on your computer and pair this phone to work with your own agents.")
-                    .font(.system(size: 14))
+                    .scaledFont(14)
                     .foregroundStyle(Color(p.muted))
                     .fixedSize(horizontal: false, vertical: true)
                 Button("Pair with harlo") { model.endDemo() }
-                    .font(.system(size: 15, weight: .medium))
+                    .scaledFont(15, .medium)
                     .padding(.top, 4)
             }
             Spacer(minLength: 0)

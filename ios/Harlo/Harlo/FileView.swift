@@ -210,7 +210,7 @@ struct BranchesView: View {
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: remote ? "cloud" : "arrow.triangle.branch")
-                    .font(.system(size: 13))
+                    .scaledFont(13)
                     .foregroundStyle(Color(p.muted))
                     .frame(width: 18)
                 VStack(alignment: .leading, spacing: 2) {

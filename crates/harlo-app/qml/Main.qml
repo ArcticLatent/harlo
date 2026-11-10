@@ -6875,7 +6875,7 @@ ApplicationWindow {
             const t = win.chatText()
             win.check(t.indexOf("Started in the background as j1") >= 0, "the command starts as a job (" + t.slice(-300) + ")")
             win.check(t.indexOf("The background job ended: built-ok") >= 0, "its end comes as a notice, with its output, and starts a run by itself")
-            win.check(win.findContaining("Background job j1", chat.transcript) !== null, "the notice shows in the conversation")
+            win.check(win.findContaining("The background command finished", chat.transcript) !== null && win.findContaining("read or grep it", chat.transcript) === null, "the notice shows in the conversation, in plain words")
             win.shotWindow("clicks-harlo-job")
             // Its one line, cut short to the well: a click shows all of it.
             const w = win.findAllNames("toolWhat", chat.transcript).find(l => l.plain.indexOf("echo built-ok") >= 0)

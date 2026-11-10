@@ -30,7 +30,7 @@ struct DiagramBlock: View {
                         toggle("Show the diagram", "point.3.connected.trianglepath.dotted")
                     } else if !why.isEmpty {
                         Text(why)
-                            .font(.system(size: 12.5))
+                            .scaledFont(12.5)
                             .foregroundStyle(Color(p.muted))
                             .padding(.horizontal, 4)
                     }
@@ -60,7 +60,7 @@ struct DiagramBlock: View {
             } else {
                 HStack(spacing: 8) {
                     ProgressView()
-                    Text("Drawing the diagram…").font(.system(size: 13.5)).foregroundStyle(Color(p.muted))
+                    Text("Drawing the diagram…").scaledFont(13.5).foregroundStyle(Color(p.muted))
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)

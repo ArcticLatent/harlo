@@ -38,14 +38,14 @@ struct ModelPicker: View {
                             } label: {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(m.name).font(.system(size: 15))
+                                        Text(m.name).scaledFont(15)
                                         Text(m.modelId).font(Style.mono(11)).foregroundStyle(Color(p.muted))
                                         if !m.stoppedServer.isEmpty {
                                             HStack(spacing: 4) {
                                                 Image(systemName: "pause.circle")
                                                 Text("\(m.stoppedServer) is stopped: it starts with your next message")
                                             }
-                                            .font(.system(size: 12))
+                                            .scaledFont(12)
                                             .foregroundStyle(Color(p.warning))
                                         }
                                     }

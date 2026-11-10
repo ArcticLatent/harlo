@@ -48,7 +48,7 @@ struct PhotoButton: View {
             }
         } label: {
             Image(systemName: "plus")
-                .font(.system(size: 17, weight: .semibold))
+                .scaledFont(17, .semibold)
                 .frame(width: size, height: size)
                 .background(Circle().fill(Color(p.subtle)))
                 .overlay(Circle().strokeBorder(Color(p.border), lineWidth: 1))
@@ -104,7 +104,7 @@ struct PhotoStrip: View {
                             photos.removeAll { $0.id == photo.id }
                         } label: {
                             Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 18))
+                                .scaledFont(18)
                                 .symbolRenderingMode(.palette)
                                 .foregroundStyle(Color.white, Color.black.opacity(0.6))
                         }

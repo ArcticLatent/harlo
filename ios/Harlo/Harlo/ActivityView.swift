@@ -19,7 +19,7 @@ struct ActivityView: View {
                                 Image(systemName: icon(t.status))
                                     .foregroundStyle(Color(color(t.status)))
                                 Text(t.content)
-                                    .font(.system(size: 15))
+                                    .scaledFont(15)
                                     .strikethrough(t.status == "completed", color: Color(p.muted))
                                     .foregroundStyle(Color(t.status == "completed" ? p.muted : p.foreground))
                             }
@@ -45,7 +45,7 @@ struct ActivityView: View {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(s.agent.isEmpty ? s.id : s.agent).font(Style.mono(13, .semibold))
                                     if !s.description.isEmpty {
-                                        Text(s.description).font(.system(size: 14)).foregroundStyle(Color(p.muted)).lineLimit(3)
+                                        Text(s.description).scaledFont(14).foregroundStyle(Color(p.muted)).lineLimit(3)
                                     }
                                 }
                                 Spacer(minLength: 0)
@@ -69,9 +69,9 @@ struct ActivityView: View {
                                         StatusDot(status: h.needsSomeone ? "input" : h.status == "running" ? "busy" : h.status == "completed" ? "idle" : "exited")
                                             .padding(.top, 6)
                                         VStack(alignment: .leading, spacing: 3) {
-                                            Text(h.name.isEmpty ? Style.harnessLabel(h.agent) : h.name).font(.system(size: 15, weight: .medium))
+                                            Text(h.name.isEmpty ? Style.harnessLabel(h.agent) : h.name).scaledFont(15, .medium)
                                             Text(h.summary.isEmpty ? Style.harnessLabel(h.agent) : h.summary)
-                                                .font(.system(size: 13.5))
+                                                .scaledFont(13.5)
                                                 .foregroundStyle(Color(p.muted))
                                                 .lineLimit(3)
                                             // Its agent and model, and what it used.
@@ -81,14 +81,14 @@ struct ActivityView: View {
                                                 .lineLimit(1)
                                             if let ask = h.asks {
                                                 Text(ask.text)
-                                                    .font(.system(size: 13.5))
+                                                    .scaledFont(13.5)
                                                     .foregroundStyle(Color(p.warning))
                                                     .lineLimit(4)
                                             }
                                         }
                                         Spacer(minLength: 0)
                                         Text(helperState(h.status))
-                                            .font(.system(size: 12))
+                                            .scaledFont(12)
                                             .foregroundStyle(Color(h.needsSomeone ? p.warning : h.status == "failed" ? p.error : p.muted))
                                     }
                                     .contentShape(Rectangle())

@@ -29,7 +29,7 @@ struct ChangesView: View {
                             HStack(spacing: 6) {
                                 Image(systemName: "shippingbox")
                                 Text(repo.name)
-                                Text(repo.branch).foregroundStyle(Color(p.faint))
+                                Text(repo.branch).foregroundStyle(Color(p.muted))
                                 if repo.ahead > 0 { Text("↑\(repo.ahead)") }
                                 Spacer()
                                 Text(repo.changes == 1 ? "1 file" : "\(repo.changes) files")
@@ -192,10 +192,10 @@ struct DiffView: View {
                 HStack(spacing: 10) {
                     Image(systemName: "text.bubble.fill").foregroundStyle(Color(p.primary))
                     Text(review.count == 1 ? "1 comment" : "\(review.count) comments")
-                        .font(.system(size: 15, weight: .medium))
+                        .scaledFont(15, .medium)
                     Spacer(minLength: 6)
                     Button("Clear") { model.session?.review = [] }
-                        .font(.system(size: 15))
+                        .scaledFont(15)
                         .foregroundStyle(Color(p.muted))
                     Button {
                         let message = ReviewComment.message(review)
@@ -204,9 +204,9 @@ struct DiffView: View {
                         close()
                     } label: {
                         Text("Send to the agent")
-                            .font(.system(size: 15, weight: .semibold))
+                            .scaledFont(15, .semibold)
                             .padding(.horizontal, 14)
-                            .frame(height: 36)
+                            .frame(minHeight: 36)
                             .background(Capsule().fill(Color(p.primary)))
                             .foregroundStyle(Color(p.onPrimary))
                     }
@@ -266,7 +266,7 @@ struct DiffView: View {
         HStack(alignment: .top, spacing: 0) {
             // A commented line's mark.
             Image(systemName: "text.bubble.fill")
-                .font(.system(size: 10))
+                .scaledFont(10)
                 .foregroundStyle(Color(p.primary))
                 .frame(width: 16)
                 .opacity(commented ? 1 : 0)

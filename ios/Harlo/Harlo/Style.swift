@@ -57,6 +57,17 @@ struct Screen: ViewModifier {
 extension View {
     func screen(sidebar: Bool = false) -> some View { modifier(Screen(sidebar: sidebar)) }
 
+    /// A text field in a card: the page's colour (not the system's, which
+    /// is black in dark mode) inside a hairline.
+    func answerField(_ p: Palette) -> some View {
+        textFieldStyle(.plain)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 10)
+            .frame(minHeight: 44)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color(p.background)))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color(p.border), lineWidth: 1))
+    }
+
     /// A card: the theme's raised surface with a hairline.
     func card(_ p: Palette, radius: CGFloat = 12, fill: RGBA? = nil) -> some View {
         background(RoundedRectangle(cornerRadius: radius).fill(Color(fill ?? p.raised)))
@@ -133,12 +144,16 @@ enum Style {
         return "\(n)"
     }
 
-    /// Spans as styled text: `size` for prose, JetBrains Mono for code.
-    static func attributed(_ spans: [Span], _ p: Palette, size: CGFloat = 16, inCode: Bool = false) -> AttributedString {
+    /// Spans as styled text: `size` for prose (at the default text size,
+    /// grown or shrunk to `typeSize`), JetBrains Mono for code (which
+    /// follows the text size itself).
+    static func attributed(_ spans: [Span], _ p: Palette, size: CGFloat = 16, inCode: Bool = false,
+                           typeSize: DynamicTypeSize = .large) -> AttributedString {
+        let prose = scaled(size, typeSize)
         var out = AttributedString()
         for s in spans {
             var a = AttributedString(s.text)
-            var font: Font = s.code || inCode ? mono(size - 2, s.bold ? .bold : .regular) : .system(size: size, weight: s.bold ? .semibold : .regular)
+            var font: Font = s.code || inCode ? mono(size - 2, s.bold ? .bold : .regular) : .system(size: prose, weight: s.bold ? .semibold : .regular)
             if s.italic { font = font.italic() }
             a.font = font
             if s.code && !inCode {
@@ -155,6 +170,90 @@ enum Style {
             out += a
         }
         return out
+    }
+}
+
+extension Style {
+    /// `size` (in points at the default text size) at the phone's text
+    /// size, as text styles grow: for text built in code, where a view
+    /// modifier can't reach.
+    static func scaled(_ size: CGFloat, _ typeSize: DynamicTypeSize) -> CGFloat {
+        let traits = UITraitCollection(preferredContentSizeCategory: category(typeSize))
+        return UIFontMetrics(forTextStyle: textStyle(for: size)).scaledValue(for: size, compatibleWith: traits)
+    }
+
+    /// The text style whose size is nearest `size`, whose growth it follows.
+    static func textStyle(for size: CGFloat) -> UIFont.TextStyle {
+        switch size {
+        case 30...: return .title1
+        case 21..<30: return .title2
+        case 19..<21: return .title3
+        case 16.5..<19: return .body
+        case 15.5..<16.5: return .callout
+        case 14..<15.5: return .subheadline
+        case 12.5..<14: return .footnote
+        case 11.5..<12.5: return .caption1
+        default: return .caption2
+        }
+    }
+
+    static func category(_ t: DynamicTypeSize) -> UIContentSizeCategory {
+        switch t {
+        case .xSmall: return .extraSmall
+        case .small: return .small
+        case .medium: return .medium
+        case .large: return .large
+        case .xLarge: return .extraLarge
+        case .xxLarge: return .extraExtraLarge
+        case .xxxLarge: return .extraExtraExtraLarge
+        case .accessibility1: return .accessibilityMedium
+        case .accessibility2: return .accessibilityLarge
+        case .accessibility3: return .accessibilityExtraLarge
+        case .accessibility4: return .accessibilityExtraExtraLarge
+        case .accessibility5: return .accessibilityExtraExtraExtraLarge
+        @unknown default: return .large
+        }
+    }
+}
+
+/// The system font at `size` points at the default text size, growing and
+/// shrinking with the phone's text size (Dynamic Type) as the nearest text
+/// style does.
+struct ScaledFont: ViewModifier {
+    @ScaledMetric private var size: CGFloat
+    private let weight: Font.Weight
+    private let design: Font.Design
+
+    init(size: CGFloat, weight: Font.Weight, design: Font.Design) {
+        _size = ScaledMetric(wrappedValue: size, relativeTo: Self.style(for: size))
+        self.weight = weight
+        self.design = design
+    }
+
+    static func style(for size: CGFloat) -> Font.TextStyle {
+        switch Style.textStyle(for: size) {
+        case .title1: return .title
+        case .title2: return .title2
+        case .title3: return .title3
+        case .body: return .body
+        case .callout: return .callout
+        case .subheadline: return .subheadline
+        case .footnote: return .footnote
+        case .caption1: return .caption
+        default: return .caption2
+        }
+    }
+
+    func body(content: Content) -> some View {
+        content.font(.system(size: size, weight: weight, design: design))
+    }
+}
+
+extension View {
+    /// The system font at `size` (at the default text size), following the
+    /// phone's text size.
+    func scaledFont(_ size: CGFloat, _ weight: Font.Weight = .regular, design: Font.Design = .default) -> some View {
+        modifier(ScaledFont(size: size, weight: weight, design: design))
     }
 }
 
@@ -221,7 +320,7 @@ struct SectionLabel: View {
 
     var body: some View {
         Text(text.uppercased())
-            .font(.system(size: 12, weight: .medium))
+            .scaledFont(12, .medium)
             .tracking(0.8)
             .foregroundStyle(Color(p.label))
             .textCase(nil)
@@ -235,7 +334,7 @@ struct AgentTag: View {
 
     var body: some View {
         Text(Style.harnessLabel(harness))
-            .font(.system(size: 12, weight: .medium))
+            .scaledFont(12, .medium)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(Capsule().fill(Color(p.subtle)))
@@ -253,11 +352,11 @@ struct Chip: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            Image(systemName: icon).font(.system(size: 11, weight: .semibold))
-            Text(text).font(.system(size: 13, weight: .medium)).lineLimit(1)
+            Image(systemName: icon).scaledFont(11, .semibold)
+            Text(text).scaledFont(13, .medium).lineLimit(1)
         }
         .padding(.horizontal, 10)
-        .frame(height: 30)
+        .frame(minHeight: 30)
         .background(RoundedRectangle(cornerRadius: 9).fill(Color(on ? p.accentSoft.over(p.raised) : p.raised.mix(p.foreground, 0.04))))
         .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Color(on ? p.primary.mix(p.raised, 0.4) : p.hairline), lineWidth: 1))
         .foregroundStyle(Color(on ? p.primary : p.muted))
@@ -332,15 +431,15 @@ struct StatusPill: View {
         if let l = look {
             HStack(spacing: 6) {
                 if l.check {
-                    Image(systemName: "checkmark").font(.system(size: 11, weight: .bold))
+                    Image(systemName: "checkmark").scaledFont(11, .bold)
                 } else {
                     PulsingDot(color: l.color, pulsing: status == "busy" || status == "starting")
                 }
-                Text(l.text).font(.system(size: 13, weight: .medium))
+                Text(l.text).scaledFont(13, .medium)
             }
             .foregroundStyle(Color(l.color))
             .padding(.horizontal, 10)
-            .frame(height: 28)
+            .frame(minHeight: 28)
             .background(Capsule().fill(Color(l.color).opacity(0.13)))
             .fixedSize()
         }
@@ -379,9 +478,11 @@ struct AppHeader: View {
                 .scaledToFit()
                 .frame(width: 24, height: 24)
             Text(model.host?.name ?? "harlo")
-                .font(.system(size: 19, weight: .medium))
+                .scaledFont(19, .medium)
                 .lineLimit(1)
+                .accessibilityLabel("\(model.host?.name ?? "harlo"), \(model.state == .connected ? "connected" : "not connected")")
             StatusDot(status: model.state == .connected ? "live" : "exited")
+                .accessibilityHidden(true)
             Spacer(minLength: 8)
             // (Only when harlo says limits.)
             if let limits, !model.limits.isEmpty {
@@ -433,11 +534,11 @@ struct BigTitle: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(text)
-                .font(.system(size: 34, weight: .bold))
+                .scaledFont(34, .bold)
                 .tracking(-0.4)
             if !subtitle.isEmpty {
                 Text(subtitle)
-                    .font(.system(size: 16))
+                    .scaledFont(16)
                     .foregroundStyle(Color(p.muted))
             }
         }

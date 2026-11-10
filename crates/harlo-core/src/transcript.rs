@@ -423,19 +423,31 @@ impl Transcript {
             return false;
         }
         let raw = content_text(&message["content"]);
-        let text = raw.replace("<system-notice>", "").replace("</system-notice>", "").trim().to_owned();
+        let mut text = raw.replace("<system-notice>", "").replace("</system-notice>", "").trim().to_owned();
         if text.is_empty() {
             return false;
         }
+        // A background command's end is written for the agent (where its
+        // whole output is, how to read it); people get it in plain words.
+        let mut level = NoticeLevel::Info;
+        if message["customType"] == "harlo_job" {
+            if let Some((plain, failed)) = job_notice_for_people(&text) {
+                text = plain;
+                if failed {
+                    level = NoticeLevel::Warning;
+                }
+            }
+        }
         if let Some(&pos) = self.by_id.get(id) {
             self.items[pos].blocks = vec![Block::Text(text)];
+            self.items[pos].role = Role::Notice(level);
             self.touch(pos);
             return true;
         }
         self.by_id.insert(id.to_owned(), self.items.len());
         self.items.push(Item {
             id: id.to_owned(),
-            role: Role::Notice(NoticeLevel::Info),
+            role: Role::Notice(level),
             blocks: vec![Block::Text(text)],
             done: true,
             error: None,
@@ -1079,9 +1091,60 @@ pub fn diff_rows(old: &[Arc<Row>], new: &[Arc<Row>]) -> Vec<RowChange> {
     diff_by(old, new, |a, b| a.key == b.key, |a, b| Arc::ptr_eq(a, b) || **a == **b)
 }
 
+/// harlo-agent's note to the agent when a background command ends
+/// ("Background job j1 ended, exit code 0, after 3 s.\nCommand: …\nIts last
+/// lines:\n…\nWhole output: <log> (read or grep it, or jobs output).") in
+/// plain words: what ended and how, and its last few lines. Whether it
+/// failed, too. None when it isn't one.
+fn job_notice_for_people(text: &str) -> Option<(String, bool)> {
+    let mut lines = text.lines();
+    let first = lines.next()?.strip_prefix("Background job ")?;
+    let how = first.split_once(' ')?.1.trim_end_matches('.');
+    let command = lines.next()?.strip_prefix("Command: ")?.trim();
+    if lines.next()? != "Its last lines:" {
+        return None;
+    }
+    let output: Vec<&str> = lines.take_while(|l| !l.starts_with("Whole output: ")).filter(|l| !l.trim().is_empty()).collect();
+    let (what, after) = how.rsplit_once(", after ").unwrap_or((how, ""));
+    let after = if after.is_empty() { String::new() } else { format!(" after {after}") };
+    let (said, failed) = match what.strip_prefix("ended, exit code ") {
+        Some("0") => (format!("finished{after}"), false),
+        Some(code) => (format!("failed{after} (exit code {code})"), true),
+        None if what == "stopped: it timed out" => (format!("was stopped{after} (it ran too long)"), true),
+        None if what == "ended by a signal" => (format!("was stopped by a signal{after}"), true),
+        None => (format!("{what}{after}"), true),
+    };
+    let mut out = format!("The background command {said}: {command}");
+    let shown = &output[output.len().saturating_sub(5)..];
+    if !shown.is_empty() && shown != ["(no output)"] {
+        out.push_str("\nLast lines:");
+        for l in shown {
+            out.push_str("\n  ");
+            out.push_str(l.trim());
+        }
+    }
+    Some((out, failed))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn job_notices_read_plainly() {
+        let ok = "Background job j1 ended, exit code 0, after 3 s.\nCommand: ./build.sh\nIts last lines:\na\nb\nc\nd\nCompiling harlo v0.4.0\nFinished release in 41.2s\nWhole output: /tmp/harlo-agent/jobs-1/j1.log (read or grep it, or jobs output).";
+        let (t, failed) = job_notice_for_people(ok).unwrap();
+        assert!(!failed);
+        assert_eq!(t, "The background command finished after 3 s: ./build.sh\nLast lines:\n  b\n  c\n  d\n  Compiling harlo v0.4.0\n  Finished release in 41.2s");
+        let bad = "Background job j2 ended, exit code 101, after 1m 2s.\nCommand: cargo test\nIts last lines:\n(no output)\nWhole output: /tmp/x.log (read or grep it, or jobs output).";
+        assert_eq!(job_notice_for_people(bad).unwrap(), ("The background command failed after 1m 2s (exit code 101): cargo test".to_owned(), true));
+        let slow = "Background job j3 stopped: it timed out, after 30m.\nCommand: sleep 9999\nIts last lines:\n\nWhole output: /tmp/x.log (read or grep it, or jobs output).";
+        assert_eq!(job_notice_for_people(slow).unwrap().0, "The background command was stopped after 30m (it ran too long): sleep 9999");
+        assert!(job_notice_for_people("Something else").is_none());
+        let mut t = Transcript::default();
+        assert!(t.upsert_custom("n1", &serde_json::json!({ "role": "custom", "customType": "harlo_job", "content": bad, "display": true })));
+        assert!(matches!(t.items[0].role, Role::Notice(NoticeLevel::Warning)));
+    }
     use serde_json::json;
 
     fn apply_changes(rows: &mut Vec<Arc<Row>>, changes: Vec<RowChange>) {

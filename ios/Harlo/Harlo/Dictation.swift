@@ -180,7 +180,7 @@ struct MicButton: View {
             dictation.toggle(into: $text)
         } label: {
             Image(systemName: dictation.listening ? "waveform" : "mic")
-                .font(.system(size: 16, weight: .semibold))
+                .scaledFont(16, .semibold)
                 .symbolEffect(.variableColor.iterative, isActive: dictation.state == .listening)
                 .frame(width: size, height: size)
                 .background(Circle().fill(Color(dictation.listening ? p.error : p.subtle)))

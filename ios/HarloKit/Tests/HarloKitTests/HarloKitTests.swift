@@ -436,6 +436,13 @@ final class ModelPartsTests: XCTestCase {
         XCTAssertEqual(ToolName.words("bash", running: false), "Ran command")
         XCTAssertEqual(ToolName.words("Bash", running: true), "Running command")
         XCTAssertEqual(ToolName.words("run_code", running: false), "Ran a program")
+        // Words under a question or a plan, a path or a command under the rest.
+        XCTAssertTrue(ToolName.saysWords("ask"))
+        XCTAssertTrue(ToolName.saysWords("AskUserQuestion"))
+        XCTAssertTrue(ToolName.saysWords("task"))
+        XCTAssertTrue(ToolName.saysWords("plan_set"))
+        XCTAssertFalse(ToolName.saysWords("bash"))
+        XCTAssertFalse(ToolName.saysWords("read"))
         XCTAssertEqual(ToolName.words("hashline_edit", running: false), "Edited file")
         XCTAssertEqual(ToolName.words("AskUserQuestion", running: false), "Asked you")
         XCTAssertEqual(ToolName.words("web_search", running: false), "Searched the web")
@@ -1135,7 +1142,7 @@ final class RecordingTests: XCTestCase {
         XCTAssertFalse(s.subagents.isEmpty)
         (m, s) = try await open("aside")
         XCTAssertEqual(s.aside?.done, true)
-        XCTAssertTrue(s.rows.contains { $0.kind == "notice" && $0.text.contains("Background job j1") })
+        XCTAssertTrue(s.rows.contains { $0.kind == "notice" && $0.text.contains("The background command finished") })
         (m, s) = try await open("plan")
         for _ in 0..<250 where (s.plan?.steps.count ?? 0) < 3 { try await Task.sleep(nanoseconds: 20_000_000) }
         XCTAssertEqual(s.plan?.steps.count, 3)

@@ -7,19 +7,39 @@ import UIKit
 struct AsideCard: View {
     @Environment(\.palette) private var p
     let aside: Aside
+    @Binding var folded: Bool
     let dismiss: () -> Void
 
     var answer: AttributedString {
         (try? AttributedString(markdown: aside.text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(aside.text)
     }
 
+    /// Folded only once it's answered (an error stays open).
+    var isFolded: Bool { folded && aside.done && aside.error.isEmpty }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Label(aside.question, systemImage: "text.bubble")
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(2)
-                Spacer(minLength: 6)
+                Button {
+                    withAnimation(.easeOut(duration: 0.2)) { folded.toggle() }
+                } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Label(aside.question, systemImage: "text.bubble")
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(isFolded ? 1 : 2)
+                            .multilineTextAlignment(.leading)
+                        if aside.done && aside.error.isEmpty {
+                            Image(systemName: isFolded ? "chevron.down" : "chevron.up")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Color(p.muted))
+                        }
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!aside.done || !aside.error.isEmpty)
+                .accessibilityHint(isFolded ? "Shows the answer" : "Folds the answer")
                 if !aside.done {
                     Text("answering…")
                         .font(.caption)
@@ -29,28 +49,31 @@ struct AsideCard: View {
                     .font(.subheadline)
                     .foregroundStyle(Color(p.primary))
                     .buttonStyle(.plain)
+                    .frame(minWidth: 44, minHeight: 32)
+                    .contentShape(Rectangle())
             }
             if !aside.error.isEmpty {
                 Text(aside.error)
                     .font(.subheadline)
                     .foregroundStyle(Color(p.error))
-            } else if !aside.text.isEmpty {
+            } else if !aside.text.isEmpty && !isFolded {
                 ScrollView {
                     Text(answer)
-                        .font(.system(size: 15))
+                        .scaledFont(15)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
                 }
                 .frame(maxHeight: 220)
                 .fixedSize(horizontal: false, vertical: true)
             }
-            if aside.done && aside.error.isEmpty {
+            if aside.done && aside.error.isEmpty && !isFolded {
                 Text("A side question: not part of the conversation, and not kept.")
                     .font(.caption)
                     .foregroundStyle(Color(p.muted))
             }
         }
-        .padding(14)
+        .padding(.horizontal, 14)
+        .padding(.vertical, isFolded ? 6 : 14)
         .card(p, radius: 18)
         .padding(.horizontal, 12)
         .padding(.top, 8)
@@ -82,7 +105,7 @@ struct RequestCard: View {
             VStack(alignment: .leading, spacing: 10) {
                 if !request.message.isEmpty {
                     Text(request.message)
-                        .font(.system(size: 15))
+                        .scaledFont(15)
                         .lineLimit(6)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -157,7 +180,7 @@ struct RequestCard: View {
         } else if request.method == "input" || request.method == "editor" {
             TextField(request.placeholder, text: $typed, axis: .vertical)
                 .lineLimit(1...5)
-                .textFieldStyle(.roundedBorder)
+                .answerField(p)
             Button("Send") { answer(UIRequest.typed(typed)) }
                 .buttonStyle(.borderedProminent)
                 .foregroundStyle(Color(p.onPrimary))
@@ -220,7 +243,7 @@ struct RequestCard: View {
                 get: { i < custom.count ? custom[i] : "" },
                 set: { if i < custom.count { custom[i] = $0 } }
             ))
-            .textFieldStyle(.roundedBorder)
+            .answerField(p)
         }
     }
 
@@ -287,14 +310,14 @@ struct ApprovalButtons: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 switch role {
-                case .allow: Image(systemName: "checkmark").font(.system(size: 15, weight: .bold))
-                case .deny: Image(systemName: "xmark").font(.system(size: 15, weight: .semibold))
+                case .allow: Image(systemName: "checkmark").scaledFont(15, .bold)
+                case .deny: Image(systemName: "xmark").scaledFont(15, .semibold)
                 case .plain: EmptyView()
                 }
-                Text(text).font(.system(size: 17, weight: .semibold)).lineLimit(1)
+                Text(text).scaledFont(17, .semibold).lineLimit(1)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 48)
+            .frame(minHeight: 48)
             .foregroundStyle(Color(role == .allow ? p.onPrimary : role == .deny ? p.error : p.foreground))
             .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(role == .allow ? p.primary : p.raised)))
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color(role == .allow ? p.primary : p.hairline), lineWidth: 1))

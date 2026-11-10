@@ -25,7 +25,7 @@ struct ModelServersView: View {
                             ForEach(m.servers) { s in row(s, on: m.host) }
                             if !m.error.isEmpty {
                                 Label(m.error, systemImage: "exclamationmark.triangle")
-                                    .font(.system(size: 14))
+                                    .scaledFont(14)
                                     .foregroundStyle(Color(p.warning))
                             }
                         } header: {
@@ -63,13 +63,13 @@ struct ModelServersView: View {
                 .frame(width: 9, height: 9)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
-                Text(s.name).font(.system(size: 16, weight: .medium))
+                Text(s.name).scaledFont(16, .medium)
                 Text(([s.engine] + s.models).filter { !$0.isEmpty }.joined(separator: " · "))
-                    .font(.system(size: 13))
+                    .scaledFont(13)
                     .foregroundStyle(Color(p.muted))
                     .lineLimit(2)
                 Text(busy ? (s.running ? "Stopping…" : "Starting… (a big model can take minutes)") : s.running ? "Running" : "Stopped")
-                    .font(.system(size: 13))
+                    .scaledFont(13)
                     .foregroundStyle(Color(s.running && !busy ? p.success : p.muted))
             }
             Spacer(minLength: 6)

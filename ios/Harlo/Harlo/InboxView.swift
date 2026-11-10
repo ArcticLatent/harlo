@@ -41,10 +41,10 @@ struct ApprovalsView: View {
             if waiting.isEmpty {
                 VStack(spacing: 10) {
                     Image(systemName: "checkmark.shield")
-                        .font(.system(size: 40))
+                        .scaledFont(40)
                         .foregroundStyle(Color(p.success))
                     Text("Questions and approvals from your sessions show here.")
-                        .font(.system(size: 15))
+                        .scaledFont(15)
                         .foregroundStyle(Color(p.muted))
                         .multilineTextAlignment(.center)
                 }
@@ -114,11 +114,11 @@ struct ApprovalCard: View {
             HStack(spacing: 12) {
                 AgentTile(harness: session.harness, size: 42)
                 Text(Style.harnessLabel(session.harness))
-                    .font(.system(size: 18, weight: .semibold))
+                    .scaledFont(18, .semibold)
                 Spacer(minLength: 6)
                 if request.asked > 0 {
                     Text(Style.ago(request.asked / 1000, now: now) + (Style.ago(request.asked / 1000, now: now) == "now" ? "" : " ago"))
-                        .font(.system(size: 14))
+                        .scaledFont(14)
                         .foregroundStyle(Color(p.muted))
                 }
             }
@@ -126,21 +126,21 @@ struct ApprovalCard: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Text(session.title.isEmpty ? "New session" : session.title)
-                            .font(.system(size: 17, weight: .semibold))
+                            .scaledFont(17, .semibold)
                             .multilineTextAlignment(.leading)
                             .lineLimit(2)
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 12, weight: .semibold))
+                            .scaledFont(12, .semibold)
                             .foregroundStyle(Color(p.muted))
                     }
                     Text(what)
-                        .font(.system(size: 15))
+                        .scaledFont(15)
                         .foregroundStyle(Color(p.muted))
                     // Why it asks (Harlo's: a destructive command, one
                     // outside the sandbox).
                     if request.approval && !request.note.isEmpty {
                         Label(request.note, systemImage: "exclamationmark.triangle")
-                            .font(.system(size: 14, weight: .medium))
+                            .scaledFont(14, .medium)
                             .foregroundStyle(Color(p.warning))
                     }
                 }
@@ -151,7 +151,7 @@ struct ApprovalCard: View {
             if request.approval && !command.isEmpty {
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: tool.isEmpty ? "doc.text" : Style.toolSymbol(tool))
-                        .font(.system(size: 14))
+                        .scaledFont(14)
                         .foregroundStyle(Color(p.muted))
                         .padding(.top, 1)
                     Text(command)

@@ -170,7 +170,7 @@ final class HarloUITests: XCTestCase {
         launch("aside")
         openMain()
         see("Because it only touches the rows")
-        see("Background job j1")
+        see("The background command finished after 3 s: ./build.sh")
         shot("11-side-question")
     }
 

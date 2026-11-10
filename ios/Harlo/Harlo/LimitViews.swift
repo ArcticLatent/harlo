@@ -15,10 +15,10 @@ struct LimitLine: View {
             let out = limit?.out ?? false
             HStack(spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 12))
+                    .scaledFont(12)
                     .foregroundStyle(Color(out ? p.error : p.warning))
                 Text(words(limit))
-                    .font(.system(size: 13.5))
+                    .scaledFont(13.5)
                     .foregroundStyle(Color(out ? p.error : p.warning))
                     .lineLimit(2)
                 Spacer(minLength: 4)
@@ -52,7 +52,7 @@ struct LimitLine: View {
             Task { await action() }
         } label: {
             Text(title)
-                .font(.system(size: 12.5, weight: .medium))
+                .scaledFont(12.5, .medium)
                 .foregroundStyle(Color(p.primary))
                 .multilineTextAlignment(.trailing)
         }
@@ -71,10 +71,10 @@ struct CompactLine: View {
         if !note.isEmpty {
             HStack(spacing: 8) {
                 Image(systemName: "arrow.down.right.and.arrow.up.left")
-                    .font(.system(size: 12))
+                    .scaledFont(12)
                     .foregroundStyle(Color(p.warning))
                 Text(note)
-                    .font(.system(size: 13.5))
+                    .scaledFont(13.5)
                     .foregroundStyle(Color(p.muted))
                     .lineLimit(1)
                 Spacer(minLength: 0)
@@ -118,19 +118,19 @@ struct AccountLimits: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Text(account.name).font(.system(size: 15, weight: .semibold))
+                Text(account.name).scaledFont(15, .semibold)
                 if !account.plan.isEmpty {
-                    Text(account.plan.capitalized).font(.system(size: 13)).foregroundStyle(Color(p.muted))
+                    Text(account.plan.capitalized).scaledFont(13).foregroundStyle(Color(p.muted))
                 }
             }
             ForEach(account.windows) { w in
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text(String(w.name.prefix(1)).uppercased() + String(w.name.dropFirst()))
-                            .font(.system(size: 13))
+                            .scaledFont(13)
                         Spacer()
                         Text(detail(w))
-                            .font(.system(size: 12.5))
+                            .scaledFont(12.5)
                             .foregroundStyle(Color(w.nearly ? (w.usedUp ? p.error : p.warning) : p.muted))
                             .monospacedDigit()
                     }

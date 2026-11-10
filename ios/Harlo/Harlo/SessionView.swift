@@ -32,6 +32,9 @@ struct SessionContent: View {
     /// The transcript is scrolled to its end (new rows follow then; read
     /// further up and they wait).
     @State private var atBottom = true
+    /// The side question's answer folded to its question (once you send
+    /// the next message; tap it to open it again).
+    @State private var asideFolded = false
 
     /// The agent and the session's project.
     var subtitle: String {
@@ -106,16 +109,16 @@ struct SessionContent: View {
                         } label: {
                             HStack(spacing: 12) {
                                 Image(systemName: "doc.text")
-                                    .font(.system(size: 17))
+                                    .scaledFont(17)
                                     .foregroundStyle(Color(p.muted))
                                 Text(changed.count == 1 ? "1 file changed" : "\(changed.count) files changed")
-                                    .font(.system(size: 16))
+                                    .scaledFont(16)
                                 Spacer(minLength: 6)
                                 Text("View diff")
-                                    .font(.system(size: 16, weight: .medium))
+                                    .scaledFont(16, .medium)
                                     .foregroundStyle(Color(p.primary))
                                 Image(systemName: "chevron.right")
-                                    .font(.system(size: 13, weight: .semibold))
+                                    .scaledFont(13, .semibold)
                                     .foregroundStyle(Color(p.muted))
                             }
                             .padding(.horizontal, 14)
@@ -154,6 +157,7 @@ struct SessionContent: View {
             .onChange(of: session.rows.count) { _, _ in
                 if atBottom { proxy.scrollTo("bottom", anchor: .bottom) }
             }
+            .onChange(of: session.aside?.question) { _, _ in asideFolded = false }
             .modifier(FollowsTheEnd(atBottom: $atBottom) { proxy.scrollTo("bottom", anchor: .bottom) })
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
@@ -162,13 +166,14 @@ struct SessionContent: View {
                     CompactLine(session: session)
                     ActivityBar(session: session) { sheet = $0 }
                     if let aside = session.aside {
-                        AsideCard(aside: aside) { session.aside = nil }
+                        AsideCard(aside: aside, folded: $asideFolded) { session.aside = nil }
                     }
                     if let req = session.requests.first {
                         RequestCard(request: req)
                             .id(req.id)
                     }
                     Composer(session: session, openSheet: { sheet = $0 }) {
+                        if session.aside?.done == true { asideFolded = true }
                         atBottom = true
                         proxy.scrollTo("bottom", anchor: .bottom)
                     }
@@ -179,6 +184,8 @@ struct SessionContent: View {
         .screen()
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
+        // (The conversation gets the room; Back returns to the tabs.)
+        .toolbar(.hidden, for: .tabBar)
         .toolbar {
             // The agent's tile, the session's name, and the agent · project · branch.
             ToolbarItem(placement: .principal) {
@@ -190,11 +197,13 @@ struct SessionContent: View {
                                     .padding(2)
                                     .background(Circle().fill(Color(p.background)))
                                     .offset(x: 4, y: 4)
+                                    // (The line above the composer says it.)
+                                    .accessibilityHidden(true)
                             }
                         }
                     VStack(alignment: .leading, spacing: 1) {
                         Text(session.title.isEmpty ? "Session" : session.title)
-                            .font(.system(size: 16, weight: .semibold))
+                            .scaledFont(16, .semibold)
                             .lineLimit(1)
                     HStack(spacing: 6) {
                         if !subtitle.isEmpty {
@@ -207,17 +216,23 @@ struct SessionContent: View {
                                 sheet = .branches
                             } label: {
                                 HStack(spacing: 2) {
-                                    Image(systemName: "arrow.triangle.branch").font(.system(size: 9, weight: .semibold))
+                                    Image(systemName: "arrow.triangle.branch").scaledFont(9, .semibold)
                                     Text(branch).lineLimit(1)
-                                    Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold))
+                                    Image(systemName: "chevron.down").scaledFont(7, .bold)
                                 }
                                 .foregroundStyle(Color(p.primary))
+                                // (A full-size target, though its line is small.)
+                                .padding(.vertical, 14)
+                                .padding(.horizontal, 6)
+                                .contentShape(Rectangle())
+                                .padding(.vertical, -14)
+                                .padding(.horizontal, -6)
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel("Branch \(branch). Switch branch")
                         }
                     }
-                    .font(.system(size: 12.5))
+                    .scaledFont(12.5)
                     .foregroundStyle(Color(p.muted))
                     }
                 }
@@ -231,7 +246,7 @@ struct SessionContent: View {
                     } label: {
                         HStack(spacing: 3) {
                             Image(systemName: "hand.raised.fill")
-                            Text("\(others)").font(.system(size: 13.5, weight: .semibold))
+                            Text("\(others)").scaledFont(13.5, .semibold)
                         }
                         .foregroundStyle(Color(p.warning))
                     }
@@ -512,13 +527,13 @@ struct ActivityBar: View {
                         HStack(spacing: 8) {
                             ProgressRing(fraction: Double(t.done) / Double(max(t.total, 1)))
                             Text("\(t.done)/\(t.total)")
-                                .font(.system(size: 13, weight: .semibold))
+                                .scaledFont(13, .semibold)
                                 .foregroundStyle(Color(p.muted))
                             Text(t.now)
-                                .font(.system(size: 13))
+                                .scaledFont(13)
                                 .lineLimit(1)
                             Spacer(minLength: 0)
-                            Image(systemName: "chevron.up").font(.system(size: 10, weight: .semibold)).foregroundStyle(Color(p.muted))
+                            Image(systemName: "chevron.up").scaledFont(10, .semibold).foregroundStyle(Color(p.muted))
                         }
                         .contentShape(Rectangle())
                     }
@@ -529,7 +544,7 @@ struct ActivityBar: View {
                         HStack(spacing: 8) {
                             ProgressView().controlSize(.mini)
                             Text(running == 1 ? "1 subagent working" : "\(running) subagents working")
-                                .font(.system(size: 13))
+                                .scaledFont(13)
                             Spacer(minLength: 0)
                         }
                         .contentShape(Rectangle())
@@ -539,10 +554,10 @@ struct ActivityBar: View {
                 ForEach(queued.indices, id: \.self) { i in
                     HStack(spacing: 6) {
                         Text(i < session.steering.count ? "Steer" : "Next")
-                            .font(.system(size: 12, weight: .semibold))
+                            .scaledFont(12, .semibold)
                             .foregroundStyle(Color(p.primary))
                         Text(queued[i])
-                            .font(.system(size: 13))
+                            .scaledFont(13)
                             .foregroundStyle(Color(p.muted))
                             .lineLimit(1)
                         Spacer(minLength: 4)
@@ -553,7 +568,7 @@ struct ActivityBar: View {
                                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                                     Task { await model.sendNow(i) }
                                 } label: {
-                                    Text("Send now").font(.system(size: 12.5, weight: .medium)).foregroundStyle(Color(p.primary))
+                                    Text("Send now").scaledFont(12.5, .medium).foregroundStyle(Color(p.primary))
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -648,7 +663,7 @@ struct Composer: View {
                     VStack(alignment: .leading, spacing: 4) {
                         PhotoStrip(photos: .constant(sendingPhotos), sending: true)
                         Text(sendingPhotos.count == 1 ? "Sending 1 photo…" : "Sending \(sendingPhotos.count) photos…")
-                            .font(.system(size: 12.5))
+                            .scaledFont(12.5)
                             .foregroundStyle(Color(p.muted))
                             .padding(.horizontal, 6)
                     }
@@ -657,7 +672,7 @@ struct Composer: View {
                 if !photos.isEmpty { PhotoStrip(photos: $photos) }
                 TextField(placeholder, text: $session.draft, axis: .vertical)
                     .lineLimit(1...6)
-                    .font(.system(size: 16.5))
+                    .scaledFont(16.5)
                     .focused($focused)
                     .padding(.horizontal, 6)
                     .padding(.top, 4)
@@ -713,9 +728,9 @@ struct Composer: View {
                     session.steer = steer
                 } label: {
                     Text(steer ? "Steer" : "Queue")
-                        .font(.system(size: 13, weight: .semibold))
+                        .scaledFont(13, .semibold)
                         .padding(.horizontal, 10)
-                        .frame(height: 32)
+                        .frame(minHeight: 32)
                         .background(Color(session.steer == steer ? p.primary : p.subtle))
                         .foregroundStyle(Color(session.steer == steer ? p.onPrimary : p.muted))
                 }
@@ -760,15 +775,15 @@ struct Composer: View {
             HStack(spacing: 6) {
                 AgentTile(harness: session.harness, size: 20)
                 Text(session.model.isEmpty ? "Model" : session.model)
-                    .font(.system(size: 13.5, weight: .medium))
+                    .scaledFont(13.5, .medium)
                     .lineLimit(1)
                     .frame(maxWidth: 120, alignment: .leading)
                     .fixedSize(horizontal: true, vertical: false)
-                Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).foregroundStyle(Color(p.muted))
+                Image(systemName: "chevron.down").scaledFont(9, .bold).foregroundStyle(Color(p.muted))
             }
             .padding(.leading, 6)
             .padding(.trailing, 10)
-            .frame(height: 34)
+            .frame(minHeight: 34)
             .background(Capsule().fill(Color(p.raised.mix(p.foreground, 0.04))))
             .overlay(Capsule().strokeBorder(Color(p.hairline), lineWidth: 1))
             .contentShape(Capsule())
@@ -782,9 +797,16 @@ struct Composer: View {
     @ViewBuilder var options: some View {
         let m = session.modes
         let approvals = m?.approvals ?? []
-        if !levels.isEmpty || !approvals.isEmpty {
+        let i = session.info
+        if !levels.isEmpty || !approvals.isEmpty || i.contextWindow > 0 {
             let plan = m?.plan == true, yolo = m?.approval == "yolo"
             Menu {
+                if i.contextWindow > 0 {
+                    Section {
+                        Text("Context: \(Int(i.contextUsed * 100))% used (\(Style.tokens(i.contextTokens)) of \(Style.tokens(i.contextWindow)))")
+                        if i.cost > 0 { Text(String(format: "$%.2f so far", i.cost)) }
+                    }
+                }
                 if !levels.isEmpty {
                     Picker(selection: Binding(get: { session.info.thinking }, set: { l in Task { await model.setThinking(l) } })) {
                         ForEach(levels, id: \.self) { Text($0.capitalized).tag($0) }
@@ -812,7 +834,7 @@ struct Composer: View {
                     .overlay(Circle().strokeBorder(Color(plan || yolo ? p.primary.mix(p.raised, 0.4) : p.hairline), lineWidth: 1))
                     .foregroundStyle(Color(plan || yolo ? p.primary : p.muted))
             }
-            .accessibilityLabel("Options: thinking \(session.info.thinking), approvals \(Modes.label(m?.approval ?? "")), Plan \(plan ? "on" : "off")")
+            .accessibilityLabel("Options: thinking \(session.info.thinking), approvals \(Modes.label(m?.approval ?? "")), Plan \(plan ? "on" : "off"), context \(Int(i.contextUsed * 100))% used")
         }
     }
 
@@ -820,7 +842,8 @@ struct Composer: View {
     /// tap for the numbers.
     @ViewBuilder var context: some View {
         let i = session.info
-        if i.contextWindow > 0 {
+        // (Until it's half full, it's in the options menu.)
+        if i.contextWindow > 0 && (i.contextUsed >= 0.5 || !i.compactNote.isEmpty) {
             let near = !i.compactNote.isEmpty || i.contextUsed >= 0.9
             Menu {
                 Text("Context: \(Style.tokens(i.contextTokens)) of \(Style.tokens(i.contextWindow)) (\(Int(i.contextUsed * 100))%)")
@@ -834,9 +857,9 @@ struct Composer: View {
                         .stroke(Color(near ? p.warning : p.primary), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
                         .rotationEffect(.degrees(-90))
                     Text("\(Int(i.contextUsed * 100))")
-                        .font(.system(size: 9.5, weight: .semibold))
+                        .font(.system(size: 10, weight: .bold))
                         .monospacedDigit()
-                        .foregroundStyle(Color(near ? p.warning : p.muted))
+                        .foregroundStyle(Color(near ? p.warning : p.foreground))
                 }
                 .frame(width: 28, height: 28)
                 .frame(width: 32, height: 34)
@@ -881,10 +904,10 @@ struct FileList: View {
             ForEach(sessions) { s in
                 Button { pick(s.inserted) } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: "bubble.left.and.text.bubble.right").font(.system(size: 12)).foregroundStyle(Color(p.muted))
-                        Text(s.title.isEmpty ? "Untitled session" : s.title).font(.system(size: 14.5, weight: .medium)).lineLimit(1)
+                        Image(systemName: "bubble.left.and.text.bubble.right").scaledFont(12).foregroundStyle(Color(p.muted))
+                        Text(s.title.isEmpty ? "Untitled session" : s.title).scaledFont(14.5, .medium).lineLimit(1)
                         Text(Style.harnessLabel(s.harness))
-                            .font(.system(size: 12))
+                            .scaledFont(12)
                             .foregroundStyle(Color(p.muted))
                             .lineLimit(1)
                             .fixedSize()
@@ -901,7 +924,7 @@ struct FileList: View {
             ForEach(files, id: \.self) { f in
                 Button { pick(f) } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: "doc.text").font(.system(size: 12)).foregroundStyle(Color(p.muted))
+                        Image(systemName: "doc.text").scaledFont(12).foregroundStyle(Color(p.muted))
                         Text(f.split(separator: "/").last.map(String.init) ?? f).font(Style.mono(13.5, .semibold)).lineLimit(1)
                         if f.contains("/") {
                             Text(f.split(separator: "/").dropLast().joined(separator: "/"))
@@ -940,7 +963,7 @@ struct SlashList: View {
                             if !c.hint.isEmpty { Text(c.hint).font(Style.mono(11.5)).foregroundStyle(Color(p.muted)) }
                         }
                         if !c.description.isEmpty {
-                            Text(c.description).font(.system(size: 12.5)).foregroundStyle(Color(p.muted)).lineLimit(1)
+                            Text(c.description).scaledFont(12.5).foregroundStyle(Color(p.muted)).lineLimit(1)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -967,12 +990,12 @@ struct ActivityLine: View {
                 HStack(spacing: 8) {
                     StatusDot(status: session.requests.isEmpty ? "busy" : "input")
                     Text(a.text)
-                        .font(.system(size: 13.5))
+                        .scaledFont(13.5)
                         .lineLimit(1)
                         .truncationMode(.middle)
                     if a.since > 0 {
                         Text(Style.elapsed(since: a.since, now: ctx.date))
-                            .font(.system(size: 13.5))
+                            .scaledFont(13.5)
                             .foregroundStyle(Color(p.muted))
                             .monospacedDigit()
                     }

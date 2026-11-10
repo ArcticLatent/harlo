@@ -114,6 +114,21 @@ public enum ToolName {
         }
     }
 
+    /// Whether the line under its name is words (a question, a plan's
+    /// steps, a subagent's task), not a path or a command: shown in the
+    /// text font, cut at its end rather than in the middle.
+    public static func saysWords(_ tool: String) -> Bool {
+        let h = harloTool(tool)
+        if plan[h] != nil || harlo[h] != nil { return true }
+        switch tool.lowercased() {
+        case "ask", "askuserquestion", "task", "agent", "subagent", "todo", "todowrite", "exitplanmode",
+             "web_search", "websearch", "skill":
+            return true
+        default:
+            return false
+        }
+    }
+
     /// Whether what matters in its output is the end (a command's result),
     /// not the start (a file's first lines).
     public static func isCommand(_ tool: String) -> Bool {
