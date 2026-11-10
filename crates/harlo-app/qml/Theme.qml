@@ -307,6 +307,36 @@ QtObject {
     // Qt rich text wants #RRGGBB (alpha dropped).
     function rgb(col) { return "#" + [col.r, col.g, col.b].map(v => Math.round(v * 255).toString(16).padStart(2, "0")).join("") }
 
+    // "#aarrggbb", as CodeView takes a colour (`a`: its alpha scaled).
+    function argb(col, a) {
+        const q = Qt.color(col)
+        return "#" + [q.a * (a === undefined ? 1 : a), q.r, q.g, q.b].map(v => Math.round(v * 255).toString(16).padStart(2, "0")).join("")
+    }
+    // The colours of code drawn by CodeView (the editor, a diff's sides), as
+    // JSON; `extra` replaces some ({background: …}).
+    function codeColors(extra) {
+        const s = c.syntax.base, h = c.syntax.highlights || {}
+        const tok = col => col ? argb(col) : argb(foreground)
+        const out = {
+            foreground: argb(foreground),
+            background: argb(background),
+            gutterText: argb(muted, 0.55),
+            border: argb(border, 0.6),
+            selection: argb(selection),
+            find: argb(warning, isLight ? 0.24 : 0.2),
+            findCurrent: argb(warning, isLight ? 0.3 : 0.4),
+            findEdge: argb(warning),
+            bracket: argb(primary, 0.14),
+            bracketEdge: argb(primary, 0.6),
+            arrival: argb(primary, 0.16),
+            arrivalText: argb(primary),
+            cursor: argb(foreground),
+            classes: [s.comment, s.keyword, s.string, s.number, s.function, s.variable, s.type, s.operator,
+                      h.diffAdded, h.diffRemoved, h.diffModified].map(tok)
+        }
+        return JSON.stringify(Object.assign(out, extra || {}))
+    }
+
     // Prepended to every rich-text block: markdown colours and the token
     // classes of highlighted code (see TOKEN_CLASSES in markdown.rs).
     readonly property string htmlStyle: {

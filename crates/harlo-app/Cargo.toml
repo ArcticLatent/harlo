@@ -11,6 +11,8 @@ path = "src/main.rs"
 [dependencies]
 harlo-core.workspace = true
 harlo-harness.workspace = true
+# The code view: text laid out and drawn in Rust.
+harlo-code.workspace = true
 cxx.workspace = true
 cxx-qt.workspace = true
 cxx-qt-lib.workspace = true

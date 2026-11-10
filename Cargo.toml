@@ -10,6 +10,7 @@ license = "MIT"
 [workspace.dependencies]
 harlo-core = { path = "crates/harlo-core" }
 harlo-harness = { path = "crates/harlo-harness" }
+harlo-code = { path = "crates/harlo-code" }
 harlo-relay = { path = "crates/harlo-relay" }
 harlo-apns = { path = "crates/harlo-apns" }
 anyhow = "1"
@@ -25,6 +26,34 @@ cxx-qt-build = { version = "0.10", features = ["link_qt_object_files"] }
 
 # Checksums of engine downloads (gigabytes) in a dev build: seconds, not minutes.
 [profile.dev.package.sha2]
+opt-level = 3
+
+# The code view draws every frame in Rust: optimized even in a dev build.
+[profile.dev.package.harlo-code]
+opt-level = 3
+[profile.dev.package.cosmic-text]
+opt-level = 3
+[profile.dev.package.swash]
+opt-level = 3
+[profile.dev.package.skrifa]
+opt-level = 3
+[profile.dev.package.read-fonts]
+opt-level = 3
+[profile.dev.package.harfrust]
+opt-level = 3
+[profile.dev.package.fontdb]
+opt-level = 3
+[profile.dev.package.ttf-parser]
+opt-level = 3
+[profile.dev.package.zeno]
+opt-level = 3
+[profile.dev.package.syntect]
+opt-level = 3
+[profile.dev.package.fancy-regex]
+opt-level = 3
+[profile.dev.package.regex-automata]
+opt-level = 3
+[profile.dev.package.regex-syntax]
 opt-level = 3
 
 # harlo-agent as shipped: one optimized unit (smaller, less memory per session).

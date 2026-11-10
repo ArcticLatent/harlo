@@ -4,15 +4,16 @@ import QtQuick.Layouts
 import harlo
 
 // A file open in a tab: always editable, syntax-highlighted, Ctrl+S saves.
-// Unsaved text lives in `drafts` (shared with the owner) so it survives
-// switching tabs. Ctrl+F finds (Ctrl+H replaces), Ctrl+G goes to a line,
+// The text is a CodeView (drawn in Rust). A file's unsaved edits (its text
+// and undo) are kept by the view's side when you switch tabs; `drafts` (shared
+// with the owner) says which files have them. Ctrl+F finds (Ctrl+H replaces), Ctrl+G goes to a line,
 // Ctrl+/ comments lines out; Enter keeps the indentation, Tab and Shift+Tab
 // indent and outdent lines, and the bracket next to the cursor is shown
 // with its partner.
 Rectangle {
     id: root
     required property string path      // absolute; "" when no file tab is active
-    required property var drafts       // { path: text } of unsaved files
+    required property var drafts       // { path: true } of files with unsaved edits
     signal draftsEdited()
     signal saved(string path)
     color: Theme.background
@@ -32,6 +33,10 @@ Rectangle {
     onPathChanged: { closeBars(); reload() }
     Component.onCompleted: reload()
     function reload() {
+        // The file shown until now: its unsaved edits kept for when it's
+        // opened again (unless they were dropped).
+        const ed = root.editor
+        if (ed && ed.modified && root.drafts[ed.path] !== undefined) ed.keep()
         diskNotice = ""
         imageVersion = 0
         imageGone = false
@@ -73,7 +78,7 @@ Rectangle {
     }
     function reloadKeepingView() {
         const area = editorLoader.item
-        root.restoreView = area ? { path: root.path, cursor: area.editor.cursorPosition, x: area.flick.contentX, y: area.flick.contentY } : null
+        root.restoreView = area ? { path: root.path, cursor: area.editor.cursorPosition, x: area.editor.contentX, y: area.editor.contentY } : null
         root.diskNotice = ""
         reload()
     }
@@ -120,6 +125,8 @@ Rectangle {
     Connections {
         target: file
         function onSavedTo(path) {
+            if (root.editor && root.editor.path === path) root.editor.markSaved()
+            else CodeDrafts.markSaved(path)
             delete root.drafts[path]
             root.draftsEdited()
             root.saved(path)
@@ -139,7 +146,7 @@ Rectangle {
 
     // ---- edits in one undo step ---------------------------------------------
     // `edits`: [[start, end, text], ...] in the text as it is now.
-    function apply(edits) { return root.editor ? TextOps.apply(root.editor.textDocument, JSON.stringify(edits)) : false }
+    function apply(edits) { return root.editor ? root.editor.apply(JSON.stringify(edits)) : false }
 
     // ---- find and replace, go to line ---------------------------------------
     property bool findOpen: false
@@ -178,17 +185,16 @@ Rectangle {
         lineOpen = false
         matches = []
         currentMatch = -1
+        if (root.editor) root.editor.clearFind()
         if (had && root.editor) root.editor.forceActiveFocus()
     }
     // Finds the query again (after typing it, or an edit); `select` also
     // selects the first match from the cursor and shows it.
     function search(select) {
         const ed = root.editor, q = findField.text
-        if (!ed || !findOpen || q === "") { matches = []; currentMatch = -1; return }
-        const text = ed.text
-        const hay = matchCase ? text : text.toLowerCase(), needle = matchCase ? q : q.toLowerCase()
-        const list = []
-        for (let i = hay.indexOf(needle); i >= 0 && list.length < matchLimit; i = hay.indexOf(needle, i + needle.length)) list.push(i)
+        if (!ed || !findOpen || q === "") { matches = []; currentMatch = -1; if (ed) ed.clearFind(); return }
+        // (Found, and marked in the text, by the view.)
+        const list = JSON.parse(ed.findAll(q, matchCase, matchLimit))
         matchLength = q.length
         matches = list
         if (list.length === 0) { currentMatch = -1; return }
@@ -203,7 +209,7 @@ Rectangle {
         if (!ed || matches.length === 0) return
         currentMatch = (i % matches.length + matches.length) % matches.length
         const s = matches[currentMatch]
-        if (editorLoader.item) editorLoader.item.reveal(s)
+        ed.reveal(s, false)
         ed.select(s, s + matchLength)
     }
     // Enter / F3: the next match (Shift: the one before), from the cursor
@@ -246,27 +252,6 @@ Rectangle {
         if (!(n >= 1) || !root.editor) return
         lineOpen = false
         showLine(root.path, Math.min(n, root.editor.lineCount))
-    }
-
-    // ---- the language's comments --------------------------------------------
-    // [line marker] or [open, close] for languages with only block comments;
-    // [] where it isn't known.
-    function commentFor(p) {
-        const name = p.split("/").pop().toLowerCase()
-        if (/^(makefile|gnumakefile|dockerfile|containerfile|cmakelists\.txt|\.gitignore|\.dockerignore|\.env.*|\.bashrc|\.zshrc|\.profile|pkgbuild|justfile)$/.test(name)) return ["#"]
-        const ext = name.indexOf(".") >= 0 ? name.split(".").pop() : ""
-        const by = {
-            "//": "c h cc cpp cxx hpp hh hxx ino m mm rs go js jsx mjs cjs ts tsx mts cts java kt kts swift cs fs dart scala sc php qml proto zig groovy gradle jsonc json5 glsl frag vert wgsl hlsl sol v vala d",
-            "#": "py pyi pyw sh bash zsh fish ksh rb pl pm r yaml yml toml conf cfg ini nix cmake mk tf tfvars hcl ps1 psm1 jl ex exs nim cr coffee properties gitignore env desktop service timer mount socket rake gemspec podspec bzl star",
-            "--": "lua sql hs lhs elm ada adb ads",
-            ";": "lisp lsp clj cljs cljc edn el scm ss rkt asm s",
-            "%": "tex sty cls erl hrl",
-            "\"": "vim"
-        }
-        for (const k in by) if (by[k].split(" ").indexOf(ext) >= 0) return [k]
-        if (["html", "htm", "xhtml", "xml", "svg", "md", "markdown", "ui", "qrc", "plist", "xsl", "vue", "svelte"].indexOf(ext) >= 0) return ["<!--", "-->"]
-        if (["css", "scss", "less"].indexOf(ext) >= 0) return ext === "css" ? ["/*", "*/"] : ["//"]
-        return []
     }
 
     ColumnLayout {
@@ -314,7 +299,7 @@ Rectangle {
                 Label {
                     objectName: "editorLineLabel"
                     visible: !!root.editor
-                    text: root.editor ? "Ln " + (root.editor.text.substring(0, root.editor.cursorPosition).split("\n").length) + "  ·  " + root.editor.lineCount + " lines" : ""
+                    text: root.editor ? "Ln " + (root.editor.cursorLine + 1) + "  ·  " + root.editor.lineCount + " lines" : ""
                     color: lineHover.hovered ? Theme.foreground : Theme.muted
                     font.pixelSize: Theme.px(11)
                     HoverHandler { id: lineHover; cursorShape: Qt.PointingHandCursor }
@@ -572,6 +557,7 @@ Rectangle {
                     onClicked: {
                         delete root.drafts[root.path]
                         root.draftsEdited()
+                        CodeDrafts.discard(root.path)
                         root.reloadKeepingView()
                     }
                 }
@@ -591,6 +577,7 @@ Rectangle {
                     onClicked: {
                         delete root.drafts[root.path]
                         root.draftsEdited()
+                        CodeDrafts.discard(root.path)
                         Workspace.closeTab("file:" + root.path)
                     }
                 }
@@ -631,446 +618,154 @@ Rectangle {
         Item {
             id: area
             property alias editor: editor
-            property alias flick: flick
-            readonly property string language: highlight.item ? highlight.item.language : ""
-            readonly property real lineHeight: editor.lineCount > 0 ? editor.contentHeight / editor.lineCount : 16
+            readonly property string language: editor.language
+            readonly property real lineHeight: editor.lineHeight
             property bool ready: false
 
             Component.onCompleted: {
-                // The highlighter, then the text (a long one a slice at a
-                // time, each coloured as it comes), then edits are tracked.
-                highlight.active = true
-                const text = root.drafts[root.path] !== undefined ? root.drafts[root.path] : file.text
-                unit = detectIndent(text)
-                fill.put(text)
+                // (The path first: the text's language, comments and
+                // indentation; set once, as this view goes with its file.)
+                editor.path = root.path
+                const kept = root.drafts[root.path] !== undefined && editor.restore(root.path)
+                if (!kept) {
+                    CodeDrafts.discard(root.path)
+                    if (root.drafts[root.path] !== undefined) { delete root.drafts[root.path]; root.draftsEdited() }
+                    editor.text = file.text
+                }
+                const view = root.restoreView && root.restoreView.path === root.path ? root.restoreView : null
+                root.restoreView = null
+                if (!kept) editor.cursorPosition = view ? Math.min(view.cursor, editor.length) : 0
+                area.ready = true
+                if (root.findOpen) root.search(false)
+                editor.forceActiveFocus()
+                if (view) area.whenSized(() => { editor.contentX = view.x; editor.contentY = view.y })
+                else if (kept) area.whenSized(() => editor.reveal(editor.cursorPosition, false))
+                area.applyLine()
             }
-            TextFill {
-                id: fill
-                editor: editor
-                onDone: {
-                    const view = root.restoreView && root.restoreView.path === root.path ? root.restoreView : null
-                    root.restoreView = null
-                    editor.cursorPosition = view ? Math.min(view.cursor, editor.length) : 0
-                    area.ready = true
-                    if (root.findOpen) root.search(false)
-                    editor.forceActiveFocus()
-                    if (view) Qt.callLater(() => { flick.contentX = view.x; flick.contentY = Math.min(view.y, Math.max(0, flick.contentHeight - flick.height)) })
-                    area.applyLine()
+            // Runs `f` once the view has its size (it scrolls by it).
+            property var sized: []
+            function whenSized(f) {
+                if (editor.height > 0) { f(); return }
+                sized.push(f)
+                sizedWait.tries = 0
+                sizedWait.restart()
+            }
+            Timer {
+                id: sizedWait
+                property int tries: 0
+                interval: 40
+                onTriggered: {
+                    if (editor.height <= 0 && ++tries < 25) { restart(); return }
+                    const list = area.sized
+                    area.sized = []
+                    list.forEach(f => f())
                 }
             }
             // The line asked for: the cursor at its start, a third of the
-            // way down the view.
+            // way down the view, tinted a moment.
             function applyLine() {
                 const want = root.pendingLine
                 if (!want || want.path !== root.path) return
                 root.pendingLine = null
-                const text = editor.text
-                let at = 0
-                for (let n = 1; n < want.line; n++) {
-                    const nl = text.indexOf("\n", at)
-                    if (nl < 0) break
-                    at = nl + 1
-                }
-                // (Placed once the view is laid out: until then it doesn't
-                // follow the cursor.)
-                lineScroll.tries = 0
-                lineScroll.restart()
+                const line = Math.max(0, Math.min(want.line, editor.lineCount) - 1)
+                const at = editor.lineStart(line)
                 editor.cursorPosition = at
                 editor.forceActiveFocus()
-            }
-            Timer {
-                id: lineScroll
-                property int tries: 0
-                interval: 40
-                onTriggered: {
-                    if (flick.height <= 0 && ++tries < 25) { restart(); return }
-                    flick.contentX = 0
-                    const y = editor.cursorRectangle.y
-                    flick.contentY = Math.max(0, Math.min(y - flick.height / 3, flick.contentHeight - flick.height))
-                    // (Where you arrived: tinted a moment, its number primary.)
-                    area.arrivalY = y
-                    area.arrival = editor.text.slice(0, editor.cursorPosition).split("\n").length
+                area.whenSized(() => {
+                    editor.contentX = 0
+                    editor.reveal(at, true)
+                    editor.arrivalLine = line
                     arrivalFade.restart()
-                }
-            }
-            // Shows a position a third of the way down, unless it's in view.
-            function reveal(pos) {
-                const r = editor.positionToRectangle(pos)
-                if (r.y < flick.contentY || r.y + r.height > flick.contentY + flick.height)
-                    flick.contentY = Math.max(0, Math.min(r.y - flick.height / 3, flick.contentHeight - flick.height))
-                if (r.x < flick.contentX || r.x > flick.contentX + flick.width - 40)
-                    flick.contentX = Math.max(0, r.x - flick.width / 3)
-            }
-
-            // ---- indentation ----------------------------------------------
-            // One level: a tab, or the spaces the file indents by (4 if it
-            // doesn't say).
-            property string unit: "    "
-            readonly property bool colonIndents: /\.(py|pyi|pyw|ya?ml)$/i.test(root.path)
-            function detectIndent(text) {
-                if (/(^|\/)(gnu)?makefile$|\.mk$/i.test(root.path)) return "\t"
-                const lines = text.slice(0, 400000).split("\n")
-                let tabs = 0, spaces = 0, prev = 0
-                const steps = {}
-                for (const l of lines) {
-                    if (l.trim() === "") continue
-                    if (l[0] === "\t") { tabs++; continue }
-                    let n = 0
-                    while (l[n] === " ") n++
-                    if (n > 0) spaces++
-                    if (n > prev) steps[n - prev] = (steps[n - prev] || 0) + 1
-                    prev = n
-                }
-                if (tabs > spaces) return "\t"
-                let best = 4, seen = 0
-                for (const d of [4, 2, 8, 3]) if ((steps[d] || 0) > seen) { best = d; seen = steps[d] }
-                return " ".repeat(best)
-            }
-            function lineStart(t, pos) { return t.lastIndexOf("\n", pos - 1) + 1 }
-            function lineEnd(t, pos) { const e = t.indexOf("\n", pos); return e < 0 ? t.length : e }
-            readonly property var pairs: ({ "(": ")", "[": "]", "{": "}", ")": "(", "]": "[", "}": "{" })
-
-            // Enter: the new line keeps this one's indentation, one level
-            // more after an opening bracket (or a colon in Python and YAML);
-            // between a pair of brackets the closing one gets a line of its
-            // own.
-            function newLine() {
-                const t = editor.text, a = editor.selectionStart, b = editor.selectionEnd
-                const ls = lineStart(t, a), before = t.slice(ls, a)
-                const indent = before.match(/^[ \t]*/)[0]
-                const last = before.replace(/\s+$/, "").slice(-1)
-                const opens = last === "(" || last === "[" || last === "{"
-                const deeper = opens || (last === ":" && colonIndents)
-                // (No spaces left at the end of the line you leave.)
-                const from = before.trim() === "" ? ls : a - (before.length - before.replace(/\s+$/, "").length)
-                let ins = "\n" + indent + (deeper ? unit : "")
-                const caret = from + ins.length
-                if (opens && t[b] === pairs[last]) ins += "\n" + indent
-                root.apply([[from, b, ins]])
-                editor.cursorPosition = caret
-            }
-            // Tab: a level of indentation at the cursor, or on every line
-            // a selection spans.
-            function tab() {
-                const t = editor.text, a = editor.selectionStart, b = editor.selectionEnd
-                if (a !== b && t.slice(a, b).indexOf("\n") >= 0) { shiftLines(true); return }
-                let ins = unit
-                if (unit !== "\t") {
-                    const col = a - lineStart(t, a)
-                    ins = " ".repeat(unit.length - col % unit.length)
-                }
-                root.apply([[a, b, ins]])
-                editor.cursorPosition = a + ins.length
-            }
-            // Indents (or outdents) the lines the cursor or selection is on.
-            function shiftLines(indent) {
-                const t = editor.text, a = editor.selectionStart, had = a !== editor.selectionEnd
-                let b = editor.selectionEnd
-                if (had && t[b - 1] === "\n") b--
-                const first = lineStart(t, a), last = lineEnd(t, b)
-                const width = unit === "\t" ? 4 : unit.length
-                const old = t.slice(first, last)
-                const lines = old.split("\n").map(l => {
-                    if (indent) return l.trim() === "" ? l : unit + l
-                    if (l[0] === "\t") return l.slice(1)
-                    let n = 0
-                    while (n < width && l[n] === " ") n++
-                    return l.slice(n)
                 })
-                const joined = lines.join("\n")
-                if (joined === old) return
-                const cursor = editor.cursorPosition
-                root.apply([[first, last, joined]])
-                if (had) editor.select(first, first + joined.length)
-                else editor.cursorPosition = Math.max(first, cursor + joined.length - old.length)
             }
-            // Backspace in spaces before a line's text: back a level.
-            function backspace() {
-                const t = editor.text, a = editor.selectionStart
-                if (unit === "\t" || a !== editor.selectionEnd) return false
-                const before = t.slice(lineStart(t, a), a)
-                if (before === "" || before.trim() !== "" || before.indexOf("\t") >= 0) return false
-                const n = (before.length - 1) % unit.length + 1
-                if (n < 2) return false
-                root.apply([[a - n, a, ""]])
-                return true
-            }
-            // A closing bracket typed on a line of only spaces: lined up
-            // with the line its partner opened.
-            function closer(ch) {
-                const t = editor.text, a = editor.selectionStart
-                if (a !== editor.selectionEnd) return false
-                const ls = lineStart(t, a), before = t.slice(ls, a)
-                if (before === "" || before.trim() !== "") return false
-                let depth = 0, at = -1
-                for (let i = a - 1, n = 0; i >= 0 && n < 200000; i--, n++) {
-                    if (t[i] === ch) depth++
-                    else if (t[i] === pairs[ch]) { if (depth === 0) { at = i; break } depth-- }
-                }
-                let indent
-                if (at >= 0) { const os = lineStart(t, at); indent = t.slice(os, at).match(/^[ \t]*/)[0] }
-                else indent = before.endsWith(unit) ? before.slice(0, before.length - unit.length) : before
-                if (indent === before) return false
-                root.apply([[ls, a, indent + ch]])
-                editor.cursorPosition = ls + indent.length + 1
-                return true
+            // (For the self-tests: the line arrived at, from 1; 0 none.)
+            readonly property int arrival: editor.arrivalLine + 1
+            SequentialAnimation {
+                id: arrivalFade
+                PropertyAction { target: editor; property: "arrivalGlow"; value: 1 }
+                PauseAnimation { duration: 1100 }
+                NumberAnimation { target: editor; property: "arrivalGlow"; to: 0; duration: Math.max(1, Theme.motion * 2.5); easing.type: Easing.OutCubic }
+                PropertyAction { target: editor; property: "arrivalLine"; value: -1 }
             }
 
-            // Ctrl+/: comments the lines out, or back in when they all are.
-            function toggleComment() {
-                const marks = root.commentFor(root.path)
-                if (marks.length === 0) return
-                const open = marks[0], close = marks.length > 1 ? marks[1] : ""
-                const t = editor.text, a = editor.selectionStart, had = a !== editor.selectionEnd
-                let b = editor.selectionEnd
-                if (had && t[b - 1] === "\n") b--
-                const first = lineStart(t, a), last = lineEnd(t, b)
-                const old = t.slice(first, last), lines = old.split("\n")
-                const used = lines.filter(l => l.trim() !== "")
-                if (used.length === 0) return
-                const commented = l => { const x = l.trim(); return x.startsWith(open) && (close === "" || x.endsWith(close)) }
-                const remove = used.every(commented)
-                const indent = Math.min(...used.map(l => l.match(/^\s*/)[0].length))
-                const out = lines.map(l => {
-                    if (l.trim() === "") return l
-                    if (!remove) return l.slice(0, indent) + open + " " + l.slice(indent) + (close !== "" ? " " + close : "")
-                    const i = l.indexOf(open)
-                    let rest = l.slice(i + open.length)
-                    if (rest[0] === " ") rest = rest.slice(1)
-                    if (close !== "") {
-                        const j = rest.lastIndexOf(close)
-                        rest = rest.slice(0, j).replace(/ $/, "") + rest.slice(j + close.length)
-                    }
-                    return l.slice(0, i) + rest
-                })
-                const joined = out.join("\n")
-                const cursor = editor.cursorPosition
-                root.apply([[first, last, joined]])
-                if (had) editor.select(first, first + joined.length)
-                else editor.cursorPosition = Math.max(first, Math.min(first + joined.length, cursor + joined.length - old.length))
-            }
-
-            // Keys the editor keeps from the app's shortcuts while it has
-            // the focus.
+            // Keys the editor leaves to this file's bars (the view handles
+            // typing, moving, selecting, undo, the clipboard, Enter, Tab and
+            // Ctrl+/ itself).
             function claims(e) {
                 const ctrl = e.modifiers & Qt.ControlModifier, alt = e.modifiers & Qt.AltModifier
-                return (ctrl && !alt && (e.key === Qt.Key_Slash || e.key === Qt.Key_H || e.key === Qt.Key_G))
+                return (ctrl && !alt && (e.key === Qt.Key_H || e.key === Qt.Key_G))
                     || e.key === Qt.Key_F3 || (e.key === Qt.Key_Escape && (root.findOpen || root.lineOpen))
             }
             function press(e) {
                 const ctrl = e.modifiers & Qt.ControlModifier, alt = e.modifiers & Qt.AltModifier, shift = e.modifiers & Qt.ShiftModifier
                 let done = true
-                if (ctrl && !alt && e.key === Qt.Key_Slash) toggleComment()
-                else if (ctrl && !alt && e.key === Qt.Key_H) root.openFind(true)
+                if (ctrl && !alt && e.key === Qt.Key_H) root.openFind(true)
                 else if (ctrl && !alt && e.key === Qt.Key_G) root.openGoToLine()
                 else if (e.key === Qt.Key_F3) root.findStep(shift ? -1 : 1)
                 else if (e.key === Qt.Key_Escape && (root.findOpen || root.lineOpen)) root.closeBars()
-                else if ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter) && !ctrl && !alt) newLine()
-                else if (e.key === Qt.Key_Tab && !ctrl && !alt && !shift) tab()
-                else if (e.key === Qt.Key_Backtab && !ctrl && !alt) shiftLines(false)
-                else if (e.key === Qt.Key_Backspace && !ctrl && !alt && !shift) done = backspace()
-                else if (!ctrl && !alt && (e.text === "}" || e.text === "]" || e.text === ")")) done = closer(e.text)
                 else done = false
                 e.accepted = done
             }
 
-            // ---- marks: the matches in view, the bracket pair --------------
-            property var hitRects: []
-            property var bracketRects: []
-            function placeHits() {
-                const list = root.matches, len = root.matchLength
-                if (!root.findOpen || list.length === 0) { hitRects = []; return }
-                const top = editor.positionAt(0, Math.max(0, flick.contentY - area.lineHeight))
-                const bottom = editor.positionAt(editor.width, flick.contentY + flick.height + area.lineHeight)
-                let lo = 0, hi = list.length
-                while (lo < hi) { const m = (lo + hi) >> 1; if (list[m] + len < top) lo = m + 1; else hi = m }
-                const out = []
-                for (let i = lo; i < list.length && list[i] <= bottom && out.length < 400; i++) {
-                    const r = editor.positionToRectangle(list[i]), e = editor.positionToRectangle(list[i] + len)
-                    out.push({ x: r.x, y: r.y, w: Math.max(2, e.y === r.y ? e.x - r.x : editor.width - r.x), h: r.height, current: i === root.currentMatch })
-                }
-                hitRects = out
-            }
-            function placeBrackets() {
-                const t = editor.text, c = editor.cursorPosition
-                let p = -1
-                if (editor.selectionStart === editor.selectionEnd) {
-                    if ("([{".indexOf(t[c]) >= 0 && t[c] !== undefined) p = c
-                    else if (c > 0 && ")]}".indexOf(t[c - 1]) >= 0) p = c - 1
-                    else if (")]}".indexOf(t[c]) >= 0 && t[c] !== undefined) p = c
-                    else if (c > 0 && "([{".indexOf(t[c - 1]) >= 0) p = c - 1
-                }
-                const q = p >= 0 ? partner(t, p) : -1
-                if (q < 0) { bracketRects = []; return }
-                bracketRects = [p, q].map(i => { const r = editor.positionToRectangle(i), e = editor.positionToRectangle(i + 1); return { x: r.x, y: r.y, w: Math.max(4, e.x - r.x), h: r.height } })
-            }
-            function partner(t, p) {
-                const ch = t[p], other = pairs[ch], step = "([{".indexOf(ch) >= 0 ? 1 : -1
-                let depth = 0
-                for (let i = p, n = 0; i >= 0 && i < t.length && n < 200000; i += step, n++) {
-                    if (t[i] === ch) depth++
-                    else if (t[i] === other && --depth === 0) return i
-                }
-                return -1
-            }
-            Connections {
-                target: root
-                function onMatchesChanged() { Qt.callLater(area.placeHits) }
-                function onCurrentMatchChanged() { Qt.callLater(area.placeHits) }
-                function onFindOpenChanged() { Qt.callLater(area.placeHits) }
-            }
-            Connections { target: flick; function onContentYChanged() { Qt.callLater(area.placeHits) } function onHeightChanged() { Qt.callLater(area.placeHits) } }
-
-            property int arrival: 0
-            property real arrivalY: 0
-            property real arrivalGlow: 0
-            SequentialAnimation {
-                id: arrivalFade
-                PropertyAction { target: area; property: "arrivalGlow"; value: 1 }
-                PauseAnimation { duration: 1100 }
-                NumberAnimation { target: area; property: "arrivalGlow"; to: 0; duration: Math.max(1, Theme.motion * 2.5); easing.type: Easing.OutCubic }
-                PropertyAction { target: area; property: "arrival"; value: 0 }
-            }
-
-            Loader {
-                id: highlight
-                active: false
-                source: "EditorHighlighter.qml"
-                onLoaded: {
-                    item.fileName = root.path.split("/").pop()
-                    item.textEdit = editor
-                }
-            }
-
-            // Line numbers, scrolled with the text.
-            ListView {
-                id: gutter
-                width: 52
-                anchors.top: parent.top
-                anchors.bottom: parent.bottom
-                anchors.topMargin: 8
-                interactive: false
-                clip: true
-                model: editor.lineCount
-                // (Set, not bound: a list's originY moves with its contentY,
-                // so a binding on both loops.)
-                function follow() { contentY = flick.contentY + originY }
-                Connections { target: flick; function onContentYChanged() { gutter.follow() } }
-                onCountChanged: Qt.callLater(follow)
-                Component.onCompleted: follow()
-                delegate: Label {
-                    required property int index
-                    width: gutter.width - 10
-                    height: area.lineHeight
-                    text: index + 1
-                    horizontalAlignment: Text.AlignRight
-                    verticalAlignment: Text.AlignVCenter
-                    readonly property bool arrived: area.arrival === index + 1
-                    color: arrived ? Theme.primary : Theme.muted
-                    opacity: arrived ? 0.55 + 0.45 * area.arrivalGlow : 0.55
-                    font.family: Theme.mono
-                    font.pixelSize: Theme.mpx(12)
-                }
-            }
-            Rectangle { x: gutter.width; width: 1; height: parent.height; color: Theme.border; opacity: 0.6 }
-
-            Flickable {
-                id: flick
+            CodeView {
+                id: editor
+                objectName: "fileCode"
                 anchors.fill: parent
-                anchors.leftMargin: gutter.width + 8
-                anchors.topMargin: 8
-                clip: true
-                contentWidth: Math.max(width, editor.implicitWidth + 40)
-                contentHeight: Math.max(height, editor.implicitHeight + 40)
-                boundsBehavior: Flickable.StopAtBounds
-                pixelAligned: true
-                ScrollBar.vertical: ScrollBar { }
-                ScrollBar.horizontal: ScrollBar { }
+                Accessible.role: Accessible.EditableText
+                Accessible.name: root.path.split("/").pop() + ", line " + (cursorLine + 1)
+                fontFamily: Theme.mono
+                fontPixelSize: Theme.mpx(13)
+                gutterPixelSize: Theme.mpx(12)
+                colors: Theme.codeColors()
+                currentMatch: root.currentMatch
+                Keys.onShortcutOverride: event => event.accepted = area.claims(event)
+                Keys.onPressed: event => area.press(event)
+                // Which files have unsaved edits (for the tabs and leaving).
+                onModifiedChanged: {
+                    if (!area.ready || path !== root.path) return
+                    if (modified) root.drafts[path] = true
+                    else delete root.drafts[path]
+                    root.draftsEdited()
+                }
+                onTextChanged: if (root.findOpen && area.ready) refind.restart()
+                onContextMenuRequested: (x, y) => editMenu.popup(editor, x, y)
+            }
 
-                // Keep the cursor in view while typing or moving with the keyboard.
-                function ensureVisible(r) {
-                    if (lineScroll.running) return   // (a line asked for: placed once laid out)
-                    if (contentX >= r.x) contentX = r.x
-                    else if (contentX + width <= r.x + r.width + 20) contentX = r.x + r.width + 20 - width
-                    if (contentY >= r.y) contentY = r.y
-                    else if (contentY + height <= r.y + r.height + 20) contentY = r.y + r.height + 20 - height
-                }
+            ScrollBar {
+                id: vbar
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.bottom: hbar.visible ? hbar.top : parent.bottom
+                orientation: Qt.Vertical
+                size: editor.contentHeight > 0 ? Math.min(1, editor.height / editor.contentHeight) : 1
+                position: editor.contentHeight > 0 ? editor.contentY / editor.contentHeight : 0
+                policy: size < 1 ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+                onPositionChanged: if (active) editor.contentY = position * editor.contentHeight
+            }
+            ScrollBar {
+                id: hbar
+                anchors.left: parent.left
+                anchors.leftMargin: editor.textX
+                anchors.right: vbar.visible ? vbar.left : parent.right
+                anchors.bottom: parent.bottom
+                orientation: Qt.Horizontal
+                size: editor.contentWidth > 0 ? Math.min(1, editor.width / editor.contentWidth) : 1
+                position: editor.contentWidth > 0 ? editor.contentX / editor.contentWidth : 0
+                policy: size < 1 ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+                visible: policy !== ScrollBar.AlwaysOff
+                onPositionChanged: if (active) editor.contentX = position * editor.contentWidth
+            }
 
-                // The line you arrived at (a listing's line number, clicked).
-                Rectangle {
-                    objectName: "arrivalLine"
-                    visible: area.arrivalGlow > 0
-                    y: area.arrivalY
-                    width: flick.contentWidth
-                    height: area.lineHeight
-                    color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.16)
-                    opacity: area.arrivalGlow
-                }
-                // Where the query is found (the current one stronger).
-                Repeater {
-                    model: area.hitRects
-                    Rectangle {
-                        required property var modelData
-                        objectName: "findHit"
-                        x: modelData.x - 1
-                        y: modelData.y
-                        width: modelData.w + 2
-                        height: modelData.h
-                        radius: 3
-                        color: Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, modelData.current ? (Theme.isLight ? 0.3 : 0.4) : (Theme.isLight ? 0.24 : 0.2))
-                        border.width: modelData.current ? 1 : 0
-                        border.color: Theme.warning
-                    }
-                }
-                // The bracket by the cursor and its partner.
-                Repeater {
-                    model: area.bracketRects
-                    Rectangle {
-                        required property var modelData
-                        objectName: "bracketMark"
-                        x: modelData.x
-                        y: modelData.y
-                        width: modelData.w
-                        height: modelData.h
-                        radius: 2
-                        color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.14)
-                        border.width: 1
-                        border.color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.6)
-                    }
-                }
-                TextArea {
-                    id: editor
-                    width: Math.max(flick.width, implicitWidth)
-                    padding: 0
-                    leftPadding: 0
-                    topPadding: 0
-                    bottomPadding: 0
-                    background: null
-                    wrapMode: TextEdit.NoWrap
-                    font.family: Theme.mono
-                    font.pixelSize: Theme.mpx(13)
-                    color: Theme.foreground
-                    selectionColor: Theme.selection
-                    selectedTextColor: Theme.foreground
-                    persistentSelection: true
-                    // (While a long file is still coming in.)
-                    readOnly: !area.ready
-                    tabStopDistance: 4 * metrics.averageCharacterWidth
-                    FontMetrics { id: metrics; font: editor.font }
-                    onCursorRectangleChanged: flick.ensureVisible(cursorRectangle)
-                    onCursorPositionChanged: Qt.callLater(area.placeBrackets)
-                    onSelectionEndChanged: Qt.callLater(area.placeBrackets)
-                    Keys.onShortcutOverride: event => event.accepted = area.claims(event)
-                    Keys.onPressed: event => area.press(event)
-                    onTextChanged: {
-                        Qt.callLater(area.placeBrackets)
-                        if (root.findOpen) refind.restart()
-                        if (!area.ready) return
-                        if (text === file.text) delete root.drafts[root.path]
-                        else root.drafts[root.path] = text
-                        root.draftsEdited()
-                    }
-                }
+            AppMenu {
+                id: editMenu
+                objectName: "editorMenu"
+                readonly property bool selected: editor.selectionStart !== editor.selectionEnd
+                AppMenuItem { text: "Cut"; hint: "Ctrl+X"; enabled: editMenu.selected; onTriggered: editor.cut() }
+                AppMenuItem { text: "Copy"; hint: "Ctrl+C"; enabled: editMenu.selected; onTriggered: editor.copy() }
+                AppMenuItem { text: "Paste"; hint: "Ctrl+V"; onTriggered: editor.paste() }
+                AppMenuSeparator { }
+                AppMenuItem { text: "Select all"; hint: "Ctrl+A"; onTriggered: editor.selectAll() }
+                onClosed: editor.forceActiveFocus()
             }
         }
     }

@@ -105,7 +105,8 @@ Rectangle {
     onIsDiffChanged: followDiff()
     Connections { target: Workspace; function onActiveKeyChanged() { root.followDiff() } }
     readonly property bool covered: isFile || isView || isDraft || isDiff
-    // Unsaved editor text per file path.
+    // Files with unsaved edits ({ path: true }; the edits themselves are
+    // kept with the editor's view: CodeView, CodeDrafts).
     property var fileDrafts: ({})
 
     // Leaving a file with unsaved edits (open another, close the tab) asks

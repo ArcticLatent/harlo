@@ -770,8 +770,9 @@ Rectangle {
         ToolTip.text: tip
     }
 
-    // One side (or, inline, the one column): line numbers, row colours, the
-    // text (read-only, selectable, syntax-highlighted), folds and comments.
+    // One side (or, inline, the one column): a read-only CodeView (drawn in
+    // Rust) with the rows' colours, numbers and +/−; folds, comments and
+    // the gutter's comment marks over it.
     component DiffPane: Item {
         id: pane
         property bool isLeft: true
@@ -780,9 +781,10 @@ Rectangle {
         property var rows: []
         property string text: ""
         signal scrolled(real y)
-        property alias flick: flick
+        // (`flick`: the view scrolls itself; kept for its owner and tests.)
+        property alias flick: editor
         property alias editor: editor
-        readonly property real lineHeight: editor.lineCount > 0 ? editor.contentHeight / editor.lineCount : 16
+        readonly property real lineHeight: editor.lineHeight
         readonly property int base: isLeft ? 0 : 5
         readonly property var folds: rows.reduce((out, r, i) => { if (r[0] === 3) out.push({ row: i, count: r[1], start: r[10] }); return out }, [])
         // Saved comments' cards: on the side they're about (inline, all).
@@ -792,87 +794,109 @@ Rectangle {
             return out
         }, [])
         readonly property int gutterWidth: 58
-        readonly property bool ready: editor.text === text
-        // Test hook: how far the row colours are scrolled.
+        // The text shown is `text` (set in one go, but kept for its owner).
+        property string shown: ""
+        readonly property bool ready: shown === text
+        // Test hook: how far the gutter's marks are scrolled.
         function rowsAt() { return rowsView.contentY - rowsView.originY }
         clip: true
 
+        // Which side's fields a row's are: the pane's, or inline the row's own.
+        function rowBase(r) { return pane.unified ? (r[14] === 1 ? 0 : 5) : pane.base }
+        function pushRows() {
+            // (Five numbers a row, in one flat list: quick for thousands.)
+            const out = new Array(rows.length * 5)
+            for (let i = 0, k = 0; i < rows.length; i++) {
+                const r = rows[i], b = rowBase(r)
+                out[k++] = r[b]; out[k++] = b === 0 ? 0 : 1; out[k++] = r[b + 1]; out[k++] = r[b + 3]; out[k++] = r[b + 4]
+            }
+            editor.setRows(out.join(","))
+        }
+        onRowsChanged: pushRows()
+        onUnifiedChanged: pushRows()
         onTextChanged: {
             // Same place after a reload (the file changed under the view).
-            const x = flick.contentX, y = flick.contentY
-            // (The highlighter first: it colours each slice as it comes in.)
-            if (!highlight.active && text !== "") highlight.active = true
-            fill.put(text)
-            flick.contentX = x
-            flick.contentY = Math.min(y, Math.max(0, flick.contentHeight - flick.height))
+            const x = editor.contentX, y = editor.contentY
+            editor.text = text
+            shown = text
+            editor.contentX = x
+            editor.contentY = y
         }
         onReadyChanged: if (ready) root.jumpWhenReady()
-        TextFill { id: fill; editor: editor }
-        Loader {
-            id: highlight
-            active: false
-            source: "EditorHighlighter.qml"
-            onLoaded: {
-                item.fileName = root.fileName
-                item.textEdit = editor
-            }
+        Component.onCompleted: { editor.path = root.fileName; pushRows() }
+        Connections { target: root; function onFileNameChanged() { editor.path = root.fileName } }
+
+        CodeView {
+            id: editor
+            objectName: pane.isLeft ? "diffLeftText" : "diffRightText"
+            anchors.fill: parent
+            Accessible.role: Accessible.StaticText
+            Accessible.name: root.fileName + (pane.unified ? ", changes" : pane.isLeft ? ", before" : ", after")
+            readOnly: true
+            gutter: 2
+            gutterWidth: pane.gutterWidth
+            fontFamily: Theme.mono
+            fontPixelSize: Theme.mpx(13)
+            gutterPixelSize: Theme.mpx(12)
+            colors: Theme.codeColors({
+                removed: Theme.argb(Theme.error, 0.14), added: Theme.argb(Theme.success, 0.14),
+                // (Light: red reads heavier than green at the same strength.)
+                removedStrong: Theme.argb(Theme.error, Theme.isLight ? 0.22 : 0.32), addedStrong: Theme.argb(Theme.success, 0.32),
+                removedText: Theme.argb(Theme.error, 0.9), addedText: Theme.argb(Theme.success, 0.9)
+            })
+            onContentYChanged: { rowsView.follow(); pane.scrolled(contentY) }
+            onContextMenuRequested: (x, y) => paneMenu.popup(editor, x, y)
+        }
+        AppMenu {
+            id: paneMenu
+            AppMenuItem { text: "Copy"; hint: "Ctrl+C"; enabled: editor.selectionStart !== editor.selectionEnd; onTriggered: editor.copy() }
+            AppMenuItem { text: "Select all"; hint: "Ctrl+A"; onTriggered: editor.selectAll() }
+        }
+        ScrollBar {
+            anchors.left: parent.left
+            anchors.leftMargin: pane.gutterWidth
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            orientation: Qt.Horizontal
+            size: editor.contentWidth > 0 ? Math.min(1, editor.width / editor.contentWidth) : 1
+            position: editor.contentWidth > 0 ? editor.contentX / editor.contentWidth : 0
+            policy: size < 1 ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+            onPositionChanged: if (active) editor.contentX = position * editor.contentWidth
         }
 
-        // Row colours and line numbers, scrolled with the text.
+        // The gutter's comment marks: a click on a number adds a comment
+        // (or opens it), scrolled with the text.
         ListView {
             id: rowsView
-            anchors.fill: parent
+            width: pane.gutterWidth
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
             anchors.topMargin: 8
             interactive: false
             model: pane.rows.length
             // Kept in step by hand: a new model resets a ListView's
             // position, which would undo a binding.
-            function follow() { contentY = flick.contentY + originY }
+            function follow() { contentY = editor.contentY + originY }
             onCountChanged: follow()
             onOriginYChanged: follow()
             // As far down as the text scrolls (its 40px past the end).
             footer: Item { width: 1; height: 40 }
+            // (The wheel over the gutter scrolls the text.)
+            WheelHandler {
+                target: null
+                onWheel: event => {
+                    editor.contentY -= event.pixelDelta.y !== 0 ? event.pixelDelta.y : event.angleDelta.y / 120 * 3 * pane.lineHeight
+                    editor.contentX -= event.pixelDelta.x !== 0 ? event.pixelDelta.x : event.angleDelta.x / 120 * 3 * pane.lineHeight
+                }
+            }
             delegate: Item {
                 id: rowItem
                 required property int index
                 readonly property var r: pane.rows[index] || [0, 0, 0, -1, -1, 0, 0, 0, -1, -1]
-                // Which side's fields: the pane's, or inline the row's own.
-                readonly property int base: pane.unified ? (r[14] === 1 ? 0 : 5) : pane.base
-                readonly property color tint: base === 0 ? Theme.error : Theme.success
+                readonly property int base: pane.rowBase(r)
                 readonly property int kind: r[base]
                 width: rowsView.width
                 height: pane.lineHeight
-                Rectangle {
-                    anchors.fill: parent
-                    visible: rowItem.kind === 1
-                    color: Qt.rgba(rowItem.tint.r, rowItem.tint.g, rowItem.tint.b, 0.14)
-                }
-                // Nothing on this side: hatched.
-                Image {
-                    anchors.fill: parent
-                    anchors.leftMargin: pane.gutterWidth
-                    visible: rowItem.kind === 2
-                    fillMode: Image.Tile
-                    horizontalAlignment: Image.AlignLeft
-                    verticalAlignment: Image.AlignTop
-                    source: rowItem.kind === 2 ? "data:image/svg+xml;utf8," + encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8'><path d='M-2 2 L2 -2 M0 8 L8 0 M6 10 L10 6' stroke='" + Theme.border + "' stroke-width='1.2'/></svg>") : ""
-                }
-                // The part of the line that changed.
-                Rectangle {
-                    readonly property int from: rowItem.r[rowItem.base + 3]
-                    readonly property int to: rowItem.r[rowItem.base + 4]
-                    readonly property int offset: rowItem.r[rowItem.base + 2]
-                    visible: rowItem.kind === 1 && from >= 0 && pane.ready
-                    // (After the text is laid out: its size says when.)
-                    readonly property real x0: visible && editor.contentWidth > 0 ? editor.positionToRectangle(Math.min(offset + from, editor.length)).x : 0
-                    readonly property real x1: visible && editor.contentWidth > 0 ? editor.positionToRectangle(Math.min(offset + to, editor.length)).x : 0
-                    x: pane.gutterWidth + 8 + x0 - flick.contentX
-                    width: Math.max(2, x1 - x0)
-                    height: parent.height
-                    // (Light: red reads heavier than green at the same strength.)
-                    color: Qt.rgba(rowItem.tint.r, rowItem.tint.g, rowItem.tint.b, Theme.isLight && rowItem.base === 0 ? 0.22 : 0.32)
-                }
-                Rectangle { width: pane.gutterWidth; height: parent.height; color: Theme.background; opacity: rowItem.kind === 1 ? 0.35 : 1 }
                 // A review comment on this line: its mark; a click on the
                 // number adds one (or opens it).
                 readonly property int lineNo: rowItem.kind < 2 ? rowItem.r[rowItem.base + 1] : -1
@@ -903,28 +927,6 @@ Rectangle {
                     ToolTip.delay: 600
                     ToolTip.text: rowItem.commented ? "Your comment (click to edit)" : "Comment on this line"
                 }
-                Label {
-                    width: pane.gutterWidth - 18
-                    height: parent.height
-                    text: rowItem.kind >= 2 ? "" : rowItem.r[rowItem.base + 1]
-                    horizontalAlignment: Text.AlignRight
-                    verticalAlignment: Text.AlignVCenter
-                    color: rowItem.kind === 1 ? rowItem.tint : Theme.muted
-                    opacity: rowItem.kind === 1 ? 0.9 : 0.55
-                    font.family: Theme.mono
-                    font.pixelSize: Theme.mpx(12)
-                }
-                Label {
-                    x: pane.gutterWidth - 14
-                    width: 12
-                    height: parent.height
-                    visible: rowItem.kind === 1
-                    text: rowItem.base === 0 ? "−" : "+"
-                    verticalAlignment: Text.AlignVCenter
-                    color: rowItem.tint
-                    font.family: Theme.mono
-                    font.pixelSize: Theme.mpx(12)
-                }
             }
         }
 
@@ -938,7 +940,7 @@ Rectangle {
                 z: 2
                 width: pane.width
                 height: pane.lineHeight + 4
-                y: 8 + modelData.row * pane.lineHeight - flick.contentY - 2
+                y: 8 + modelData.row * pane.lineHeight - editor.contentY - 2
                 visible: y > -height && y < pane.height
                 color: foldHover.hovered ? Theme.hover : Theme.elevated
                 Rectangle { width: parent.width; height: 1; color: Theme.border }
@@ -978,7 +980,7 @@ Rectangle {
                 x: pane.gutterWidth + 4
                 width: pane.width - x - 10
                 height: root.noteRows * pane.lineHeight - 6
-                y: 8 + modelData.row * pane.lineHeight - flick.contentY + 3
+                y: 8 + modelData.row * pane.lineHeight - editor.contentY + 3
                 visible: y > -height && y < pane.height
                 radius: 8
                 color: noteHover.hovered ? Theme.hover : Theme.raised
@@ -1011,39 +1013,6 @@ Rectangle {
                 ToolTip.visible: noteHover.hovered && noteText.truncated
                 ToolTip.delay: 500
                 ToolTip.text: note.comment.text
-            }
-        }
-
-        Flickable {
-            id: flick
-            anchors.fill: parent
-            anchors.leftMargin: pane.gutterWidth + 8
-            anchors.topMargin: 8
-            clip: true
-            contentWidth: Math.max(width, editor.implicitWidth + 40)
-            // (As tall as all its rows while the text is still coming in.)
-            contentHeight: Math.max(height, editor.implicitHeight + 40, fill.running ? pane.rows.length * pane.lineHeight + 40 : 0)
-            boundsBehavior: Flickable.StopAtBounds
-            pixelAligned: true
-            ScrollBar.horizontal: ScrollBar { }
-            onContentYChanged: { rowsView.follow(); pane.scrolled(contentY) }
-
-            TextArea {
-                id: editor
-                objectName: pane.isLeft ? "diffLeftText" : "diffRightText"
-                width: Math.max(flick.width, implicitWidth)
-                padding: 0
-                background: null
-                readOnly: true
-                selectByMouse: true
-                wrapMode: TextEdit.NoWrap
-                font.family: Theme.mono
-                font.pixelSize: Theme.mpx(13)
-                color: Theme.foreground
-                selectionColor: Theme.selection
-                selectedTextColor: Theme.foreground
-                tabStopDistance: 4 * metrics.averageCharacterWidth
-                FontMetrics { id: metrics; font: editor.font }
             }
         }
     }

@@ -192,6 +192,15 @@ fn push_token(html: &mut String, class: u8, piece: &str) {
     html.push_str(newline);
 }
 
+/// The syntaxes and the token-class theme (`TOKEN_CLASSES`), for the code
+/// view (harlo-code), which colours a file a line at a time itself.
+pub fn code_syntaxes() -> &'static syntect::parsing::SyntaxSet {
+    &highlighter().syntaxes
+}
+pub fn code_theme() -> &'static Theme {
+    &highlighter().theme
+}
+
 /// Loads the syntax definitions ahead of time (they take a moment to parse).
 pub fn warm_up() {
     highlighter();

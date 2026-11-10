@@ -1,0 +1,12 @@
+[package]
+name = "harlo-code"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cosmic-text = "0.19"
+unicode-segmentation = "1"
+# Colouring: harlo's syntaxes and token classes.
+harlo-core.workspace = true
+syntect = { version = "5.3", default-features = false, features = ["default-fancy"] }

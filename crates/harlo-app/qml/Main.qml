@@ -2320,7 +2320,7 @@ ApplicationWindow {
         ScriptAction { script: {
             win.check(chat.fileEditor.editor && chat.fileEditor.editor.text === "changed on the host\n", "a change on the host reloads it (" + (chat.fileEditor.editor ? JSON.stringify(chat.fileEditor.editor.text) : "") + ")")
             // With edits here, a change there is pointed out instead.
-            chat.fileEditor.editor.text = "my edit\n"
+            chat.fileEditor.apply([[0, chat.fileEditor.editor.length, "my edit\n"]])
             TestInput.writeFile(win.argValue("--cwd=") + "/README.md", "changed again\n") } }
         PauseAnimation { duration: 4500 }
         ScriptAction { script: {
@@ -4284,10 +4284,9 @@ ApplicationWindow {
             const ed = chat.fileEditor.editor
             const line = ed ? ed.text.slice(0, ed.cursorPosition).split("\n").length : -1
             win.check(chat.filePath.endsWith("/src/listing.rs") && line === 38, "line 38: the file opens at it (" + chat.filePath + ", line " + line + ")")
-            const top = chat.fileEditor.editor.parent.parent.contentY, lh = chat.fileEditor.editor.contentHeight / chat.fileEditor.editor.lineCount
+            const top = ed.contentY, lh = ed.lineHeight
             win.check(top > 0 && top < 37 * lh - 2 * lh, "…with lines above it in view (" + Math.round(top / lh) + " lines scrolled)")
-            const band = win.findName("arrivalLine", chat.fileEditor)
-            win.check(band && Math.abs(band.y - ed.cursorRectangle.y) < 1, "…tinted where you arrived")
+            win.check(ed.arrivalLine === 37 && ed.arrivalGlow > 0, "…tinted where you arrived (line " + (ed.arrivalLine + 1) + ")")
             win.shotWindow("listings-open-at-line")
             Workspace.open(chat.session.key) } }
         PauseAnimation { duration: 600 }
@@ -6133,7 +6132,7 @@ ApplicationWindow {
             const first = ed.text.indexOf("total"), second = ed.text.indexOf("total", first + 1)
             win.check(fe.matches.length === 2 && fe.currentMatch === 0 && ed.selectionStart === first && ed.selectionEnd === first + 5, "typed: both found, the first selected (" + fe.matches.length + ")")
             win.check(win.findName("editorFindCount", fe).text === "1 of 2", "1 of 2 (" + win.findName("editorFindCount", fe).text + ")")
-            win.check(win.findAllNames("findHit", fe).length === 2, "both marked in the text (" + win.findAllNames("findHit", fe).length + ")")
+            win.check(ed.visibleMatches() === 2, "both marked in the text (" + ed.visibleMatches() + ")")
             win.shot("editor-find")
             TestInput.key(Qt.Key_Return, 0)
             win.check(fe.currentMatch === 1 && ed.selectionStart === second, "Enter: the next")
@@ -6178,7 +6177,7 @@ ApplicationWindow {
             win.check(win.edCount("total") === 1 && win.edCount("sum") === 1 && fe.matches.length === 1, "Enter in Replace: just the one shown (" + win.edCount("sum") + ")")
             TestInput.key(Qt.Key_Escape, 0)
             win.check(!fe.findOpen && !win.findName("editorFind", fe) && ed.activeFocus, "Esc: find closed, back in the text")
-            win.check(win.findAllNames("findHit", fe).length === 0, "…its marks gone") } }
+            win.check(ed.visibleMatches() === 0, "…its marks gone") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             const fe = chat.fileEditor, ed = fe.editor
@@ -6204,15 +6203,14 @@ ApplicationWindow {
         ScriptAction { script: {
             const fe = chat.fileEditor, ed = fe.editor
             const open = ed.text.indexOf("fn add(") + 6, close = ed.text.indexOf(")", open)
-            const marks = win.findAllNames("bracketMark", fe)
-            const at = i => ed.positionToRectangle(i).x
-            win.check(marks.length === 2 && marks.some(m => Math.abs(m.x - at(open)) < 1) && marks.some(m => Math.abs(m.x - at(close)) < 1), "( and its ) marked (" + marks.map(m => m.x) + " vs " + [at(open), at(close)] + ")")
+            const marks = JSON.parse(ed.bracketPair())
+            win.check(marks.length === 2 && marks[0] === open && marks[1] === close, "( and its ) marked (" + marks + " vs " + [open, close] + ")")
             win.shot("editor-brackets")
             ed.cursorPosition = ed.text.indexOf("let x")
             TestInput.key(Qt.Key_S, Qt.ControlModifier) } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
-            win.check(win.findAllNames("bracketMark", chat.fileEditor).length === 0, "no bracket by the cursor: no marks")
+            win.check(chat.fileEditor.editor.bracketPair() === "[]", "no bracket by the cursor: no marks")
             win.check(TestInput.readFile(win.argValue("--cwd=") + "/src/editor.rs") === win.edText() && !chat.fileEditor.modified, "Ctrl+S saves it")
             win.check(win.composerKeys.some(k => k.group === "File editor" && k.seq === "Ctrl+/"), "the shortcuts sheet lists the editor's keys")
             // A file indented by two spaces: Enter adds two.
@@ -6242,12 +6240,24 @@ ApplicationWindow {
             ed.cursorPosition = ed.text.indexOf("print")
             TestInput.key(Qt.Key_Slash, Qt.ControlModifier)
             win.check(win.edText().indexOf("    # print(\"hi\")") >= 0, "# for Python, at the line's indentation")
+            // Back to app.js (left with unsaved edits): they're still there,
+            // and so is their undo.
+            Workspace.openFileTab(win.argValue("--cwd=") + "/web/app.js") } }
+        ScriptAction { script: win.waitUntil(editorSteps, () => !!chat.fileEditor.editor && chat.filePath.endsWith("/app.js"), 8000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const fe = chat.fileEditor, ed = fe.editor
+            win.check(fe.modified && win.edLines()[0] === "// function show() {" && win.edLines()[1] === "    ", "back to a file with unsaved edits: they're kept (" + JSON.stringify(win.edLines()[0]) + ")")
+            win.check(chat.fileDrafts[chat.filePath] === true && chat.fileDrafts[win.argValue("--cwd=") + "/tool.py"] === true, "…and both files are marked unsaved")
+            ed.forceActiveFocus()
+            TestInput.key(Qt.Key_Z, Qt.ControlModifier)
+            win.check(win.edLines()[0] === "function show() {", "…and so is their undo (" + JSON.stringify(win.edLines()[0]) + ")")
             win.summary(); Qt.quit() } }
     }
 
     // A big file (8000 lines): its diff from the Changes panel, then the
-    // file itself. The window keeps answering while each comes in (its
-    // text a slice at a time, coloured as it comes); it held still 5 s.
+    // file itself, scrolled; then 100,000 lines, typed at the end. The code
+    // views (drawn in Rust) show at once and colour in the background.
     property real perfT0: 0
     property real perfLast: 0
     property var perfMarks: ({})
@@ -6289,7 +6299,7 @@ ApplicationWindow {
             const dv = chat.diffView, m = win.perfMarks
             console.log("PERF big diff: marks", JSON.stringify(m), "stalls", JSON.stringify(win.perfStalls))
             win.check(m.jumped !== undefined, "the diff opened at its first change (" + m.jumped + " ms)")
-            win.check(win.perfLongest() < 1000, "the window kept answering: longest hold " + win.perfLongest() + " ms (it was 5100)")
+            win.check(m.jumped < 300 && win.perfLongest() < 200, "the window kept answering: longest hold " + win.perfLongest() + " ms (it was 5100; then 1900)")
             win.check(dv.rightPane.editor.text === dv.rightPane.text && dv.leftPane.editor.text === dv.leftPane.text && dv.rightPane.editor.lineCount >= 8000, "both sides all in (" + dv.rightPane.editor.lineCount + " lines)")
             const f = dv.rightPane.flick, y = dv.blocks[0].start * dv.lineHeight
             win.check(y >= f.contentY && y <= f.contentY + f.height, "the first change in view")
@@ -6302,11 +6312,69 @@ ApplicationWindow {
             perfPoll.stop()
             const fe = chat.fileEditor, m = win.perfMarks
             console.log("PERF big file: marks", JSON.stringify(m), "stalls", JSON.stringify(win.perfStalls))
-            win.check(m.fileReady !== undefined && win.perfLongest() < 1000, "the file opened, the window answering: longest hold " + win.perfLongest() + " ms")
+            win.check(m.fileReady !== undefined && m.fileShown < 150 && win.perfLongest() < 100, "the file shown in " + m.fileShown + " ms, the window answering: longest hold " + win.perfLongest() + " ms")
             win.check(fe.editor.text === TestInput.readFile(win.argValue("--cwd=") + "/src/big.rs") && !fe.modified, "all of it in, and not an edit")
             win.check(fe.language === "Rust" && !fe.editor.readOnly, "coloured, and editable once in (" + fe.language + ")")
             win.shot("bigfile-editor")
+            // Scrolling through it: each frame drawn quickly, the window
+            // never held.
+            win.cvFrames = []
+            cvScroll.n = 0
+            win.perfStart()
+            cvScroll.start() } }
+        ScriptAction { script: win.waitUntil(bigFileSteps, () => !cvScroll.running, 10000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            perfPoll.stop()
+            const f = win.cvFrames.slice(2), ed = chat.fileEditor.editor
+            const avg = f.reduce((a, b) => a + b, 0) / f.length, max = Math.max.apply(null, f)
+            console.log("PERF big file scroll: frames", f.length, "avg", avg.toFixed(2), "ms max", max.toFixed(2), "ms; stalls", JSON.stringify(win.perfStalls))
+            win.check(ed.contentY > 5000 && max < 8, "scrolling: every frame drawn in under 8 ms (max " + max.toFixed(2) + " ms)")
+            win.check(win.perfLongest() < 50, "…and the window never held (longest " + win.perfLongest() + " ms)")
+            // 100,000 lines.
+            win.perfStart()
+            Workspace.openFileTab(win.argValue("--cwd=") + "/src/huge.rs") } }
+        ScriptAction { script: win.waitUntil(bigFileSteps, () => win.perfMarks.fileReady !== undefined && chat.fileEditor.editor && chat.fileEditor.editor.path.endsWith("/huge.rs"), 15000) }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            perfPoll.stop()
+            const fe = chat.fileEditor, ed = fe.editor, m = win.perfMarks
+            console.log("PERF huge file: lines", ed.lineCount, "marks", JSON.stringify(m), "stalls", JSON.stringify(win.perfStalls))
+            win.check(ed.lineCount >= 100000, "100,000 lines in (" + ed.lineCount + ")")
+            win.check(m.fileShown < 250, "…shown in " + m.fileShown + " ms")
+            win.check(win.perfLongest() < 150, "…the window held at most " + win.perfLongest() + " ms")
+            // Typing at the very end.
+            ed.forceActiveFocus()
+            ed.cursorPosition = ed.length
+            const t0 = Date.now()
+            TestInput.typeText("// the end.")
+            const ms = (Date.now() - t0) / 11
+            console.log("PERF huge file typing:", ms.toFixed(2), "ms a key")
+            win.check(ed.text.endsWith("// the end.") && fe.modified, "typing at the end of 100,000 lines")
+            win.check(ms < 16, "…" + ms.toFixed(1) + " ms a key")
+            win.check(ed.colouring, "(colouring in order hasn't got this far)") } }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const ed = chat.fileEditor.editor
+            win.check(ed.lineColoured(ed.lineCount - 3) && ed.lineColoured(ed.lineCount - 30), "…yet the lines on screen are coloured at once")
+            win.shot("bigfile-huge-end")
             win.summary(); Qt.quit() } }
+    }
+
+    // Scrolls the file editor a frame at a time (clicksbigfile), noting how
+    // long each frame took to draw.
+    property var cvFrames: []
+    Timer {
+        id: cvScroll
+        interval: 16
+        repeat: true
+        property int n: 0
+        onTriggered: {
+            const v = chat.fileEditor.editor
+            win.cvFrames.push(v.paintMs)
+            v.contentY = v.contentY + 53
+            if (++n >= 150) stop()
+        }
     }
 
     // Multirun (demo harness): two lanes in worktrees, overview, keep one.

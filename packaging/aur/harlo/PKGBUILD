@@ -15,7 +15,6 @@ depends=('qt6-base' 'qt6-declarative' 'qt6-multimedia' 'qt6-svg' 'git' 'gcc-libs
 # cmake and clang build the bundled whisper.cpp (dictation).
 makedepends=('cargo' 'cmake' 'clang')
 optdepends=('layer-shell-qt: drop-down window on Wayland'
-            'syntax-highlighting: syntax colours in the file editor'
             'libnotify: desktop notifications (notify-send)'
             'openssh: projects on remote machines (Settings → Remote Instances)')
 # The C++ parts (cxx-qt) must stay plain object code: with makepkg's LTO

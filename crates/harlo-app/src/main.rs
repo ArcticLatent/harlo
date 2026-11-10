@@ -4,6 +4,7 @@
 mod accounts;
 mod audio;
 mod chat_session;
+mod code_view;
 mod ci;
 mod diagnostics;
 mod diagrams;
@@ -162,6 +163,7 @@ fn main() {
     });
     // The interface font, bundled.
     fonts::load_bundled();
+    fonts::preload_code_fonts();
     fonts::set_application_font_family(&QString::from(fonts::DEFAULT_UI_FONT));
     diagnostics::capture_qt_messages();
     // Named only when harlo.desktop is installed (a package): Qt registers

@@ -85,8 +85,6 @@ fn main() {
                 "qml/ActivityPanel.qml",
                 "qml/FilesPanel.qml",
                 "qml/FileEditor.qml",
-                "qml/EditorHighlighter.qml",
-                "qml/TextFill.qml",
                 "qml/TranscriptView.qml",
                 "qml/PromptRail.qml",
                 "qml/BranchPicker.qml",
@@ -182,11 +180,12 @@ fn main() {
                 .collect::<Vec<_>>(),
         )
         .include_dir("cpp")
+        .cpp_file("cpp/harlo_codeview.h")
         .qt_module("Quick")
         .qt_module("QuickControls2")
         .qt_module("Widgets")
         .qt_module("Test")
         .qt_module("Multimedia")
-        .files(["src/qt_base.rs", "src/chat_session.rs", "src/workspace.rs", "src/git_panel.rs", "src/file_browser.rs", "src/text_file.rs", "src/usage_stats.rs", "src/fonts.rs", "src/terminal_session.rs", "src/platform.rs", "src/test_input.rs", "src/dictation.rs", "src/audio.rs", "src/remotes.rs", "src/updates.rs", "src/mcp.rs", "src/phone.rs", "src/accounts.rs", "src/setup.rs", "src/diagrams.rs", "src/visuals.rs", "src/server_setup.rs"])
+        .files(["src/qt_base.rs", "src/chat_session.rs", "src/workspace.rs", "src/git_panel.rs", "src/file_browser.rs", "src/text_file.rs", "src/code_view.rs", "src/usage_stats.rs", "src/fonts.rs", "src/terminal_session.rs", "src/platform.rs", "src/test_input.rs", "src/dictation.rs", "src/audio.rs", "src/remotes.rs", "src/updates.rs", "src/mcp.rs", "src/phone.rs", "src/accounts.rs", "src/setup.rs", "src/diagrams.rs", "src/visuals.rs", "src/server_setup.rs"])
         .build();
 }

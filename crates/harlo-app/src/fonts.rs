@@ -43,6 +43,17 @@ pub fn load_bundled() {
     }
 }
 
+/// Starts loading the code view's fonts (harlo-code draws code itself):
+/// JetBrains Mono, bundled, and the system's for what it lacks.
+pub fn preload_code_fonts() {
+    harlo_code::fonts::preload(vec![
+        include_bytes!("../fonts/JetBrainsMono-Regular.ttf"),
+        include_bytes!("../fonts/JetBrainsMono-Italic.ttf"),
+        include_bytes!("../fonts/JetBrainsMono-Bold.ttf"),
+        include_bytes!("../fonts/JetBrainsMono-BoldItalic.ttf"),
+    ]);
+}
+
 /// The interface font for a setting ("" = harlo's default).
 pub fn ui_family(setting: &str) -> String {
     if setting.is_empty() { DEFAULT_UI_FONT.to_owned() } else { setting.to_owned() }
