@@ -50,6 +50,23 @@ final class HarloUITests: XCTestCase {
         e.tap()
     }
 
+    /// Taps `text` in the conversation once it's above the message box: at
+    /// the largest text sizes it can sit under the box, and the tap would
+    /// land there (on the model's button, say).
+    func tapInConversation(_ text: String, file: StaticString = #filePath, line: UInt = #line) {
+        let e = element(text)
+        guard e.waitForExistence(timeout: 8) else {
+            XCTFail("nothing to tap: \(text)", file: file, line: line)
+            return
+        }
+        let box = app.textViews.firstMatch.exists ? app.textViews.firstMatch : app.textFields.firstMatch
+        for _ in 0..<5 where box.exists && e.frame.maxY > box.frame.minY - 24 {
+            let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
+            from.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)))
+        }
+        e.tap()
+    }
+
     /// Waits for `e` to go (false: still there after `timeout`).
     func gone(_ e: XCUIElement, timeout: Double = 8) -> Bool {
         let done = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: e)
@@ -121,7 +138,7 @@ final class HarloUITests: XCTestCase {
         see("Run the tests")
         shot("03-session-run")
         // The command's card opened: the command and the end of its output.
-        tap("Run the tests")
+        tapInConversation("Run the tests")
         see("./run-tests.sh")
         see("112 passed; 0 failed")
         shot("04-command-output")
@@ -180,13 +197,13 @@ final class HarloUITests: XCTestCase {
         see("bring over a helper's changes")
         see("Update the changelog finished")
         shot("12-helper-report")
-        tap("Update the changelog finished")
+        tapInConversation("Update the changelog finished")
         // Opened: its plain line, then what the agent got, under its name.
         see("As the agent got it")
         shot("13-harlo-message-open")
         // An MCP server's tool, named in words.
         see("dice roll")
-        tap("dice roll")
+        tapInConversation("dice roll")
         shot("14-mcp-tool")
     }
 
@@ -266,7 +283,7 @@ final class HarloUITests: XCTestCase {
         launch("end")
         tap("Have a subagent look over")
         // Its run folded; opened, the subagent's call.
-        tap("started 1 subagent")
+        tapInConversation("started 1 subagent")
         see("Subagent")
         shot("23-claude-session")
     }
