@@ -999,6 +999,8 @@ struct ActivityLine: View {
             TimelineView(.periodic(from: .now, by: 1)) { ctx in
                 HStack(spacing: 8) {
                     StatusDot(status: session.requests.isEmpty ? "busy" : "input")
+                        // (Its line says it.)
+                        .accessibilityHidden(true)
                     Text(a.text)
                         .scaledFont(13.5)
                         .lineLimit(1)

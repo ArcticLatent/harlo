@@ -727,6 +727,29 @@ public struct RGBA: Codable, Equatable, Sendable {
 
     public var luminance: Double { 0.2126 * r + 0.7152 * g + 0.0722 * b }
 
+    /// Relative luminance, as contrast is measured (WCAG).
+    public var relativeLuminance: Double {
+        let lin = { (v: Double) in v <= 0.03928 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4) }
+        return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+    }
+
+    /// The contrast ratio with `other` (1 to 21).
+    public func contrast(with other: RGBA) -> Double {
+        let (x, y) = (relativeLuminance, other.relativeLuminance)
+        return (max(x, y) + 0.05) / (min(x, y) + 0.05)
+    }
+
+    /// This colour, moved toward `ink` just enough to read as small text on
+    /// `background` (4.5:1): a theme's bright orange on white, say.
+    public func legible(on background: RGBA, toward ink: RGBA) -> RGBA {
+        var t = 0.0, c = self
+        while c.contrast(with: background) < 4.5 && t < 1 {
+            t += 0.05
+            c = mix(ink, t)
+        }
+        return c
+    }
+
     /// `#rrggbb` (opaque).
     public var hex: String {
         let c = { (v: Double) in String(format: "%02x", Int((max(0, min(1, v)) * 255).rounded())) }
@@ -773,9 +796,10 @@ public struct Palette: Codable, Equatable, Sendable {
         border = (col(c["chat"]["divider"]) ?? fg.mix(bg, 0.85)).over(bg)
         userBubble = (col(c["chat"]["userMessageBackground"]) ?? elevated).over(bg)
         codeBackground = (col(c["syntax"]["base"]["background"]) ?? col(c["markdown"]["inlineCodeBackground"]) ?? elevated).over(bg)
-        error = col(c["status"]["error"]) ?? RGBA(0.85, 0.25, 0.25)
-        warning = col(c["status"]["warning"]) ?? RGBA(0.9, 0.6, 0.2)
-        success = col(c["status"]["success"]) ?? RGBA(0.3, 0.7, 0.4)
+        // (Status colours are text too: each made to read on the page.)
+        error = (col(c["status"]["error"]) ?? RGBA(0.85, 0.25, 0.25)).legible(on: bg, toward: fg)
+        warning = (col(c["status"]["warning"]) ?? RGBA(0.9, 0.6, 0.2)).legible(on: bg, toward: fg)
+        success = (col(c["status"]["success"]) ?? RGBA(0.3, 0.7, 0.4)).legible(on: bg, toward: fg)
         info = col(c["status"]["info"]) ?? primary
         link = col(c["markdown"]["link"]) ?? primary
         inlineCode = col(c["markdown"]["inlineCode"]) ?? primary

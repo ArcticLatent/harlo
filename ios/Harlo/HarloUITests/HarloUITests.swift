@@ -226,7 +226,14 @@ final class HarloUITests: XCTestCase {
     func test11ModelPicker() {
         launch("end")
         openMain()
-        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Model:'")).firstMatch.tap()
+        // (A tap while the conversation settles can miss: again if the sheet
+        // didn't open.)
+        let chip = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Model:'")).firstMatch
+        XCTAssertTrue(chip.waitForExistence(timeout: 8), "the model chip")
+        for _ in 0..<2 {
+            chip.tap()
+            if app.navigationBars["Model"].waitForExistence(timeout: 4) { break }
+        }
         see("Tour Coder")
         shot("19-model-picker")
     }

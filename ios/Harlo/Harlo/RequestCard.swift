@@ -202,6 +202,15 @@ struct RequestCard: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
+        } else if request.method == "ask" && request.questions.count == 1 && big {
+            // (At the largest text sizes only the question's words scroll:
+            // its choices and Answer stay in view.)
+            question(0, wordsCap: 110)
+            Button("Answer") {
+                answer(UIRequest.askAnswer(request.questions, picked: picks.map { Array($0) }, typed: custom))
+            }
+            .buttonStyle(.borderedProminent)
+            .foregroundStyle(Color(p.onPrimary))
         } else if request.method == "ask" && !request.questions.isEmpty {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
@@ -212,6 +221,7 @@ struct RequestCard: View {
             }
             .frame(maxHeight: big ? 190 : 320)
             .fixedSize(horizontal: false, vertical: true)
+            .scrollIndicators(.visible)
             Button("Answer") {
                 answer(UIRequest.askAnswer(request.questions, picked: picks.map { Array($0) }, typed: custom))
             }
@@ -223,7 +233,9 @@ struct RequestCard: View {
         }
     }
 
-    @ViewBuilder func question(_ i: Int) -> some View {
+    /// A question, its choices and a field for your own answer; `wordsCap`:
+    /// the question's words scroll past that height.
+    @ViewBuilder func question(_ i: Int, wordsCap: CGFloat? = nil) -> some View {
         let q = request.questions[i]
         VStack(alignment: .leading, spacing: 6) {
             if !q.header.isEmpty {
@@ -231,8 +243,19 @@ struct RequestCard: View {
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(Color(p.muted))
             }
-            Text(q.question)
-                .font(.subheadline)
+            if let wordsCap {
+                ScrollView {
+                    Text(q.question)
+                        .font(.subheadline)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: wordsCap)
+                .fixedSize(horizontal: false, vertical: true)
+                .scrollIndicators(.visible)
+            } else {
+                Text(q.question)
+                    .font(.subheadline)
+            }
             ForEach(q.options, id: \.self) { o in
                 let on = i < picks.count && picks[i].contains(o)
                 Button {

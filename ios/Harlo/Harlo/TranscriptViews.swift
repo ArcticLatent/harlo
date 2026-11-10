@@ -182,9 +182,21 @@ struct StepMark: View {
 /// went (lines added and removed, or a tick and how long), and, opened, its
 /// diff or output; a command's result under it.
 struct ToolCard: View {
+    @Environment(HarloModel.self) private var model
     @Environment(\.palette) private var p
     let row: Row
     @State private var open = false
+
+    /// The line under its name, and whether it's words: harlo's tools name
+    /// the session they're about by its title (live:4 → Update the changelog).
+    var line: (text: String, words: Bool) {
+        let l = ToolName.line(row.title, row.subtitle)
+        if !l.words, ToolName.isHarlo(row.title),
+           let s = model.sessions.first(where: { $0.key == row.subtitle }), !s.title.isEmpty, s.title != "New session" {
+            return (s.title, true)
+        }
+        return l
+    }
 
     var running: Bool { row.state == "running" }
     var symbol: String { Style.toolSymbol(row.title) }
@@ -214,10 +226,10 @@ struct ToolCard: View {
                                 .scaledFont(14)
                                 .foregroundStyle(Color(p.muted))
                                 .lineLimit(2)
-                        } else if !row.subtitle.isEmpty && ToolName.line(row.title, row.subtitle).words {
+                        } else if !row.subtitle.isEmpty && line.words {
                             // (A question, a task, a helper's title: words,
                             // cut at the end.)
-                            Text(ToolName.line(row.title, row.subtitle).text)
+                            Text(line.text)
                                 .scaledFont(14)
                                 .foregroundStyle(Color(p.muted))
                                 .lineLimit(2)
@@ -489,7 +501,7 @@ struct UserBubble: View {
                 }
                 if row.time > 0 {
                     Text(Style.clock(row.time))
-                        .scaledFont(12, .medium)
+                        .scaledFont(12.5, .semibold)
                 }
             }
             .foregroundStyle(Color(ink))

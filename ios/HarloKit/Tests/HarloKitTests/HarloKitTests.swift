@@ -309,6 +309,18 @@ final class ModelPartsTests: XCTestCase {
         XCTAssertTrue(Theme.standard.light.isLight)
     }
 
+    func testStatusColoursReadAsText() throws {
+        for dark in [false, true] {
+            let p = Theme.standard.palette(dark: dark)
+            for c in [p.warning, p.error, p.success] {
+                XCTAssertGreaterThanOrEqual(c.contrast(with: p.background), 4.5, "\(c.hex) on \(p.background.hex)")
+            }
+        }
+        // (Already legible: left as it is.)
+        let black = RGBA(0, 0, 0), white = RGBA(1, 1, 1)
+        XCTAssertEqual(black.legible(on: white, toward: black).hex, "#000000")
+    }
+
     func testThemeAvatar() throws {
         var v = try JSON.parse(#"{"family":"harlo","mode":"dark","avatar":"glasses"}"#)
         v["dark"] = try JSON.parse(##"{"surface":{"background":"#000000","foreground":"#ffffff"},"primary":{"base":"#3366ff"}}"##)

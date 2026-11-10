@@ -128,6 +128,9 @@ public enum ToolName {
         }
     }
 
+    /// One of harlo's own tools (start a session, bring over a helper, …).
+    public static func isHarlo(_ tool: String) -> Bool { harlo[harloTool(tool)] != nil }
+
     /// The line under a tool's name, and whether it's words: harlo's own
     /// tools say the session's title or what it's asked rather than their
     /// input ("agent=harlo  title=Update the changelog  worktree=…").
