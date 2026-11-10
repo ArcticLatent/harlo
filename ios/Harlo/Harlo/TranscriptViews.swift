@@ -394,16 +394,23 @@ struct HarloMessage: View {
                 // Its plain line, folded; all of it, as the agent got it,
                 // opened.
                 VStack(alignment: .leading, spacing: 4) {
-                    if open && !row.label.isEmpty {
-                        Text("What harlo told the agent")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(Color(p.muted))
-                    }
-                    Text(open || row.label.isEmpty ? row.text : row.label)
+                    // Its plain line first; opened, what the agent got
+                    // under it, smaller.
+                    Text(row.label.isEmpty ? row.text : row.label)
                         .font(.footnote)
                         .foregroundStyle(Color(p.muted))
                         .multilineTextAlignment(.leading)
                         .lineLimit(open ? nil : 2)
+                    if open && !row.label.isEmpty {
+                        Text("As the agent got it")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color(p.muted))
+                            .padding(.top, 6)
+                        Text(row.text)
+                            .font(.caption)
+                            .foregroundStyle(Color(p.muted))
+                            .multilineTextAlignment(.leading)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }

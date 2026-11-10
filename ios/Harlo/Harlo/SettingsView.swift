@@ -176,6 +176,8 @@ struct SettingsView: View {
                 }
                 .listRowBackground(Color(p.elevated))
             }
+            // (In the tab, its last rows clear the floating tab bar.)
+            .contentMargins(.bottom, inTab ? 24 : 0, for: .scrollContent)
             .screen()
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)

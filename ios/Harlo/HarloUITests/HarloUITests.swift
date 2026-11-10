@@ -181,6 +181,8 @@ final class HarloUITests: XCTestCase {
         see("Update the changelog finished")
         shot("12-helper-report")
         tap("Update the changelog finished")
+        // Opened: its plain line, then what the agent got, under its name.
+        see("As the agent got it")
         shot("13-harlo-message-open")
         // An MCP server's tool, named in words.
         see("dice roll")
