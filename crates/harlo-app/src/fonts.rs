@@ -31,8 +31,12 @@ pub use ffi::{font_families, set_application_font_family, system_font_family};
 /// JetBrains Mono (bundled too).
 pub const DEFAULT_UI_FONT: &str = "Geist";
 
-/// Loads the bundled Geist and JetBrains Mono (every weight harlo uses).
+/// Loads the bundled Geist and JetBrains Mono (every weight harlo uses) and
+/// the file-type icons ("Harlo File Icons", FileIcon.qml).
 pub fn load_bundled() {
+    if !ffi::add_application_font(&cxx_qt_lib::QString::from(":/qt/qml/harlo/fonts/FileIcons.ttf")) {
+        tracing::warn!("couldn't load the bundled file icons");
+    }
     for family in ["Geist", "JetBrainsMono"] {
         for w in ["Regular", "Italic", "Medium", "MediumItalic", "SemiBold", "SemiBoldItalic", "Bold", "BoldItalic"] {
             let path = format!(":/qt/qml/harlo/fonts/{family}-{w}.ttf");

@@ -564,6 +564,12 @@ ApplicationWindow {
                         visible: rightPanel.shownMode === "files"
                         onCloseRequested: windowSettings.rightMode = ""
                         onOpenRequested: path => chat.requestOpenFile(path)
+                        onViewImagesRequested: folder => {
+                            const list = JSON.parse(Images.list(folder))
+                            if (list.length === 0) return
+                            chat.fileEditor.gridNext = true
+                            chat.requestOpenFile(list[0])
+                        }
                     }
                 }
             }
@@ -3784,6 +3790,7 @@ ApplicationWindow {
     // and mark the changed part; a hunk stages from between the sides;
     // the view follows the file as it changes.
     SequentialAnimation {
+        id: diffSteps
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksdiff"
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
@@ -3895,6 +3902,15 @@ ApplicationWindow {
             win.check(box.visible && box.side === "old" && box.code === win.reviewKey && box.line === 3, "a comment on a removed line, inline (" + box.side + " " + box.code + " " + box.line + ")")
             box.close()
             chat.diffView.setLayout("auto")
+            Workspace.openDiffTab(win.argValue("--cwd=") + "/gone/deep/old.svg", false) } }
+        ScriptAction { script: win.waitUntil(diffSteps, () => chat.diffView.info !== null && chat.diffView.path.endsWith("old.svg"), 8000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            // Its folder is gone too: the diff comes from the repository still.
+            const dv = chat.diffView
+            const old = (dv.unified ? dv.rightPane : dv.leftPane).editor.text
+            win.check(dv.info !== null && dv.info.note === "" && dv.rows.length === 2 && old.indexOf("second") >= 0,
+                      "a file deleted with its folders still shows its diff (" + (dv.info ? dv.rows.length + " rows, " + JSON.stringify(old) : "loading") + ")")
             win.summary(); Qt.quit() } }
     }
 
@@ -6460,6 +6476,306 @@ ApplicationWindow {
             win.shot("terminal-glyphs"); win.summary(); Qt.quit() } }
     }
 
+    // The image viewer: a big image (a copy at the screen's size first, then
+    // whole), wheel zoom about the pointer, actual size, fit, turning,
+    // stepping to an image decoded ahead, an animation, the folder's grid
+    // (thumbnails made, cached on disk, read back) and filling the window.
+    property string imgDir: win.argValue("--cwd=") + "/pics"
+    property string imgBig: "big.png"
+    property real imgT0: 0
+    property var imgBefore: null
+    property real imgZoom: 0
+    property int imgFrames: 0
+    property bool imgSawPreview: false
+    property var imgStats: null
+    function imgView() { return chat.fileEditor.imageViewer.view }
+    function imgOpen(name) { win.imgT0 = Date.now(); win.imgSawPreview = false; Workspace.openFileTab(win.imgDir + "/" + name) }
+    function imgReady(name) { const v = win.imgView(); return v.path === win.imgDir + "/" + name && v.status === "ready" }
+    function imgDpr() { return win.screen ? win.screen.devicePixelRatio : 1 }
+    /// The grid's thumbnails in view.
+    function imgThumbs() {
+        const g = chat.fileEditor.imageViewer.grid
+        const out = []
+        for (const d of g.contentItem.children)
+            for (const c of d.children)
+                if (c.objectName === "imageThumb" && d.y + d.height > g.contentY && d.y < g.contentY + g.height) out.push(c)
+        return out
+    }
+    function imgThumbsReady() { const t = win.imgThumbs(); return t.length > 0 && t.every(c => c.status === "ready") }
+    Connections {
+        target: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksimages" ? chat.fileEditor.imageViewer.view : null
+        function onFrameChanged() { win.imgFrames++ }
+        function onStatusChanged() { if (win.imgView().status === "preview") win.imgSawPreview = true }
+    }
+    SequentialAnimation {
+        id: imgSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksimages"
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: { Workspace.addProject(win.argValue("--cwd=")); Workspace.newSession(1, "demo"); if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth=")) } }
+        PauseAnimation { duration: 1000 }
+        // A big one: more than a texture's side; a JPEG shows a copy at the
+        // screen's size first.
+        ScriptAction { script: win.imgBig = TestInput.readFile(win.imgDir + "/big.png") !== "" ? "big.png" : "big.jpg" }
+        ScriptAction { script: win.imgOpen(win.imgBig) }
+        ScriptAction { script: win.waitUntil(imgSteps, () => win.imgReady(win.imgBig), 30000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const v = win.imgView()
+            console.log("PERF image 9000x6000 " + win.imgBig + ": first on screen", v.firstMs.toFixed(1), "ms, whole", v.loadMs.toFixed(1), "ms")
+            win.check(v.imageWidth === 9000 && v.imageHeight === 6000, "the big image whole: " + v.imageWidth + "×" + v.imageHeight + " (" + v.status + ")")
+            if (win.imgBig === "big.jpg")
+                win.check(win.imgSawPreview && v.firstMs < v.loadMs, "a copy at the screen's size first (" + v.firstMs.toFixed(0) + " ms), then the whole (" + v.loadMs.toFixed(0) + " ms)")
+            win.check(v.fit && v.zoom < 0.2, "fitted to the view (" + (v.zoom * 100).toFixed(1) + "%)")
+            win.imgOpen("img1.png") } }
+        ScriptAction { script: win.waitUntil(imgSteps, () => win.imgReady("img1.png"), 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const v = win.imgView()
+            const viewer = chat.fileEditor.imageViewer
+            console.log("PERF image 1200x800:", v.loadMs.toFixed(1), "ms")
+            win.check(v.loadMs < 1000, "a 1200×800 image on screen in " + v.loadMs.toFixed(0) + " ms")
+            win.check(v.activeFocus, "the image has the keys")
+            const dpr = win.imgDpr()
+            const fitZoom = Math.min(1, v.width * dpr / 1200, v.height * dpr / 800)
+            win.check(v.fit && Math.abs(v.zoom - fitZoom) < 1e-6, "fitted: " + v.zoom.toFixed(4) + " (" + fitZoom.toFixed(4) + ")")
+            win.check(viewer.images.length === 33 && viewer.images[2] === win.imgDir + "/img1.png" && viewer.images[3] === win.imgDir + "/img2.png" && viewer.images[11] === win.imgDir + "/img10.png",
+                      "the folder's 33 images in natural order (" + viewer.images.slice(0, 5).map(p => p.split("/").pop()).join(" ") + " …), not the text file")
+            // Four wheel notches at a point left of the middle.
+            const x = v.width * 0.35, y = v.height * 0.5
+            win.imgBefore = JSON.parse(v.imagePointAt(x, y))
+            win.imgZoom = v.zoom
+            const p = v.mapToItem(null, x, y)
+            for (let i = 0; i < 4; i++) TestInput.wheel(p.x, p.y, 120) } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const v = win.imgView()
+            const after = JSON.parse(v.imagePointAt(v.width * 0.35, v.height * 0.5))
+            const moved = Math.hypot(after[0] - win.imgBefore[0], after[1] - win.imgBefore[1])
+            win.check(Math.abs(v.zoom / win.imgZoom - Math.pow(1.25, 4)) < 0.01, "four wheel notches zoom ×2.44 (" + (v.zoom / win.imgZoom).toFixed(3) + ")")
+            win.check(moved < 1, "the point under the pointer stays under it (moved " + moved.toFixed(2) + " image px)")
+            win.check(!v.fit, "zoomed, it no longer follows the view's size")
+            TestInput.key(Qt.Key_1, 0) } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const v = win.imgView()
+            win.check(Math.abs(v.zoom - 1) < 1e-9 && v.pixelated === false, "1: actual size (" + v.zoom + ")")
+            const tl = JSON.parse(v.imagePointAt(0, 0))
+            win.check(Math.abs(tl[0] - Math.round(tl[0])) < 1e-6 && Math.abs(tl[1] - Math.round(tl[1])) < 1e-6, "at actual size the pixels sit on whole screen pixels (" + tl + ")")
+            TestInput.key(Qt.Key_Plus, 0) } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const v = win.imgView()
+            win.check(Math.abs(v.zoom - 1.5) < 1e-6, "+ zooms a step, to 150% (" + v.zoom + ")")
+            TestInput.key(Qt.Key_Plus, 0) } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const v = win.imgView()
+            win.check(Math.abs(v.zoom - 2) < 1e-6 && v.pixelated, "the next step is 200%, pixels drawn as squares (" + v.zoom + ", " + v.pixelated + ")")
+            v.pan(-100000, -100000)
+            const br = JSON.parse(v.imagePointAt(v.width - 0.01, v.height - 0.01))
+            win.check(Math.abs(br[0] - 1200) < 0.1 && Math.abs(br[1] - 800) < 0.1, "dragged far, it stops at the image's corner (" + br + ")")
+            TestInput.key(Qt.Key_0, 0) } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const v = win.imgView()
+            const dpr = win.imgDpr()
+            win.check(v.fit && Math.abs(v.zoom - Math.min(1, v.width * dpr / 1200, v.height * dpr / 800)) < 1e-6, "0 fits it again (" + v.zoom.toFixed(4) + ")")
+            TestInput.key(Qt.Key_R, 0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const v = win.imgView()
+            const dpr = win.imgDpr()
+            win.check(v.turn === 90 && Math.abs(v.zoom - Math.min(1, v.width * dpr / 800, v.height * dpr / 1200)) < 1e-6, "R turns it right and fits it turned (" + v.turn + "°, " + v.zoom.toFixed(4) + ")")
+            const c = JSON.parse(v.imagePointAt(v.width / 2, v.height / 2))
+            win.check(Math.abs(c[0] - 600) < 0.6 && Math.abs(c[1] - 400) < 0.6, "turned about its middle (" + c + ")")
+            TestInput.key(Qt.Key_R, Qt.ShiftModifier) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(win.imgView().turn === 0, "Shift+R turns it back")
+            // (img2 was decoded ahead while this one was looked at.)
+            win.imgT0 = Date.now()
+            TestInput.key(Qt.Key_Right, 0) } }
+        ScriptAction { script: win.waitUntil(imgSteps, () => win.imgReady("img2.png"), 10000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            const v = win.imgView()
+            console.log("PERF image next (decoded ahead):", v.loadMs.toFixed(2), "ms")
+            win.check(v.loadMs < 30, "→ steps to img2, decoded ahead: on screen in " + v.loadMs.toFixed(1) + " ms")
+            win.check(Workspace.activeKey === "file:" + win.imgDir + "/img2.png" && v.fit && v.turn === 0, "the file tab now shows img2, fitted")
+            TestInput.key(Qt.Key_K, 0) } }
+        ScriptAction { script: win.waitUntil(imgSteps, () => win.imgReady("img1.png"), 10000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            win.check(win.imgView().loadMs < 30, "K steps back, from memory (" + win.imgView().loadMs.toFixed(1) + " ms)")
+            win.imgOpen("anim.gif") } }
+        ScriptAction { script: win.waitUntil(imgSteps, () => win.imgReady("anim.gif"), 10000) }
+        ScriptAction { script: win.imgFrames = 0 }
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            const v = win.imgView()
+            win.check(v.frameCount === 3 && v.playing && win.imgFrames >= 4, "a GIF plays: " + v.frameCount + " frames, " + win.imgFrames + " shown in 0.9 s")
+            TestInput.key(Qt.Key_P, 0)
+            win.imgFrames = 0 } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const v = win.imgView()
+            win.check(!v.playing && win.imgFrames === 0, "P pauses it (" + win.imgFrames + " frames since)")
+            TestInput.key(Qt.Key_Period, 0) } }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            win.check(win.imgFrames === 1, ". shows the next frame (" + win.imgView().frame + ")")
+            win.imgOpen("logo.png") } }
+        ScriptAction { script: win.waitUntil(imgSteps, () => win.imgReady("logo.png"), 10000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            const v = win.imgView()
+            const dpr = win.imgDpr()
+            win.check(v.fit && Math.abs(v.zoom - Math.min(1, v.width * dpr / 400, v.height * dpr / 400)) < 1e-6, "a small image isn't enlarged to fit (" + v.zoom + ")")
+            win.imgT0 = Date.now()
+            win.imgStats = JSON.parse(Images.stats())
+            TestInput.key(Qt.Key_G, 0) } }
+        ScriptAction { script: win.waitUntil(imgSteps, () => win.imgThumbsReady(), 20000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            const viewer = chat.fileEditor.imageViewer
+            const shown = win.imgThumbs().length
+            const st = JSON.parse(Images.stats())
+            console.log("PERF image grid:", shown, "thumbnails made in", Date.now() - win.imgT0, "ms;", JSON.stringify(st))
+            win.check(viewer.gridMode && viewer.grid.count === 33 && viewer.grid.activeFocus, "G shows the folder's 33 images as a grid, with the keys")
+            win.check(win.imgThumbsReady(), "every thumbnail in view is drawn (" + shown + ")")
+            win.check(st.diskThumbs >= shown - 1 && st.thumbsMade - win.imgStats.thumbsMade >= shown - 1, "they're kept on disk (" + st.diskThumbs + " files)")
+            win.check(viewer.grid.currentIndex === 32, "the grid starts at the image shown (" + viewer.grid.currentIndex + ")")
+            TestInput.key(Qt.Key_Escape, 0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const viewer = chat.fileEditor.imageViewer
+            win.check(!viewer.gridMode && win.imgView().activeFocus, "Esc goes back to the image")
+            // Again, with only the disk cache.
+            Images.forgetMemory()
+            win.imgStats = JSON.parse(Images.stats())
+            win.imgT0 = Date.now()
+            TestInput.key(Qt.Key_G, 0) } }
+        ScriptAction { script: win.waitUntil(imgSteps, () => win.imgThumbsReady(), 20000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            const st = JSON.parse(Images.stats())
+            const ms = Date.now() - win.imgT0
+            console.log("PERF image grid from the disk cache:", ms, "ms;", JSON.stringify(st))
+            const read = st.thumbsFromDisk - win.imgStats.thumbsFromDisk
+            win.check(read >= win.imgThumbs().length - 1, "opened again, the thumbnails come from disk (" + read + " read, " + (st.thumbsMade - win.imgStats.thumbsMade) + " made: those just past the view the first time)")
+            const g = chat.fileEditor.imageViewer.grid
+            g.currentIndex = 0
+            TestInput.key(Qt.Key_L, 0)
+            TestInput.key(Qt.Key_L, 0)
+            TestInput.key(Qt.Key_Return, 0) } }
+        ScriptAction { script: win.waitUntil(imgSteps, () => win.imgReady("img1.png"), 10000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            win.check(!chat.fileEditor.imageViewer.gridMode && Workspace.activeKey === "file:" + win.imgDir + "/img1.png", "L L Enter opens the third image (" + Workspace.activeKey.split("/").pop() + ")")
+            TestInput.key(Qt.Key_F, 0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const v = win.imgView()
+            win.check(chat.fileEditor.imageViewer.filled && v.width === win.width, "F fills the window (" + v.width + " of " + win.width + ")")
+            TestInput.key(Qt.Key_Escape, 0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const v = win.imgView()
+            win.check(!chat.fileEditor.imageViewer.filled && v.width < win.width && v.activeFocus, "Esc puts it back in the tab")
+            windowSettings.rightMode = "files" } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            // File-type icons: glyphs of the bundled font, in their type's colour.
+            const icons = win.findAllNames("fileIcon", win.contentItem).filter(i => i.visible && i.text !== "")
+            win.check(icons.length >= 3, "file icons in the tabs and the files panel (" + icons.length + ")")
+            win.check(icons.every(i => i.fontInfo.family === "Harlo File Icons" && i.contentWidth > 6 && i.contentHeight >= 12),
+                      "drawn from the bundled icon font (" + icons.map(i => i.fontInfo.family + " " + i.contentWidth.toFixed(0) + "×" + i.contentHeight.toFixed(0)).slice(0, 3).join(", ") + ")")
+            const rs = Workspace.fileIcon("src/main.rs"), toml = Workspace.fileIcon("Cargo.toml"), png = Workspace.fileIcon("a.png")
+            win.check(rs.startsWith("#ff7043") && rs !== toml && toml !== png && png.length >= 8, "each type its own glyph and colour (" + [rs, toml, png].map(t => t.substring(0, 7)).join(" ") + ")")
+            const pale = Theme.fileTint("#ffd54f")
+            const contrast = (Math.max(Theme.relativeLuminance(pale), Theme.relativeLuminance(Theme.background)) + 0.05) / (Math.min(Theme.relativeLuminance(pale), Theme.relativeLuminance(Theme.background)) + 0.05)
+            win.check(contrast >= 2.9, "a pale colour still stands out from the background (" + contrast.toFixed(2) + ":1)")
+            win.summary(); Qt.quit() } }
+    }
+
+    // Pictures in the chat: thumbnails for one you sent, one a tool
+    // returned, a file a command wrote, a reply's Markdown images (one gone
+    // from disk) and one a model made; a click opens the viewer over the
+    // chat, stepping through them all; Open in tab; the composer's.
+    function picTiles() { return win.findAllNames("pictureTile", chat.transcript).filter(t => win.shown(t)) }
+    function picViewer() { return chat.transcript.chatPictures.viewer }
+    property var picAll: []
+    SequentialAnimation {
+        id: picSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clickspictures"
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            // (Tall: the whole conversation at once.)
+            win.height = 2000
+            win.clickItem(win.findText("Make me a sun picture", sidebar), "the session") } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: { chat.transcript.scrollToEnd(); win.waitUntil(picSteps, () => win.picTiles().length >= 8 && win.picTiles().every(t => t.thumb.status === "ready" || t.thumb.status === "error"), 10000) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const tiles = win.picTiles()
+            const names = tiles.map(t => t.modelData.split("/").pop())
+            win.log("tiles:", tiles.map(t => t.modelData.split("/").pop() + "=" + t.thumb.status).join(" "), "all:", win.findAllNames("pictureTile", chat.transcript).length, "pictures:", chat.session.sessionPictures())
+            win.check(tiles.length === 8, "8 thumbnails: sent, returned, written, two Markdown images, a named file, made, pasted (" + names.join(", ") + ")")
+            const gone = tiles.filter(t => t.thumb.status === "error")
+            win.check(gone.length === 1 && gone[0].modelData.endsWith("/art/gone.png") && win.findText("No longer on disk", gone[0]) !== null, "a picture gone from disk says so")
+            win.check(tiles.filter(t => t.thumb.status === "ready").length === 7, "the rest are drawn")
+            win.check(win.findText("paste-1.png", chat.transcript) === null, "a pasted picture shows as itself, not its file's name")
+            win.check(win.findContaining("a yellow sun", chat.transcript) !== null, "a Markdown image's words stay in the reply")
+            const all = JSON.parse(chat.session.sessionPictures())
+            win.picAll = all
+            win.clickItem(tiles.find(t => t.modelData === all[1]), "the returned picture") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: win.waitUntil(picSteps, () => win.picViewer().view.status === "ready", 5000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            const v = win.picViewer()
+            win.check(chat.transcript.chatPictures.opened && v.view.imageWidth === 800 && v.view.activeFocus, "a click opens it over the chat (" + v.view.imageWidth + "×" + v.view.imageHeight + ", keys " + v.view.activeFocus + ")")
+            win.check(v.images.length === 7 && v.index === 1, "it steps through the chat's 7 pictures, this the 2nd (" + (v.index + 1) + " / " + v.images.length + ")")
+            win.check(v.view.width >= chat.transcript.width - 1, "over the whole conversation")
+            TestInput.key(Qt.Key_Right, 0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(picSteps, () => win.picViewer().view.status === "ready", 5000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            const v = win.picViewer()
+            win.check(v.path.endsWith("/art/sun.png") && v.view.imageWidth === 640 && chat.transcript.chatPictures.opened, "→ steps to the next picture, the file the command wrote")
+            TestInput.key(Qt.Key_G, 0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const v = win.picViewer()
+            win.check(v.gridMode && v.grid.count === 7, "G: all the chat's pictures as a grid (" + v.grid.count + ")")
+            TestInput.key(Qt.Key_Escape, 0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(!win.picViewer().gridMode && chat.transcript.chatPictures.opened, "Esc leaves the grid first")
+            TestInput.key(Qt.Key_Escape, 0) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            win.check(!chat.transcript.chatPictures.opened, "Esc again closes the viewer")
+            win.clickItem(win.picTiles().find(t => t.modelData === win.picAll[0]), "the sent picture") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const v = win.picViewer()
+            win.check(v.index === 0 && v.view.imageWidth === 300, "the picture you sent opens (" + v.view.imageWidth + ")")
+            TestInput.key(Qt.Key_T, 0) } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: {
+            win.check(!chat.transcript.chatPictures.opened && Workspace.activeKey.startsWith("file:") && chat.fileEditor.imageViewer.view.imageWidth === 300, "T opens it in the file tab (" + Workspace.activeKey.split("/").pop() + ")")
+            Workspace.open(Workspace.tabs.map(t => t.split("\t")[0]).find(k => !k.startsWith("file:")) || "")
+            chat.session.addAttachment(win.argValue("--cwd=") + "/out/sun 2.png") } }
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: {
+            const thumbs = win.findAllNames("attachmentThumb", chat).filter(t => win.shown(t))
+            win.check(thumbs.length === 1 && thumbs[0].status === "ready", "a picture to send shows as a thumbnail (" + thumbs.map(t => t.status) + ")")
+            win.summary(); Qt.quit() } }
+    }
+
     // Scrolls the file editor a frame at a time (clicksbigfile), noting how
     // long each frame took to draw.
     property var cvFrames: []
@@ -7638,7 +7954,27 @@ ApplicationWindow {
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
             win.check(win.findAllNames("optionCard", chat.transcript).length === 0 && win.findText("Cards", chat.transcript) !== null, "Code shows the block's text, Cards the cards again")
-            win.clickText("Cards", chat.transcript)
+            win.clickText("Cards", chat.transcript) } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            // Waiting for your answer: a Choose on each card; one sends its name.
+            const chooses = win.findAllNames("optionChoose", chat.transcript).filter(b => b.visible)
+            win.check(chooses.length === 2 && chooses.some(b => b.variant === "primary"), "a Choose button on each card, the recommended one filled (" + chooses.length + ")")
+            const [p0, p1] = chooses.map(b => b.mapToItem(null, 0, 0))
+            win.check(chooses.length === 2 && (Math.abs(p0.x - p1.x) < 1 || Math.abs(p0.y - p1.y) < 1),
+                      "side by side, the buttons line up (" + (p0 ? p0.y.toFixed(0) : "") + ", " + (p1 ? p1.y.toFixed(0) : "") + ")")
+            win.clickItem(chooses.find(b => b.Accessible.name === "Choose Match rows by key"), "Choose on the recommended card") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(visualSteps, () => win.chatText().indexOf("ok: Match rows by key") >= 0 && chat.session.status === "idle", 15000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const sent = ((win.modelRequests().slice(-1)[0] || {}).messages || []).filter(m => m.role === "user").slice(-1)[0]
+            const said = sent ? (typeof sent.content === "string" ? sent.content : JSON.stringify(sent.content)) : ""
+            win.check(said.indexOf("Match rows by key") >= 0, "the choice's name is sent as your answer (" + said.substring(0, 60) + ")")
+            const chosen = win.findAllNames("optionChosen", chat.transcript).filter(l => l.visible)
+            const cards = win.findAllNames("optionCard", chat.transcript)
+            win.check(chosen.length === 1 && win.findAllNames("optionChoose", chat.transcript).every(b => !b.visible), "the card is marked Chosen, the buttons gone")
+            win.check(cards.filter(c => c.opacity < 0.9).length === 1, "the other card steps back")
             win.sendByKeys("mock up the settings") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: win.waitUntil(visualSteps, () => win.chatText().indexOf("That's the change") >= 0 && chat.session.status === "idle", 15000) }

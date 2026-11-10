@@ -264,9 +264,8 @@ Popup {
                                     visible: row.item.kind === "file"
                                     anchors.centerIn: parent
                                     path: visible ? row.item.title : ""
-                                    width: 18
+                                    width: 16
                                     height: 16
-                                    fillMode: Image.Pad
                                 }
                                 Icon {
                                     visible: row.item.kind === "action" || row.item.kind === "project"

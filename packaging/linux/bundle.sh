@@ -51,7 +51,7 @@ done
 LIC=$APPDIR/usr/share/licenses/harlo
 install -Dm644 LICENSE "$LIC/LICENSE"
 install -Dm644 crates/harlo-app/themes/LICENSE "$LIC/themes-LICENSE"
-install -Dm644 crates/harlo-app/icons/file-types/LICENSE "$LIC/file-icons-LICENSE"
+install -Dm644 crates/harlo-app/fonts/FileIcons-LICENSE.txt "$LIC/file-icons-LICENSE"
 install -Dm644 crates/harlo-app/icons/REMIXICON-LICENSE "$LIC/remixicon-LICENSE"
 install -Dm644 crates/harlo-app/icons/PASEO-NOTICE "$LIC/paseo-NOTICE"
 install -Dm644 crates/harlo-app/sounds/NOTICE "$LIC/sounds-NOTICE"

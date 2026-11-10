@@ -251,7 +251,7 @@ impl FileBrowser {
             ROLE_DEPTH => QVariant::from(&r.depth),
             ROLE_IS_DIR => QVariant::from(&r.entry.is_dir),
             ROLE_EXPANDED => QVariant::from(&r.expanded),
-            ROLE_ICON => QVariant::from(&if r.entry.is_dir { QString::default() } else { QString::from(&crate::file_icons::url_for(&r.entry.name)) }),
+            ROLE_ICON => QVariant::from(&if r.entry.is_dir { QString::default() } else { QString::from(&crate::file_icons::icon_text(&r.entry.name)) }),
             _ => QVariant::default(),
         }
     }

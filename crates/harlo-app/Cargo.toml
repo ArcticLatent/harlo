@@ -41,4 +41,5 @@ libc = "0.2"
 cxx-qt-build.workspace = true
 
 [dev-dependencies]
+ttf-parser = "0.25"
 crypto_box = { version = "0.9", features = ["std"] }

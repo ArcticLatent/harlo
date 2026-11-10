@@ -391,7 +391,7 @@ Rectangle {
             anchors.leftMargin: 12
             anchors.rightMargin: 8
             spacing: 6
-            FileIcon { path: root.fileName; Layout.preferredWidth: 16; Layout.preferredHeight: 16; sourceSize: Qt.size(16, 16) }
+            FileIcon { path: root.fileName; Layout.preferredWidth: 16; Layout.preferredHeight: 16 }
             Label { text: root.fileName; color: Theme.foreground; font.pixelSize: Theme.px(13); font.bold: true; elide: Text.ElideRight; Layout.minimumWidth: 0; Layout.maximumWidth: implicitWidth }
             Label {
                 Layout.fillWidth: true

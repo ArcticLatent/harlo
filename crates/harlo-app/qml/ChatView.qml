@@ -466,6 +466,7 @@ Rectangle {
                 session: root.session
                 onOpenDiff: path => root.openDiff(path)
                 onOpenFileAt: (path, line) => { fileEditor.showLine(path, line); root.requestOpenFile(path) }
+                onOpenFile: path => root.requestOpenFile(path)
                 // Leaving the runs (Escape), or typing there: the composer.
                 onLeaveRuns: text => { if (text !== "") composer.insertText(text); else composer.focusInput() }
                 onEditRequested: row => root.session.editAndResend(row)
@@ -999,6 +1000,7 @@ Rectangle {
                     path: modelData
                     removable: true
                     onRemoveClicked: session.removeAttachment(index)
+                    onOpenRequested: transcript.showPicture(modelData)
                 }
             }
             Label { id: dropHint; visible: text !== ""; color: Theme.warning; font.pixelSize: Theme.px(12) }

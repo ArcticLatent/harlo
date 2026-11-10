@@ -330,6 +330,13 @@ struct RowView: View {
     @Environment(\.palette) private var p
     let row: Row
 
+    /// What you wrote after this row (an ```options block's question): nil
+    /// while nothing has followed.
+    var answerAfter: String? {
+        guard let rows = model.session?.rows, let at = rows.firstIndex(where: { $0.key == row.key }) else { return nil }
+        return rows[(at + 1)...].first { $0.kind == "user" }?.text
+    }
+
     var body: some View {
         switch row.kind {
         case "user":
@@ -340,7 +347,12 @@ struct RowView: View {
             if row.title.lowercased() == "mermaid" && model.drawsDiagrams {
                 DiagramBlock(source: row.text, code: CodeBlock(spans: codeSpans, language: row.title, raw: row.text))
             } else if row.title.lowercased() == "options", let choices = Visuals.options(row.text) {
-                OptionsBlock(choices: choices, code: CodeBlock(spans: codeSpans, language: row.title, raw: row.text))
+                let answer = answerAfter
+                OptionsBlock(choices: choices, code: CodeBlock(spans: codeSpans, language: row.title, raw: row.text),
+                             answer: answer,
+                             choosing: answer == nil && model.session.map { !$0.busy && $0.requests.isEmpty } == true) { name in
+                    Task { await model.send(name) }
+                }
             } else if row.title.lowercased() == "mockup" && model.showsMockups {
                 MockupBlock(source: row.text, code: CodeBlock(spans: codeSpans, language: row.title, raw: row.text))
             } else {

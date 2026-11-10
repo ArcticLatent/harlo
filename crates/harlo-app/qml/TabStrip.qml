@@ -90,7 +90,7 @@ Rectangle {
                         color: tab.active ? Theme.agentColor(tab.harness).ink : Theme.textMuted
                         ring: tab.active ? Theme.rowSelected : hover.hovered ? Theme.rowHover : Theme.chrome
                     }
-                    FileIcon { visible: tab.isFile || tab.isDiff; path: tab.isFile ? tab.key.substring(5) : tab.diffPath; Layout.preferredWidth: 14; Layout.preferredHeight: 14; sourceSize: Qt.size(14, 14) }
+                    FileIcon { visible: tab.isFile || tab.isDiff; path: tab.isFile ? tab.key.substring(5) : tab.diffPath; Layout.preferredWidth: 14; Layout.preferredHeight: 14 }
                     Icon { visible: tab.key.startsWith("view:"); name: tab.key === "view:new" ? "chat-new" : tab.key.startsWith("view:run:") ? "node-tree" : tab.key.substring(5); color: Theme.primary; implicitWidth: 12; implicitHeight: 12 }
                     Label {
                         id: label

@@ -115,6 +115,10 @@ fn render_block(events: Vec<Event<'_>>) -> MdBlock {
         Event::InlineMath(s) | Event::DisplayMath(s) => Event::Code(s),
         Event::End(TagEnd::HtmlBlock) => Event::SoftBreak,
         Event::Start(Tag::HtmlBlock) => Event::SoftBreak,
+        // An image: its words, in italics (the picture shows under the
+        // reply, from its file).
+        Event::Start(Tag::Image { .. }) => Event::Start(Tag::Emphasis),
+        Event::End(TagEnd::Image) => Event::End(TagEnd::Emphasis),
         other => other,
     });
     let mut html = String::new();
@@ -406,6 +410,13 @@ mod tests {
         let blocks = r.render("Hello <img src=x onerror=alert(1)> world");
         assert!(blocks[0].html.contains("&lt;img"));
     }
+    #[test]
+    fn images_read_as_their_words() {
+        let mut r = MarkdownRenderer::default();
+        let blocks = r.render("See ![a red sun](art/sun.png) here.");
+        assert!(blocks[0].html.contains("<em>a red sun</em>") && !blocks[0].html.contains("<img"), "{}", blocks[0].html);
+    }
+
 
     #[test]
     fn commit_reveals_whole_lines() {

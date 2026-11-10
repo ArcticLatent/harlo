@@ -5,6 +5,7 @@ mod accounts;
 mod audio;
 mod chat_session;
 mod code_view;
+mod image_view;
 mod ci;
 mod diagnostics;
 mod diagrams;

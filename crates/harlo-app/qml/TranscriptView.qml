@@ -21,6 +21,8 @@ Item {
     signal openDiff(string path)
     // A file at a line (a listing's line number, or a file's name in it).
     signal openFileAt(string path, int line)
+    /// A file to open in the file tab (a picture from the viewer).
+    signal openFile(string path)
     // Escape from a run's line, or typing in a run: back to the composer
     // (with what was typed).
     signal leaveRuns(string text)
@@ -47,6 +49,49 @@ Item {
     readonly property var subagents: session.subagentsJson !== "" ? JSON.parse(session.subagentsJson) : []
 
     function scrollToEnd() { view.follow = true; view.scrollToEnd() }
+    // A picture in the chat (one you sent, a tool returned, a reply has):
+    // the image viewer over the conversation, stepping through all of them.
+    function showPicture(path) {
+        const all = JSON.parse(root.session.sessionPictures())
+        if (all.indexOf(path) < 0) all.push(path)
+        chatPictures.show(all, path)
+    }
+    Popup {
+        id: chatPictures
+        objectName: "chatPictures"
+        parent: root
+        x: 0
+        y: 0
+        width: root.width
+        height: root.height
+        padding: 0
+        modal: true
+        focus: true
+        // (Esc is the viewer's: out of the grid first, then closed.)
+        closePolicy: Popup.NoAutoClose
+        readonly property alias viewer: chatViewer
+        function show(list, path) {
+            chatViewer.gridMode = false
+            chatViewer.pictureList = list
+            chatViewer.path = path
+            chatViewer.source = path
+            open()
+            Qt.callLater(() => chatViewer.focusView())
+        }
+        background: Rectangle { color: Theme.codeBg }
+        Overlay.modal: Rectangle { color: "transparent" }
+        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Math.round(Theme.motion * 0.5) } }
+        exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Math.round(Theme.motion * 0.4) } }
+        contentItem: ImageViewer {
+            id: chatViewer
+            pictureList: []
+            onCloseRequested: chatPictures.close()
+            onOpenInTab: p => { chatPictures.close(); root.openFile(p) }
+        }
+        onClosed: { chatViewer.source = ""; chatViewer.path = ""; chatViewer.pictureList = [] }
+    }
+    property alias chatPictures: chatPictures
+
     // A reply's picture full size, inside harlo.
     PictureViewer { id: pictureViewer }
     property alias pictureViewer: pictureViewer
@@ -76,7 +121,7 @@ Item {
         if (act(kind) && act(prev)) return 0
         // The reply opens with the agent's avatar and name.
         if (root.opensTurn(prev)) return 22 + root.headHeight
-        if (kind === "markdown" && prev === "markdown") return 8
+        if ((kind === "markdown" || kind === "images") && prev === "markdown") return 8
         if (act(kind) || act(prev)) return 8
         return 14
     }
@@ -741,6 +786,8 @@ Item {
         property real took
         property string label
         property string command
+        /// Its pictures (files, a line each): returned, or ones it names.
+        property string images
         // Waiting for your approval (the row's own).
         property bool asking: false
         // Its run ("" for a call on its own).
@@ -1293,6 +1340,14 @@ Item {
                 }
             }
         }
+        PictureStrip {
+            Layout.fillWidth: true
+            Layout.topMargin: 4
+            Layout.bottomMargin: 2
+            side: 96
+            paths: card.images !== "" ? card.images.split("\n") : []
+            onOpenRequested: path => root.showPicture(path)
+        }
     }
     // A finished run, open: its summary line, then its thoughts and calls
     // in a box of its own height that scrolls (starting at its end, next
@@ -1375,6 +1430,7 @@ Item {
                                 took: cell.modelData.took
                                 label: cell.modelData.label
                                 command: cell.modelData.command
+                                images: cell.modelData.images || ""
                                 readsAfter: (view.count, root.session.readsAfter(box.group, cell.modelData.rowKey))
                                 group: box.group
                             }
@@ -1759,6 +1815,7 @@ Item {
                     required property string text
                     required property string title
                     required property string subtitle
+                    required property string images
                     // Attached file paths, one per line.
                     readonly property var files: title !== "" ? title.split("\n") : []
                     readonly property real gap: root.gapAbove("user", ListView.previousSection)
@@ -1842,6 +1899,11 @@ Item {
                                     font.pixelSize: Theme.px(13.5)
                                     font.weight: Font.DemiBold
                                 }
+                            }
+                            PictureStrip {
+                                width: parent.width
+                                paths: userRow.images !== "" ? userRow.images.split("\n") : []
+                                onOpenRequested: path => root.showPicture(path)
                             }
                             Flow {
                                 width: parent.width
@@ -1936,6 +1998,33 @@ Item {
                             } else Qt.openUrlExternally(link)
                         }
                         HoverHandler { cursorShape: md.hoveredLink ? Qt.PointingHandCursor : Qt.IBeamCursor }
+                    }
+                }
+            }
+
+            // A reply's pictures (Markdown images, files it names, ones the
+            // model made).
+            DelegateChoice {
+                roleValue: "images"
+                Item {
+                    id: picsRow
+                    required property string rowModel
+                    required property string images
+                    ListView.onAdd: if (Theme.motion > 0) picsRowFade.start()
+                    AddFade { id: picsRowFade; target: picsRow }
+                    readonly property real gap: root.gapAbove("images", ListView.previousSection)
+                    AgentHead { replyModel: picsRow.rowModel; visible: root.opensTurn(picsRow.ListView.previousSection); y: picsRow.gap - height - 10 }
+                    width: view.width
+                    implicitHeight: strip.paths.length > 0 ? strip.height + picsRow.gap : 0
+                    visible: implicitHeight > 0
+                    PictureStrip {
+                        id: strip
+                        x: view.columnX
+                        y: picsRow.gap
+                        width: view.columnWidth
+                        side: 160
+                        paths: picsRow.images !== "" ? picsRow.images.split("\n") : []
+                        onOpenRequested: path => root.showPicture(path)
                     }
                 }
             }
@@ -2095,6 +2184,11 @@ Item {
                                 y: 10
                                 width: parent.width - 20
                                 choices: codeRow.options && codeRow.options.choices ? codeRow.options.choices : []
+                                // (Looked at again as rows come: your answer is one.)
+                                readonly property var after: visible && root.count >= 0 ? JSON.parse(root.session.answerAfter(codeRow.rowKey)) : null
+                                answer: after ? after.text : ""
+                                choosing: after !== null && !after.answered && root.session.status !== "busy" && !root.session.hasRequest
+                                onChosen: name => root.session.send(name, "normal")
                             }
                             MockupView {
                                 id: mockupView
@@ -2222,6 +2316,7 @@ Item {
                     required property real took
                     required property string label
                     required property string command
+                    required property string images
                     // The agent waits for your approval to run this call.
                     readonly property bool asking: root.session.hasRequest && root.session.requestIsApproval && root.session.approvalRow === rowKey
                     // (Over the rows after it: its buttons are never covered.)
@@ -2297,6 +2392,7 @@ Item {
                             took: toolRow.took
                             label: toolRow.label
                             command: toolRow.command
+                            images: toolRow.images
                             asking: toolRow.asking
                             askLines: toolRow.askLines
                             readsAfter: (view.count, root.session.readsAfter(toolRow.group, toolRow.rowKey))

@@ -2445,7 +2445,7 @@ impl Workspace {
     }
 
     pub fn file_icon(&self, path: &QString) -> QString {
-        QString::from(&crate::file_icons::url_for(&path.to_string()))
+        QString::from(&crate::file_icons::icon_text(&path.to_string()))
     }
 
     pub fn project_list(&self) -> QStringList {

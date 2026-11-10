@@ -7,21 +7,6 @@ const FONTS: [&str; 8] = ["Regular", "Italic", "Medium", "MediumItalic", "SemiBo
 
 fn main() {
     println!("cargo::rerun-if-changed=fonts");
-    // File-type icons: bundled as resources, and their ids listed for
-    // src/file_icons.rs.
-    let mut icons: Vec<String> = std::fs::read_dir("icons/file-types")
-        .expect("icons/file-types")
-        .filter_map(|e| e.ok()?.file_name().into_string().ok())
-        .filter(|n| n.ends_with(".svg"))
-        .collect();
-    icons.sort();
-    // Sorted by id (not file name: "go-mod.svg" < "go.svg" but "go" < "go-mod").
-    let mut ids: Vec<&str> = icons.iter().map(|n| n.trim_end_matches(".svg")).collect();
-    ids.sort();
-    let ids: Vec<String> = ids.iter().map(|id| format!("{id:?}")).collect();
-    let out = Path::new(&std::env::var("OUT_DIR").unwrap()).join("file_icons.rs");
-    std::fs::write(out, format!("pub const ICONS: &[&str] = &[{}];\n", ids.join(", "))).unwrap();
-    println!("cargo::rerun-if-changed=icons/file-types");
     // Provider logos, shown next to the model.
     let mut providers: Vec<String> = std::fs::read_dir("icons/providers")
         .expect("icons/providers")
@@ -124,6 +109,8 @@ fn main() {
                 "qml/OptionsCards.qml",
                 "qml/MockupView.qml",
                 "qml/PictureViewer.qml",
+                "qml/ImageViewer.qml",
+                "qml/PictureStrip.qml",
                 "qml/SegmentedControl.qml",
                 "qml/PlanDock.qml",
                 "qml/InstanceSwitcher.qml",
@@ -166,10 +153,9 @@ fn main() {
                 "qml/AttachmentChip.qml",
             ]))
         .qrc_resources(
-            icons
-                .iter()
-                .map(|n| format!("icons/file-types/{n}"))
-                .chain(["harlo", "tray", "tray-busy", "tray-input"].map(|n| format!("icons/app/{n}.svg")))
+            ["harlo", "tray", "tray-busy", "tray-input"]
+                .map(|n| format!("icons/app/{n}.svg"))
+                .into_iter()
                 .chain(providers.iter().map(|n| format!("icons/providers/{n}")))
                 // Your avatar (the left rail, your turns in a chat).
                 .chain(["beanie", "classic", "glasses", "headphones", "jacket", "scarf"].map(|n| format!("icons/avatars/penguin-{n}.png")))
@@ -177,15 +163,19 @@ fn main() {
                 // (SIL OFL, fonts/Geist-OFL.txt, fonts/OFL.txt): the same
                 // whether or not they're installed.
                 .chain(FONTS.iter().flat_map(|w| [format!("fonts/Geist-{w}.ttf"), format!("fonts/JetBrainsMono-{w}.ttf")]))
+                // File-type icons as glyphs (fonts/file-icons.py, from Nerd
+                // Fonts: fonts/FileIcons-LICENSE.txt).
+                .chain(["fonts/FileIcons.ttf".to_owned()])
                 .collect::<Vec<_>>(),
         )
         .include_dir("cpp")
         .cpp_file("cpp/harlo_codeview.h")
+        .cpp_file("cpp/harlo_image.h")
         .qt_module("Quick")
         .qt_module("QuickControls2")
         .qt_module("Widgets")
         .qt_module("Test")
         .qt_module("Multimedia")
-        .files(["src/qt_base.rs", "src/chat_session.rs", "src/workspace.rs", "src/git_panel.rs", "src/file_browser.rs", "src/text_file.rs", "src/code_view.rs", "src/usage_stats.rs", "src/fonts.rs", "src/terminal_session.rs", "src/platform.rs", "src/test_input.rs", "src/dictation.rs", "src/audio.rs", "src/remotes.rs", "src/updates.rs", "src/mcp.rs", "src/phone.rs", "src/accounts.rs", "src/setup.rs", "src/diagrams.rs", "src/visuals.rs", "src/server_setup.rs"])
+        .files(["src/qt_base.rs", "src/chat_session.rs", "src/workspace.rs", "src/git_panel.rs", "src/file_browser.rs", "src/text_file.rs", "src/code_view.rs", "src/image_view.rs", "src/usage_stats.rs", "src/fonts.rs", "src/terminal_session.rs", "src/platform.rs", "src/test_input.rs", "src/dictation.rs", "src/audio.rs", "src/remotes.rs", "src/updates.rs", "src/mcp.rs", "src/phone.rs", "src/accounts.rs", "src/setup.rs", "src/diagrams.rs", "src/visuals.rs", "src/server_setup.rs"])
         .build();
 }

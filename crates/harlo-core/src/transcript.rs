@@ -20,6 +20,9 @@ pub enum RowKind {
     Thinking,
     Tool,
     Notice,
+    /// Pictures in a reply (a Markdown image, a file it names, one a model
+    /// made): `images` and `mentions`.
+    Images,
 }
 
 impl RowKind {
@@ -31,6 +34,7 @@ impl RowKind {
             Self::Thinking => "thinking",
             Self::Tool => "tool",
             Self::Notice => "notice",
+            Self::Images => "images",
         }
     }
 }
@@ -97,6 +101,12 @@ pub struct Row {
     pub label: String,
     /// Shell tool rows: the whole command.
     pub command: String,
+    /// Pictures it has: files (an image sent or returned inline, kept in
+    /// the cache; a Markdown image's path, maybe relative to the session's
+    /// folder).
+    pub images: Vec<String>,
+    /// Picture files it names, shown when they exist (maybe relative).
+    pub mentions: Vec<String>,
 }
 
 /// What harlo's own messages to an agent start with (a helper's report, an
@@ -159,7 +169,8 @@ enum Block {
     Text(String),
     Thinking(String),
     Tool { call_id: String, name: String, args: Value },
-    Image,
+    /// The picture's file in the cache (None: unreadable).
+    Image(Option<String>),
 }
 
 struct Item {
@@ -186,6 +197,32 @@ struct ToolRun {
     /// When it started and returned (unix ms; 0 unknown).
     started: i64,
     ended_at: i64,
+    /// Pictures it returned (files in the cache).
+    images: Vec<String>,
+}
+
+/// A tool's output naming more picture files than this is a listing: they
+/// aren't shown.
+const MENTIONS_FROM_OUTPUT: usize = 4;
+/// Picture files shown under a tool call, at most.
+const MENTIONS_SHOWN: usize = 8;
+
+/// A tool's arguments that name files or run commands (not a file's
+/// contents, an edit's text): their strings.
+fn collect_strings(v: &Value, f: &mut impl FnMut(&str)) {
+    const NAMING: [&str; 8] = ["path", "file", "command", "cmd", "out", "dest", "save", "target"];
+    let Some(o) = v.as_object() else { return };
+    for (k, x) in o {
+        let k = k.to_ascii_lowercase();
+        if !NAMING.iter().any(|n| k.contains(n)) {
+            continue;
+        }
+        match x {
+            Value::String(s) => f(s),
+            Value::Array(a) => a.iter().filter_map(Value::as_str).for_each(&mut *f),
+            _ => {}
+        }
+    }
 }
 
 /// Tool output beyond this is cut from the front for display.
@@ -246,7 +283,7 @@ impl Transcript {
                 match &mut item.blocks[*index] {
                     Block::Text(t) | Block::Thinking(t) => t.push_str(delta),
                     // Partial argument JSON: not shown until the call completes.
-                    Block::Tool { .. } | Block::Image => return false,
+                    Block::Tool { .. } | Block::Image(_) => return false,
                 }
                 let pos = self.by_id[id];
                 self.touch(pos);
@@ -473,6 +510,10 @@ impl Transcript {
                 run.ended = true;
                 run.is_error = message["isError"].as_bool().unwrap_or(false);
                 run.output = content_text(&message["content"]).into();
+                run.images = message["content"]
+                    .as_array()
+                    .map(|a| a.iter().filter(|b| b["type"] == "image").filter_map(crate::pictures::inline_file).collect())
+                    .unwrap_or_default();
                 if run.ended_at == 0 {
                     run.ended_at = message_time(message);
                 }
@@ -594,7 +635,8 @@ impl Transcript {
                         _ => None,
                     })
                     .collect();
-                let images = item.blocks.iter().filter(|b| matches!(b, Block::Image)).count();
+                let pictures: Vec<String> = item.blocks.iter().filter_map(|b| if let Block::Image(p) = b { p.clone() } else { None }).collect();
+                let images = item.blocks.iter().filter(|b| matches!(b, Block::Image(_))).count();
                 // harlo's own (a helper's report, …): a harlo row, the
                 // session it's about to open.
                 let joined = text.join("\n");
@@ -614,9 +656,13 @@ impl Transcript {
                 let (rest, ask_first) = harlo_harness::file_blocks::strip_ask_first(rest);
                 let (rest, plan) = harlo_harness::file_blocks::strip_plan(rest);
                 r.text = rest.to_owned();
+                // Pictures sent show as pictures (their files' names, as
+                // chips, would say it twice).
+                let files: Vec<String> = if pictures.is_empty() { files } else { files.into_iter().filter(|f| !crate::pictures::is_picture_name(f)).collect() };
                 r.title = files.join("\n");
+                r.images = pictures;
                 let mut tags = Vec::new();
-                if images > 0 && files.is_empty() {
+                if images > 0 && files.is_empty() && r.images.is_empty() {
                     tags.push(format!("{images} image{}", if images == 1 { "" } else { "s" }));
                 }
                 if let Some(s) = starter {
@@ -657,6 +703,17 @@ impl Transcript {
                                 let mut r = row(format!("{id}:{bi}:{mi}"), kind);
                                 (r.html, r.text, r.title) = (html, code, lang);
                                 rows.push(Arc::new(r));
+                            }
+                            // Its pictures, once it's written: Markdown images
+                            // and the picture files it names.
+                            if shown.len() == text.len() {
+                                let images = crate::pictures::markdown_images(text);
+                                let mentions: Vec<String> = crate::pictures::mentioned(text).into_iter().filter(|m| !images.contains(m)).collect();
+                                if !images.is_empty() || !mentions.is_empty() {
+                                    let mut r = row(format!("{id}:{bi}:pics"), RowKind::Images);
+                                    (r.images, r.mentions) = (images, mentions);
+                                    rows.push(Arc::new(r));
+                                }
                             }
                         }
                         Block::Thinking(text) => {
@@ -701,6 +758,22 @@ impl Transcript {
                             if run.ended {
                                 (r.result, r.diff) = crate::tool_facts::facts(name, args, &run.output, run.is_error);
                             }
+                            // Pictures it returned; else picture files it
+                            // names (in what it was asked; in what it said
+                            // when that's a few, not a listing).
+                            r.images = run.images.clone();
+                            if r.images.is_empty() {
+                                let mut mentions = Vec::new();
+                                collect_strings(args, &mut |t| mentions.extend(crate::pictures::mentioned(t)));
+                                let said = crate::pictures::mentioned(&run.output);
+                                if said.len() <= MENTIONS_FROM_OUTPUT {
+                                    mentions.extend(said);
+                                }
+                                let mut seen = std::collections::HashSet::new();
+                                mentions.retain(|m| seen.insert(m.clone()));
+                                mentions.truncate(MENTIONS_SHOWN);
+                                r.mentions = mentions;
+                            }
                             r.state = if run.running {
                                 "running"
                             } else if run.is_error {
@@ -724,7 +797,13 @@ impl Transcript {
                                 }
                             }
                         }
-                        Block::Image => {}
+                        // A picture the model made.
+                        Block::Image(Some(path)) => {
+                            let mut r = row(format!("{id}:{bi}:pic"), RowKind::Images);
+                            r.images = vec![path.clone()];
+                            rows.push(Arc::new(r));
+                        }
+                        Block::Image(None) => {}
                     }
                 }
                 if let Some(err) = error {
@@ -786,7 +865,7 @@ fn parse_blocks(message: &Value) -> Vec<Block> {
                         name: "web_search".into(),
                         args: json!({ "query": b["query"] }),
                     },
-                    Some("image") => Block::Image,
+                    Some("image") => Block::Image(crate::pictures::inline_file(b)),
                     _ => Block::Text(String::new()),
                 })
                 .collect()
@@ -1342,6 +1421,42 @@ mod tests {
         t.apply(&HarnessEvent::Notice { level: NoticeLevel::Warning, text: "MCP server failed".into(), system: true });
         t.apply(&HarnessEvent::Notice { level: NoticeLevel::Info, text: "/context output".into(), system: false });
         assert_eq!(t.rows().len(), 2);
+    }
+
+    #[test]
+    fn pictures_show_as_pictures() {
+        let dir = std::env::temp_dir().join(format!("harlo-transcript-pictures-{}", std::process::id()));
+        crate::pictures::TEST_DIR.with(|d| *d.borrow_mut() = Some(dir.clone()));
+        let png = json!({ "type": "image", "data": "iVBORw0KGgo=", "mimeType": "image/png" });
+        let mut t = Transcript::new();
+        t.load_messages(&[
+            json!({ "role": "user", "content": [{ "type": "text", "text": "<file name=\"/x/pasted/paste-1.png\"></file>\n<file name=\"/x/notes.md\">hi</file>\nWhat is this?" }, png.clone()] }),
+            json!({ "role": "assistant", "content": [
+                { "type": "toolCall", "id": "c1", "name": "read", "arguments": { "path": "shot.png" } },
+                { "type": "toolCall", "id": "c2", "name": "bash", "arguments": { "command": "python gen.py --out art/sun.png" } },
+                { "type": "toolCall", "id": "c3", "name": "write", "arguments": { "path": "gen.py", "content": "save('decoy.png')" } },
+                { "type": "toolCall", "id": "c4", "name": "bash", "arguments": { "command": "ls" } },
+            ] }),
+            json!({ "role": "toolResult", "toolCallId": "c1", "content": [png.clone()] }),
+            json!({ "role": "toolResult", "toolCallId": "c2", "content": [{ "type": "text", "text": "saved art/sun.png" }] }),
+            json!({ "role": "toolResult", "toolCallId": "c3", "content": [{ "type": "text", "text": "ok" }] }),
+            json!({ "role": "toolResult", "toolCallId": "c4", "content": [{ "type": "text", "text": "a.png b.png c.png d.png e.png" }] }),
+            json!({ "role": "assistant", "content": [{ "type": "text", "text": "Here it is: ![sun](art/sun.png), and a copy in `out/sun 2.png`." }, png] }),
+        ]);
+        let rows = t.rows();
+        let user = rows.iter().find(|r| r.kind == RowKind::User).unwrap();
+        assert_eq!((user.images.len(), user.title.as_str(), user.subtitle.as_str()), (1, "/x/notes.md", ""), "{user:?}");
+        assert!(std::path::Path::new(&user.images[0]).exists());
+        let tools: Vec<&Arc<Row>> = rows.iter().filter(|r| r.kind == RowKind::Tool).collect();
+        assert_eq!((tools[0].images.len(), tools[0].mentions.len()), (1, 0), "a read picture: the picture, not its name");
+        assert_eq!(tools[1].mentions, ["art/sun.png"]);
+        assert!(tools[2].mentions.is_empty(), "a written file's text isn't searched: {:?}", tools[2].mentions);
+        assert!(tools[3].mentions.is_empty(), "a listing's names aren't pictures to show");
+        let pics: Vec<&Arc<Row>> = rows.iter().filter(|r| r.kind == RowKind::Images).collect();
+        assert_eq!(pics.len(), 2, "{pics:?}");
+        assert_eq!((pics[0].images.clone(), pics[0].mentions.clone()), (vec!["art/sun.png".to_owned()], vec!["out/sun 2.png".to_owned()]));
+        assert_eq!(pics[1].images, user.images, "a picture the model made, from the same cache file");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

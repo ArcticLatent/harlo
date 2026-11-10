@@ -10,15 +10,38 @@ Rectangle {
     signal closeRequested()
     /// A file was clicked; the owner shows it (after any unsaved-edits prompt).
     signal openRequested(string path)
+    /// A folder's images, as a grid in the file tab.
+    signal viewImagesRequested(string folder)
     color: Theme.canvas
     clip: true
 
     property alias browser: browser
     FileBrowser { id: browser }
-    onFolderChanged: browser.setRoot(folder)
-    Component.onCompleted: browser.setRoot(folder)
+    onFolderChanged: { browser.setRoot(folder); countImages() }
+    Component.onCompleted: { browser.setRoot(folder); countImages() }
 
-    function absolute(rel) { return root.folder + "/" + rel }
+    /// Images in the folder itself.
+    property int rootImages: 0
+    function countImages() { rootImages = folder === "" || folder.startsWith("ssh://") ? 0 : JSON.parse(Images.list(folder)).length }
+    function absolute(rel) { return rel === "" ? root.folder : root.folder + "/" + rel }
+
+    AppMenu {
+        id: folderMenu
+        objectName: "filesFolderMenu"
+        property string path: ""
+        property int images: 0
+        AppMenuItem {
+            objectName: "filesViewImages"
+            text: folderMenu.images === 0 ? "No images here" : folderMenu.images === 1 ? "View 1 image" : "View " + folderMenu.images + " images"
+            enabled: folderMenu.images > 0
+            onTriggered: root.viewImagesRequested(folderMenu.path)
+        }
+    }
+    function folderMenuAt(path) {
+        folderMenu.path = path
+        folderMenu.images = JSON.parse(Images.list(path)).length
+        folderMenu.popup()
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -28,7 +51,14 @@ Rectangle {
             title: "Files"
             subtitle: root.folder.split("/").pop()
             onCloseRequested: root.closeRequested()
-            PanelButton { iconName: "refresh"; tip: "Refresh"; onClicked: browser.refresh() }
+            PanelButton {
+                objectName: "filesImagesButton"
+                visible: root.rootImages > 0
+                iconName: "grid"
+                tip: root.rootImages === 1 ? "View the image here" : "View the " + root.rootImages + " images here"
+                onClicked: root.viewImagesRequested(root.folder)
+            }
+            PanelButton { iconName: "refresh"; tip: "Refresh"; onClicked: { browser.refresh(); root.countImages() } }
         }
 
         Label {
@@ -75,10 +105,9 @@ Rectangle {
                         name: node.expanded ? "folder-open" : "folder"
                         color: node.expanded ? Theme.accent : Theme.textMuted
                     }
-                    Image {
+                    FileIcon {
                         visible: !node.isDir
-                        source: node.fileIcon
-                        sourceSize: Qt.size(16, 16)
+                        spec: node.fileIcon
                         Layout.preferredWidth: 16
                         Layout.preferredHeight: 16
                     }
@@ -92,6 +121,12 @@ Rectangle {
                     }
                 }
                 onClicked: node.isDir ? browser.toggle(index) : root.openRequested(root.absolute(node.rel))
+                // A folder's menu: its images.
+                TapHandler {
+                    acceptedButtons: Qt.RightButton
+                    enabled: node.isDir && !root.folder.startsWith("ssh://")
+                    onTapped: root.folderMenuAt(root.absolute(node.rel))
+                }
             }
         }
     }

@@ -562,7 +562,7 @@ impl GitPanel {
             let diff = match (&status, &selection) {
                 (Some(st), Some((path, staged))) if changed || force => {
                     let untracked = st.files.iter().any(|f| &f.path == path && f.untracked);
-                    load_diff(&st.root, path, *staged, untracked, split).ok()
+                    Some(load_diff(&st.root, path, *staged, untracked, split))
                 }
                 _ => None,
             };
@@ -609,15 +609,24 @@ impl GitPanel {
         self.as_mut().set_selected_path(QString::from(&path));
         self.as_mut().set_selected_staged(staged);
         let split = self.split_mode;
-        self.run(false, move || match load_diff(&root, &path, staged, untracked, split) {
-            Ok((diff, rows, split)) => vec![Outcome::Diff(diff, rows, split)],
-            Err(e) => vec![Outcome::Done(Err(format!("{e:#}")))],
+        self.run(false, move || {
+            let (diff, rows, split) = load_diff(&root, &path, staged, untracked, split);
+            vec![Outcome::Diff(diff, rows, split)]
         });
     }
 
     pub fn show_file(mut self: Pin<&mut Self>, path: &QString, staged: bool) {
         let file = PathBuf::from(path.to_string());
-        let Some(dir) = file.parent() else { return };
+        let Some(mut dir) = file.parent() else { return };
+        // A deleted file's folder may be gone too: the nearest one left
+        // (still in the repository).
+        if dir.is_absolute() {
+            while !dir.is_dir()
+                && let Some(up) = dir.parent()
+            {
+                dir = up;
+            }
+        }
         let dir = QString::from(&dir.to_string_lossy().into_owned());
         if self.directory != dir {
             self.as_mut().rust_mut().generation += 1;
@@ -991,8 +1000,13 @@ const MAX_SPLIT_ROWS: usize = 60_000;
 /// `[leftKind, leftNo, leftOffset, leftFrom, leftTo, rightKind, …]`
 /// (kinds: 0 same, 1 changed, 2 filler; numbers 0 for filler; from / to
 /// the changed part's columns, -1 when none), each hunk `[index, row]`.
+/// A side-by-side view with nothing to compare, only a note.
+fn note_view(note: &str) -> SplitView {
+    SplitView { left: String::new(), right: String::new(), json: serde_json::json!({ "rows": [], "hunks": [], "note": note }).to_string() }
+}
+
 fn split_view(root: &Path, path: &str, staged: bool, untracked: bool, diff: &FileDiff) -> SplitView {
-    let note = |n: &str| SplitView { left: String::new(), right: String::new(), json: serde_json::json!({ "rows": [], "hunks": [], "note": n }).to_string() };
+    let note = note_view;
     if diff.binary {
         return note("A binary file: there's no text to compare.");
     }
@@ -1016,14 +1030,28 @@ fn split_view(root: &Path, path: &str, staged: bool, untracked: bool, diff: &Fil
 }
 
 /// Loads a diff and renders its rows, or its side-by-side view (blocking).
-fn load_diff(root: &Path, path: &str, staged: bool, untracked: bool, split: bool) -> anyhow::Result<(FileDiff, Vec<DiffRow>, Option<SplitView>)> {
-    let diff = git::diff_file(root, path, staged, untracked)?;
+/// When git can't give it, the view says why (rather than loading forever).
+fn load_diff(root: &Path, path: &str, staged: bool, untracked: bool, split: bool) -> (FileDiff, Vec<DiffRow>, Option<SplitView>) {
+    let diff = match git::diff_file(root, path, staged, untracked) {
+        Ok(d) => d,
+        Err(e) => {
+            let why = format!("Couldn't compare the file: {e:#}");
+            let mut failed = FileDiff::default();
+            failed.path = path.to_owned();
+            if split {
+                return (failed, Vec::new(), Some(note_view(&why)));
+            }
+            let mut html = String::new();
+            harlo_core::markdown::escape_into(&mut html, &why);
+            return (failed, vec![DiffRow { kind: "note", old_no: 0, new_no: 0, html, hunk: -1 }], None);
+        }
+    };
     if split {
         let view = split_view(root, path, staged, untracked, &diff);
-        return Ok((diff, Vec::new(), Some(view)));
+        return (diff, Vec::new(), Some(view));
     }
     let rows = render_rows(&diff);
-    Ok((diff, rows, None))
+    (diff, rows, None)
 }
 
 fn render_rows(diff: &FileDiff) -> Vec<DiffRow> {

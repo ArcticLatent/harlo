@@ -153,6 +153,16 @@ pub mod qobject {
         /// finished run shows in one box).
         #[qinvokable]
         fn run_json(self: &ChatSession, group: &QString) -> QString;
+        /// Every picture in the conversation, in order (JSON list of files):
+        /// the viewer steps through them.
+        #[qinvokable]
+        #[cxx_name = "sessionPictures"]
+        fn session_pictures(self: &ChatSession) -> QString;
+        /// What you wrote after a row (an ```options block's question):
+        /// `{answered, text}`, `answered` false while nothing has followed.
+        #[qinvokable]
+        #[cxx_name = "answerAfter"]
+        fn answer_after(self: &ChatSession, key: &QString) -> QString;
         /// Answers the current dialog with a value (select/input/editor).
         #[qinvokable]
         fn answer_value(self: Pin<&mut ChatSession>, value: &QString);
@@ -349,6 +359,8 @@ const ROLE_DIFF: i32 = 0x10e;
 const ROLE_TOOK: i32 = 0x10f;
 const ROLE_LABEL: i32 = 0x110;
 const ROLE_COMMAND: i32 = 0x111;
+/// A row's pictures to show (files, a line each).
+const ROLE_IMAGES: i32 = 0x112;
 
 #[derive(Default)]
 pub struct ChatSessionRust {
@@ -834,6 +846,74 @@ impl ChatSession {
         PathBuf::from(self.cwd.to_string())
     }
 
+    /// A row's pictures to show: its own (a relative path is in the
+    /// session's folder) and the picture files it names that exist. (On
+    /// another machine, only those kept here.)
+    fn shown_pictures(&self, row: &Row) -> Vec<String> {
+        if row.images.is_empty() && row.mentions.is_empty() {
+            return Vec::new();
+        }
+        let folder = self.folder();
+        let remote = harlo_core::remote::host_of(&folder).is_some();
+        let whole = |p: &str| -> Option<PathBuf> {
+            let path = if let Some(rest) = p.strip_prefix("~/") {
+                PathBuf::from(std::env::var_os("HOME")?).join(rest)
+            } else {
+                PathBuf::from(p)
+            };
+            if path.is_absolute() {
+                Some(path)
+            } else if remote || folder.as_os_str().is_empty() {
+                None
+            } else {
+                Some(folder.join(path))
+            }
+        };
+        let mut out: Vec<String> = Vec::new();
+        let mut add = |p: PathBuf| {
+            let p = p.to_string_lossy().into_owned();
+            if !out.contains(&p) {
+                out.push(p);
+            }
+        };
+        for p in row.images.iter().filter_map(|p| whole(p)) {
+            // (A cache file is local even for another machine's session.)
+            if !remote || p.starts_with(harlo_core::pictures::cache_dir()) {
+                add(p);
+            }
+        }
+        for p in row.mentions.iter().filter_map(|p| whole(p)).filter(|p| !remote && p.is_file()) {
+            add(p);
+        }
+        out
+    }
+
+    pub fn session_pictures(&self) -> QString {
+        let mut all: Vec<String> = Vec::new();
+        for r in &self.rows {
+            for p in self.shown_pictures(r) {
+                if !all.contains(&p) {
+                    all.push(p);
+                }
+            }
+        }
+        QString::from(&serde_json::to_string(&all).unwrap_or_else(|_| "[]".into()))
+    }
+
+    pub fn answer_after(&self, key: &QString) -> QString {
+        let key = key.to_string();
+        let answer = self
+            .rows
+            .iter()
+            .position(|r| r.key == key)
+            .and_then(|at| self.rows[at + 1..].iter().find(|r| r.kind == harlo_core::RowKind::User));
+        let json = match answer {
+            Some(r) => serde_json::json!({ "answered": true, "text": r.text }),
+            None => serde_json::json!({ "answered": false, "text": "" }),
+        };
+        QString::from(&json.to_string())
+    }
+
     pub fn load_undo(mut self: Pin<&mut Self>) {
         let dir = self.folder();
         if dir.as_os_str().is_empty() {
@@ -969,6 +1049,7 @@ impl ChatSession {
                 serde_json::json!({
                     "rowKey": r.key, "kind": r.kind.as_str(), "text": r.text, "title": r.title, "subtitle": r.subtitle, "rowState": r.state,
                     "callId": r.call_id, "result": r.result, "diff": r.diff, "took": took, "label": r.label, "command": r.command,
+                    "images": self.shown_pictures(r).join("\n"),
                 })
             })
             .collect();
@@ -1466,6 +1547,7 @@ impl ChatSession {
             ROLE_TOOK => QVariant::from(&(if row.time > 0 && row.ended >= row.time { (row.ended - row.time) as f64 } else { 0.0 })),
             ROLE_LABEL => s(&row.label),
             ROLE_COMMAND => s(&row.command),
+            ROLE_IMAGES => s(&self.shown_pictures(row).join("\n")),
             _ => QVariant::default(),
         }
     }
@@ -1491,6 +1573,7 @@ impl ChatSession {
             (ROLE_TOOK, "took"),
             (ROLE_LABEL, "label"),
             (ROLE_COMMAND, "command"),
+            (ROLE_IMAGES, "images"),
         ] {
             roles.insert(role, QByteArray::from(name));
         }

@@ -20,7 +20,7 @@ Rectangle {
 
     TextFile { id: file }
     // Images are shown, not edited.
-    function isImagePath(p) { return /\.(png|jpe?g|gif|webp|bmp|svg|ico|tiff?)$/i.test(p) }
+    function isImagePath(p) { return Images.isImage(p) }
     readonly property bool isImage: isImagePath(path)
     // The loaded file is the one on screen (an older load may still be pending).
     readonly property bool current: file.path === path
@@ -29,6 +29,7 @@ Rectangle {
     // re-using one editor and swapping its text crashed Qt's syntax
     // highlighter, which still had queued work for the old text.
     readonly property var editor: editorLoader.item ? editorLoader.item.editor : null
+    readonly property alias imageViewer: imageViewer
 
     onPathChanged: { closeBars(); reload() }
     Component.onCompleted: reload()
@@ -42,12 +43,20 @@ Rectangle {
         imageGone = false
         imageStamp = isImagePath(path) ? Workspace.fileStamp(path) : ""
         editorLoader.active = false
-        zoomFit = true
+        // An image: the grid when asked for (a folder's "View images"), and
+        // the keys.
+        if (path !== "" && isImagePath(path)) {
+            imageViewer.gridMode = false
+            if (gridNext) Qt.callLater(() => imageViewer.showGrid(true))
+            else Qt.callLater(() => { if (root.visible) imageViewer.focusView() })
+        }
+        gridNext = false
         // Test the new path itself: `isImage` may not be re-evaluated yet
         // when this handler runs, and would still describe the previous file.
         if (path !== "" && !isImagePath(path)) file.load(path)
     }
-    property bool zoomFit: true
+    /// The next image opens in its folder's grid.
+    property bool gridNext: false
 
     // ---- the file changing on disk (e.g. an agent edited it) ---------------
     // "" | "changed" | "deleted": shown as a bar while there are unsaved edits
@@ -83,7 +92,7 @@ Rectangle {
         reload()
     }
     // Images: reload when the file changes on disk (an agent regenerated
-    // it, say); the version suffix makes Image fetch it again.
+    // it, say).
     property string imageStamp: ""
     property int imageVersion: 0
     property bool imageGone: false
@@ -95,8 +104,10 @@ Rectangle {
         onTriggered: {
             const stamp = Workspace.fileStamp(root.path)
             root.imageGone = stamp === ""
-            if (stamp !== "" && root.imageStamp !== "" && stamp !== root.imageStamp)
+            if (stamp !== "" && root.imageStamp !== "" && stamp !== root.imageStamp) {
                 root.imageVersion++
+                imageViewer.view.reload()
+            }
             root.imageStamp = stamp
         }
     }
@@ -141,7 +152,7 @@ Rectangle {
     readonly property bool loaded: editorLoader.item ? editorLoader.item.ready : false
     readonly property bool diskBarVisible: diskNotice !== ""
     readonly property string shownMessage: messageLabel.visible ? messageLabel.text : ""
-    readonly property string imageInfo: isImage ? image.status + " " + image.sourceSize.width + "x" + image.sourceSize.height : ""
+    readonly property string imageInfo: isImage ? imageViewer.view.status + " " + imageViewer.view.imageWidth + "x" + imageViewer.view.imageHeight : ""
     function typeText(t) { if (root.editor) root.editor.insert(root.editor.cursorPosition, t) }
 
     // ---- edits in one undo step ---------------------------------------------
@@ -282,19 +293,6 @@ Rectangle {
                     text: root.language
                     color: Theme.muted
                     font.pixelSize: Theme.px(11)
-                }
-                Label {
-                    visible: root.isImage && image.status === Image.Ready
-                    text: image.sourceSize.width + " × " + image.sourceSize.height + (root.zoomFit && image.paintedWidth < image.sourceSize.width ? "  ·  " + Math.round(100 * image.paintedWidth / image.sourceSize.width) + "%" : "")
-                    color: Theme.muted
-                    font.pixelSize: Theme.px(11)
-                }
-                FlatButton {
-                    visible: root.isImage
-                    text: root.zoomFit ? "100%" : "Fit"
-                    font.pixelSize: Theme.px(11)
-                    padding: 4
-                    onClicked: root.zoomFit = !root.zoomFit
                 }
                 Label {
                     objectName: "editorLineLabel"
@@ -479,52 +477,15 @@ Rectangle {
             }
         }
 
-        // Image viewer: fit to the area, or actual size with scrolling.
-        Flickable {
-            id: imageFlick
+        ImageViewer {
+            id: imageViewer
             Layout.fillWidth: true
             Layout.fillHeight: true
             visible: root.isImage
-            clip: true
-            contentWidth: root.zoomFit ? width : Math.max(width, image.sourceSize.width + 32)
-            contentHeight: root.zoomFit ? height : Math.max(height, image.sourceSize.height + 32)
-            boundsBehavior: Flickable.StopAtBounds
-            ScrollBar.vertical: ScrollBar { }
-            ScrollBar.horizontal: ScrollBar { }
-            // Checkerboard-ish backdrop so transparent images read clearly.
-            Rectangle { anchors.fill: parent; color: Theme.codeBg }
-            Image {
-                id: image
-                source: root.imagePath !== "" ? "file://" + root.imagePath + (root.imageVersion > 0 ? "?v=" + root.imageVersion : "") : ""
-                asynchronous: true
-                cache: false
-                fillMode: Image.PreserveAspectFit
-                smooth: true
-                mipmap: true
-                // Never upscale small images when fitting.
-                width: root.zoomFit ? Math.min(imageFlick.width - 32, sourceSize.width) : sourceSize.width
-                height: root.zoomFit ? Math.min(imageFlick.height - 32, sourceSize.height) : sourceSize.height
-                x: Math.max(16, (imageFlick.contentWidth - width) / 2)
-                y: Math.max(16, (imageFlick.contentHeight - height) / 2)
-            }
-            Label {
-                anchors.centerIn: parent
-                visible: image.status === Image.Error && !root.imageGone
-                text: "Could not load this image."
-                color: Theme.error
-            }
-            Rectangle {
-                visible: root.imageGone
-                anchors.horizontalCenter: parent.horizontalCenter
-                anchors.top: parent.top
-                anchors.topMargin: 12
-                implicitWidth: goneLabel.implicitWidth + 20
-                implicitHeight: 28
-                radius: 6
-                color: Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, 0.16)
-                border.color: Theme.warning
-                Label { id: goneLabel; anchors.centerIn: parent; text: "This image was deleted on disk."; color: Theme.foreground; font.pixelSize: Theme.px(12) }
-            }
+            path: root.isImage ? root.path : ""
+            source: root.imagePath
+            remote: root.remote
+            gone: root.imageGone
         }
 
         // The file changed (or vanished) on disk while you have unsaved edits.

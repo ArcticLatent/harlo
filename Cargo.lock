@@ -1402,6 +1402,7 @@ dependencies = [
  "tokio-tungstenite",
  "tracing",
  "tracing-subscriber",
+ "ttf-parser",
 ]
 
 [[package]]

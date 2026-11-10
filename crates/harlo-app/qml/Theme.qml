@@ -56,6 +56,24 @@ QtObject {
     // the page and a border that stands out from it, in the theme's own
     // colours.
     function blend(a, b, t) { return Qt.rgba(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, 1) }
+    // (Relative luminance, as contrast ratios are reckoned.)
+    function relativeLuminance(c) {
+        const ch = v => v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
+        return 0.2126 * ch(c.r) + 0.7152 * ch(c.g) + 0.0722 * ch(c.b)
+    }
+    /// A file type's colour (FileIcon), moved toward the text colour until it
+    /// stands out from the background (3:1), so a pale yellow still reads on
+    /// a light theme and a deep blue on a dark one.
+    function fileTint(hex) {
+        let c = Qt.color(hex)
+        const bg = relativeLuminance(background)
+        for (let i = 0; i < 6; i++) {
+            const l = relativeLuminance(c)
+            if ((Math.max(l, bg) + 0.05) / (Math.min(l, bg) + 0.05) >= 3) break
+            c = blend(c, foreground, 0.2)
+        }
+        return c
+    }
     // WCAG contrast between two colours, and the colour moved from `from`
     // toward `toward` just far enough to reach `target` against both the
     // canvas and the chrome, so small text stays readable in every theme.
