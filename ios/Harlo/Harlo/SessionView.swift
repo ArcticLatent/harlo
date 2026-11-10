@@ -181,6 +181,9 @@ struct SessionContent: View {
                 // (Solid, with a hairline: nothing of the conversation shows through.)
                 .background(Color(p.background).ignoresSafeArea(edges: .bottom))
                 .overlay(alignment: .top) { Rectangle().fill(Color(p.hairline)).frame(height: 1) }
+                // (For the UI tests: where the conversation's visible part ends.)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("sessionBottom")
             }
         }
         .screen()

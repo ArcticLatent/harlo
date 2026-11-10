@@ -288,7 +288,8 @@ jobs:
   ui-tests:
     if: github.event_name == 'workflow_dispatch' && inputs.uitests
     runs-on: macos-15
-    timeout-minutes: 75
+    # (The full set, five phones, takes 60–75 minutes.)
+    timeout-minutes: 100
     steps:
       - uses: actions/checkout@v6
 

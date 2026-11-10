@@ -50,17 +50,19 @@ final class HarloUITests: XCTestCase {
         e.tap()
     }
 
-    /// Taps `text` in the conversation once it's above the message box: at
-    /// the largest text sizes it can sit under the box, and the tap would
-    /// land there (on the model's button, say).
+    /// Taps `text` in the conversation once it's above everything under it
+    /// (the message box, the plan, a side question): at the largest text
+    /// sizes it can sit under them, and the tap would land there (on the
+    /// model's button, say).
     func tapInConversation(_ text: String, file: StaticString = #filePath, line: UInt = #line) {
         let e = element(text)
         guard e.waitForExistence(timeout: 8) else {
             XCTFail("nothing to tap: \(text)", file: file, line: line)
             return
         }
-        let box = app.textViews.firstMatch.exists ? app.textViews.firstMatch : app.textFields.firstMatch
-        for _ in 0..<5 where box.exists && e.frame.maxY > box.frame.minY - 24 {
+        let bottom = app.otherElements["sessionBottom"]
+        let box = bottom.exists ? bottom : app.textViews.firstMatch.exists ? app.textViews.firstMatch : app.textFields.firstMatch
+        for _ in 0..<6 where box.exists && e.frame.maxY > box.frame.minY - 24 {
             let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
             from.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)))
         }
