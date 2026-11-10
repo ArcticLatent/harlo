@@ -544,6 +544,7 @@ struct CodeBlock: View {
     let language: String
     var raw: String = ""
     @State private var whole = false
+    @AppStorage(CodeWrap.key) private var wrap = true
 
     /// Longer than this folds, to its first `shown` lines.
     static let long = 40
@@ -576,11 +577,12 @@ struct CodeBlock: View {
                 .accessibilityLabel("Copy code")
             }
             .padding(.horizontal, 10)
-            ScrollView(.horizontal, showsIndicators: false) {
+            CodeScroll(wrap: wrap) {
                 Text(Style.attributed(folded ? RichText.firstLines(spans, Self.shown) : spans, p, size: 15, inCode: true))
                     .textSelection(.enabled)
-                    .fixedSize(horizontal: true, vertical: false)
+                    .fixedSize(horizontal: !wrap, vertical: false)
                     .padding(10)
+                    .frame(maxWidth: wrap ? .infinity : nil, alignment: .leading)
             }
             .mask {
                 // Fading out where it's cut.
@@ -717,15 +719,16 @@ struct DiffLines: View {
     let diff: String
     /// Inside a card already (no card of its own).
     var bare = false
+    @AppStorage(CodeWrap.key) private var wrap = true
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        CodeScroll(wrap: wrap) {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(diff.split(separator: "\n", omittingEmptySubsequences: false).prefix(400).enumerated()), id: \.offset) { _, line in
                     let tint: RGBA? = line.hasPrefix("+") ? (p.token(9) ?? p.success) : line.hasPrefix("-") ? (p.token(10) ?? p.error) : nil
                     Text(line.isEmpty ? " " : String(line))
                         .font(Style.mono(11.5))
-                        .fixedSize(horizontal: true, vertical: false)
+                        .fixedSize(horizontal: !wrap, vertical: false)
                         .padding(.horizontal, 8)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(tint.map { Color($0).opacity(0.14) } ?? Color.clear)
@@ -735,6 +738,42 @@ struct DiffLines: View {
         }
         .background(bare ? Color(p.codeBackground) : Color.clear)
         .modifier(CardUnless(bare: bare, radius: 8, fill: p.codeBackground))
+    }
+}
+
+/// Long lines of code: wrapped to the screen (the default; Settings →
+/// Reviewing, or the button on a file or its changes), or kept whole and
+/// scrolled across.
+enum CodeWrap {
+    static let key = "wrapCode"
+}
+
+/// Code lines' container: as they are when wrapped, else in a sideways
+/// scroll.
+struct CodeScroll<Content: View>: View {
+    let wrap: Bool
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        if wrap {
+            content
+        } else {
+            ScrollView(.horizontal, showsIndicators: false) { content }
+        }
+    }
+}
+
+/// The button that wraps long lines, or unwraps them.
+struct WrapButton: View {
+    @Binding var wrap: Bool
+
+    var body: some View {
+        Button {
+            wrap.toggle()
+        } label: {
+            Image(systemName: wrap ? "arrow.left.and.right" : "text.alignleft")
+        }
+        .accessibilityLabel(wrap ? "Show long lines whole" : "Wrap long lines")
     }
 }
 

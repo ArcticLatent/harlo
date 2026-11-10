@@ -12,6 +12,7 @@ struct FileView: View {
     let line: Int
     @State private var file: FileText?
     @State private var problem: String?
+    @AppStorage(CodeWrap.key) private var wrap = true
 
     var name: String { path.split(separator: "/").last.map(String.init) ?? path }
 
@@ -32,6 +33,11 @@ struct FileView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
+                }
+                if file != nil {
+                    ToolbarItem(placement: .topBarLeading) {
+                        WrapButton(wrap: $wrap)
+                    }
                 }
                 if let f = file {
                     ToolbarItem(placement: .topBarLeading) {
@@ -59,7 +65,7 @@ struct FileView: View {
     func lines(_ f: FileText) -> some View {
         let width = String(f.lines.count).count
         return ScrollViewReader { proxy in
-            ScrollView([.vertical, .horizontal]) {
+            ScrollView(wrap ? [.vertical] : [.vertical, .horizontal]) {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     Text(f.path)
                         .font(Style.mono(11))
@@ -72,7 +78,8 @@ struct FileView: View {
                                 .font(Style.mono(12))
                                 .foregroundStyle(Color(p.muted))
                             Text(Style.attributed(f.spans(i), p, size: 14, inCode: true))
-                                .fixedSize(horizontal: true, vertical: false)
+                                .fixedSize(horizontal: !wrap, vertical: false)
+                                .frame(maxWidth: wrap ? .infinity : nil, alignment: .leading)
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 1)

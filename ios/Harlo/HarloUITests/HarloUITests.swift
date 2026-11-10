@@ -268,6 +268,17 @@ final class HarloUITests: XCTestCase {
         tap("sidebar.rs")
         see("merge_by_key")
         shot("21-diff")
+        // Long lines wrap to the screen; the button keeps them whole, to
+        // scroll across, and wraps them again.
+        let screen = app.windows.firstMatch.frame
+        let long = element("each project's sessions, newest first")
+        XCTAssertTrue(long.exists && long.frame.maxX <= screen.maxX + 1, "a long line wraps (\(long.frame) in \(screen))")
+        app.buttons["Show long lines whole"].tap()
+        XCTAssertTrue(app.buttons["Wrap long lines"].waitForExistence(timeout: 4), "the button now wraps them")
+        XCTAssertTrue(long.frame.maxX > screen.maxX, "kept whole, it runs past the screen (\(long.frame))")
+        shot("21-diff-whole")
+        app.buttons["Wrap long lines"].tap()
+        XCTAssertTrue(app.buttons["Show long lines whole"].waitForExistence(timeout: 4) && long.frame.maxX <= screen.maxX + 1, "wrapped again")
     }
 
     func test13ActionLog() {

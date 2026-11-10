@@ -17,6 +17,7 @@ struct SettingsView: View {
     @AppStorage("yourName") private var name = ""
     @AppStorage("undoTurns") private var undoOn = true
     @AppStorage("reviewComments") private var commentsOn = true
+    @AppStorage(CodeWrap.key) private var wrapCode = true
     @AppStorage("dictationLanguage") private var dictationLanguage = ""
 
     /// The six penguins; the one you have ringed. Picking one needs harlo
@@ -103,10 +104,11 @@ struct SettingsView: View {
                 Section {
                     Toggle("Undo a turn", isOn: $undoOn)
                     Toggle("Comments on changes", isOn: $commentsOn)
+                    Toggle("Wrap long lines of code", isOn: $wrapCode)
                 } header: {
                     Text("Reviewing")
                 } footer: {
-                    Text("Undo: long-press the agent's reply (or tap ↶ next to View diff) to put the folder's files back as they were before it (harlo on your computer keeps the snapshots; its Settings → Git turns them off). Comments: tap a line of a file's changes to comment on it, then send them all to the agent.")
+                    Text("Undo: long-press the agent's reply (or tap ↶ next to View diff) to put the folder's files back as they were before it (harlo on your computer keeps the snapshots; its Settings → Git turns them off). Comments: tap a line of a file's changes to comment on it, then send them all to the agent. Wrapping fits code to the screen; off, long lines stay whole and scroll across (also the button on a file and its changes).")
                 }
                 if model.demo {
                     Section {

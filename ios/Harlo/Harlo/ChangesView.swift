@@ -143,6 +143,7 @@ struct DiffView: View {
     @State private var loading = true
     /// Comments on lines (Settings → Comments on changes).
     @AppStorage("reviewComments") private var commentsOn = true
+    @AppStorage(CodeWrap.key) private var wrap = true
     @State private var commenting: FileDiff.Line?
     @State private var commentText = ""
 
@@ -154,9 +155,10 @@ struct DiffView: View {
     }
 
     var body: some View {
-        // (Up and down, then across: a two-way scroll view centres a short diff.)
+        // (Up and down, then across: a two-way scroll view centres a short
+        // diff. Wrapped, only up and down.)
         ScrollView(.vertical) {
-            ScrollView(.horizontal, showsIndicators: false) {
+            CodeScroll(wrap: wrap) {
                 if let d = diff {
                     VStack(alignment: .leading, spacing: 0) {
                         if d.binary {
@@ -234,6 +236,9 @@ struct DiffView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
+                WrapButton(wrap: $wrap)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
                 if let d = diff {
                     HStack(spacing: 6) {
                         Text("+\(d.added)").foregroundStyle(Color(p.token(9) ?? p.success))
@@ -279,8 +284,10 @@ struct DiffView: View {
             Text(l.kind == .added ? "+" : l.kind == .removed ? "−" : " ")
                 .frame(width: 18)
                 .foregroundStyle(tint.map { Color($0) } ?? Color(p.muted))
+            // (Wrapped, its further rows start under its first's code.)
             Text(l.text.isEmpty ? " " : l.text)
-                .fixedSize(horizontal: true, vertical: false)
+                .fixedSize(horizontal: !wrap, vertical: false)
+                .frame(maxWidth: wrap ? .infinity : nil, alignment: .leading)
                 .padding(.trailing, 12)
         }
         .font(Style.mono(12))
