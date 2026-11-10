@@ -1139,6 +1139,10 @@ final class RecordingTests: XCTestCase {
         (m, s) = try await open("plan")
         for _ in 0..<250 where (s.plan?.steps.count ?? 0) < 3 { try await Task.sleep(nanoseconds: 20_000_000) }
         XCTAssertEqual(s.plan?.steps.count, 3)
+        // The plan's sheet reads the specs as it opens: none in the
+        // recording, and no alert for it (one would close the sheet).
+        await m.loadSpecs()
+        XCTAssertNil(m.alert, "specs that can't be read say nothing")
         XCTAssertTrue(tools(s).contains { ToolName.words($0.title, running: false) == "dice roll" })
         (m, s) = try await open("helpers")
         XCTAssertTrue(s.rows.contains { $0.fromHarlo && !$0.label.isEmpty })

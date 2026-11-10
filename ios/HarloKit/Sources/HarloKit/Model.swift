@@ -840,12 +840,14 @@ public final class HarloModel {
         return await with { c, k in try await c.reviewStep(k, step: step.id, agent: agent) } != nil
     }
 
-    /// The open session's repository's specs.
+    /// The open session's repository's specs. Quietly: they're extra on
+    /// the plan's sheet, and an alert there (specs on a host that's gone,
+    /// say) could close the sheet it opens with.
     public func loadSpecs() async {
         guard let s = session else { return }
         if demo || samples != nil { s.specs = Self.sampleSpecs; return }
-        guard features.contains("plan") else { return }
-        if let specs = await with({ c, k in try await c.specs(k) }) { s.specs = specs }
+        guard features.contains("plan"), let c = client, !s.liveKey.isEmpty else { return }
+        if let specs = try? await c.specs(s.liveKey) { s.specs = specs }
     }
 
     /// Diagrams drawn this run (by source, mode and colours).

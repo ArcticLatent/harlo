@@ -372,6 +372,9 @@ jobs:
                   human = a.get("suggestedHumanReadableName") or a["exportedFileName"]
                   base, ext = os.path.splitext(human)
                   base = re.sub(r"_\d+_[0-9A-Fa-f-]{36}$", "", base)
+                  # (The upload refuses " : < > | * ? \r \n in a name: a failed
+                  # query's debug description names its element in quotes.)
+                  base = re.sub(r'[":<>|*?\r\n]', "", base)
                   os.replace(os.path.join(raw, a["exportedFileName"]), os.path.join(out, base + ext))
           try:
               s = json.load(open(os.path.join(out, "summary.json")))
