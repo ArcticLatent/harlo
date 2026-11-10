@@ -77,9 +77,14 @@ struct FileView: View {
                             Text(String(i + 1).leftPadded(to: width))
                                 .font(Style.mono(12))
                                 .foregroundStyle(Color(p.muted))
-                            Text(Style.attributed(f.spans(i), p, size: 14, inCode: true))
-                                .fixedSize(horizontal: !wrap, vertical: false)
-                                .frame(maxWidth: wrap ? .infinity : nil, alignment: .leading)
+                            if wrap, let line = CodeLines.lines(f.spans(i)).first {
+                                WrappedLine(indent: line.indent, font: Style.mono(12)) {
+                                    Text(Style.attributed(line.spans.isEmpty ? [Span(" ")] : line.spans, p, size: 14, inCode: true))
+                                }
+                            } else {
+                                Text(Style.attributed(f.spans(i), p, size: 14, inCode: true))
+                                    .fixedSize(horizontal: true, vertical: false)
+                            }
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 1)

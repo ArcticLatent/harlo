@@ -284,11 +284,19 @@ struct DiffView: View {
             Text(l.kind == .added ? "+" : l.kind == .removed ? "−" : " ")
                 .frame(width: 18)
                 .foregroundStyle(tint.map { Color($0) } ?? Color(p.muted))
-            // (Wrapped, its further rows start under its first's code.)
-            Text(l.text.isEmpty ? " " : l.text)
-                .fixedSize(horizontal: !wrap, vertical: false)
-                .frame(maxWidth: wrap ? .infinity : nil, alignment: .leading)
+            // (Wrapped, its further rows start under its code, past its
+            // indentation.)
+            if wrap {
+                let (n, rest) = CodeLines.indent(Substring(l.text))
+                WrappedLine(indent: n, font: Style.mono(12)) {
+                    Text(rest.isEmpty ? " " : String(rest))
+                }
                 .padding(.trailing, 12)
+            } else {
+                Text(l.text.isEmpty ? " " : l.text)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(.trailing, 12)
+            }
         }
         .font(Style.mono(12))
         .padding(.vertical, 1)

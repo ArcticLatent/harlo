@@ -577,12 +577,25 @@ struct CodeBlock: View {
                 .accessibilityLabel("Copy code")
             }
             .padding(.horizontal, 10)
-            CodeScroll(wrap: wrap) {
-                Text(Style.attributed(folded ? RichText.firstLines(spans, Self.shown) : spans, p, size: 15, inCode: true))
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: !wrap, vertical: false)
-                    .padding(10)
-                    .frame(maxWidth: wrap ? .infinity : nil, alignment: .leading)
+            let shown = folded ? RichText.firstLines(spans, Self.shown) : spans
+            if wrap {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(CodeLines.lines(shown).enumerated()), id: \.offset) { _, line in
+                        WrappedLine(indent: line.indent, font: Style.mono(13)) {
+                            Text(Style.attributed(line.spans.isEmpty ? [Span(" ")] : line.spans, p, size: 15, inCode: true))
+                        }
+                    }
+                }
+                .textSelection(.enabled)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    Text(Style.attributed(shown, p, size: 15, inCode: true))
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(10)
+                }
             }
             .mask {
                 // Fading out where it's cut.
@@ -726,9 +739,18 @@ struct DiffLines: View {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(diff.split(separator: "\n", omittingEmptySubsequences: false).prefix(400).enumerated()), id: \.offset) { _, line in
                     let tint: RGBA? = line.hasPrefix("+") ? (p.token(9) ?? p.success) : line.hasPrefix("-") ? (p.token(10) ?? p.error) : nil
-                    Text(line.isEmpty ? " " : String(line))
-                        .font(Style.mono(11.5))
-                        .fixedSize(horizontal: !wrap, vertical: false)
+                    Group {
+                        if wrap, let first = line.first {
+                            let (n, rest) = CodeLines.indent(line.dropFirst())
+                            WrappedLine(lead: String(first), indent: n, font: Style.mono(11.5)) {
+                                Text(rest.isEmpty ? " " : String(rest)).font(Style.mono(11.5))
+                            }
+                        } else {
+                            Text(line.isEmpty ? " " : String(line))
+                                .font(Style.mono(11.5))
+                                .fixedSize(horizontal: true, vertical: false)
+                        }
+                    }
                         .padding(.horizontal, 8)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(tint.map { Color($0).opacity(0.14) } ?? Color.clear)
@@ -759,6 +781,70 @@ struct CodeScroll<Content: View>: View {
             content
         } else {
             ScrollView(.horizontal, showsIndicators: false) { content }
+        }
+    }
+}
+
+/// A line of code, wrapped with a hanging indent: its further rows start
+/// under its own code, not at the margin, so the nesting still reads (and
+/// a line too long to fit after its indentation doesn't break there,
+/// leaving its first row empty). `lead` is shown before the indentation
+/// (a diff's + or −).
+struct WrappedLine<Code: View>: View {
+    var lead = ""
+    let indent: Int
+    let font: Font
+    @ViewBuilder let code: Code
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 0) {
+            if !lead.isEmpty { Text(lead).font(font).fixedSize() }
+            // (Hidden digits: a monospaced font's width, which spaces
+            // alone may not be given.)
+            if indent > 0 { Text(String(repeating: "0", count: indent)).font(font).fixedSize().hidden() }
+            code.frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+/// Code's lines and their indentation.
+enum CodeLines {
+    /// How far `s` is indented (a tab as 4), and the rest of it.
+    static func indent(_ s: Substring) -> (Int, Substring) {
+        var n = 0
+        var i = s.startIndex
+        while i < s.endIndex, s[i] == " " || s[i] == "\t" {
+            n += s[i] == "\t" ? 4 : 1
+            i = s.index(after: i)
+        }
+        return (n, s[i...])
+    }
+
+    /// Spans split into lines, each with its indentation taken off.
+    static func lines(_ spans: [Span]) -> [(indent: Int, spans: [Span])] {
+        var lines: [[Span]] = [[]]
+        for s in spans {
+            let parts = s.text.split(separator: "\n", omittingEmptySubsequences: false)
+            for (k, part) in parts.enumerated() {
+                if k > 0 { lines.append([]) }
+                if !part.isEmpty { var t = s; t.text = String(part); lines[lines.count - 1].append(t) }
+            }
+        }
+        return lines.map { line in
+            var n = 0
+            var out: [Span] = []
+            var leading = true
+            for var s in line {
+                if leading {
+                    let (k, rest) = indent(Substring(s.text))
+                    n += k
+                    if rest.isEmpty { continue }
+                    s.text = String(rest)
+                    leading = false
+                }
+                out.append(s)
+            }
+            return (n, out)
         }
     }
 }
