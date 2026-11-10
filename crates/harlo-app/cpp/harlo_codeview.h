@@ -1,6 +1,7 @@
 // The code view's Qt side: an item that shows an image Rust drew and hands
 // Rust its keys, mouse, wheel and input method as plain values. CodeView
-// (src/code_view.rs) derives from it and overrides the hooks.
+// (src/code_view.rs) derives from it and overrides the hooks; so does the
+// terminal (src/terminal_session.rs), which only draws.
 #pragma once
 
 #include <QtCore/QTimerEvent>
@@ -31,6 +32,9 @@ public:
         setCursor(Qt::IBeamCursor);
         setOpaquePainting(true);
         setAntialiasing(false);
+        // The image is drawn pixel for pixel: shown unfiltered, so an item
+        // at a fractional position stays sharp (filtered, it blurs).
+        setSmooth(false);
     }
 
     // The window's device pixels per logical pixel.
@@ -54,6 +58,13 @@ public:
     {
         if (hasActiveFocus())
             QGuiApplication::inputMethod()->update(Qt::ImCursorRectangle | Qt::ImEnabled);
+    }
+    // Only shows: the mouse and the keys go to the items around it.
+    void takeNoInput()
+    {
+        setAcceptedMouseButtons(Qt::NoButton);
+        setFlag(ItemAcceptsInputMethod, false);
+        unsetCursor();
     }
     // The mouse pointer: an I-beam over the text, an arrow over the gutter.
     void setTextCursor(bool text) { setCursor(text ? Qt::IBeamCursor : Qt::ArrowCursor); }

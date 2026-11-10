@@ -2,8 +2,8 @@ import QtQuick
 import QtQuick.Controls
 import harlo
 
-// One terminal: a shell in `cwd`, drawn line by line in the code font and
-// the theme's colours. Typing goes to the shell; Ctrl+Shift+C / Ctrl+Shift+V
+// One terminal: a shell in `cwd`, drawn by Rust (TerminalSession) in the
+// code font and the theme's colours. Typing goes to the shell; Ctrl+Shift+C / Ctrl+Shift+V
 // copy and paste; drag selects; the wheel scrolls the history; a click on a
 // link opens it.
 Rectangle {
@@ -26,8 +26,8 @@ Rectangle {
     readonly property real pad: 8
     readonly property int cols: Math.max(2, Math.floor((width - 2 * pad - 10) / cellW))
     readonly property int rows: Math.max(1, Math.floor((height - 2 * pad) / cellH))
-    readonly property real cellW: Math.max(1, metrics.advanceWidth("M"))
-    readonly property real cellH: Math.max(1, Math.ceil(metrics.height))
+    readonly property real cellW: Math.max(1, term.cellWidth)
+    readonly property real cellH: Math.max(1, term.cellHeight)
 
     // 16 ANSI colours from the theme, then foreground, background, cursor, selection.
     readonly property var termColors: {
@@ -42,8 +42,16 @@ Rectangle {
     }
     onTermColorsChanged: term.setPalette(termColors)
 
-    TerminalSession { id: term }
-    FontMetrics { id: metrics; font.family: Theme.mono; font.pixelSize: Theme.mpx(13) }
+    // The screen and its cursor (under the mouse area below).
+    TerminalSession {
+        id: term
+        objectName: "terminalScreen"
+        anchors.fill: parent
+        fontFamily: Theme.mono
+        fontPixelSize: Theme.mpx(13)
+        padding: root.pad
+        focused: root.activeFocus
+    }
 
     /// Typed into the shell once it has started (then cleared).
     property string initialCommand: ""
@@ -93,52 +101,6 @@ Rectangle {
         if (!term.running) return
         term.key(event.key, event.modifiers, event.text)
         event.accepted = true
-    }
-
-    // Screen
-    Column {
-        id: screen
-        x: root.pad
-        y: root.pad
-        Repeater {
-            model: term
-            Item {
-                required property string html
-                width: root.cols * root.cellW
-                height: root.cellH
-                Text {
-                    text: html
-                    textFormat: Text.RichText
-                    color: Theme.foreground
-                    font.family: Theme.mono
-                    font.pixelSize: Theme.mpx(13)
-                    renderType: Text.NativeRendering
-                }
-            }
-        }
-    }
-
-    // Cursor: a block when focused, an outline otherwise; blinks while idle.
-    Rectangle {
-        id: cursor
-        visible: term.cursorVisible && term.running
-        x: root.pad + term.cursorCol * root.cellW
-        y: root.pad + term.cursorRow * root.cellH
-        width: root.cellW
-        height: root.cellH
-        color: root.activeFocus ? Theme.primary : "transparent"
-        border.color: Theme.primary
-        opacity: root.activeFocus && blink.off ? 0.25 : (root.activeFocus ? 0.7 : 1)
-        Timer {
-            id: blink
-            property bool off: false
-            interval: 600
-            repeat: true
-            running: root.activeFocus && cursor.visible
-            onTriggered: off = !off
-            onRunningChanged: off = false
-        }
-        Connections { target: term; function onCursorColChanged() { blink.off = false; blink.restart() } }
     }
 
     MouseArea {

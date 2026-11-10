@@ -551,7 +551,8 @@ Rectangle {
             // they do inline.
             readonly property bool added: dg.splitLeft.replace(/\n/g, "") === "" && dg.splitRight.trim() !== ""
             readonly property bool single: added || root.unified
-            readonly property real paneWidth: (width - middleWidth - rulerWidth) / (single ? 1 : 2)
+            // (Whole pixels: a pane at half a pixel draws its text blurred.)
+            readonly property real paneWidth: Math.floor((width - middleWidth - rulerWidth) / (single ? 1 : 2))
 
             DiffPane {
                 id: leftPane

@@ -55,6 +55,11 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.regex-syntax]
 opt-level = 3
+# The terminal's emulator: output read at full speed in the debug build too.
+[profile.dev.package.alacritty_terminal]
+opt-level = 3
+[profile.dev.package.vte]
+opt-level = 3
 
 # harlo-agent as shipped: one optimized unit (smaller, less memory per session).
 [profile.agent]

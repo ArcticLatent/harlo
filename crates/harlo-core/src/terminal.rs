@@ -1,7 +1,7 @@
 //! An embedded terminal: a shell on a pty, emulated by `alacritty_terminal`
-//! (the engine of the Alacritty terminal), rendered as one rich-text line per
-//! screen row. The UI calls `render` after a wakeup and sends input as
-//! bytes; keys are translated with `key_bytes`.
+//! (the engine of the Alacritty terminal), read out as a grid of coloured
+//! cells. The UI calls `render` after a wakeup and sends input as bytes;
+//! keys are translated with `key_bytes`.
 
 use std::borrow::Cow;
 use std::path::PathBuf;
@@ -16,7 +16,8 @@ use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::term::{Config, Term, TermMode};
 use alacritty_terminal::tty;
-use alacritty_terminal::vte::ansi::{Color, NamedColor, Rgb};
+use alacritty_terminal::vte::ansi::{Color, NamedColor};
+pub use alacritty_terminal::vte::ansi::Rgb;
 use anyhow::{Context, Result};
 
 const SCROLLBACK: usize = 10_000;
@@ -117,16 +118,66 @@ impl EventListener for Proxy {
     }
 }
 
-/// The visible screen: one rich-text line per row, and the cursor.
+/// One cell of the screen, its colours resolved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Cell {
+    pub c: char,
+    pub fg: Rgb,
+    pub bg: Rgb,
+    /// `BOLD`, `ITALIC`… below.
+    pub flags: u8,
+}
+
+impl Cell {
+    pub const BOLD: u8 = 1;
+    pub const ITALIC: u8 = 2;
+    pub const UNDERLINE: u8 = 4;
+    pub const STRIKE: u8 = 8;
+    /// A double-width character (CJK, most emoji): it covers the next cell too.
+    pub const WIDE: u8 = 16;
+    /// The second half of a wide character (nothing of its own).
+    pub const SPACER: u8 = 32;
+
+    pub fn blank(palette: &Palette) -> Cell {
+        Cell { c: ' ', fg: palette.foreground, bg: palette.background, flags: 0 }
+    }
+}
+
+/// How the cursor is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CursorShape {
+    #[default]
+    Block,
+    Underline,
+    Beam,
+}
+
+/// The visible screen: its cells, row by row, and the cursor.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Screen {
-    pub lines: Vec<String>,
+    pub cols: usize,
+    pub rows: usize,
+    /// `rows` × `cols`, row by row.
+    pub cells: Vec<Cell>,
     pub cursor_row: i32,
     pub cursor_col: i32,
     /// Hidden by the program, or scrolled out of view.
     pub cursor_visible: bool,
+    pub cursor_shape: CursorShape,
     /// Rows scrolled back into history (0 = at the bottom).
     pub scrolled_back: usize,
+}
+
+impl Screen {
+    pub fn row(&self, r: usize) -> &[Cell] {
+        self.cells.get(r * self.cols..(r + 1) * self.cols).unwrap_or_default()
+    }
+
+    /// A row's text, without its trailing blanks.
+    pub fn row_text(&self, r: usize) -> String {
+        let text: String = self.row(r).iter().filter(|c| c.flags & Cell::SPACER == 0).map(|c| if c.c == '\0' { ' ' } else { c.c }).collect();
+        text.trim_end().to_owned()
+    }
 }
 
 pub struct Terminal {
@@ -285,21 +336,27 @@ impl Terminal {
         let _ = self.sender.send(Msg::Shutdown);
     }
 
-    /// The visible screen as rich text in `palette`'s colours.
-    pub fn render(&self, palette: &Palette) -> Screen {
+    /// Rows scrolled back into history (0 = at the bottom).
+    pub fn scrolled_back(&self) -> usize {
+        self.term.lock().grid().display_offset()
+    }
+
+    /// Reads the visible screen into `screen` in `palette`'s colours.
+    pub fn render(&self, palette: &Palette, screen: &mut Screen) {
         let term = self.term.lock();
         let content = term.renderable_content();
         let offset = content.display_offset as i32;
-        let lines = term.screen_lines();
+        let (rows, cols) = (term.screen_lines(), term.columns());
         let colors = content.colors;
         let selection = content.selection;
-        let mut rows: Vec<Vec<(char, Style)>> = vec![Vec::new(); lines];
+        screen.rows = rows;
+        screen.cols = cols;
+        screen.cells.clear();
+        screen.cells.resize(rows * cols, Cell::blank(palette));
         for cell in content.display_iter {
-            if cell.flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER) {
-                continue;
-            }
             let row = cell.point.line.0 + offset;
-            if row < 0 || row as usize >= lines {
+            let col = cell.point.column.0;
+            if row < 0 || row as usize >= rows || col >= cols {
                 continue;
             }
             let selected = selection.is_some_and(|s| s.contains(cell.point));
@@ -317,26 +374,35 @@ impl Terminal {
             if selected {
                 bg = palette.selection_bg;
             }
-            let style = Style {
-                fg: (fg != palette.foreground).then_some(fg),
-                bg: (bg != palette.background).then_some(bg),
-                bold: cell.flags.contains(Flags::BOLD),
-                italic: cell.flags.contains(Flags::ITALIC),
-                underline: cell.flags.intersects(Flags::ALL_UNDERLINES),
-                strike: cell.flags.contains(Flags::STRIKEOUT),
-            };
-            rows[row as usize].push((cell.c, style));
+            let mut flags = 0;
+            for (has, bit) in [
+                (Flags::BOLD, Cell::BOLD),
+                (Flags::ITALIC, Cell::ITALIC),
+                (Flags::ALL_UNDERLINES, Cell::UNDERLINE),
+                (Flags::STRIKEOUT, Cell::STRIKE),
+                (Flags::WIDE_CHAR, Cell::WIDE),
+                (Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER, Cell::SPACER),
+            ] {
+                if cell.flags.intersects(has) {
+                    flags |= bit;
+                }
+            }
+            let c = if flags & Cell::SPACER != 0 || cell.c == '\0' || cell.c == '\t' { ' ' } else { cell.c };
+            screen.cells[row as usize * cols + col] = Cell { c, fg, bg, flags };
         }
         let cursor = content.cursor;
         let cursor_row = cursor.point.line.0 + offset;
-        let hidden = matches!(cursor.shape, alacritty_terminal::vte::ansi::CursorShape::Hidden) || !content.mode.contains(TermMode::SHOW_CURSOR);
-        Screen {
-            lines: rows.iter().map(|r| line_html(r)).collect(),
-            cursor_row,
-            cursor_col: cursor.point.column.0 as i32,
-            cursor_visible: !hidden && cursor_row >= 0 && (cursor_row as usize) < lines,
-            scrolled_back: content.display_offset,
-        }
+        use alacritty_terminal::vte::ansi::CursorShape as Shape;
+        let hidden = matches!(cursor.shape, Shape::Hidden) || !content.mode.contains(TermMode::SHOW_CURSOR);
+        screen.cursor_row = cursor_row;
+        screen.cursor_col = cursor.point.column.0 as i32;
+        screen.cursor_visible = !hidden && cursor_row >= 0 && (cursor_row as usize) < rows;
+        screen.cursor_shape = match cursor.shape {
+            Shape::Underline => CursorShape::Underline,
+            Shape::Beam => CursorShape::Beam,
+            _ => CursorShape::Block,
+        };
+        screen.scrolled_back = content.display_offset;
     }
 }
 
@@ -385,16 +451,6 @@ fn link_in(text: &[char], at: usize) -> Option<String> {
     (!rest.is_empty() && offset < from_chars + url.chars().count()).then(|| url.to_owned())
 }
 
-#[derive(Clone, Copy, PartialEq, Default)]
-struct Style {
-    fg: Option<Rgb>,
-    bg: Option<Rgb>,
-    bold: bool,
-    italic: bool,
-    underline: bool,
-    strike: bool,
-}
-
 fn mix(a: Rgb, b: Rgb) -> Rgb {
     Rgb { r: ((a.r as u16 + b.r as u16) / 2) as u8, g: ((a.g as u16 + b.g as u16) / 2) as u8, b: ((a.b as u16 + b.b as u16) / 2) as u8 }
 }
@@ -437,59 +493,6 @@ fn resolve(color: Color, overrides: &alacritty_terminal::term::color::Colors, pa
             }
         }
     }
-}
-
-fn hex(c: Rgb) -> String {
-    format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b)
-}
-
-/// One row as Qt rich text: runs of equal style become spans; spaces are
-/// non-breaking so columns line up; trailing default spaces are dropped.
-fn line_html(cells: &[(char, Style)]) -> String {
-    let end = cells.iter().rposition(|(c, s)| *c != ' ' || s.bg.is_some() || s.underline || s.strike).map_or(0, |i| i + 1);
-    let mut html = String::new();
-    let mut i = 0;
-    while i < end {
-        let style = cells[i].1;
-        let mut j = i;
-        let mut text = String::new();
-        while j < end && cells[j].1 == style {
-            match cells[j].0 {
-                '&' => text.push_str("&amp;"),
-                '<' => text.push_str("&lt;"),
-                '>' => text.push_str("&gt;"),
-                ' ' | '\0' => text.push_str("&nbsp;"),
-                c => text.push(c),
-            }
-            j += 1;
-        }
-        if style == Style::default() {
-            html.push_str(&text);
-        } else {
-            let mut css = String::new();
-            if let Some(fg) = style.fg {
-                css.push_str(&format!("color:{};", hex(fg)));
-            }
-            if let Some(bg) = style.bg {
-                css.push_str(&format!("background-color:{};", hex(bg)));
-            }
-            if style.bold {
-                css.push_str("font-weight:bold;");
-            }
-            if style.italic {
-                css.push_str("font-style:italic;");
-            }
-            match (style.underline, style.strike) {
-                (true, true) => css.push_str("text-decoration:underline line-through;"),
-                (true, false) => css.push_str("text-decoration:underline;"),
-                (false, true) => css.push_str("text-decoration:line-through;"),
-                _ => {}
-            }
-            html.push_str(&format!("<span style=\"{css}\">{text}</span>"));
-        }
-        i = j;
-    }
-    html
 }
 
 // Qt key codes and modifier bits (Qt::Key, Qt::KeyboardModifier).
@@ -609,11 +612,7 @@ mod tests {
     }
 
     #[test]
-    fn renders_styled_lines() {
-        let s = |c, fg| (c, Style { fg, ..Style::default() });
-        let red = Some(Rgb { r: 255, g: 0, b: 0 });
-        let html = line_html(&[s('a', None), s('<', red), s(' ', red), s('b', None), s(' ', None), s(' ', None)]);
-        assert_eq!(html, "a<span style=\"color:#ff0000;\">&lt;&nbsp;</span>b");
+    fn resolves_colours() {
         assert_eq!(parse_rgb("#80112233"), Some(Rgb { r: 0x11, g: 0x22, b: 0x33 }));
         assert_eq!(xterm_256(196), Rgb { r: 255, g: 0, b: 0 });
     }
@@ -627,13 +626,16 @@ mod tests {
         .unwrap();
         term.write(b"printf 'harlo-%s\\n' term-ok\r".to_vec());
         let palette = Palette::from_hex(&[]);
+        let mut screen = Screen::default();
         let deadline = Instant::now() + Duration::from_secs(5);
         let mut found = false;
         while Instant::now() < deadline && !found {
             let _ = rx.recv_timeout(Duration::from_millis(100));
-            found = term.render(&palette).lines.iter().any(|l| l.contains("harlo-term-ok"));
+            term.render(&palette, &mut screen);
+            found = (0..screen.rows).any(|r| screen.row_text(r).contains("harlo-term-ok"));
         }
-        assert!(found, "{:?}", term.render(&palette).lines);
+        assert!(found, "{:?}", (0..screen.rows).map(|r| screen.row_text(r)).collect::<Vec<_>>());
+        assert_eq!(screen.cells.len(), 60 * 10);
         term.write(b"exit\r".to_vec());
         let deadline = Instant::now() + Duration::from_secs(5);
         let mut exited = false;
@@ -654,11 +656,13 @@ mod tests {
         term.write(b"clear; printf '%s%s\\n' https://example.org/ codex/device/abc\r".to_vec());
         let url = "https://example.org/codex/device/abc";
         let palette = Palette::from_hex(&[]);
+        let mut screen = Screen::default();
         let deadline = Instant::now() + Duration::from_secs(5);
         let mut row = None;
         while Instant::now() < deadline && row.is_none() {
             let _ = rx.recv_timeout(Duration::from_millis(100));
-            row = term.render(&palette).lines.iter().position(|l| l.starts_with("https://example.org/"));
+            term.render(&palette, &mut screen);
+            row = (0..screen.rows).position(|r| screen.row_text(r).starts_with("https://example.org/"));
         }
         let row = row.expect("printed") as i32;
         assert_eq!(term.link_at(row, 3), url, "on its first row");

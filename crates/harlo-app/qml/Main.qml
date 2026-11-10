@@ -3807,6 +3807,11 @@ ApplicationWindow {
             win.check(dv.leftPane.editor.text.indexOf("line 10") >= 0 && dv.rightPane.editor.text.indexOf("line 10\n") < 0 && dv.rightPane.editor.text.indexOf("new B") >= 0, "old on the left, new on the right")
             win.check(win.findName("diffRuler") !== null && win.findName("hunk-stage-0") !== null, "the change map, and a hunk's buttons")
             win.check(dv.leftPane.width * 2 + 44 <= dv.width + 1, "the sides fit the view (" + dv.leftPane.width + " of " + dv.width + ")")
+            {
+                // Both sides on whole pixels (at half a pixel the text blurs).
+                const lx = dv.leftPane.editor.mapToItem(null, 0, 0).x, rx = dv.rightPane.editor.mapToItem(null, 0, 0).x
+                win.check(lx === Math.round(lx) && rx === Math.round(rx) && !dv.rightPane.editor.smooth, "both sides on whole pixels, drawn unfiltered (" + lx + ", " + rx + ")")
+            }
             const f = dv.rightPane.flick, third = Math.max(0, Math.min(f.contentHeight - f.height, dv.blocks[0].start * dv.lineHeight - f.height / 3))
             win.check(f.height > 0 && Math.abs(f.contentY - third) < 1, "it opens at the first change, a third of the way down (" + f.contentY + ", not " + third + ")")
             win.shotWindow("clicks-diff")
@@ -6359,6 +6364,100 @@ ApplicationWindow {
             win.check(ed.lineColoured(ed.lineCount - 3) && ed.lineColoured(ed.lineCount - 30), "…yet the lines on screen are coloured at once")
             win.shot("bigfile-huge-end")
             win.summary(); Qt.quit() } }
+    }
+
+    // The terminal under a flood of output: 20,000 coloured lines, then 400
+    // full screens redrawn in place. The window keeps answering and the
+    // screen keeps up.
+    property int termFrames: 0
+    property real termT0: 0
+    Connections {
+        target: win
+        enabled: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksterminalspeed"
+        function onFrameSwapped() { win.termFrames++ }
+    }
+    function termRun(command) {
+        const t = terminal.current.session
+        win.termFrames = 0
+        win.termT0 = Date.now()
+        win.perfStart()
+        win.termTicks = 0
+        win.termPaintMax = 0
+        win.termPaints = []
+        termTick.start()
+        t.paste(command)
+        t.key(Qt.Key_Return, 0, "\r")
+    }
+    // Ticks every 5 ms while the window is free: how much of the time it was.
+    property int termTicks: 0
+    property real termPaintMax: 0
+    property real termPaintLast: 0
+    property var termPaints: []
+    Timer {
+        id: termTick
+        interval: 5
+        repeat: true
+        onTriggered: {
+            win.termTicks++
+            const ms = terminal.current.session.paintMs
+            if (ms !== win.termPaintLast) { win.termPaints.push(Math.round(ms * 10) / 10); win.termPaintLast = ms }
+            win.termPaintMax = Math.max(win.termPaintMax, ms)
+        }
+    }
+    /// The terminal's rows run together, without spaces (wrapped lines whole).
+    function termScreen() {
+        const t = terminal.current.session
+        let text = ""
+        for (let r = 0; r < 300; r++) text += t.rowText(r)
+        return text.replace(/ /g, "")
+    }
+    function termReport(what, limit, file) {
+        perfPoll.stop()
+        termTick.stop()
+        const ms = Number(TestInput.readFile(win.argValue("--cwd=") + "/" + file).trim()) - win.termT0
+        const free = Math.round(100 * win.termTicks * 5 / (Date.now() - win.termT0))
+        console.log("PERF terminal " + what + ":", ms, "ms,", win.termFrames, "frames, slowest drawn in", win.termPaintMax.toFixed(2), "ms, window free", free + "%, longest hold", win.perfLongest(), "ms; stalls", JSON.stringify(win.perfStalls), "frames drawn in", JSON.stringify(win.termPaints))
+        win.check(win.perfLongest() < limit, what + ": the window held at most " + win.perfLongest() + " ms (" + ms + " ms in all, " + win.termFrames + " frames; it held 120–360 ms a frame when rows were rich text)")
+        win.check(win.termPaintMax < 30, what + ": every frame drawn in under 30 ms (slowest " + win.termPaintMax.toFixed(1) + ")")
+    }
+    SequentialAnimation {
+        id: termSpeedSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksterminalspeed"
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: { Workspace.addProject(win.argValue("--cwd=")); Workspace.newSession(1, "demo"); if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth=")) } }
+        PauseAnimation { duration: 1000 }
+        ScriptAction { script: { windowSettings.terminalHeight = win.height - 120; win.clickItem(win.findName("composerInput"), "composer"); TestInput.key(Qt.Key_QuoteLeft, Qt.ControlModifier) } }
+        ScriptAction { script: win.waitUntil(termSpeedSteps, () => terminal.visible && terminal.current !== null && terminal.current.running, 5000) }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: win.termRun("awk 'BEGIN{for(i=1;i<=20000;i++) printf \"\\033[3%dm%06d\\033[0m the quick brown fox jumps over the lazy dog \\033[1m%d\\033[0m\\n\", i%8, i, i*i}'; date +%s%3N > stream.done") }
+        ScriptAction { script: win.waitUntil(termSpeedSteps, () => TestInput.readFile(win.argValue("--cwd=") + "/stream.done") !== "", 60000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.termReport("20,000 lines", 100, "stream.done")
+            const screen = win.termScreen()
+            win.check(screen.indexOf("020000thequickbrownfoxjumpsoverthelazydog400000000") >= 0, "the last line drawn whole (" + screen.slice(-120) + ")")
+            win.shot("terminal-stream") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.termRun("clear; awk -v R=$LINES -v C=$COLUMNS 'BEGIN{for(f=0;f<400;f++){printf \"\\033[H\"; for(r=0;r<R-1;r++){for(c=0;c<int(C/10);c++) printf \"\\033[3%dm%-9d\\033[0m \", (r+c+f)%8, f*r+c; printf \"\\n\"}}}'; date +%s%3N > redraw.done") }
+        ScriptAction { script: win.waitUntil(termSpeedSteps, () => TestInput.readFile(win.argValue("--cwd=") + "/redraw.done") !== "", 60000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: { win.termReport("400 full screens", 100, "redraw.done"); win.shot("terminal-redraw") } }
+        PauseAnimation { duration: 300 }
+        // Every cell its own colours (a busy full-screen program).
+        ScriptAction { script: win.termRun("clear; awk -v R=$LINES -v C=$COLUMNS 'BEGIN{for(f=0;f<200;f++){printf \"\\033[H\"; for(r=0;r<R-1;r++){for(c=0;c<C;c++) printf \"\\033[38;5;%d;48;5;%dm%c\", (r+c+f)%256, (r*3+c+f*2)%256, 33+(r+c+f)%90; printf \"\\033[0m\\n\"}}}'; date +%s%3N > cells.done") }
+        ScriptAction { script: win.waitUntil(termSpeedSteps, () => TestInput.readFile(win.argValue("--cwd=") + "/cells.done") !== "", 60000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: { win.termReport("200 screens of coloured cells", 100, "cells.done"); win.shot("terminal-cells") } }
+        PauseAnimation { duration: 300 }
+        // Boxes, blocks, styles, wide characters.
+        ScriptAction { script: win.termRun("clear; printf '╭──┬──╮ ┏━━┓ ╔══╗\\n│ab│cd│ ┃  ┃ ║  ║\\n├──┼──┤ ┗━━┛ ╚══╝\\n╰──┴──╯ ▀▄█▌▐░▒▓ ▖▗▘▝▙▟\\n\\033[1mbold\\033[0m \\033[3mitalic\\033[0m \\033[4munderline\\033[0m \\033[9mstrike\\033[0m \\033[7minverse\\033[0m \\033[2mdim\\033[0m\\n漢字 テスト ✓ → é ü\\n'; date +%s%3N > glyphs.done") }
+        ScriptAction { script: win.waitUntil(termSpeedSteps, () => TestInput.readFile(win.argValue("--cwd=") + "/glyphs.done") !== "", 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            perfPoll.stop(); termTick.stop()
+            const screen = win.termScreen()
+            win.check(screen.indexOf("╭──┬──╮┏━━┓╔══╗") === 0 && screen.indexOf("漢字テスト✓→éü") > 0, "boxes and wide characters in their cells (" + screen + ")")
+            win.shot("terminal-glyphs"); win.summary(); Qt.quit() } }
     }
 
     // Scrolls the file editor a frame at a time (clicksbigfile), noting how

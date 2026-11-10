@@ -6,6 +6,7 @@ pub mod doc;
 pub mod fonts;
 pub mod lang;
 pub mod syntax;
+pub mod terminal;
 pub mod text;
 pub mod view;
 
