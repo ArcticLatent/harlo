@@ -257,6 +257,8 @@ ApplicationWindow {
         // `--size=WxH` (testing): override the saved window size.
         const size = argValue("--size=").split("x")
         if (size.length === 2) { width = Number(size[0]); height = Number(size[1]) }
+        // `--theme-mode=` (self-tests): every scenario in that appearance.
+        if (selftestDir !== "" && argValue("--theme-mode=")) Workspace.chooseThemeMode(argValue("--theme-mode="))
     }
     // Cheap `git status` poll to catch edits made elsewhere: often while the
     // panel is open, slowly otherwise (the header shows the change count).
@@ -7180,7 +7182,7 @@ ApplicationWindow {
             const v = chat.transcript.pictureViewer
             const frame = win.findName("viewerPictureFrame")
             win.check(v && v.opened && v.pictures.length === 2 && v.pic.label === "After" && frame && frame.width > 0,
-                      "clicking it opens it full size in harlo, After shown, Before beside it (" + (v ? v.pictures.length : "none") + ")")
+                      "clicking it opens it full size in harlo, After shown, Before beside it (" + (v ? v.pictures.length : "none") + "; " + (() => { const m = win.findName("mockupView"); return m && m.mock ? (m.mock.before ? m.mock.before.state : "-") + "/" + m.mock.after.state : "" })() + ")")
             win.shotWindow("clicks-harlo-mockup-viewer")
             // (Shown whole at its own size, there's nothing to switch.)
             if (v.fit < 1) win.clickItem(win.findName("viewerZoom"), "100%")
