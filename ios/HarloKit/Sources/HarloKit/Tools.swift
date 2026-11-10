@@ -118,8 +118,7 @@ public enum ToolName {
     /// steps, a subagent's task), not a path or a command: shown in the
     /// text font, cut at its end rather than in the middle.
     public static func saysWords(_ tool: String) -> Bool {
-        let h = harloTool(tool)
-        if plan[h] != nil || harlo[h] != nil { return true }
+        if plan[harloTool(tool)] != nil { return true }
         switch tool.lowercased() {
         case "ask", "askuserquestion", "task", "agent", "subagent", "todo", "todowrite", "exitplanmode",
              "web_search", "websearch", "skill":
@@ -127,6 +126,22 @@ public enum ToolName {
         default:
             return false
         }
+    }
+
+    /// The line under a tool's name, and whether it's words: harlo's own
+    /// tools say the session's title or what it's asked rather than their
+    /// input ("agent=harlo  title=Update the changelog  worktree=…").
+    public static func line(_ tool: String, _ subtitle: String) -> (text: String, words: Bool) {
+        guard harlo[harloTool(tool)] != nil else { return (subtitle, saysWords(tool)) }
+        var args: [String: String] = [:]
+        for part in subtitle.components(separatedBy: "  ") {
+            guard let eq = part.firstIndex(of: "=") else { continue }
+            args[String(part[..<eq]).trimmingCharacters(in: .whitespaces)] = String(part[part.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
+        }
+        for key in ["title", "message", "prompt", "task"] {
+            if let v = args[key], !v.isEmpty { return (v, true) }
+        }
+        return (subtitle, false)
     }
 
     /// Whether what matters in its output is the end (a command's result),

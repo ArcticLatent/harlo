@@ -178,7 +178,9 @@ struct SessionContent: View {
                         proxy.scrollTo("bottom", anchor: .bottom)
                     }
                 }
-                .background(Color(p.background).opacity(0.97).ignoresSafeArea(edges: .bottom))
+                // (Solid, with a hairline: nothing of the conversation shows through.)
+                .background(Color(p.background).ignoresSafeArea(edges: .bottom))
+                .overlay(alignment: .top) { Rectangle().fill(Color(p.hairline)).frame(height: 1) }
             }
         }
         .screen()
@@ -259,6 +261,14 @@ struct SessionContent: View {
                         sheet = .changes
                     } label: {
                         Label("Changed files", systemImage: "plusminus")
+                    }
+                    // (Also the branch under the title, a small target.)
+                    if let branch, !branch.isEmpty {
+                        Button {
+                            sheet = .branches
+                        } label: {
+                            Label("Switch branch (\(branch))", systemImage: "arrow.triangle.branch")
+                        }
                     }
                     Button {
                         sheet = .actions

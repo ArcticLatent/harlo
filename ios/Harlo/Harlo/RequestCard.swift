@@ -6,6 +6,7 @@ import UIKit
 /// composer: not part of the conversation, and not kept.
 struct AsideCard: View {
     @Environment(\.palette) private var p
+    @Environment(\.dynamicTypeSize) private var typeSize
     let aside: Aside
     @Binding var folded: Bool
     let dismiss: () -> Void
@@ -18,15 +19,19 @@ struct AsideCard: View {
     var isFolded: Bool { folded && aside.done && aside.error.isEmpty }
 
     var body: some View {
+        // (At the largest text sizes, Dismiss goes under the question.)
+        let head = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+            head {
                 Button {
                     withAnimation(.easeOut(duration: 0.2)) { folded.toggle() }
                 } label: {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Label(aside.question, systemImage: "text.bubble")
                             .font(.subheadline.weight(.semibold))
-                            .lineLimit(isFolded ? 1 : 2)
+                            .lineLimit(isFolded ? 1 : typeSize.isAccessibilitySize ? 4 : 2)
                             .multilineTextAlignment(.leading)
                         if aside.done && aside.error.isEmpty {
                             Image(systemName: isFolded ? "chevron.down" : "chevron.up")
@@ -91,9 +96,14 @@ struct RequestCard: View {
     var open: (() -> Void)? = nil
     /// On an Approvals card: only the answer (the card shows the rest).
     var bare = false
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var typed = ""
     @State private var picks: [Set<String>] = []
     @State private var custom: [String] = []
+
+    /// At the largest text sizes its scrolling parts are shorter, so the
+    /// card leaves the conversation room (its answers stay in view).
+    var big: Bool { typeSize.isAccessibilitySize }
 
     var heading: String {
         if request.approval { return "Approve this?" }
@@ -143,7 +153,7 @@ struct RequestCard: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .textSelection(.enabled)
                     }
-                    .frame(maxHeight: 140)
+                    .frame(maxHeight: big ? 90 : 140)
                     .fixedSize(horizontal: false, vertical: true)
                 } else {
                     Text(request.message)
@@ -200,7 +210,7 @@ struct RequestCard: View {
                     }
                 }
             }
-            .frame(maxHeight: 320)
+            .frame(maxHeight: big ? 190 : 320)
             .fixedSize(horizontal: false, vertical: true)
             Button("Answer") {
                 answer(UIRequest.askAnswer(request.questions, picked: picks.map { Array($0) }, typed: custom))

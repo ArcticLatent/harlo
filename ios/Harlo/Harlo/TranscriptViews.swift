@@ -214,9 +214,10 @@ struct ToolCard: View {
                                 .scaledFont(14)
                                 .foregroundStyle(Color(p.muted))
                                 .lineLimit(2)
-                        } else if !row.subtitle.isEmpty && ToolName.saysWords(row.title) {
-                            // (A question or a task: words, cut at the end.)
-                            Text(row.subtitle)
+                        } else if !row.subtitle.isEmpty && ToolName.line(row.title, row.subtitle).words {
+                            // (A question, a task, a helper's title: words,
+                            // cut at the end.)
+                            Text(ToolName.line(row.title, row.subtitle).text)
                                 .scaledFont(14)
                                 .foregroundStyle(Color(p.muted))
                                 .lineLimit(2)
@@ -489,7 +490,6 @@ struct UserBubble: View {
                 if row.time > 0 {
                     Text(Style.clock(row.time))
                         .scaledFont(12, .medium)
-                        .opacity(0.92)
                 }
             }
             .foregroundStyle(Color(ink))

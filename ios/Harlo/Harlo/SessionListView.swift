@@ -368,6 +368,21 @@ struct SessionCard: View {
     /// A helper shown under the session that started it.
     var nested = false
     @State private var now = Date()
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    /// At the largest text sizes the title gets the row, and its state goes
+    /// under it.
+    var stacked: Bool { typeSize.isAccessibilitySize }
+
+    @ViewBuilder var state: some View {
+        if StatusPill.shows(session.status, unread: unread) {
+            StatusPill(status: session.status, unread: unread)
+        } else {
+            Text(Style.ago(session.modified, now: now))
+                .scaledFont(13.5)
+                .foregroundStyle(Color(p.muted))
+        }
+    }
 
     var detail: String {
         var parts = [Style.harnessLabel(session.harness)]
@@ -398,22 +413,17 @@ struct SessionCard: View {
                     }
                     Text(session.title.isEmpty ? "New session" : session.title)
                         .scaledFont(17, unread ? .semibold : .medium)
-                        .lineLimit(2)
+                        .lineLimit(stacked ? 4 : 2)
                         .multilineTextAlignment(.leading)
                 }
                 Text(detail)
                     .scaledFont(14.5)
                     .foregroundStyle(Color(p.muted))
-                    .lineLimit(1)
+                    .lineLimit(stacked ? 2 : 1)
+                if stacked { state }
             }
             Spacer(minLength: 6)
-            if StatusPill.shows(session.status, unread: unread) {
-                StatusPill(status: session.status, unread: unread)
-            } else {
-                Text(Style.ago(session.modified, now: now))
-                    .scaledFont(13.5)
-                    .foregroundStyle(Color(p.muted))
-            }
+            if !stacked { state }
             Image(systemName: "chevron.right")
                 .scaledFont(14, .semibold)
                 .foregroundStyle(Color(p.muted))
