@@ -636,6 +636,10 @@ struct Composer: View {
     /// The folder's other sessions matching it (`@session:…`).
     @State private var sessionMatches: [SessionMention] = []
     @FocusState private var focused: Bool
+    @Environment(\.dynamicTypeSize) private var typeSize
+    /// At the largest text sizes the model (or Steer | Queue) gets a row of
+    /// its own, above the buttons, so its name isn't cut.
+    var big: Bool { typeSize.isAccessibilitySize }
 
     var text: String { session.draft }
 
@@ -686,9 +690,15 @@ struct Composer: View {
                     .focused($focused)
                     .padding(.horizontal, 6)
                     .padding(.top, 4)
+                if big {
+                    HStack(spacing: 0) {
+                        if session.busy { steerOrQueue } else { modelChip }
+                        Spacer(minLength: 0)
+                    }
+                }
                 HStack(spacing: 6) {
                     PhotoButton(photos: $photos, size: 34)
-                    if session.busy { steerOrQueue } else { modelChip }
+                    if !big { if session.busy { steerOrQueue } else { modelChip } }
                     options
                     Spacer(minLength: 0)
                     context
@@ -787,8 +797,8 @@ struct Composer: View {
                 Text(session.model.isEmpty ? "Model" : session.model)
                     .scaledFont(13.5, .medium)
                     .lineLimit(1)
-                    .frame(maxWidth: 120, alignment: .leading)
-                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(maxWidth: big ? nil : 120, alignment: .leading)
+                    .fixedSize(horizontal: !big, vertical: false)
                 Image(systemName: "chevron.down").scaledFont(9, .bold).foregroundStyle(Color(p.muted))
             }
             .padding(.leading, 6)

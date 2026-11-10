@@ -29,6 +29,10 @@ struct NewSessionView: View {
     /// A template just changed the agent: keep its model and permissions.
     @State private var keepPicks = false
     @FocusState private var focused: Bool
+    @Environment(\.dynamicTypeSize) private var typeSize
+    /// At the largest text sizes the agent and model get a row of their
+    /// own, above the buttons, so the model's name isn't cut.
+    var big: Bool { typeSize.isAccessibilitySize }
     /// Your name, for the greeting (Settings).
     @AppStorage("yourName") private var name = ""
 
@@ -141,7 +145,8 @@ struct NewSessionView: View {
             if !c.templates.isEmpty { templates(c) }
             // As the session's composer: where it starts on top (a "To:"
             // line), the message, then photos, the agent and its model, what
-            // runs without asking, dictation and start, all on one line.
+            // runs without asking, dictation and start, all on one line (the
+            // agent and model on a line of their own at the largest sizes).
             VStack(alignment: .leading, spacing: 8) {
                 placeRow(c)
                 Rectangle().fill(Color(p.hairline)).frame(height: 1)
@@ -151,9 +156,15 @@ struct NewSessionView: View {
                     .scaledFont(17)
                     .focused($focused)
                     .padding(.top, 2)
+                if big {
+                    HStack(spacing: 0) {
+                        agentAndModel(c)
+                        Spacer(minLength: 0)
+                    }
+                }
                 HStack(spacing: 6) {
                     PhotoButton(photos: $photos, size: 34)
-                    agentAndModel(c)
+                    if !big { agentAndModel(c) }
                     permissions(c)
                     Spacer(minLength: 0)
                     MicButton(text: $text, size: 34)
@@ -286,8 +297,8 @@ struct NewSessionView: View {
                     .scaledFont(13.5, .medium)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .frame(maxWidth: 130, alignment: .leading)
-                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(maxWidth: big ? nil : 130, alignment: .leading)
+                    .fixedSize(horizontal: !big, vertical: false)
                 Image(systemName: "chevron.down").scaledFont(9, .bold).foregroundStyle(Color(p.muted))
             }
             .padding(.leading, 6)
