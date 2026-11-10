@@ -5,6 +5,34 @@ pub mod qobject {
     unsafe extern "C++" {
         include!("cxx-qt-lib/qstring.h");
         type QString = cxx_qt_lib::QString;
+        include!("cxx-qt-lib/qvariant.h");
+        type QVariant = cxx_qt_lib::QVariant;
+        include!("harlo_editor.h");
+
+        #[namespace = "harlo"]
+        fn editor_apply(doc: &QVariant, edits: &QString) -> bool;
+        #[namespace = "harlo"]
+        fn editor_append(doc: &QVariant, text: &QString) -> bool;
+    }
+
+    extern "RustQt" {
+        /// Edits to a TextEdit's document (its `textDocument`) that QML
+        /// can't make itself.
+        #[qobject]
+        #[qml_element]
+        #[qml_singleton]
+        type TextOps = super::TextOpsRust;
+    }
+
+    #[auto_cxx_name]
+    extern "RustQt" {
+        /// Applies `edits` (JSON: `[[start, end, text], ...]`) as one undo step.
+        #[qinvokable]
+        fn apply(self: &TextOps, doc: &QVariant, edits: &QString) -> bool;
+        /// Adds `text` at the end, outside the undo history (a read-only
+        /// view's too).
+        #[qinvokable]
+        fn append(self: &TextOps, doc: &QVariant, text: &QString) -> bool;
     }
 
     extern "RustQt" {
@@ -213,5 +241,18 @@ impl TextFile {
         let path = PathBuf::from(self.path.to_string());
         let now = if harlo_core::remote::is_remote(&path) { self.remote_now.lock().unwrap().0.clone().flatten() } else { stamp(&path) };
         self.as_mut().rust_mut().disk = now;
+    }
+}
+
+#[derive(Default)]
+pub struct TextOpsRust;
+
+impl qobject::TextOps {
+    pub fn apply(&self, doc: &cxx_qt_lib::QVariant, edits: &QString) -> bool {
+        qobject::editor_apply(doc, edits)
+    }
+
+    pub fn append(&self, doc: &cxx_qt_lib::QVariant, text: &QString) -> bool {
+        qobject::editor_append(doc, text)
     }
 }

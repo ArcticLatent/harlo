@@ -86,6 +86,7 @@ fn main() {
                 "qml/FilesPanel.qml",
                 "qml/FileEditor.qml",
                 "qml/EditorHighlighter.qml",
+                "qml/TextFill.qml",
                 "qml/TranscriptView.qml",
                 "qml/PromptRail.qml",
                 "qml/BranchPicker.qml",

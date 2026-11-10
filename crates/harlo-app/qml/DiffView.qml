@@ -323,7 +323,11 @@ Rectangle {
     readonly property real lineHeight: leftPane.lineHeight
     // The first time a file's changes show, they're scrolled into view.
     property bool jumped: false
-    onBlocksChanged: if (!jumped && blocks.length > 0 && leftPane.ready && rightPane.ready) { jumped = true; jumpTries = 0; Qt.callLater(jumpToFirst) }
+    onBlocksChanged: jumpWhenReady()
+    // (A long file's text comes in a slice at a time: once it's all in.)
+    function jumpWhenReady() {
+        if (!jumped && blocks.length > 0 && leftPane.ready && rightPane.ready) { jumped = true; jumpTries = 0; Qt.callLater(jumpToFirst) }
+    }
     // The first change, a third of the way down, once the view has its
     // height (a third of none put it at the very top).
     property int jumpTries: 0
@@ -796,11 +800,14 @@ Rectangle {
         onTextChanged: {
             // Same place after a reload (the file changed under the view).
             const x = flick.contentX, y = flick.contentY
-            editor.text = text
+            // (The highlighter first: it colours each slice as it comes in.)
+            if (!highlight.active && text !== "") highlight.active = true
+            fill.put(text)
             flick.contentX = x
             flick.contentY = Math.min(y, Math.max(0, flick.contentHeight - flick.height))
-            if (!highlight.active && text !== "") highlight.active = true
         }
+        onReadyChanged: if (ready) root.jumpWhenReady()
+        TextFill { id: fill; editor: editor }
         Loader {
             id: highlight
             active: false
@@ -1014,7 +1021,8 @@ Rectangle {
             anchors.topMargin: 8
             clip: true
             contentWidth: Math.max(width, editor.implicitWidth + 40)
-            contentHeight: Math.max(height, editor.implicitHeight + 40)
+            // (As tall as all its rows while the text is still coming in.)
+            contentHeight: Math.max(height, editor.implicitHeight + 40, fill.running ? pane.rows.length * pane.lineHeight + 40 : 0)
             boundsBehavior: Flickable.StopAtBounds
             pixelAligned: true
             ScrollBar.horizontal: ScrollBar { }

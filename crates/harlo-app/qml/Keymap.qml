@@ -20,7 +20,7 @@ QtObject {
     })
     /// Keys the app handles itself; they can't be assigned.
     readonly property var reserved: {
-        const r = { "Ctrl+Return": "Steer (composer)", "Ctrl+Enter": "Steer (composer)", "Ctrl+S": "Save file",
+        const r = { "Ctrl+Return": "Steer (composer)", "Ctrl+Enter": "Steer (composer)", "Ctrl+S": "Save file", "Ctrl+H": "Replace (file)", "Ctrl+G": "Go to line (file)",
                     "Ctrl+Shift+C": "Copy (terminal)", "Ctrl+Shift+V": "Paste (terminal)", "Ctrl+Alt+L": "Layout readout" }
         for (let i = 1; i <= 9; i++) r["Ctrl+" + i] = "Go to tab " + i
         return r

@@ -618,7 +618,7 @@ ApplicationWindow {
             { id: "palette", seq: Keymap.seq("palette"), label: "Go to a session or action", group: nav, icon: "command", run: () => palette.openWith("") },
             { id: "goToSession", seq: Keymap.seq("goToSession"), label: "Go to a session or action", group: nav, icon: "command", run: () => palette.openWith("") },
             { id: "searchAll", seq: Keymap.seq("searchAll"), label: "Search all sessions", group: nav, icon: "search", run: () => searchDialog.openSearch() },
-            { id: "findInSession", seq: Keymap.seq("findInSession"), label: "Find in this session", group: nav, icon: "search-eye", run: () => chat.openFind() },
+            { id: "findInSession", seq: Keymap.seq("findInSession"), label: "Find in this session or file", group: nav, icon: "search-eye", run: () => chat.openFind() },
             { id: "actions", seq: Keymap.seq("actions"), label: "Actions only", group: nav, icon: "play-circle", run: () => palette.openWith(">") },
             { id: "jumpPrompt", seq: Keymap.seq("jumpPrompt"), label: "Jump to a prompt", group: nav, icon: "bookmark", run: () => { if (chat.transcript.visible) chat.transcript.openPromptRail() } },
             { id: "prevPrompt", seq: Keymap.seq("prevPrompt"), label: "Previous prompt in the session", group: nav, icon: "arrow-up-s", run: () => { if (chat.transcript.visible) chat.transcript.stepPrompt(-1) } },
@@ -672,6 +672,15 @@ ApplicationWindow {
         { seq: "Esc", label: "Back to the run, then to the composer", group: "Runs in a session", icon: "arrow-go-back" },
         { seq: "Ctrl+C", label: "Copy a call's listing", group: "Runs in a session", icon: "file-copy" },
         { seq: "Tab", label: "Next run", group: "Runs in a session", icon: "arrow-right-s" },
+        // In a file's tab.
+        { seq: "Ctrl+S", label: "Save the file", group: "File editor", icon: "check" },
+        { seq: "Ctrl+H", label: "Find and replace", group: "File editor", icon: "edit" },
+        { seq: "Enter", label: "Next match (in Find)", group: "File editor", icon: "arrow-down-s" },
+        { seq: "Shift+Enter", label: "Previous match (in Find)", group: "File editor", icon: "arrow-up-s" },
+        { seq: "Ctrl+G", label: "Go to line", group: "File editor", icon: "arrow-right-s" },
+        { seq: "Ctrl+/", label: "Comment lines out or back in", group: "File editor", icon: "code-box" },
+        { seq: "Tab", label: "Indent the selected lines", group: "File editor", icon: "text-wrap" },
+        { seq: "Shift+Tab", label: "Outdent the lines", group: "File editor", icon: "text-wrap" },
     ]
     Instantiator {
         model: win.shortcutList.filter(s => s.run)
@@ -6042,6 +6051,262 @@ ApplicationWindow {
         ScriptAction { script: win.writeDisk("// agent edit 3\n") }
         PauseAnimation { duration: 2600 }
         ScriptAction { script: { win.log("after save, next agent edit reloads:", win.editorText().startsWith("// agent edit 3"), "bar:", chat.fileEditor.diskBarVisible); Qt.quit() } }
+    }
+
+    // The file editor's keys: Enter keeps the indentation, brackets,
+    // Tab and Shift+Tab, Backspace by a level, Ctrl+/ comments, find and
+    // replace (one undo), go to line, the bracket pair; per file type.
+    function edText() { return chat.fileEditor.editor ? chat.fileEditor.editor.text : "" }
+    function edLines() { return win.edText().split("\n") }
+    function edLine() { const ed = chat.fileEditor.editor; return ed ? ed.text.slice(0, ed.cursorPosition).split("\n").length : -1 }
+    function edCol() { const ed = chat.fileEditor.editor; return ed ? ed.cursorPosition - (ed.text.lastIndexOf("\n", ed.cursorPosition - 1) + 1) : -1 }
+    function edCount(what) { return win.edText().split(what).length - 1 }
+    property string edBefore: ""
+    SequentialAnimation {
+        id: editorSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clickseditor"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            Workspace.addProject(win.argValue("--cwd="))
+            Workspace.openFileTab(win.argValue("--cwd=") + "/src/editor.rs") } }
+        ScriptAction { script: win.waitUntil(editorSteps, () => !!chat.fileEditor.editor && chat.filePath.endsWith("/editor.rs"), 8000) }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const ed = chat.fileEditor.editor
+            win.clickItem(ed, "the editor")
+            // Enter after an opening brace: a level deeper.
+            ed.cursorPosition = ed.text.indexOf("fn main() {") + 11
+            TestInput.key(Qt.Key_Return, 0)
+            win.check(win.edLines()[1] === "    " && win.edCol() === 4, "Enter after {: the new line a level in (" + JSON.stringify(win.edLines()[1]) + ", col " + win.edCol() + ")")
+            TestInput.typeText("let x = 1;")
+            win.check(win.edLines()[1] === "    let x = 1;", "…and you type there (" + JSON.stringify(win.edLines()[1]) + ")")
+            // Between a pair: the closing one on a line of its own.
+            ed.cursorPosition = ed.length
+            TestInput.typeText("fn f() {}")
+            TestInput.key(Qt.Key_Left, 0)
+            TestInput.key(Qt.Key_Return, 0)
+            const l = win.edLines(), n = win.edLine()
+            win.check(l[n - 2] === "fn f() {" && l[n - 1] === "    " && l[n] === "}" && win.edCol() === 4, "Enter between {}: the } on its own line, the cursor between (" + JSON.stringify(l.slice(n - 2, n + 1)) + ")")
+            // A } typed on a line of spaces: lined up with its {.
+            TestInput.typeText("if x {")
+            TestInput.key(Qt.Key_Return, 0)
+            win.check(win.edLines()[win.edLine() - 1] === "        ", "a nested block: two levels")
+            TestInput.typeText("}")
+            win.check(win.edLines()[win.edLine() - 1] === "    }", "} lines up with its { (" + JSON.stringify(win.edLines()[win.edLine() - 1]) + ")")
+            // Backspace in the indentation: a level at once.
+            TestInput.key(Qt.Key_Return, 0)
+            win.check(win.edLines()[win.edLine() - 1] === "    ", "Enter after }: the same indentation")
+            TestInput.key(Qt.Key_Backspace, 0)
+            win.check(win.edLines()[win.edLine() - 1] === "" && win.edCol() === 0, "Backspace: back a level, not a space (" + JSON.stringify(win.edLines()[win.edLine() - 1]) + ")")
+            // Tab on selected lines: each a level in, one undo.
+            win.edBefore = ed.text
+            const s = ed.text.indexOf("fn add("), e = ed.text.indexOf("}\n", s) + 2
+            ed.select(s, e)
+            TestInput.key(Qt.Key_Tab, 0)
+            win.check(ed.text.indexOf("    fn add(a: i32, b: i32) -> i32 {\n        a + b\n    }\n") >= 0, "Tab: the selected lines a level in")
+            win.check(ed.selectionStart === s && ed.selectionEnd === ed.text.indexOf("    }\n", s) + 5, "…still selected (" + [ed.selectionStart, ed.selectionEnd] + ")")
+            TestInput.key(Qt.Key_Z, Qt.ControlModifier)
+            win.check(ed.text === win.edBefore, "Ctrl+Z: undone in one step")
+            ed.select(s, e)
+            TestInput.key(Qt.Key_Backtab, Qt.ShiftModifier)
+            win.check(ed.text.indexOf("fn add(a: i32, b: i32) -> i32 {\na + b\n}") >= 0, "Shift+Tab: a level out (" + JSON.stringify(ed.text.slice(s, s + 44)) + ")")
+            TestInput.key(Qt.Key_Z, Qt.ControlModifier)
+            // Ctrl+/: comments the lines out at their indentation, then back.
+            ed.select(s, e)
+            TestInput.key(Qt.Key_Slash, Qt.ControlModifier)
+            win.check(ed.text.indexOf("// fn add(a: i32, b: i32) -> i32 {\n//     a + b\n// }\n") >= 0, "Ctrl+/: commented out (" + JSON.stringify(ed.text.slice(s, s + 50)) + ")")
+            win.check(!shortcutsDialog.visible, "…not the shortcuts sheet")
+            TestInput.key(Qt.Key_Slash, Qt.ControlModifier)
+            win.check(ed.text === win.edBefore, "Ctrl+/ again: back in")
+            ed.cursorPosition = 0 } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            // Find: Ctrl+F in a file finds in the file.
+            TestInput.key(Qt.Key_F, Qt.ControlModifier)
+            const fe = chat.fileEditor
+            win.check(fe.findOpen && win.findName("editorFindField", fe).activeFocus && !chat.findBar.open, "Ctrl+F: the file's find, not the session's")
+            TestInput.typeText("total") } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const fe = chat.fileEditor, ed = fe.editor
+            const first = ed.text.indexOf("total"), second = ed.text.indexOf("total", first + 1)
+            win.check(fe.matches.length === 2 && fe.currentMatch === 0 && ed.selectionStart === first && ed.selectionEnd === first + 5, "typed: both found, the first selected (" + fe.matches.length + ")")
+            win.check(win.findName("editorFindCount", fe).text === "1 of 2", "1 of 2 (" + win.findName("editorFindCount", fe).text + ")")
+            win.check(win.findAllNames("findHit", fe).length === 2, "both marked in the text (" + win.findAllNames("findHit", fe).length + ")")
+            win.shot("editor-find")
+            TestInput.key(Qt.Key_Return, 0)
+            win.check(fe.currentMatch === 1 && ed.selectionStart === second, "Enter: the next")
+            TestInput.key(Qt.Key_Return, Qt.ShiftModifier)
+            win.check(fe.currentMatch === 0 && ed.selectionStart === first, "Shift+Enter: back")
+            win.clickItem(win.findName("editorMatchCase", fe), "Aa")
+            win.findName("editorFindField", fe).forceActiveFocus()
+            win.findName("editorFindField", fe).selectAll()
+            TestInput.typeText("TOTAL") } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const fe = chat.fileEditor
+            win.check(fe.matchCase && fe.matches.length === 0 && win.findName("editorFindCount", fe).text === "None", "Aa: TOTAL isn't total (" + win.findName("editorFindCount", fe).text + ")")
+            win.clickItem(win.findName("editorMatchCase", fe), "Aa")
+            win.findName("editorFindField", fe).forceActiveFocus() } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const fe = chat.fileEditor
+            win.check(!fe.matchCase && fe.matches.length === 2, "Aa off: found again")
+            // Replace: Ctrl+H, then All.
+            TestInput.key(Qt.Key_H, Qt.ControlModifier)
+            win.check(fe.replaceOpen && win.findName("editorReplaceField", fe).activeFocus, "Ctrl+H: the replace line, its field focused")
+            TestInput.typeText("sum") } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            const fe = chat.fileEditor, ed = fe.editor
+            win.shot("editor-replace")
+            win.edBefore = ed.text
+            win.clickItem(win.findName("editorReplaceAll", fe), "All")
+            win.check(win.edCount("total") === 0 && win.edCount("sum") === 2, "All: both replaced (" + win.edCount("sum") + ")")
+            win.check(win.findName("editorFindCount", fe).text === "Replaced 2", "…and says so (" + win.findName("editorFindCount", fe).text + ")")
+            ed.forceActiveFocus()
+            TestInput.key(Qt.Key_Z, Qt.ControlModifier)
+            win.check(ed.text === win.edBefore, "Ctrl+Z: every replacement undone at once") } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const fe = chat.fileEditor, ed = fe.editor
+            win.check(fe.matches.length === 2, "the matches found again after the undo (" + fe.matches.length + ")")
+            win.clickItem(win.findName("editorFindNext", fe), "next")
+            win.clickItem(win.findName("editorReplaceField", fe), "the replace field")
+            TestInput.key(Qt.Key_Return, 0)
+            win.check(win.edCount("total") === 1 && win.edCount("sum") === 1 && fe.matches.length === 1, "Enter in Replace: just the one shown (" + win.edCount("sum") + ")")
+            TestInput.key(Qt.Key_Escape, 0)
+            win.check(!fe.findOpen && !win.findName("editorFind", fe) && ed.activeFocus, "Esc: find closed, back in the text")
+            win.check(win.findAllNames("findHit", fe).length === 0, "…its marks gone") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const fe = chat.fileEditor, ed = fe.editor
+            // Go to line: Ctrl+G, or the line count in the header.
+            TestInput.key(Qt.Key_G, Qt.ControlModifier)
+            win.check(fe.lineOpen && win.findName("editorLineField", fe).activeFocus, "Ctrl+G: go to line")
+            win.shot("editor-goto")
+            TestInput.typeText("7")
+            TestInput.key(Qt.Key_Return, 0) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const fe = chat.fileEditor, ed = fe.editor
+            win.check(!fe.lineOpen && win.edLine() === 7 && ed.activeFocus, "…line 7 (" + win.edLine() + ")")
+            win.clickItem(win.findName("editorLineLabel", fe), "Ln")
+            win.check(fe.lineOpen, "the header's Ln opens it too")
+            TestInput.key(Qt.Key_Escape, 0)
+            win.check(!fe.lineOpen, "Esc closes it")
+            // The bracket by the cursor and its partner.
+            ed.forceActiveFocus()
+            const open = ed.text.indexOf("fn add(") + 6, close = ed.text.indexOf(")", open)
+            ed.cursorPosition = open } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            const fe = chat.fileEditor, ed = fe.editor
+            const open = ed.text.indexOf("fn add(") + 6, close = ed.text.indexOf(")", open)
+            const marks = win.findAllNames("bracketMark", fe)
+            const at = i => ed.positionToRectangle(i).x
+            win.check(marks.length === 2 && marks.some(m => Math.abs(m.x - at(open)) < 1) && marks.some(m => Math.abs(m.x - at(close)) < 1), "( and its ) marked (" + marks.map(m => m.x) + " vs " + [at(open), at(close)] + ")")
+            win.shot("editor-brackets")
+            ed.cursorPosition = ed.text.indexOf("let x")
+            TestInput.key(Qt.Key_S, Qt.ControlModifier) } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            win.check(win.findAllNames("bracketMark", chat.fileEditor).length === 0, "no bracket by the cursor: no marks")
+            win.check(TestInput.readFile(win.argValue("--cwd=") + "/src/editor.rs") === win.edText() && !chat.fileEditor.modified, "Ctrl+S saves it")
+            win.check(win.composerKeys.some(k => k.group === "File editor" && k.seq === "Ctrl+/"), "the shortcuts sheet lists the editor's keys")
+            // A file indented by two spaces: Enter adds two.
+            Workspace.openFileTab(win.argValue("--cwd=") + "/web/app.js") } }
+        ScriptAction { script: win.waitUntil(editorSteps, () => !!chat.fileEditor.editor && chat.filePath.endsWith("/app.js"), 8000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const ed = chat.fileEditor.editor
+            ed.forceActiveFocus()
+            ed.cursorPosition = ed.text.indexOf("function show() {") + 17
+            TestInput.key(Qt.Key_Return, 0)
+            win.check(win.edLines()[1] === "  " && win.edCol() === 2, "two-space JavaScript: Enter adds two (" + JSON.stringify(win.edLines()[1]) + ")")
+            TestInput.key(Qt.Key_Tab, 0)
+            win.check(win.edLines()[1] === "    ", "…and Tab two more (" + JSON.stringify(win.edLines()[1]) + ")")
+            ed.cursorPosition = 0
+            TestInput.key(Qt.Key_Slash, Qt.ControlModifier)
+            win.check(win.edLines()[0] === "// function show() {", "// for JavaScript (" + win.edLines()[0] + ")")
+            Workspace.openFileTab(win.argValue("--cwd=") + "/tool.py") } }
+        ScriptAction { script: win.waitUntil(editorSteps, () => !!chat.fileEditor.editor && chat.filePath.endsWith("/tool.py"), 8000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const ed = chat.fileEditor.editor
+            ed.forceActiveFocus()
+            ed.cursorPosition = ed.text.indexOf("def main():") + 11
+            TestInput.key(Qt.Key_Return, 0)
+            win.check(win.edLines()[1] === "    ", "Python: a level in after a colon (" + JSON.stringify(win.edLines()[1]) + ")")
+            ed.cursorPosition = ed.text.indexOf("print")
+            TestInput.key(Qt.Key_Slash, Qt.ControlModifier)
+            win.check(win.edText().indexOf("    # print(\"hi\")") >= 0, "# for Python, at the line's indentation")
+            win.summary(); Qt.quit() } }
+    }
+
+    // A big file (8000 lines): its diff from the Changes panel, then the
+    // file itself. The window keeps answering while each comes in (its
+    // text a slice at a time, coloured as it comes); it held still 5 s.
+    property real perfT0: 0
+    property real perfLast: 0
+    property var perfMarks: ({})
+    property var perfStalls: []
+    function perfStart() { win.perfT0 = Date.now(); win.perfLast = win.perfT0; win.perfMarks = {}; win.perfStalls = []; perfPoll.start() }
+    function perfLongest() { return win.perfStalls.reduce((m, s) => Math.max(m, s.ms), 0) }
+    Timer {
+        id: perfPoll
+        interval: 5
+        repeat: true
+        onTriggered: {
+            const now = Date.now(), t = now - win.perfT0, m = win.perfMarks
+            if (now - win.perfLast > 40) win.perfStalls.push({ at: Math.round(t - (now - win.perfLast)), ms: now - win.perfLast })
+            win.perfLast = now
+            const dv = chat.diffView, fe = chat.fileEditor
+            if (m.diffReady === undefined && dv.visible && dv.leftPane.ready && dv.rightPane.ready && dv.rightPane.text !== "") m.diffReady = t
+            if (m.jumped === undefined && dv.visible && dv.jumped) m.jumped = t
+            if (m.fileShown === undefined && fe.visible && fe.editor && fe.editor.length > 0) m.fileShown = t
+            if (m.fileReady === undefined && fe.visible && fe.loaded) m.fileReady = t
+        }
+    }
+    SequentialAnimation {
+        id: bigFileSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksbigfile"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            Workspace.setSetting("diff_layout", "split")
+            Workspace.addProject(win.argValue("--cwd="))
+            Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "demo") } }
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: { windowSettings.rightMode = "changes"; git.refresh(true) } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: { win.perfStart(); win.clickText("big.rs", changes) } }
+        ScriptAction { script: win.waitUntil(bigFileSteps, () => win.perfMarks.jumped !== undefined, 15000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            perfPoll.stop()
+            const dv = chat.diffView, m = win.perfMarks
+            console.log("PERF big diff: marks", JSON.stringify(m), "stalls", JSON.stringify(win.perfStalls))
+            win.check(m.jumped !== undefined, "the diff opened at its first change (" + m.jumped + " ms)")
+            win.check(win.perfLongest() < 1000, "the window kept answering: longest hold " + win.perfLongest() + " ms (it was 5100)")
+            win.check(dv.rightPane.editor.text === dv.rightPane.text && dv.leftPane.editor.text === dv.leftPane.text && dv.rightPane.editor.lineCount >= 8000, "both sides all in (" + dv.rightPane.editor.lineCount + " lines)")
+            const f = dv.rightPane.flick, y = dv.blocks[0].start * dv.lineHeight
+            win.check(y >= f.contentY && y <= f.contentY + f.height, "the first change in view")
+            win.shot("bigfile-diff")
+            win.perfStart()
+            Workspace.openFileTab(win.argValue("--cwd=") + "/src/big.rs") } }
+        ScriptAction { script: win.waitUntil(bigFileSteps, () => win.perfMarks.fileReady !== undefined, 15000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            perfPoll.stop()
+            const fe = chat.fileEditor, m = win.perfMarks
+            console.log("PERF big file: marks", JSON.stringify(m), "stalls", JSON.stringify(win.perfStalls))
+            win.check(m.fileReady !== undefined && win.perfLongest() < 1000, "the file opened, the window answering: longest hold " + win.perfLongest() + " ms")
+            win.check(fe.editor.text === TestInput.readFile(win.argValue("--cwd=") + "/src/big.rs") && !fe.modified, "all of it in, and not an edit")
+            win.check(fe.language === "Rust" && !fe.editor.readOnly, "coloured, and editable once in (" + fe.language + ")")
+            win.shot("bigfile-editor")
+            win.summary(); Qt.quit() } }
     }
 
     // Multirun (demo harness): two lanes in worktrees, overview, keep one.

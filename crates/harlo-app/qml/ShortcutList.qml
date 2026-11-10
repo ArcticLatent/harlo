@@ -15,7 +15,7 @@ RowLayout {
     property bool twoColumns: width > 600
     // A row clicked outside Settings: its action, to run.
     signal activated(var run)
-    readonly property var groupOrder: ["Navigation", "Sessions and tabs", "Window", "Panels", "Composer", "Runs in a session"]
+    readonly property var groupOrder: ["Navigation", "Sessions and tabs", "Window", "Panels", "Composer", "Runs in a session", "File editor"]
 
     readonly property var sections: {
         const out = []

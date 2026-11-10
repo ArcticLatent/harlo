@@ -25,8 +25,11 @@ Rectangle {
     property alias undoDialog: undoDialog
     property alias reviewStore: reviewStore
     property alias findBar: findBar
-    /// Ctrl+F: find in the session shown.
-    function openFind() { if (!root.covered && root.hasSession) findBar.show() }
+    /// Ctrl+F: find in the session (or the file) shown.
+    function openFind() {
+        if (root.isFile) fileEditor.openFind(false)
+        else if (!root.covered && root.hasSession) findBar.show()
+    }
     // Review comments on diffs, by repository (`{ root: [ { path, side, line,
     // code, text } ] }`), until sent or cleared.
     QtObject {
