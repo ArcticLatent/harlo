@@ -387,7 +387,9 @@ Rectangle {
                 visible: list.dragId >= 0 && list.dropY >= 0
                 z: 10
                 x: 14
-                y: list.dropY - list.contentY - 4
+                // (Kept inside the list: the first project's place is at
+                // its very top.)
+                y: Math.max(0, Math.min(list.height - height, list.dropY - list.contentY - 4))
                 width: list.width - 28
                 height: 8
                 Rectangle { x: 6; anchors.verticalCenter: parent.verticalCenter; width: parent.width - 6; height: 2; radius: 1; color: Theme.accent }
@@ -400,7 +402,7 @@ Rectangle {
                 visible: list.dragId >= 0
                 z: 20
                 x: 18
-                y: Math.max(-height / 2, Math.min(list.height - height / 2, list.dragY - list.dragGrab))
+                y: Math.max(0, Math.min(list.height - height, list.dragY - list.dragGrab))
                 width: list.width - 36
                 height: 30
                 radius: 8

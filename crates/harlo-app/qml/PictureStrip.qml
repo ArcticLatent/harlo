@@ -12,6 +12,8 @@ Flow {
     property var paths: []
     /// A thumbnail's side (logical pixels).
     property real side: 112
+    /// A picture in words (where it came from); its file's name by default.
+    property var labelOf: p => p.substring(p.lastIndexOf("/") + 1)
     signal openRequested(string path)
     spacing: 6
     visible: paths.length > 0
@@ -32,7 +34,7 @@ Flow {
             border.color: activeFocus ? Theme.accent : tileHover.hovered ? Theme.controlBorderHover : Theme.border
             activeFocusOnTab: true
             Accessible.role: Accessible.Button
-            Accessible.name: "Picture " + modelData.substring(modelData.lastIndexOf("/") + 1)
+            Accessible.name: "Picture: " + strip.labelOf(modelData)
             ImageThumb {
                 id: thumb
                 anchors.fill: parent
@@ -56,7 +58,7 @@ Flow {
             Keys.onSpacePressed: strip.openRequested(tile.modelData)
             ToolTip.visible: tileHover.hovered
             ToolTip.delay: 600
-            ToolTip.text: tile.modelData.substring(tile.modelData.lastIndexOf("/") + 1)
+            ToolTip.text: tileHover.hovered ? strip.labelOf(tile.modelData) : ""
         }
     }
 }

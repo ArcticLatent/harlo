@@ -54,7 +54,19 @@ Item {
     function showPicture(path) {
         const all = JSON.parse(root.session.sessionPictures())
         if (all.indexOf(path) < 0) all.push(path)
-        chatPictures.show(all, path)
+        root.pictureLabelCache = JSON.parse(root.session.pictureLabels())
+        chatPictures.show(all, path, root.pictureLabelCache)
+    }
+    // Where each picture came from, in words, for the thumbnails' tips and
+    // names (asked again for one not known yet; forgotten with the session).
+    property var pictureLabelCache: ({})
+    function pictureLabel(p) {
+        // (Filled in place: a binding asking mustn't set off the others.)
+        if (!(p in pictureLabelCache) && root.session) {
+            const fresh = JSON.parse(root.session.pictureLabels())
+            for (const k in fresh) pictureLabelCache[k] = fresh[k]
+        }
+        return pictureLabelCache[p] || p.substring(p.lastIndexOf("/") + 1)
     }
     Popup {
         id: chatPictures
@@ -70,21 +82,23 @@ Item {
         // (Esc is the viewer's: out of the grid first, then closed.)
         closePolicy: Popup.NoAutoClose
         readonly property alias viewer: chatViewer
-        function show(list, path) {
+        function show(list, path, labels) {
             chatViewer.gridMode = false
+            chatViewer.labels = labels || ({})
             chatViewer.pictureList = list
             chatViewer.path = path
             chatViewer.source = path
             open()
             Qt.callLater(() => chatViewer.focusView())
         }
-        background: Rectangle { color: Theme.codeBg }
+        background: Rectangle { color: Theme.stage }
         Overlay.modal: Rectangle { color: "transparent" }
         enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Math.round(Theme.motion * 0.5) } }
         exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Math.round(Theme.motion * 0.4) } }
         contentItem: ImageViewer {
             id: chatViewer
             pictureList: []
+            backdrop: Theme.stage
             onCloseRequested: chatPictures.close()
             onOpenInTab: p => { chatPictures.close(); root.openFile(p) }
         }
@@ -141,7 +155,7 @@ Item {
         }
     }
     onWantModelNamesChanged: readModelNames()
-    onSessionChanged: wantModelNames = false
+    onSessionChanged: { wantModelNames = false; pictureLabelCache = ({}) }
     Connections {
         target: root.session
         function onStatusChanged() { root.readModelNames() }
@@ -1345,6 +1359,7 @@ Item {
             Layout.topMargin: 4
             Layout.bottomMargin: 2
             side: 96
+            labelOf: p => root.pictureLabel(p)
             paths: card.images !== "" ? card.images.split("\n") : []
             onOpenRequested: path => root.showPicture(path)
         }
@@ -1902,6 +1917,7 @@ Item {
                             }
                             PictureStrip {
                                 width: parent.width
+                                labelOf: p => root.pictureLabel(p)
                                 paths: userRow.images !== "" ? userRow.images.split("\n") : []
                                 onOpenRequested: path => root.showPicture(path)
                             }
@@ -2023,6 +2039,7 @@ Item {
                         y: picsRow.gap
                         width: view.columnWidth
                         side: 160
+                        labelOf: p => root.pictureLabel(p)
                         paths: picsRow.images !== "" ? picsRow.images.split("\n") : []
                         onOpenRequested: path => root.showPicture(path)
                     }

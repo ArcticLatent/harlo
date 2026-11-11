@@ -5275,7 +5275,8 @@ ApplicationWindow {
             const line = win.findName("projectDropLine"), ghost = win.findName("projectDragGhost")
             const first = win.findName("projectTitle-" + win.selftestDir.split("/").filter(s => s).pop())
             const ly = line ? line.mapToItem(null, 0, line.height / 2).y : -1, fy = first.mapToItem(null, 0, 0).y
-            win.check(line !== null && line.visible && ly < fy && ly > fy - 20, "past the first project's header, the line shows just above it (" + Math.round(ly) + " over " + Math.round(fy) + ")")
+            win.check(line !== null && line.visible && ly < fy + 6 && ly > fy - 20, "past the first project's header, the line shows just above it (" + Math.round(ly) + " over " + Math.round(fy) + ")")
+            win.check(line !== null && line.y >= 0 && line.y + line.height <= line.parent.height, "and inside the list, at its very top too (" + (line ? line.y.toFixed(1) : "") + ")")
             win.check(ghost !== null && ghost.visible && win.findText("Rocket app", ghost) !== null, "and a copy of its header follows the pointer")
             // Nothing under the pointer lights up as if it took the drop.
             const lit = []
@@ -6619,6 +6620,15 @@ ApplicationWindow {
             const dpr = win.imgDpr()
             const fitZoom = Math.min(1, v.width * dpr / 1200, v.height * dpr / 800)
             win.check(v.fit && Math.abs(v.zoom - fitZoom) < 1e-6, "fitted: " + v.zoom.toFixed(4) + " (" + fitZoom.toFixed(4) + ")")
+            win.shotWindow("clicks-images-tab")
+            const pathLabel = win.findName("editorPath", chat.fileEditor)
+            win.check(pathLabel && pathLabel.text === "pics/img1.png" && pathLabel.whole.endsWith("/pics/img1.png"), "the tab's path is the file's in its project, the whole on hover (" + (pathLabel ? pathLabel.text : "none") + ")")
+            const tight = viewer.width < 640
+            const more = win.findName("imageMore", viewer), turn = win.findName("imageTurnLeft", viewer)
+            win.check(tight ? (more !== null && turn === null) : (more === null && turn !== null), (tight ? "narrow, turning and the grid go into the ⋯ menu" : "wide, the bar shows turning, no ⋯ menu") + " (more " + (more !== null) + ", turn " + (turn !== null) + ")")
+            const zoom = win.findName("imageZoom", viewer)
+            const barRight = zoom ? zoom.parent.mapToItem(viewer, zoom.parent.width, 0).x : -1
+            win.check(barRight > 0 && barRight <= viewer.width + 0.5, "the bar fits its view (" + barRight.toFixed(0) + " of " + viewer.width.toFixed(0) + ")")
             win.check(viewer.images.length === 33 && viewer.images[2] === win.imgDir + "/img1.png" && viewer.images[3] === win.imgDir + "/img2.png" && viewer.images[11] === win.imgDir + "/img10.png",
                       "the folder's 33 images in natural order (" + viewer.images.slice(0, 5).map(p => p.split("/").pop()).join(" ") + " …), not the text file")
             // Four wheel notches at a point left of the middle.
@@ -6653,6 +6663,7 @@ ApplicationWindow {
         ScriptAction { script: {
             const v = win.imgView()
             win.check(Math.abs(v.zoom - 2) < 1e-6 && v.pixelated, "the next step is 200%, pixels drawn as squares (" + v.zoom + ", " + v.pixelated + ")")
+            win.shotWindow("clicks-images-zoomed")
             const edges = win.imgEdgeColours()
             win.check(edges[0] !== "" && edges[0] === win.imgEdges[0] && edges[1] === win.imgEdges[1],
                       "bigger than its view, the image is drawn only inside it: not over the bar below or what is above (" + edges + ", fitted " + win.imgEdges + ")")
@@ -6730,6 +6741,7 @@ ApplicationWindow {
             win.check(win.imgThumbsReady(), "every thumbnail in view is drawn (" + shown + ")")
             win.check(st.diskThumbs >= shown - 1 && st.thumbsMade - win.imgStats.thumbsMade >= shown - 1, "they're kept on disk (" + st.diskThumbs + " files)")
             win.check(viewer.grid.currentIndex === 32, "the grid starts at the image shown (" + viewer.grid.currentIndex + ")")
+            win.shotWindow("clicks-images-grid")
             TestInput.key(Qt.Key_Escape, 0) } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
@@ -6762,6 +6774,7 @@ ApplicationWindow {
         ScriptAction { script: {
             const v = win.imgView()
             win.check(chat.fileEditor.imageViewer.filled && v.width === win.width, "F fills the window (" + v.width + " of " + win.width + ")")
+            win.shotWindow("clicks-images-filled")
             TestInput.key(Qt.Key_Escape, 0) } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
@@ -6810,6 +6823,7 @@ ApplicationWindow {
             const gone = tiles.filter(t => t.thumb.status === "error")
             win.check(gone.length === 1 && gone[0].modelData.endsWith("/art/gone.png") && win.findText("No longer on disk", gone[0]) !== null, "a picture gone from disk says so")
             win.check(tiles.filter(t => t.thumb.status === "ready").length === 7, "the rest are drawn")
+            win.shotWindow("clicks-pictures-thumbs")
             win.check(win.findText("paste-1.png", chat.transcript) === null, "a pasted picture shows as itself, not its file's name")
             win.check(win.findContaining("a yellow sun", chat.transcript) !== null, "a Markdown image's words stay in the reply")
             const all = JSON.parse(chat.session.sessionPictures())
@@ -6823,6 +6837,9 @@ ApplicationWindow {
             win.check(chat.transcript.chatPictures.opened && v.view.imageWidth === 800 && v.view.activeFocus, "a click opens it over the chat (" + v.view.imageWidth + "×" + v.view.imageHeight + ", keys " + v.view.activeFocus + ")")
             win.check(v.images.length === 7 && v.index === 1, "it steps through the chat's 7 pictures, this the 2nd (" + (v.index + 1) + " / " + v.images.length + ")")
             win.check(v.view.width >= chat.transcript.width - 1, "over the whole conversation")
+            win.shotWindow("clicks-pictures-viewer")
+            const origin = win.findName("imageOrigin", v)
+            win.check(origin !== null && origin.text.startsWith("From "), "the bar says where it came from (" + (origin ? origin.text : "none") + ")")
             win.imgEdges = win.imgEdgeColours(v.view)
             for (let i = 0; i < 8; i++) TestInput.key(Qt.Key_Plus, 0) } }
         PauseAnimation { duration: 800 }
@@ -6831,6 +6848,7 @@ ApplicationWindow {
             const edges = win.imgEdgeColours(v.view)
             win.check(v.view.zoom * 600 / win.imgDpr() > v.view.height * 2 && edges[0] !== "" && edges[0] === win.imgEdges[0] && edges[1] === win.imgEdges[1],
                       "zoomed past its view, the picture is drawn only inside it: not over the bar below or the tabs above (" + edges + ", fitted " + win.imgEdges + ", zoom " + v.view.zoom + ")")
+            win.shotWindow("clicks-pictures-zoomed")
             TestInput.key(Qt.Key_0, 0) } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
@@ -6848,6 +6866,12 @@ ApplicationWindow {
         ScriptAction { script: {
             const v = win.picViewer()
             win.check(v.gridMode && v.grid.count === 7, "G: all the chat's pictures as a grid (" + v.grid.count + ")")
+            win.shotWindow("clicks-pictures-grid")
+            const names = win.findAllNames("imageThumbName", v.grid).map(l => l.text)
+            win.check(names.length === 7 && names.indexOf("You sent") >= 0 && names.indexOf("art/sun.png") >= 0 && names.every(n => !/[0-9a-f]{12}/.test(n)),
+                      "the grid names each by where it came from, not its stored file's name (" + names.join(", ") + ")")
+            const goneTile = win.findAllNames("imageThumb", v.grid).find(t => t.path.endsWith("/art/gone.png"))
+            win.check(goneTile && goneTile.status === "error" && win.findText("No longer on disk", goneTile.parent) !== null, "in the grid too, a picture gone from disk says so")
             TestInput.key(Qt.Key_Escape, 0) } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {

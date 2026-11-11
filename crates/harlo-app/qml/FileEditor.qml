@@ -280,13 +280,28 @@ Rectangle {
                 anchors.leftMargin: 14
                 anchors.rightMargin: 8
                 spacing: 8
+                // The file's path in its project (the full path on hover).
                 Label {
+                    id: pathLabel
+                    objectName: "editorPath"
                     Layout.fillWidth: true
-                    text: root.path.replace(/^\/home\/[^/]+/, "~") + (root.modified ? "  ●" : "")
+                    readonly property string whole: root.path.replace(/^\/home\/[^/]+/, "~")
+                    readonly property string inProject: {
+                        if (Workspace.projectsRevision < 0) return ""
+                        let best = ""
+                        for (const pr of JSON.parse(Workspace.projectsJson()))
+                            if (root.path.startsWith(pr.path + "/") && pr.path.length > best.length) best = pr.path
+                        return best === "" ? "" : root.path.substring(best.length + 1)
+                    }
+                    text: (inProject || whole) + (root.modified ? "  ●" : "")
                     color: Theme.foreground
                     font.family: Theme.mono
                     font.pixelSize: Theme.mpx(12)
                     elide: Text.ElideMiddle
+                    HoverHandler { id: pathHover }
+                    ToolTip.visible: pathHover.hovered && pathLabel.inProject !== ""
+                    ToolTip.delay: 600
+                    ToolTip.text: pathLabel.whole
                 }
                 Label {
                     visible: root.language !== ""

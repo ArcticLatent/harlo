@@ -158,6 +158,11 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "sessionPictures"]
         fn session_pictures(self: &ChatSession) -> QString;
+        /// Where each of the chat's pictures came from, in words:
+        /// `{ path: "You sent" | "From Read shot.png" | "art/sun.png" … }`.
+        #[qinvokable]
+        #[cxx_name = "pictureLabels"]
+        fn picture_labels(self: &ChatSession) -> QString;
         /// What you wrote after a row (an ```options block's question):
         /// `{answered, text}`, `answered` false while nothing has followed.
         #[qinvokable]
@@ -861,6 +866,20 @@ impl ChatSession {
             }
         }
         QString::from(&serde_json::to_string(&all).unwrap_or_else(|_| "[]".into()))
+    }
+
+    pub fn picture_labels(&self) -> QString {
+        let folder = self.folder();
+        let mut labels = serde_json::Map::new();
+        for r in &self.rows {
+            for p in self.shown_pictures(r) {
+                if !labels.contains_key(&p) {
+                    let label = harlo_core::pictures::origin(r, &p, &folder);
+                    labels.insert(p, serde_json::Value::String(label));
+                }
+            }
+        }
+        QString::from(&serde_json::Value::Object(labels).to_string())
     }
 
     pub fn answer_after(&self, key: &QString) -> QString {

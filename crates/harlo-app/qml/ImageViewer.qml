@@ -27,6 +27,11 @@ Item {
     /// Its own pictures to step through (the chat's), instead of a folder's.
     property var pictureList: null
     readonly property bool ownList: pictureList !== null
+    /// The chat's pictures in words (where each came from, by path).
+    property var labels: ({})
+    function labelOf(p) { return labels[p] || p.substring(p.lastIndexOf("/") + 1) }
+    /// Behind the image (over the chat: its own layer, set apart from it).
+    property color backdrop: Theme.codeBg
     /// Over the chat: its file to the file tab, or close.
     signal openInTab(string path)
     signal closeRequested()
@@ -155,7 +160,7 @@ Item {
         anchors.fill: parent
         z: root.fillNow ? 1000 : 0
 
-        Rectangle { anchors.fill: parent; color: Theme.codeBg }
+        Rectangle { anchors.fill: parent; color: root.backdrop }
 
         ImageView {
             id: view
@@ -236,9 +241,22 @@ Item {
                     height: width
                     path: cellItem.modelData
                 }
+                // (One gone from disk says so, as in the chat.)
                 Label {
+                    anchors.centerIn: thumb
+                    width: thumb.width - 12
+                    visible: thumb.status === "error"
+                    text: "No longer on disk"
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.Wrap
+                    color: Theme.textMuted
+                    font.pixelSize: Theme.px(11)
+                }
+                // The picture's name: where it came from, for the chat's.
+                Label {
+                    objectName: "imageThumbName"
                     anchors { left: parent.left; right: parent.right; bottom: parent.bottom; leftMargin: 8; rightMargin: 16; bottomMargin: 10 }
-                    text: cellItem.modelData.substring(cellItem.modelData.lastIndexOf("/") + 1)
+                    text: root.ownList ? root.labelOf(cellItem.modelData) : cellItem.modelData.substring(cellItem.modelData.lastIndexOf("/") + 1)
                     color: cellItem.modelData === root.path ? Theme.foreground : Theme.muted
                     font.pixelSize: Theme.px(11)
                     elide: Text.ElideMiddle
@@ -265,9 +283,12 @@ Item {
         }
 
         // The bar under the image: where it is in its folder, its size and
-        // zoom, and the view's controls.
+        // zoom, and the view's controls. Narrow, turning, the grid and
+        // filling go into a menu and the size gives way, so nothing is cut
+        // off at the edge.
         Rectangle {
             id: bar
+            readonly property bool tight: width < 640
             anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
             height: 34
             color: Theme.subtle
@@ -300,9 +321,21 @@ Item {
                     focusPolicy: Qt.NoFocus
                     onClicked: root.step(1)
                 }
+                // Over the chat: where the picture came from.
+                Label {
+                    objectName: "imageOrigin"
+                    Layout.leftMargin: 8
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    visible: root.ownList && !root.gridMode
+                    text: root.labelOf(root.path)
+                    color: Theme.textMuted
+                    font.pixelSize: Theme.px(11.5)
+                    elide: Text.ElideMiddle
+                }
                 Label {
                     Layout.leftMargin: 8
-                    visible: !root.gridMode && view.imageWidth > 0
+                    visible: !root.gridMode && view.imageWidth > 0 && !bar.tight
                     text: view.imageWidth + " × " + view.imageHeight
                           + (view.frameCount > 1 ? "  ·  frame " + (view.frame + 1) + " of " + view.frameCount : "")
                     color: Theme.muted
@@ -316,7 +349,7 @@ Item {
                     color: Theme.muted
                     font.pixelSize: Theme.px(11)
                 }
-                Item { Layout.fillWidth: true }
+                Item { Layout.fillWidth: true; visible: !(root.ownList && !root.gridMode) }
                 ComposerIconButton {
                     objectName: "imagePlay"
                     visible: !root.gridMode && view.frameCount > 1
@@ -363,14 +396,15 @@ Item {
                     onClicked: view.fit ? view.actualSize() : view.fitView()
                 }
                 ComposerIconButton {
-                    visible: !root.gridMode
+                    objectName: "imageTurnLeft"
+                    visible: !root.gridMode && !bar.tight
                     iconName: "rotate-left"; tint: Theme.muted
                     tip: "Turn left (Shift+R)"
                     focusPolicy: Qt.NoFocus
                     onClicked: view.rotate(false)
                 }
                 ComposerIconButton {
-                    visible: !root.gridMode
+                    visible: !root.gridMode && !bar.tight
                     iconName: "rotate-right"; tint: Theme.muted
                     tip: "Turn right (R)"
                     focusPolicy: Qt.NoFocus
@@ -378,24 +412,19 @@ Item {
                 }
                 ComposerIconButton {
                     objectName: "imageGridButton"
-                    visible: root.folder !== "" || (root.ownList && root.images.length > 1)
+                    visible: (root.folder !== "" || (root.ownList && root.images.length > 1)) && (!bar.tight || root.gridMode)
                     iconName: "grid"; tint: Theme.muted
                     on: root.gridMode
                     tip: root.gridMode ? "Back to the image (G, Esc)" : root.ownList ? "All the chat's pictures (G)" : "The folder's images (G)"
                     focusPolicy: Qt.NoFocus
                     onClicked: root.showGrid(!root.gridMode)
                 }
-                FlatButton {
+                ComposerIconButton {
                     objectName: "imageOpenInTab"
                     visible: root.ownList
-                    text: "Open in tab"
-                    font.pixelSize: Theme.px(11)
-                    padding: 4
-                    outlined: false
+                    iconName: "folder-open"; tint: Theme.muted
+                    tip: "Open in a tab, with its folder (T)"
                     focusPolicy: Qt.NoFocus
-                    ToolTip.visible: hovered
-                    ToolTip.delay: 400
-                    ToolTip.text: "In the file tab, with its folder (T)"
                     onClicked: root.openInTab(root.path)
                 }
                 ComposerIconButton {
@@ -405,8 +434,35 @@ Item {
                     focusPolicy: Qt.NoFocus
                     onClicked: root.closeRequested()
                 }
+                // Narrow: the rest of the controls, in a menu.
                 ComposerIconButton {
-                    visible: !root.ownList
+                    id: moreButton
+                    objectName: "imageMore"
+                    visible: bar.tight && !root.gridMode
+                    iconName: "more"; tint: Theme.muted
+                    tip: "More"
+                    focusPolicy: Qt.NoFocus
+                    onClicked: moreMenu.popup(moreButton, 0, -moreMenu.implicitHeight)
+                    AppMenu {
+                        id: moreMenu
+                        AppMenuItem { text: "Turn left"; hint: "Shift+R"; onTriggered: view.rotate(false) }
+                        AppMenuItem { text: "Turn right"; hint: "R"; onTriggered: view.rotate(true) }
+                        AppMenuItem {
+                            visible: root.folder !== "" || (root.ownList && root.images.length > 1)
+                            text: root.ownList ? "All the chat's pictures" : "The folder's images"
+                            hint: "G"
+                            onTriggered: root.showGrid(true)
+                        }
+                        AppMenuItem {
+                            visible: !root.ownList
+                            text: root.filled ? "Back into the tab" : "Fill the window"
+                            hint: "F"
+                            onTriggered: { root.filled = !root.filled; root.focusView() }
+                        }
+                    }
+                }
+                ComposerIconButton {
+                    visible: !root.ownList && (!bar.tight || root.gridMode)
                     iconName: root.filled ? "fullscreen-exit" : "fullscreen"; tint: Theme.muted
                     tip: root.filled ? "Back into the tab (F, Esc)" : "Fill the window (F)"
                     focusPolicy: Qt.NoFocus

@@ -111,6 +111,9 @@ QtObject {
     readonly property color chrome: sidebar
     /// Cards on the canvas: a tool run, code, the composer.
     readonly property color raised: blend(background, foreground, (isLight ? 0.035 : 0.035) * contrast)
+    /// Behind a picture shown over the conversation (the image viewer): a
+    /// layer of its own, set apart from the canvas.
+    readonly property color stage: isLight ? blend(background, foreground, 0.075 * contrast) : blend(background, Qt.rgba(0, 0, 0, 1), 0.38)
     /// Fields on the chrome (search).
     readonly property color well: blend(sidebar, foreground, (isLight ? 0.05 : 0.045) * contrast)
     /// Lines between messages and sections: barely there.

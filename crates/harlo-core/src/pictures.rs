@@ -164,9 +164,47 @@ pub fn shown(row: &crate::Row, folder: &std::path::Path) -> Vec<String> {
     out
 }
 
+/// Where a picture of a row came from, in words: a project's file by its
+/// path in the project, one kept inline by who gave it ("You sent", "From
+/// Read shot.png", "In a reply"), another file by its path (~ for home).
+pub fn origin(row: &crate::Row, path: &str, folder: &std::path::Path) -> String {
+    let p = std::path::Path::new(path);
+    if p.starts_with(cache_dir()) {
+        return match row.kind {
+            crate::RowKind::User => "You sent".into(),
+            crate::RowKind::Tool => {
+                let mut name = row.title.clone();
+                if let Some(c) = name.get(..1) {
+                    name = c.to_uppercase() + &name[1..];
+                }
+                format!("From {name} {}", row.subtitle).trim_end().to_owned()
+            }
+            _ => "In a reply".into(),
+        };
+    }
+    match p.strip_prefix(folder) {
+        Ok(rel) if !folder.as_os_str().is_empty() && !rel.as_os_str().is_empty() => rel.to_string_lossy().into_owned(),
+        _ => crate::sidebar::tilde(p),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn says_where_a_picture_came_from() {
+        let dir = std::env::temp_dir().join(format!("harlo-origins-{}", std::process::id()));
+        TEST_DIR.with(|d| *d.borrow_mut() = Some(dir.clone()));
+        let cached = dir.join("ab0acd98b.png").to_string_lossy().into_owned();
+        let row = |kind, title: &str, subtitle: &str| crate::Row { kind, title: title.into(), subtitle: subtitle.into(), ..Default::default() };
+        let project = std::path::Path::new("/w/app");
+        assert_eq!(origin(&row(crate::RowKind::User, "", ""), &cached, project), "You sent");
+        assert_eq!(origin(&row(crate::RowKind::Tool, "read", "shot.png"), &cached, project), "From Read shot.png");
+        assert_eq!(origin(&row(crate::RowKind::Images, "", ""), &cached, project), "In a reply");
+        assert_eq!(origin(&row(crate::RowKind::Images, "", ""), "/w/app/art/sun.png", project), "art/sun.png");
+        assert_eq!(origin(&row(crate::RowKind::Images, "", ""), "/elsewhere/x.png", project), "/elsewhere/x.png");
+    }
 
     #[test]
     fn finds_markdown_images() {
