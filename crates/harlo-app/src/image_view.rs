@@ -18,6 +18,8 @@ pub mod qobject {
         type QString = cxx_qt_lib::QString;
         include!("cxx-qt-lib/qimage.h");
         type QImage = cxx_qt_lib::QImage;
+        include!("cxx-qt-lib/qbytearray.h");
+        type QByteArray = cxx_qt_lib::QByteArray;
     }
 
     #[namespace = "harlo"]
@@ -34,6 +36,7 @@ pub mod qobject {
         fn decode_thumbnail(path: &QString, side: i32) -> QImage;
         fn load_cached(path: &QString) -> QImage;
         fn save_thumbnail(image: &QImage, path_without_suffix: &QString) -> bool;
+        fn encode_for_phone(image: &QImage, quality: i32, png: &mut bool) -> QByteArray;
         fn readable_suffixes() -> QString;
 
         type FrameReader;
@@ -629,6 +632,32 @@ fn make_thumb(path: &str, side: i32) -> Option<Pixels> {
     let _ = std::fs::create_dir_all(cache_dir());
     qobject::save_thumbnail(&p.0, &qs(&base.to_string_lossy()));
     Some(p)
+}
+
+// ---- pictures for the phone ---------------------------------------------------------
+
+/// The longest side of a picture opened on the phone (a phone's screen).
+const PHONE_SIDE: i32 = 2048;
+/// The thumbnail a phone shows in a conversation (its tiles are about
+/// 110 points, 330 pixels).
+const PHONE_THUMB: i32 = 512;
+
+/// A picture as the phone gets it: a thumbnail (from the thumbnail cache)
+/// or a copy fitted to a phone's screen; its bytes (JPEG, or PNG when it
+/// has transparency), type and size. (Blocking: a decoding thread.)
+pub fn for_phone(path: &str, thumb: bool) -> Option<(Vec<u8>, &'static str, i32, i32)> {
+    let img = if thumb { make_thumb(path, PHONE_THUMB)? } else { Pixels(qobject::decode_image(&qs(path), PHONE_SIDE)) };
+    if !img.ok() {
+        return None;
+    }
+    let (w, h) = (img.0.width(), img.0.height());
+    let mut png = false;
+    // (Big photos: a lower quality keeps one well under a relay's frame.)
+    let mut bytes: Vec<u8> = (&qobject::encode_for_phone(&img.0, 82, &mut png)).into();
+    if !png && bytes.len() > 2_500_000 {
+        bytes = (&qobject::encode_for_phone(&img.0, 65, &mut png)).into();
+    }
+    (!bytes.is_empty()).then_some((bytes, if png { "image/png" } else { "image/jpeg" }, w, h))
 }
 
 // ---- suffixes and folders -----------------------------------------------------------

@@ -75,6 +75,12 @@ public final class OpenSession {
     /// "busy", "idle", "input", …
     public internal(set) var status = ""
     public internal(set) var rows: [Row] = []
+    /// Every picture the conversation shows, in order, each once (the
+    /// viewer steps through them).
+    public var pictures: [String] {
+        var seen = Set<String>()
+        return rows.flatMap(\.images).filter { seen.insert($0).inserted }
+    }
     /// Rows before these, only in harlo (a long session's phone gets its
     /// latest).
     public internal(set) var earlier = 0
@@ -868,6 +874,48 @@ public final class HarloModel {
         } catch {
             return (nil, Self.describe(error))
         }
+    }
+
+    /// harlo sends the conversation's pictures to the phone (an older one
+    /// doesn't).
+    public var showsPictures: Bool { features.contains("pictures") }
+
+    /// Pictures fetched this run (by size and path; the newest last), and
+    /// the ones on their way.
+    @ObservationIgnored var pictures: [String: Picture] = [:]
+    @ObservationIgnored var pictureOrder: [String] = []
+    @ObservationIgnored var pictureLoads: [String: Task<(Picture?, String), Never>] = [:]
+    /// Screen-sized pictures kept at once (thumbnails are small: all kept).
+    static let keptPictures = 24
+
+    /// A picture the open session shows (`Row.images`), or a picture file in
+    /// its folder, from harlo: a thumbnail or fitted to the screen (nil: it
+    /// can't be had, `why` says why). Kept for the run, so opening one again
+    /// is instant; asked for once however many views want it.
+    public func picture(_ path: String, thumb: Bool) async -> (picture: Picture?, why: String) {
+        let id = (thumb ? "thumb|" : "screen|") + path
+        if let p = pictures[id] { return (p, "") }
+        if demo || samples != nil { return (nil, "harlo shows pictures from your computer.") }
+        guard showsPictures else { return (nil, "This harlo doesn't send pictures to the phone.") }
+        guard let c = client, let key = session?.liveKey, !key.isEmpty else { return (nil, "Not connected to harlo.") }
+        if let t = pictureLoads[id] { return await t.value }
+        let t = Task { () -> (Picture?, String) in
+            do { return (try await c.picture(path, of: key, thumb: thumb), "") } catch { return (nil, Self.describe(error)) }
+        }
+        pictureLoads[id] = t
+        let got = await t.value
+        pictureLoads[id] = nil
+        if let p = got.0 {
+            pictures[id] = p
+            pictureOrder.removeAll { $0 == id }
+            pictureOrder.append(id)
+            let screens = pictureOrder.filter { $0.hasPrefix("screen|") }
+            for old in screens.dropLast(Self.keptPictures) {
+                pictures[old] = nil
+                pictureOrder.removeAll { $0 == old }
+            }
+        }
+        return got
     }
 
     /// harlo shows mockups to the phone (an older one doesn't).

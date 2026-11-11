@@ -313,4 +313,29 @@ final class HarloUITests: XCTestCase {
         shot("25-settings")
         audit("settings")
     }
+
+    func test16Pictures() {
+        launch("pictures")
+        openMain()
+        // Your photo in your message, the reply's picture under it.
+        let tiles = app.buttons.matching(identifier: "pictureTile")
+        XCTAssertTrue(tiles.firstMatch.waitForExistence(timeout: 8), "a picture's thumbnail")
+        XCTAssertEqual(tiles.count, 2, "the photo and the reply's picture")
+        see("Picture, sidebar.png")
+        shot("26-pictures")
+        audit("pictures")
+        // The viewer: at the one tapped, then across to the other.
+        tiles.element(boundBy: tiles.count - 1).tap()
+        let viewer = app.descendants(matching: .any).matching(identifier: "pictureViewer").firstMatch
+        XCTAssertTrue(viewer.waitForExistence(timeout: 8), "the viewer")
+        see("2 of 2")
+        shot("27-picture-viewer")
+        audit("picture-viewer")
+        viewer.swipeRight()
+        see("1 of 2")
+        XCTAssertTrue(app.buttons["pictureShare"].waitForExistence(timeout: 5), "Share")
+        shot("28-picture-photo")
+        app.buttons["pictureDone"].tap()
+        XCTAssertTrue(gone(viewer), "Done closes it")
+    }
 }

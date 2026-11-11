@@ -93,6 +93,10 @@ public struct Row: Equatable, Sendable, Identifiable {
     public var command: String
     /// Replies: the model that wrote it ("" when it's the session's own).
     public var model: String
+    /// The pictures it shows (one you sent, one a tool returned or a model
+    /// made, a picture file it names), as harlo names them: ask harlo for
+    /// one with `HarloModel.picture`.
+    public var images: [String]
 
     public var id: String { key }
 
@@ -115,13 +119,15 @@ public struct Row: Equatable, Sendable, Identifiable {
         label = v["label"].text
         command = v["command"].text
         model = v["model"].text
+        images = (v["images"].array ?? []).compactMap(\.string)
     }
 
     public init(key: String, kind: String, html: String = "", text: String = "", title: String = "", subtitle: String = "",
                 state: String = "", group: String = "", summary: String = "", groupOpen: Bool = false,
                 time: Int64 = 0, ended: Int64 = 0, result: String = "", diff: String = "", runMs: Int64 = 0,
-                label: String = "", command: String = "", model: String = "")
+                label: String = "", command: String = "", model: String = "", images: [String] = [])
     {
+        self.images = images
         self.label = label
         self.command = command
         self.model = model

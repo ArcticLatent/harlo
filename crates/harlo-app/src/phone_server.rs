@@ -197,12 +197,14 @@ fn clip_end(s: &str) -> String {
 
 /// A row for a phone: `label` is what a call is for in the agent's words
 /// (harlo's own messages: what happened, in a line), `command` a shell
-/// call's whole command, `model` the reply's model.
-fn row_json(r: &harlo_core::Row) -> Value {
+/// call's whole command, `model` the reply's model; `images` the pictures
+/// it shows (`harlo_core::pictures::shown`, which a phone asks for with
+/// `picture`).
+fn row_json(r: &harlo_core::Row, folder: &std::path::Path) -> Value {
     let text = if r.command.is_empty() { clip(&r.text) } else { clip_end(&r.text) };
     json!({ "key": r.key, "kind": r.kind.as_str(), "html": clip(&r.html), "text": text, "title": r.title, "subtitle": r.subtitle, "state": r.state,
         "group": r.group, "summary": r.summary, "groupOpen": r.group_open, "time": r.time, "ended": r.ended, "result": r.result, "diff": clip(&r.diff),
-        "runMs": r.run_ms, "label": r.label, "command": clip(&r.command), "model": r.model })
+        "runMs": r.run_ms, "label": r.label, "command": clip(&r.command), "model": r.model, "images": harlo_core::pictures::shown(r, folder) })
 }
 
 /// The part of a session's rows a phone has: everything after `skipped`.
@@ -215,6 +217,8 @@ struct Window {
     full: Vec<Arc<harlo_core::Row>>,
     /// The session's file (from its meta), for branching and forking.
     file: Option<std::path::PathBuf>,
+    /// The session's folder (its rows' pictures are found from it).
+    cwd: std::path::PathBuf,
 }
 
 impl Window {
@@ -271,7 +275,7 @@ fn row_frames(key: &str, window: &mut Window, u: &SessionUpdate) -> Vec<Value> {
             let shown = window.reset(rows);
             let mut frames = Vec::new();
             let mut at = 0;
-            for (i, piece) in pieces(shown.iter().map(|r| row_json(r)).collect()).into_iter().enumerate() {
+            for (i, piece) in pieces(shown.iter().map(|r| row_json(r, &window.cwd)).collect()).into_iter().enumerate() {
                 let n = piece.len();
                 frames.push(if i == 0 {
                     json!({ "ev": "reset", "key": key, "rows": piece, "earlier": window.skipped })
@@ -285,13 +289,15 @@ fn row_frames(key: &str, window: &mut Window, u: &SessionUpdate) -> Vec<Value> {
         SessionUpdate::Rows(changes) => {
             harlo_core::listdiff::apply(&mut window.full, changes.clone());
             let mut values = Vec::new();
-            for c in changes.iter().filter_map(|c| window.change(c)) {
+            let cwd = window.cwd.clone();
+            let changes: Vec<_> = changes.iter().filter_map(|c| window.change(c)).collect();
+            for c in changes {
                 match c {
-                    ListChange::Update { at, row } => values.push(json!({ "op": "update", "at": at, "row": row_json(&row) })),
+                    ListChange::Update { at, row } => values.push(json!({ "op": "update", "at": at, "row": row_json(&row, &cwd) })),
                     ListChange::Remove { at, count } => values.push(json!({ "op": "remove", "at": at, "count": count })),
                     ListChange::Insert { at, rows } => {
                         let mut at = at;
-                        for piece in pieces(rows.iter().map(|r| row_json(r)).collect()) {
+                        for piece in pieces(rows.iter().map(|r| row_json(r, &cwd)).collect()) {
                             let n = piece.len();
                             values.push(json!({ "op": "insert", "at": at, "rows": piece }));
                             at += n;
@@ -333,7 +339,7 @@ fn event(key: &str, u: &SessionUpdate) -> Option<Value> {
 /// (sessions say their machine), `settled` (settled sessions, for a phone
 /// that says it shows them), `limits` (plan limits: the `limits` call and
 /// event), `compaction` (a session's meta says where it compacts).
-const FEATURES: &[&str] = &["sessionMentions", "serverStart", "machines", "settled", "limits", "compaction", "connect", "modelServers", "putBack", "stoppedModels", "plan", "diagrams", "visuals", "planRun", "helpers", "answerHelper", "team"];
+const FEATURES: &[&str] = &["sessionMentions", "serverStart", "machines", "settled", "limits", "compaction", "connect", "modelServers", "putBack", "stoppedModels", "plan", "diagrams", "visuals", "planRun", "helpers", "answerHelper", "team", "pictures"];
 
 /// The session list for one phone: settled sessions only for one that
 /// shows them.
@@ -733,13 +739,9 @@ async fn session_op(op: &str, msg: &Value, live: &crate::registry::LiveRef) -> V
     json!({ "ok": true })
 }
 
-/// Lines of a file sent to a phone, at most.
-const FILE_LINES: usize = 5000;
-
-/// A file in the session's folder for a phone to read (a path a reply
-/// mentions): its lines, highlighted (`.sN` token spans, as code blocks).
-/// Only files inside the folder (or its repository).
-fn file_json(cwd: &std::path::Path, path: &str) -> Value {
+/// A path a reply mentions, found in the session's folder (or its
+/// repository): the file and its path as shown. Only files inside it.
+fn in_folder(cwd: &std::path::Path, path: &str) -> Result<(std::path::PathBuf, String), String> {
     let wanted = std::path::Path::new(path.trim());
     let base = harlo_core::git::repo_root(cwd).unwrap_or_else(|| cwd.to_owned());
     // (On another machine, an absolute path is that machine's.)
@@ -751,15 +753,57 @@ fn file_json(cwd: &std::path::Path, path: &str) -> Value {
     let full = if wanted.is_absolute() { absolute(wanted) } else { cwd.join(wanted) };
     // Relative to the repository when not to the folder (agents write either).
     let full = if wanted.is_absolute() || real_path(&full).is_some() { full } else { base.join(wanted) };
-    let (Some((real, is_dir)), Some((base_real, _))) = (real_path(&full), real_path(&base)) else { return json!({ "error": format!("{path} isn't there.") }) };
+    let (Some((real, is_dir)), Some((base_real, _))) = (real_path(&full), real_path(&base)) else { return Err(format!("{path} isn't there.")) };
     let cwd_real = real_path(cwd).map_or_else(|| base_real.clone(), |(p, _)| p);
     if !real.starts_with(&base_real) && !real.starts_with(&cwd_real) {
-        return json!({ "error": "Only files in the session's folder open here." });
+        return Err("Only files in the session's folder open here.".into());
     }
     if is_dir {
-        return json!({ "error": format!("{path} is a folder.") });
+        return Err(format!("{path} is a folder."));
     }
     let shown = real.strip_prefix(&base_real).map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| path.to_owned());
+    Ok((real, shown))
+}
+
+/// A picture for a phone (`picture`): one the conversation shows
+/// (`shown`), else a picture file in the session's folder on this
+/// computer; its bytes in base64, type and size.
+fn picture_json(cwd: &std::path::Path, path: &str, shown: bool, thumb: bool) -> Value {
+    use base64::Engine as _;
+    let file = if shown {
+        std::path::PathBuf::from(path)
+    } else {
+        if !harlo_core::pictures::is_picture_name(path) {
+            return json!({ "error": format!("{path} isn't a picture.") });
+        }
+        if harlo_core::remote::host_of(cwd).is_some() {
+            return json!({ "error": "Pictures on another machine don't open on the phone." });
+        }
+        match in_folder(cwd, path) {
+            Ok((real, _)) => real,
+            Err(e) => return json!({ "error": e }),
+        }
+    };
+    if !file.is_file() {
+        return json!({ "error": "That picture is no longer on the computer." });
+    }
+    match crate::image_view::for_phone(&file.to_string_lossy(), thumb) {
+        Some((bytes, kind, w, h)) => json!({ "data": base64::engine::general_purpose::STANDARD.encode(bytes), "type": kind, "width": w, "height": h }),
+        None => json!({ "error": "harlo couldn't read that picture." }),
+    }
+}
+
+/// Lines of a file sent to a phone, at most.
+const FILE_LINES: usize = 5000;
+
+/// A file in the session's folder for a phone to read (a path a reply
+/// mentions): its lines, highlighted (`.sN` token spans, as code blocks).
+/// Only files inside the folder (or its repository).
+fn file_json(cwd: &std::path::Path, path: &str) -> Value {
+    let (real, shown) = match in_folder(cwd, path) {
+        Ok(found) => found,
+        Err(e) => return json!({ "error": e }),
+    };
     match harlo_core::files::read_text(&real) {
         Ok(harlo_core::files::FileContent::Text(t)) => {
             let lines: Vec<&str> = t.lines().collect();
@@ -964,7 +1008,7 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
                         match crate::phone_bridge::open(msg["key"].as_str().unwrap_or_default()).await.and_then(|k| crate::registry::get(&k).map(|l| (k, l))) {
                             Some((key, live)) => {
                                 subagents.clear();
-                                window = Window::default();
+                                window = Window { cwd: live.cwd.clone(), ..Window::default() };
                                 let sub = live.handle.subscribe(Forward(updates_tx.clone()));
                                 open = Some((key.clone(), sub));
                                 json!({ "key": key, "harness": live.harness })
@@ -1008,6 +1052,23 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
                         wants_plans = true;
                         crate::phone_bridge::call(msg.clone()).await
                     }
+                    // A picture the conversation shows (or a picture file in the
+                    // session's folder), as a thumbnail or fitted to a phone's
+                    // screen. (Off the loop: it's decoded.)
+                    "picture" => match (crate::registry::get(msg["key"].as_str().unwrap_or_default()), &open) {
+                        (Some(live), Some((key, _))) if key == msg["key"].as_str().unwrap_or_default() => {
+                            let path = msg["path"].as_str().unwrap_or_default().to_owned();
+                            let shown = !path.is_empty() && window.full.iter().any(|r| harlo_core::pictures::shown(r, &window.cwd).contains(&path));
+                            let (cwd, later, id, thumb) = (live.cwd.clone(), later_tx.clone(), id.clone(), msg["size"].as_str() == Some("thumb"));
+                            tokio::task::spawn_blocking(move || {
+                                let mut reply = picture_json(&cwd, &path, shown, thumb);
+                                reply["id"] = id;
+                                let _ = later.send(reply);
+                            });
+                            Value::Null
+                        }
+                        _ => json!({ "error": "Open the session first." }),
+                    },
                     // Edit & resend (`fork` false) or fork from one of the user's messages.
                     "branch" => match (crate::registry::get(msg["key"].as_str().unwrap_or_default()), &open) {
                         (Some(live), Some((key, _))) if key == msg["key"].as_str().unwrap_or_default() => {
@@ -1169,14 +1230,44 @@ pub(crate) mod tests {
         let long: String = (0..20_000).map(|i| format!("line {i}\n")).collect();
         let mut r = harlo_core::Row { key: "c".into(), kind: harlo_core::transcript::RowKind::Tool, title: "bash".into(), text: long.clone(),
             label: "Run the tests".into(), command: "cargo test".into(), model: "codex/gpt-6.1-sol".into(), ..Default::default() };
-        let v = row_json(&r);
+        let v = row_json(&r, std::path::Path::new(""));
         assert_eq!((v["label"].as_str(), v["command"].as_str(), v["model"].as_str()), (Some("Run the tests"), Some("cargo test"), Some("codex/gpt-6.1-sol")));
         let text = v["text"].as_str().unwrap();
         assert!(text.ends_with("line 19999\n") && text.starts_with("… (its start is in harlo on your computer)\nline "), "{}", &text[..80]);
         assert!(text.len() <= ROW_BYTES + 60);
         r.command.clear();
-        let text = row_json(&r)["text"].as_str().unwrap().to_owned();
+        let text = row_json(&r, std::path::Path::new(""))["text"].as_str().unwrap().to_owned();
         assert!(text.starts_with("line 0\n") && text.ends_with("(cut here; the rest is in harlo on your computer)"));
+    }
+
+    /// A row names its pictures (ones that exist); a phone gets one the
+    /// conversation shows, or a picture in the session's folder, as a
+    /// thumbnail or fitted to its screen, and nothing else.
+    #[test]
+    fn pictures_reach_phones() {
+        use base64::Engine as _;
+        let dir = std::env::temp_dir().join(format!("harlo-phone-pictures-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("out")).unwrap();
+        let png = base64::engine::general_purpose::STANDARD
+            .decode("iVBORw0KGgoAAAANSUhEUgAAAAQAAAADCAIAAAA7ljmRAAAAEElEQVR4nGP4z8AARww4OQD1MQv1NXv7ggAAAABJRU5ErkJggg==")
+            .unwrap();
+        std::fs::write(dir.join("out/cat.png"), &png).unwrap();
+        std::fs::write(dir.join("notes.txt"), "hi").unwrap();
+        let r = harlo_core::Row { key: "t".into(), kind: harlo_core::transcript::RowKind::Tool, mentions: vec!["out/cat.png".into(), "out/gone.png".into()], ..Default::default() };
+        let cat = dir.join("out/cat.png").to_string_lossy().into_owned();
+        assert_eq!(row_json(&r, &dir)["images"], json!([cat]), "only the pictures that are there");
+        let v = picture_json(&dir, &cat, true, true);
+        assert_eq!((v["width"].as_i64(), v["height"].as_i64(), v["type"].as_str()), (Some(4), Some(3), Some("image/jpeg")), "{v}");
+        let bytes = base64::engine::general_purpose::STANDARD.decode(v["data"].as_str().unwrap()).unwrap();
+        assert!(bytes.starts_with(&[0xff, 0xd8]), "a JPEG");
+        assert_eq!(picture_json(&dir, "out/cat.png", false, false)["width"].as_i64(), Some(4), "a picture in the folder, by its path");
+        assert!(picture_json(&dir, "notes.txt", false, true)["error"].as_str().unwrap().contains("isn't a picture"));
+        let outside = std::env::temp_dir().join(format!("harlo-phone-outside-{}.png", std::process::id()));
+        std::fs::write(&outside, &png).unwrap();
+        assert!(picture_json(&dir, &outside.to_string_lossy(), false, true)["error"].as_str().unwrap().contains("Only files in the session's folder"));
+        assert!(picture_json(&dir, &dir.join("out/gone.png").to_string_lossy(), true, true)["error"].as_str().unwrap().contains("no longer"));
+        let _ = std::fs::remove_file(outside);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A side question's answer goes to phones as it comes.

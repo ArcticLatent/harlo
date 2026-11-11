@@ -846,46 +846,9 @@ impl ChatSession {
         PathBuf::from(self.cwd.to_string())
     }
 
-    /// A row's pictures to show: its own (a relative path is in the
-    /// session's folder) and the picture files it names that exist. (On
-    /// another machine, only those kept here.)
+    /// A row's pictures to show (`harlo_core::pictures::shown`).
     fn shown_pictures(&self, row: &Row) -> Vec<String> {
-        if row.images.is_empty() && row.mentions.is_empty() {
-            return Vec::new();
-        }
-        let folder = self.folder();
-        let remote = harlo_core::remote::host_of(&folder).is_some();
-        let whole = |p: &str| -> Option<PathBuf> {
-            let path = if let Some(rest) = p.strip_prefix("~/") {
-                PathBuf::from(std::env::var_os("HOME")?).join(rest)
-            } else {
-                PathBuf::from(p)
-            };
-            if path.is_absolute() {
-                Some(path)
-            } else if remote || folder.as_os_str().is_empty() {
-                None
-            } else {
-                Some(folder.join(path))
-            }
-        };
-        let mut out: Vec<String> = Vec::new();
-        let mut add = |p: PathBuf| {
-            let p = p.to_string_lossy().into_owned();
-            if !out.contains(&p) {
-                out.push(p);
-            }
-        };
-        for p in row.images.iter().filter_map(|p| whole(p)) {
-            // (A cache file is local even for another machine's session.)
-            if !remote || p.starts_with(harlo_core::pictures::cache_dir()) {
-                add(p);
-            }
-        }
-        for p in row.mentions.iter().filter_map(|p| whole(p)).filter(|p| !remote && p.is_file()) {
-            add(p);
-        }
-        out
+        harlo_core::pictures::shown(row, &self.folder())
     }
 
     pub fn session_pictures(&self) -> QString {

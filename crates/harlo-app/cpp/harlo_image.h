@@ -5,6 +5,7 @@
 // ImageThumb (src/image_view.rs) derive from the item.
 #pragma once
 
+#include <QtCore/QBuffer>
 #include <QtCore/QTimerEvent>
 #include <QtGui/QColorSpace>
 #include <QtGui/QImage>
@@ -96,24 +97,46 @@ inline QImage decode_thumbnail(const QString &path, int side)
 
 inline QImage load_cached(const QString &path) { return for_screen(QImage(path)); }
 
+// Whether a decoded image has any pixel that isn't opaque.
+inline bool has_transparency(const QImage &img)
+{
+    if (!img.hasAlphaChannel())
+        return false;
+    if (img.format() != QImage::Format_RGBA8888_Premultiplied)
+        return true;
+    for (int y = 0; y < img.height(); ++y) {
+        const uchar *row = img.constScanLine(y);
+        for (int x = 0; x < img.width(); ++x)
+            if (row[x * 4 + 3] != 255)
+                return true;
+    }
+    return false;
+}
+
 // Saves a thumbnail: JPEG when it has no transparency, else PNG.
 inline bool save_thumbnail(const QImage &img, const QString &path_without_suffix)
 {
     if (img.isNull())
         return false;
-    // (Decoded images are RGBA8888: alpha is every fourth byte.)
-    const bool alpha = img.hasAlphaChannel() && [&] {
-        if (img.format() != QImage::Format_RGBA8888_Premultiplied)
-            return true;
-        for (int y = 0; y < img.height(); ++y) {
-            const uchar *row = img.constScanLine(y);
-            for (int x = 0; x < img.width(); ++x)
-                if (row[x * 4 + 3] != 255)
-                    return true;
-        }
-        return false;
-    }();
+    const bool alpha = has_transparency(img);
     return alpha ? img.save(path_without_suffix + ".png", "PNG") : img.convertToFormat(QImage::Format_RGB888).save(path_without_suffix + ".jpg", "JPG", 88);
+}
+
+// An image as a file's bytes for the phone: PNG when it has transparency
+// (`png` set), else JPEG at `quality`.
+inline QByteArray encode_for_phone(const QImage &img, int quality, bool &png)
+{
+    QByteArray out;
+    if (img.isNull())
+        return out;
+    QBuffer buf(&out);
+    buf.open(QIODevice::WriteOnly);
+    png = has_transparency(img);
+    if (png)
+        img.save(&buf, "PNG");
+    else
+        img.convertToFormat(QImage::Format_RGB888).save(&buf, "JPG", quality);
+    return out;
 }
 
 // The file suffixes Qt can read here (with the installed format plugins).

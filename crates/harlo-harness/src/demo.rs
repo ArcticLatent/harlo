@@ -221,6 +221,8 @@ pub(crate) fn spawn() -> (Harness, mpsc::UnboundedReceiver<HarnessEvent>) {
                     respond(json!({"disposition":"started"}));
                     abort.store(false, Ordering::Relaxed);
                     let text = cmd["message"].as_str().unwrap_or_default().to_owned();
+                    // (Its pictures stay in the message, as an agent keeps them.)
+                    let images = cmd["images"].as_array().cloned().unwrap_or_default();
                     let rate = if text.contains("fast") { 240 } else { 60 };
                     let ask = text.contains("approve").then(|| Arc::clone(&approval));
                     // "later": it starts after a while (a phone hangs up first, as
@@ -229,7 +231,7 @@ pub(crate) fn spawn() -> (Harness, mpsc::UnboundedReceiver<HarnessEvent>) {
                     let (events, seq, abort) = (events.clone(), seq.clone(), abort.clone());
                     tokio::spawn(async move {
                         tokio::time::sleep(wait).await;
-                        stream_answer(events, seq, abort, text, rate, ask).await
+                        stream_answer(events, seq, abort, text, images, rate, ask).await
                     });
                 }
                 "abort" => {
@@ -297,6 +299,7 @@ async fn stream_answer(
     seq: Arc<AtomicU64>,
     abort: Arc<AtomicBool>,
     prompt: String,
+    images: Vec<Value>,
     rate: u64,
     approval: Option<Approval>,
 ) {
@@ -306,8 +309,12 @@ async fn stream_answer(
     };
     send(HarnessEvent::RunStarted);
     let uid = next_id(&seq);
-    send(HarnessEvent::MessageStart { id: uid.clone(), message: user_message(&prompt) });
-    send(HarnessEvent::MessageEnd { id: uid, message: user_message(&prompt) });
+    let mut asked = user_message(&prompt);
+    if let Some(content) = asked["content"].as_array_mut() {
+        content.extend(images);
+    }
+    send(HarnessEvent::MessageStart { id: uid.clone(), message: asked.clone() });
+    send(HarnessEvent::MessageEnd { id: uid, message: asked });
 
     let aid = next_id(&seq);
     send(HarnessEvent::MessageStart { id: aid.clone(), message: json!({"role":"assistant","content":[]}) });

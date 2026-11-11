@@ -411,6 +411,19 @@ final class ModelPartsTests: XCTestCase {
         XCTAssertTrue(code.allSatisfy { $0.link == nil }, "code blocks stay as they are")
     }
 
+    func testPictureLinksOpenTheViewer() {
+        XCTAssertEqual(FileLinks.path("shot.png")?.path, "shot.png")
+        XCTAssertTrue(PictureNames.isPicture("docs/a.PNG"))
+        XCTAssertFalse(PictureNames.isPicture(".png"))
+        XCTAssertFalse(PictureNames.isPicture("src/a.rs"))
+        let shown = ["/home/you/.cache/harlo/pictures/1.jpg", "/home/you/p/docs/sidebar.png"]
+        XCTAssertEqual(PictureNames.match("docs/sidebar.png", in: shown), shown[1])
+        XCTAssertEqual(PictureNames.match("./docs/sidebar.png", in: shown), shown[1])
+        XCTAssertEqual(PictureNames.match(shown[0], in: shown), shown[0])
+        XCTAssertNil(PictureNames.match("bar.png", in: shown), "a whole name only")
+        XCTAssertEqual(PictureNames.name(shown[1]), "sidebar.png")
+    }
+
     func testLongCodeFolds() {
         let spans = [Span("a\nb\n", code: true, token: 2), Span("c\nd", code: true)]
         XCTAssertEqual(RichText.lineCount(spans), 4)
@@ -1137,7 +1150,7 @@ final class RecordingTests: XCTestCase {
 
     func testEveryScene() async throws {
         let text = try XCTUnwrap(Self.text)
-        XCTAssertEqual(Replay.scenes(in: text), ["session", "ask", "approval", "working", "aside", "plan", "helpers", "end"])
+        XCTAssertEqual(Replay.scenes(in: text), ["session", "ask", "approval", "working", "aside", "plan", "helpers", "end", "pictures"])
         let tools = { (s: OpenSession) in s.rows.filter { $0.kind == "tool" } }
 
         var (m, s) = try await open("session")
@@ -1180,6 +1193,22 @@ final class RecordingTests: XCTestCase {
         let c = try XCTUnwrap(m.session)
         for _ in 0..<100 where c.rows.isEmpty { try await Task.sleep(nanoseconds: 20_000_000) }
         XCTAssertTrue(c.rows.contains { $0.kind == "tool" && $0.title == "Agent" }, "\(c.rows.map(\.title))")
+
+        // The phone's photo and the reply's picture, each as a thumbnail
+        // and fitted to the screen.
+        (m, s) = try await open("pictures")
+        XCTAssertTrue(m.showsPictures)
+        XCTAssertEqual(s.pictures.count, 2, "\(s.pictures)")
+        XCTAssertEqual(s.rows.last { $0.kind == "user" }?.images.count, 1)
+        XCTAssertEqual(s.pictures.last.map { ($0 as NSString).lastPathComponent }, "sidebar.png")
+        for path in s.pictures {
+            for thumb in [true, false] {
+                let got = await m.picture(path, thumb: thumb)
+                let picture = try XCTUnwrap(got.picture, got.why)
+                XCTAssertGreaterThan(picture.width, 0)
+                XCTAssertEqual(picture.type, "image/jpeg")
+            }
+        }
     }
 }
 

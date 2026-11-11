@@ -353,6 +353,14 @@ public actor HarloClient {
         return DiagramPicture(png: png, width: r["width"].double ?? 0, height: r["height"].double ?? 0)
     }
 
+    /// A picture a session shows (`Row.images`), or a picture file in its
+    /// folder: a thumbnail, or fitted to a phone's screen.
+    public func picture(_ path: String, of key: String, thumb: Bool) async throws -> Picture {
+        let r = try check(await call("picture", ["key": .string(key), "path": .string(path), "size": .string(thumb ? "thumb" : "screen")]))
+        guard let data = Data(base64Encoded: r["data"].text), !data.isEmpty else { throw HarloError.closed("harlo sent no picture.") }
+        return Picture(data: data, type: r["type"].text, width: r["width"].double ?? 0, height: r["height"].double ?? 0)
+    }
+
     /// A ```mockup block of a session: its pictures, taken by harlo.
     public func mockup(_ source: String, of key: String) async throws -> MockupPictures {
         let r = try check(await call("mockup", ["source": .string(source), "key": .string(key)]))

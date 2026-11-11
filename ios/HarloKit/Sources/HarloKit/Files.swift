@@ -71,7 +71,7 @@ public enum FileLinks {
         "rs", "swift", "ts", "tsx", "js", "jsx", "mjs", "py", "md", "json", "toml", "yml", "yaml", "qml", "sh", "zsh", "bash", "go", "c", "h", "cc",
         "cpp", "hpp", "m", "mm", "java", "kt", "kts", "gradle", "html", "css", "scss", "txt", "lock", "cfg", "ini", "conf", "xml", "plist", "sql",
         "rb", "php", "lua", "vue", "svelte", "dart", "cs", "fs", "ex", "exs", "erl", "hs", "ml", "nix", "zig", "env", "csv", "svg", "proto",
-        "graphql", "tf", "dockerfile", "mdx", "rst", "tex", "pro", "pri", "cmake", "mk", "entitlements", "pbxproj", "storyboard", "xib",
+        "graphql", "png", "jpg", "jpeg", "gif", "webp", "tf", "dockerfile", "mdx", "rst", "tex", "pro", "pri", "cmake", "mk", "entitlements", "pbxproj", "storyboard", "xib",
     ]
 
     /// A path (and line) if `text` is one: `src/app.rs`, `app.rs:42`,

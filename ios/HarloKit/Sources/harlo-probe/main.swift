@@ -306,6 +306,19 @@ func features(_ model: HarloModel) async {
     let photo = s.rows.first { $0.kind == "user" }
     check(photo.map { $0.text.contains("Photo 1") || $0.html.contains("Photo 1") || $0.title.contains("Photo") } ?? false,
           "the photo goes with it (\(photo?.text.prefix(80) ?? ""))")
+    // The photo comes back as a picture (a thumbnail and fitted to the
+    // screen); a file that isn't one doesn't.
+    if let pic = photo?.images.first, model.showsPictures {
+        let thumb = await model.picture(pic, thumb: true)
+        check(thumb.picture.map { $0.width == 1 && $0.height == 1 && !$0.data.isEmpty } ?? false,
+              "the photo comes back as a picture (\(thumb.picture.map { "\(Int($0.width))x\(Int($0.height)) \($0.type), \($0.data.count) bytes" } ?? thumb.why))")
+        let screen = await model.picture(pic, thumb: false)
+        check(screen.picture != nil, "and fitted to the screen (\(screen.picture.map { "\($0.data.count) bytes" } ?? screen.why))")
+    } else {
+        check(false, "the photo is one of its row's pictures (\(photo?.images ?? []), features \(model.showsPictures))")
+    }
+    let notOne = await model.picture("notes.txt", thumb: true)
+    check(notOne.picture == nil && notOne.why.contains("isn't a picture"), "a file that isn't a picture isn't sent as one (\(notOne.why))")
     let listed = await waitFor(5) { model.sessions.contains { $0.key == s.liveKey && $0.project == repo.name } }
     check(listed, "it's listed under its project")
     let gotModes = await waitFor(5) { s.modes != nil }
@@ -682,5 +695,21 @@ func record(_ link: String, to path: String) async {
     _ = await model.sessionMentions(matching: "")
     _ = await model.changes()
     rec.scene("end")
+
+    // Pictures: a photo from the phone, and the one the reply shows; the
+    // phone asks for each as a thumbnail and fitted to its screen.
+    if let file = ProcessInfo.processInfo.environment["HARLO_RECORD_PHOTO"], let jpeg = FileManager.default.contents(atPath: file) {
+        _ = await connected()
+        let sent = await model.send("Here's how it looks on my phone.", photos: [Photo(data: jpeg, mimeType: "image/jpeg")])
+        let shown = await waitFor(30) { !s.busy && s.pictures.count >= 2 }
+        check(sent && shown && model.showsPictures, "the photo and the reply's picture show (\(s.pictures))")
+        for path in s.pictures {
+            for thumb in [true, false] {
+                let got = await model.picture(path, thumb: thumb)
+                check(got.picture != nil, "\(path.split(separator: "/").last ?? "") as \(thumb ? "a thumbnail" : "a screen's picture") (\(got.picture.map { "\(Int($0.width))x\(Int($0.height)), \($0.data.count) bytes" } ?? got.why))")
+            }
+        }
+        rec.scene("pictures")
+    }
     Recorder.shared = nil
 }

@@ -253,6 +253,11 @@ struct ToolCard: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            if !row.images.isEmpty && model.showsPictures {
+                PictureStrip(paths: row.images, side: 72)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
+            }
             if open && !row.diff.isEmpty {
                 Rectangle().fill(Color(p.hairline)).frame(height: 1)
                 DiffLines(diff: row.diff, bare: true)
@@ -338,6 +343,18 @@ struct RowView: View {
     }
 
     var body: some View {
+        // (Your pictures are in your bubble, a tool's in its card.)
+        if !row.images.isEmpty && model.showsPictures && row.kind != "user" && row.kind != "tool" {
+            VStack(alignment: .leading, spacing: 10) {
+                content
+                PictureStrip(paths: row.images)
+            }
+        } else {
+            content
+        }
+    }
+
+    @ViewBuilder var content: some View {
         switch row.kind {
         case "user":
             UserBubble(row: row)
@@ -488,6 +505,7 @@ struct ThinkingRow: View {
 /// Your message: a bubble on the right in the accent's colour (when you
 /// sent it under it), and your penguin.
 struct UserBubble: View {
+    @Environment(HarloModel.self) private var model
     @Environment(\.palette) private var p
     let row: Row
 
@@ -497,9 +515,14 @@ struct UserBubble: View {
         HStack(alignment: .bottom, spacing: 8) {
             Spacer(minLength: 36)
             VStack(alignment: .trailing, spacing: 5) {
-                // What came with it: photos and files (by name), and tags
-                // ("1 image", "Plan").
-                let files = row.title.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
+                // What came with it: photos (as pictures, from a harlo that
+                // sends them; else by name) and files, and tags ("1 image",
+                // "Plan").
+                let pictures = model.showsPictures ? row.images : []
+                if !pictures.isEmpty {
+                    PictureStrip(paths: pictures)
+                }
+                let files = row.title.split(separator: "\n").map(String.init).filter { !$0.isEmpty && (pictures.isEmpty || !Self.isPhoto($0)) }
                 if !files.isEmpty || !row.subtitle.isEmpty {
                     Flow(spacing: 6) {
                         ForEach(files, id: \.self) { f in
@@ -535,10 +558,14 @@ struct UserBubble: View {
 
     /// An attachment: a photo (as the phone names them, or an image file)
     /// or a file, by its name.
+    static func isPhoto(_ path: String) -> Bool {
+        let name = path.split(separator: "/").last.map(String.init) ?? path
+        return name.hasPrefix("Photo ") || PictureNames.isPicture(name)
+    }
+
     func attachment(_ path: String) -> some View {
         let name = path.split(separator: "/").last.map(String.init) ?? path
-        let ext = name.split(separator: ".").last.map { $0.lowercased() } ?? ""
-        let photo = name.hasPrefix("Photo ") || ["png", "jpg", "jpeg", "gif", "webp", "heic"].contains(ext)
+        let photo = Self.isPhoto(path)
         return HStack(spacing: 5) {
             Image(systemName: photo ? "photo" : "doc").scaledFont(12, .semibold)
             Text(name).scaledFont(13, .medium).lineLimit(1).truncationMode(.middle)

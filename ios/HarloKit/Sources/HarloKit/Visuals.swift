@@ -88,3 +88,45 @@ public struct MockupPictures: Equatable, Sendable {
         beforeWhy = v["before"]["error"].text
     }
 }
+
+/// Pictures by name: which files are pictures (as harlo counts them), and
+/// which of a conversation's pictures a link in a reply means.
+public enum PictureNames {
+    public static let suffixes: Set<String> = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif", "heic", "jxl", "tif", "tiff"]
+
+    public static func isPicture(_ path: String) -> Bool {
+        let name = path.split(separator: "/").last.map(String.init) ?? path
+        guard let dot = name.lastIndex(of: "."), dot != name.startIndex else { return false }
+        return suffixes.contains(name[name.index(after: dot)...].lowercased())
+    }
+
+    /// The file's name (a photo's cache name stays as it is).
+    public static func name(_ path: String) -> String {
+        path.split(separator: "/").last.map(String.init) ?? path
+    }
+
+    /// The conversation's picture `link` names (as written: `docs/a.png`,
+    /// `./a.png` or the whole path), or nil.
+    public static func match(_ link: String, in pictures: [String]) -> String? {
+        var tail = link
+        while tail.hasPrefix("./") { tail.removeFirst(2) }
+        if pictures.contains(tail) { return tail }
+        return pictures.first { $0.hasSuffix("/" + tail) }
+    }
+}
+
+/// A picture from harlo: a file's bytes (JPEG, or PNG with transparency),
+/// its type and size in pixels.
+public struct Picture: Equatable, Sendable {
+    public var data: Data
+    public var type: String
+    public var width: Double
+    public var height: Double
+
+    public init(data: Data, type: String, width: Double, height: Double) {
+        self.data = data
+        self.type = type
+        self.width = width
+        self.height = height
+    }
+}

@@ -123,6 +123,47 @@ pub fn mentioned(text: &str) -> Vec<String> {
     out
 }
 
+/// A row's pictures to show: its own (a relative path is in the session's
+/// `folder`) and the picture files it names that exist. (On another
+/// machine, only those kept here.)
+pub fn shown(row: &crate::Row, folder: &std::path::Path) -> Vec<String> {
+    if row.images.is_empty() && row.mentions.is_empty() {
+        return Vec::new();
+    }
+    let remote = crate::remote::host_of(folder).is_some();
+    let whole = |p: &str| -> Option<PathBuf> {
+        let path = if let Some(rest) = p.strip_prefix("~/") {
+            PathBuf::from(std::env::var_os("HOME")?).join(rest)
+        } else {
+            PathBuf::from(p)
+        };
+        if path.is_absolute() {
+            Some(path)
+        } else if remote || folder.as_os_str().is_empty() {
+            None
+        } else {
+            Some(folder.join(path))
+        }
+    };
+    let mut out: Vec<String> = Vec::new();
+    let mut add = |p: PathBuf| {
+        let p = p.to_string_lossy().into_owned();
+        if !out.contains(&p) {
+            out.push(p);
+        }
+    };
+    for p in row.images.iter().filter_map(|p| whole(p)) {
+        // (A cache file is local even for another machine's session.)
+        if !remote || p.starts_with(cache_dir()) {
+            add(p);
+        }
+    }
+    for p in row.mentions.iter().filter_map(|p| whole(p)).filter(|p| !remote && p.is_file()) {
+        add(p);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

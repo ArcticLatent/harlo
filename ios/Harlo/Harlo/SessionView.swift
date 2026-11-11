@@ -23,6 +23,8 @@ struct SessionContent: View {
     @Environment(\.palette) private var p
     let session: OpenSession
     @State private var sheet: SessionSheet?
+    /// The picture the viewer is open at.
+    @State private var picture: PictureOpening?
     @State private var renaming = false
     @State private var newName = ""
     /// The repository's branch (nil: not one, or not known yet).
@@ -331,12 +333,22 @@ struct SessionContent: View {
                 }
             }
         }
-        // Paths in replies open the file.
+        // Paths in replies open the file (a picture in the viewer).
         .environment(\.openURL, OpenURLAction { url in
             guard let target = FileLinks.target(url) else { return .systemAction }
-            sheet = .file(target.path, target.line)
+            if model.showsPictures && PictureNames.isPicture(target.path) {
+                picture = PictureOpening(path: PictureNames.match(target.path, in: session.pictures) ?? target.path)
+            } else {
+                sheet = .file(target.path, target.line)
+            }
             return .handled
         })
+        .environment(\.openPicture, { (path: String) in picture = PictureOpening(path: path) })
+        .fullScreenCover(item: $picture) { opening in
+            let all = session.pictures
+            PictureViewer(paths: all.contains(opening.path) ? all : [opening.path], current: opening.path)
+                .presentationBackground(.clear)
+        }
         // The branch: when it opens, and after each run (the agent may switch).
         .task(id: session.liveKey) {
             guard !session.liveKey.isEmpty else { return }
