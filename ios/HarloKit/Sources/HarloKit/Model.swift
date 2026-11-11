@@ -81,33 +81,60 @@ public final class OpenSession {
         var seen = Set<String>()
         return rows.flatMap(\.images).filter { seen.insert($0).inserted }
     }
-    /// A picture's name as people say it: a file's own name, or for one
-    /// harlo keeps under a made-up name where it came from ("Your photo",
-    /// "Picture from screenshot", numbered when a row has several).
+    /// Its folder (`~/…`), when the phone knows it: a picture in it is
+    /// named by its path there.
+    public internal(set) var folder = ""
+    /// A picture's name as people say it, as on the desktop: where it came
+    /// from for one harlo keeps under a made-up name ("You sent", "From
+    /// Screenshot", "In a reply", numbered when a row has several), the
+    /// words a reply gave it, or its path in the session's folder. A name
+    /// two messages share gets each message's first words ("You sent · And
+    /// this one?").
     public func pictureName(_ path: String) -> String {
+        let base = pictureOrigin(path)
+        guard let row = rows.first(where: { $0.images.contains(path) }) else { return base }
+        let twins = pictures.filter { $0 != path && pictureOrigin($0) == base }
+        guard twins.contains(where: { twin in !row.images.contains(twin) }) else { return base }
+        let words = PictureNames.firstWords(messageText(row))
+        return words.isEmpty ? base : base + " · " + words
+    }
+
+    /// Where a picture came from, before names two messages share are told
+    /// apart.
+    func pictureOrigin(_ path: String) -> String {
         let name = PictureNames.name(path)
         let row = rows.first(where: { $0.images.contains(path) })
         // The words a reply gave it, shown in its place ("The sidebar"):
         // harlo sends a reply's pictures as a row after its text, with the
         // same message key (`m44:0:pics` after `m44:0:0`).
         if let row, row.kind != "user", row.kind != "tool" {
-            let message = row.key.split(separator: ":").dropLast().joined(separator: ":")
-            let reply = row.kind == "images" && !message.isEmpty ? rows.filter { $0.key.hasPrefix(message + ":") } : [row]
-            for r in reply {
+            for r in messageRows(row) {
                 for (src, alt) in RichText.pictureWords(RichText.parse(r.html)) where !alt.isEmpty && PictureNames.match(src, in: [path]) != nil {
                     return alt
                 }
             }
         }
-        guard PictureNames.isMadeUp(name) else { return name }
+        guard PictureNames.isMadeUp(name) else { return PictureNames.inFolder(path, folder) ?? name }
         guard let row else { return "Picture" }
         let madeUp = row.images.filter { PictureNames.isMadeUp(PictureNames.name($0)) }
         let n = madeUp.count > 1 ? " \((madeUp.firstIndex(of: path) ?? 0) + 1)" : ""
         switch row.kind {
-        case "user": return "Your photo" + n
-        case "tool": return "Picture from " + ToolName.words(row.title, running: false) + n
-        default: return "Picture" + n
+        case "user": return "You sent" + n
+        case "tool": return "From " + PictureNames.toolWords(row.title, row.subtitle) + n
+        default: return "In a reply" + n
         }
+    }
+
+    /// The rows of the message `row` is in (a reply's pictures come in a
+    /// row of their own).
+    func messageRows(_ row: Row) -> [Row] {
+        let message = row.key.split(separator: ":").dropLast().joined(separator: ":")
+        return row.kind == "images" && !message.isEmpty ? rows.filter { $0.key.hasPrefix(message + ":") } : [row]
+    }
+
+    /// The words of the message a picture is in.
+    func messageText(_ row: Row) -> String {
+        messageRows(row).map { $0.text.isEmpty ? RichText.plainText(RichText.parse($0.html)) : $0.text }.first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? ""
     }
     /// Rows before these, only in harlo (a long session's phone gets its
     /// latest).
@@ -716,6 +743,7 @@ public final class HarloModel {
         if unreadMarks.contains(s.key) { markUnread(s, false) }
         if demo { return demoOpen(s) }
         let open = OpenSession(key: s.key, title: s.title, harness: s.harness)
+        open.folder = s.location
         session = open
         Task { await reopen(open) }
     }
@@ -1048,6 +1076,7 @@ public final class HarloModel {
         }) else { return false }
         let title = String(t.split(separator: "\n").first ?? "").prefix(80)
         let open = OpenSession(key: r.key, title: String(title), harness: r.harness)
+        open.folder = project?.location ?? ""
         session = open
         await reopen(open)
         return true

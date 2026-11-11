@@ -418,9 +418,24 @@ final class HarloUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["The sidebar"].waitForExistence(timeout: 5), "the picture's name")
         shot("27-picture-viewer")
         audit("picture-viewer")
+        // The grid: every picture over its name, the open one marked; a tap
+        // opens one.
+        app.buttons["pictureGrid"].tap()
+        let cells = app.buttons.matching(identifier: "pictureGridCell")
+        XCTAssertTrue(cells.firstMatch.waitForExistence(timeout: 5), "the grid")
+        see("All pictures")
+        XCTAssertEqual(cells.count, 2, "both pictures")
+        XCTAssertEqual(cells.element(boundBy: 0).label, "Picture: You sent")
+        XCTAssertTrue(cells.element(boundBy: 1).isSelected, "the open picture is marked")
+        XCTAssertFalse(app.buttons["pictureShare"].exists, "Share is for one picture")
+        shot("27b-picture-grid")
+        audit("picture-grid")
+        cells.element(boundBy: 1).tap()
+        XCTAssertTrue(gone(cells.firstMatch), "a tap opens it")
+        see("2 of 2")
         viewer.swipeRight()
         see("1 of 2")
-        see("Your photo")
+        see("You sent")
         XCTAssertTrue(app.buttons["pictureShare"].waitForExistence(timeout: 5), "Share")
         shot("28-picture-photo")
         app.buttons["pictureDone"].tap()
@@ -432,6 +447,6 @@ final class HarloUITests: XCTestCase {
         }
         XCTAssertTrue(tiles.firstMatch.waitForExistence(timeout: 5), "your photo's thumbnail")
         XCTAssertEqual(tiles.count, 1, "only your photo is a thumbnail")
-        XCTAssertEqual(tiles.firstMatch.label, "Picture: Your photo")
+        XCTAssertEqual(tiles.firstMatch.label, "Picture: You sent")
     }
 }

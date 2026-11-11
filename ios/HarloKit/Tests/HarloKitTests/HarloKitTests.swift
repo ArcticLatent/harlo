@@ -458,18 +458,42 @@ final class ModelPartsTests: XCTestCase {
         XCTAssertTrue(PictureNames.isMadeUp("930bbd53bde91971bc307bea8ed0503c.jpg"))
         XCTAssertFalse(PictureNames.isMadeUp("sidebar.png"))
         XCTAssertEqual(PictureNames.spoken("sidebar-dark_mode.png"), "sidebar dark mode")
+        XCTAssertEqual(PictureNames.spoken("art/sun.png"), "sun")
+        XCTAssertEqual(PictureNames.spoken("You sent · Fix it. Then this.png"), "You sent · Fix it. Then this.png")
         let cache = "/home/you/.cache/harlo/pictures/"
         let s = OpenSession(key: "live:1")
         s.rows = [Row(key: "u", kind: "user", images: [cache + "930bbd53bde91971bc307bea8ed0503c.jpg"]),
                   Row(key: "t", kind: "tool", title: "screenshot", images: [cache + "aaaaaaaaaaaaaaaa1111.png", cache + "bbbbbbbbbbbbbbbb2222.png"]),
+                  Row(key: "r", kind: "tool", title: "read", subtitle: "/home/you/p/out/shot.png", images: [cache + "cccccccccccccccc3333.png"]),
                   Row(key: "m", kind: "markdown", images: ["/home/you/p/docs/sidebar.png"])]
-        XCTAssertEqual(s.pictureName(cache + "930bbd53bde91971bc307bea8ed0503c.jpg"), "Your photo")
-        XCTAssertEqual(s.pictureName(cache + "bbbbbbbbbbbbbbbb2222.png"), "Picture from " + ToolName.words("screenshot", running: false) + " 2")
-        XCTAssertEqual(s.pictureName("/home/you/p/docs/sidebar.png"), "sidebar.png")
+        XCTAssertEqual(s.pictureName(cache + "930bbd53bde91971bc307bea8ed0503c.jpg"), "You sent")
+        XCTAssertEqual(s.pictureName(cache + "bbbbbbbbbbbbbbbb2222.png"), "From Screenshot 2")
+        XCTAssertEqual(s.pictureName(cache + "cccccccccccccccc3333.png"), "From Read shot.png")
+        XCTAssertEqual(s.pictureName("/home/you/p/docs/sidebar.png"), "sidebar.png", "the session's folder not known")
+        // In the session's folder: its path there.
+        s.folder = "~/p"
+        XCTAssertEqual(s.pictureName("/home/you/p/docs/sidebar.png"), "docs/sidebar.png")
+        XCTAssertEqual(PictureNames.inFolder("/root/p/a.png", "~/p"), "a.png")
+        XCTAssertEqual(PictureNames.inFolder("/srv/p/a.png", "/srv/p/"), "a.png")
+        XCTAssertNil(PictureNames.inFolder("/home/you/q/a.png", "~/p"))
+        XCTAssertNil(PictureNames.inFolder("/home/you/pq/a.png", "~/p"))
         // Shown in its reply's place, it's named by the reply's words.
         s.rows += [Row(key: "harlo-m4:0:0", kind: "markdown", html: "<p>Now:</p><p><em data-img=\"docs/now.png\">The sidebar now</em></p>"),
                    Row(key: "harlo-m4:0:pics", kind: "images", images: ["/home/you/p/docs/now.png"])]
         XCTAssertEqual(s.pictureName("/home/you/p/docs/now.png"), "The sidebar now")
+        // A reply's picture without words: "In a reply".
+        s.rows += [Row(key: "harlo-m5:0:0", kind: "markdown", html: "<p>Done.</p>"),
+                   Row(key: "harlo-m5:0:pics", kind: "images", images: [cache + "dddddddddddddddd4444.png"])]
+        XCTAssertEqual(s.pictureName(cache + "dddddddddddddddd4444.png"), "In a reply")
+        // Two messages' photos: told apart by their first words; two in one
+        // message by their number.
+        s.rows += [Row(key: "u2", kind: "user", text: "\nAnd this one, from the other window please?", images: [cache + "eeeeeeeeeeeeeeee5555.png"])]
+        XCTAssertEqual(s.pictureName(cache + "930bbd53bde91971bc307bea8ed0503c.jpg"), "You sent")
+        XCTAssertEqual(s.pictureName(cache + "eeeeeeeeeeeeeeee5555.png"), "You sent · And this one, from the…")
+        s.rows[0].text = "Make me a sun"
+        XCTAssertEqual(s.pictureName(cache + "930bbd53bde91971bc307bea8ed0503c.jpg"), "You sent · Make me a sun")
+        XCTAssertEqual(s.pictureName(cache + "aaaaaaaaaaaaaaaa1111.png"), "From Screenshot 1")
+        XCTAssertEqual(PictureNames.firstWords("Make me a sun picture please, a big yellow one"), "Make me a sun picture…")
     }
 
     func testDiffLinesColouredAsCode() {

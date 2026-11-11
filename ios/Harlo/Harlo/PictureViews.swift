@@ -71,10 +71,14 @@ struct PictureTile: View {
                     VStack(spacing: 4) {
                         Image(systemName: "photo")
                             .font(.system(size: 18, weight: .medium))
-                        Text(why.contains("no longer") ? "Gone" : "Can't show")
+                        Text(why.contains("no longer") ? "No longer on disk" : "Can't show")
                             .font(.caption2.weight(.medium))
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.8)
                     }
                     .foregroundStyle(Color(p.muted))
+                    .padding(.horizontal, 6)
                 } else {
                     ProgressView()
                 }
@@ -105,12 +109,14 @@ struct PictureViewer: View {
     let paths: [String]
     @State var current: String
     @State private var bars = true
+    /// Every picture at once, as the desktop's grid (more than one).
+    @State private var grid = false
     /// How far it's been pulled down (to close), 0…1.
     @State private var pulled: CGFloat = 0
     @State private var shown: [String: UIImage] = [:]
 
     var index: Int { paths.firstIndex(of: current) ?? 0 }
-    /// Its name as people say it ("Your photo", not harlo's file name).
+    /// Its name as people say it ("You sent", not harlo's file name).
     func name(_ path: String) -> String { model.session?.pictureName(path) ?? PictureNames.name(path) }
 
     var body: some View {
@@ -126,7 +132,14 @@ struct PictureViewer: View {
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .ignoresSafeArea()
-            if bars && pulled == 0 {
+            if grid {
+                PictureGrid(paths: paths, current: current, name: name) { path in
+                    current = path
+                    withAnimation(.easeOut(duration: 0.15)) { grid = false }
+                }
+                .transition(.opacity)
+            }
+            if (bars || grid) && pulled == 0 {
                 VStack(spacing: 0) {
                     top
                     Spacer()
@@ -142,18 +155,37 @@ struct PictureViewer: View {
     var top: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(name(current))
-                    .accessibilityLabel(PictureNames.spoken(name(current)))
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                if paths.count > 1 {
-                    Text("\(index + 1) of \(paths.count)")
+                if grid {
+                    Text("All pictures")
+                        .font(.subheadline.weight(.semibold))
+                    Text("\(paths.count) in this session")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.7))
+                } else {
+                    Text(name(current))
+                        .accessibilityLabel(PictureNames.spoken(name(current)))
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if paths.count > 1 {
+                        Text("\(index + 1) of \(paths.count)")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
                 }
             }
             Spacer(minLength: 8)
+            if paths.count > 1 {
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) { grid.toggle() }
+                } label: {
+                    Image(systemName: grid ? "square.grid.2x2.fill" : "square.grid.2x2")
+                        .font(.body.weight(.semibold))
+                        .frame(minWidth: 44, minHeight: 44)
+                }
+                .accessibilityIdentifier("pictureGrid")
+                .accessibilityLabel(grid ? "Back to the picture" : "All pictures")
+            }
             Button("Done") { dismiss() }
                 .font(.body.weight(.semibold))
                 .frame(minHeight: 44)
@@ -167,7 +199,7 @@ struct PictureViewer: View {
 
     var bottom: some View {
         HStack {
-            if let image = shown[current] {
+            if !grid, let image = shown[current] {
                 let name = name(current)
                 ShareLink(item: Image(uiImage: image), preview: SharePreview(name, image: Image(uiImage: image))) {
                     Label("Share", systemImage: "square.and.arrow.up")
@@ -182,6 +214,86 @@ struct PictureViewer: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .background(LinearGradient(colors: [.clear, .black.opacity(0.7)], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+    }
+}
+
+/// The viewer's grid: every picture of the session, each over its name, the
+/// one open ringed; a tap opens one.
+struct PictureGrid: View {
+    let paths: [String]
+    let current: String
+    let name: (String) -> String
+    let open: (String) -> Void
+
+    var body: some View {
+        ScrollViewReader { reader in
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 12)], spacing: 16) {
+                    ForEach(paths, id: \.self) { path in
+                        PictureGridCell(path: path, name: name(path), open: path == current) { open(path) }
+                            .id(path)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 64)
+                .padding(.bottom, 24)
+            }
+            .onAppear { reader.scrollTo(current, anchor: .center) }
+        }
+        .background(Color.black.ignoresSafeArea())
+    }
+}
+
+/// One picture of the grid: its thumbnail, square, over its name.
+struct PictureGridCell: View {
+    @Environment(HarloModel.self) private var model
+    let path: String
+    let name: String
+    let open: Bool
+    let tap: () -> Void
+    @State private var image: UIImage?
+    @State private var why = ""
+
+    var body: some View {
+        Button(action: tap) {
+            VStack(alignment: .leading, spacing: 6) {
+                Color.white.opacity(0.08)
+                    .aspectRatio(1, contentMode: .fit)
+                    .overlay {
+                        if let image {
+                            Image(uiImage: image).resizable().interpolation(.high).scaledToFill()
+                        } else if !why.isEmpty {
+                            VStack(spacing: 4) {
+                                Image(systemName: "photo").font(.system(size: 20, weight: .light))
+                                Text(why.contains("no longer") ? "No longer on disk" : "Can't show")
+                                    .font(.caption2.weight(.medium))
+                                    .multilineTextAlignment(.center)
+                            }
+                            .foregroundStyle(.white.opacity(0.7))
+                            .padding(6)
+                        } else {
+                            ProgressView().tint(.white)
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(.white, lineWidth: open ? 2 : 0))
+                Text(name)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(open ? 1 : 0.8))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("pictureGridCell")
+        .accessibilityLabel("Picture: " + PictureNames.spoken(name))
+        .accessibilityAddTraits(open ? .isSelected : [])
+        .task(id: path) {
+            let r = await model.picture(path, thumb: true)
+            image = r.picture.flatMap { UIImage(data: $0.data) }
+            why = image == nil ? (r.why.isEmpty ? "harlo couldn't read that picture." : r.why) : ""
+        }
     }
 }
 
@@ -208,7 +320,7 @@ struct PicturePage: View {
             } else if !why.isEmpty {
                 VStack(spacing: 10) {
                     Image(systemName: "photo").font(.system(size: 34, weight: .light))
-                    Text(why).font(.subheadline).multilineTextAlignment(.center)
+                    Text(why.contains("no longer") ? "No longer on disk" : why).font(.subheadline).multilineTextAlignment(.center)
                 }
                 .foregroundStyle(.white.opacity(0.75))
                 .padding(32)

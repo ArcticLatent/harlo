@@ -114,10 +114,56 @@ public enum PictureNames {
 
     /// The name read aloud: without its suffix, dashes and underscores as
     /// spaces (`sidebar-dark.png`: "sidebar dark").
+    /// (A path in the project is read as its file's name: `art/sun.png`,
+    /// "sun"; words, such as "You sent · Fix it.", as they are.)
     public static func spoken(_ name: String) -> String {
-        let stem = name.contains(".") ? String(name[..<name.lastIndex(of: ".")!]) : name
+        guard isPicture(name), !name.contains(" ") else { return name }
+        let file = Self.name(name)
+        let stem = String(file[..<file.lastIndex(of: ".")!])
         let words = stem.map { $0 == "-" || $0 == "_" ? " " : $0 }
-        return words.isEmpty ? name : String(words)
+        return words.isEmpty ? file : String(words)
+    }
+
+    /// A message's first line, cut at about 28 characters (as the desktop
+    /// tells two pictures' names apart).
+    public static func firstWords(_ text: String) -> String {
+        let line = text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty } ?? ""
+        guard line.count > 28 else { return line }
+        let cut = String(line.prefix(27))
+        var head = cut
+        if let space = cut.lastIndex(of: " "), cut.distance(from: cut.startIndex, to: space) > 12 {
+            head = String(cut[..<space])
+        }
+        return head.trimmingCharacters(in: .whitespaces) + "…"
+    }
+
+    /// A tool picture's source: the tool and what it was given, as the
+    /// desktop says it ("Read shot.png", "Screenshot").
+    public static func toolWords(_ tool: String, _ subtitle: String) -> String {
+        var t = ToolName.mcp(tool)?.tool ?? tool
+        t = t.replacingOccurrences(of: "_", with: " ")
+        t = t.prefix(1).uppercased() + t.dropFirst()
+        var what = subtitle.contains("/") && !subtitle.contains(" ") ? name(subtitle) : subtitle
+        if what.count > 28 { what = String(what.prefix(27)) + "…" }
+        return what.isEmpty ? (t.isEmpty ? "a tool" : t) : t + " " + what
+    }
+
+    /// `path`'s place in `folder` (`~/…` or a whole path), or nil when it
+    /// isn't in it.
+    public static func inFolder(_ path: String, _ folder: String) -> String? {
+        guard !folder.isEmpty else { return nil }
+        var root = folder.hasSuffix("/") ? String(folder.dropLast()) : folder
+        if root.hasPrefix("~/") || root == "~" {
+            // (`~` is the home folder: /home/you, /root, /Users/you.)
+            let tail = String(root.dropFirst())
+            let parts = path.split(separator: "/", omittingEmptySubsequences: false)
+            let homeLength = parts.count > 1 && parts[1] == "root" ? 2 : 3
+            guard parts.count > homeLength, ["home", "root", "Users"].contains(String(parts[1])) else { return nil }
+            root = parts.prefix(homeLength).joined(separator: "/") + tail
+        }
+        guard path.hasPrefix(root + "/") else { return nil }
+        let rest = String(path.dropFirst(root.count + 1))
+        return rest.isEmpty ? nil : rest
     }
 
     /// The conversation's picture `link` names (as written: `docs/a.png`,
