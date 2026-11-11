@@ -463,6 +463,7 @@ Rectangle {
                         rightInset: 6
                         opacity: list.dragId >= 0 && list.dragId === projectId ? 0.4 : 1
                         contentItem: Label { text: moreRow.title; color: Theme.muted; font.pixelSize: Theme.px(12); verticalAlignment: Text.AlignVCenter }
+                        hoverEnabled: list.dragId < 0
                         background: Rectangle { radius: 8; color: moreRow.hovered ? Theme.hover : "transparent" }
                         onClicked: Workspace.showMore(projectId)
                     }
@@ -483,7 +484,7 @@ Rectangle {
                         leftPadding: 30
                         leftInset: 6
                         rightInset: 6
-                        hoverEnabled: true
+                        hoverEnabled: list.dragId < 0
                         ToolTip.visible: hovered
                         ToolTip.text: "Finished helpers, and worktree sessions that are merged,\nclosed or quiet for a week. Working in one brings it back.\nArchived after 30 days here; right-click to archive all now."
                         ToolTip.delay: 700
@@ -536,7 +537,7 @@ Rectangle {
                         readonly property string detail: [helperOf !== "" ? "Helper of “" + helperOf + "”" : "", branch !== "" ? "⎇ " + branch : "", subtitle, settled].filter(t => t !== "").join("  ·  ")
                         width: ListView.view.width
                         height: 42
-                        hoverEnabled: true
+                        hoverEnabled: list.dragId < 0
                         ToolTip.visible: hovered && detail !== ""
                         ToolTip.text: detail
                         ToolTip.delay: 700
@@ -701,7 +702,7 @@ Rectangle {
             Rectangle { width: 5; height: 5; radius: 2.5; color: Theme.warning; anchors.verticalCenter: parent.verticalCenter }
             Label { text: pill.changes > 99 ? "99+" : pill.changes; color: Theme.warning; font.pixelSize: Theme.px(10); font.bold: true }
         }
-        HoverHandler { id: pillHover }
+        HoverHandler { id: pillHover; enabled: list.dragId < 0 }
         ToolTip.visible: pillHover.hovered
         ToolTip.text: pill.changes + (pill.changes === 1 ? " uncommitted change" : " uncommitted changes") + pill.tip
         ToolTip.delay: 400
@@ -732,7 +733,7 @@ Rectangle {
         width: ListView.view.width
         height: 30 + gap
         // The arrow shows on hover, whatever the platform's hover setting.
-        hoverEnabled: true
+        hoverEnabled: list.dragId < 0
         leftInset: 10
         rightInset: 10
         topInset: gap
@@ -820,7 +821,7 @@ Rectangle {
                     Icon { anchors.verticalCenter: parent.verticalCenter; name: "server"; color: Theme.muted; implicitWidth: 11; implicitHeight: 11 }
                     Label { objectName: "remoteBadgeText"; text: parent.parent.host; color: Theme.muted; font.pixelSize: Theme.px(10.5) }
                 }
-                HoverHandler { id: badgeHover }
+                HoverHandler { id: badgeHover; enabled: list.dragId < 0 }
                 ToolTip.visible: badgeHover.hovered
                 ToolTip.text: "On " + host + ": " + Remotes.displayPath(groupRow.path)
             }
@@ -833,11 +834,12 @@ Rectangle {
                 implicitWidth: 12
                 implicitHeight: 12
                 opacity: 0.8
-                tip: "New sessions here use " + Theme.harnessLabel(groupRow.harness)
+                tip: list.dragId >= 0 ? "" : "New sessions here use " + Theme.harnessLabel(groupRow.harness)
             }
             Label { visible: !groupRow.narrow; text: groupRow.count; color: Theme.textFaint; font.pixelSize: Theme.px(12) }
             FlatButton {
                 text: "+"
+                hoverEnabled: list.dragId < 0
                 outlined: false
                 accent: Theme.textMuted
                 implicitWidth: 24

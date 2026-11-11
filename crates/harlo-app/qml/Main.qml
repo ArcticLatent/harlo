@@ -5277,6 +5277,11 @@ ApplicationWindow {
             const ly = line ? line.mapToItem(null, 0, line.height / 2).y : -1, fy = first.mapToItem(null, 0, 0).y
             win.check(line !== null && line.visible && ly < fy && ly > fy - 20, "past the first project's header, the line shows just above it (" + Math.round(ly) + " over " + Math.round(fy) + ")")
             win.check(ghost !== null && ghost.visible && win.findText("Rocket app", ghost) !== null, "and a copy of its header follows the pointer")
+            // Nothing under the pointer lights up as if it took the drop.
+            const lit = []
+            const walk = item => { for (const c of item.children) { if (c.hovered === true && c.objectName !== "projectDragGhost") lit.push(c.objectName || String(c)); walk(c) } }
+            walk(sidebar)
+            win.check(lit.length === 0, "rows don't light up under the dragged project (" + lit.join(", ") + ")")
             // (findName skips what's faded out: its title isn't to be found.)
             win.check(win.findName("projectTitle-Rocket app") === null && win.findName("projectTitle-" + win.selftestDir.split("/").filter(s => s).pop()) !== null, "its place is left empty")
             win.shotWindow("clicks-projects-drag")
