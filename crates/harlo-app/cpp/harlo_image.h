@@ -291,8 +291,11 @@ protected:
         auto *root = old ? old : new QSGNode;
         if (!old) {
             m_checkerNode = nullptr;
+            m_clip = new QSGClipNode;
+            m_clip->setIsRectangular(true);
+            root->appendChildNode(m_clip);
             m_transform = new QSGTransformNode;
-            root->appendChildNode(m_transform);
+            m_clip->appendChildNode(m_transform);
             m_imageDirty = true;
             m_checkerDirty = true;
         }
@@ -332,6 +335,8 @@ protected:
         for (QSGImageNode *n : m_tiles)
             n->setFiltering(m_nearest ? QSGTexture::Nearest : QSGTexture::Linear);
         m_transform->setMatrix(QMatrix4x4(m_view));
+        // Zoomed past the item, the image is drawn only inside it.
+        m_clip->setClipRect(boundingRect());
         // The checkerboard under it, in the item's pixels (its squares keep
         // their size at any zoom).
         if (m_checkerDirty || (m_checker && !m_checkerNode)) {
@@ -372,6 +377,7 @@ protected:
         // kept image.)
         m_tiles.clear();
         m_checkerNode = nullptr;
+        m_clip = nullptr;
         m_transform = nullptr;
         m_imageDirty = true;
     }
@@ -385,6 +391,7 @@ private:
     bool m_checker = false;
     bool m_checkerDirty = false;
     QColor m_light, m_dark;
+    QSGClipNode *m_clip = nullptr;
     QSGTransformNode *m_transform = nullptr;
     QSGImageNode *m_checkerNode = nullptr;
     std::vector<QSGImageNode *> m_tiles;

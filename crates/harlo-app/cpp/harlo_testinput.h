@@ -9,6 +9,7 @@
 #include <QtCore/QString>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QWindow>
+#include <QtGui/QColor>
 #include <QtGui/QImage>
 #include <QtGui/QWheelEvent>
 #include <QtQuick/QQuickWindow>
@@ -105,6 +106,19 @@ inline bool test_grab_area(const QString &path, double x, double y, double w, do
     const qreal r = all.devicePixelRatio();
     const QRect area = QRectF(x * r, y * r, w * r, h * r).toAlignedRect().intersected(all.rect());
     return !area.isEmpty() && all.copy(area).save(path);
+}
+
+// The window's colour at a point (window coordinates), "#rrggbb": what is
+// drawn there now.
+inline QString test_colour_at(double x, double y)
+{
+    auto *win = qobject_cast<QQuickWindow *>(test_window());
+    if (!win)
+        return QString();
+    const QImage all = win->grabWindow();
+    const qreal r = all.devicePixelRatio();
+    const QPoint p(int(x * r), int(y * r));
+    return all.rect().contains(p) ? QColor(all.pixel(p)).name() : QString();
 }
 
 } // namespace harlo

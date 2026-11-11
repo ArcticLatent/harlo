@@ -22,6 +22,8 @@ pub mod qobject {
         fn test_grab_window(path: &QString) -> bool;
         #[namespace = "harlo"]
         fn test_grab_area(path: &QString, x: f64, y: f64, w: f64, h: f64) -> bool;
+        #[namespace = "harlo"]
+        fn test_colour_at(x: f64, y: f64) -> QString;
     }
 
     extern "RustQt" {
@@ -57,6 +59,10 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "grabArea"]
         fn grab_area(self: &TestInput, path: &QString, x: f64, y: f64, w: f64, h: f64) -> bool;
+        /// The window's colour at a point (window coordinates), "#rrggbb".
+        #[qinvokable]
+        #[cxx_name = "colourAt"]
+        fn colour_at(self: &TestInput, x: f64, y: f64) -> QString;
         /// A text file's contents ("" if it can't be read): what a stand-in
         /// recorded.
         #[qinvokable]
@@ -97,6 +103,10 @@ impl qobject::TestInput {
 
     pub fn grab_area(&self, path: &QString, x: f64, y: f64, w: f64, h: f64) -> bool {
         qobject::test_grab_area(path, x, y, w, h)
+    }
+
+    pub fn colour_at(&self, x: f64, y: f64) -> QString {
+        qobject::test_colour_at(x, y)
     }
 
     pub fn write_file(&self, path: &QString, text: &QString) -> bool {

@@ -6485,6 +6485,14 @@ ApplicationWindow {
     property real imgT0: 0
     property var imgBefore: null
     property real imgZoom: 0
+    // The colours just above the image's view and in the bar below it, with
+    // the image fitted: a zoomed image mustn't be drawn over them.
+    property var imgEdges: []
+    function imgEdgeColours(view) {
+        const v = view || win.imgView()
+        const top = v.mapToItem(null, v.width / 2, -2), below = v.mapToItem(null, v.width / 2, v.height + 12)
+        return [TestInput.colourAt(top.x, top.y), TestInput.colourAt(below.x, below.y)]
+    }
     property int imgFrames: 0
     property bool imgSawPreview: false
     property var imgStats: null
@@ -6544,6 +6552,7 @@ ApplicationWindow {
             const x = v.width * 0.35, y = v.height * 0.5
             win.imgBefore = JSON.parse(v.imagePointAt(x, y))
             win.imgZoom = v.zoom
+            win.imgEdges = win.imgEdgeColours()
             const p = v.mapToItem(null, x, y)
             for (let i = 0; i < 4; i++) TestInput.wheel(p.x, p.y, 120) } }
         PauseAnimation { duration: 600 }
@@ -6571,6 +6580,9 @@ ApplicationWindow {
         ScriptAction { script: {
             const v = win.imgView()
             win.check(Math.abs(v.zoom - 2) < 1e-6 && v.pixelated, "the next step is 200%, pixels drawn as squares (" + v.zoom + ", " + v.pixelated + ")")
+            const edges = win.imgEdgeColours()
+            win.check(edges[0] !== "" && edges[0] === win.imgEdges[0] && edges[1] === win.imgEdges[1],
+                      "bigger than its view, the image is drawn only inside it: not over the bar below or what is above (" + edges + ", fitted " + win.imgEdges + ")")
             v.pan(-100000, -100000)
             const br = JSON.parse(v.imagePointAt(v.width - 0.01, v.height - 0.01))
             win.check(Math.abs(br[0] - 1200) < 0.1 && Math.abs(br[1] - 800) < 0.1, "dragged far, it stops at the image's corner (" + br + ")")
@@ -6738,6 +6750,19 @@ ApplicationWindow {
             win.check(chat.transcript.chatPictures.opened && v.view.imageWidth === 800 && v.view.activeFocus, "a click opens it over the chat (" + v.view.imageWidth + "×" + v.view.imageHeight + ", keys " + v.view.activeFocus + ")")
             win.check(v.images.length === 7 && v.index === 1, "it steps through the chat's 7 pictures, this the 2nd (" + (v.index + 1) + " / " + v.images.length + ")")
             win.check(v.view.width >= chat.transcript.width - 1, "over the whole conversation")
+            win.imgEdges = win.imgEdgeColours(v.view)
+            for (let i = 0; i < 8; i++) TestInput.key(Qt.Key_Plus, 0) } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: {
+            const v = win.picViewer()
+            const edges = win.imgEdgeColours(v.view)
+            win.check(v.view.zoom * 600 / win.imgDpr() > v.view.height * 2 && edges[0] !== "" && edges[0] === win.imgEdges[0] && edges[1] === win.imgEdges[1],
+                      "zoomed past its view, the picture is drawn only inside it: not over the bar below or the tabs above (" + edges + ", fitted " + win.imgEdges + ", zoom " + v.view.zoom + ")")
+            TestInput.key(Qt.Key_0, 0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const v = win.picViewer()
+            win.check(v.view.fit, "0 fits it again")
             TestInput.key(Qt.Key_Right, 0) } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: win.waitUntil(picSteps, () => win.picViewer().view.status === "ready", 5000) }
