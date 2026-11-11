@@ -4,9 +4,10 @@
 # from the iOS simulator (the app's `-tour` mode, sample content, dark and
 # light) as the `screenshots` artifact; and (uitests on) the UI tests,
 # driving the app on its recording of harlo (ios/fixtures/recording.jsonl)
-# on several phones, appearances and text sizes, as the `ui-tests` artifact:
-# a folder per run with each screen's picture, its accessibility audit, and
-# what failed. scripts/ios-ui-tests.sh runs it and fetches that.
+# on several phones, appearances and text sizes at once (a job each), as
+# `ui-tests-<run>` artifacts: a folder per run with each screen's picture,
+# its accessibility audit, and what failed. scripts/ios-ui-tests.sh runs it
+# and fetches them.
 #
 # Secrets: APPLE_TEAM_ID, ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8 (the .p8's
 # text). The key needs the Admin role, so Xcode can make the signing
@@ -285,11 +286,16 @@ jobs:
           path: ${{ runner.temp }}/shots
           if-no-files-found: ignore
 
+  # A job per run, side by side (a run alone takes about 20 minutes; the
+  # five one after another took 85): a phone, light or dark, a text size.
   ui-tests:
     if: github.event_name == 'workflow_dispatch' && inputs.uitests
     runs-on: macos-15
-    # (The full set, five phones, takes 60–75 minutes.)
-    timeout-minutes: 100
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        run: ${{ fromJSON(inputs.uitests_set == 'quick' && '["pro-light"]' || '["pro-light", "pro-dark", "small-light", "max-dark", "pro-light-largetext"]') }}
     steps:
       - uses: actions/checkout@v6
 
@@ -314,11 +320,11 @@ jobs:
 
       - name: Runs
         env:
-          SET: ${{ inputs.uitests_set }}
+          RUN: ${{ matrix.run }}
         run: |
-          # Each run: a phone on the newest iOS, light or dark, a text size.
+          # The run: a phone on the newest iOS, light or dark, a text size.
           xcrun simctl list devices available -j > "$RUNNER_TEMP/devices.json"
-          python3 - "$RUNNER_TEMP/devices.json" "$SET" > "$RUNNER_TEMP/runs.txt" <<'PY'
+          python3 - "$RUNNER_TEMP/devices.json" "$RUN" > "$RUNNER_TEMP/runs.txt" <<'PY'
           import json, re, sys
           d = json.load(open(sys.argv[1]))["devices"]
           rts = sorted((k for k in d if "iOS" in k), key=lambda k: [int(x) for x in re.findall(r"\d+", k.split("iOS")[-1])])
@@ -332,10 +338,9 @@ jobs:
           pro, mx = pick(r"^iPhone \d+ Pro$"), pick(r"Pro Max$")
           small = pick(r"iPhone SE", r"mini$", r"^iPhone \d+e$", r"^iPhone \d+$")
           large = "UICTContentSizeCategoryAccessibilityL"
-          runs = [("pro-light", pro, "light", "")]
-          if sys.argv[2] != "quick":
-              runs += [("pro-dark", pro, "dark", ""), ("small-light", small, "light", ""), ("max-dark", mx, "dark", ""), ("pro-light-largetext", pro, "light", large)]
-          for name, dev, look, size in runs:
+          runs = [("pro-light", pro, "light", ""), ("pro-dark", pro, "dark", ""), ("small-light", small, "light", ""),
+                  ("max-dark", mx, "dark", ""), ("pro-light-largetext", pro, "light", large)]
+          for name, dev, look, size in (r for r in runs if r[0] == sys.argv[2]):
               print(name, dev["udid"], look, size or "-", dev["name"].replace(" ", "_"))
           PY
           cat "$RUNNER_TEMP/runs.txt"
@@ -401,7 +406,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: ui-tests
+          name: ui-tests-${{ matrix.run }}
           path: ${{ runner.temp }}/ui
           if-no-files-found: ignore
 
@@ -409,7 +414,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v6
         with:
-          name: ui-test-results
+          name: ui-test-results-${{ matrix.run }}
           path: |
             ${{ runner.temp }}/results
             ${{ runner.temp }}/build.log
