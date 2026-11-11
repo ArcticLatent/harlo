@@ -104,8 +104,8 @@ const HIDDEN_IN_HOME: &[&str] = &[
 ];
 /// Under the home folder, inside a hidden place: shown read-only. harlo's
 /// worktrees (a session reads its helpers' work there; its own is
-/// writable), and skills (Claude Code's among them).
-const SHOWN_IN_HOME: &[&str] = &[".local/share/harlo/worktrees", ".claude/skills", ".agents/skills"];
+/// writable), and skills (Claude Code's among them, its plugins' too).
+const SHOWN_IN_HOME: &[&str] = &[".local/share/harlo/worktrees", ".claude/skills", ".agents/skills", ".claude/plugins/cache", ".claude/plugins/marketplaces"];
 /// Elsewhere: sockets that would let a command act as you (the Docker
 /// daemon's is as good as root).
 const HIDDEN_ELSEWHERE: &[&str] = &["/var/run/docker.sock", "/run/docker.sock", "/tmp/.X11-unix"];
