@@ -102,7 +102,8 @@ struct NewSessionView: View {
                         .padding(.top, 24)
                 }
             }
-            .padding(.horizontal, 20)
+            // (The other tabs' margin, so the header lines up with theirs.)
+            .padding(.horizontal, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .scrollDismissesKeyboard(.interactively)

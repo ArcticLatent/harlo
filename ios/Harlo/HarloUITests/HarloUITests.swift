@@ -393,7 +393,24 @@ final class HarloUITests: XCTestCase {
 
     func test15OtherTabs() {
         launch("end")
-        app.tabBars.buttons["New Session"].tap()
+        // The header (harlo's mark, the computer's name, its dot) sits in
+        // the same place on every tab.
+        // (Other tabs may stay loaded: the one on screen.)
+        func header() -> CGRect? {
+            let all = app.staticTexts.matching(identifier: "appHeaderName")
+            XCTAssertTrue(all.firstMatch.waitForExistence(timeout: 8), "a header")
+            return all.allElementsBoundByIndex.first { $0.isHittable }?.frame
+        }
+        guard let home = header() else { return XCTFail("the dashboard's header") }
+        func sameHeader(_ tab: String) {
+            app.tabBars.buttons[tab].tap()
+            guard let f = header() else { return XCTFail("\(tab)'s header") }
+            XCTAssertEqual(f.minX, home.minX, accuracy: 1, "\(tab)'s header across: \(f) against the dashboard's \(home)")
+            XCTAssertEqual(f.midY, home.midY, accuracy: 1, "\(tab)'s header down: \(f) against the dashboard's \(home)")
+        }
+        sameHeader("Approvals")
+        sameHeader("Settings")
+        sameHeader("New Session")
         // (A field's placeholder isn't its label.)
         let field = app.descendants(matching: .any).matching(NSPredicate(format: "placeholderValue == %@", "What should the agent do?")).firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 8), "the new session's message box")

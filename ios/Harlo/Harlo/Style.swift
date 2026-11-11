@@ -481,6 +481,7 @@ struct AppHeader: View {
                 .scaledFont(19, .medium)
                 .lineLimit(1)
                 .accessibilityLabel("\(model.host?.name ?? "harlo"), \(model.state == .connected ? "connected" : "not connected")")
+                .accessibilityIdentifier("appHeaderName")
             StatusDot(status: model.state == .connected ? "live" : "exited")
                 .accessibilityHidden(true)
             Spacer(minLength: 8)
@@ -522,6 +523,9 @@ struct AppHeader: View {
                 .accessibilityLabel(model.waiting.isEmpty ? "Approvals" : "\(model.waiting.count) waiting for you")
             }
         }
+        // (The buttons' height with or without them, so the name sits in
+        // the same place on every tab.)
+        .frame(minHeight: 40)
     }
 }
 

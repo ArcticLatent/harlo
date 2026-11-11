@@ -71,7 +71,7 @@ struct SettingsView: View {
                             BigTitle(text: "Settings")
                         }
                         .listRowBackground(Color.clear)
-                        .listRowInsets(EdgeInsets(top: 8, leading: 4, bottom: 0, trailing: 4))
+                        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 0, trailing: 0))
                     }
                 }
                 Section {
@@ -180,6 +180,10 @@ struct SettingsView: View {
             }
             // (In the tab, its last rows clear the floating tab bar.)
             .contentMargins(.bottom, inTab ? 24 : 0, for: .scrollContent)
+            // (In the tab, the other tabs' margins: its header sits where
+            // theirs does, the cards 16 from the edges as theirs are.)
+            .contentMargins(.horizontal, inTab ? 16 : nil, for: .scrollContent)
+            .contentMargins(.top, inTab ? 0 : nil, for: .scrollContent)
             .screen()
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
