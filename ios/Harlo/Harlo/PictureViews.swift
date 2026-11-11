@@ -154,6 +154,21 @@ struct PictureViewer: View {
 
     var top: some View {
         HStack(spacing: 12) {
+            if grid {
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) { grid = false }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left").font(.body.weight(.semibold))
+                        Text("Back")
+                    }
+                    .font(.body)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+                .accessibilityIdentifier("pictureGridBack")
+                .accessibilityLabel("Back to the picture")
+            }
             VStack(alignment: .leading, spacing: 2) {
                 if grid {
                     Text("All pictures")
@@ -247,6 +262,7 @@ struct PictureGrid: View {
 /// One picture of the grid: its thumbnail, square, over its name.
 struct PictureGridCell: View {
     @Environment(HarloModel.self) private var model
+    @Environment(\.dynamicTypeSize) private var typeSize
     let path: String
     let name: String
     let open: Bool
@@ -280,8 +296,9 @@ struct PictureGridCell: View {
                 Text(name)
                     .font(.caption)
                     .foregroundStyle(.white.opacity(open ? 1 : 0.8))
-                    .lineLimit(1)
+                    .lineLimit(typeSize >= .xLarge ? 2 : 1)
                     .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .contentShape(Rectangle())
         }

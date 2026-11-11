@@ -164,6 +164,7 @@ final class HarloUITests: XCTestCase {
         XCTAssertTrue(ctx.waitForExistence(timeout: 5), "the context bar")
         XCTAssertTrue(ctx.label.hasPrefix("Context 9%"), ctx.label)
         XCTAssertGreaterThan(ctx.frame.width, app.frame.width * 0.7, "as wide as the box (\(ctx.frame))")
+        XCTAssertGreaterThanOrEqual(ctx.frame.height, 44, "a finger's height to tap (\(ctx.frame))")
         shot("02-session-reply")
         audit("session")
         // The run folded to its summary; opened, each call on its card.
@@ -414,6 +415,11 @@ final class HarloUITests: XCTestCase {
         XCTAssertGreaterThan(reply.frame.width, 150, "the reply's picture is big (\(reply.frame))")
         shot("26-pictures")
         audit("pictures")
+        // (At large text sizes the picture can be under the header: brought
+        // into view first.)
+        for _ in 0..<6 where reply.frame.minY < app.frame.height * 0.12 {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.32)))
+        }
         // The viewer: at the one tapped, then across to your photo.
         reply.tap()
         let viewer = app.descendants(matching: .any).matching(identifier: "pictureViewer").firstMatch
@@ -435,6 +441,12 @@ final class HarloUITests: XCTestCase {
         XCTAssertFalse(app.buttons["pictureShare"].exists, "Share is for one picture")
         shot("27b-picture-grid")
         audit("picture-grid")
+        // Back: to the picture it came from.
+        app.buttons["pictureGridBack"].tap()
+        XCTAssertTrue(gone(cells.firstMatch), "Back leaves the grid")
+        see("2 of 2")
+        app.buttons["pictureGrid"].tap()
+        XCTAssertTrue(cells.firstMatch.waitForExistence(timeout: 5), "the grid again")
         cells.element(boundBy: 1).tap()
         XCTAssertTrue(gone(cells.firstMatch), "a tap opens it")
         see("2 of 2")

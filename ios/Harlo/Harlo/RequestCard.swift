@@ -31,7 +31,7 @@ struct AsideCard: View {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Label(aside.question, systemImage: "text.bubble")
                             .font(.subheadline.weight(.semibold))
-                            .lineLimit(isFolded ? 1 : typeSize.isAccessibilitySize ? 4 : 2)
+                            .lineLimit(isFolded ? 1 : 2)
                             .multilineTextAlignment(.leading)
                         if aside.done && aside.error.isEmpty {
                             Image(systemName: isFolded ? "chevron.down" : "chevron.up")
@@ -68,10 +68,12 @@ struct AsideCard: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
                 }
-                .frame(maxHeight: 220)
+                // (At the largest text sizes, less of it at once: the
+                // conversation above keeps its room.)
+                .frame(maxHeight: typeSize.isAccessibilitySize ? 150 : 220)
                 .fixedSize(horizontal: false, vertical: true)
             }
-            if aside.done && aside.error.isEmpty && !isFolded {
+            if aside.done && aside.error.isEmpty && !isFolded && !typeSize.isAccessibilitySize {
                 Text("A side question: not part of the conversation, and not kept.")
                     .font(.caption)
                     .foregroundStyle(Color(p.muted))

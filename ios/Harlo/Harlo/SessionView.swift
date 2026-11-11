@@ -698,15 +698,21 @@ struct ContextBar: View {
                         .frame(width: w, height: g.size.height)
                     }
                     .frame(height: 8)
+                    // (Capped: at the largest sizes it stays one slim row,
+                    // and the conversation keeps its room.)
                     Text("\(Int(used * 100))% context")
                         .scaledFont(11.5, .medium)
+                        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
                         .monospacedDigit()
-                        .foregroundStyle(Color(way > 0.6 ? tint : p.muted))
+                        .foregroundStyle(way > 0.6 ? Color(tint) : Color(p.foreground).opacity(0.72))
                         .fixedSize()
                 }
                 .padding(.horizontal, 16)
-                .frame(minHeight: 18)
+                // (A finger's height to tap, taking only a slim row: the
+                // rest reaches into the space around it.)
+                .frame(minHeight: 44)
                 .contentShape(Rectangle())
+                .padding(.vertical, -12)
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("contextBar")
