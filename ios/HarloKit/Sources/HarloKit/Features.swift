@@ -824,6 +824,16 @@ public struct Palette: Codable, Equatable, Sendable {
     public var raised: RGBA { background.mix(foreground, 0.035) }
     /// Lines between messages and sections: barely there.
     public var hairline: RGBA { background.mix(foreground, isLight ? 0.08 : 0.075) }
+
+    /// Your message's bubble: the accent (in a dark theme a little toward
+    /// the background), and its text, near-black on a light accent, else
+    /// white with the bubble darkened just enough to read (4.5:1).
+    public var sentBubble: (fill: RGBA, ink: RGBA) {
+        let fill = isLight ? primary : primary.mix(background, 0.28)
+        if fill.luminance > 0.6 { return (fill, RGBA(0.08, 0.08, 0.1)) }
+        let white = RGBA(1, 1, 1)
+        return (fill.legible(on: white, toward: RGBA(0, 0, 0)), white)
+    }
     /// A list's rows: the open one, and a field on the sidebar.
     public var rowSelected: RGBA { sidebar.mix(foreground, isLight ? 0.075 : 0.085) }
     public var well: RGBA { sidebar.mix(foreground, isLight ? 0.05 : 0.045) }

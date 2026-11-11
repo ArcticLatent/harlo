@@ -84,6 +84,29 @@ public enum RichText {
     }
 
     /// One highlighted line of a file (harlo's `highlight_lines`).
+    /// Code with places to break after `(` `[` `{` `,` `.` `/` and `::`, so
+    /// wrapped code breaks between its parts before inside a name (a
+    /// zero-width space: for showing only, never for copying).
+    public static func breakable(_ s: String) -> String {
+        var out = ""
+        out.reserveCapacity(s.utf8.count + 8)
+        var prev: Character = " "
+        for c in s {
+            out.append(c)
+            if "([{,./".contains(c) || (c == ":" && prev == ":") { out.append("\u{200B}") }
+            prev = c
+        }
+        return out
+    }
+
+    public static func breakable(_ spans: [Span]) -> [Span] {
+        spans.map { s in
+            var t = s
+            t.text = breakable(s.text)
+            return t
+        }
+    }
+
     public static func codeLine(_ html: String) -> [Span] {
         inline(Node.parse(html).children, Style(code: true), keepSpace: true)
     }

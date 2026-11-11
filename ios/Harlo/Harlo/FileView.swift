@@ -103,7 +103,12 @@ struct FileView: View {
                                 number(i + 1, width)
                                 if wrap, let line = CodeLines.lines(f.spans(i)).first {
                                     WrappedLine(indent: line.indent, font: Style.mono(12)) {
-                                        Text(Style.attributed(line.spans.isEmpty ? [Span(" ")] : line.spans, p, size: 14, inCode: true))
+                                        Text(Style.attributed(line.spans.isEmpty ? [Span(" ")] : RichText.breakable(line.spans), p, size: 14, inCode: true))
+                                            .accessibilityLabel(RichText.plain(line.spans))
+                                    }
+                                    // (Its breaks are only shown: copied, the line as it is.)
+                                    .contextMenu {
+                                        Button("Copy Line", systemImage: "doc.on.doc") { UIPasteboard.general.string = RichText.plain(f.spans(i)) }
                                     }
                                 } else {
                                     Text(Style.attributed(f.spans(i), p, size: 14, inCode: true))
@@ -126,7 +131,7 @@ struct FileView: View {
                 }
                 .padding(.bottom, 20)
                 .frame(minWidth: room.size.width, minHeight: room.size.height, alignment: .topLeading)
-                .textSelection(.enabled)
+                .modifier(Selectable(on: !wrap))
             }
             .background(Color(p.codeBackground))
             .onAppear {
@@ -288,5 +293,15 @@ struct BranchesView: View {
                 dismiss()
             }
         }
+    }
+}
+
+/// Text selection, on or off (code wrapped at its breaks isn't selectable:
+/// what it copied would carry them).
+struct Selectable: ViewModifier {
+    let on: Bool
+
+    func body(content: Content) -> some View {
+        if on { content.textSelection(.enabled) } else { content.textSelection(.disabled) }
     }
 }

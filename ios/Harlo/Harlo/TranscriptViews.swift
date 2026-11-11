@@ -528,8 +528,7 @@ struct UserBubble: View {
     let row: Row
 
     var body: some View {
-        let fill = p.isLight ? p.primary : p.primary.mix(p.background, 0.28)
-        let ink: RGBA = fill.luminance > 0.6 ? RGBA(0.08, 0.08, 0.1) : RGBA(1, 1, 1)
+        let (fill, ink) = p.sentBubble
         HStack(alignment: .bottom, spacing: 8) {
             Spacer(minLength: 36)
             VStack(alignment: .trailing, spacing: 5) {
@@ -640,11 +639,13 @@ struct CodeBlock: View {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(CodeLines.lines(visible).enumerated()), id: \.offset) { _, line in
                             WrappedLine(indent: line.indent, font: Style.mono(13)) {
-                                Text(Style.attributed(line.spans.isEmpty ? [Span(" ")] : line.spans, p, size: 15, inCode: true))
+                                Text(Style.attributed(line.spans.isEmpty ? [Span(" ")] : RichText.breakable(line.spans), p, size: 15, inCode: true))
+                                    .accessibilityLabel(RichText.plain(line.spans))
                             }
                         }
                     }
-                    .textSelection(.enabled)
+                    // (Not selectable, wrapped: its breaks would be copied;
+                    // Copy code above copies it as it is.)
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
@@ -804,7 +805,8 @@ struct DiffLines: View {
                         if wrap, let first = line.first {
                             let (n, rest) = CodeLines.indent(line.dropFirst())
                             WrappedLine(lead: String(first), indent: n, font: Style.mono(11.5)) {
-                                Text(rest.isEmpty ? " " : String(rest)).font(Style.mono(11.5))
+                                Text(rest.isEmpty ? " " : RichText.breakable(String(rest))).font(Style.mono(11.5))
+                                    .accessibilityLabel(String(rest))
                             }
                         } else {
                             Text(line.isEmpty ? " " : String(line))

@@ -244,6 +244,29 @@ final class ModelPartsTests: XCTestCase {
         XCTAssertNil(Palette(["surface": ["background": "#ff101010"]], light: true))
     }
 
+    /// Your message's text reads on its bubble (4.5:1) in every theme harlo
+    /// ships, dark and light.
+    func testSentBubblesReadInEveryTheme() throws {
+        let themes = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("../../../../crates/harlo-app/themes").standardized
+        let files = try FileManager.default.contentsOfDirectory(atPath: themes.path).filter { $0.hasSuffix(".json") }
+        XCTAssertGreaterThan(files.count, 20)
+        for f in files {
+            let json = try JSON.parse(Data(contentsOf: themes.appendingPathComponent(f)))
+            guard let p = Palette(json["colors"], light: f.contains("-light")) else { continue }
+            let (fill, ink) = p.sentBubble
+            XCTAssertGreaterThanOrEqual(ink.contrast(with: fill), 4.5, f)
+        }
+    }
+
+    func testWrappedCodeBreaksBetweenItsParts() {
+        XCTAssertEqual(RichText.breakable("rows.extend(project_rows(project, input));"),
+                       "rows.\u{200B}extend(\u{200B}project_rows(\u{200B}project,\u{200B} input));")
+        XCTAssertEqual(RichText.breakable("crate::projects"), "crate::\u{200B}projects")
+        XCTAssertEqual(RichText.breakable("a: b"), "a: b", "a single colon has its space")
+        XCTAssertEqual(RichText.plain(RichText.breakable([Span("f(x)", token: 5)])).replacingOccurrences(of: "\u{200B}", with: ""), "f(x)")
+    }
+
     func testSlashCommandsMatchWhatsTyped() {
         let all = [SlashCommand(name: "plan"), SlashCommand(name: "compact"), SlashCommand(name: "explain-plan")]
         XCTAssertEqual(SlashCommand.matching(all, typed: "/pl").map(\.name), ["plan", "explain-plan"])

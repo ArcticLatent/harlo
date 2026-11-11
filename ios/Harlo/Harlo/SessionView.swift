@@ -37,6 +37,9 @@ struct SessionContent: View {
     /// The side question's answer folded to its question (once you send
     /// the next message; tap it to open it again).
     @State private var asideFolded = false
+    /// The phone's text size (the navigation bar keeps its own at the
+    /// default; the header takes this, as far as the bar has room).
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     /// The agent and the session's project.
     var subtitle: String {
@@ -220,10 +223,14 @@ struct SessionContent: View {
                         Text(session.title.isEmpty ? "Session" : session.title)
                             .scaledFont(16, .semibold)
                             .lineLimit(1)
+                            // (Larger than the bar has room for: press and
+                            // hold to read it big.)
+                            .accessibilityShowsLargeContentViewer()
                     HStack(spacing: 6) {
                         if !subtitle.isEmpty {
                             Text(subtitle)
                                 .lineLimit(1)
+                                .accessibilityShowsLargeContentViewer()
                         }
                         // The branch: tap to switch.
                         if let branch, !branch.isEmpty {
@@ -245,6 +252,9 @@ struct SessionContent: View {
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel("Branch \(branch). Switch branch")
+                            .accessibilityShowsLargeContentViewer {
+                                Label(branch, systemImage: "arrow.triangle.branch")
+                            }
                         }
                     }
                     .scaledFont(12.5)
@@ -252,6 +262,8 @@ struct SessionContent: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                // The phone's text size, up to what fits the bar's height.
+                .environment(\.dynamicTypeSize, min(typeSize, .xLarge))
             }
             ToolbarItem(placement: .topBarTrailing) {
                 let others = model.waiting.filter { $0.session.key != session.liveKey && $0.session.key != session.key }.count
