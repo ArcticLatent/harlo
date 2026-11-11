@@ -443,6 +443,20 @@ final class ModelPartsTests: XCTestCase {
         XCTAssertEqual(s.pictureName(cache + "930bbd53bde91971bc307bea8ed0503c.jpg"), "Your photo")
         XCTAssertEqual(s.pictureName(cache + "bbbbbbbbbbbbbbbb2222.png"), "Picture from " + ToolName.words("screenshot", running: false) + " 2")
         XCTAssertEqual(s.pictureName("/home/you/p/docs/sidebar.png"), "sidebar.png")
+        // Shown in its reply's place, it's named by the reply's words.
+        s.rows += [Row(key: "harlo-m4:0:0", kind: "markdown", html: "<p>Now:</p><p><em data-img=\"docs/now.png\">The sidebar now</em></p>"),
+                   Row(key: "harlo-m4:0:pics", kind: "images", images: ["/home/you/p/docs/now.png"])]
+        XCTAssertEqual(s.pictureName("/home/you/p/docs/now.png"), "The sidebar now")
+    }
+
+    func testDiffLinesColouredAsCode() {
+        let d = FileDiff(["path": "a.rs", "hunks": [["header": "@@ -1 +1 @@", "lines": [
+            ["k": "+", "n": 1, "t": "let x = 1;", "h": "<span class=\"s1\">let</span> x = 1;"],
+            ["k": "-", "o": 1, "t": "old"]]]]])
+        let lines = d.hunks[0].lines
+        XCTAssertEqual(lines[0].spans.first, Span("let", code: true, token: 1))
+        XCTAssertEqual(RichText.plain(lines[0].spans), "let x = 1;")
+        XCTAssertEqual(lines[1].spans, [Span("old", code: true)], "from an older harlo, its plain text")
     }
 
     func testPictureLinksOpenTheViewer() {

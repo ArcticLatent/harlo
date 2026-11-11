@@ -108,11 +108,16 @@ public enum RichText {
     /// The pictures blocks show in their place (in lists and quotes too),
     /// as the reply wrote them.
     public static func pictures(_ blocks: [RichBlock]) -> [String] {
-        blocks.flatMap { b -> [String] in
+        pictureWords(blocks).map(\.src)
+    }
+
+    /// The pictures shown in their place, with the words the reply gave them.
+    public static func pictureWords(_ blocks: [RichBlock]) -> [(src: String, alt: String)] {
+        blocks.flatMap { b -> [(src: String, alt: String)] in
             switch b {
-            case .picture(let src, _): return [src]
-            case .list(_, _, let items): return items.flatMap(pictures)
-            case .quote(let inner): return pictures(inner)
+            case .picture(let src, let alt): return [(src, alt)]
+            case .list(_, _, let items): return items.flatMap(pictureWords)
+            case .quote(let inner): return pictureWords(inner)
             default: return []
             }
         }

@@ -286,14 +286,14 @@ struct DiffView: View {
                 .foregroundStyle(tint.map { Color($0) } ?? Color(p.muted))
             // (Wrapped, its further rows start under its code, past its
             // indentation.)
-            if wrap {
-                let (n, rest) = CodeLines.indent(Substring(l.text))
-                WrappedLine(indent: n, font: Style.mono(12)) {
-                    Text(rest.isEmpty ? " " : String(rest))
+            // (Coloured as code, as the file view, when harlo sends it so.)
+            if wrap, let code = CodeLines.lines(l.spans).first {
+                WrappedLine(indent: code.indent, font: Style.mono(12)) {
+                    Text(Style.attributed(code.spans.isEmpty ? [Span(" ")] : code.spans, p, size: 14, inCode: true))
                 }
                 .padding(.trailing, 12)
             } else {
-                Text(l.text.isEmpty ? " " : l.text)
+                Text(Style.attributed(l.text.isEmpty ? [Span(" ")] : l.spans, p, size: 14, inCode: true))
                     .fixedSize(horizontal: true, vertical: false)
                     .padding(.trailing, 12)
             }

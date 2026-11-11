@@ -384,7 +384,8 @@ enum PictureFit {
 }
 
 /// A picture a reply shows on its own line, in its place: as wide as the
-/// reply (never past twice its own pixels), a tap opens the viewer. Its
+/// reply (at most four screen pixels to each of its own, as in the
+/// viewer), a tap opens the viewer. Its
 /// words when it isn't one of the session's pictures (a web address, a
 /// file that's gone).
 struct ReplyPicture: View {
@@ -415,7 +416,7 @@ struct ReplyPicture: View {
                             .resizable()
                             .interpolation(.high)
                             .aspectRatio(px, contentMode: .fit)
-                            .frame(maxWidth: px.width * 2 / max(displayScale, 1))
+                            .frame(maxWidth: px.width * 4 / max(displayScale, 1))
                     } else if !why.isEmpty {
                         Label(alt.isEmpty ? why : "\(alt): \(why)", systemImage: "photo")
                             .font(.subheadline)

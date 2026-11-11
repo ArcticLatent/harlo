@@ -86,8 +86,21 @@ public final class OpenSession {
     /// "Picture from screenshot", numbered when a row has several).
     public func pictureName(_ path: String) -> String {
         let name = PictureNames.name(path)
+        let row = rows.first(where: { $0.images.contains(path) })
+        // The words a reply gave it, shown in its place ("The sidebar"):
+        // harlo sends a reply's pictures as a row after its text, with the
+        // same message key (`m44:0:pics` after `m44:0:0`).
+        if let row, row.kind != "user", row.kind != "tool" {
+            let message = row.key.split(separator: ":").dropLast().joined(separator: ":")
+            let reply = row.kind == "images" && !message.isEmpty ? rows.filter { $0.key.hasPrefix(message + ":") } : [row]
+            for r in reply {
+                for (src, alt) in RichText.pictureWords(RichText.parse(r.html)) where !alt.isEmpty && PictureNames.match(src, in: [path]) != nil {
+                    return alt
+                }
+            }
+        }
         guard PictureNames.isMadeUp(name) else { return name }
-        guard let row = rows.first(where: { $0.images.contains(path) }) else { return "Picture" }
+        guard let row else { return "Picture" }
         let madeUp = row.images.filter { PictureNames.isMadeUp(PictureNames.name($0)) }
         let n = madeUp.count > 1 ? " \((madeUp.firstIndex(of: path) ?? 0) + 1)" : ""
         switch row.kind {

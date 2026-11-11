@@ -847,9 +847,21 @@ fn diff_json(d: &harlo_core::git::FileDiff) -> Value {
         if left == 0 {
             break;
         }
-        let lines: Vec<Value> = h.lines.iter().take(left).map(|l| {
+        // Coloured as code, each side on its own (the old file's lines, then
+        // the new one's), so a comment or string started on one side colours
+        // the lines after it on that side; `h` is a line's HTML, as a file's.
+        let shown = &h.lines[..h.lines.len().min(left)];
+        let mut colored: Vec<Option<String>> = vec![None; shown.len()];
+        for side in [LineKind::Removed, LineKind::Added] {
+            let at: Vec<usize> = (0..shown.len()).filter(|&i| shown[i].kind == side || shown[i].kind == LineKind::Context).collect();
+            let texts: Vec<&str> = at.iter().map(|&i| shown[i].text.as_str()).collect();
+            for (i, html) in at.into_iter().zip(harlo_core::markdown::highlight_lines(&d.path, &texts)) {
+                colored[i].get_or_insert(html);
+            }
+        }
+        let lines: Vec<Value> = shown.iter().zip(colored).map(|(l, html)| {
             let k = match l.kind { LineKind::Added => "+", LineKind::Removed => "-", LineKind::Context => " ", LineKind::NoNewline => "\\" };
-            json!({ "k": k, "o": l.old_no, "n": l.new_no, "t": l.text })
+            json!({ "k": k, "o": l.old_no, "n": l.new_no, "t": l.text, "h": html })
         }).collect();
         left -= lines.len();
         hunks.push(json!({ "header": h.header, "lines": lines }));
@@ -1238,6 +1250,36 @@ pub(crate) mod tests {
         r.command.clear();
         let text = row_json(&r, std::path::Path::new(""))["text"].as_str().unwrap().to_owned();
         assert!(text.starts_with("line 0\n") && text.ends_with("(cut here; the rest is in harlo on your computer)"));
+    }
+
+    /// A diff's lines come coloured as code, each side on its own: a block
+    /// comment opened in a removed line colours the removed line after it,
+    /// not the added one.
+    #[test]
+    fn diffs_reach_phones_coloured() {
+        let dir = std::env::temp_dir().join(format!("harlo-phone-diff-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let git = |args: &[&str]| {
+            let ok = std::process::Command::new("git").args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]).args(args).current_dir(&dir).output().unwrap();
+            assert!(ok.status.success(), "{}", String::from_utf8_lossy(&ok.stderr));
+        };
+        git(&["init", "-q"]);
+        std::fs::write(dir.join("a.rs"), "fn main() {\n    /* old\n    still */\n}\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "a"]);
+        std::fs::write(dir.join("a.rs"), "fn main() {\n    let x = 1;\n    let y = 2;\n}\n").unwrap();
+        let d = harlo_core::git::diff_file(&dir, "a.rs", false, false).unwrap();
+        let v = diff_json(&d);
+        let lines = v["hunks"][0]["lines"].as_array().unwrap();
+        let html = |t: &str| lines.iter().find(|l| l["t"].as_str().unwrap().trim() == t).map(|l| l["h"].as_str().unwrap_or("").to_owned()).unwrap();
+        assert!(html("fn main() {").contains("<span class=\"s"), "{lines:?}");
+        let (opened, old, new) = (html("/* old"), html("still */"), html("let y = 2;"));
+        let comment = &opened[opened.find('<').unwrap()..opened.find('>').unwrap() + 1];
+        assert!(comment.starts_with("<span class=\"s") && old.split("</span>").filter(|p| !p.is_empty()).all(|p| p.starts_with(comment)),
+                "the comment goes on: {opened} / {old}");
+        assert!(new.contains("let</span>"), "the new side isn't in the comment: {new}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A row names its pictures (ones that exist); a phone gets one the

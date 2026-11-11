@@ -648,6 +648,12 @@ public struct FileDiff: Equatable, Sendable {
         public var old: Int?
         public var new: Int?
         public var text: String
+        /// Its HTML coloured as code (harlo's `.sN` spans), empty from an
+        /// older harlo.
+        public var html: String = ""
+
+        /// As styled spans, coloured when harlo sent its HTML.
+        public var spans: [Span] { html.isEmpty ? [Span(text, code: true)] : RichText.codeLine(html) }
     }
 
     public struct Hunk: Equatable, Sendable {
@@ -671,7 +677,7 @@ public struct FileDiff: Equatable, Sendable {
         cut = v["cut"].bool ?? false
         hunks = (v["hunks"].array ?? []).map { h in
             Hunk(header: h["header"].text, lines: (h["lines"].array ?? []).map { l in
-                Line(kind: Line.Kind(rawValue: l["k"].text) ?? .context, old: l["o"].int.map(Int.init), new: l["n"].int.map(Int.init), text: l["t"].text)
+                Line(kind: Line.Kind(rawValue: l["k"].text) ?? .context, old: l["o"].int.map(Int.init), new: l["n"].int.map(Int.init), text: l["t"].text, html: l["h"].text)
             })
         }
     }
