@@ -112,7 +112,7 @@ struct PictureViewer: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(1 - pulled * 0.7).ignoresSafeArea()
+            Color.black.opacity(1 - Double(pulled) * 0.7).ignoresSafeArea()
             TabView(selection: $current) {
                 ForEach(paths, id: \.self) { path in
                     PicturePage(path: path, pulled: $pulled, loaded: { shown[path] = $0 }, toggleBars: {
