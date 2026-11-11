@@ -1,5 +1,7 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Effects
+import QtQuick.Shapes
 import QtQuick.Layouts
 import QtQuick.Dialogs
 import Qt.labs.qmlmodels
@@ -319,6 +321,13 @@ Rectangle {
             property int dropBefore: -1
             property real dropY: -1
             property real dragSceneY: 0
+            // What the lifted copy shows, and where on the header it was
+            // taken (so it doesn't jump under the pointer).
+            property string dragTitle: ""
+            property string dragIcon: ""
+            property string dragColor: ""
+            property int dragCount: 0
+            property real dragGrab: 0
             readonly property real dragY: dragId >= 0 ? mapFromItem(null, 0, dragSceneY).y : 0
             cacheBuffer: dragId >= 0 ? 100000 : 320
             // The places it can go: above each group's header (its gap's
@@ -346,16 +355,51 @@ Rectangle {
                 dragId = -1
                 dropY = -1
             }
-            Rectangle {
+            // Where it lands: a line with a ring at its start.
+            Item {
                 objectName: "projectDropLine"
                 visible: list.dragId >= 0 && list.dropY >= 0
                 z: 10
-                x: 12
-                y: list.dropY - 1
-                width: list.width - 24
-                height: 2
-                radius: 1
-                color: Theme.accent
+                x: 14
+                y: list.dropY - 4
+                width: list.width - 28
+                height: 8
+                Rectangle { x: 6; anchors.verticalCenter: parent.verticalCenter; width: parent.width - 6; height: 2; radius: 1; color: Theme.accent }
+                Rectangle { width: 8; height: 8; radius: 4; color: Theme.sidebar; border.width: 2; border.color: Theme.accent }
+            }
+            // The project lifted: a copy of its header following the pointer.
+            Rectangle {
+                objectName: "projectDragGhost"
+                parent: list
+                visible: list.dragId >= 0
+                z: 20
+                x: 18
+                y: Math.max(-height / 2, Math.min(list.height - height / 2, list.dragY - list.dragGrab))
+                width: list.width - 36
+                height: 30
+                radius: 8
+                rotation: -1
+                antialiasing: true
+                color: Theme.raised
+                border.color: Theme.controlBorder
+                RectangularShadow {
+                    z: -1
+                    anchors.fill: parent
+                    radius: parent.radius
+                    offset.y: 6
+                    blur: 18
+                    spread: -6
+                    color: Qt.rgba(0, 0, 0, Theme.isLight ? 0.16 : 0.45)
+                }
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 10
+                    anchors.rightMargin: 12
+                    spacing: 8
+                    ProjectIcon { Layout.preferredWidth: 13; Layout.preferredHeight: 13; icon: list.dragIcon; color: list.dragColor }
+                    Label { Layout.fillWidth: true; text: list.dragTitle; color: Theme.text; font.pixelSize: Theme.px(13); font.weight: Font.DemiBold; elide: Text.ElideRight }
+                    Label { text: list.dragCount; color: Theme.textFaint; font.pixelSize: Theme.px(12) }
+                }
             }
             // Near the top or bottom edge, the list scrolls on.
             Timer {
@@ -391,6 +435,7 @@ Rectangle {
                         leftPadding: 38
                         leftInset: 6
                         rightInset: 6
+                        opacity: list.dragId >= 0 && list.dragId === projectId ? 0.4 : 1
                         contentItem: Label { text: moreRow.title; color: Theme.muted; font.pixelSize: Theme.px(12); verticalAlignment: Text.AlignVCenter }
                         background: Rectangle { radius: 8; color: moreRow.hovered ? Theme.hover : "transparent" }
                         onClicked: Workspace.showMore(projectId)
@@ -406,6 +451,7 @@ Rectangle {
                         required property int count
                         required property int projectId
                         objectName: "shelfRow-" + rowKey
+                        opacity: list.dragId >= 0 && list.dragId === projectId ? 0.4 : 1
                         width: ListView.view.width
                         height: 30
                         leftPadding: 30
@@ -450,7 +496,10 @@ Rectangle {
                         // Started by another session's agent: shown under it.
                         required property string helperOf
                         required property int nest
+                        required property int projectId
                         readonly property bool active: rowKey === Workspace.activeKey
+                        // Its project lifted to move: faded with it.
+                        opacity: list.dragId >= 0 && list.dragId === projectId ? 0.4 : 1
                         // On hover: whose helper it is, the cwd (other sessions)
                         // and/or the worktree branch, and why it's settled.
                         // On the Settled shelf: faded, until you point at it.
@@ -664,8 +713,27 @@ Rectangle {
         topPadding: gap
         leftPadding: 18
         rightPadding: 14
-        background: Rectangle { radius: 8; color: groupRow.hovered ? Theme.rowHover : "transparent"; Behavior on color { ColorAnimation { duration: Theme.hoverMotion } } }
+        background: Rectangle {
+            radius: 8
+            color: groupRow.hovered && !groupRow.lifted ? Theme.rowHover : "transparent"
+            Behavior on color { ColorAnimation { duration: Theme.hoverMotion } }
+            Shape {
+                id: hole
+                anchors.fill: parent
+                visible: groupRow.lifted
+                preferredRendererType: Shape.CurveRenderer
+                ShapePath {
+                    strokeColor: Theme.controlBorder
+                    strokeWidth: 1
+                    strokeStyle: ShapePath.DashLine
+                    dashPattern: [4, 3]
+                    fillColor: "transparent"
+                    PathRectangle { x: 0.5; y: 0.5; width: hole.width - 1; height: hole.height - 1; radius: 8 }
+                }
+            }
+        }
         contentItem: RowLayout {
+            opacity: groupRow.lifted ? 0 : 1
             spacing: 6
             // The project's icon in its colour (Settings → Projects; a grey
             // folder by default, and for Other sessions); hovered, the
@@ -756,7 +824,8 @@ Rectangle {
             }
         }
         onClicked: Workspace.toggleCollapsed(rowKey)
-        opacity: list.dragId >= 0 && list.dragId === projectId && kind === "project" ? 0.5 : 1
+        // Lifted: its place shows as a dashed outline.
+        readonly property bool lifted: list.dragId >= 0 && list.dragId === projectId && kind === "project"
         // Dragged by its header, a project goes where it's dropped.
         DragHandler {
             objectName: "projectDrag"
@@ -766,6 +835,12 @@ Rectangle {
             cursorShape: Qt.ClosedHandCursor
             onActiveChanged: {
                 if (active) {
+                    list.dragTitle = groupRow.title
+                    list.dragIcon = groupRow.projectIcon
+                    list.dragColor = groupRow.projectColor
+                    list.dragCount = groupRow.count
+                    // (From the header's visible part, below its gap.)
+                    list.dragGrab = centroid.pressPosition.y - groupRow.gap
                     list.dragId = groupRow.projectId
                     list.dragSceneY = centroid.scenePosition.y
                     list.updateDrop()

@@ -5263,8 +5263,11 @@ ApplicationWindow {
             for (let i = 1; i <= 12; i++) TestInput.moveTo(from.x, from.y + (to.y - from.y) * i / 12) } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
-            const line = win.findName("projectDropLine")
+            const line = win.findName("projectDropLine"), ghost = win.findName("projectDragGhost")
             win.check(line !== null && line.visible, "dragging, a line shows where it goes")
+            win.check(ghost !== null && ghost.visible && win.findText("Rocket app", ghost) !== null, "and a copy of its header follows the pointer")
+            // (findName skips what's faded out: its title isn't to be found.)
+            win.check(win.findName("projectTitle-Rocket app") === null && win.findName("projectTitle-" + win.selftestDir.split("/").filter(s => s).pop()) !== null, "its place is left empty")
             win.shotWindow("clicks-projects-drag")
             const top = win.findName("projectTitle-" + win.selftestDir.split("/").filter(s => s).pop()), to = top.mapToItem(null, 10, -6)
             TestInput.press(to.x, to.y, false) } }
@@ -5272,8 +5275,8 @@ ApplicationWindow {
         ScriptAction { script: {
             const names = JSON.parse(Workspace.projectsJson()).map(p => p.name)
             win.check(names[0] === "Rocket app", "dropped above, it's first (" + names.join(", ") + ")")
-            const line = win.findName("projectDropLine")
-            win.check(line === null || !line.visible, "and the line goes")
+            const line = win.findName("projectDropLine"), ghost = win.findName("projectDragGhost")
+            win.check((line === null || !line.visible) && (ghost === null || !ghost.visible), "and the line and the copy go")
             // Its menu: Move down, and Move up is off at the top.
             const p = JSON.parse(Workspace.projectsJson())[0]
             sidebar.projectMenu.projectId = p.id; sidebar.projectMenu.path = p.path; sidebar.projectMenu.name = p.name; sidebar.projectMenu.harness = p.harness
