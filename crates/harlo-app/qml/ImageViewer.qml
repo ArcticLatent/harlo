@@ -11,6 +11,11 @@ import harlo
 Item {
     id: root
     objectName: "imageViewer"
+    // The shortcuts sheet (the viewer's keys are among them).
+    function showKeys() {
+        const w = root.Window.window
+        if (w && w.showShortcuts) w.showShortcuts()
+    }
     // (Narrow: the bar's ⋯ menu.)
     readonly property alias moreMenu: moreMenu
     /// The file tab's path (ssh:// for a remote one) and the local file shown.
@@ -435,7 +440,7 @@ Item {
                     visible: (root.folder !== "" || (root.ownList && root.images.length > 1)) && (!bar.tight || root.gridMode)
                     iconName: "grid"; tint: Theme.muted
                     on: root.gridMode
-                    tip: root.gridMode ? "Back to the image (G, Esc)" : root.ownList ? "All the chat's pictures (G)" : "The folder's images (G)"
+                    tip: (root.gridMode ? "Back to the image (G, Esc)" : root.ownList ? "All the chat's pictures (G)" : "The folder's images (G)") + "\nEvery key: Ctrl+/"
                     focusPolicy: Qt.NoFocus
                     onClicked: root.showGrid(!root.gridMode)
                 }
@@ -480,15 +485,24 @@ Item {
                             onTriggered: moreMenu.after = () => root.showGrid(true)
                         }
                         AppMenuItem {
-                            visible: !root.ownList
+                            visible: !root.ownList && !root.filled
                             text: root.filled ? "Back into the tab" : "Fill the window"
                             hint: "F"
                             onTriggered: moreMenu.after = () => { root.filled = !root.filled; root.focusView() }
                         }
+                        AppMenuSeparator { }
+                        AppMenuItem {
+                            objectName: "imageKeys"
+                            text: "Keyboard shortcuts"
+                            hint: "Ctrl+/"
+                            onTriggered: moreMenu.after = () => root.showKeys()
+                        }
                     }
                 }
                 ComposerIconButton {
-                    visible: !root.ownList && (!bar.tight || root.gridMode)
+                    objectName: "imageFill"
+                    // (Filling the window, the way back always shows.)
+                    visible: !root.ownList && (!bar.tight || root.gridMode || root.filled)
                     iconName: root.filled ? "fullscreen-exit" : "fullscreen"; tint: Theme.muted
                     tip: root.filled ? "Back into the tab (F, Esc)" : "Fill the window (F)"
                     focusPolicy: Qt.NoFocus

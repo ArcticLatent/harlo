@@ -18,19 +18,57 @@ Rectangle {
     // (`before`, -1: to the end), says where it went to a screen reader,
     // and (moved from the keyboard) keeps the keys on its header.
     property int focusAfterMove: -1
+    // The last move, to undo from its notice: { id, before, notice }.
+    property var lastMove: null
+    readonly property bool moveUndoable: lastMove !== null && Workspace.notice === lastMove.notice
     function moveProject(id, step, before, keepFocus) {
+        const was = JSON.parse(Workspace.projectsJson())
+        const at = was.findIndex(p => p.id === id)
+        const wasBefore = at >= 0 && at + 1 < was.length ? was[at + 1].id : -1
         if (step !== 0)
             Workspace.moveProjectStep(id, step)
         else
             Workspace.moveProject(id, before)
         const ps = JSON.parse(Workspace.projectsJson())
         const i = ps.findIndex(p => p.id === id)
-        if (i >= 0)
-            root.Accessible.announce(ps[i].name + (i + 1 < ps.length ? " moved above " + ps[i + 1].name : " moved to the end"))
+        if (i >= 0 && i !== at) {
+            const said = ps[i].name + (i + 1 < ps.length ? " moved above " + ps[i + 1].name : " moved to the end")
+            root.Accessible.announce(said)
+            Workspace.showNotice(said, false)
+            lastMove = { id: id, before: wasBefore, notice: said }
+            moveNoticeTimer.restart()
+        }
         if (keepFocus) {
             focusAfterMove = id
             refocus.restart()
         }
+    }
+    // Puts the last moved project back where it was.
+    function undoMove() {
+        if (!moveUndoable)
+            return
+        const m = lastMove
+        lastMove = null
+        Workspace.clearNotice()
+        Workspace.moveProject(m.id, m.before)
+        const p = JSON.parse(Workspace.projectsJson()).find(x => x.id === m.id)
+        if (p) root.Accessible.announce(p.name + " moved back")
+    }
+    // (A move's notice goes after a while, unless something else replaced it.)
+    Timer {
+        id: moveNoticeTimer
+        interval: 10000
+        onTriggered: if (root.moveUndoable) { Workspace.clearNotice(); root.lastMove = null }
+    }
+    // Ctrl+Z while a move's notice shows, unless typing has the keys (the
+    // composer's and the editor's own undo).
+    Shortcut {
+        sequences: [StandardKey.Undo]
+        enabled: {
+            const f = root.Window.activeFocusItem
+            return root.moveUndoable && !(f && f.cursorPosition !== undefined)
+        }
+        onActivated: root.undoMove()
     }
     // (Its header is made again after a move: the keys go to the new one.)
     Timer {
@@ -734,16 +772,29 @@ Rectangle {
                         color: noticeCard.failed ? Theme.error : Theme.textMuted
                     }
                 }
-                Label {
+                // (Narrow, Undo goes under the words rather than beside them.)
+                readonly property bool undoBelow: noticeCard.width < 240
+                ColumnLayout {
                     Layout.fillWidth: true
                     Layout.alignment: Qt.AlignTop
-                    text: Workspace.notice
-                    color: Theme.text
-                    wrapMode: Text.Wrap
-                    maximumLineCount: 5
-                    elide: Text.ElideRight
-                    lineHeight: 1.15
-                    font.pixelSize: Theme.px(12.5)
+                    spacing: 6
+                    Label {
+                        Layout.fillWidth: true
+                        text: Workspace.notice
+                        color: Theme.text
+                        wrapMode: Text.Wrap
+                        maximumLineCount: 5
+                        elide: Text.ElideRight
+                        lineHeight: 1.15
+                        font.pixelSize: Theme.px(12.5)
+                    }
+                    UndoButton { visible: root.moveUndoable && noticeRow.undoBelow }
+                }
+                // A project's move: put it back.
+                UndoButton {
+                    Layout.alignment: Qt.AlignTop
+                    Layout.topMargin: -4
+                    visible: root.moveUndoable && !noticeRow.undoBelow
                 }
                 PanelButton {
                     Layout.alignment: Qt.AlignTop
@@ -757,6 +808,18 @@ Rectangle {
                 }
             }
         }
+    }
+
+    // Puts the last moved project back (the notice card's).
+    component UndoButton: FlatButton {
+        objectName: "noticeUndo"
+        text: "Undo"
+        font.pixelSize: Theme.px(12)
+        padding: 4
+        ToolTip.visible: hovered
+        ToolTip.delay: 500
+        ToolTip.text: "Put it back (Ctrl+Z)"
+        onClicked: root.undoMove()
     }
 
     // Uncommitted changes: a small warning-tinted count.

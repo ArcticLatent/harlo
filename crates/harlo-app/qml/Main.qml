@@ -126,6 +126,8 @@ ApplicationWindow {
     // The drop-down window (toggled by `harlo --toggle-dropdown`, e.g. from a
     // desktop shortcut): layer-shell on KDE Wayland, a plain window elsewhere.
     property var dropDown: null
+    // The shortcuts sheet (from a viewer's ⋯ menu).
+    function showShortcuts() { shortcutsDialog.open() }
     function showMainWindow() {
         win.show()
         win.raise()
@@ -5376,7 +5378,20 @@ ApplicationWindow {
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
             win.check(sidebar.projectMenu.opened && sidebar.projectMenu.name === "Rocket app", "Shift+F10 opens its menu")
-            sidebar.projectMenu.close()
+            sidebar.projectMenu.close() } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            // The move's notice offers Undo, and Ctrl+Z (not typing) takes it.
+            const undo = win.findName("noticeUndo")
+            win.check(undo !== null && Workspace.notice.startsWith("Rocket app moved above "), "a move's notice offers Undo (" + Workspace.notice + ")")
+            win.shotWindow("clicks-projects-undo")
+            const f = win.activeFocusItem
+            win.check(f && f.cursorPosition === undefined, "the keys aren't in a text field (" + f + ")")
+            TestInput.key(Qt.Key_Z, Qt.ControlModifier) } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const names = JSON.parse(Workspace.projectsJson()).map(p => p.name)
+            win.check(names[1] === "Rocket app" && Workspace.notice === "" && win.findName("noticeUndo") === null, "Ctrl+Z puts it back, and the notice goes (" + names.join(", ") + ")")
             win.summary(); Qt.quit() } }
     }
 
@@ -6692,6 +6707,26 @@ ApplicationWindow {
             const zoom = win.findName("imageZoom", viewer)
             const barRight = zoom ? zoom.parent.mapToItem(viewer, zoom.parent.width, 0).x : -1
             win.check(barRight > 0 && barRight <= viewer.width + 0.5, "the bar fits its view (" + barRight.toFixed(0) + " of " + viewer.width.toFixed(0) + ")")
+            if (tight) viewer.moreMenu.popup(more, 0, 0)
+        } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const viewer = chat.fileEditor.imageViewer
+            if (viewer.width < 640)
+                win.clickItem(win.findName("imageKeys", viewer.moreMenu.contentItem), "Keyboard shortcuts")
+        } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const viewer = chat.fileEditor.imageViewer, v = win.imgView()
+            if (viewer.width < 640) {
+                win.check(shortcutsDialog.visible, "⋯ → Keyboard shortcuts opens the sheet")
+                shortcutsDialog.close()
+            }
+        } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const v = win.imgView(), viewer = chat.fileEditor.imageViewer
+            viewer.focusView()
             win.check(viewer.images.length === 33 && viewer.images[2] === win.imgDir + "/img1.png" && viewer.images[3] === win.imgDir + "/img2.png" && viewer.images[11] === win.imgDir + "/img10.png",
                       "the folder's 33 images in natural order (" + viewer.images.slice(0, 5).map(p => p.split("/").pop()).join(" ") + " …), not the text file")
             // Four wheel notches at a point left of the middle.
@@ -6838,6 +6873,8 @@ ApplicationWindow {
         ScriptAction { script: {
             const v = win.imgView()
             win.check(chat.fileEditor.imageViewer.filled && v.width === win.width, "F fills the window (" + v.width + " of " + win.width + ")")
+            const back = win.findName("imageFill")
+            win.check(back !== null && back.iconName === "fullscreen-exit", "and the way back shows in its bar, narrow too (" + (back ? back.iconName : "none") + ")")
             win.shotWindow("clicks-images-filled")
             TestInput.key(Qt.Key_Escape, 0) } }
         PauseAnimation { duration: 300 }
