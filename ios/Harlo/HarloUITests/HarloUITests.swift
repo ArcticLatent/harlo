@@ -365,7 +365,9 @@ final class HarloUITests: XCTestCase {
         // each time.
         func atEnd(_ why: String, file: StaticString = #filePath, line: UInt = #line) {
             let last = element("The session list keeps its place now")
-            XCTAssertTrue(last.waitForExistence(timeout: 8), "the last reply", file: file, line: line)
+            // (20 s: at a large text size the session is 64 pages, and each look
+            // at what is on screen takes seconds.)
+            XCTAssertTrue(last.waitForExistence(timeout: 20), "the last reply", file: file, line: line)
             // (Settled.)
             Thread.sleep(forTimeInterval: 1.5)
             // (Its end: at a large text size it's taller than the room above
