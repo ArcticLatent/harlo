@@ -116,7 +116,8 @@ fn defines(lang: Lang, t: &str, indent: usize, next: &str) -> bool {
             let opens = t.ends_with('{') || (t.ends_with(')') && next.trim_start().starts_with('{'));
             opens && ident_start(t) && t.contains('(') && !t.starts_with("#") && !["if", "for", "while", "switch", "return", "else", "do"].iter().any(|k| t.starts_with(&format!("{k} ")) || t.starts_with(&format!("{k}(")))
         }
-        Lang::Markdown => t.starts_with('#') && t.trim_start_matches('#').starts_with(' '),
+        // (Indented four spaces, it's code.)
+        Lang::Markdown => indent < 4 && t.starts_with('#') && t.trim_start_matches('#').starts_with(' '),
     }
 }
 
@@ -141,7 +142,13 @@ pub fn of(path: &Path, text: &str) -> Option<String> {
         if !defines(lang, t, indent, next) {
             continue;
         }
-        let shown = line.trim_end().replace('\t', "    ");
+        let (indent, shown) = if lang == Lang::Markdown {
+            // A heading's level is its depth, its words without their links.
+            let level = t.len() - t.trim_start_matches('#').len();
+            (level, format!("{} {}", "#".repeat(level), plain_heading(&t[level..])))
+        } else {
+            (indent, line.trim_end().replace('\t', "    "))
+        };
         let shown = if shown.chars().count() > LINE_CHARS { format!("{}…", shown.chars().take(LINE_CHARS).collect::<String>()) } else { shown };
         entries.push((i + 1, indent, shown));
     }
@@ -158,7 +165,8 @@ pub fn of(path: &Path, text: &str) -> Option<String> {
         let out = render(&rows);
         if out.len() <= MAX_BYTES {
             let left = entries.len() - rows.len();
-            return Some(if left > 0 { format!("{out}\n[{left} nested definitions not shown: read a part to see them]") } else { out });
+            let what = if lang == Lang::Markdown { "deeper headings" } else { "nested definitions" };
+            return Some(if left > 0 { format!("{out}\n[{left} {what} not shown: read a part to see them]") } else { out });
         }
     }
     let top: Vec<&(usize, usize, String)> = entries.iter().filter(|e| e.1 == depths[0]).collect();
@@ -173,6 +181,63 @@ pub fn of(path: &Path, text: &str) -> Option<String> {
         shown += 1;
     }
     Some(format!("{}[{} more definitions not shown: grep for what you need]", out, entries.len() - shown))
+}
+
+/// A Markdown heading's words: links as their text, anchor links (`¶`,
+/// `§`, none) dropped, escapes undone.
+fn plain_heading(text: &str) -> String {
+    let c: Vec<char> = text.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < c.len() {
+        match c[i] {
+            '\\' if i + 1 < c.len() && c[i + 1].is_ascii_punctuation() => {
+                out.push(c[i + 1]);
+                i += 2;
+                continue;
+            }
+            '[' => {
+                // [words](target): the words, read on for links inside.
+                if let Some(close) = closing(&c, i, '[', ']')
+                    && c.get(close + 1) == Some(&'(')
+                    && let Some(end) = closing(&c, close + 1, '(', ')')
+                {
+                    let words = plain_heading(&c[i + 1..close].iter().collect::<String>());
+                    if !matches!(words.trim(), "" | "¶" | "§" | "#") {
+                        out.push_str(&words);
+                    }
+                    i = end + 1;
+                    continue;
+                }
+            }
+            _ => {}
+        }
+        out.push(c[i]);
+        i += 1;
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Where the bracket opened at `at` closes (escapes skipped).
+fn closing(c: &[char], at: usize, open: char, close: char) -> Option<usize> {
+    let mut depth = 0;
+    let mut i = at;
+    while i < c.len() {
+        if c[i] == '\\' {
+            i += 2;
+            continue;
+        }
+        if c[i] == open {
+            depth += 1;
+        } else if c[i] == close {
+            depth -= 1;
+            if depth == 0 {
+                return Some(i);
+            }
+        }
+        i += 1;
+    }
+    None
 }
 
 #[cfg(test)]
@@ -204,8 +269,11 @@ mod tests {
     fn outlines_c_and_markdown() {
         let c = "#include <stdio.h>\n\nstruct point {\n    int x;\n};\n\nstatic int add(int a, int b)\n{\n    if (a) {\n        return a + b;\n    }\n    return b;\n}\n\nint main(void) {\n    return add(1, 2);\n}\n";
         assert_eq!(of(Path::new("m.c"), c).unwrap(), "3: struct point {\n7: static int add(int a, int b)\n15: int main(void) {");
-        let md = "# Title\n\nText.\n\n```sh\n# not a heading\n```\n\n## Part\n\n### Detail\n";
-        assert_eq!(of(Path::new("README.md"), md).unwrap(), "1: # Title\n9: ## Part\n11: ### Detail");
+        let md = "# Title\n\nText.\n\n```sh\n# not a heading\n```\n\n## Part\n\n    # code, indented\n\n### Detail\n";
+        assert_eq!(of(Path::new("README.md"), md).unwrap(), "1: # Title\n9: ## Part\n13: ### Detail");
+        // Headings as words: links as their text, anchors dropped.
+        let doc = "## [§](#examples)Examples\n## Numeric Types — [`int`](https://x/int), [`float`](#f)[¶](#numeric)\n#### pub fn [with\\_capacity](#m)(n: [usize](https://u)) -> [Vec](https://v)\\<T>\n";
+        assert_eq!(of(Path::new("page.md"), doc).unwrap(), "1: ## Examples\n2: ## Numeric Types — `int`, `float`\n3: #### pub fn with_capacity(n: usize) -> Vec<T>");
     }
 
     #[test]

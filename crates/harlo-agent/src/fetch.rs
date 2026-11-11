@@ -2,7 +2,12 @@
 //! (its main part: `<main>` or `<article>` when it has one, without
 //! scripts, menus and footers), text and JSON as they are, an image as an
 //! image; another kind of file is saved for a command to open. A long page
-//! shows its start, with all of it in a file to read on.
+//! is saved to a file and shows its opening and its outline (its headings,
+//! with their lines), to read the parts wanted
+//! (`HARLO_AGENT_PAGE_OUTLINE=off`: its first 50 KB instead); without
+//! headings to outline, it shows its start. Measured on three questions
+//! about long documentation pages: the same answers with 77% fewer input
+//! tokens (40k against 174k, two runs each).
 
 use std::path::Path;
 use std::rc::Rc;
@@ -18,6 +23,14 @@ const SHOWN_BYTES: usize = 50 * 1024;
 const SHOWN_LINES: usize = 2000;
 const MAX_BODY: usize = 10 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(30);
+/// A page longer than this shows its outline instead (about 4,000 tokens).
+const OUTLINE_ABOVE: usize = 16 * 1024;
+/// How much of a long page's opening comes with its outline.
+const OPENING_BYTES: usize = 2 * 1024;
+
+fn page_outlines() -> bool {
+    std::env::var("HARLO_AGENT_PAGE_OUTLINE").map_or(true, |v| v.trim() != "off")
+}
 
 fn client() -> &'static reqwest::Client {
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
@@ -130,6 +143,19 @@ pub async fn run(url: &str, spill_dir: &Path) -> Outcome {
     }
     let cut_note = if cut { format!(" It was cut at {}.", size(MAX_BODY)) } else { String::new() };
     let lines = text.lines().count();
+    if text.len() > OUTLINE_ABOVE && page_outlines()
+        && let Some(outline) = crate::outline::of(Path::new("page.md"), &text)
+        && let Some(p) = save(text.as_bytes(), spill_dir, &format!("{}.md", file_name(&at).trim_end_matches(".html")))
+    {
+        let opening = opening_of(&text);
+        return Outcome::new(
+            format!(
+                "{head}\n\n{opening}\n\n[The page is {} ({lines} lines), more than is worth showing whole.{cut_note} All of it is in {p}. Its outline follows (line: heading): read the parts you need with offset and limit, or grep it.]\n{outline}",
+                size(text.len())
+            ),
+            false,
+        );
+    }
     if text.len() <= SHOWN_BYTES && lines <= SHOWN_LINES {
         return Outcome::new(format!("{head}\n\n{text}{}", if cut { format!("\n\n[{}]", cut_note.trim()) } else { String::new() }), false);
     }
@@ -278,6 +304,37 @@ fn tidy(md: &str) -> String {
     out
 }
 
+/// A long page's opening: from its title (its first `# ` heading, when
+/// one comes early: menus can come before it), up to about 2 KB, stopping
+/// at the next heading (the outline has the rest).
+fn opening_of(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let start = lines.iter().take(200).position(|l| l.starts_with("# ")).unwrap_or(0);
+    let mut out = String::new();
+    let mut headings = 0;
+    for l in &lines[start..] {
+        if l.starts_with('#') {
+            headings += 1;
+            if headings > 1 && !out.trim().is_empty() {
+                break;
+            }
+        }
+        if out.len() + l.len() + 1 > OPENING_BYTES {
+            if out.trim().is_empty() {
+                out = l.chars().take(OPENING_BYTES).collect();
+            }
+            break;
+        }
+        out.push_str(l);
+        out.push('\n');
+    }
+    // (Cut inside a code block: closed, so what follows isn't code.)
+    if out.lines().filter(|l| l.trim_start().starts_with("```")).count() % 2 == 1 {
+        out.push_str("```\n");
+    }
+    out.trim_end().to_owned()
+}
+
 /// The text's start, as much as is shown (whole lines).
 fn start_of(text: &str) -> String {
     let mut out = String::new();
@@ -361,6 +418,10 @@ mod tests {
             ("/old", "301 Moved Permanently", "text/html", Vec::new()),
             ("/a.json", "200 OK", "application/json", b"{\"a\": 1}".to_vec()),
             ("/f.pdf", "200 OK", "application/pdf", b"%PDF-1.4 \x00\x01".to_vec()),
+            ("/long", "200 OK", "text/html", format!(
+                "<html><head><title>Long</title></head><body><main><h1>Guide</h1><p>What it is, briefly.</p>{}</main></body></html>",
+                (1..=40).map(|i| format!("<h2>Part {i}</h2><p>{}</p>", format!("Words about part {i}. ").repeat(30))).collect::<String>()
+            ).into_bytes()),
             ("/big.txt", "200 OK", "text/plain", (1..=5000).map(|i| format!("line {i}\n")).collect::<String>().into_bytes()),
         ])
         .await;
@@ -376,6 +437,11 @@ mod tests {
         assert!(saved.ends_with("-f.pdf") && std::fs::read(saved).unwrap().starts_with(b"%PDF"));
         let big = run(&format!("{base}/big.txt"), &dir).await;
         assert!(big.text.contains("these are its first 2000 lines") && big.text.contains("read it on with offset=2001"), "{}", &big.text[big.text.len() - 300..]);
+        let long = run(&format!("{base}/long"), &dir).await;
+        assert!(!long.failed && long.text.starts_with(&format!("[{base}/long: Long]\n\n# Guide\n\nWhat it is, briefly.\n\n[The page is ")), "{}", &long.text[..long.text.len().min(400)]);
+        assert!(long.text.contains("Its outline follows (line: heading)") && long.text.contains(": ## Part 1") && long.text.contains(": ## Part 40") && !long.text.contains("Words about part"), "{}", long.text);
+        let saved = long.text.split("All of it is in ").nth(1).unwrap().split(". Its outline").next().unwrap();
+        assert!(std::fs::read_to_string(saved).unwrap().contains("Words about part 40"));
         let gone = run(&format!("{base}/nope"), &dir).await;
         assert!(gone.failed && gone.text.starts_with(&format!("{base}/nope answered 404 Not Found.\n\n# Gone")), "{}", gone.text);
         assert!(run("file:///etc/passwd", &dir).await.text.contains("Only http and https"));
