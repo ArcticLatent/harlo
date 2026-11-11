@@ -1260,7 +1260,9 @@ pub(crate) mod tests {
         assert_eq!((v["width"].as_i64(), v["height"].as_i64(), v["type"].as_str()), (Some(4), Some(3), Some("image/jpeg")), "{v}");
         let bytes = base64::engine::general_purpose::STANDARD.decode(v["data"].as_str().unwrap()).unwrap();
         assert!(bytes.starts_with(&[0xff, 0xd8]), "a JPEG");
-        assert_eq!(picture_json(&dir, "out/cat.png", false, false)["width"].as_i64(), Some(4), "a picture in the folder, by its path");
+        let screen = picture_json(&dir, "out/cat.png", false, false);
+        assert_eq!(screen["width"].as_i64(), Some(4), "a picture in the folder, by its path");
+        assert_eq!(screen["type"].as_str(), Some("image/png"), "a PNG on screen stays one (a screenshot's text stays sharp)");
         assert!(picture_json(&dir, "notes.txt", false, true)["error"].as_str().unwrap().contains("isn't a picture"));
         let outside = std::env::temp_dir().join(format!("harlo-phone-outside-{}.png", std::process::id()));
         std::fs::write(&outside, &png).unwrap();

@@ -213,7 +213,7 @@ public enum FileLinks {
             case .list(let o, let start, let items): return .list(ordered: o, start: start, items: items.map(link))
             case .quote(let inner): return .quote(link(inner))
             case .table(let head, let rows): return .table(header: head.map(link), rows: rows.map { $0.map(link) })
-            case .code, .rule: return b
+            case .code, .rule, .picture: return b
             }
         }
     }

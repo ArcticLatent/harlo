@@ -343,15 +343,24 @@ struct RowView: View {
     }
 
     var body: some View {
-        // (Your pictures are in your bubble, a tool's in its card.)
-        if !row.images.isEmpty && model.showsPictures && row.kind != "user" && row.kind != "tool" {
+        // (Your pictures are in your bubble, a tool's in its card, a reply's
+        // in their place; the rest, files it names, under it.)
+        let rest = row.kind == "user" || row.kind == "tool" || !model.showsPictures ? [] : under
+        if !rest.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 content
-                PictureStrip(paths: row.images)
+                PictureStrip(paths: rest)
             }
         } else {
             content
         }
+    }
+
+    /// The row's pictures its text doesn't show in their place.
+    var under: [String] {
+        guard !row.images.isEmpty else { return [] }
+        let placed = RichText.pictures(RichCache.blocks(row.html)).compactMap { PictureNames.match($0, in: row.images) }
+        return row.images.filter { !placed.contains($0) }
     }
 
     @ViewBuilder var content: some View {
@@ -715,6 +724,8 @@ struct BlockView: View {
             CodeBlock(spans: spans, language: "")
         case .rule:
             Rectangle().fill(Color(p.border)).frame(height: 1)
+        case .picture(let src, let alt):
+            ReplyPicture(src: src, alt: alt)
         case .table(let head, let rows):
             ScrollView(.horizontal, showsIndicators: false) {
                 Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 6) {
@@ -890,17 +901,25 @@ enum CodeLines {
     }
 }
 
-/// The button that wraps long lines, or unwraps them.
-struct WrapButton: View {
+/// A file's or a diff's view options, behind "…": long lines wrapped (a
+/// checkmark when they are) or kept whole to scroll across, and copying
+/// the file when there's one to copy.
+struct ViewMenu: View {
     @Binding var wrap: Bool
+    var copy: (() -> Void)? = nil
 
     var body: some View {
-        Button {
-            wrap.toggle()
+        Menu {
+            Toggle("Wrap Long Lines", isOn: $wrap)
+            if let copy {
+                Button(action: copy) {
+                    Label("Copy File", systemImage: "doc.on.doc")
+                }
+            }
         } label: {
-            Image(systemName: wrap ? "arrow.left.and.right" : "text.alignleft")
+            Image(systemName: "ellipsis.circle")
         }
-        .accessibilityLabel(wrap ? "Show long lines whole" : "Wrap long lines")
+        .accessibilityLabel("View options")
     }
 }
 

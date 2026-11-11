@@ -420,6 +420,31 @@ final class ModelPartsTests: XCTestCase {
         XCTAssertNil(f.longestLine)
     }
 
+    @MainActor func testPicturesInRepliesAndTheirNames() {
+        // A picture on its own line is a picture block; inside a sentence
+        // it stays its words.
+        let blocks = RichText.parse("<p>Here:</p>\n<p><em data-img=\"docs/a &quot;b&quot;.png\">The sidebar</em></p>\n<p>See <em data-img=\"x.png\">x</em> too.</p><ul><li><em data-img=\"c.png\">c</em></li></ul>")
+        XCTAssertEqual(blocks[1], .picture(src: "docs/a \"b\".png", alt: "The sidebar"))
+        guard case .paragraph(let spans) = blocks[2] else { return XCTFail("\(blocks[2])") }
+        XCTAssertEqual(RichText.plain(spans), "See x too.")
+        XCTAssertEqual(RichText.pictures(blocks), ["docs/a \"b\".png", "c.png"])
+        XCTAssertEqual(RichText.plainText(Array(blocks.prefix(2))), "Here:\n\nThe sidebar")
+        XCTAssertEqual(RichText.parse("<p><em>just words</em></p>"), [.paragraph([Span("just words", italic: true)])])
+
+        // Names: a file's own; one harlo made up says where it came from.
+        XCTAssertTrue(PictureNames.isMadeUp("930bbd53bde91971bc307bea8ed0503c.jpg"))
+        XCTAssertFalse(PictureNames.isMadeUp("sidebar.png"))
+        XCTAssertEqual(PictureNames.spoken("sidebar-dark_mode.png"), "sidebar dark mode")
+        let cache = "/home/you/.cache/harlo/pictures/"
+        let s = OpenSession(key: "live:1")
+        s.rows = [Row(key: "u", kind: "user", images: [cache + "930bbd53bde91971bc307bea8ed0503c.jpg"]),
+                  Row(key: "t", kind: "tool", title: "screenshot", images: [cache + "aaaaaaaaaaaaaaaa1111.png", cache + "bbbbbbbbbbbbbbbb2222.png"]),
+                  Row(key: "m", kind: "markdown", images: ["/home/you/p/docs/sidebar.png"])]
+        XCTAssertEqual(s.pictureName(cache + "930bbd53bde91971bc307bea8ed0503c.jpg"), "Your photo")
+        XCTAssertEqual(s.pictureName(cache + "bbbbbbbbbbbbbbbb2222.png"), "Picture from " + ToolName.words("screenshot", running: false) + " 2")
+        XCTAssertEqual(s.pictureName("/home/you/p/docs/sidebar.png"), "sidebar.png")
+    }
+
     func testPictureLinksOpenTheViewer() {
         XCTAssertEqual(FileLinks.path("shot.png")?.path, "shot.png")
         XCTAssertTrue(PictureNames.isPicture("docs/a.PNG"))
@@ -1215,7 +1240,8 @@ final class RecordingTests: XCTestCase {
                 let got = await m.picture(path, thumb: thumb)
                 let picture = try XCTUnwrap(got.picture, got.why)
                 XCTAssertGreaterThan(picture.width, 0)
-                XCTAssertEqual(picture.type, "image/jpeg")
+                // (A screenshot stays a PNG on screen, so its text stays sharp.)
+                XCTAssertEqual(picture.type, path.hasSuffix(".png") && !thumb ? "image/png" : "image/jpeg", path)
             }
         }
     }

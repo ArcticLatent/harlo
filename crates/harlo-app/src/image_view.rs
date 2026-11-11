@@ -642,19 +642,31 @@ const PHONE_SIDE: i32 = 2048;
 /// 110 points, 330 pixels).
 const PHONE_THUMB: i32 = 512;
 
+/// Pictures kept lossless on the phone (screenshots, drawings: text in a
+/// JPEG goes soft), when they fit under `PHONE_BYTES`.
+const LOSSLESS: [&str; 6] = ["png", "gif", "bmp", "svg", "tif", "tiff"];
+/// Well under a relay's 4 MB frame, once in base64.
+const PHONE_BYTES: usize = 2_500_000;
+
 /// A picture as the phone gets it: a thumbnail (from the thumbnail cache)
-/// or a copy fitted to a phone's screen; its bytes (JPEG, or PNG when it
-/// has transparency), type and size. (Blocking: a decoding thread.)
+/// or a copy fitted to a phone's screen; its bytes (JPEG; PNG when it has
+/// transparency, or on screen when it was lossless and fits), type and
+/// size. (Blocking: a decoding thread.)
 pub fn for_phone(path: &str, thumb: bool) -> Option<(Vec<u8>, &'static str, i32, i32)> {
     let img = if thumb { make_thumb(path, PHONE_THUMB)? } else { Pixels(qobject::decode_image(&qs(path), PHONE_SIDE)) };
     if !img.ok() {
         return None;
     }
     let (w, h) = (img.0.width(), img.0.height());
-    let mut png = false;
-    // (Big photos: a lower quality keeps one well under a relay's frame.)
+    let ext = Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
+    let mut png = !thumb && LOSSLESS.contains(&ext.as_str());
     let mut bytes: Vec<u8> = (&qobject::encode_for_phone(&img.0, 82, &mut png)).into();
-    if !png && bytes.len() > 2_500_000 {
+    // (Too big as a PNG: a JPEG after all; big photos: a lower quality.)
+    if png && bytes.len() > PHONE_BYTES {
+        png = false;
+        bytes = (&qobject::encode_for_phone(&img.0, 82, &mut png)).into();
+    }
+    if !png && bytes.len() > PHONE_BYTES {
         bytes = (&qobject::encode_for_phone(&img.0, 65, &mut png)).into();
     }
     (!bytes.is_empty()).then_some((bytes, if png { "image/png" } else { "image/jpeg" }, w, h))

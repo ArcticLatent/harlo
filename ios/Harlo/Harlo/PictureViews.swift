@@ -86,7 +86,7 @@ struct PictureTile: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("pictureTile")
-        .accessibilityLabel("Picture, " + PictureNames.name(path))
+        .accessibilityLabel("Picture: " + PictureNames.spoken(model.session?.pictureName(path) ?? PictureNames.name(path)))
         .accessibilityHint(why.isEmpty ? "Opens it" : why)
         .task(id: path) {
             let r = await model.picture(path, thumb: true)
@@ -100,6 +100,7 @@ struct PictureTile: View {
 /// double-tap to zoom, swipe down (or Done) to close, Share to send or save
 /// one. A tap hides the bars.
 struct PictureViewer: View {
+    @Environment(HarloModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     let paths: [String]
     @State var current: String
@@ -109,6 +110,8 @@ struct PictureViewer: View {
     @State private var shown: [String: UIImage] = [:]
 
     var index: Int { paths.firstIndex(of: current) ?? 0 }
+    /// Its name as people say it ("Your photo", not harlo's file name).
+    func name(_ path: String) -> String { model.session?.pictureName(path) ?? PictureNames.name(path) }
 
     var body: some View {
         ZStack {
@@ -139,7 +142,7 @@ struct PictureViewer: View {
     var top: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(PictureNames.name(current))
+                Text(name(current))
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -164,7 +167,7 @@ struct PictureViewer: View {
     var bottom: some View {
         HStack {
             if let image = shown[current] {
-                let name = PictureNames.name(current)
+                let name = name(current)
                 ShareLink(item: Image(uiImage: image), preview: SharePreview(name, image: Image(uiImage: image))) {
                     Label("Share", systemImage: "square.and.arrow.up")
                         .font(.body.weight(.medium))
@@ -199,7 +202,7 @@ struct PicturePage: View {
                 ZoomableImage(image: image, pulled: $pulled, tapped: toggleBars, close: close)
                     .accessibilityElement()
                     .accessibilityIdentifier("pictureViewer")
-                    .accessibilityLabel(PictureNames.name(path))
+                    .accessibilityLabel(PictureNames.spoken(model.session?.pictureName(path) ?? PictureNames.name(path)))
                     .accessibilityAddTraits(.isImage)
             } else if !why.isEmpty {
                 VStack(spacing: 10) {
@@ -245,16 +248,31 @@ struct ZoomableImage: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
-    /// Fits the picture to itself at 1× whenever it's laid out (it starts
-    /// at no size, and turning the phone changes it).
+    /// Fits the picture inside itself at 1×, centred, whenever it's laid
+    /// out (it starts at no size, and turning the phone changes it); zoomed
+    /// smaller than the screen, kept centred.
     final class FittingScroll: UIScrollView {
-        weak var picture: UIView?
+        weak var picture: UIImageView?
 
         override func layoutSubviews() {
             super.layoutSubviews()
-            guard let picture, picture.transform.isIdentity, picture.frame.size != bounds.size else { return }
-            picture.frame = CGRect(origin: .zero, size: bounds.size)
-            contentSize = bounds.size
+            guard let picture, let image = picture.image else { return }
+            if picture.transform.isIdentity {
+                let size = PictureFit.size(image.size, in: bounds.size, scale: traitCollection.displayScale)
+                if picture.frame.size != size {
+                    picture.frame = CGRect(origin: .zero, size: size)
+                    contentSize = size
+                }
+            }
+            center()
+        }
+
+        func center() {
+            let dx = max(0, (bounds.width - contentSize.width) / 2), dy = max(0, (bounds.height - contentSize.height) / 2)
+            let inset = UIEdgeInsets(top: dy, left: dx, bottom: dy, right: dx)
+            guard contentInset != inset else { return }
+            contentInset = inset
+            if zoomScale <= minimumZoomScale && !isTracking { contentOffset = CGPoint(x: -dx, y: -dy) }
         }
     }
 
@@ -304,6 +322,8 @@ struct ZoomableImage: UIViewRepresentable {
 
         func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
 
+        func scrollViewDidZoom(_ scrollView: UIScrollView) { (scrollView as? FittingScroll)?.center() }
+
         @objc func singleTapped() { parent.tapped() }
 
         @objc func doubleTapped(_ g: UITapGestureRecognizer) {
@@ -346,6 +366,88 @@ struct ZoomableImage: UIViewRepresentable {
             default:
                 break
             }
+        }
+    }
+}
+
+/// How big a picture is drawn: as big as fits, but never past twice its own
+/// pixels (a small screenshot blown up to the screen goes soft; zooming
+/// still goes further).
+enum PictureFit {
+    static func size(_ pixels: CGSize, in box: CGSize, scale: CGFloat) -> CGSize {
+        guard pixels.width > 0, pixels.height > 0, box.width > 0, box.height > 0 else { return .zero }
+        let most = min(box.width / pixels.width, box.height / pixels.height, 2 / max(scale, 1))
+        return CGSize(width: (pixels.width * most).rounded(), height: (pixels.height * most).rounded())
+    }
+}
+
+/// A picture a reply shows on its own line, in its place: as wide as the
+/// reply (never past twice its own pixels), a tap opens the viewer. Its
+/// words when it isn't one of the session's pictures (a web address, a
+/// file that's gone).
+struct ReplyPicture: View {
+    @Environment(HarloModel.self) private var model
+    @Environment(\.palette) private var p
+    @Environment(\.openPicture) private var openPicture
+    @Environment(\.displayScale) private var displayScale
+    @Environment(\.dynamicTypeSize) private var typeSize
+    let src: String
+    let alt: String
+    @State private var image: UIImage?
+    @State private var why = ""
+
+    var path: String? {
+        guard model.showsPictures, let s = model.session else { return nil }
+        return PictureNames.match(src, in: s.pictures)
+    }
+
+    var body: some View {
+        if let path {
+            Button {
+                openPicture?(path)
+            } label: {
+                Group {
+                    if let image {
+                        let px = CGSize(width: image.size.width * image.scale, height: image.size.height * image.scale)
+                        Image(uiImage: image)
+                            .resizable()
+                            .interpolation(.high)
+                            .aspectRatio(px, contentMode: .fit)
+                            .frame(maxWidth: px.width * 2 / max(displayScale, 1))
+                    } else if !why.isEmpty {
+                        Label(alt.isEmpty ? why : "\(alt): \(why)", systemImage: "photo")
+                            .font(.subheadline)
+                            .foregroundStyle(Color(p.muted))
+                            .padding(12)
+                    } else {
+                        Rectangle()
+                            .fill(Color(p.codeBackground))
+                            .aspectRatio(16 / 10, contentMode: .fit)
+                            .overlay { ProgressView() }
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color(p.hairline), lineWidth: 1))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("replyPicture")
+            .accessibilityLabel("Picture: " + (alt.isEmpty ? PictureNames.spoken(PictureNames.name(path)) : alt))
+            .accessibilityHint(why.isEmpty ? "Opens it" : why)
+            .task(id: path) {
+                // (The thumbnail first: it's quick, and gives the shape.)
+                if let t = await model.picture(path, thumb: true).picture { image = UIImage(data: t.data) }
+                let r = await model.picture(path, thumb: false)
+                if let full = r.picture.flatMap({ UIImage(data: $0.data) }) {
+                    image = full
+                } else if image == nil {
+                    why = r.why.isEmpty ? "harlo couldn't read that picture." : r.why
+                }
+            }
+        } else {
+            Text(Style.attributed([Span(alt, italic: true)], p, typeSize: typeSize))
+                .textSelection(.enabled)
         }
     }
 }

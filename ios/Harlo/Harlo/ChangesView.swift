@@ -236,7 +236,7 @@ struct DiffView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                WrapButton(wrap: $wrap)
+                ViewMenu(wrap: $wrap)
             }
             ToolbarItem(placement: .topBarTrailing) {
                 if let d = diff {

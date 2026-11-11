@@ -116,9 +116,10 @@ fn render_block(events: Vec<Event<'_>>) -> MdBlock {
         Event::End(TagEnd::HtmlBlock) => Event::SoftBreak,
         Event::Start(Tag::HtmlBlock) => Event::SoftBreak,
         // An image: its words, in italics (the picture shows under the
-        // reply, from its file).
-        Event::Start(Tag::Image { .. }) => Event::Start(Tag::Emphasis),
-        Event::End(TagEnd::Image) => Event::End(TagEnd::Emphasis),
+        // reply, from its file), marked with the file for the phone, which
+        // shows the picture in their place (Qt's rich text ignores the mark).
+        Event::Start(Tag::Image { dest_url, .. }) => Event::InlineHtml(CowStr::from(format!("<em data-img=\"{}\">", attr_escape(&dest_url)))),
+        Event::End(TagEnd::Image) => Event::InlineHtml(CowStr::Borrowed("</em>")),
         other => other,
     });
     let mut html = String::new();
@@ -379,6 +380,11 @@ pub fn plain_text(html: &str) -> String {
     decoded.lines().map(|l| l.trim().trim_end_matches([',', ' '])).filter(|l| !l.is_empty()).collect::<Vec<_>>().join("\n")
 }
 
+/// `s` inside a double-quoted HTML attribute.
+fn attr_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -413,8 +419,10 @@ mod tests {
     #[test]
     fn images_read_as_their_words() {
         let mut r = MarkdownRenderer::default();
-        let blocks = r.render("See ![a red sun](art/sun.png) here.");
-        assert!(blocks[0].html.contains("<em>a red sun</em>") && !blocks[0].html.contains("<img"), "{}", blocks[0].html);
+        let blocks = r.render("See ![a red sun](art/sun.png) here, and ![\"q\"](<a \"b\".png>).");
+        let html = &blocks[0].html;
+        assert!(html.contains("<em data-img=\"art/sun.png\">a red sun</em>") && !html.contains("<img"), "{html}");
+        assert!(html.contains("<em data-img=\"a &quot;b&quot;.png\">"), "the file's name stays inside its quotes: {html}");
     }
 
 

@@ -117,6 +117,19 @@ final class HarloUITests: XCTestCase {
         row.tap()
     }
 
+    /// "Wrap Long Lines" in a file's or a diff's view options (…).
+    func toggleWrap(file: StaticString = #filePath, line: UInt = #line) {
+        let menu = app.buttons["View options"]
+        guard menu.waitForExistence(timeout: 8) else {
+            XCTFail("no view options", file: file, line: line)
+            return
+        }
+        menu.tap()
+        tap("Wrap Long Lines", file: file, line: line)
+        // (The menu closes and the lines settle.)
+        Thread.sleep(forTimeInterval: 0.6)
+    }
+
     // ---- the screens ---------------------------------------------------------
 
     func test01Dashboard() {
@@ -275,12 +288,11 @@ final class HarloUITests: XCTestCase {
         let screen = app.windows.firstMatch.frame
         let long = element("each project's sessions, newest first")
         XCTAssertTrue(long.exists && long.frame.maxX <= screen.maxX + 1, "a long line wraps (\(long.frame) in \(screen))")
-        app.buttons["Show long lines whole"].tap()
-        XCTAssertTrue(app.buttons["Wrap long lines"].waitForExistence(timeout: 4), "the button now wraps them")
+        toggleWrap()
         XCTAssertTrue(long.frame.maxX > screen.maxX, "kept whole, it runs past the screen (\(long.frame))")
         shot("21-diff-whole")
-        app.buttons["Wrap long lines"].tap()
-        XCTAssertTrue(app.buttons["Show long lines whole"].waitForExistence(timeout: 4) && long.frame.maxX <= screen.maxX + 1, "wrapped again")
+        toggleWrap()
+        XCTAssertTrue(long.frame.maxX <= screen.maxX + 1, "wrapped again (\(long.frame))")
     }
 
     func test12bFileFromAReply() {
@@ -295,11 +307,12 @@ final class HarloUITests: XCTestCase {
         let long = element("each project's sessions, newest first")
         let short = element("use crate::projects::project_rows")
         XCTAssertTrue(long.exists && long.frame.maxX <= screen.maxX + 1, "a long line wraps (\(long.frame) in \(screen))")
+        // (Its folder above the code, not its name again: that's the title.)
+        see("In src")
         shot("21b-file")
         // Kept whole: every line starts at the left, after its number, and
         // the long one runs past the screen.
-        app.buttons["Show long lines whole"].tap()
-        XCTAssertTrue(app.buttons["Wrap long lines"].waitForExistence(timeout: 4), "the button now wraps them")
+        toggleWrap()
         XCTAssertTrue(long.frame.maxX > screen.maxX, "kept whole, it runs past the screen (\(long.frame))")
         XCTAssertTrue(short.frame.minX < 80 && abs(short.frame.minX - long.frame.minX) < 1,
                       "lines start at the left, lined up (\(short.frame), \(long.frame))")
@@ -363,22 +376,29 @@ final class HarloUITests: XCTestCase {
     func test16Pictures() {
         launch("pictures")
         openMain()
-        // Your photo in your message, the reply's picture under it.
+        // Your photo in your message; the reply's picture in its place, as
+        // wide as the reply, not its words.
         let tiles = app.buttons.matching(identifier: "pictureTile")
-        XCTAssertTrue(tiles.firstMatch.waitForExistence(timeout: 8), "a picture's thumbnail")
-        XCTAssertEqual(tiles.count, 2, "the photo and the reply's picture")
-        see("Picture, sidebar.png")
+        XCTAssertTrue(tiles.firstMatch.waitForExistence(timeout: 8), "your photo's thumbnail")
+        XCTAssertEqual(tiles.count, 1, "only your photo is a thumbnail")
+        see("Picture: Your photo")
+        let reply = app.buttons["replyPicture"]
+        XCTAssertTrue(reply.waitForExistence(timeout: 8), "the reply's picture")
+        XCTAssertEqual(reply.label, "Picture: The sidebar")
+        XCTAssertGreaterThan(reply.frame.width, 150, "the reply's picture is big (\(reply.frame))")
         shot("26-pictures")
         audit("pictures")
         // The viewer: at the one tapped, then across to the other.
-        tiles.element(boundBy: tiles.count - 1).tap()
+        reply.tap()
         let viewer = app.descendants(matching: .any).matching(identifier: "pictureViewer").firstMatch
         XCTAssertTrue(viewer.waitForExistence(timeout: 8), "the viewer")
         see("2 of 2")
+        see("sidebar.png")
         shot("27-picture-viewer")
         audit("picture-viewer")
         viewer.swipeRight()
         see("1 of 2")
+        see("Your photo")
         XCTAssertTrue(app.buttons["pictureShare"].waitForExistence(timeout: 5), "Share")
         shot("28-picture-photo")
         app.buttons["pictureDone"].tap()

@@ -13,6 +13,9 @@ public enum RichBlock: Equatable, Sendable {
     case code([Span])
     case rule
     case table(header: [[Span]], rows: [[[Span]]])
+    /// A picture on its own line (Markdown's `![alt](src)`): its file as
+    /// the reply wrote it, and its words.
+    case picture(src: String, alt: String)
 }
 
 /// A run of text with one style.
@@ -97,8 +100,33 @@ public enum RichText {
             case .rule: return "---"
             case .table(let head, let rows):
                 return ([head] + rows).filter { !$0.isEmpty }.map { $0.map(plain).joined(separator: "\t") }.joined(separator: "\n")
+            case .picture(_, let alt): return alt
             }
         }.joined(separator: "\n\n")
+    }
+
+    /// The pictures blocks show in their place (in lists and quotes too),
+    /// as the reply wrote them.
+    public static func pictures(_ blocks: [RichBlock]) -> [String] {
+        blocks.flatMap { b -> [String] in
+            switch b {
+            case .picture(let src, _): return [src]
+            case .list(_, _, let items): return items.flatMap(pictures)
+            case .quote(let inner): return pictures(inner)
+            default: return []
+            }
+        }
+    }
+
+    /// A paragraph that's only a picture (harlo marks one's words with its
+    /// file: `<em data-img="…">`).
+    static func picture(_ children: [Node]) -> RichBlock? {
+        let parts = children.filter {
+            if case .text(let t) = $0 { return !t.allSatisfy(\.isWhitespace) }
+            return true
+        }
+        guard parts.count == 1, case .element("em", let attrs, let kids) = parts[0], let src = attrs["data-img"], !src.isEmpty else { return nil }
+        return .picture(src: src, alt: plain(trimmed(inline(kids, Style()))))
     }
 
     // ---- tree → blocks -------------------------------------------------------
@@ -109,8 +137,12 @@ public enum RichText {
         var out: [RichBlock] = []
         var loose: [Node] = []
         func flush() {
-            let spans = trimmed(inline(loose, Style()))
-            if !spans.isEmpty { out.append(.paragraph(spans)) }
+            if let pic = picture(loose) {
+                out.append(pic)
+            } else {
+                let spans = trimmed(inline(loose, Style()))
+                if !spans.isEmpty { out.append(.paragraph(spans)) }
+            }
             loose.removeAll()
         }
         for n in nodes {
@@ -121,6 +153,10 @@ public enum RichText {
             flush()
             switch tag {
             case "p", "div", "li":
+                if let pic = picture(children) {
+                    out.append(pic)
+                    continue
+                }
                 let spans = trimmed(inline(children, Style()))
                 if !spans.isEmpty { out.append(.paragraph(spans)) }
             case "h1", "h2", "h3", "h4", "h5", "h6":

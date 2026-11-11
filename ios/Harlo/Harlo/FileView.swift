@@ -34,19 +34,11 @@ struct FileView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
-                if file != nil {
-                    ToolbarItem(placement: .topBarLeading) {
-                        WrapButton(wrap: $wrap)
-                    }
-                }
                 if let f = file {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        ViewMenu(wrap: $wrap) {
                             UIPasteboard.general.string = (0..<f.lines.count).map { RichText.plain(f.spans($0)) }.joined(separator: "\n")
-                        } label: {
-                            Image(systemName: "doc.on.doc")
                         }
-                        .accessibilityLabel("Copy the file")
                     }
                 }
             }
@@ -91,11 +83,19 @@ struct FileView: View {
                         .accessibilityHidden(true)
                     }
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        Text(f.path)
-                            .font(Style.mono(11))
-                            .foregroundStyle(Color(p.muted))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
+                        // Its folder, when it's in one (its name is the title).
+                        if let slash = f.path.lastIndex(of: "/"), slash != f.path.startIndex {
+                            Text(f.path[..<slash])
+                                .font(Style.mono(11))
+                                .foregroundStyle(Color(p.muted))
+                                .lineLimit(1)
+                                .truncationMode(.head)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .accessibilityLabel("In " + String(f.path[..<slash]))
+                        } else {
+                            Color.clear.frame(height: 8)
+                        }
                         ForEach(0..<f.lines.count, id: \.self) { i in
                             HStack(alignment: .firstTextBaseline, spacing: 10) {
                                 number(i + 1, width)

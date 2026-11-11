@@ -131,7 +131,9 @@ inline QByteArray encode_for_phone(const QImage &img, int quality, bool &png)
         return out;
     QBuffer buf(&out);
     buf.open(QIODevice::WriteOnly);
-    png = has_transparency(img);
+    // (`png` in: wanted lossless, a screenshot say; PNG with transparency
+    // whatever was wanted.)
+    png = png || has_transparency(img);
     if (png)
         img.save(&buf, "PNG");
     else

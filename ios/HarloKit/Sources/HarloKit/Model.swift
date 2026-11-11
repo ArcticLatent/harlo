@@ -81,6 +81,21 @@ public final class OpenSession {
         var seen = Set<String>()
         return rows.flatMap(\.images).filter { seen.insert($0).inserted }
     }
+    /// A picture's name as people say it: a file's own name, or for one
+    /// harlo keeps under a made-up name where it came from ("Your photo",
+    /// "Picture from screenshot", numbered when a row has several).
+    public func pictureName(_ path: String) -> String {
+        let name = PictureNames.name(path)
+        guard PictureNames.isMadeUp(name) else { return name }
+        guard let row = rows.first(where: { $0.images.contains(path) }) else { return "Picture" }
+        let madeUp = row.images.filter { PictureNames.isMadeUp(PictureNames.name($0)) }
+        let n = madeUp.count > 1 ? " \((madeUp.firstIndex(of: path) ?? 0) + 1)" : ""
+        switch row.kind {
+        case "user": return "Your photo" + n
+        case "tool": return "Picture from " + ToolName.words(row.title, running: false) + n
+        default: return "Picture" + n
+        }
+    }
     /// Rows before these, only in harlo (a long session's phone gets its
     /// latest).
     public internal(set) var earlier = 0

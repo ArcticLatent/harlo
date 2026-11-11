@@ -100,9 +100,24 @@ public enum PictureNames {
         return suffixes.contains(name[name.index(after: dot)...].lowercased())
     }
 
-    /// The file's name (a photo's cache name stays as it is).
+    /// The file's name.
     public static func name(_ path: String) -> String {
         path.split(separator: "/").last.map(String.init) ?? path
+    }
+
+    /// A name harlo made up (a picture it keeps: a photo you sent, one a
+    /// tool returned): a long run of hex digits.
+    public static func isMadeUp(_ name: String) -> Bool {
+        let stem = name.split(separator: ".").first ?? ""
+        return stem.count >= 16 && stem.allSatisfy(\.isHexDigit)
+    }
+
+    /// The name read aloud: without its suffix, dashes and underscores as
+    /// spaces (`sidebar-dark.png`: "sidebar dark").
+    public static func spoken(_ name: String) -> String {
+        let stem = name.contains(".") ? String(name[..<name.lastIndex(of: ".")!]) : name
+        let words = stem.map { $0 == "-" || $0 == "_" ? " " : $0 }
+        return words.isEmpty ? name : String(words)
     }
 
     /// The conversation's picture `link` names (as written: `docs/a.png`,
