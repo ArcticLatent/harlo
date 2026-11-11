@@ -111,6 +111,9 @@ struct PictureViewer: View {
     @State private var bars = true
     /// Every picture at once, as the desktop's grid (more than one).
     @State private var grid = false
+    /// The top bar's height, so the grid starts below it at any text size.
+    @State private var topHeight: CGFloat = 56
+    @Environment(\.dynamicTypeSize) private var typeSize
     /// How far it's been pulled down (to close), 0…1.
     @State private var pulled: CGFloat = 0
     @State private var shown: [String: UIImage] = [:]
@@ -133,7 +136,7 @@ struct PictureViewer: View {
             .tabViewStyle(.page(indexDisplayMode: .never))
             .ignoresSafeArea()
             if grid {
-                PictureGrid(paths: paths, current: current, name: name) { path in
+                PictureGrid(paths: paths, current: current, name: name, top: topHeight) { path in
                     current = path
                     withAnimation(.easeOut(duration: 0.15)) { grid = false }
                 }
@@ -160,22 +163,31 @@ struct PictureViewer: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "chevron.left").font(.body.weight(.semibold))
-                        Text("Back")
+                        // (At the largest sizes the arrow alone: the word
+                        // doesn't fit beside the title.)
+                        if !typeSize.isAccessibilitySize { Text("Back") }
                     }
                     .font(.body)
-                    .frame(minHeight: 44)
+                    .frame(minWidth: 44, minHeight: 44, alignment: .leading)
                     .contentShape(Rectangle())
                 }
                 .accessibilityIdentifier("pictureGridBack")
                 .accessibilityLabel("Back to the picture")
+                .accessibilityShowsLargeContentViewer {
+                    Label("Back", systemImage: "chevron.left")
+                }
             }
             VStack(alignment: .leading, spacing: 2) {
                 if grid {
                     Text("All pictures")
                         .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                     Text("\(paths.count) in this session")
                         .font(.caption)
-                        .foregroundStyle(.white.opacity(0.7))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .foregroundStyle(Self.caption)
                 } else {
                     Text(name(current))
                         .accessibilityLabel(PictureNames.spoken(name(current)))
@@ -185,10 +197,11 @@ struct PictureViewer: View {
                     if paths.count > 1 {
                         Text("\(index + 1) of \(paths.count)")
                             .font(.caption)
-                            .foregroundStyle(.white.opacity(0.7))
+                            .foregroundStyle(Self.caption)
                     }
                 }
             }
+            .layoutPriority(1)
             Spacer(minLength: 8)
             if paths.count > 1 {
                 Button {
@@ -209,8 +222,13 @@ struct PictureViewer: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { topHeight = $0 }
         .background(LinearGradient(colors: [.black.opacity(0.7), .clear], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
     }
+
+    /// The bars' second line: a solid grey (Apple's audit misreads text at
+    /// partial opacity), about 9:1 on black.
+    static let caption = Color(white: 0.72)
 
     var bottom: some View {
         HStack {
@@ -238,6 +256,8 @@ struct PictureGrid: View {
     let paths: [String]
     let current: String
     let name: (String) -> String
+    /// The viewer's top bar height, which the grid starts below.
+    let top: CGFloat
     let open: (String) -> Void
 
     var body: some View {
@@ -250,7 +270,7 @@ struct PictureGrid: View {
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.top, 64)
+                .padding(.top, top + 8)
                 .padding(.bottom, 24)
             }
             .onAppear { reader.scrollTo(current, anchor: .center) }
@@ -285,7 +305,7 @@ struct PictureGridCell: View {
                                     .font(.caption2.weight(.medium))
                                     .multilineTextAlignment(.center)
                             }
-                            .foregroundStyle(.white.opacity(0.7))
+                            .foregroundStyle(PictureViewer.caption)
                             .padding(6)
                         } else {
                             ProgressView().tint(.white)
@@ -295,7 +315,7 @@ struct PictureGridCell: View {
                     .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(.white, lineWidth: open ? 2 : 0))
                 Text(name)
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(open ? 1 : 0.8))
+                    .foregroundStyle(open ? Color.white : Color(white: 0.85))
                     .lineLimit(typeSize >= .xLarge ? 2 : 1)
                     .truncationMode(.tail)
                     .fixedSize(horizontal: false, vertical: true)

@@ -116,12 +116,20 @@ struct SessionContent: View {
                                 Image(systemName: "doc.text")
                                     .scaledFont(17)
                                     .foregroundStyle(Color(p.muted))
-                                Text(changed.count == 1 ? "1 file changed" : "\(changed.count) files changed")
-                                    .scaledFont(16)
-                                Spacer(minLength: 6)
-                                Text("View diff")
-                                    .scaledFont(16, .medium)
-                                    .foregroundStyle(Color(p.primary))
+                                // (At the largest sizes "View diff" goes under
+                                // it, so neither breaks inside a word.)
+                                let words = typeSize.isAccessibilitySize
+                                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+                                    : AnyLayout(HStackLayout(spacing: 6))
+                                words {
+                                    Text(changed.count == 1 ? "1 file changed" : "\(changed.count) files changed")
+                                        .scaledFont(16)
+                                    if !typeSize.isAccessibilitySize { Spacer(minLength: 0) }
+                                    Text("View diff")
+                                        .scaledFont(16, .medium)
+                                        .foregroundStyle(Color(p.primary))
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
                                 Image(systemName: "chevron.right")
                                     .scaledFont(13, .semibold)
                                     .foregroundStyle(Color(p.muted))
@@ -704,7 +712,7 @@ struct ContextBar: View {
                         .scaledFont(11.5, .medium)
                         .dynamicTypeSize(...DynamicTypeSize.xxLarge)
                         .monospacedDigit()
-                        .foregroundStyle(Color(way > 0.6 ? tint : p.foreground.mix(p.background, 0.28)))
+                        .foregroundStyle(Color(way > 0.6 ? tint : p.foreground))
                         .fixedSize()
                 }
                 .padding(.horizontal, 16)

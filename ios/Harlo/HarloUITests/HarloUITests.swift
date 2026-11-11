@@ -439,6 +439,9 @@ final class HarloUITests: XCTestCase {
         XCTAssertEqual(cells.element(boundBy: 0).label, "Picture: You sent")
         XCTAssertTrue(cells.element(boundBy: 1).isSelected, "the open picture is marked")
         XCTAssertFalse(app.buttons["pictureShare"].exists, "Share is for one picture")
+        // Below the top bar at any text size, not under it.
+        XCTAssertGreaterThanOrEqual(cells.element(boundBy: 0).frame.minY, app.buttons["pictureGridBack"].frame.maxY,
+                                    "the grid starts below the top bar")
         shot("27b-picture-grid")
         audit("picture-grid")
         // Back: to the picture it came from.
