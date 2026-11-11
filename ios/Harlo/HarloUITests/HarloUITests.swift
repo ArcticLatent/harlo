@@ -283,6 +283,30 @@ final class HarloUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Show long lines whole"].waitForExistence(timeout: 4) && long.frame.maxX <= screen.maxX + 1, "wrapped again")
     }
 
+    func test12bFileFromAReply() {
+        launch("session")
+        openMain()
+        // A path in the reply opens the file.
+        let link = app.links.matching(NSPredicate(format: "label CONTAINS %@", "src/sidebar.rs")).firstMatch
+        XCTAssertTrue(link.waitForExistence(timeout: 8), "the reply's path is a link")
+        link.tap()
+        see("merge_by_key")
+        let screen = app.windows.firstMatch.frame
+        let long = element("each project's sessions, newest first")
+        let short = element("use crate::projects::project_rows")
+        XCTAssertTrue(long.exists && long.frame.maxX <= screen.maxX + 1, "a long line wraps (\(long.frame) in \(screen))")
+        shot("21b-file")
+        // Kept whole: every line starts at the left, after its number, and
+        // the long one runs past the screen.
+        app.buttons["Show long lines whole"].tap()
+        XCTAssertTrue(app.buttons["Wrap long lines"].waitForExistence(timeout: 4), "the button now wraps them")
+        XCTAssertTrue(long.frame.maxX > screen.maxX, "kept whole, it runs past the screen (\(long.frame))")
+        XCTAssertTrue(short.frame.minX < 80 && abs(short.frame.minX - long.frame.minX) < 1,
+                      "lines start at the left, lined up (\(short.frame), \(long.frame))")
+        XCTAssertEqual(short.frame.height, long.frame.height, accuracy: 1, "a line's height is one row's")
+        shot("21c-file-whole")
+    }
+
     func test13ActionLog() {
         launch("end")
         openMain()
@@ -299,6 +323,28 @@ final class HarloUITests: XCTestCase {
         tapInConversation("started 1 subagent")
         see("Subagent")
         shot("23-claude-session")
+    }
+
+    func test14bBackAtTheEnd() {
+        launch("end")
+        // Opened, left for another session and opened again: at its end
+        // each time.
+        func atEnd(_ why: String, file: StaticString = #filePath, line: UInt = #line) {
+            let last = element("The session list keeps its place now")
+            XCTAssertTrue(last.waitForExistence(timeout: 8), "the last reply", file: file, line: line)
+            // (Settled.)
+            Thread.sleep(forTimeInterval: 1.5)
+            let bottom = app.otherElements["sessionBottom"].frame
+            XCTAssertTrue(last.frame.minY >= 0 && last.frame.minY < bottom.minY, "\(why): the last reply in sight (\(last.frame), the composer at \(bottom.minY))", file: file, line: line)
+        }
+        openMain()
+        atEnd("opened")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        tap("Have a subagent look over")
+        see("started 1 subagent")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        openMain()
+        atEnd("opened again")
     }
 
     func test15OtherTabs() {

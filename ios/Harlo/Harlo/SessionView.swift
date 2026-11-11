@@ -155,9 +155,17 @@ struct SessionContent: View {
             .overlay {
                 if session.loading && session.rows.isEmpty && session.error == nil { ProgressView() }
             }
-            // New rows: follow them while at the end (not animated).
+            // New rows: follow them while at the end (not animated; after
+            // they're laid out, or it stops at the old end).
             .onChange(of: session.rows.count) { _, _ in
-                if atBottom { proxy.scrollTo("bottom", anchor: .bottom) }
+                if atBottom { DispatchQueue.main.async { proxy.scrollTo("bottom", anchor: .bottom) } }
+            }
+            // Opened (again): at the end once its rows are in, wherever the
+            // rows loading on the way had left it.
+            .onChange(of: session.loading) { _, loading in
+                guard !loading else { return }
+                atBottom = true
+                DispatchQueue.main.async { proxy.scrollTo("bottom", anchor: .bottom) }
             }
             .onChange(of: session.aside?.question) { _, _ in asideFolded = false }
             .modifier(FollowsTheEnd(atBottom: $atBottom) { proxy.scrollTo("bottom", anchor: .bottom) })
@@ -1049,7 +1057,9 @@ struct ActivityLine: View {
 /// Whether the transcript is at its end, and back to the end when it's
 /// scrolled past it: rows folding, a card or the keyboard resizing can
 /// leave it showing only empty space below the last row (iOS 18 and later,
-/// which say where it's scrolled).
+/// which say where it's scrolled). Content growing under it while it's at
+/// the end (rows coming in as it opens, a reply, a picture or a diagram
+/// drawn) keeps it there: only scrolling up leaves the end.
 struct FollowsTheEnd: ViewModifier {
     @Binding var atBottom: Bool
     var toEnd: () -> Void
@@ -1059,6 +1069,9 @@ struct FollowsTheEnd: ViewModifier {
         var nearEnd: Bool
         /// Nothing of the content in sight: past its end.
         var pastEnd: Bool
+        /// The content's height, and the top of what's in sight.
+        var height: CGFloat
+        var top: CGFloat
     }
 
     func body(content: Content) -> some View {
@@ -1066,8 +1079,15 @@ struct FollowsTheEnd: ViewModifier {
             content.onScrollGeometryChange(for: Where.self) { g in
                 let end = g.contentSize.height
                 return Where(nearEnd: g.visibleRect.maxY >= end - 120,
-                             pastEnd: end > 0 && g.visibleRect.minY > end - 40)
-            } action: { _, now in
+                             pastEnd: end > 0 && g.visibleRect.minY > end - 40,
+                             height: end, top: g.visibleRect.minY)
+            } action: { old, now in
+                // Grown below while at the end (and not scrolled up): to
+                // the new end.
+                if atBottom && !now.nearEnd && now.height > old.height + 0.5 && now.top >= old.top - 0.5 {
+                    toEnd()
+                    return
+                }
                 atBottom = now.nearEnd
                 // (Once a moment: the scroll there says where it is again.)
                 if now.pastEnd && Date().timeIntervalSince(healed) > 0.4 {
