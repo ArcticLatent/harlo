@@ -1078,6 +1078,10 @@ struct FollowsTheEnd: ViewModifier {
     @Binding var atBottom: Bool
     var toEnd: () -> Void
     @State private var healed = Date.distantPast
+    /// Your finger on it, or its fling: only that leaves the end (a picture
+    /// or a panel coming in late moved the end out of sight too, and the
+    /// session then stopped short of it).
+    @State private var yours = false
 
     struct Where: Equatable {
         var nearEnd: Bool
@@ -1096,9 +1100,9 @@ struct FollowsTheEnd: ViewModifier {
                              pastEnd: end > 0 && g.visibleRect.minY > end - 40,
                              height: end, top: g.visibleRect.minY)
             } action: { old, now in
-                // Grown below while at the end (and not scrolled up): to
-                // the new end.
-                if atBottom && !now.nearEnd && now.height > old.height + 0.5 && now.top >= old.top - 0.5 {
+                // At the end and moved from it by anything but you (grown
+                // below, a panel taller, laid out late): to the new end.
+                if atBottom && !now.nearEnd && !yours {
                     toEnd()
                     return
                 }
@@ -1108,6 +1112,14 @@ struct FollowsTheEnd: ViewModifier {
                     healed = Date()
                     atBottom = true
                     toEnd()
+                }
+            }
+            .onScrollPhaseChange { _, phase in
+                // (Animating: a tap on the status bar, to the top; the
+                // scrolls to the end aren't animated.)
+                switch phase {
+                case .tracking, .interacting, .decelerating, .animating: yours = true
+                default: yours = false
                 }
             }
         } else {
