@@ -404,7 +404,8 @@ final class HarloUITests: XCTestCase {
         let viewer = app.descendants(matching: .any).matching(identifier: "pictureViewer").firstMatch
         XCTAssertTrue(viewer.waitForExistence(timeout: 8), "the viewer")
         see("2 of 2")
-        see("sidebar.png")
+        // (Its name, read without its suffix.)
+        XCTAssertTrue(app.staticTexts["sidebar"].waitForExistence(timeout: 5), "the picture's name")
         shot("27-picture-viewer")
         audit("picture-viewer")
         viewer.swipeRight()

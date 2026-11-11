@@ -64,7 +64,9 @@ struct FileView: View {
 
     func lines(_ f: FileText) -> some View {
         let width = String(f.lines.count).count
-        return ScrollViewReader { proxy in
+        // (Scrolling both ways, a file shorter or narrower than the screen
+        // sat in its middle: its content is at least the screen, from the top.)
+        return GeometryReader { room in ScrollViewReader { proxy in
             ScrollView(wrap ? Axis.Set.vertical : [.vertical, .horizontal]) {
                 // Lines kept whole: as wide as the longest, which a lazy
                 // stack can't know (it lays out only the lines on screen;
@@ -123,16 +125,14 @@ struct FileView: View {
                     }
                 }
                 .padding(.bottom, 20)
+                .frame(minWidth: room.size.width, minHeight: room.size.height, alignment: .topLeading)
                 .textSelection(.enabled)
             }
-            // Scrolling both ways, a file shorter than the screen would sit
-            // in its middle; it starts at the top, like a wrapped one.
-            .defaultScrollAnchor(.topLeading)
             .background(Color(p.codeBackground))
             .onAppear {
                 if line > 1 { proxy.scrollTo(line, anchor: .center) }
             }
-        }
+        } }
     }
 }
 
