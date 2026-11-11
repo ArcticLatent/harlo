@@ -708,16 +708,17 @@ struct ContextBar: View {
                         .fixedSize()
                 }
                 .padding(.horizontal, 16)
-                // (A finger's height to tap, taking only a slim row: the
-                // rest reaches into the space around it.)
+                // (A finger's height to tap.)
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
-                .padding(.vertical, -12)
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("contextBar")
             .accessibilityLabel("Context \(Int(used * 100))%, \(Style.tokens(info.contextTokens)) of \(Style.tokens(info.contextWindow))"
                 + (info.compactAt > 0 ? ", compacts at \(Style.tokens(info.compactAt))" : ""))
+            // (Taking only a slim row: the rest of its height reaches into
+            // the space around it. Outside the button, which keeps its 44.)
+            .padding(.vertical, -10)
         }
     }
 }
