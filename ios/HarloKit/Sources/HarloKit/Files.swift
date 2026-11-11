@@ -27,6 +27,29 @@ public struct FileText: Equatable, Sendable {
         guard lines.indices.contains(i) else { return [] }
         return RichText.codeLine(lines[i])
     }
+
+    /// The longest line as shown (tags left out, `&lt;` one character, a
+    /// tab four), for the width of lines kept whole; nil when there are none.
+    public var longestLine: Int? {
+        var best: (i: Int, n: Int)?
+        for (i, html) in lines.enumerated() {
+            var n = 0
+            var inTag = false
+            var inEntity = false
+            for c in html {
+                if inTag { inTag = c != ">"; continue }
+                if inEntity { inEntity = c != ";"; continue }
+                switch c {
+                case "<": inTag = true
+                case "&": inEntity = true; n += 1
+                case "\t": n += 4
+                default: n += 1
+                }
+            }
+            if n > (best?.n ?? -1) { best = (i, n) }
+        }
+        return best?.i
+    }
 }
 
 /// The session repository's branches (harlo-core's `git::branches`).

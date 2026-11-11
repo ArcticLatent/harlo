@@ -62,41 +62,64 @@ struct FileView: View {
         }
     }
 
+    /// A line's number, as wide as the last one's.
+    func number(_ n: Int, _ width: Int) -> some View {
+        Text(String(n).leftPadded(to: width))
+            .font(Style.mono(12))
+            .foregroundStyle(Color(p.muted))
+            .fixedSize()
+    }
+
     func lines(_ f: FileText) -> some View {
         let width = String(f.lines.count).count
         return ScrollViewReader { proxy in
             ScrollView(wrap ? Axis.Set.vertical : [.vertical, .horizontal]) {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    Text(f.path)
-                        .font(Style.mono(11))
-                        .foregroundStyle(Color(p.muted))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                    ForEach(0..<f.lines.count, id: \.self) { i in
-                        HStack(alignment: .firstTextBaseline, spacing: 10) {
-                            Text(String(i + 1).leftPadded(to: width))
-                                .font(Style.mono(12))
-                                .foregroundStyle(Color(p.muted))
-                            if wrap, let line = CodeLines.lines(f.spans(i)).first {
-                                WrappedLine(indent: line.indent, font: Style.mono(12)) {
-                                    Text(Style.attributed(line.spans.isEmpty ? [Span(" ")] : line.spans, p, size: 14, inCode: true))
-                                }
-                            } else {
-                                Text(Style.attributed(f.spans(i), p, size: 14, inCode: true))
-                                    .fixedSize(horizontal: true, vertical: false)
-                            }
+                // Lines kept whole: as wide as the longest, which a lazy
+                // stack can't know (it lays out only the lines on screen;
+                // narrower, its lines stuck out on both sides).
+                VStack(alignment: .leading, spacing: 0) {
+                    if !wrap, let i = f.longestLine {
+                        HStack(spacing: 10) {
+                            number(i + 1, width)
+                            Text(Style.attributed(f.spans(i), p, size: 14, inCode: true))
+                                .fixedSize()
                         }
                         .padding(.horizontal, 12)
-                        .padding(.vertical, 1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(i + 1 == line ? Color(p.primary).opacity(0.16) : Color.clear)
-                        .id(i + 1)
+                        .frame(height: 0)
+                        .clipped()
+                        .hidden()
+                        .accessibilityHidden(true)
                     }
-                    if f.cut {
-                        Text("The first \(f.lines.count) of \(f.total) lines; the rest is in harlo on your computer.")
-                            .font(.footnote)
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        Text(f.path)
+                            .font(Style.mono(11))
                             .foregroundStyle(Color(p.muted))
-                            .padding(12)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                        ForEach(0..<f.lines.count, id: \.self) { i in
+                            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                number(i + 1, width)
+                                if wrap, let line = CodeLines.lines(f.spans(i)).first {
+                                    WrappedLine(indent: line.indent, font: Style.mono(12)) {
+                                        Text(Style.attributed(line.spans.isEmpty ? [Span(" ")] : line.spans, p, size: 14, inCode: true))
+                                    }
+                                } else {
+                                    Text(Style.attributed(f.spans(i), p, size: 14, inCode: true))
+                                        .fixedSize(horizontal: true, vertical: false)
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(i + 1 == line ? Color(p.primary).opacity(0.16) : Color.clear)
+                            .id(i + 1)
+                        }
+                        if f.cut {
+                            Text("The first \(f.lines.count) of \(f.total) lines; the rest is in harlo on your computer.")
+                                .font(.footnote)
+                                .foregroundStyle(Color(p.muted))
+                                .padding(12)
+                        }
                     }
                 }
                 .padding(.bottom, 20)

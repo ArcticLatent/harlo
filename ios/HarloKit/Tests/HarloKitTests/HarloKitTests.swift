@@ -411,6 +411,15 @@ final class ModelPartsTests: XCTestCase {
         XCTAssertTrue(code.allSatisfy { $0.link == nil }, "code blocks stay as they are")
     }
 
+    func testLongestLineOfAFile() {
+        var f = FileText(["path": "a.py", "lines": ["<span class=\"s1\">import</span> sys", "x = a &lt; b &amp;&amp; c", "\tpass", ""]])
+        XCTAssertEqual(f.longestLine, 1)
+        f.lines = ["<b>abcdefghij</b>", "\t\t\tx"]
+        XCTAssertEqual(f.longestLine, 1, "tags don't count, tabs count four")
+        f.lines = []
+        XCTAssertNil(f.longestLine)
+    }
+
     func testPictureLinksOpenTheViewer() {
         XCTAssertEqual(FileLinks.path("shot.png")?.path, "shot.png")
         XCTAssertTrue(PictureNames.isPicture("docs/a.PNG"))
