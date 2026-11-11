@@ -356,10 +356,16 @@ struct RowView: View {
         }
     }
 
-    /// The row's pictures its text doesn't show in their place.
+    /// The row's pictures its reply doesn't show in their place (harlo
+    /// sends a reply's pictures as a row of their own after its text, with
+    /// the same message key: `m44:0:pics` after `m44:0:0`).
     var under: [String] {
         guard !row.images.isEmpty else { return [] }
-        let placed = RichText.pictures(RichCache.blocks(row.html)).compactMap { PictureNames.match($0, in: row.images) }
+        let message = row.key.split(separator: ":").dropLast().joined(separator: ":")
+        let reply = row.kind == "images" && !message.isEmpty
+            ? (model.session?.rows ?? []).filter { $0.key.hasPrefix(message + ":") }
+            : [row]
+        let placed = reply.flatMap { RichText.pictures(RichCache.blocks($0.html)) }.compactMap { PictureNames.match($0, in: row.images) }
         return row.images.filter { !placed.contains($0) }
     }
 
@@ -390,6 +396,9 @@ struct RowView: View {
             ToolCard(row: row)
         case "notice" where row.fromHarlo:
             HarloMessage(row: row)
+        case "images":
+            // (Its pictures only: under it, the ones its reply doesn't show.)
+            EmptyView()
         default:
             Text(row.text)
                 .font(.footnote)

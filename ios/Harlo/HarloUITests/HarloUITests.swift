@@ -388,19 +388,15 @@ final class HarloUITests: XCTestCase {
     func test16Pictures() {
         launch("pictures")
         openMain()
-        // Your photo in your message; the reply's picture in its place, as
-        // wide as the reply, not its words.
-        let tiles = app.buttons.matching(identifier: "pictureTile")
-        XCTAssertTrue(tiles.firstMatch.waitForExistence(timeout: 8), "your photo's thumbnail")
-        XCTAssertEqual(tiles.count, 1, "only your photo is a thumbnail")
-        see("Picture: Your photo")
+        // The reply's picture in its place, as wide as the reply, not its
+        // words, and not again under it.
         let reply = app.buttons["replyPicture"]
         XCTAssertTrue(reply.waitForExistence(timeout: 8), "the reply's picture")
         XCTAssertEqual(reply.label, "Picture: The sidebar")
         XCTAssertGreaterThan(reply.frame.width, 150, "the reply's picture is big (\(reply.frame))")
         shot("26-pictures")
         audit("pictures")
-        // The viewer: at the one tapped, then across to the other.
+        // The viewer: at the one tapped, then across to your photo.
         reply.tap()
         let viewer = app.descendants(matching: .any).matching(identifier: "pictureViewer").firstMatch
         XCTAssertTrue(viewer.waitForExistence(timeout: 8), "the viewer")
@@ -415,5 +411,13 @@ final class HarloUITests: XCTestCase {
         shot("28-picture-photo")
         app.buttons["pictureDone"].tap()
         XCTAssertTrue(gone(viewer), "Done closes it")
+        // Your photo, in your message above: the only thumbnail.
+        let tiles = app.buttons.matching(identifier: "pictureTile")
+        for _ in 0..<6 where !(tiles.firstMatch.exists && tiles.firstMatch.isHittable) {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55)))
+        }
+        XCTAssertTrue(tiles.firstMatch.waitForExistence(timeout: 5), "your photo's thumbnail")
+        XCTAssertEqual(tiles.count, 1, "only your photo is a thumbnail")
+        XCTAssertEqual(tiles.firstMatch.label, "Picture: Your photo")
     }
 }
