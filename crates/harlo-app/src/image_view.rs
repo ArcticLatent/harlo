@@ -244,6 +244,12 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "isImage"]
         fn is_image(self: &Images, path: &QString) -> bool;
+        /// The most common shape (height over width) among `paths` (a JSON
+        /// list), read from their headers (some of them, in a big folder),
+        /// for a grid's cells: 1 when none can be read.
+        #[qinvokable]
+        #[cxx_name = "commonShape"]
+        fn common_shape(self: &Images, paths: &QString) -> f64;
         /// The caches' counts, as JSON (self-tests).
         #[qinvokable]
         fn stats(self: &Images) -> QString;
@@ -778,6 +784,21 @@ impl qobject::Images {
 
     pub fn is_image(&self, path: &QString) -> bool {
         is_image_path(&path.to_string())
+    }
+
+    pub fn common_shape(&self, paths: &QString) -> f64 {
+        let paths: Vec<String> = serde_json::from_str(&paths.to_string()).unwrap_or_default();
+        let step = paths.len().div_ceil(48).max(1);
+        let shapes: Vec<f64> = paths
+            .iter()
+            .step_by(step)
+            .filter_map(|p| {
+                let (mut w, mut h) = (0, 0);
+                qobject::image_size(&qs(p), &mut w, &mut h);
+                (w > 0 && h > 0).then(|| h as f64 / w as f64)
+            })
+            .collect();
+        median_shape(shapes)
     }
 
     pub fn stats(&self) -> QString {
@@ -1469,6 +1490,15 @@ impl qobject::ImageView {
     }
 }
 
+/// The middle of the shapes, kept between wide and tall bounds (1: none).
+fn median_shape(mut shapes: Vec<f64>) -> f64 {
+    if shapes.is_empty() {
+        return 1.0;
+    }
+    shapes.sort_by(|a, b| a.total_cmp(b));
+    shapes[shapes.len() / 2].clamp(0.5, 1.4)
+}
+
 // ---- ImageThumb ---------------------------------------------------------------------
 
 pub struct ImageThumbRust {
@@ -1608,6 +1638,14 @@ impl qobject::ImageThumb {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_grids_shape_is_its_pictures_middle_one() {
+        assert_eq!(median_shape(vec![]), 1.0);
+        assert_eq!(median_shape(vec![0.667, 0.667, 1.0, 0.5625, 0.667]), 0.667);
+        assert_eq!(median_shape(vec![0.2, 0.25]), 0.5);
+        assert_eq!(median_shape(vec![3.0]), 1.4);
+    }
 
     #[test]
     fn natural_order() {

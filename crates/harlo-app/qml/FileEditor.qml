@@ -341,10 +341,12 @@ Rectangle {
                     onClicked: root.findOpen ? root.closeBars() : root.openFind(false)
                 }
                 FlatButton { visible: !root.isImage; text: file.saving ? "Saving…" : "Save"; accent: Theme.primary; font.pixelSize: Theme.px(11); padding: 4; enabled: root.modified && !file.saving; onClicked: root.save() }
-                FlatButton {
+                ComposerIconButton {
+                    objectName: "editorOpenOutside"
                     visible: !root.remote
-                    text: "↗"; font.pixelSize: Theme.px(12); outlined: false; padding: 3
-                    ToolTip.visible: hovered; ToolTip.text: "Open in default app"
+                    iconName: "external-link"; tint: Theme.muted
+                    tip: "Open in its default app"
+                    focusPolicy: Qt.NoFocus
                     onClicked: Qt.openUrlExternally("file://" + root.path)
                 }
             }

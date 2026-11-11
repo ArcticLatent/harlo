@@ -143,6 +143,10 @@ Item {
 
     /// The grid's cells (logical pixels, before the name).
     property int cell: 168
+    // The grid's cells' shape (height over width): its pictures' most
+    // common one, read when the grid opens.
+    property real gridShape: 1
+    onGridModeChanged: if (gridMode) gridShape = Images.commonShape(JSON.stringify(images))
 
     // The checkerboard under transparency, from the theme.
     readonly property color checkDark: Theme.codeBg
@@ -208,7 +212,9 @@ Item {
             clip: true
             model: root.gridMode ? root.images : []
             cellWidth: Math.max(96, Math.floor((width - 8) / Math.max(1, Math.round((width - 8) / root.cell))))
-            cellHeight: cellWidth + 22
+            // (Shaped like most of its pictures: wide ones don't leave a
+            // blank band over each row.)
+            cellHeight: Math.round((cellWidth - 20) * root.gridShape) + 42
             keyNavigationEnabled: true
             highlightFollowsCurrentItem: false
             boundsBehavior: Flickable.StopAtBounds
@@ -248,7 +254,7 @@ Item {
                     id: thumb
                     objectName: "imageThumb"
                     anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 6; rightMargin: 14; topMargin: 6 }
-                    height: width
+                    height: Math.round(width * root.gridShape)
                     // (Over its name, however wide it is.)
                     bottomAligned: true
                     path: cellItem.modelData

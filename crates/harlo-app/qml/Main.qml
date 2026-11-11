@@ -5288,6 +5288,7 @@ ApplicationWindow {
             win.check(ghost !== null && ghost.visible && (line === null || !line.visible), "lifted where it would stay, no line shows")
             const low = win.findName("projectDragGhost"), top = win.findName("projectTitle-" + win.selftestDir.split("/").filter(s => s).pop())
             const from = low.mapToItem(null, 10, low.height / 2), to = top.mapToItem(null, 10, -6)
+            win.dragPointerY = to.y
             for (let i = 1; i <= 12; i++) TestInput.moveTo(from.x, from.y + (to.y - from.y) * i / 12) } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
@@ -5298,7 +5299,7 @@ ApplicationWindow {
             win.check(line !== null && line.y >= 0 && line.y + line.height <= line.parent.height, "and inside the list, at its very top too (" + (line ? line.y.toFixed(1) : "") + ")")
             win.check(ghost !== null && ghost.visible && win.findText("Rocket app", ghost) !== null, "and a copy of its header follows the pointer")
             const below = first.mapToItem(null, 0, first.height).y, gy = ghost ? ghost.mapToItem(null, 0, 0).y : -1
-            win.check(line !== null && ghost !== null && line.z > ghost.z && gy >= below, "the copy hangs below the header it lands above, the line drawn over it (" + Math.round(gy) + " under " + Math.round(below) + ")")
+            win.check(line !== null && ghost !== null && line.z > ghost.z && gy >= below && gy - win.dragPointerY <= 36, "the copy hangs just under the name it lands above, close to the pointer, the line drawn over it (" + Math.round(gy) + " under " + Math.round(below) + ", pointer " + Math.round(win.dragPointerY) + ")")
             // Nothing under the pointer lights up as if it took the drop.
             const lit = []
             const walk = item => { for (const c of item.children) { if (c.hovered === true && c.objectName !== "projectDragGhost") lit.push(c.objectName || String(c)); walk(c) } }
@@ -6663,6 +6664,8 @@ ApplicationWindow {
             win.check(v.fit && Math.abs(v.zoom - fitZoom) < 1e-6, "fitted: " + v.zoom.toFixed(4) + " (" + fitZoom.toFixed(4) + ")")
             win.shotWindow("clicks-images-tab")
             const pathLabel = win.findName("editorPath", chat.fileEditor)
+            const outside = win.findName("editorOpenOutside", chat.fileEditor)
+            win.check(outside !== null && outside.iconName === "external-link", "opening it outside is a drawn icon")
             win.check(pathLabel && pathLabel.text === "pics/img1.png" && pathLabel.whole.endsWith("/pics/img1.png"), "the tab's path is the file's in its project, the whole on hover (" + (pathLabel ? pathLabel.text : "none") + ")")
             const tight = viewer.width < 640
             const more = win.findName("imageMore", viewer), turn = win.findName("imageTurnLeft", viewer)
@@ -6782,6 +6785,7 @@ ApplicationWindow {
             win.check(win.imgThumbsReady(), "every thumbnail in view is drawn (" + shown + ")")
             win.check(st.diskThumbs >= shown - 1 && st.thumbsMade - win.imgStats.thumbsMade >= shown - 1, "they're kept on disk (" + st.diskThumbs + " files)")
             win.check(viewer.grid.currentIndex === 32, "the grid starts at the image shown (" + viewer.grid.currentIndex + ")")
+            win.check(Math.abs(viewer.gridShape - 800 / 1200) < 0.01 && viewer.grid.cellHeight < viewer.grid.cellWidth, "its cells are shaped like most of its pictures, 3:2 (" + viewer.gridShape.toFixed(3) + ", " + viewer.grid.cellWidth + "×" + viewer.grid.cellHeight + ")")
             win.shotWindow("clicks-images-grid")
             TestInput.key(Qt.Key_Escape, 0) } }
         PauseAnimation { duration: 300 }
@@ -6844,6 +6848,7 @@ ApplicationWindow {
     function picTiles() { return win.findAllNames("pictureTile", chat.transcript).filter(t => win.shown(t)) }
     function picViewer() { return chat.transcript.chatPictures.viewer }
     property var picAll: []
+    property real dragPointerY: 0
     SequentialAnimation {
         id: picSteps
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clickspictures"

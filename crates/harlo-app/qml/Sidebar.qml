@@ -332,9 +332,10 @@ Rectangle {
             // at first, then sliding to just below the pointer (so the line
             // and where it lands stay in sight).
             property real ghostShift: 0
-            // ...and never over the header it lands above: no higher than
-            // that header's bottom (sliding there as the line moves on).
-            readonly property real landFloor: dropY >= 0 ? dropY - contentY + 42 : -1e6
+            // ...and never over the name of the header it lands above: no
+            // higher than just under it (sliding there as the line moves on).
+            property real dropGap: 0
+            readonly property real landFloor: dropY >= 0 ? dropY - contentY + dropGap / 2 + 26 : -1e6
             property real ghostFloor: landFloor
             Behavior on ghostFloor { enabled: list.dragId >= 0; NumberAnimation { duration: Math.round(Theme.motion * 0.4); easing.type: Easing.OutCubic } }
             NumberAnimation { id: ghostSlide; target: list; property: "ghostShift"; to: 10; duration: Math.round(Theme.motion * 0.6); easing.type: Easing.OutCubic }
@@ -372,6 +373,7 @@ Rectangle {
                         heads.push(it)
                 heads.sort((a, b) => a.y - b.y)
                 let before = -1, at = originY + contentHeight - 4, next = -1, seen = false
+                dropGap = 0
                 for (const it of heads) {
                     if (seen && next === -1)
                         next = it.kind === "project" ? it.projectId : -2
@@ -382,6 +384,7 @@ Rectangle {
                     if (it.y + it.gap + 15 > y) {
                         before = it.kind === "project" ? it.projectId : -1
                         at = it.y + it.gap / 2
+                        dropGap = it.gap
                         break
                     }
                 }
