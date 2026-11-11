@@ -870,16 +870,19 @@ impl ChatSession {
 
     pub fn picture_labels(&self) -> QString {
         let folder = self.folder();
-        let mut labels = serde_json::Map::new();
+        let (mut paths, mut labels, mut texts) = (Vec::new(), Vec::new(), Vec::new());
         for r in &self.rows {
             for p in self.shown_pictures(r) {
-                if !labels.contains_key(&p) {
-                    let label = harlo_core::pictures::origin(r, &p, &folder);
-                    labels.insert(p, serde_json::Value::String(label));
+                if !paths.contains(&p) {
+                    labels.push(harlo_core::pictures::origin(r, &p, &folder));
+                    texts.push(r.text.as_str());
+                    paths.push(p);
                 }
             }
         }
-        QString::from(&serde_json::Value::Object(labels).to_string())
+        harlo_core::pictures::tell_apart(&mut labels, &texts);
+        let map: serde_json::Map<String, serde_json::Value> = paths.into_iter().zip(labels).map(|(p, l)| (p, serde_json::Value::String(l))).collect();
+        QString::from(&serde_json::Value::Object(map).to_string())
     }
 
     pub fn answer_after(&self, key: &QString) -> QString {

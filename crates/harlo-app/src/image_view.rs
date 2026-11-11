@@ -85,6 +85,9 @@ pub mod qobject {
         #[qproperty(QString, path, READ, WRITE = set_path, NOTIFY)]
         /// "", "loading", "ready" or "error".
         #[qproperty(QString, status)]
+        /// Drawn at the bottom of the item, not its middle (a grid's,
+        /// over its name).
+        #[qproperty(bool, bottom_aligned, cxx_name = "bottomAligned", READ, WRITE = set_bottom_aligned, NOTIFY)]
         type ImageThumb = super::ImageThumbRust;
 
         #[qobject]
@@ -105,6 +108,8 @@ pub mod qobject {
         fn set_playing(self: Pin<&mut ImageView>, on: bool);
         #[cxx_name = "setPath"]
         fn set_path(self: Pin<&mut ImageThumb>, path: QString);
+        #[cxx_name = "setBottomAligned"]
+        fn set_bottom_aligned(self: Pin<&mut ImageThumb>, on: bool);
     }
 
     extern "RustQt" {
@@ -1469,6 +1474,7 @@ impl qobject::ImageView {
 pub struct ImageThumbRust {
     path: QString,
     status: QString,
+    bottom_aligned: bool,
     /// The thumbnail's size in pixels.
     size: (f64, f64),
     /// The thumbnail size asked for (0: none yet).
@@ -1479,7 +1485,7 @@ pub struct ImageThumbRust {
 
 impl Default for ImageThumbRust {
     fn default() -> Self {
-        Self { path: QString::default(), status: QString::default(), size: (0.0, 0.0), side: 0, cancel: Arc::new(AtomicBool::new(false)), generation: 0 }
+        Self { path: QString::default(), status: QString::default(), bottom_aligned: false, size: (0.0, 0.0), side: 0, cancel: Arc::new(AtomicBool::new(false)), generation: 0 }
     }
 }
 
@@ -1504,6 +1510,15 @@ impl qobject::ImageThumb {
         self.as_mut().rust_mut().path = path;
         self.as_mut().path_changed();
         self.request();
+    }
+
+    pub fn set_bottom_aligned(mut self: Pin<&mut Self>, on: bool) {
+        if on == self.bottom_aligned {
+            return;
+        }
+        self.as_mut().rust_mut().bottom_aligned = on;
+        self.as_mut().bottom_aligned_changed();
+        self.layout();
     }
 
     fn request(mut self: Pin<&mut Self>) {
@@ -1561,7 +1576,8 @@ impl qobject::ImageThumb {
         self.layout();
     }
 
-    /// Fitted in the item and centred, never above a screen pixel a pixel.
+    /// Fitted in the item and centred (or at its bottom), never above a
+    /// screen pixel a pixel.
     fn layout(self: Pin<&mut Self>) {
         let (pw, ph) = self.size;
         if pw <= 0.0 || ph <= 0.0 {
@@ -1571,7 +1587,7 @@ impl qobject::ImageThumb {
         let s = (w / pw).min(h / ph).min(1.0 / self.pixel_ratio().max(0.5));
         let dpr = self.pixel_ratio().max(0.5);
         let x = (((w - pw * s) / 2.0) * dpr).round() / dpr;
-        let y = (((h - ph * s) / 2.0) * dpr).round() / dpr;
+        let y = (((h - ph * s) / if self.bottom_aligned { 1.0 } else { 2.0 }) * dpr).round() / dpr;
         self.set_view(s, 0.0, 0.0, s, x, y);
     }
 

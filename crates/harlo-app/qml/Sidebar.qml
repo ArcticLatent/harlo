@@ -328,6 +328,22 @@ Rectangle {
             property string dragColor: ""
             property int dragCount: 0
             property real dragGrab: 0
+            // The lifted copy's top, from the pointer: where it was taken
+            // at first, then sliding to just below the pointer (so the line
+            // and where it lands stay in sight).
+            property real ghostShift: 0
+            // ...and never over the header it lands above: no higher than
+            // that header's bottom (sliding there as the line moves on).
+            readonly property real landFloor: dropY >= 0 ? dropY - contentY + 42 : -1e6
+            property real ghostFloor: landFloor
+            Behavior on ghostFloor { enabled: list.dragId >= 0; NumberAnimation { duration: Math.round(Theme.motion * 0.4); easing.type: Easing.OutCubic } }
+            NumberAnimation { id: ghostSlide; target: list; property: "ghostShift"; to: 10; duration: Math.round(Theme.motion * 0.6); easing.type: Easing.OutCubic }
+            // Esc calls a drag off.
+            Shortcut {
+                sequence: "Esc"
+                enabled: list.dragId >= 0
+                onActivated: list.endDrag(false)
+            }
             readonly property real dragY: dragId >= 0 ? mapFromItem(null, 0, dragSceneY).y : 0
             cacheBuffer: dragId >= 0 ? 100000 : 320
             // (A drag moves the project, not the list; the rows hold still
@@ -374,7 +390,12 @@ Rectangle {
                 dropBefore = before
                 dropY = stays ? -1 : at
             }
+            function startDrag() {
+                ghostShift = -dragGrab
+                ghostSlide.restart()
+            }
             function endDrag(drop) {
+                ghostSlide.stop()
                 if (drop && dragId >= 0 && dropY >= 0)
                     Workspace.moveProject(dragId, dropBefore)
                 dragId = -1
@@ -385,7 +406,8 @@ Rectangle {
                 objectName: "projectDropLine"
                 parent: list
                 visible: list.dragId >= 0 && list.dropY >= 0
-                z: 10
+                // (Over the lifted copy.)
+                z: 30
                 x: 14
                 // (Kept inside the list: the first project's place is at
                 // its very top.)
@@ -402,7 +424,7 @@ Rectangle {
                 visible: list.dragId >= 0
                 z: 20
                 x: 18
-                y: Math.max(0, Math.min(list.height - height, list.dragY - list.dragGrab))
+                y: Math.max(0, Math.min(list.height - height, Math.max(list.dragY + list.ghostShift, list.ghostFloor)))
                 width: list.width - 36
                 height: 30
                 radius: 8
@@ -854,6 +876,11 @@ Rectangle {
             }
         }
         onClicked: Workspace.toggleCollapsed(rowKey)
+        // A project's header can be picked up.
+        HoverHandler {
+            enabled: groupRow.kind === "project" && list.dragId < 0
+            cursorShape: Qt.OpenHandCursor
+        }
         // Lifted: its place shows as a dashed outline.
         readonly property bool lifted: list.dragId >= 0 && list.dragId === projectId && kind === "project"
         // Dragged by its header, a project goes where it's dropped.
@@ -873,13 +900,14 @@ Rectangle {
                     list.dragGrab = centroid.pressPosition.y - groupRow.gap
                     list.dragId = groupRow.projectId
                     list.dragSceneY = centroid.scenePosition.y
+                    list.startDrag()
                     list.updateDrop()
                 } else {
                     list.endDrag(true)
                 }
             }
             onCanceled: list.endDrag(false)
-            onCentroidChanged: if (active) { list.dragSceneY = centroid.scenePosition.y; list.updateDrop() }
+            onCentroidChanged: if (active && list.dragId >= 0) { list.dragSceneY = centroid.scenePosition.y; list.updateDrop() }
         }
         TapHandler {
             acceptedButtons: Qt.RightButton

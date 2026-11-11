@@ -188,9 +188,43 @@ pub fn origin(row: &crate::Row, path: &str, folder: &std::path::Path) -> String 
     }
 }
 
+/// Labels made different where they'd be the same: a repeated one gets
+/// the first words of the message its picture is in (`texts`, one per
+/// label), e.g. "You sent · And this one?".
+pub fn tell_apart(labels: &mut [String], texts: &[&str]) {
+    let mut seen = std::collections::HashMap::<String, usize>::new();
+    for l in labels.iter() {
+        *seen.entry(l.clone()).or_default() += 1;
+    }
+    for (l, text) in labels.iter_mut().zip(texts) {
+        let words = first_words(text);
+        if seen[l.as_str()] > 1 && !words.is_empty() {
+            *l = format!("{l} · {words}");
+        }
+    }
+}
+
+/// A message's first line, cut at about 28 characters.
+fn first_words(text: &str) -> String {
+    let line = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    if line.chars().count() <= 28 {
+        return line.to_owned();
+    }
+    let cut: String = line.chars().take(27).collect();
+    let cut = cut.rsplit_once(' ').map(|(a, _)| a).filter(|a| a.len() > 12).unwrap_or(&cut);
+    format!("{}…", cut.trim_end())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeated_labels_get_their_messages_words() {
+        let mut labels = vec!["You sent".to_owned(), "art/sun.png".to_owned(), "You sent".to_owned(), "In a reply".to_owned()];
+        tell_apart(&mut labels, &["\nMake me a sun picture please, a big yellow one", "", "And this one?", "Here"]);
+        assert_eq!(labels, ["You sent · Make me a sun picture…", "art/sun.png", "You sent · And this one?", "In a reply"]);
+    }
 
     #[test]
     fn says_where_a_picture_came_from() {

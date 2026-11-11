@@ -11,6 +11,8 @@ import harlo
 Item {
     id: root
     objectName: "imageViewer"
+    // (Narrow: the bar's ⋯ menu.)
+    readonly property alias moreMenu: moreMenu
     /// The file tab's path (ssh:// for a remote one) and the local file shown.
     property string path
     property string source
@@ -234,14 +236,23 @@ Item {
                     border.width: cellItem.current && grid.activeFocus ? 1 : 0
                     border.color: Theme.accent
                 }
+                // One gone from disk: a tile saying so, as in the chat.
+                Rectangle {
+                    anchors.fill: thumb
+                    visible: thumb.status === "error"
+                    radius: 8
+                    color: Theme.codeBg
+                    border.color: Theme.border
+                }
                 ImageThumb {
                     id: thumb
                     objectName: "imageThumb"
                     anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 6; rightMargin: 14; topMargin: 6 }
                     height: width
+                    // (Over its name, however wide it is.)
+                    bottomAligned: true
                     path: cellItem.modelData
                 }
-                // (One gone from disk says so, as in the chat.)
                 Label {
                     anchors.centerIn: thumb
                     width: thumb.width - 12
@@ -259,7 +270,8 @@ Item {
                     text: root.ownList ? root.labelOf(cellItem.modelData) : cellItem.modelData.substring(cellItem.modelData.lastIndexOf("/") + 1)
                     color: cellItem.modelData === root.path ? Theme.foreground : Theme.muted
                     font.pixelSize: Theme.px(11)
-                    elide: Text.ElideMiddle
+                    // (A chat's say who sent it first; a file's name keeps its end.)
+                    elide: root.ownList ? Text.ElideRight : Text.ElideMiddle
                     horizontalAlignment: Text.AlignHCenter
                 }
                 HoverHandler { id: cellHover; cursorShape: Qt.PointingHandCursor }
@@ -327,7 +339,7 @@ Item {
                     Layout.leftMargin: 8
                     Layout.fillWidth: true
                     Layout.minimumWidth: 0
-                    visible: root.ownList && !root.gridMode
+                    visible: root.ownList && !root.gridMode && !bar.tight
                     text: root.labelOf(root.path)
                     color: Theme.textMuted
                     font.pixelSize: Theme.px(11.5)
@@ -349,7 +361,7 @@ Item {
                     color: Theme.muted
                     font.pixelSize: Theme.px(11)
                 }
-                Item { Layout.fillWidth: true; visible: !(root.ownList && !root.gridMode) }
+                Item { Layout.fillWidth: true; visible: !(root.ownList && !root.gridMode && !bar.tight) }
                 ComposerIconButton {
                     objectName: "imagePlay"
                     visible: !root.gridMode && view.frameCount > 1
@@ -427,13 +439,6 @@ Item {
                     focusPolicy: Qt.NoFocus
                     onClicked: root.openInTab(root.path)
                 }
-                ComposerIconButton {
-                    visible: root.ownList
-                    iconName: "close"; tint: Theme.muted
-                    tip: "Close (Esc)"
-                    focusPolicy: Qt.NoFocus
-                    onClicked: root.closeRequested()
-                }
                 // Narrow: the rest of the controls, in a menu.
                 ComposerIconButton {
                     id: moreButton
@@ -445,19 +450,32 @@ Item {
                     onClicked: moreMenu.popup(moreButton, 0, -moreMenu.implicitHeight)
                     AppMenu {
                         id: moreMenu
-                        AppMenuItem { text: "Turn left"; hint: "Shift+R"; onTriggered: view.rotate(false) }
-                        AppMenuItem { text: "Turn right"; hint: "R"; onTriggered: view.rotate(true) }
+                        // (What was chosen runs once the menu has gone, so
+                        // the keys go where it puts them, not back to the
+                        // image.)
+                        property var after: null
+                        onClosed: { const f = after; after = null; if (f) f() }
+                        // (Too narrow for it in the bar: where it came from.)
+                        AppMenuItem {
+                            objectName: "imageOriginItem"
+                            visible: root.ownList
+                            enabled: false
+                            text: root.labelOf(root.path)
+                        }
+                        AppMenuSeparator { visible: root.ownList; height: visible ? implicitHeight : 0 }
+                        AppMenuItem { text: "Turn left"; hint: "Shift+R"; onTriggered: moreMenu.after = () => view.rotate(false) }
+                        AppMenuItem { text: "Turn right"; hint: "R"; onTriggered: moreMenu.after = () => view.rotate(true) }
                         AppMenuItem {
                             visible: root.folder !== "" || (root.ownList && root.images.length > 1)
                             text: root.ownList ? "All the chat's pictures" : "The folder's images"
                             hint: "G"
-                            onTriggered: root.showGrid(true)
+                            onTriggered: moreMenu.after = () => root.showGrid(true)
                         }
                         AppMenuItem {
                             visible: !root.ownList
                             text: root.filled ? "Back into the tab" : "Fill the window"
                             hint: "F"
-                            onTriggered: { root.filled = !root.filled; root.focusView() }
+                            onTriggered: moreMenu.after = () => { root.filled = !root.filled; root.focusView() }
                         }
                     }
                 }
@@ -467,6 +485,15 @@ Item {
                     tip: root.filled ? "Back into the tab (F, Esc)" : "Fill the window (F)"
                     focusPolicy: Qt.NoFocus
                     onClicked: { root.filled = !root.filled; root.focusView() }
+                }
+                // (Last, where it's looked for.)
+                ComposerIconButton {
+                    objectName: "imageClose"
+                    visible: root.ownList
+                    iconName: "close"; tint: Theme.muted
+                    tip: "Close (Esc)"
+                    focusPolicy: Qt.NoFocus
+                    onClicked: root.closeRequested()
                 }
             }
         }

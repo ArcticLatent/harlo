@@ -687,6 +687,25 @@ ApplicationWindow {
         { seq: "Ctrl+/", label: "Comment lines out or back in", group: "File editor", icon: "code-box" },
         { seq: "Tab", label: "Indent the selected lines", group: "File editor", icon: "text-wrap" },
         { seq: "Shift+Tab", label: "Outdent the lines", group: "File editor", icon: "text-wrap" },
+        // An image (in a file's tab, or a chat's pictures over the chat).
+        { seq: "→", label: "Next image", group: "Image viewer", icon: "arrow-right-s" },
+        { seq: "J", label: "Next image", group: "Image viewer", icon: "arrow-right-s" },
+        { seq: "Space", label: "Next image", group: "Image viewer", icon: "arrow-right-s" },
+        { seq: "←", label: "Previous image", group: "Image viewer", icon: "arrow-left-s" },
+        { seq: "K", label: "Previous image", group: "Image viewer", icon: "arrow-left-s" },
+        { seq: "+", label: "Zoom in", group: "Image viewer", icon: "add" },
+        { seq: "−", label: "Zoom out", group: "Image viewer", icon: "subtract" },
+        { seq: "0", label: "Fit the view", group: "Image viewer", icon: "fullscreen-exit" },
+        { seq: "1", label: "Actual size", group: "Image viewer", icon: "fullscreen" },
+        { seq: "R", label: "Turn right", group: "Image viewer", icon: "rotate-right" },
+        { seq: "Shift+R", label: "Turn left", group: "Image viewer", icon: "rotate-left" },
+        { seq: "G", label: "All the images as a grid", group: "Image viewer", icon: "grid" },
+        { seq: "F", label: "Fill the window", group: "Image viewer", icon: "fullscreen" },
+        { seq: "T", label: "Open a chat's picture in a tab", group: "Image viewer", icon: "folder-open" },
+        { seq: "P", label: "Play or pause an animation", group: "Image viewer", icon: "play" },
+        { seq: "Esc", label: "Out of the grid, then close", group: "Image viewer", icon: "close" },
+        // Projects in the sidebar.
+        { seq: "Esc", label: "Call off dragging a project", group: "Sidebar", icon: "close" },
     ]
     Instantiator {
         model: win.shortcutList.filter(s => s.run)
@@ -5278,6 +5297,8 @@ ApplicationWindow {
             win.check(line !== null && line.visible && ly < fy + 6 && ly > fy - 20, "past the first project's header, the line shows just above it (" + Math.round(ly) + " over " + Math.round(fy) + ")")
             win.check(line !== null && line.y >= 0 && line.y + line.height <= line.parent.height, "and inside the list, at its very top too (" + (line ? line.y.toFixed(1) : "") + ")")
             win.check(ghost !== null && ghost.visible && win.findText("Rocket app", ghost) !== null, "and a copy of its header follows the pointer")
+            const below = first.mapToItem(null, 0, first.height).y, gy = ghost ? ghost.mapToItem(null, 0, 0).y : -1
+            win.check(line !== null && ghost !== null && line.z > ghost.z && gy >= below, "the copy hangs below the header it lands above, the line drawn over it (" + Math.round(gy) + " under " + Math.round(below) + ")")
             // Nothing under the pointer lights up as if it took the drop.
             const lit = []
             const walk = item => { for (const c of item.children) { if (c.hovered === true && c.objectName !== "projectDragGhost") lit.push(c.objectName || String(c)); walk(c) } }
@@ -5316,6 +5337,26 @@ ApplicationWindow {
         ScriptAction { script: {
             const names = JSON.parse(Workspace.projectsJson()).map(p => p.name)
             win.check(names[1] === "Rocket app", "Move down moves it a place (" + names.join(", ") + ")")
+            // Esc calls a drag off: it stays where it was.
+            const low = win.findName("projectTitle-Rocket app"), top = win.findName("projectTitle-" + names[0])
+            const from = low.mapToItem(null, 10, low.height / 2), to = top.mapToItem(null, 10, -6)
+            TestInput.moveTo(from.x, from.y); TestInput.press(from.x, from.y, true)
+            for (let i = 1; i <= 12; i++) TestInput.moveTo(from.x, from.y + (to.y - from.y) * i / 12) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const line = win.findName("projectDropLine")
+            win.check(line !== null && line.visible, "dragged again, the line shows")
+            TestInput.key(Qt.Key_Escape, 0) } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            const ghost = win.findName("projectDragGhost"), line = win.findName("projectDropLine")
+            win.check((ghost === null || !ghost.visible) && (line === null || !line.visible), "Esc calls the drag off")
+            const top = win.findName("projectTitle-" + JSON.parse(Workspace.projectsJson())[0].name), to = top.mapToItem(null, 10, -6)
+            TestInput.press(to.x, to.y, false) } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const names = JSON.parse(Workspace.projectsJson()).map(p => p.name)
+            win.check(names[1] === "Rocket app", "and letting go then leaves it where it was (" + names.join(", ") + ")")
             win.summary(); Qt.quit() } }
     }
 
@@ -6838,8 +6879,37 @@ ApplicationWindow {
             win.check(v.images.length === 7 && v.index === 1, "it steps through the chat's 7 pictures, this the 2nd (" + (v.index + 1) + " / " + v.images.length + ")")
             win.check(v.view.width >= chat.transcript.width - 1, "over the whole conversation")
             win.shotWindow("clicks-pictures-viewer")
-            const origin = win.findName("imageOrigin", v)
-            win.check(origin !== null && origin.text.startsWith("From "), "the bar says where it came from (" + (origin ? origin.text : "none") + ")")
+            const origin = win.findName("imageOrigin", v), more = win.findName("imageMore", v), close = win.findName("imageClose", v)
+            if (v.width < 640) {
+                win.check(origin === null && more !== null && close !== null && close.mapToItem(v, 0, 0).x > more.mapToItem(v, 0, 0).x, "narrow, the bar has ⋯ and close stays last, after it")
+                v.moreMenu.popup(more, 0, 0)
+            } else {
+                win.check(origin !== null && origin.text.startsWith("From "), "the bar says where it came from (" + (origin ? origin.text : "none") + ")")
+            }
+        } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const v = win.picViewer()
+            if (v.width < 640) {
+                const item = win.findName("imageOriginItem", v.moreMenu.contentItem)
+                win.check(item !== null && item.text.startsWith("From "), "and where it came from heads the ⋯ menu (" + (item ? item.text : "none") + ")")
+                win.shotWindow("clicks-pictures-more")
+                win.clickItem(win.findText("All the chat's pictures", v.moreMenu.contentItem), "All the chat's pictures")
+            }
+        } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const v = win.picViewer()
+            if (v.width < 640) {
+                win.check(v.gridMode && v.grid.activeFocus, "the grid chosen from ⋯ opens with the keys")
+                TestInput.key(Qt.Key_Escape, 0)
+            }
+        } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const v = win.picViewer()
+            v.focusView()
+            win.check(v.view.activeFocus, "the image has the keys again")
             win.imgEdges = win.imgEdgeColours(v.view)
             for (let i = 0; i < 8; i++) TestInput.key(Qt.Key_Plus, 0) } }
         PauseAnimation { duration: 800 }
@@ -6868,10 +6938,12 @@ ApplicationWindow {
             win.check(v.gridMode && v.grid.count === 7, "G: all the chat's pictures as a grid (" + v.grid.count + ")")
             win.shotWindow("clicks-pictures-grid")
             const names = win.findAllNames("imageThumbName", v.grid).map(l => l.text)
-            win.check(names.length === 7 && names.indexOf("You sent") >= 0 && names.indexOf("art/sun.png") >= 0 && names.every(n => !/[0-9a-f]{12}/.test(n)),
+            win.check(names.length === 7 && names.indexOf("You sent · Make me a sun picture") >= 0 && names.indexOf("You sent · And this one?") >= 0 && names.indexOf("art/sun.png") >= 0 && names.every(n => !/[0-9a-f]{12}/.test(n)),
                       "the grid names each by where it came from, not its stored file's name (" + names.join(", ") + ")")
             const goneTile = win.findAllNames("imageThumb", v.grid).find(t => t.path.endsWith("/art/gone.png"))
             win.check(goneTile && goneTile.status === "error" && win.findText("No longer on disk", goneTile.parent) !== null, "in the grid too, a picture gone from disk says so")
+            const sun = win.findAllNames("imageThumb", v.grid).find(t => t.path.endsWith("/art/sun.png"))
+            win.check(sun && sun.bottomAligned, "the grid's pictures sit on their names")
             TestInput.key(Qt.Key_Escape, 0) } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
@@ -7039,6 +7111,7 @@ ApplicationWindow {
             const go = win.shortcutList.filter(s => s.label === "Go to a session or action")
             win.check(go.length === 2 && go[0].group === go[1].group, "Ctrl+K and Ctrl+P are one row")
             win.check(win.composerKeys.some(s => s.group === "Runs in a session"), "the run keys are listed")
+            win.check(win.composerKeys.filter(s => s.group === "Image viewer").length >= 12 && win.composerKeys.some(s => s.group === "Sidebar" && s.seq === "Esc"), "the image viewer's keys and Esc for a drag are listed")
             win.check(!!win.findName("shortcutTips", shortcutsDialog.contentItem), "the footer explains > and @")
             shortcutsDialog.close(); Workspace.chooseThemeMode("light") } }
         PauseAnimation { duration: 800 }
