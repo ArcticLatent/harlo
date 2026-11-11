@@ -51,6 +51,7 @@ mod responses;
 mod retry;
 mod rpc;
 mod sandbox;
+mod search;
 mod session;
 mod skills;
 mod stubs;

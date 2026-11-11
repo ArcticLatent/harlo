@@ -1564,6 +1564,16 @@ mod tests {
         let search = rows.iter().find(|r| r.kind == RowKind::Tool).expect("a row for the search");
         assert_eq!((search.title.as_str(), search.subtitle.as_str(), search.state.as_str()), ("web_search", "rust latest release", "done"));
         assert_eq!(crate::actions::kind("web_search"), "web");
+        // harlo-agent's own web_search (a tool call and its result) looks the same.
+        let mut t = Transcript::new();
+        t.load_messages(&[
+            json!({"role":"user","content":"latest rust?"}),
+            json!({"role":"assistant","model":"m","content":[{"type":"toolCall","id":"c1","name":"web_search","arguments":{"query":"rust latest release"}}]}),
+            json!({"role":"toolResult","toolCallId":"c1","toolName":"web_search","content":[{"type":"text","text":"Rust 1.99.1"}],"isError":false}),
+        ]);
+        let rows = t.rows();
+        let search = rows.iter().find(|r| r.kind == RowKind::Tool).expect("a row for the search");
+        assert_eq!((search.title.as_str(), search.subtitle.as_str(), search.state.as_str()), ("web_search", "rust latest release", "done"));
     }
 
     #[test]

@@ -672,12 +672,14 @@ impl Agent {
             let triples: Vec<(&str, &str, &Value)> = ids.iter().copied().zip(names.iter().copied()).zip(&args).map(|((i, n), a)| (i, n, a)).collect();
             // (Subagents: what they take from this session, when asked for.)
             let task = names.contains(&"task").then(|| self.task_ctx());
+            let key = self.cache_key.clone().unwrap_or_else(|| self.log.id.clone());
             let extra = Extra {
                 gate: self.gate.as_deref(),
                 harlo: self.harlo.as_deref().map(|h| (h, self.harlo_tools.as_slice())),
                 allowed: self.allowed,
                 task: task.as_ref(),
                 mcp: self.mcp.as_ref(),
+                search: Some((&self.model, &key)),
             };
             let outcomes = run_calls(&self.tools, &triples, &extra, stop).await;
             handed_over |= hands_over(&names, &outcomes);
@@ -708,6 +710,14 @@ impl Agent {
                     self.totals.input += u["input"].as_u64().unwrap_or(0);
                     self.totals.cached += u["cached"].as_u64().unwrap_or(0);
                     self.totals.output += u["output"].as_u64().unwrap_or(0);
+                    // (A web search's request comes out of the session's budget;
+                    // subagents take theirs from it themselves.)
+                    if *name == crate::search::NAME
+                        && let Some(b) = &self.budget
+                    {
+                        let spent = u["input"].as_u64().unwrap_or(0).saturating_sub(u["cached"].as_u64().unwrap_or(0)) + u["output"].as_u64().unwrap_or(0);
+                        b.spent.fetch_add(spent, std::sync::atomic::Ordering::Relaxed);
+                    }
                     result["details"] = o.details;
                 }
                 self.push(result, show)?;
@@ -1263,12 +1273,14 @@ async fn send_once(a: Asked<'_>, show: &mut (dyn FnMut(Shown) + Send)) -> Result
         input.push(json!({ "type": "compaction_trigger" }));
     }
     let mut specs = a.specs.clone();
-    // (The server's own web search, beside fetch: where there's network.)
+    // (The server's web search, beside fetch: where there's network. As a
+    // tool of ours: offered as the server's, its instructions came with
+    // every request; see `search`.)
     if provider.searches_web()
         && let Some(list) = specs.as_array_mut()
         && list.iter().any(|t| t["name"] == "fetch")
     {
-        list.push(json!({ "type": "web_search" }));
+        list.push(crate::search::spec());
     }
     let mut body = responses::request(&model, a.instructions, &input, specs, effort.as_deref(), a.session);
     if !a.tools {
@@ -1394,18 +1406,45 @@ struct Extra<'a> {
     allowed: Option<&'a [&'a str]>,
     task: Option<&'a crate::task::Ctx>,
     mcp: Option<&'a crate::mcp::Mcp>,
+    /// The session's model and cache key, for web searches.
+    search: Option<(&'a str, &'a str)>,
 }
 
 impl Extra<'_> {
     /// Whether a call only looks (several of those run at once, and they
     /// don't need the user's yes).
     fn read_only(&self, name: &str) -> bool {
-        tools::read_only(name) || self.mcp.is_some_and(|m| m.read_only(name))
+        tools::read_only(name) || name == crate::search::NAME || self.mcp.is_some_and(|m| m.read_only(name))
+    }
+}
+
+/// A web search: a request of its own, with the server's search in it.
+async fn web_search(args: &Value, model: &str, key: &str) -> tools::Outcome {
+    let Some(query) = args["query"].as_str().map(str::trim).filter(|q| !q.is_empty()) else {
+        return tools::Outcome::new("Say what to search for in query.", true);
+    };
+    let history = crate::search::history(query);
+    let specs = crate::search::request_specs();
+    let key = format!("{key}-search");
+    let asked = Asked { model, effort: Some("low"), instructions: crate::search::INSTRUCTIONS, history: &history, session: &key, specs: &specs, tools: true, images: false, trigger: false };
+    let mut quiet = |_: Shown| {};
+    match send(asked, &mut quiet).await {
+        Ok((reply, usage)) => {
+            let mut o = tools::Outcome::new(crate::search::findings(&reply), false);
+            o.details = json!({ "usage": crate::search::usage(&usage) });
+            o
+        }
+        Err(e) => tools::Outcome::new(format!("The search failed: {e:#}"), true),
     }
 }
 
 /// A call of ours or of an MCP server's.
-async fn call_tool(tools: &Tools, mcp: Option<&crate::mcp::Mcp>, name: &str, args: &Value) -> tools::Outcome {
+async fn call_tool(tools: &Tools, mcp: Option<&crate::mcp::Mcp>, search: Option<(&str, &str)>, name: &str, args: &Value) -> tools::Outcome {
+    if name == crate::search::NAME
+        && let Some((model, key)) = search
+    {
+        return web_search(args, model, key).await;
+    }
     if name == "run_code" {
         let mut specs: Vec<Value> = tools::specs().as_array().cloned().unwrap_or_default();
         if crate::lsp::offered(&tools.cwd) {
@@ -1429,10 +1468,13 @@ async fn run_calls(tools: &Tools, calls: &[(&str, &str, &Value)], extra: &Extra<
     let (gate, harlo) = (extra.gate, extra.harlo);
     // (A subagent's: only its own.)
     // (apply_patch is edit when it's offered in its place.)
-    let not_here = |name: &str| extra.allowed.is_some_and(|only| !only.contains(&name) && !(name == "apply_patch" && only.contains(&"edit")));
+    // (web_search goes with fetch.)
+    let not_here = |name: &str| {
+        extra.allowed.is_some_and(|only| !only.contains(&name) && !(name == "apply_patch" && only.contains(&"edit")) && !(name == crate::search::NAME && only.contains(&"fetch")))
+    };
     let mcp = extra.mcp;
     if calls.iter().all(|(_, n, _)| extra.read_only(n) && !not_here(n)) {
-        let all = join_all(calls.iter().map(|(_, name, args)| async move { if args.is_null() { bad_args() } else { call_tool(tools, mcp, name, args).await } }));
+        let all = join_all(calls.iter().map(|(_, name, args)| async move { if args.is_null() { bad_args() } else { call_tool(tools, mcp, extra.search, name, args).await } }));
         return tokio::select! {
             biased;
             _ = stop.cancelled() => calls.iter().map(|_| cut(INTERRUPTED)).collect(),
@@ -1553,7 +1595,7 @@ async fn run_calls(tools: &Tools, calls: &[(&str, &str, &Value)], extra: &Extra<
         let ran = tokio::select! {
             biased;
             _ = stop.cancelled() => None,
-            o = call_tool(tools, mcp, name, args) => Some(o),
+            o = call_tool(tools, mcp, extra.search, name, args) => Some(o),
         };
         out.push(ran.unwrap_or_else(|| cut(INTERRUPTED)));
     }
