@@ -130,6 +130,12 @@ final class HarloUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 0.6)
     }
 
+    /// Lines wrapped to start with, whatever a test before left (the
+    /// setting is kept on the phone).
+    func wrapped(_ long: XCUIElement, _ screen: CGRect) {
+        if long.waitForExistence(timeout: 8), long.frame.maxX > screen.maxX + 1 { toggleWrap() }
+    }
+
     // ---- the screens ---------------------------------------------------------
 
     func test01Dashboard() {
@@ -287,6 +293,7 @@ final class HarloUITests: XCTestCase {
         // scroll across, and wraps them again.
         let screen = app.windows.firstMatch.frame
         let long = element("each project's sessions, newest first")
+        wrapped(long, screen)
         XCTAssertTrue(long.exists && long.frame.maxX <= screen.maxX + 1, "a long line wraps (\(long.frame) in \(screen))")
         toggleWrap()
         XCTAssertTrue(long.frame.maxX > screen.maxX, "kept whole, it runs past the screen (\(long.frame))")
@@ -306,6 +313,7 @@ final class HarloUITests: XCTestCase {
         let screen = app.windows.firstMatch.frame
         let long = element("each project's sessions, newest first")
         let short = element("use crate::projects::project_rows")
+        wrapped(long, screen)
         XCTAssertTrue(long.exists && long.frame.maxX <= screen.maxX + 1, "a long line wraps (\(long.frame) in \(screen))")
         // (Its folder above the code, not its name again: that's the title.)
         see("In src")
@@ -318,6 +326,8 @@ final class HarloUITests: XCTestCase {
                       "lines start at the left, lined up (\(short.frame), \(long.frame))")
         XCTAssertEqual(short.frame.height, long.frame.height, accuracy: 1, "a line's height is one row's")
         shot("21c-file-whole")
+        toggleWrap()
+        XCTAssertTrue(long.frame.maxX <= screen.maxX + 1, "wrapped again (\(long.frame))")
     }
 
     func test13ActionLog() {
@@ -347,8 +357,10 @@ final class HarloUITests: XCTestCase {
             XCTAssertTrue(last.waitForExistence(timeout: 8), "the last reply", file: file, line: line)
             // (Settled.)
             Thread.sleep(forTimeInterval: 1.5)
+            // (Its end: at a large text size it's taller than the room above
+            // the panels.)
             let bottom = app.otherElements["sessionBottom"].frame
-            XCTAssertTrue(last.frame.minY >= 0 && last.frame.minY < bottom.minY, "\(why): the last reply in sight (\(last.frame), the composer at \(bottom.minY))", file: file, line: line)
+            XCTAssertTrue(last.frame.maxY > 0 && last.frame.maxY <= bottom.minY + 1, "\(why): the last reply's end in sight (\(last.frame), the composer at \(bottom.minY))", file: file, line: line)
         }
         openMain()
         atEnd("opened")
