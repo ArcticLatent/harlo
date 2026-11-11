@@ -1051,6 +1051,7 @@ ApplicationWindow {
     }
     TextFile { id: testFile }
     function sidebarCount() { let n = 0; while (Workspace.keyAt(n) !== "") n++; return n }
+    property int sessionsBefore: 0
     Connections {
         target: chat.transcript
         function onCountChanged() {
@@ -5279,10 +5280,18 @@ ApplicationWindow {
             // (findName skips what's faded out: its title isn't to be found.)
             win.check(win.findName("projectTitle-Rocket app") === null && win.findName("projectTitle-" + win.selftestDir.split("/").filter(s => s).pop()) !== null, "its place is left empty")
             win.shotWindow("clicks-projects-drag")
+            // A session starting mid-drag (the rows made again) doesn't drop it.
+            win.sessionsBefore = win.sidebarCount()
+            Workspace.newSession(-1, "demo") } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: {
+            const ghost = win.findName("projectDragGhost")
+            win.check(ghost !== null && ghost.visible && win.sidebarCount() === win.sessionsBefore, "a session starting mid-drag leaves the rows as they are, still lifted")
             const top = win.findName("projectTitle-" + win.selftestDir.split("/").filter(s => s).pop()), to = top.mapToItem(null, 10, -6)
             TestInput.press(to.x, to.y, false) } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
+            win.check(win.sidebarCount() === win.sessionsBefore + 1, "dropped, the rows catch up (" + win.sidebarCount() + ")")
             const names = JSON.parse(Workspace.projectsJson()).map(p => p.name)
             win.check(names[0] === "Rocket app", "dropped above, it's first (" + names.join(", ") + ")")
             const line = win.findName("projectDropLine"), ghost = win.findName("projectDragGhost")

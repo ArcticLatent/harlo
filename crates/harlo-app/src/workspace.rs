@@ -129,6 +129,11 @@ pub mod qobject {
         /// stay where they're put, whatever runs in them.
         #[qinvokable]
         fn move_project(self: Pin<&mut Workspace>, id: i32, before: i32);
+        /// Holds the sidebar's rows as they are (while a project is
+        /// dragged: a row made again would drop the drag), then lets them
+        /// catch up.
+        #[qinvokable]
+        fn hold_rows(self: Pin<&mut Workspace>, hold: bool);
         /// Moves a project up (-1) or down (1) a place.
         #[qinvokable]
         fn move_project_step(self: Pin<&mut Workspace>, id: i32, step: i32);
@@ -973,6 +978,10 @@ pub struct WorkspaceRust {
     next_live: u64,
     filter: String,
     other_collapsed: bool,
+    /// The sidebar's rows held still (a project being dragged), and
+    /// whether they changed meanwhile.
+    rows_held: bool,
+    rows_pending: bool,
     expanded: Vec<i64>,
     /// Projects whose Settled shelf is open.
     shelves_open: Vec<i64>,
@@ -1598,6 +1607,13 @@ impl Workspace {
         let r = self.db().map(|db| db.set_project_order(&ids)).transpose();
         self.as_mut().report(r);
         self.reload_projects();
+    }
+
+    pub fn hold_rows(mut self: Pin<&mut Self>, hold: bool) {
+        self.as_mut().rust_mut().rows_held = hold;
+        if !hold && std::mem::take(&mut self.as_mut().rust_mut().rows_pending) {
+            self.rebuild();
+        }
     }
 
     pub fn move_project_step(self: Pin<&mut Self>, id: i32, step: i32) {
@@ -6005,6 +6021,10 @@ impl Workspace {
     fn rebuild(mut self: Pin<&mut Self>) {
         if crate::phone_bridge::active() {
             self.publish_phone_sessions();
+        }
+        if self.rows_held {
+            self.as_mut().rust_mut().rows_pending = true;
+            return;
         }
         // This instance's: its projects, sessions (by their file) and runs.
         let sessions: Vec<SessionInfo> = self.sessions.values().filter(|s| self.here(&s.path)).cloned().collect();

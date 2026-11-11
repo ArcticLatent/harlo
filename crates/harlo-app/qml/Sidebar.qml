@@ -330,6 +330,18 @@ Rectangle {
             property real dragGrab: 0
             readonly property real dragY: dragId >= 0 ? mapFromItem(null, 0, dragSceneY).y : 0
             cacheBuffer: dragId >= 0 ? 100000 : 320
+            // (A drag moves the project, not the list; the rows hold still
+            // meanwhile, see hold_rows.)
+            interactive: dragId < 0
+            onDragIdChanged: Workspace.holdRows(dragId >= 0)
+            // The pointer, watched by the list too: the drag follows it and
+            // ends when it's let go, even if the header it started on is
+            // gone.
+            PointHandler {
+                acceptedButtons: Qt.LeftButton
+                onTranslationChanged: if (list.dragId >= 0) { list.dragSceneY = point.scenePosition.y; list.updateDrop() }
+                onActiveChanged: if (!active && list.dragId >= 0) list.endDrag(true)
+            }
             // Where it goes: past every project whose header the pointer
             // has crossed (a header counts once its middle is above the
             // pointer), so it lands before the first one still below it,
