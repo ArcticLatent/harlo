@@ -339,27 +339,16 @@ impl Sandbox {
 
     /// What the model's told about it.
     pub fn describe(&self) -> String {
-        self.describe_for(true)
-    }
-
-    /// `can_ask`: whether a command may run outside it with the user's yes
-    /// (`outside_sandbox`); else the model says what the user should run.
-    pub fn describe_for(&self, can_ask: bool) -> String {
         if let Some(why) = &self.broken {
             return format!("Commands can't run on this machine: Harlo's sandbox can't start ({why}). Tell the user if you need to run one.");
         }
-        let changeable = match (self.project_writable, can_ask) {
-            (true, _) => format!("{}, /tmp and tool caches", self.project.display()),
-            (false, true) => format!("/tmp and tool caches (this session works in {}, the home folder or above it, which stays read-only: to change a file there, use outside_sandbox for a command and say why)", self.project.display()),
-            (false, false) => format!("/tmp and tool caches (this session works in {}, the home folder or above it, which stays read-only)", self.project.display()),
-        };
-        let outside = if can_ask {
-            "If a command fails because of the sandbox (say, git push needs SSH keys), run it again with outside_sandbox: true and say why: the user is asked first."
+        let changeable = if self.project_writable {
+            format!("{}, /tmp and tool caches", self.project.display())
         } else {
-            "Commands can't run outside it here: if one fails because of the sandbox (say, git push needs SSH keys), do it another way inside it, or say what the user should run."
+            format!("/tmp and tool caches (this session works in {}, the home folder or above it, which stays read-only: to change a file there, use outside_sandbox for a command and say why)", self.project.display())
         };
         format!(
-            "Commands run in a sandbox: they can change only {changeable} (the rest is read-only), and places that hold secrets (SSH keys, credentials, sign-ins, browser profiles) are hidden. The network is {}. {outside}",
+            "Commands run in a sandbox: they can change only {changeable} (the rest is read-only), and places that hold secrets (SSH keys, credentials, sign-ins, browser profiles) are hidden. The network is {}. If a command fails because of the sandbox (say, git push needs SSH keys), run it again with outside_sandbox: true and say why: the user is asked first.",
             if self.network { "available" } else { "off" }
         )
     }
@@ -540,10 +529,7 @@ pub mod tests {
             assert!(!sb.project_writable && !sb.writable.iter().any(|w| home.starts_with(w)), "{cwd:?}: {:?}", sb.writable);
             assert!(sb.may_write(&home.join("x")).unwrap_err().contains("keeps read-only"), "{cwd:?}");
             assert!(sb.may_write(Path::new("/tmp/x")).is_ok());
-            assert!(sb.describe().contains("stays read-only") && sb.describe().contains("outside_sandbox"));
-            // (Served to another agent: no one to ask.)
-            let served = sb.describe_for(false);
-            assert!(served.contains("stays read-only") && !served.contains("outside_sandbox") && served.contains("say what the user should run"), "{served}");
+            assert!(sb.describe().contains("stays read-only"));
         }
         // A repository of the whole home folder (dotfiles): a folder in it
         // is the project, not home.

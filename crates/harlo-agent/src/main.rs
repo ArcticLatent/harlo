@@ -14,9 +14,6 @@
 //! harlo-agent models           the models your plan can use
 //! harlo-agent -p "…" [-m model] [--thinking low|medium|high]
 //!                              [--resume | --session <file>]
-//! harlo-agent serve-tools [--sandbox on|off|no-network]
-//!                              its tools as an MCP server on stdin/stdout,
-//!                              in this folder (for Claude Code, from harlo)
 //! harlo-agent --version        and the commit it was built from
 //! harlo-agent --mode rpc [--session <file> | --no-session] [-m model] [--thinking level]
 //!                         [--harlo-tools] [--task-model provider/model] [--budget tokens]
@@ -54,7 +51,6 @@ mod responses;
 mod retry;
 mod rpc;
 mod sandbox;
-mod serve;
 mod session;
 mod skills;
 mod stubs;
@@ -149,19 +145,6 @@ async fn run(args: Vec<String>) -> Result<()> {
                 bail!("No models: sign in (`harlo-agent login`) or set up a provider in {}", auth::config_dir().join("providers.json").display());
             }
             Ok(())
-        }
-        Some("serve-tools") => {
-            // The tools as an MCP server (stdin/stdout) in this folder.
-            let mut sandbox = None;
-            let mut it = args.into_iter().skip(1);
-            while let Some(a) = it.next() {
-                match a.as_str() {
-                    "--sandbox" => sandbox = it.next(),
-                    other => bail!("serve-tools: unknown argument {other}"),
-                }
-            }
-            sandbox::configure(sandbox.as_deref())?;
-            serve::run(std::env::current_dir()?).await
         }
         Some("lsp-status") => {
             // For harlo's settings: each language's server here.
