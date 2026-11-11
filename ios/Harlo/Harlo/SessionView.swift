@@ -658,6 +658,64 @@ struct ProgressRing: View {
 
 /// What to type (photos, slash commands), the session's settings (model,
 /// thinking, approval mode, Plan), and send / stop.
+/// How full the session's context is: a slim bar the width of the
+/// composer, green, then amber and red as it nears where the agent
+/// compacts, with that place marked and the stretch past it shaded (as on
+/// the desktop); its percentage beside it. A tap gives the numbers and the
+/// cost so far.
+struct ContextBar: View {
+    @Environment(\.palette) private var p
+    let info: SessionInfo
+
+    var body: some View {
+        if info.contextWindow > 0 && info.contextTokens > 0 {
+            let used = info.contextUsed, mark = info.compactMark, way = info.contextWay
+            let marked = mark > 0 && mark < 1
+            let tint = way > 0.85 ? p.error : way > 0.6 ? p.warning : p.success
+            Menu {
+                Text("Context: \(Style.tokens(info.contextTokens)) of \(Style.tokens(info.contextWindow)) (\(Int(used * 100))%)")
+                if info.compactAt > 0 { Text("Compacts at \(Style.tokens(info.compactAt))") }
+                if info.cost > 0 { Text(String(format: "$%.2f so far", info.cost)) }
+            } label: {
+                HStack(spacing: 8) {
+                    GeometryReader { g in
+                        let w = g.size.width
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color(p.muted).opacity(0.18)).frame(height: 4)
+                            if marked {
+                                // Past where it compacts.
+                                Capsule().fill(Color(p.muted).opacity(0.3))
+                                    .frame(width: w * (1 - mark), height: 4)
+                                    .offset(x: w * mark)
+                            }
+                            Capsule().fill(Color(tint)).frame(width: max(4, w * used), height: 4)
+                            if marked {
+                                Capsule().fill(Color(p.muted))
+                                    .frame(width: 1.5, height: 8)
+                                    .offset(x: w * mark - 0.75)
+                            }
+                        }
+                        .frame(width: w, height: g.size.height)
+                    }
+                    .frame(height: 8)
+                    Text("\(Int(used * 100))% context")
+                        .scaledFont(11.5, .medium)
+                        .monospacedDigit()
+                        .foregroundStyle(Color(way > 0.6 ? tint : p.muted))
+                        .fixedSize()
+                }
+                .padding(.horizontal, 16)
+                .frame(minHeight: 18)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("contextBar")
+            .accessibilityLabel("Context \(Int(used * 100))%, \(Style.tokens(info.contextTokens)) of \(Style.tokens(info.contextWindow))"
+                + (info.compactAt > 0 ? ", compacts at \(Style.tokens(info.compactAt))" : ""))
+        }
+    }
+}
+
 struct Composer: View {
     @Environment(HarloModel.self) private var model
     @Environment(\.palette) private var p
@@ -706,9 +764,11 @@ struct Composer: View {
                     session.draft = Mention.insert(f, into: session.draft)
                 }
             }
+            // How full the context is, in a slim bar over the box.
+            ContextBar(info: session.info)
             // What to say, then one line: photos, the model (while it works:
-            // steer or queue), the session's options in one menu, the
-            // context, dictation, and send or stop.
+            // steer or queue), the session's options in one menu,
+            // dictation, and send or stop.
             VStack(alignment: .leading, spacing: 6) {
                 if !sendingPhotos.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
@@ -738,7 +798,6 @@ struct Composer: View {
                     if !big { if session.busy { steerOrQueue } else { modelChip } }
                     options
                     Spacer(minLength: 0)
-                    context
                     MicButton(text: $session.draft, size: 34)
                     sendOrStop
                 }
@@ -854,16 +913,9 @@ struct Composer: View {
     @ViewBuilder var options: some View {
         let m = session.modes
         let approvals = m?.approvals ?? []
-        let i = session.info
-        if !levels.isEmpty || !approvals.isEmpty || i.contextWindow > 0 {
+        if !levels.isEmpty || !approvals.isEmpty {
             let plan = m?.plan == true, yolo = m?.approval == "yolo"
             Menu {
-                if i.contextWindow > 0 {
-                    Section {
-                        Text("Context: \(Int(i.contextUsed * 100))% used (\(Style.tokens(i.contextTokens)) of \(Style.tokens(i.contextWindow)))")
-                        if i.cost > 0 { Text(String(format: "$%.2f so far", i.cost)) }
-                    }
-                }
                 if !levels.isEmpty {
                     Picker(selection: Binding(get: { session.info.thinking }, set: { l in Task { await model.setThinking(l) } })) {
                         ForEach(levels, id: \.self) { Text($0.capitalized).tag($0) }
@@ -891,39 +943,7 @@ struct Composer: View {
                     .overlay(Circle().strokeBorder(Color(plan || yolo ? p.primary.mix(p.raised, 0.4) : p.hairline), lineWidth: 1))
                     .foregroundStyle(Color(plan || yolo ? p.primary : p.muted))
             }
-            .accessibilityLabel("Options: thinking \(session.info.thinking), approvals \(Modes.label(m?.approval ?? "")), Plan \(plan ? "on" : "off"), context \(Int(i.contextUsed * 100))% used")
-        }
-    }
-
-    /// How full the context is, as a ring (amber near where it compacts);
-    /// tap for the numbers.
-    @ViewBuilder var context: some View {
-        let i = session.info
-        // (Until it's half full, it's in the options menu.)
-        if i.contextWindow > 0 && (i.contextUsed >= 0.5 || !i.compactNote.isEmpty) {
-            let near = !i.compactNote.isEmpty || i.contextUsed >= 0.9
-            Menu {
-                Text("Context: \(Style.tokens(i.contextTokens)) of \(Style.tokens(i.contextWindow)) (\(Int(i.contextUsed * 100))%)")
-                if i.compactAt > 0 { Text("Compacts at \(Style.tokens(i.compactAt))") }
-                if i.cost > 0 { Text(String(format: "$%.2f so far", i.cost)) }
-            } label: {
-                // (The number in it: a gauge, not a spinner.)
-                ZStack {
-                    Circle().stroke(Color(p.muted).opacity(0.3), lineWidth: 2.5)
-                    Circle().trim(from: 0, to: max(0.02, i.contextUsed))
-                        .stroke(Color(near ? p.warning : p.primary), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                    Text("\(Int(i.contextUsed * 100))")
-                        .font(.system(size: 10, weight: .bold))
-                        .monospacedDigit()
-                        .foregroundStyle(Color(near ? p.warning : p.foreground))
-                }
-                .frame(width: 28, height: 28)
-                .frame(width: 32, height: 34)
-                .contentShape(Rectangle())
-            }
-            .accessibilityLabel("Context \(Int(i.contextUsed * 100))%, \(Style.tokens(i.contextTokens)) of \(Style.tokens(i.contextWindow))"
-                + (i.compactAt > 0 ? ", compacts at \(Style.tokens(i.compactAt))" : ""))
+            .accessibilityLabel("Options: thinking \(session.info.thinking), approvals \(Modes.label(m?.approval ?? "")), Plan \(plan ? "on" : "off")")
         }
     }
 

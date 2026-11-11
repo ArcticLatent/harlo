@@ -159,6 +159,11 @@ final class HarloUITests: XCTestCase {
         launch("session")
         openMain()
         see("Found it")
+        // How full the context is: a slim bar over the box.
+        let ctx = app.buttons["contextBar"]
+        XCTAssertTrue(ctx.waitForExistence(timeout: 5), "the context bar")
+        XCTAssertTrue(ctx.label.hasPrefix("Context 9%"), ctx.label)
+        XCTAssertGreaterThan(ctx.frame.width, app.frame.width * 0.7, "as wide as the box (\(ctx.frame))")
         shot("02-session-reply")
         audit("session")
         // The run folded to its summary; opened, each call on its card.

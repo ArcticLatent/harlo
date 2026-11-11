@@ -162,6 +162,12 @@ extension SessionInfo {
         return "\(left >= 1000 ? "\((left + 500) / 1000)k" : "\(left)") tokens left before the context compacts"
     }
 
+    /// How far it is to where it compacts (or, not knowing, to the
+    /// window's end), 0…1: the context bar's colour.
+    public var contextWay: Double {
+        compactMark > 0 ? min(1, contextUsed / compactMark) : contextUsed
+    }
+
     /// Where it compacts, as a part of the window (0 unknown).
     public var compactMark: Double {
         contextWindow > 0 && compactAt > 0 ? min(1, Double(compactAt) / Double(contextWindow)) : 0

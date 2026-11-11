@@ -865,6 +865,11 @@ final class LimitsTests: XCTestCase {
         i.contextTokens = 170_000
         XCTAssertEqual(i.compactNote, "The context is at its limit: it compacts next")
         XCTAssertEqual(i.compactMark, 0.8, accuracy: 1e-9)
+        XCTAssertEqual(i.contextWay, 1, "past where it compacts")
+        i.contextTokens = 80_000
+        XCTAssertEqual(i.contextWay, 0.5, accuracy: 1e-9)
+        i.compactAt = 0
+        XCTAssertEqual(i.contextWay, 0.4, accuracy: 1e-9, "to the window's end")
         let meta = SessionInfo(["compactAt": 160000, "limitRefused": true])
         XCTAssertEqual(meta.compactAt, 160_000)
         XCTAssertTrue(meta.limitRefused)
