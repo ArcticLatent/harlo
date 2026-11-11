@@ -242,12 +242,14 @@ Item {
                     border.width: cellItem.current && grid.activeFocus ? 1 : 0
                     border.color: Theme.accent
                 }
-                // One gone from disk: a tile saying so, as in the chat.
+                // One gone from disk: a tile saying so, as in the chat (in
+                // light, a shade under the stage: the pictures there have
+                // no card).
                 Rectangle {
                     anchors.fill: thumb
                     visible: thumb.status === "error"
                     radius: 8
-                    color: Theme.codeBg
+                    color: Theme.isLight ? Qt.darker(root.backdrop, 1.035) : Theme.codeBg
                     border.color: Theme.border
                 }
                 ImageThumb {

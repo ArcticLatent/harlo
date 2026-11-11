@@ -5305,6 +5305,8 @@ ApplicationWindow {
             const walk = item => { for (const c of item.children) { if (c.hovered === true && c.objectName !== "projectDragGhost") lit.push(c.objectName || String(c)); walk(c) } }
             walk(sidebar)
             win.check(lit.length === 0, "rows don't light up under the dragged project (" + lit.join(", ") + ")")
+            const rows = win.findAllNames("sessionRow", sidebar).filter(r => r.visible)
+            win.check(rows.length > 0 && rows.every(r => r.opacity < 0.6), "the sessions fade while it's dragged: only the headers take it (" + rows.map(r => r.opacity).join(", ") + ")")
             // (findName skips what's faded out: its title isn't to be found.)
             win.check(win.findName("projectTitle-Rocket app") === null && win.findName("projectTitle-" + win.selftestDir.split("/").filter(s => s).pop()) !== null, "its place is left empty")
             win.shotWindow("clicks-projects-drag")
@@ -5358,6 +5360,23 @@ ApplicationWindow {
         ScriptAction { script: {
             const names = JSON.parse(Workspace.projectsJson()).map(p => p.name)
             win.check(names[1] === "Rocket app", "and letting go then leaves it where it was (" + names.join(", ") + ")")
+            // From the keyboard: its header focused, Alt+Shift+↑ moves it up.
+            let h = win.findName("projectTitle-Rocket app")
+            while (h && h.projectId === undefined) h = h.parent
+            win.check(h !== null && h.focusPolicy === Qt.TabFocus && h.Accessible.name.startsWith("Rocket app, project"), "a project's header takes the keys from Tab, named for a screen reader (" + (h ? h.Accessible.name : "") + ")")
+            h.forceActiveFocus(Qt.TabFocusReason)
+            TestInput.key(Qt.Key_Up, Qt.AltModifier | Qt.ShiftModifier) } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const names = JSON.parse(Workspace.projectsJson()).map(p => p.name)
+            const f = win.activeFocusItem
+            win.check(names[0] === "Rocket app" && f && f.projectId !== undefined && f.title === "Rocket app" && f.background.border.width === 2, "Alt+Shift+↑ moves it up, and its header keeps the keys, ringed (" + names.join(", ") + "; " + (f ? f.title : "none") + ")")
+            win.shotWindow("clicks-projects-keys")
+            TestInput.key(Qt.Key_F10, Qt.ShiftModifier) } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            win.check(sidebar.projectMenu.opened && sidebar.projectMenu.name === "Rocket app", "Shift+F10 opens its menu")
+            sidebar.projectMenu.close()
             win.summary(); Qt.quit() } }
     }
 

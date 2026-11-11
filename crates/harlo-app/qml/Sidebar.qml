@@ -14,6 +14,49 @@ Rectangle {
     // (Nothing spills under the chat when it's narrow.)
     clip: true
 
+    // Moves a project a place up (step -1) or down, or before another
+    // (`before`, -1: to the end), says where it went to a screen reader,
+    // and (moved from the keyboard) keeps the keys on its header.
+    property int focusAfterMove: -1
+    function moveProject(id, step, before, keepFocus) {
+        if (step !== 0)
+            Workspace.moveProjectStep(id, step)
+        else
+            Workspace.moveProject(id, before)
+        const ps = JSON.parse(Workspace.projectsJson())
+        const i = ps.findIndex(p => p.id === id)
+        if (i >= 0)
+            root.Accessible.announce(ps[i].name + (i + 1 < ps.length ? " moved above " + ps[i + 1].name : " moved to the end"))
+        if (keepFocus) {
+            focusAfterMove = id
+            refocus.restart()
+        }
+    }
+    // (Its header is made again after a move: the keys go to the new one.)
+    Timer {
+        id: refocus
+        interval: 30
+        onTriggered: {
+            for (const it of list.contentItem.children)
+                if (it.kind === "project" && it.projectId === root.focusAfterMove) {
+                    list.positionViewAtIndex(it.index, ListView.Contain)
+                    it.forceActiveFocus(Qt.TabFocusReason)
+                    root.focusAfterMove = -1
+                    return
+                }
+        }
+    }
+    // Opens a project's menu (from its header: right-click, Menu or Shift+F10).
+    function openProjectMenu(row, x, y) {
+        projectMenu.projectId = row.projectId
+        projectMenu.path = row.path
+        projectMenu.harness = row.harness
+        projectMenu.name = row.title
+        projectMenu.place = Workspace.projectPlace(row.projectId)
+        if (x === undefined) projectMenu.popup()
+        else projectMenu.popup(row, x, y)
+    }
+
     // Ticks so relative times ("5m") stay current.
     property double now: Date.now()
     Timer { interval: 30000; running: true; repeat: true; onTriggered: root.now = Date.now() }
@@ -131,8 +174,8 @@ Rectangle {
         }
         AppMenuSeparator { }
         // (Or drag the project's header.)
-        AppMenuItem { objectName: "projectMoveUp"; text: "Move up"; enabled: projectMenu.place !== "first" && projectMenu.place !== "only"; onTriggered: Workspace.moveProjectStep(projectMenu.projectId, -1) }
-        AppMenuItem { objectName: "projectMoveDown"; text: "Move down"; enabled: projectMenu.place !== "last" && projectMenu.place !== "only"; onTriggered: Workspace.moveProjectStep(projectMenu.projectId, 1) }
+        AppMenuItem { objectName: "projectMoveUp"; text: "Move up"; enabled: projectMenu.place !== "first" && projectMenu.place !== "only"; onTriggered: root.moveProject(projectMenu.projectId, -1, 0, false) }
+        AppMenuItem { objectName: "projectMoveDown"; text: "Move down"; enabled: projectMenu.place !== "last" && projectMenu.place !== "only"; onTriggered: root.moveProject(projectMenu.projectId, 1, 0, false) }
         AppMenuSeparator { }
         AppMenuItem { text: "Project settings…"; onTriggered: root.projectSettingsRequested(projectMenu.projectId) }
         AppMenuItem { text: "Open folder"; visible: !projectMenu.path.startsWith("ssh://"); onTriggered: Qt.openUrlExternally("file://" + projectMenu.path) }
@@ -400,7 +443,7 @@ Rectangle {
             function endDrag(drop) {
                 ghostSlide.stop()
                 if (drop && dragId >= 0 && dropY >= 0)
-                    Workspace.moveProject(dragId, dropBefore)
+                    root.moveProject(dragId, 0, dropBefore, false)
                 dragId = -1
                 dropY = -1
             }
@@ -426,9 +469,11 @@ Rectangle {
                 parent: list
                 visible: list.dragId >= 0
                 z: 20
-                x: 18
+                // (As wide as the rows, so the one under it doesn't show
+                // at its edges.)
+                x: 8
                 y: Math.max(0, Math.min(list.height - height, Math.max(list.dragY + list.ghostShift, list.ghostFloor)))
-                width: list.width - 36
+                width: list.width - 16
                 height: 30
                 radius: 8
                 rotation: -1
@@ -488,7 +533,7 @@ Rectangle {
                         leftPadding: 38
                         leftInset: 6
                         rightInset: 6
-                        opacity: list.dragId >= 0 && list.dragId === projectId ? 0.4 : 1
+                        opacity: list.dragId < 0 ? 1 : list.dragId === projectId ? 0.35 : 0.55
                         contentItem: Label { text: moreRow.title; color: Theme.muted; font.pixelSize: Theme.px(12); verticalAlignment: Text.AlignVCenter }
                         hoverEnabled: list.dragId < 0
                         background: Rectangle { radius: 8; color: moreRow.hovered ? Theme.hover : "transparent" }
@@ -505,7 +550,7 @@ Rectangle {
                         required property int count
                         required property int projectId
                         objectName: "shelfRow-" + rowKey
-                        opacity: list.dragId >= 0 && list.dragId === projectId ? 0.4 : 1
+                        opacity: list.dragId < 0 ? 1 : list.dragId === projectId ? 0.35 : 0.55
                         width: ListView.view.width
                         height: 30
                         leftPadding: 30
@@ -537,6 +582,7 @@ Rectangle {
                     roleValue: "session"
                     ItemDelegate {
                         id: sessionRow
+                        objectName: "sessionRow"
                         required property string rowKey
                         required property string title
                         required property string subtitle
@@ -552,8 +598,9 @@ Rectangle {
                         required property int nest
                         required property int projectId
                         readonly property bool active: rowKey === Workspace.activeKey
-                        // Its project lifted to move: faded with it.
-                        opacity: list.dragId >= 0 && list.dragId === projectId ? 0.4 : 1
+                        // While a project is dragged, the sessions fade (only
+                        // the headers take it), its own the most.
+                        opacity: list.dragId < 0 ? 1 : list.dragId === projectId ? 0.35 : 0.55
                         // On hover: whose helper it is, the cwd (other sessions)
                         // and/or the worktree branch, and why it's settled.
                         // On the Settled shelf: faded, until you point at it.
@@ -759,6 +806,26 @@ Rectangle {
         readonly property bool narrow: width < Theme.px(220)
         width: ListView.view.width
         height: 30 + gap
+        // From the keyboard (Tab reaches a project's header): Menu or
+        // Shift+F10 opens its menu, Alt+Shift+↑/↓ moves it.
+        focusPolicy: kind === "project" ? Qt.TabFocus : Qt.NoFocus
+        Accessible.role: Accessible.Button
+        Accessible.name: kind === "project" ? title + ", project, " + count + (count === 1 ? " session" : " sessions") : title
+        Accessible.description: kind === "project" ? "Alt+Shift+Up or Down moves it; Menu opens its menu" : ""
+        Keys.onPressed: event => {
+            if (kind !== "project")
+                return
+            if (event.key === Qt.Key_Menu || (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier))) {
+                root.openProjectMenu(groupRow, 0, height)
+                event.accepted = true
+            } else if ((event.key === Qt.Key_Up || event.key === Qt.Key_Down) && (event.modifiers & Qt.AltModifier) && (event.modifiers & Qt.ShiftModifier)) {
+                const place = Workspace.projectPlace(projectId)
+                const up = event.key === Qt.Key_Up
+                if (place !== "only" && place !== (up ? "first" : "last"))
+                    root.moveProject(projectId, up ? -1 : 1, 0, true)
+                event.accepted = true
+            }
+        }
         // The arrow shows on hover, whatever the platform's hover setting.
         hoverEnabled: list.dragId < 0
         leftInset: 10
@@ -770,6 +837,10 @@ Rectangle {
         background: Rectangle {
             radius: 8
             color: groupRow.hovered && !groupRow.lifted ? Theme.rowHover : "transparent"
+            // (With the keys, a ring: only the keyboard gives a header
+            // them, never a click.)
+            border.width: groupRow.activeFocus ? 2 : 0
+            border.color: Theme.accent
             Behavior on color { ColorAnimation { duration: Theme.hoverMotion } }
             Shape {
                 id: hole
@@ -915,14 +986,7 @@ Rectangle {
         TapHandler {
             acceptedButtons: Qt.RightButton
             enabled: groupRow.kind === "project"
-            onTapped: {
-                projectMenu.projectId = groupRow.projectId
-                projectMenu.path = groupRow.path
-                projectMenu.harness = groupRow.harness
-                projectMenu.name = groupRow.title
-                projectMenu.place = Workspace.projectPlace(groupRow.projectId)
-                projectMenu.popup()
-            }
+            onTapped: root.openProjectMenu(groupRow)
         }
     }
 }
