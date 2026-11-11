@@ -194,7 +194,7 @@ pub fn shorten(text: &str, total: usize, spill_dir: &Path) -> String {
     )
 }
 
-fn save(text: &str, dir: &Path) -> Option<String> {
+pub(crate) fn save(text: &str, dir: &Path) -> Option<String> {
     std::fs::create_dir_all(dir).ok()?;
     let mut b = [0u8; 6];
     getrandom::fill(&mut b).ok()?;

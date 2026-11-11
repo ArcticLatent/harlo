@@ -28,6 +28,15 @@ const PREVIEW_BYTES: usize = 12 * 1024;
 /// Entries `ls` and `find` list at most; matches `grep` shows.
 const LIST_MAX: usize = 500;
 const GREP_MAX: usize = 300;
+/// More matches than this, or more bytes: the first ones, a count per
+/// file, and all of them in a file (what a search shows stays in every
+/// later request). `HARLO_AGENT_GREP_CAP=off`: up to 300 shown.
+const GREP_SHOWN: usize = 100;
+const GREP_BYTES: usize = 12 * 1024;
+
+fn grep_capped() -> bool {
+    std::env::var("HARLO_AGENT_GREP_CAP").map_or(true, |v| v.trim() != "off")
+}
 
 pub struct Tools {
     pub cwd: PathBuf,
@@ -167,7 +176,7 @@ pub fn specs() -> Value {
                    With background: true it runs in the background (a server, a watcher, a long test run): you get its job id at once and are told when it ends (it times out after 30 min unless timeout says otherwise, up to 2 h); jobs shows its output, waits for it or stops it. Don't add & yourself.",
           json!({ "command": { "type": "string" }, "timeout": { "type": "integer" }, "background": { "type": "boolean" },
                   "outside_sandbox": { "type": "boolean", "description": "Run it outside the sandbox. Only when it failed because of the sandbox and really needs what the sandbox hides or protects (e.g. git push over SSH); say why first. The user is asked every time." } }), &["command"]),
-        f("grep", "Search file contents for a regular expression (ripgrep syntax; respects .gitignore). Shows file:line: text, up to 300 matches.",
+        f("grep", "Search file contents for a regular expression (ripgrep syntax; respects .gitignore). Shows file:line: text; many matches: the first, a count per file, and all of them in a file.",
           json!({ "pattern": { "type": "string" }, "path": { "type": "string" }, "glob": { "type": "string", "description": "Only files matching this, e.g. *.rs" }, "ignore_case": { "type": "boolean" } }), &["pattern"]),
         f("find", "Find files by name with a glob (e.g. **/*.toml), respecting .gitignore. Up to 500.",
           json!({ "pattern": { "type": "string" }, "path": { "type": "string" } }), &["pattern"]),
@@ -764,11 +773,59 @@ impl Tools {
             return ok("No matches.");
         }
         let total = lines.len();
+        let bytes: usize = lines.iter().map(|l| l.len() + 1).sum();
+        if grep_capped() && (total > GREP_SHOWN || bytes > GREP_BYTES) {
+            return ok(self.many_matches(&lines, path.is_dir()));
+        }
         let mut shown = lines.into_iter().take(GREP_MAX).collect::<Vec<_>>().join("\n");
         if total > GREP_MAX {
             shown.push_str(&format!("\n[{} matches; first {GREP_MAX} shown. Narrow the pattern, path or glob.]", total));
         }
         ok(shown)
+    }
+
+    /// Many matches: a line saying how many and in which files (the most
+    /// first), where all of them are, then the first ones.
+    fn many_matches(&self, lines: &[String], in_folder: bool) -> String {
+        let mut first = Vec::new();
+        let mut size = 0;
+        for l in lines {
+            if first.len() >= GREP_SHOWN || size + l.len() + 1 > GREP_BYTES {
+                break;
+            }
+            size += l.len() + 1;
+            first.push(l.as_str());
+        }
+        let mut files: Vec<(String, usize)> = Vec::new();
+        if in_folder {
+            let mut counts: HashMap<&str, usize> = HashMap::new();
+            for l in lines {
+                if let Some((file, _)) = l.split_once(':') {
+                    *counts.entry(file).or_default() += 1;
+                }
+            }
+            files = counts.into_iter().map(|(f, n)| (f.to_owned(), n)).collect();
+            files.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        }
+        let where_ = match files.len() {
+            0 | 1 => String::new(),
+            n => {
+                let named: Vec<String> = files.iter().take(8).map(|(f, c)| format!("{f} {c}")).collect();
+                let more = if n > 8 { format!(", {} more files", n - 8) } else { String::new() };
+                format!(" in {n} files ({}{more})", named.join(", "))
+            }
+        };
+        let all = lines.join("\n");
+        let saved = match bash::save(&all, &self.spill_dir) {
+            Some(p) => format!("All of them are in {p}: grep that, or read it with offset."),
+            None => "The rest couldn't be saved.".into(),
+        };
+        format!(
+            "[{} matches{where_}; the first {} shown. {saved} Or narrow the pattern, path or glob.]\n{}",
+            lines.len(),
+            first.len(),
+            first.join("\n")
+        )
     }
 
     async fn find(&self, pattern: &str, p: &str) -> Outcome {
@@ -806,6 +863,26 @@ impl Tools {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn many_matches_show_the_first_and_where_the_rest_are() {
+        let dir = std::env::temp_dir().join(format!("harlo-agent-grep-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("logs")).unwrap();
+        std::fs::write(dir.join("logs/a.log"), (1..=150).map(|i| format!("event {i} ok\n")).collect::<String>()).unwrap();
+        std::fs::write(dir.join("logs/b.log"), (1..=30).map(|i| format!("event {i} late\n")).collect::<String>()).unwrap();
+        let t = Tools::new(dir.clone(), dir.join(".out"));
+        let out = t.call("grep", &json!({ "pattern": "event", "path": "logs" })).await.text;
+        assert!(out.starts_with("[180 matches in 2 files (logs/a.log 150, logs/b.log 30); the first 100 shown. All of them are in "), "{}", &out[..200]);
+        assert_eq!(out.lines().count(), 101, "the note, then 100 matches");
+        let saved = out.split("All of them are in ").nth(1).unwrap().split(": grep that").next().unwrap();
+        assert_eq!(std::fs::read_to_string(saved).unwrap().lines().count(), 180);
+        // In one file: no count per file. A few: all of them, as they are.
+        let one = t.call("grep", &json!({ "pattern": "ok", "path": "logs/a.log" })).await.text;
+        assert!(one.starts_with("[150 matches; the first 100 shown."), "{}", &one[..120]);
+        let few = t.call("grep", &json!({ "pattern": "late", "path": "logs" })).await.text;
+        assert_eq!(few.lines().count(), 30);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[tokio::test]
     async fn a_huge_file_read_whole_shows_its_start_and_size() {
