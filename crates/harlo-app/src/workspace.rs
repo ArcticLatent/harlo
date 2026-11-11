@@ -125,6 +125,16 @@ pub mod qobject {
         /// Other sessions, and says why).
         #[qinvokable]
         fn remove_project_and_sessions(self: Pin<&mut Workspace>, id: i32);
+        /// Moves a project to just before `before` (-1: last). Projects
+        /// stay where they're put, whatever runs in them.
+        #[qinvokable]
+        fn move_project(self: Pin<&mut Workspace>, id: i32, before: i32);
+        /// Moves a project up (-1) or down (1) a place.
+        #[qinvokable]
+        fn move_project_step(self: Pin<&mut Workspace>, id: i32, step: i32);
+        /// Where a project is among them: "first", "last", "only" or "".
+        #[qinvokable]
+        fn project_place(self: &Workspace, id: i32) -> QString;
         #[qinvokable]
         fn set_project_harness(self: Pin<&mut Workspace>, id: i32, harness: &QString);
         /// Collapses or expands a project (`project:<id>`), `group:other`,
@@ -1577,6 +1587,67 @@ impl Workspace {
     }
 
     /// This instance's sessions of a project.
+    pub fn move_project(mut self: Pin<&mut Self>, id: i32, before: i32) {
+        let (id, before) = (i64::from(id), i64::from(before));
+        if id == before {
+            return;
+        }
+        let mut ids: Vec<i64> = self.projects.iter().map(|p| p.id).filter(|p| *p != id).collect();
+        let at = ids.iter().position(|p| *p == before).unwrap_or(ids.len());
+        ids.insert(at, id);
+        let r = self.db().map(|db| db.set_project_order(&ids)).transpose();
+        self.as_mut().report(r);
+        self.reload_projects();
+    }
+
+    pub fn move_project_step(self: Pin<&mut Self>, id: i32, step: i32) {
+        let ids: Vec<i64> = self.projects.iter().filter(|p| self.here(&p.path)).map(|p| p.id).collect();
+        let Some(at) = ids.iter().position(|p| *p == i64::from(id)) else { return };
+        // (Down a place: before the one after the next, or last.)
+        let before = match step {
+            s if s < 0 && at > 0 => ids[at - 1],
+            s if s > 0 && at + 1 < ids.len() => ids.get(at + 2).copied().unwrap_or(-1),
+            _ => return,
+        };
+        self.move_project(id, before as i32);
+    }
+
+    pub fn project_place(&self, id: i32) -> QString {
+        let ids: Vec<i64> = self.projects.iter().filter(|p| self.here(&p.path)).map(|p| p.id).collect();
+        let at = ids.iter().position(|p| *p == i64::from(id));
+        QString::from(match at {
+            Some(_) if ids.len() == 1 => "only",
+            Some(0) => "first",
+            Some(i) if i + 1 == ids.len() => "last",
+            _ => "",
+        })
+    }
+
+    /// Projects used to go in the order they were last worked in: once,
+    /// they're placed in that order, to stay there.
+    fn place_projects_once(mut self: Pin<&mut Self>) {
+        const PLACED: &str = "projects_placed";
+        if self.sessions.is_empty() || self.db().is_none_or(|db| db.get(PLACED).ok().flatten().is_some()) {
+            return;
+        }
+        let sessions: Vec<SessionInfo> = self.sessions.values().cloned().collect();
+        let ids = sidebar::by_latest(&SidebarInput {
+            projects: &self.projects,
+            worktrees: &self.worktrees,
+            sessions: &sessions,
+            live: &[],
+            meta: &self.meta,
+            filter: "",
+            show_archived: true,
+            other_collapsed: false,
+            expanded: &[],
+            shelves_open: &[],
+        });
+        let r = self.db().map(|db| db.set_project_order(&ids).and_then(|_| db.set(PLACED, "1"))).transpose();
+        self.as_mut().report(r);
+        self.reload_projects();
+    }
+
     fn sessions_of_project(&self, id: i64) -> Vec<sidebar::ProjectSession> {
         let sessions: Vec<SessionInfo> = self.sessions.values().filter(|s| self.here(&s.path)).cloned().collect();
         let live: Vec<LiveInfo> = self.live.values().filter(|e| self.here(&e.info.cwd)).map(|e| e.info.clone()).collect();
@@ -3509,6 +3580,7 @@ impl Workspace {
         for info in delta.upserts {
             this.sessions.insert(info.path.clone(), info);
         }
+        self.as_mut().place_projects_once();
         self.as_mut().rebuild();
         // Tabs of remote sessions, once their host's sessions arrive.
         if !self.pending_remote_tabs.is_empty() {

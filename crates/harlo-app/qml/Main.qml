@@ -5242,6 +5242,52 @@ ApplicationWindow {
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
             win.check(win.findName("projectIcon-Rocket app").icon === "", "the folder again")
+            settingsDialog.close()
+            // A second project (the test's own folder): it goes first.
+            Workspace.addProject(win.selftestDir) } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const names = () => JSON.parse(Workspace.projectsJson()).map(p => p.name)
+            const second = win.selftestDir.split("/").filter(s => s).pop()
+            win.check(names()[0] === second && names()[1] === "Rocket app", "a new project goes first (" + names().join(", ") + ")")
+            // A session in the lower project doesn't move it up.
+            Workspace.newSession(JSON.parse(Workspace.projectsJson())[1].id, "demo") } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: {
+            const second = win.selftestDir.split("/").filter(s => s).pop()
+            const top = win.findName("projectTitle-" + second), low = win.findName("projectTitle-Rocket app")
+            win.check(top !== null && low !== null && top.mapToItem(null, 0, 0).y < low.mapToItem(null, 0, 0).y, "a new session in the lower project leaves it where it is")
+            // Dragged by its header above the first: it goes first.
+            const from = low.mapToItem(null, 10, low.height / 2), to = top.mapToItem(null, 10, -6)
+            TestInput.moveTo(from.x, from.y); TestInput.press(from.x, from.y, true)
+            for (let i = 1; i <= 12; i++) TestInput.moveTo(from.x, from.y + (to.y - from.y) * i / 12) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const line = win.findName("projectDropLine")
+            win.check(line !== null && line.visible, "dragging, a line shows where it goes")
+            win.shotWindow("clicks-projects-drag")
+            const top = win.findName("projectTitle-" + win.selftestDir.split("/").filter(s => s).pop()), to = top.mapToItem(null, 10, -6)
+            TestInput.press(to.x, to.y, false) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const names = JSON.parse(Workspace.projectsJson()).map(p => p.name)
+            win.check(names[0] === "Rocket app", "dropped above, it's first (" + names.join(", ") + ")")
+            const line = win.findName("projectDropLine")
+            win.check(line === null || !line.visible, "and the line goes")
+            // Its menu: Move down, and Move up is off at the top.
+            const p = JSON.parse(Workspace.projectsJson())[0]
+            sidebar.projectMenu.projectId = p.id; sidebar.projectMenu.path = p.path; sidebar.projectMenu.name = p.name; sidebar.projectMenu.harness = p.harness
+            sidebar.projectMenu.place = Workspace.projectPlace(p.id)
+            sidebar.projectMenu.popup(sidebar, 120, 160) } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const m = sidebar.projectMenu.contentItem, up = win.findName("projectMoveUp", m), down = win.findName("projectMoveDown", m)
+            win.check(up !== null && !up.enabled && down !== null && down.enabled, "at the top, Move up is off")
+            win.clickText("Move down") } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const names = JSON.parse(Workspace.projectsJson()).map(p => p.name)
+            win.check(names[1] === "Rocket app", "Move down moves it a place (" + names.join(", ") + ")")
             win.summary(); Qt.quit() } }
     }
 

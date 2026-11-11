@@ -305,7 +305,8 @@ impl Db {
     pub fn add_project(&self, path: &Path, harness: &str) -> Result<Project> {
         let path_str = path.to_string_lossy();
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path_str.to_string());
-        let position: i64 = self.conn.query_row("SELECT COALESCE(MAX(position), -1) + 1 FROM projects", [], |r| r.get(0))?;
+        // (A new project goes first.)
+        let position: i64 = self.conn.query_row("SELECT COALESCE(MIN(position), 1) - 1 FROM projects", [], |r| r.get(0))?;
         self.conn.execute(
             "INSERT INTO projects (path, name, harness, position) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(path) DO NOTHING",
             params![path_str, name, harness, position],
@@ -316,6 +317,18 @@ impl Db {
             .find(|p| p.path == path)
             .context("project missing after insert")?;
         Ok(project)
+    }
+
+    /// Puts the projects in this order (those not named keep theirs, after).
+    pub fn set_project_order(&self, ids: &[i64]) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        let mut all: Vec<i64> = tx.prepare("SELECT id FROM projects ORDER BY position, id")?.query_map([], |r| r.get(0))?.collect::<std::result::Result<_, _>>()?;
+        all.sort_by_key(|id| ids.iter().position(|x| x == id).unwrap_or(usize::MAX));
+        for (i, id) in all.iter().enumerate() {
+            tx.execute("UPDATE projects SET position = ?2 WHERE id = ?1", params![id, i as i64])?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn remove_project(&self, id: i64) -> Result<()> {
@@ -569,12 +582,17 @@ mod tests {
         assert_eq!(a, again, "adding the same path returns the existing project");
         let b = db.add_project(Path::new("/home/u/beta"), "pi").unwrap();
         assert_eq!(a.name, "alpha");
-        assert!(b.position > a.position);
+        assert!(b.position < a.position, "a new project goes first");
+        let c = db.add_project(Path::new("/home/u/gamma"), "pi").unwrap();
+        let ids = |db: &Db| db.projects().unwrap().iter().map(|p| p.id).collect::<Vec<_>>();
+        assert_eq!(ids(&db), [c.id, b.id, a.id]);
+        db.set_project_order(&[a.id, c.id]).unwrap();
+        assert_eq!(ids(&db), [a.id, c.id, b.id]);
         db.set_project_collapsed(b.id, true).unwrap();
         db.remove_project(a.id).unwrap();
         let all = db.projects().unwrap();
-        assert_eq!(all.len(), 1);
-        assert!(all[0].collapsed);
+        assert_eq!(all.len(), 2);
+        assert!(!all[0].collapsed && all[1].collapsed);
     }
 
     #[test]
@@ -656,7 +674,8 @@ mod tests {
         }
         let db = Db::open(&file).unwrap();
         let get = |k: &str| db.get(&format!("settings.{k}")).unwrap();
-        let projects = db.projects().unwrap();
+        let mut projects = db.projects().unwrap();
+        projects.sort_by_key(|p| p.id);
         assert_eq!(projects.iter().map(|p| p.harness.as_str()).collect::<Vec<_>>(), ["harlo", "claude"]);
         let schedules = db.schedules().unwrap();
         assert_eq!((schedules[0].harness.as_str(), schedules[0].model.as_str()), ("harlo", ""));
@@ -677,7 +696,7 @@ mod tests {
         // Once: one chosen afterwards stays.
         db.set_project_harness(projects[1].id, "omp").unwrap();
         drop(db);
-        assert_eq!(Db::open(&file).unwrap().projects().unwrap()[1].harness, "omp");
+        assert_eq!(Db::open(&file).unwrap().projects().unwrap().iter().find(|p| p.id == projects[1].id).unwrap().harness, "omp");
         let _ = std::fs::remove_file(&file);
         for ext in ["-wal", "-shm"] {
             let _ = std::fs::remove_file(format!("{}{ext}", file.display()));

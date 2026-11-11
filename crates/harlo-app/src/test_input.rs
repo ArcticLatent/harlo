@@ -13,6 +13,8 @@ pub mod qobject {
         #[namespace = "harlo"]
         fn test_click(x: f64, y: f64, button: i32);
         #[namespace = "harlo"]
+        fn test_press(x: f64, y: f64, down: bool);
+        #[namespace = "harlo"]
         fn test_key(key: i32, modifiers: i32);
         #[namespace = "harlo"]
         fn test_wheel(x: f64, y: f64, dy: i32);
@@ -39,6 +41,10 @@ pub mod qobject {
         /// Left click at window coordinates.
         #[qinvokable]
         fn click(self: &TestInput, x: f64, y: f64);
+        /// The left button pressed (`down`) or released at window
+        /// coordinates: with moveTo between, a drag.
+        #[qinvokable]
+        fn press(self: &TestInput, x: f64, y: f64, down: bool);
         /// The mouse wheel turned `dy` (120 a notch; negative: down) at
         /// window coordinates.
         #[qinvokable]
@@ -87,6 +93,10 @@ impl qobject::TestInput {
 
     pub fn click(&self, x: f64, y: f64) {
         qobject::test_click(x, y, 1);
+    }
+
+    pub fn press(&self, x: f64, y: f64, down: bool) {
+        qobject::test_press(x, y, down);
     }
 
     pub fn wheel(&self, x: f64, y: f64, dy: i32) {

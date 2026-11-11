@@ -48,6 +48,20 @@ inline void test_click(double x, double y, int button)
     QTest::mouseClick(w, Qt::MouseButton(button), Qt::NoModifier, p);
 }
 
+// The left button pressed, or released, at a point (a drag: press, moves,
+// release).
+inline void test_press(double x, double y, bool down)
+{
+    QWindow *w = test_window();
+    if (!w)
+        return;
+    const QPoint p(qRound(x), qRound(y));
+    if (down)
+        QTest::mousePress(w, Qt::LeftButton, Qt::NoModifier, p);
+    else
+        QTest::mouseRelease(w, Qt::LeftButton, Qt::NoModifier, p);
+}
+
 inline void test_key(int key, int modifiers)
 {
     if (QWindow *w = test_window())

@@ -143,6 +143,22 @@ fn owner_of(cwd: &Path, projects: &[Project], worktrees: &[WorktreeRecord]) -> (
     }
 }
 
+/// The projects' ids, the one with the latest session first (those with
+/// none last, as they are): the order they start in, once, before they
+/// were placed by hand.
+pub fn by_latest(input: &SidebarInput<'_>) -> Vec<i64> {
+    let mut latest: HashMap<i64, i64> = HashMap::new();
+    for s in input.sessions {
+        if let (_, Some(id)) = owner_of(&s.cwd, input.projects, input.worktrees) {
+            let t = latest.entry(id).or_default();
+            *t = (*t).max(unix(s.modified));
+        }
+    }
+    let mut ids: Vec<i64> = input.projects.iter().map(|p| p.id).collect();
+    ids.sort_by_key(|id| std::cmp::Reverse(latest.get(id).copied().unwrap_or(0)));
+    ids
+}
+
 /// All a project's sessions (each under the project `build` lists it under).
 pub fn project_sessions(id: i64, input: &SidebarInput<'_>) -> Vec<ProjectSession> {
     let ours = |cwd: &Path| owner_of(cwd, input.projects, input.worktrees);
@@ -261,18 +277,15 @@ pub fn build(input: &SidebarInput<'_>) -> Vec<SidebarRow> {
     }
 
     let filtering = !filter.is_empty();
-    // Each project's rows and when it was last worked in: the project with
-    // the latest session goes first (those without any last, as added);
-    // "Other sessions" after them all.
+    // Each project's rows, in the projects' own order (they stay where
+    // they're put, whatever runs in them); "Other sessions" after them all.
     let mut groups: Vec<(i64, Vec<SidebarRow>)> = Vec::new();
-    let latest = |list: &[&Entry]| list.iter().map(|e| e.modified).max().unwrap_or(0);
     for p in input.projects {
         let (shelf, sessions): (Vec<&Entry>, Vec<&Entry>) = by_project.remove(&p.id).unwrap_or_default().into_iter().partition(|e| !e.settled.is_empty());
         if filtering && sessions.is_empty() && shelf.is_empty() {
             continue;
         }
         let mut rows = Vec::new();
-        let worked = latest(&sessions).max(latest(&shelf));
         let collapsed = p.collapsed && !filtering;
         rows.push(SidebarRow {
             kind: SidebarKind::Project,
@@ -327,9 +340,8 @@ pub fn build(input: &SidebarInput<'_>) -> Vec<SidebarRow> {
                 }
             }
         }
-        groups.push((worked, rows));
+        groups.push((0, rows));
     }
-    groups.sort_by_key(|(worked, _)| std::cmp::Reverse(*worked));
     if !other.is_empty() {
         let mut rows = Vec::new();
         let collapsed = input.other_collapsed && !filtering;
@@ -652,7 +664,7 @@ mod tests {
         let meta = HashMap::new();
         let rows = build(&SidebarInput { projects: &projects, worktrees: &[], sessions: &sessions, live: &[], meta: &meta, filter: "", show_archived: false, other_collapsed: false, expanded: &[], shelves_open: &[] });
         let shape: Vec<(SidebarKind, &str)> = rows.iter().map(|r| (r.kind, r.title.as_str())).collect();
-        // The project worked in last first ("in w" is newer than "in app");
+        // The projects in their own order, however new their sessions;
         // "Other sessions" after the projects, however new.
         assert_eq!(shape, [
             (SidebarKind::Project, "w"),
@@ -662,6 +674,13 @@ mod tests {
             (SidebarKind::OtherGroup, "Other sessions"),
             (SidebarKind::Session, "stray"),
         ]);
+        // (Seconds ago: "in app" is now the newer.)
+        let sessions = [session("/s/a", "/w/app/src", "in app", 1), session("/s/b", "/w", "in w", 50), session("/s/c", "/elsewhere", "stray", 0)];
+        let input = SidebarInput { projects: &projects, worktrees: &[], sessions: &sessions, live: &[], meta: &meta, filter: "", show_archived: false, other_collapsed: false, expanded: &[], shelves_open: &[] };
+        let titles: Vec<String> = build(&input).into_iter().filter(|r| r.kind == SidebarKind::Project).map(|r| r.title).collect();
+        assert_eq!(titles, ["w", "app"], "a newer session doesn't move its project");
+        // (The order they start in: the latest worked in first.)
+        assert_eq!(by_latest(&input), [2, 1]);
     }
 
     #[test]

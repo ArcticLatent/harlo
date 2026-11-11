@@ -100,6 +100,8 @@ Rectangle {
         property string path: ""
         property string harness: ""
         property string name: ""
+        // "first", "last", "only" or "": which moves it has.
+        property string place: ""
         // The providers on (Settings → Providers).
         Repeater {
             // (A remote project: the agents its host has.)
@@ -125,6 +127,10 @@ Rectangle {
                 onTriggered: Workspace.setProjectHarness(projectMenu.projectId, modelData.id)
             }
         }
+        AppMenuSeparator { }
+        // (Or drag the project's header.)
+        AppMenuItem { objectName: "projectMoveUp"; text: "Move up"; enabled: projectMenu.place !== "first" && projectMenu.place !== "only"; onTriggered: Workspace.moveProjectStep(projectMenu.projectId, -1) }
+        AppMenuItem { objectName: "projectMoveDown"; text: "Move down"; enabled: projectMenu.place !== "last" && projectMenu.place !== "only"; onTriggered: Workspace.moveProjectStep(projectMenu.projectId, 1) }
         AppMenuSeparator { }
         AppMenuItem { text: "Project settings…"; onTriggered: root.projectSettingsRequested(projectMenu.projectId) }
         AppMenuItem { text: "Open folder"; visible: !projectMenu.path.startsWith("ssh://"); onTriggered: Qt.openUrlExternally("file://" + projectMenu.path) }
@@ -304,6 +310,64 @@ Rectangle {
             property bool pinnedTop: true
             onMovementEnded: pinnedTop = atYBeginning
             onCountChanged: if (pinnedTop) Qt.callLater(positionViewAtBeginning)
+
+            // A project dragged by its header to another place: its id, the
+            // project it goes before (-1: after the last), the line where
+            // it lands, and the pointer (in the window). While dragging the
+            // rows stay made, so the dragged one isn't dropped scrolling.
+            property int dragId: -1
+            property int dropBefore: -1
+            property real dropY: -1
+            property real dragSceneY: 0
+            readonly property real dragY: dragId >= 0 ? mapFromItem(null, 0, dragSceneY).y : 0
+            cacheBuffer: dragId >= 0 ? 100000 : 320
+            // The places it can go: above each group's header (its gap's
+            // middle), or after the last project; the nearest the pointer.
+            function updateDrop() {
+                const y = contentY + dragY
+                let best = -1, bestY = originY + contentHeight, bestD = Math.abs(y - bestY)
+                for (const it of contentItem.children) {
+                    if (!it.visible || (it.kind !== "project" && it.kind !== "group"))
+                        continue
+                    const slot = it.y + it.gap / 2
+                    const d = Math.abs(y - slot)
+                    if (d < bestD) {
+                        bestD = d
+                        bestY = slot
+                        best = it.kind === "project" ? it.projectId : -1
+                    }
+                }
+                dropBefore = best
+                dropY = bestY
+            }
+            function endDrag(drop) {
+                if (drop && dragId >= 0)
+                    Workspace.moveProject(dragId, dropBefore)
+                dragId = -1
+                dropY = -1
+            }
+            Rectangle {
+                objectName: "projectDropLine"
+                visible: list.dragId >= 0 && list.dropY >= 0
+                z: 10
+                x: 12
+                y: list.dropY - 1
+                width: list.width - 24
+                height: 2
+                radius: 1
+                color: Theme.accent
+            }
+            // Near the top or bottom edge, the list scrolls on.
+            Timer {
+                interval: 16
+                repeat: true
+                running: list.dragId >= 0 && (list.dragY < 28 || list.dragY > list.height - 28)
+                onTriggered: {
+                    const step = list.dragY < 28 ? -8 : 8
+                    list.contentY = Math.max(list.originY, Math.min(list.contentY + step, list.originY + list.contentHeight - list.height))
+                    list.updateDrop()
+                }
+            }
 
             delegate: DelegateChooser {
                 role: "kind"
@@ -692,6 +756,26 @@ Rectangle {
             }
         }
         onClicked: Workspace.toggleCollapsed(rowKey)
+        opacity: list.dragId >= 0 && list.dragId === projectId && kind === "project" ? 0.5 : 1
+        // Dragged by its header, a project goes where it's dropped.
+        DragHandler {
+            objectName: "projectDrag"
+            enabled: groupRow.kind === "project"
+            target: null
+            xAxis.enabled: false
+            cursorShape: Qt.ClosedHandCursor
+            onActiveChanged: {
+                if (active) {
+                    list.dragId = groupRow.projectId
+                    list.dragSceneY = centroid.scenePosition.y
+                    list.updateDrop()
+                } else {
+                    list.endDrag(true)
+                }
+            }
+            onCanceled: list.endDrag(false)
+            onCentroidChanged: if (active) { list.dragSceneY = centroid.scenePosition.y; list.updateDrop() }
+        }
         TapHandler {
             acceptedButtons: Qt.RightButton
             enabled: groupRow.kind === "project"
@@ -700,6 +784,7 @@ Rectangle {
                 projectMenu.path = groupRow.path
                 projectMenu.harness = groupRow.harness
                 projectMenu.name = groupRow.title
+                projectMenu.place = Workspace.projectPlace(groupRow.projectId)
                 projectMenu.popup()
             }
         }
