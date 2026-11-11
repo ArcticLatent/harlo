@@ -704,7 +704,7 @@ struct ContextBar: View {
                         .scaledFont(11.5, .medium)
                         .dynamicTypeSize(...DynamicTypeSize.xxLarge)
                         .monospacedDigit()
-                        .foregroundStyle(way > 0.6 ? Color(tint) : Color(p.foreground).opacity(0.72))
+                        .foregroundStyle(Color(way > 0.6 ? tint : p.foreground.mix(p.background, 0.28)))
                         .fixedSize()
                 }
                 .padding(.horizontal, 16)
