@@ -794,6 +794,24 @@ pub(crate) fn to_pi_block(b: &Value) -> Value {
     }
 }
 
+/// A tool result as pi's content: its text, and its pictures as image
+/// blocks (harlo keeps them as files and shows them in the call's card;
+/// as "[image]" they were only that word).
+pub(crate) fn result_content(content: &Value) -> Value {
+    let parts = content.as_array().map(Vec::as_slice).unwrap_or_default();
+    let text = match content {
+        Value::String(s) => s.clone(),
+        _ => parts.iter().filter(|p| p["type"] == "text").filter_map(|p| p["text"].as_str()).filter(|t| !t.is_empty()).collect::<Vec<_>>().join("\n"),
+    };
+    let images = parts.iter().filter(|p| p["type"] == "image" && p["source"]["data"].is_string()).map(to_pi_block);
+    let mut out: Vec<Value> = if text.is_empty() { Vec::new() } else { vec![json!({ "type": "text", "text": text })] };
+    out.extend(images);
+    if out.is_empty() {
+        out.push(json!({ "type": "text", "text": "" }));
+    }
+    Value::Array(out)
+}
+
 /// A tool result's text (and a note for images).
 pub(crate) fn result_text(content: &Value) -> String {
     match content {
@@ -870,11 +888,11 @@ async fn incoming(shared: &Arc<Shared>, frame: Value) {
                 let text = result_text(&b["content"]);
                 let is_error = b["is_error"].as_bool().unwrap_or(false);
                 let message = json!({
-                    "role": "toolResult", "toolCallId": call_id, "content": [{ "type": "text", "text": text }], "isError": is_error
+                    "role": "toolResult", "toolCallId": call_id, "content": result_content(&b["content"]), "isError": is_error
                 });
                 shared.state.lock().unwrap().messages.push(message.clone());
                 subagent_result(shared, &call_id, &text, is_error);
-                shared.emit(HarnessEvent::ToolEnd { call_id: call_id.clone(), result: json!({ "content": [{ "type": "text", "text": text }] }), is_error });
+                shared.emit(HarnessEvent::ToolEnd { call_id: call_id.clone(), result: json!({ "content": message["content"] }), is_error });
                 // As a message too, as the other agents send it: the session's
                 // messages (Activity, Context) then know the call ended
                 // without waiting for a reload.

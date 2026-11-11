@@ -9,7 +9,7 @@ use std::time::SystemTime;
 
 use serde_json::{Value, json};
 
-use crate::claude_run::{result_text, to_pi_block};
+use crate::claude_run::{result_content, result_text, to_pi_block};
 use crate::event::HarnessKind;
 use crate::store::SessionInfo;
 
@@ -418,7 +418,7 @@ impl HistoryReader {
                     && parts.iter().any(|p| p["type"] == "tool_result")
                 {
                     for p in parts.iter().filter(|p| p["type"] == "tool_result") {
-                        self.out.push(json!({ "role": "toolResult", "toolCallId": p["tool_use_id"], "content": [{ "type": "text", "text": result_text(&p["content"]) }], "isError": p["is_error"].as_bool().unwrap_or(false) }));
+                        self.out.push(json!({ "role": "toolResult", "toolCallId": p["tool_use_id"], "content": result_content(&p["content"]), "isError": p["is_error"].as_bool().unwrap_or(false) }));
                     }
                 } else if let Some(text) = task_notice(&e) {
                     self.out.push(json!({ "role": "custom", "customType": "task-notification", "display": true, "content": text }));
@@ -1129,6 +1129,17 @@ mod tests {
         assert_eq!(h[2]["role"], "toolResult");
         assert_eq!(h[3]["content"][0]["text"], "hello");
         assert_eq!(saved(&text).model, "anthropic/claude-haiku-4-5");
+
+        // A picture a tool returned (Read of a .png) comes as an image block,
+        // not the word "[image]"; text beside it stays text.
+        let read = [
+            r#"{"type":"assistant","isSidechain":false,"message":{"id":"m3","role":"assistant","content":[{"type":"tool_use","id":"t2","name":"Read","input":{"file_path":"/w/a.png"}}]}}"#,
+            r#"{"type":"user","isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t2","content":[{"type":"text","text":"a picture"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}}]}]}}"#,
+        ]
+        .join("\n");
+        let h = history(&read);
+        let result = h.iter().find(|m| m["role"] == "toolResult").unwrap();
+        assert_eq!(result["content"], json!([{"type":"text","text":"a picture"},{"type":"image","data":"iVBORw0KGgo=","mimeType":"image/png"}]));
 
         let dir = std::env::temp_dir().join(format!("harlo-claude-session-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
