@@ -356,7 +356,9 @@ struct SessionContent: View {
         // Paths in replies open the file (a picture in the viewer).
         .environment(\.openURL, OpenURLAction { url in
             guard let target = FileLinks.target(url) else { return .systemAction }
-            if model.showsPictures && PictureNames.isPicture(target.path) {
+            // (A picture opens the viewer, which says when this harlo is
+            // too old to send it.)
+            if PictureNames.isPicture(target.path) {
                 picture = PictureOpening(path: PictureNames.match(target.path, in: session.pictures) ?? target.path)
             } else {
                 sheet = .file(target.path, target.line)

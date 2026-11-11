@@ -924,7 +924,7 @@ public final class HarloModel {
         let id = (thumb ? "thumb|" : "screen|") + path
         if let p = pictures[id] { return (p, "") }
         if demo || samples != nil { return (nil, "harlo shows pictures from your computer.") }
-        guard showsPictures else { return (nil, "This harlo doesn't send pictures to the phone.") }
+        guard showsPictures else { return (nil, "The harlo on your computer is older than pictures on the phone. Update or restart it to see them here.") }
         guard let c = client, let key = session?.liveKey, !key.isEmpty else { return (nil, "Not connected to harlo.") }
         if let t = pictureLoads[id] { return await t.value }
         let t = Task { () -> (Picture?, String) in
