@@ -76,9 +76,17 @@ final class HarloUITests: XCTestCase {
     }
 
     /// The screen as it is now, kept as "name".
-    func shot(_ name: String) {
+    func shot(_ name: String, file: StaticString = #filePath, line: UInt = #line) {
         // (Animations settle.)
         Thread.sleep(forTimeInterval: 0.6)
+        // A session fits the screen: something kept whole and wider than
+        // its row (a long answer at a card's end) widened it past both sides.
+        let bottom = app.descendants(matching: .any).matching(identifier: "sessionBottom").firstMatch
+        if bottom.exists {
+            let screen = app.windows.firstMatch.frame
+            XCTAssertTrue(bottom.frame.minX >= screen.minX - 1 && bottom.frame.maxX <= screen.maxX + 1,
+                          "\(name): the session fits the screen (\(bottom.frame) in \(screen))", file: file, line: line)
+        }
         let a = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         a.name = name
         a.lifetime = .keepAlways

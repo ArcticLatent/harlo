@@ -317,7 +317,7 @@ struct ToolCard: View {
                 .scaledFont(13)
                 .foregroundStyle(Color(failed ? p.error : p.muted))
                 .lineLimit(1)
-                .fixedSize()
+                .shortOrCut(row.result)
         } else if !took.isEmpty {
             HStack(spacing: 5) {
                 Image(systemName: failed ? "xmark" : "checkmark")
@@ -781,7 +781,7 @@ struct ResultBadge: View {
         }
         .scaledFont(13, .medium)
         .lineLimit(1)
-        .fixedSize()
+        .shortOrCut(text)
     }
 
     var bad: Bool { text.hasSuffix("failed") || text.hasPrefix("exit") }
@@ -941,5 +941,19 @@ struct CardUnless: ViewModifier {
 
     @ViewBuilder func body(content: Content) -> some View {
         if bare { content } else { content.card(p, radius: radius, fill: fill) }
+    }
+}
+
+extension View {
+    /// A line at the end of a row: short, its own size; long (a question's
+    /// answers, an error), cut at the end to a third of the phone's width.
+    /// (Kept whole, a long one was wider than its card and widened the
+    /// whole session past the screen's sides.)
+    @ViewBuilder func shortOrCut(_ text: String) -> some View {
+        if text.count <= 20 {
+            fixedSize()
+        } else {
+            truncationMode(.tail).frame(maxWidth: 130, alignment: .trailing)
+        }
     }
 }
