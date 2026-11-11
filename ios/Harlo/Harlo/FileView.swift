@@ -125,6 +125,9 @@ struct FileView: View {
                 .padding(.bottom, 20)
                 .textSelection(.enabled)
             }
+            // Scrolling both ways, a file shorter than the screen would sit
+            // in its middle; it starts at the top, like a wrapped one.
+            .defaultScrollAnchor(.topLeading)
             .background(Color(p.codeBackground))
             .onAppear {
                 if line > 1 { proxy.scrollTo(line, anchor: .center) }

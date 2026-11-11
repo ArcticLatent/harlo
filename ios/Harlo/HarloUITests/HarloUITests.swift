@@ -318,9 +318,12 @@ final class HarloUITests: XCTestCase {
         // (Its folder above the code, not its name again: that's the title.)
         see("In src")
         shot("21b-file")
+        let top = short.frame.minY
         // Kept whole: every line starts at the left, after its number, and
-        // the long one runs past the screen.
+        // the long one runs past the screen; the file still starts at the
+        // top (scrolling both ways, a short one sat in the screen's middle).
         toggleWrap()
+        XCTAssertEqual(short.frame.minY, top, accuracy: 2, "kept whole, it starts at the top (\(short.frame))")
         XCTAssertTrue(long.frame.maxX > screen.maxX, "kept whole, it runs past the screen (\(long.frame))")
         XCTAssertTrue(short.frame.minX < 80 && abs(short.frame.minX - long.frame.minX) < 1,
                       "lines start at the left, lined up (\(short.frame), \(long.frame))")
