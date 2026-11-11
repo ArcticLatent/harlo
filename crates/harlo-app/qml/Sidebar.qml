@@ -330,27 +330,40 @@ Rectangle {
             property real dragGrab: 0
             readonly property real dragY: dragId >= 0 ? mapFromItem(null, 0, dragSceneY).y : 0
             cacheBuffer: dragId >= 0 ? 100000 : 320
-            // The places it can go: above each group's header (its gap's
-            // middle), or after the last project; the nearest the pointer.
+            // Where it goes: past every project whose header the pointer
+            // has crossed (a header counts once its middle is above the
+            // pointer), so it lands before the first one still below it,
+            // or after the last. Its line: above that header (in the gap's
+            // middle), or at the end of the projects. Nothing shows where
+            // it wouldn't move.
             function updateDrop() {
                 const y = contentY + dragY
-                let best = -1, bestY = originY + contentHeight, bestD = Math.abs(y - bestY)
-                for (const it of contentItem.children) {
-                    if (!it.visible || (it.kind !== "project" && it.kind !== "group"))
+                const heads = []
+                for (const it of contentItem.children)
+                    if (it.visible && (it.kind === "project" || it.kind === "group"))
+                        heads.push(it)
+                heads.sort((a, b) => a.y - b.y)
+                let before = -1, at = originY + contentHeight - 4, next = -1, seen = false
+                for (const it of heads) {
+                    if (seen && next === -1)
+                        next = it.kind === "project" ? it.projectId : -2
+                    if (it.kind === "project" && it.projectId === dragId) {
+                        seen = true
                         continue
-                    const slot = it.y + it.gap / 2
-                    const d = Math.abs(y - slot)
-                    if (d < bestD) {
-                        bestD = d
-                        bestY = slot
-                        best = it.kind === "project" ? it.projectId : -1
+                    }
+                    if (it.y + it.gap + 15 > y) {
+                        before = it.kind === "project" ? it.projectId : -1
+                        at = it.y + it.gap / 2
+                        break
                     }
                 }
-                dropBefore = best
-                dropY = bestY
+                // (Where it is now: before the next project, or last.)
+                const stays = before === next || (before === -1 && (next === -1 || next === -2))
+                dropBefore = before
+                dropY = stays ? -1 : at
             }
             function endDrag(drop) {
-                if (drop && dragId >= 0)
+                if (drop && dragId >= 0 && dropY >= 0)
                     Workspace.moveProject(dragId, dropBefore)
                 dragId = -1
                 dropY = -1
@@ -358,10 +371,11 @@ Rectangle {
             // Where it lands: a line with a ring at its start.
             Item {
                 objectName: "projectDropLine"
+                parent: list
                 visible: list.dragId >= 0 && list.dropY >= 0
                 z: 10
                 x: 14
-                y: list.dropY - 4
+                y: list.dropY - list.contentY - 4
                 width: list.width - 28
                 height: 8
                 Rectangle { x: 6; anchors.verticalCenter: parent.verticalCenter; width: parent.width - 6; height: 2; radius: 1; color: Theme.accent }

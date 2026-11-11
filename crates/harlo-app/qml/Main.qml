@@ -5260,11 +5260,21 @@ ApplicationWindow {
             // Dragged by its header above the first: it goes first.
             const from = low.mapToItem(null, 10, low.height / 2), to = top.mapToItem(null, 10, -6)
             TestInput.moveTo(from.x, from.y); TestInput.press(from.x, from.y, true)
+            for (let i = 1; i <= 4; i++) TestInput.moveTo(from.x, from.y - 3 * i) } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            // Lifted but not past another project's header: no line.
+            const line = win.findName("projectDropLine"), ghost = win.findName("projectDragGhost")
+            win.check(ghost !== null && ghost.visible && (line === null || !line.visible), "lifted where it would stay, no line shows")
+            const low = win.findName("projectDragGhost"), top = win.findName("projectTitle-" + win.selftestDir.split("/").filter(s => s).pop())
+            const from = low.mapToItem(null, 10, low.height / 2), to = top.mapToItem(null, 10, -6)
             for (let i = 1; i <= 12; i++) TestInput.moveTo(from.x, from.y + (to.y - from.y) * i / 12) } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             const line = win.findName("projectDropLine"), ghost = win.findName("projectDragGhost")
-            win.check(line !== null && line.visible, "dragging, a line shows where it goes")
+            const first = win.findName("projectTitle-" + win.selftestDir.split("/").filter(s => s).pop())
+            const ly = line ? line.mapToItem(null, 0, line.height / 2).y : -1, fy = first.mapToItem(null, 0, 0).y
+            win.check(line !== null && line.visible && ly < fy && ly > fy - 20, "past the first project's header, the line shows just above it (" + Math.round(ly) + " over " + Math.round(fy) + ")")
             win.check(ghost !== null && ghost.visible && win.findText("Rocket app", ghost) !== null, "and a copy of its header follows the pointer")
             // (findName skips what's faded out: its title isn't to be found.)
             win.check(win.findName("projectTitle-Rocket app") === null && win.findName("projectTitle-" + win.selftestDir.split("/").filter(s => s).pop()) !== null, "its place is left empty")
