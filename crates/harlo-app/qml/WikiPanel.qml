@@ -245,7 +245,7 @@ Rectangle {
 
         PanelHeader {
             title: "Wiki"
-            subtitle: root.st.root.replace(/\/+$/, "").split("/").pop()
+            subtitle: root.st.root.replace(/\/+$/, "").split("/").pop() + (root.st.host ? " on " + root.st.host : "")
             onCloseRequested: root.closeRequested()
             PanelButton { objectName: "wikiRefresh"; iconName: "refresh"; tip: "Refresh"; onClicked: { root.load(); if (root.openPage !== "") root.openWiki(root.openPage, "", false) } }
         }
@@ -540,7 +540,7 @@ Rectangle {
                                                                            root.pageView.verified ? "checked against the code " + root.ago(root.pageView.verified) : ""].filter(x => x !== "").join(" · ")
                         color: Theme.textFaint
                         font.pixelSize: Theme.px(11.5)
-                        elide: Text.ElideRight
+                        wrapMode: Text.Wrap
                     }
                     Repeater {
                         id: blocks

@@ -8639,6 +8639,7 @@ ApplicationWindow {
             win.check(wikiPanel.st.host === "box" && wikiPanel.st.root === "ssh://box" + win.argValue("--cwd="), "the panel reads the wiki on box (" + wikiPanel.st.root + ")")
             win.check(pages.length === 6 && pages[0].path === "quickstart.md", "its pages, the quickstart first (" + pages.map(p => p.path).join(", ") + ")")
             win.check(fresh && fresh.text.endsWith("· 1 commit since"), "how far behind box's code (" + (fresh ? fresh.text : "") + ")")
+            win.check(win.findText("repo on box", wikiPanel) !== null, "its head names the host")
             win.shotWindow("wiki-remote-pages")
             wikiPanel.openWiki("architecture/orders.md", "refunds", false) } }
         PauseAnimation { duration: 300 }
