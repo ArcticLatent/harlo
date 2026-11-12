@@ -95,10 +95,11 @@ struct LockScreenView: View {
                     .font(.system(size: 15, weight: .semibold))
                     .lineLimit(1)
                 Spacer(minLength: 6)
-                Live.clock(state)
+                Live.clock(state, took: true)
                     .font(.system(size: 14, weight: .medium).monospacedDigit())
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: 80, alignment: .trailing)
+                    .lineLimit(1)
+                    .fixedSize()
             }
             Text(Live.words(state, stale: stale))
                 .font(.system(size: 13, design: .monospaced))
@@ -160,10 +161,13 @@ enum Live {
         }
     }
 
-    /// For how long it's been at it, or (done) how long it took.
-    @ViewBuilder static func clock(_ s: SessionActivityAttributes.ContentState) -> some View {
+    /// For how long it's been at it, or (done) how long it took: "Took
+    /// 18s" where there's room (a bare "18s" by the title, on the lock
+    /// screen, read as "18 seconds ago").
+    @ViewBuilder static func clock(_ s: SessionActivityAttributes.ContentState, took: Bool = false) -> some View {
         if s.until > 0 || s.phase == "done" || s.phase == "failed" {
-            Text(duration(max(0, (s.until > 0 ? s.until : Date().timeIntervalSince1970) - s.since)))
+            let d = duration(max(0, (s.until > 0 ? s.until : Date().timeIntervalSince1970) - s.since))
+            Text(took ? "Took \(d)" : d)
         } else {
             Text(Date(timeIntervalSince1970: s.since), style: .timer)
                 .multilineTextAlignment(.trailing)
