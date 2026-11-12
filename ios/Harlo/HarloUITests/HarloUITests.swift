@@ -279,6 +279,10 @@ final class HarloUITests: XCTestCase {
         see("Workflows")
         shot("15c-wiki-pages")
         audit("wiki-pages")
+        // (Back up to the Pages/Graph switch: only while it's out of view,
+        // so a swipe never pulls the sheet down.)
+        let pick = app.descendants(matching: .any)["wikiPagesGraph"]
+        for _ in 0..<4 where !(pick.exists && pick.isHittable) { app.swipeDown() }
         tap("Graph")
         see("The wiki's pages and their links", timeout: 15)
         shot("15d-wiki-graph")
