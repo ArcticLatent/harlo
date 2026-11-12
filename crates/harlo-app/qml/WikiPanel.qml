@@ -146,7 +146,8 @@ Rectangle {
         const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
         const words = query.toLowerCase().split(/[^0-9A-Za-z\u00C0-\uFFFF]+/).filter(w => w.length > 1)
         if (words.length === 0) return esc(text)
-        const re = new RegExp("(" + words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")", "gi")
+        // (The whole word a match is in: "amended" for "amend".)
+        const re = new RegExp("([0-9A-Za-z\u00C0-\uFFFF]*(?:" + words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")[0-9A-Za-z\u00C0-\uFFFF]*)", "gi")
         return text.split(re).map((part, i) => i % 2 === 1
             ? "<b><font color='" + Theme.rgb(Theme.text) + "'>" + esc(part) + "</font></b>"
             : esc(part)).join("")

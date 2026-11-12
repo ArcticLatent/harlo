@@ -255,12 +255,20 @@ struct WikiView: View {
     func marked(_ text: String) -> AttributedString {
         var out = AttributedString(text)
         let words = query.lowercased().split { !$0.isLetter && !$0.isNumber }.filter { $0.count > 1 }
-        for w in words {
-            var from = out.startIndex
-            while from < out.endIndex, let r = out[from...].range(of: String(w), options: .caseInsensitive) {
-                out[r].foregroundColor = Color(p.foreground)
-                out[r].font = .footnote.weight(.semibold)
-                from = r.upperBound
+        guard !words.isEmpty else { return out }
+        // (The whole word a match is in: "amended" for "amend".)
+        var start: String.Index?
+        for i in Array(text.indices) + [text.endIndex] {
+            let inWord = i < text.endIndex && (text[i].isLetter || text[i].isNumber)
+            if inWord, start == nil { start = i }
+            if !inWord, let s = start {
+                let word = text[s..<i].lowercased()
+                if words.contains(where: { word.contains($0) }),
+                   let lo = AttributedString.Index(s, within: out), let hi = AttributedString.Index(i, within: out) {
+                    out[lo..<hi].foregroundColor = Color(p.foreground)
+                    out[lo..<hi].font = .footnote.weight(.semibold)
+                }
+                start = nil
             }
         }
         return out
