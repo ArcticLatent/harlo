@@ -77,8 +77,7 @@ struct DiagramBlock: View {
             }
         }
         .onGeometryChange(for: Double.self) { $0.size.width } action: { width = $0 }
-        .task(id: "\(light)|\(wiki.mermaid)") {
-            let source = wiki.mermaid
+        .task(id: "\(light)|\(source)") {
             loading = true
             let r = await model.diagram(source, light: light, colors: colors)
             picture = r.picture
@@ -183,28 +182,7 @@ struct PagesGraph: View {
     var body: some View {
         Group {
             if let d = shown, let image = UIImage(data: d.png) {
-                let zoomIn = { zoom = ZoomedPicture(image: image, size: CGSize(width: d.width, height: d.height)) }
-                // A box opens its page; anywhere else zooms.
-                Image(uiImage: image)
-                    .resizable()
-                    .interpolation(.high)
-                    .aspectRatio(CGSize(width: max(d.width, 1), height: max(d.height, 1)), contentMode: .fit)
-                    .contentShape(Rectangle())
-                    .onTapGesture(perform: zoomIn)
-                    .accessibilityLabel("The wiki's pages and their links")
-                    .accessibilityAddTraits(.isButton)
-                    .accessibilityHint("Opens it to zoom")
-                    .accessibilityAction(perform: zoomIn)
-                    .overlay {
-                        GeometryReader { g in
-                            ForEach(d.boxes, id: \.id) { b in
-                                if let page = wiki.graphPage(b.id) { box(b, page, in: g.size) }
-                            }
-                        }
-                    }
-                    .frame(maxWidth: d.width)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
+                drawn(d, image)
             } else if loading {
                 HStack(spacing: 8) {
                     ProgressView()
@@ -232,22 +210,59 @@ struct PagesGraph: View {
         }
     }
 
+    /// The picture: a box opens its page, anywhere else zooms.
+    func drawn(_ d: DiagramPicture, _ image: UIImage) -> some View {
+        let zoomed = ZoomedPicture(image: image, size: CGSize(width: d.width, height: d.height))
+        let ratio = CGSize(width: max(d.width, 1), height: max(d.height, 1))
+        return Image(uiImage: image)
+            .resizable()
+            .interpolation(.high)
+            .aspectRatio(ratio, contentMode: .fit)
+            .contentShape(Rectangle())
+            .onTapGesture { zoom = zoomed }
+            .accessibilityLabel("The wiki's pages and their links")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint("Opens it to zoom")
+            .accessibilityAction { zoom = zoomed }
+            .overlay { boxes(d) }
+            .frame(maxWidth: d.width)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+    }
+
+    /// A button over each page's box.
+    func boxes(_ d: DiagramPicture) -> some View {
+        GeometryReader { g in
+            ForEach(d.boxes, id: \.id) { (b: DiagramPicture.Box) in
+                if let page = wiki.graphPage(b.id) {
+                    box(b, page, in: g.size)
+                }
+            }
+        }
+    }
+
     /// A page's box: a button over it (at least 30 points tall, to tap),
     /// ringed when it's the page read last.
     func box(_ b: DiagramPicture.Box, _ page: WikiPage, in size: CGSize) -> some View {
-        let last = model.wikiReadLast[wiki.root] == page.path
-        let title = page.title.isEmpty ? page.path : page.title
+        let last: Bool = model.wikiReadLast[wiki.root] == page.path
+        let title: String = page.title.isEmpty ? page.path : page.title
+        let label: String = "Read " + title + (last ? ", read last" : "")
+        let ring: Color = Color(p.primary).opacity(last ? 0.75 : 0)
+        let w: Double = b.w * size.width
+        let h: Double = b.h * size.height
+        let x: Double = (b.x + b.w / 2) * size.width
+        let y: Double = (b.y + b.h / 2) * size.height
         return Button { open(WikiLink(path: page.path)) } label: {
             RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(Color(p.primary).opacity(last ? 0.75 : 0), lineWidth: 2)
+                .strokeBorder(ring, lineWidth: 2)
                 .padding(-3)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .frame(width: b.w * size.width, height: b.h * size.height)
+        .frame(width: w, height: h)
         .frame(minHeight: 30)
-        .position(x: (b.x + b.w / 2) * size.width, y: (b.y + b.h / 2) * size.height)
-        .accessibilityLabel("Read " + title + (last ? ", read last" : ""))
+        .position(x: x, y: y)
+        .accessibilityLabel(label)
         .accessibilityIdentifier("wikiGraphBox")
     }
 }
