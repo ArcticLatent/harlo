@@ -1,0 +1,8 @@
+{
+  "name": "harlo-openwiki",
+  "private": true,
+  "description": "The OpenWiki version harlo bundles (packaging/openwiki/fetch.sh).",
+  "dependencies": {
+    "openwiki": "0.9.0"
+  }
+}
