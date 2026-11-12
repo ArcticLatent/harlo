@@ -8450,7 +8450,10 @@ ApplicationWindow {
             Workspace.addProject(win.argValue("--cwd=")) } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
-            win.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo")
+            const project = JSON.parse(Workspace.projectsJson())[0].id
+            // (--specs=on: the project's specs on, before its session starts.)
+            if (win.argValue("--specs=") === "on") Workspace.setSetting("specs_" + project, "1")
+            win.harloKey = Workspace.newSession(project, "harlo")
             Workspace.setApprovalMode(win.harloKey, "yolo") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: win.waitUntil(benchSteps, () => chat.session.modelName !== "", 20000) }
