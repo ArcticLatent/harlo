@@ -8981,6 +8981,8 @@ ApplicationWindow {
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
             const project = JSON.parse(Workspace.projectsJson())[0].id
+            // (--wiki=on: the project's wiki, its reading tools on.)
+            if (win.argValue("--wiki=") === "on") Workspace.setSetting("wiki_" + project, "1")
             win.harloKey = Workspace.newSession(project, "harlo")
             Workspace.setApprovalMode(win.harloKey, "yolo") } }
         PauseAnimation { duration: 300 }
