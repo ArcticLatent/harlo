@@ -996,6 +996,63 @@ pub fn search_hits(answer: &Value, query: &str) -> Value {
     json!({ "hits": hits, "workspaces": workspaces })
 }
 
+/// Puts back the code names OpenWiki's excerpts lose (it makes `_` a
+/// space: place_order → "place order"), from each hit's page (read once):
+/// a name with underscores, where the page never writes its spaced form
+/// as plain words.
+pub fn restore_names(found: &mut Value, page_text: impl Fn(&str) -> Option<String>) {
+    let mut names: std::collections::HashMap<String, Vec<(String, String)>> = std::collections::HashMap::new();
+    let Some(hits) = found["hits"].as_array_mut() else { return };
+    for h in hits {
+        let snippet = h["snippet"].as_str().unwrap_or_default().to_owned();
+        if !snippet.contains(' ') {
+            continue;
+        }
+        let page = h["page"].as_str().unwrap_or_default().to_owned();
+        let known = names.entry(page.clone()).or_insert_with(|| page_text(&page).map(|t| underscored_names(&t)).unwrap_or_default());
+        let mut out = snippet;
+        for (spaced, name) in known.iter() {
+            out = replace_words(&out, spaced, name);
+        }
+        h["snippet"] = json!(out);
+    }
+}
+
+/// A page's names with underscores inside them (place_order), each with its
+/// spaced form, longest first; not ones whose spaced form the page also uses.
+fn underscored_names(text: &str) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for word in text.split(|c: char| !(c.is_alphanumeric() || c == '_')) {
+        let name = word.trim_matches('_');
+        if !name.contains('_') || name.split('_').any(str::is_empty) {
+            continue;
+        }
+        let spaced = name.replace('_', " ");
+        if out.iter().any(|(_, n)| n == name) || replace_words(text, &spaced, "\u{0}") != text {
+            continue;
+        }
+        out.push((spaced, name.to_owned()));
+    }
+    out.sort_by_key(|(s, _)| std::cmp::Reverse(s.len()));
+    out
+}
+
+/// `text` with each whole-word `from` (not inside a longer word) made `to`.
+fn replace_words(text: &str, from: &str, to: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(i) = rest.find(from) {
+        let before = rest[..i].chars().next_back();
+        let after = rest[i + from.len()..].chars().next();
+        let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
+        out.push_str(&rest[..i]);
+        out.push_str(if word(before) || word(after) { from } else { to });
+        rest = &rest[i + from.len()..];
+    }
+    out.push_str(rest);
+    out
+}
+
 /// A query's words, lowercase, as the searches and the snippets match them.
 fn query_words(query: &str) -> Vec<String> {
     query.split(|c: char| !c.is_alphanumeric()).filter(|w| w.len() > 1).map(str::to_lowercase).collect()
@@ -1020,7 +1077,15 @@ fn readable_snippet(text: &str, words: &[String]) -> String {
         .filter(|t| !t.chars().all(|c| matches!(c, '-' | ':' | '|' | '=' | '`' | '*' | '#' | '>')))
         .map(|t| t.trim_matches(|c| matches!(c, '`' | '*' | '|')).to_owned())
         .filter(|t| !t.is_empty())
-        .collect();
+        // (Punctuation OpenWiki left on its own where a code mark was:
+        // "raises OrderLocked ." reads "raises OrderLocked.")
+        .fold(Vec::new(), |mut out: Vec<String>, t| {
+            match out.last_mut() {
+                Some(last) if t.starts_with(['.', ',', ';', ':', '!', '?', ')']) => last.push_str(&t),
+                _ => out.push(t),
+            }
+            out
+        });
     const ROOM: usize = 200;
     let total: usize = tokens.iter().map(|t| t.chars().count() + 1).sum();
     if total <= ROOM + 1 {
@@ -1183,6 +1248,14 @@ mod tests {
         assert_eq!(hits["hits"][0]["heading"], "Retry control");
         // (The excerpt only: not the title or the description.)
         assert_eq!(hits["hits"][0]["snippet"], "A failed job is retried.");
+        // Code names OpenWiki made words come back from the page.
+        let mut named = json!({"hits": [{"page": "openwiki/o.md", "snippet": "place order stores the order; to place order twice is fine"},
+                                        {"page": "openwiki/o.md", "snippet": "the pay order step"}]});
+        restore_names(&mut named, |p| (p == "openwiki/o.md").then(|| "`place_order` stores it. See `pay_order`. We pay order fees.".to_owned()));
+        assert_eq!(named["hits"][0]["snippet"], "place_order stores the order; to place_order twice is fine");
+        // (Its spaced form is plain words on the page: left alone.)
+        assert_eq!(named["hits"][1]["snippet"], "the pay order step");
+        assert_eq!(readable_snippet("it raises `OrderLocked` . Then ( see `x` ) , done", &[]), "it raises OrderLocked. Then ( see x), done");
         let titled = search_hits(&json!({"results": [{"ref": ["openwiki/s.md#rows"], "content": "Sidebar\nSection: Rebuilding rows\nHow rows are kept.\nrebuild clears them."}]}), "rebuild");
         assert_eq!(titled["hits"][0]["heading"], "Rebuilding rows");
         assert_eq!(titled["hits"][0]["snippet"], "rebuild clears them.");

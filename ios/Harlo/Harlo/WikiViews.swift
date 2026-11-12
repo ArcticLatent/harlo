@@ -259,7 +259,7 @@ struct WikiView: View {
         // (The whole word a match is in: "amended" for "amend".)
         var start: String.Index?
         for i in Array(text.indices) + [text.endIndex] {
-            let inWord = i < text.endIndex && (text[i].isLetter || text[i].isNumber)
+            let inWord = i < text.endIndex && (text[i].isLetter || text[i].isNumber || text[i] == "_")
             if inWord, start == nil { start = i }
             if !inWord, let s = start {
                 let word = text[s..<i].lowercased()

@@ -25,6 +25,9 @@ Rectangle {
     property string mode: "pages"
     /// The page being read ("architecture/jobs.md"), "" for the list.
     property string openPage: ""
+    /// The page read last (kept once it's closed): the graph rings it.
+    property string lastRead: ""
+    onOpenPageChanged: if (openPage !== "") lastRead = openPage
     property var pageView: null
     property string loadingPage: ""
     /// The section to show once it's loaded.
@@ -181,7 +184,7 @@ Rectangle {
         const words = markWords(query)
         if (words.length === 0) return esc(text)
         // (The whole word a match is in: "amended" for "amend".)
-        const re = new RegExp("([0-9A-Za-z\u00C0-\uFFFF]*(?:" + words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")[0-9A-Za-z\u00C0-\uFFFF]*)", "gi")
+        const re = new RegExp("([0-9A-Za-z_\u00C0-\uFFFF]*(?:" + words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")[0-9A-Za-z_\u00C0-\uFFFF]*)", "gi")
         return text.split(re).map((part, i) => i % 2 === 1
             ? "<b><font color='" + Theme.rgb(Theme.text) + "'>" + esc(part) + "</font></b>"
             : esc(part)).join("")
@@ -224,7 +227,7 @@ Rectangle {
     readonly property var graphPages: {
         if (pages.length < 2) return []
         if (pages.length <= 40) return pages
-        const at = root.openPage !== "" ? root.openPage : (pages[0] ? pages[0].path : "")
+        const at = root.openPage !== "" ? root.openPage : root.lastRead !== "" && pages.some(p => p.path === root.lastRead) ? root.lastRead : (pages[0] ? pages[0].path : "")
         const near = new Set([at])
         for (const p of pages) {
             if (p.path === at) p.links.forEach(l => near.add(l))
@@ -274,16 +277,18 @@ Rectangle {
         viewer.show("Wiki", [{ label: "Graph", url: graphPic.url, width: graphPic.width, height: graphPic.height }], 0, "Graph",
                     () => Diagrams.openInBrowser(graphShown, Theme.isLight), 2)
     }
-    /// Wider than the panel: scrolled so the quickstart (else the first
-    /// page) is in view rather than whatever the left edge holds.
+    /// Wider than the panel: scrolled so the page read last (else the
+    /// quickstart, else the first page) is in view rather than whatever the
+    /// left edge holds.
     /// (Once for each graph at each panel width: zooming doesn't jump back.)
     property string graphCentredFor: ""
     function centreGraph() {
-        const key = graphShown + "|" + Math.round(graphBox.width)
+        const key = graphShown + "|" + Math.round(graphBox.width) + "|" + lastRead
         if (!graphImage.ready || graphCentredFor === key || graphImage.boxes.length === 0) return
         if (graphBox.contentWidth <= graphBox.width + 1) return
         graphCentredFor = key
-        let i = graphPages.findIndex(p => p.path === "quickstart.md")
+        let i = graphPages.findIndex(p => p.path === lastRead)
+        if (i < 0) i = graphPages.findIndex(p => p.path === "quickstart.md")
         if (i < 0) i = 0
         const b = graphImage.boxes.find(x => String(x.id) === "p" + i)
         if (!b) return
@@ -907,10 +912,11 @@ Rectangle {
                             width: modelData.w * graphImage.width
                             height: modelData.h * graphImage.height
                             Accessible.role: Accessible.Button
-                            Accessible.name: page ? "Read " + page.title : ""
+                            Accessible.name: page ? "Read " + page.title + (lastRead ? " (read last)" : "") : ""
                             activeFocusOnTab: true
                             Keys.onReturnPressed: root.openWiki(page.path, "", false)
                             Keys.onSpacePressed: root.openWiki(page.path, "", false)
+                            readonly property bool lastRead: !!page && page.path === root.lastRead
                             Rectangle {
                                 anchors.fill: parent
                                 anchors.margins: -2
@@ -918,7 +924,9 @@ Rectangle {
                                 color: "transparent"
                                 border.width: 2
                                 border.color: Theme.primary
-                                visible: boxHover.hovered || box.activeFocus
+                                // (The page read last stays ringed, fainter.)
+                                visible: boxHover.hovered || box.activeFocus || box.lastRead
+                                opacity: boxHover.hovered || box.activeFocus ? 1 : 0.55
                             }
                             HoverHandler {
                                 id: boxHover
@@ -1126,9 +1134,11 @@ Rectangle {
                         if (r) return "A run stopped part way" + (r.total > 0 ? " (" + r.done + " of " + r.total + " pages)" : "") + "."
                         if (root.st.running) return "Starting a run…"
                         if (!l) return "Not written by OpenWiki yet."
-                        const when = "Updated " + root.ago(l.at)
+                        // (Each phrase kept on one line: a narrow panel breaks at the dot.)
+                        const keep = t => t.replace(/ /g, "\u00a0")
+                        const when = keep("Updated " + root.ago(l.at))
                         const b = root.st.behind
-                        return b === null || b === undefined ? when : b === 0 ? when + " · up to date" : when + " · " + b + (b === 1 ? " commit" : " commits") + " since"
+                        return b === null || b === undefined ? when : b === 0 ? when + " · " + keep("up to date") : when + " · " + keep(b + (b === 1 ? " commit" : " commits") + " since")
                     }
                     color: Theme.textMuted
                     font.pixelSize: Theme.px(12)

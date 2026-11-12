@@ -852,7 +852,11 @@ pub(crate) fn wiki_search_at(cwd: &Path, query: &str, workspace: &str) -> serde_
     }
     let found = harlo_core::openwiki::call(&root, "openwiki_search", args).map_err(|e| format!("{e:#}")).and_then(|r| harlo_core::openwiki::answer(&r));
     match found {
-        Ok(answer) => harlo_core::openwiki::search_hits(&answer, query),
+        Ok(answer) => {
+            let mut found = harlo_core::openwiki::search_hits(&answer, query);
+            harlo_core::openwiki::restore_names(&mut found, |page| harlo_core::openwiki::read(&root, page).ok());
+            found
+        }
         // (OpenWiki couldn't run: the pages' own words.)
         Err(e) => {
             tracing::warn!("wiki search: {e}");

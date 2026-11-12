@@ -8178,7 +8178,7 @@ ApplicationWindow {
             win.check(JSON.stringify(win.wikiRows()) === JSON.stringify(["Quickstart", "Jobs", "Releasing"]), "its pages, the quickstart first (" + JSON.stringify(win.wikiRows()) + ")")
             win.check(win.findText("Architecture", wikiPanel) !== null && win.findText("Workflows", wikiPanel) !== null, "grouped by folder")
             const fresh = win.findName("wikiFreshness", wikiPanel)
-            win.check(fresh && fresh.text === "Updated just now · 1 commit since", "how fresh it is, against the code (" + (fresh ? fresh.text : "") + ")")
+            win.check(fresh && fresh.text.replace(/\u00a0/g, " ") === "Updated just now · 1 commit since", "how fresh it is, against the code (" + (fresh ? fresh.text.replace(/\u00a0/g, " ") : "") + ")")
             const run = win.findName("wikiRun", wikiPanel)
             win.check(run && run.text === "Update" && run.variant === "primary", "Update, the thing to do when it's behind")
             win.check(win.findName("wikiSwitch", wikiPanel).checked && win.findText("Agents search it, in sessions started from now on.", wikiPanel) !== null, "and whether agents use it (on unless switched off)")
@@ -8300,7 +8300,7 @@ ApplicationWindow {
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             const fresh = win.findName("wikiFreshness", wikiPanel)
-            win.check(fresh && fresh.text === "A run stopped part way (1 of 3 pages).", "a run that stopped part way says so (" + (fresh ? fresh.text : "") + ")")
+            win.check(fresh && fresh.text.replace(/\u00a0/g, " ") === "A run stopped part way (1 of 3 pages).", "a run that stopped part way says so (" + (fresh ? fresh.text.replace(/\u00a0/g, " ") : "") + ")")
             win.check(win.findName("wikiRun", wikiPanel).text === "Continue", "with Continue")
             TestInput.writeFile(win.argValue("--cwd=") + "/openwiki/.run.json", "")   // (unreadable: no run)
             // A project without a wiki: what it is, and Create.
@@ -8325,7 +8325,7 @@ ApplicationWindow {
             win.check(Workspace.setting("wiki_" + win.wikiProject2) === "1", "and turns the wiki on for the project's agents")
             win.check(JSON.stringify(win.wikiRows()) === JSON.stringify(["Quickstart"]), "its page shows in the panel (" + JSON.stringify(win.wikiRows()) + ")")
             const fresh = win.findName("wikiFreshness", wikiPanel)
-            win.check(fresh && fresh.text === "Updated just now · up to date", "up to date (" + (fresh ? fresh.text : "") + ")")
+            win.check(fresh && fresh.text.replace(/\u00a0/g, " ") === "Updated just now · up to date", "up to date (" + (fresh ? fresh.text.replace(/\u00a0/g, " ") : "") + ")")
             win.check(win.findName("wikiRun", wikiPanel).variant === "outline", "Update is quiet then")
             win.check(win.findText("Agents search it, in sessions started from now on.", wikiPanel) !== null, "and agents use it")
             win.shotWindow("clicks-wiki-created")
@@ -8423,7 +8423,7 @@ ApplicationWindow {
             const behind = Number(win.argValue("--wiki-behind=") || "-1")
             const fresh = win.findName("wikiFreshness", wikiPanel)
             if (behind >= 0)
-                win.check(fresh && fresh.text.endsWith(behind === 0 ? "· up to date" : "· " + behind + (behind === 1 ? " commit" : " commits") + " since"), "how far behind the code (" + (fresh ? fresh.text : "") + ")")
+                win.check(fresh && fresh.text.replace(/\u00a0/g, " ").endsWith(behind === 0 ? "· up to date" : "· " + behind + (behind === 1 ? " commit" : " commits") + " since"), "how far behind the code (" + (fresh ? fresh.text.replace(/\u00a0/g, " ") : "") + ")")
             win.demoQueries = JSON.parse(TestInput.readFile(win.argValue("--wiki-queries=")) || "[]")
             win.shotWindow("wiki-demo-pages")
             // Every page, opened in the panel and checked.
@@ -8519,10 +8519,13 @@ ApplicationWindow {
             const capText = cap ? cap.children[0].text : ""
             win.check(!!gbox && gbox.wider === /scroll sideways/.test(capText) && !!win.findName("wikiGraphFull", wikiPanel),
                       "wider than the panel, its caption says to scroll or open it full size, with a button for that (" + (gbox ? gbox.wider : "-") + ")")
-            const qi = wikiPanel.graphPages.findIndex(p => p.path === "quickstart.md")
+            const last = wikiPanel.graphPages.findIndex(p => p.path === wikiPanel.lastRead)
+            const qi = last >= 0 ? last : wikiPanel.graphPages.findIndex(p => p.path === "quickstart.md")
             const qbox = win.findAllNames("wikiGraphBox", wikiPanel).find(b => b.index === qi)
             const qx = qbox ? qbox.mapToItem(gbox, 0, 0).x : -1
-            win.check(qi < 0 || (qbox && qx >= 0 && qx + qbox.width <= gbox.width + 1), "it opens with the quickstart in view (" + Math.round(qx) + "+" + (qbox ? Math.round(qbox.width) : "-") + " in " + (gbox ? Math.round(gbox.width) + ", scrolled " + Math.round(gbox.contentX) + " of " + Math.round(gbox.contentWidth) : "-") + ")")
+            win.check(last >= 0 && qbox && qbox.lastRead && win.findAllNames("wikiGraphBox", wikiPanel).filter(b => b.lastRead).length === 1,
+                      "the page read last ringed in it (" + wikiPanel.lastRead + ")")
+            win.check(qi < 0 || (qbox && qx >= 0 && qx + qbox.width <= gbox.width + 1), "it opens with the page read last in view (" + Math.round(qx) + "+" + (qbox ? Math.round(qbox.width) : "-") + " in " + (gbox ? Math.round(gbox.width) + ", scrolled " + Math.round(gbox.contentX) + " of " + Math.round(gbox.contentWidth) : "-") + ")")
             win.shotWindow("wiki-demo-graph")
             wikiPanel.mode = "pages"
             // Each search, as the panel asks it of OpenWiki.
@@ -8538,6 +8541,9 @@ ApplicationWindow {
         PauseAnimation { duration: 600 }
         ScriptAction { script: {
             win.check(win.demoProblems.search.length === 0, "OpenWiki's search finds the page for each question (" + win.demoQueries.length + (win.demoProblems.search.length ? "; missed: " + win.demoProblems.search.join("; ") : "") + ")")
+            const snips = wikiPanel.results ? wikiPanel.results.hits.map(h => h.snippet).join(" | ") : ""
+            win.check(/\b(place|amend|pay|refund)_order\b/.test(snips) && !/\b(place|amend|pay|refund) order\b/.test(snips),
+                      "its hits keep the code's names (place_order, not \"place order\") (" + snips.slice(0, 160) + ")")
             win.shotWindow("wiki-demo-search")
             wikiPanel.search("") } }
         PauseAnimation { duration: 300 }
@@ -8684,7 +8690,7 @@ ApplicationWindow {
             const pages = wikiPanel.pages, fresh = win.findName("wikiFreshness", wikiPanel)
             win.check(wikiPanel.st.host === "box" && wikiPanel.st.root === "ssh://box" + win.argValue("--cwd="), "the panel reads the wiki on box (" + wikiPanel.st.root + ")")
             win.check(pages.length === 6 && pages[0].path === "quickstart.md", "its pages, the quickstart first (" + pages.map(p => p.path).join(", ") + ")")
-            win.check(fresh && fresh.text.endsWith("· 1 commit since"), "how far behind box's code (" + (fresh ? fresh.text : "") + ")")
+            win.check(fresh && fresh.text.replace(/\u00a0/g, " ").endsWith("· 1 commit since"), "how far behind box's code (" + (fresh ? fresh.text.replace(/\u00a0/g, " ") : "") + ")")
             win.check(win.findText("repo on box", wikiPanel) !== null, "its head names the host")
             win.shotWindow("wiki-remote-pages")
             wikiPanel.openWiki("architecture/orders.md", "refunds", false) } }
