@@ -7956,6 +7956,119 @@ ApplicationWindow {
             win.summary(); Qt.quit() } }
     }
 
+    // The wiki with Harlo and Claude Code: with Wiki on for a project that
+    // has one, its search and read tools (no others) and a few lines on
+    // when to use them reach both through harlo's tools, and OpenWiki
+    // answers them from the repository's openwiki/; harlo starts OpenWiki
+    // with its telemetry off unless allowed; with Wiki off they're gone.
+    property int wikiProject: -1
+    property int wikiDone: 0
+    property int wikiRequests: 0
+    function doneCount() { return win.chatText().split("Done:").length - 1 }
+    function sendWiki(text) { win.wikiDone = win.doneCount(); win.sendByKeys(text) }
+    function wikiAnswered() { return win.doneCount() > win.wikiDone && chat.session.status === "idle" }
+    // What the last tool said, as the model got it.
+    function lastToolResult() {
+        const reqs = win.modelRequests()
+        const msgs = (reqs[reqs.length - 1] || {}).messages || []
+        const tools = msgs.filter(m => m.role === "tool")
+        const last = tools[tools.length - 1]
+        return last ? (typeof last.content === "string" ? last.content : JSON.stringify(last.content)) : ""
+    }
+    function wikiEnvLog() { return TestInput.readFile(win.argValue("--cwd=") + "/../openwiki-env.log") || "" }
+    SequentialAnimation {
+        id: harloWikiSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlowiki"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            if (win.argValue("--theme-mode=")) Workspace.chooseThemeMode(win.argValue("--theme-mode="))
+            Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
+            Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            win.wikiProject = JSON.parse(Workspace.projectsJson())[0].id
+            Workspace.setSetting("wiki_" + win.wikiProject, "1")
+            win.harloKey = Workspace.newSession(win.wikiProject, "harlo")
+            Workspace.setApprovalMode(win.harloKey, "yolo") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloWikiSteps, () => chat.session.modelName !== "", 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: win.sendWiki("search the wiki for how are failed jobs retried") }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloWikiSteps, () => win.wikiAnswered(), 20000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const first = win.modelRequests()[0] || {}
+            const names = (first.tools || []).map(t => t.function.name)
+            const wiki = names.filter(n => n.indexOf("openwiki") >= 0)
+            win.check(wiki.length === 2 && wiki.some(n => n.endsWith("openwiki_search")) && wiki.some(n => n.endsWith("openwiki_read")), "Wiki on: search and read reach Harlo, and no other wiki tool (" + wiki.join(", ") + ")")
+            const tool = (first.tools || []).find(t => t.function.name.endsWith("openwiki_search"))
+            win.check(tool && JSON.stringify(tool.function.parameters).indexOf("root") < 0, "without root: harlo fills in the repository")
+            const said = JSON.stringify((first.messages || []).filter(m => m.role === "system"))
+            win.check(said.indexOf("This project has a wiki") >= 0 && said.indexOf("check it in the code") >= 0, "and a few lines on when to use them")
+            const t = win.lastToolResult()
+            win.check(t.indexOf("openwiki/architecture/jobs.md") >= 0 && t.indexOf("retried three times") >= 0, "OpenWiki finds the section (" + t.slice(0, 240) + ")")
+            win.check(win.findText("Search the wiki", chat.transcript) !== null, "its card says what it did")
+            const env = win.wikiEnvLog()
+            win.check(env.indexOf("start\nOPENWIKI_TELEMETRY_DISABLED=1") === 0 || (env.indexOf("start") === 0 && env.indexOf("OPENWIKI_TELEMETRY_DISABLED=1") > 0 && env.indexOf("DO_NOT_TRACK=1") > 0), "OpenWiki starts with its telemetry off (" + env.replace(/\n/g, " | ") + ")")
+            win.sendWiki("read the wiki at openwiki/architecture/jobs.md#retry-control") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloWikiSteps, () => win.wikiAnswered(), 20000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const t = win.lastToolResult()
+            win.check(t.indexOf("Retry control") >= 0 && t.indexOf("three times") >= 0, "openwiki_read gives the section (" + t.slice(0, 240) + ")")
+            win.check(win.wikiEnvLog().split("start").length - 1 === 1, "one OpenWiki serves both calls")
+            win.shotWindow("clicks-harlo-wiki")
+            // Claude Code, through the same tools.
+            win.claudeKey = Workspace.newSession(win.wikiProject, "claude") } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: win.sendByKeys("wiki search failed jobs retried") }
+        ScriptAction { script: win.waitUntil(harloWikiSteps, () => win.chatText().indexOf("Wiki tools:") >= 0, 20000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            const t = win.chatText()
+            win.check(t.indexOf("Wiki tools: openwiki_search, openwiki_read; wiki told; found: openwiki/architecture/jobs.md") >= 0, "Claude Code gets them and the lines too, and finds the page (" + t.slice(t.indexOf("Wiki tools:"), t.indexOf("Wiki tools:") + 200) + ")")
+            // Telemetry allowed: OpenWiki starts again without the switch.
+            Workspace.setSetting("openwiki_telemetry", "1")
+            Workspace.open(win.harloKey) } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: win.sendWiki("search the wiki for backoff") }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloWikiSteps, () => win.wikiAnswered(), 20000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const runs = win.wikiEnvLog().split("start")
+            win.check(runs.length - 1 === 2 && runs[2].indexOf("OPENWIKI_TELEMETRY_DISABLED") < 0, "allowed, OpenWiki starts again with its telemetry on (" + win.wikiEnvLog().replace(/\n/g, " | ") + ")")
+            Workspace.setSetting("openwiki_telemetry", "0")
+            // Wiki off: a new session gets neither the tools nor the lines.
+            Workspace.setSetting("wiki_" + win.wikiProject, "0")
+            win.wikiRequests = win.modelRequests().length
+            win.harloKey = Workspace.newSession(win.wikiProject, "harlo")
+            Workspace.setApprovalMode(win.harloKey, "yolo") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloWikiSteps, () => chat.session.modelName !== "", 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: win.sendWiki("hello") }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloWikiSteps, () => win.modelRequests().length > win.wikiRequests, 15000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const next = win.modelRequests()[win.wikiRequests] || {}
+            const names = (next.tools || []).map(t => t.function.name)
+            win.check(next.tools && names.every(n => n.indexOf("openwiki") < 0), "Wiki off: no wiki tools in a new session (" + names.join(", ") + ")")
+            win.check(JSON.stringify((next.messages || []).filter(m => m.role === "system")).indexOf("This project has a wiki") < 0, "nor the lines")
+            win.claudeKey = Workspace.newSession(win.wikiProject, "claude") } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: win.sendByKeys("wiki search failed jobs") }
+        ScriptAction { script: win.waitUntil(harloWikiSteps, () => win.chatText().indexOf("Wiki tools:") >= 0, 20000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            win.check(win.chatText().indexOf("Wiki tools: none; wiki not told") >= 0, "nor for Claude Code (" + win.chatText().slice(-120) + ")")
+            win.summary(); Qt.quit() } }
+    }
+
     // A diagram that doesn't parse: harlo tells the agent what's wrong
     // when its turn ends and it sends the diagram again, fixed, drawn as a
     // picture; one sent broken again isn't asked about a second time.

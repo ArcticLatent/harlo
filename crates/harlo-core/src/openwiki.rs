@@ -41,6 +41,71 @@ const CLI: &str = "node_modules/openwiki/dist/cli/cli.js";
 const SKILL: &str = "node_modules/openwiki/integrations/openwiki/SKILL.md";
 const PROTOCOL: &str = "2025-06-18";
 
+// ---- What sessions get ----
+
+/// The reading tools a session gets with its project's wiki on: search and
+/// read (a search names a workspace's choices itself when a wiki is linked
+/// to others, so the two listing tools stay unoffered: fewer tokens).
+pub const OFFERED: [&str; 2] = ["openwiki_search", "openwiki_read"];
+
+/// What a session with them is told.
+pub const READ_INSTRUCTIONS: &str = "This project has a wiki (openwiki/ in its repository), written from its code: its architecture, workflows and the reasons behind them. When a concrete question about an unfamiliar part would otherwise take a long search, openwiki_search it, then openwiki_read only the sections you need. Treat what it says as a lead and check it in the code before relying on it. Skip it for small, local changes.";
+
+/// [`OFFERED`] as the bridge lists them: short descriptions, and no `root`
+/// (harlo fills in the session's repository).
+pub fn reading_tools() -> Value {
+    let strings = |d: &str| json!({ "type": "array", "items": { "type": "string" }, "description": d });
+    json!([
+        {
+            "name": "openwiki_search",
+            "description": "Searches the project's wiki: ranked sections, each with a ref for openwiki_read.",
+            "inputSchema": { "type": "object", "properties": {
+                "query": { "type": "string", "description": "A question, behavior or concept." },
+                "paths": strings("Repository paths whose sections rank higher (optional)."),
+                "limit": { "type": "integer", "minimum": 1, "maximum": 20, "description": "How many results (optional)." },
+                "workspace": { "type": "string", "description": "Only when a search asks which workspace." }
+            }, "required": ["query"] },
+            "annotations": { "readOnlyHint": true },
+        },
+        {
+            "name": "openwiki_read",
+            "description": "Reads wiki sections from a search ref: its page and heading anchors.",
+            "inputSchema": { "type": "object", "properties": {
+                "page": { "type": "string", "description": "As in the ref: \"openwiki/architecture/jobs.md\"." },
+                "sections": strings("Heading anchors from the ref, e.g. [\"retry-control\"]."),
+                "wiki": { "type": "string", "description": "A linked wiki's id, when the result names one." }
+            }, "required": ["page", "sections"] },
+            "annotations": { "readOnlyHint": true },
+        },
+    ])
+}
+
+/// A tool's result as harlo answers it: OpenWiki's structured answer (the
+/// same JSON as its text), else its text; its error as an error.
+pub fn answer(result: &Value) -> Result<Value, String> {
+    let text: String = result["content"].as_array().into_iter().flatten().filter_map(|c| c["text"].as_str()).collect::<Vec<_>>().join("\n");
+    if result["isError"] == true {
+        return Err(if text.is_empty() { "OpenWiki couldn't do that.".into() } else { text });
+    }
+    if !result["structuredContent"].is_null() {
+        return Ok(result["structuredContent"].clone());
+    }
+    Ok(serde_json::from_str(&text).unwrap_or(Value::String(text)))
+}
+
+/// The repository a folder is in (the wiki's root), here or on its host;
+/// else the folder.
+pub fn root_of(folder: &Path) -> PathBuf {
+    crate::git::repo_root(folder).unwrap_or_else(|| folder.to_path_buf())
+}
+
+/// Whether the repository `folder` is in has a wiki (on another machine,
+/// taken as yes: asking there costs a round trip, and a search says when
+/// there isn't one).
+pub fn has_wiki(folder: &Path) -> bool {
+    remote::is_remote(folder) || root_of(folder).join(DIR).is_dir()
+}
+
 // ---- The runtime ----
 
 /// harlo's OpenWiki: a folder with `bin/node`, the package, and `VERSION`
@@ -776,6 +841,20 @@ mod tests {
         assert_eq!(hits[0]["section"], "retry-control");
         assert!(hits[0]["snippet"].as_str().unwrap().contains("backoff"));
         assert!(search_text(&root, "zebra", 5).is_empty());
+    }
+
+    #[test]
+    fn answers_and_offered_tools() {
+        let ok = json!({"content": [{"type": "text", "text": "{\"results\":[]}"}], "structuredContent": {"results": []}});
+        assert_eq!(answer(&ok).unwrap(), json!({"results": []}));
+        let text = json!({"content": [{"type": "text", "text": "{\"a\":1}"}]});
+        assert_eq!(answer(&text).unwrap(), json!({"a": 1}));
+        let err = json!({"content": [{"type": "text", "text": "No wiki here."}], "isError": true});
+        assert_eq!(answer(&err).unwrap_err(), "No wiki here.");
+        let tools = reading_tools();
+        let names: Vec<&str> = tools.as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
+        assert_eq!(names, OFFERED);
+        assert!(tools.to_string().find("\"root\"").is_none(), "harlo fills in root");
     }
 
     #[test]

@@ -1198,6 +1198,7 @@ impl cxx_qt::Initialize for Workspace {
                 let get = |k: &str| db.get(&format!("settings.{k}")).ok().flatten().unwrap_or_default();
                 let (family, mode, scale) = (get("theme_family"), get("theme_mode"), get("text_scale"));
                 crate::diagnostics::set_protocol_logging(get("debug_protocol") == "1");
+                harlo_core::openwiki::set_telemetry(get("openwiki_telemetry") == "1");
                 let mut this = self.as_mut().rust_mut();
                 this.ignored_repos = ignored_repos;
                 // (Ember was called OpenChamber before 1.0.)
@@ -3632,6 +3633,9 @@ impl Workspace {
         self.save_setting(&key, value.trim());
         if key == "debug_protocol" {
             crate::diagnostics::set_protocol_logging(value.trim() == "1");
+        }
+        if key == "openwiki_telemetry" {
+            harlo_core::openwiki::set_telemetry(value.trim() == "1");
         }
     }
 
@@ -6356,7 +6360,7 @@ impl Workspace {
             return Ok(json!(true));
         }
         // The caller's tools, and what they're for: harlo's, and its
-        // project's plan when it's on.
+        // project's wiki and plan when they're on.
         let features = caller.as_deref().and_then(|c| self.features_of(c));
         // (A helper: it reports to its parent, and offers no splits.)
         let helper = caller.as_ref().and_then(|c| self.orch_children.get(c)).is_some_and(|c| c.notify);
@@ -6367,7 +6371,10 @@ impl Workspace {
             if helper {
                 tools.extend(harlo_core::orchestration::helper_tools().as_array().cloned().unwrap_or_default());
             }
-            if let Some((_, _wiki, plan, commits)) = &features {
+            if let Some((cwd, wiki, plan, commits)) = &features {
+                if *wiki && harlo_core::openwiki::has_wiki(cwd) {
+                    tools.extend(harlo_core::openwiki::reading_tools().as_array().cloned().unwrap_or_default());
+                }
                 if *plan {
                     tools.extend(harlo_core::plan::tools(*commits).as_array().cloned().unwrap_or_default());
                 }
@@ -6376,7 +6383,10 @@ impl Workspace {
         }
         if tool == harlo_core::orchestration::INSTRUCTIONS {
             let mut text = format!("{} {}\n\n{}", harlo_core::orchestration::BASE_INSTRUCTIONS, harlo_core::orchestration::when_to_start(starting), harlo_core::orchestration::DIAGRAMS);
-            if let Some((_, _wiki, plan, commits)) = &features {
+            if let Some((cwd, wiki, plan, commits)) = &features {
+                if *wiki && harlo_core::openwiki::has_wiki(cwd) {
+                    text = format!("{text}\n\n{}", harlo_core::openwiki::READ_INSTRUCTIONS);
+                }
                 if *plan {
                     // (Claude Code plans in its own flow: its plan question.)
                     let own_flow = caller.as_ref().and_then(|c| self.live.get(c)).is_some_and(|e| e.info.harness == "claude");
@@ -6384,6 +6394,16 @@ impl Workspace {
                 }
             }
             return Ok(json!(text));
+        }
+        // The wiki: OpenWiki answers, off this thread (crate::orchestration).
+        if tool.starts_with("openwiki_") {
+            let Some((cwd, wiki, ..)) = &features else {
+                return Err("The wiki is for sessions in a harlo project.".into());
+            };
+            if !*wiki || !harlo_core::openwiki::OFFERED.contains(&tool) {
+                return Err("The wiki is off for this project (its settings in harlo).".into());
+            }
+            return Ok(json!({ "_defer": true, "cwd": cwd.to_string_lossy() }));
         }
         // The plan: done off this thread (crate::orchestration), with what
         // it needs from here.

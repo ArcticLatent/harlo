@@ -87,10 +87,10 @@ pub fn answer_pipe(thread: CxxQtThread<Workspace>, key: String, call: String, to
     });
 }
 
-/// What's left of a call after the UI thread's part: the plan
+/// What's left of a call after the UI thread's part: the wiki and the plan
 /// worked on, a session's messages read.
 fn finish(thread: &CxxQtThread<Workspace>, tool: &str, args: &Value, result: Value) -> Result<Value, String> {
-    // The plan: its work here, with what the UI thread gave.
+    // The wiki and the plan: their work here, with what the UI thread gave.
     if result["_defer"] == true {
         if tool == "bring_over" {
             let path = |k: &str| std::path::PathBuf::from(result[k].as_str().unwrap_or_default());
@@ -99,6 +99,11 @@ fn finish(thread: &CxxQtThread<Workspace>, tool: &str, args: &Value, result: Val
             let brought = harlo_core::git::bring_over(&helper, &path("here"), &text("start"), &text("base")).map_err(|e| format!("Not brought over: {e:#}."))?;
             let shown = harlo_core::remote::display(&helper);
             return Ok(json!({ "applied": brought.applied, "clashed": brought.clashed, "text": harlo_core::orchestration::brought_text(&brought.applied, &brought.clashed, &shown) }));
+        }
+        if tool.starts_with("openwiki_") {
+            let root = harlo_core::openwiki::root_of(std::path::Path::new(result["cwd"].as_str().unwrap_or_default()));
+            let said = harlo_core::openwiki::call(&root, tool, args.clone()).map_err(|e| format!("{e:#}"))?;
+            return harlo_core::openwiki::answer(&said);
         }
         let outcome = crate::plans::tool(tool, args, &result);
         let _ = thread.queue(|this| this.plans_changed());

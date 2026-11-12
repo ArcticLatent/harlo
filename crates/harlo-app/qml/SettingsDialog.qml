@@ -2609,10 +2609,10 @@ Popup {
                     FlatButton { text: "Cancel"; outlined: false; font.pixelSize: Theme.px(12); onClicked: setupArea.text = proj.p.setup }
                 }
                 Rule { visible: proj.p !== null }
-                // The shared plan.
+                // The wiki and the shared plan.
                 SectionHeader {
                     visible: proj.p !== null
-                    title: "Plans"
+                    title: "Wiki and plans"
                     subtitle: "Tools that help this project's agents plan and keep track."
                     more: "Every agent gets them, through harlo's tools (Settings → Orchestration). Sessions started afterwards get them."
                 }
@@ -2625,7 +2625,30 @@ Popup {
                     function on(name) { return rev >= 0 && pid >= 0 && Workspace.setting(name + "_" + pid) === "1" }
                     function set(name, on) { Workspace.setSetting(name + "_" + pid, on ? "1" : "0"); rev++ }
                     SettingRow {
+                        title: "Wiki"
+                        detail: "A wiki of this project in openwiki/, written by your agent from the code. With this on, agents search it and read the sections they need."
+                        more: "Create and update it from the Wiki panel (right edge); each run spends your model's tokens. It's made with OpenWiki, which comes with harlo."
+                        icon: "book-open"
+                        AppSwitch {
+                            objectName: "projectWiki"
+                            checked: featureGroup.on("wiki")
+                            onToggled: featureGroup.set("wiki", checked)
+                        }
+                    }
+                    SettingRow {
+                        divider: true
+                        title: "Share OpenWiki's usage data"
+                        detail: "Lets OpenWiki send its anonymous usage data to its makers, for every project. Off unless you turn it on."
+                        icon: "bar-chart-2"
+                        AppSwitch {
+                            objectName: "openwikiTelemetry"
+                            checked: featureGroup.rev >= 0 && Workspace.setting("openwiki_telemetry") === "1"
+                            onToggled: { Workspace.setSetting("openwiki_telemetry", checked ? "1" : "0"); featureGroup.rev++ }
+                        }
+                    }
+                    SettingRow {
                         id: planRow
+                        divider: true
                         title: "Shared plan"
                         detail: "For a bigger task the agent writes a plan of steps and works through it."
                         more: "You add, change, reorder or skip steps at any time (above the message box), and it reads them before each step. On by default in a git repository."
