@@ -1285,6 +1285,34 @@ final class ReplayTests: XCTestCase {
         XCTAssertNotNil(r.answer("diagram", ["source": "flowchart TD\n  x --> y", "light": true, "colors": [:]])["error"].string)
     }
 
+    func testAWikiPageDoesNotRepeatItsTitle() {
+        XCTAssertEqual(WikiPageText.withoutTitle("<h1 id=\"sidebar\">Sidebar</h1>\n<p>Rows.</p>"), "<p>Rows.</p>")
+        XCTAssertEqual(WikiPageText.withoutTitle("<h2>Rows</h2><p>x</p>"), "<h2>Rows</h2><p>x</p>")
+        XCTAssertEqual(WikiPageText.withoutTitle("<p>No heading.</p>"), "<p>No heading.</p>")
+    }
+
+    func testSearchMarksSkipFillerWords() {
+        XCTAssertEqual(Wiki.markWords("How is a job retried?"), ["job", "retried"])
+        XCTAssertEqual(Wiki.markWords("how to"), ["how", "to"])
+        XCTAssertEqual(Wiki.markWords(""), [])
+    }
+
+    func testADiagramDrawnAcrossCanRunDown() {
+        XCTAssertEqual(DiagramPicture.down("flowchart LR\n  a --> b"), "flowchart TB\n  a --> b")
+        XCTAssertEqual(DiagramPicture.down("%% the pages\ngraph RL\n  a --> b"), "%% the pages\ngraph TB\n  a --> b")
+        XCTAssertNil(DiagramPicture.down("flowchart TD\n  a --> b"))
+        XCTAssertNil(DiagramPicture.down("sequenceDiagram\n  a ->> b: hi"))
+        // (A label saying LR further down isn't the direction.)
+        XCTAssertNil(DiagramPicture.down("flowchart TB\n  a[graph LR] --> b"))
+        let wide = DiagramPicture(png: Data(), width: 1100, height: 120)
+        let tall = DiagramPicture(png: Data(), width: 300, height: 600)
+        // Down fits 360 points at full size; across at a third.
+        XCTAssertTrue(DiagramPicture.showsDown(across: wide, down: tall, width: 360))
+        // Both fit a wide screen whole: across stays.
+        XCTAssertFalse(DiagramPicture.showsDown(across: wide, down: tall, width: 1200))
+        XCTAssertFalse(DiagramPicture.showsDown(across: wide, down: nil, width: 360))
+    }
+
     func testTheAppShowsTheRecordingAtAScene() async throws {
         let m = HarloModel.replaying(try Replay(recording: Self.recording, scene: "approval"))
         XCTAssertTrue(m.replaying)

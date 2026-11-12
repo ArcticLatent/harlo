@@ -692,7 +692,9 @@ func record(_ link: String, to path: String) async {
     check(sidebarPage?.blocks.map(\.kind).contains("mermaid") == true && sidebarPage?.blocks.map(\.kind).contains("code") == true, "a page in blocks (\(sidebarPage?.blocks.map(\.kind) ?? []))")
     check(sidebarPage?.sources.map(\.path) == ["src/sidebar.rs", "src/projects.rs"] && sidebarPage?.sources.first?.ranges == [1...2, 4...9], "its sources, the lines its claims cite (\(sidebarPage?.sources.map { "\($0.path) \($0.ranges)" } ?? []))")
     // (Its graph and its page's diagram: drawn at the end.)
-    let wikiDiagrams = [s.wiki?.mermaid ?? ""] + (sidebarPage?.blocks.filter { $0.kind == "mermaid" }.map(\.code) ?? [])
+    // (Each drawn across and down: the phone shows the one larger on it.)
+    let wikiDiagrams = ([s.wiki?.mermaid ?? ""] + (sidebarPage?.blocks.filter { $0.kind == "mermaid" }.map(\.code) ?? []))
+        .flatMap { [$0] + (DiagramPicture.down($0).map { [$0] } ?? []) }
     let found = await model.searchWiki("rebuilds the whole list")
     check(found?.hits.first?.page == "openwiki/architecture/sidebar.md" && found?.hits.first?.heading == "Rebuilding rows" && found?.plain == false, "OpenWiki's search finds the section (\(found?.hits.first.map { "\($0.page)#\($0.section)" } ?? "none"))")
     rec.scene("plan")
@@ -736,7 +738,7 @@ func record(_ link: String, to path: String) async {
                 asked += 1
             }
         }
-        check(asked == 4, "the wiki's graph and its page's diagram, light and dark, to draw (\(asked))")
+        check(asked == 8, "the wiki's graph and its page's diagram, across and down, light and dark, to draw (\(asked))")
     }
     Recorder.shared = nil
 }

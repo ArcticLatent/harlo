@@ -10,10 +10,18 @@ struct DiagramBlock: View {
     let source: String
     let code: CodeBlock
     @State private var picture: DiagramPicture?
+    /// The same flowchart drawn down, when it's drawn across.
+    @State private var drawnDown: DiagramPicture?
+    @State private var width = 0.0
     @State private var why = ""
     @State private var loading = true
     @State private var showCode = false
     @State private var zoomed = false
+
+    /// Drawn down when that shows it larger in the card (a narrow phone).
+    var shown: DiagramPicture? {
+        DiagramPicture.showsDown(across: picture, down: drawnDown, width: width - 20) ? drawnDown : picture
+    }
 
     var light: Bool { p.background.luminance > 0.5 }
 
@@ -35,7 +43,7 @@ struct DiagramBlock: View {
                             .padding(.horizontal, 4)
                     }
                 }
-            } else if let d = picture, let image = UIImage(data: d.png) {
+            } else if let d = shown, let image = UIImage(data: d.png) {
                 VStack(alignment: .leading, spacing: 0) {
                     Button { zoomed = true } label: {
                         Image(uiImage: image)
@@ -49,7 +57,7 @@ struct DiagramBlock: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("Diagram")
                     .accessibilityHint("Opens it to zoom")
-                    toggle("Code", "chevron.left.forwardslash.chevron.right")
+                    toggle("Source", "chevron.left.forwardslash.chevron.right")
                         .padding(.horizontal, 6)
                         .padding(.bottom, 4)
                 }
@@ -67,12 +75,18 @@ struct DiagramBlock: View {
                 .card(p, radius: 10, fill: p.codeBackground)
             }
         }
+        .onGeometryChange(for: Double.self) { $0.size.width } action: { width = $0 }
         .task(id: "\(light)|\(source)") {
             loading = true
             let r = await model.diagram(source, light: light, colors: colors)
             picture = r.picture
             why = r.why
             loading = false
+            if r.picture != nil, let down = DiagramPicture.down(source) {
+                drawnDown = await model.diagram(down, light: light, colors: colors).picture
+            } else {
+                drawnDown = nil
+            }
         }
     }
 
@@ -82,7 +96,7 @@ struct DiagramBlock: View {
         } label: {
             Label(title, systemImage: icon)
                 .font(.footnote.weight(.medium))
-                .foregroundStyle(Color(p.primary))
+                .foregroundStyle(Color(p.primary.legible(on: p.raised, toward: p.foreground, ratio: 5)))
                 .padding(.horizontal, 4)
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
@@ -150,14 +164,21 @@ struct PagesGraph: View {
     let source: String
     @Binding var zoom: ZoomedPicture?
     @State private var picture: DiagramPicture?
+    @State private var drawnDown: DiagramPicture?
+    @State private var width = 0.0
     @State private var why = ""
     @State private var loading = true
 
     var light: Bool { p.background.luminance > 0.5 }
 
+    /// Drawn down when that shows it larger on the screen.
+    var shown: DiagramPicture? {
+        DiagramPicture.showsDown(across: picture, down: drawnDown, width: width) ? drawnDown : picture
+    }
+
     var body: some View {
         Group {
-            if let d = picture, let image = UIImage(data: d.png) {
+            if let d = shown, let image = UIImage(data: d.png) {
                 Button { zoom = ZoomedPicture(image: image, size: CGSize(width: d.width, height: d.height)) } label: {
                     Image(uiImage: image)
                         .resizable()
@@ -179,6 +200,8 @@ struct PagesGraph: View {
                 Text(why.isEmpty ? "The graph couldn't be drawn." : why).font(.footnote).foregroundStyle(Color(p.muted))
             }
         }
+        .frame(maxWidth: .infinity)
+        .onGeometryChange(for: Double.self) { $0.size.width } action: { width = $0 }
         .task(id: "\(light)|\(source)") {
             loading = true
             let colors = ["background": p.elevated.hex, "surface": p.raised.hex, "text": p.foreground.hex, "muted": p.muted.hex, "accent": p.primary.hex]
@@ -186,6 +209,11 @@ struct PagesGraph: View {
             picture = r.picture
             why = r.why
             loading = false
+            if r.picture != nil, let down = DiagramPicture.down(source) {
+                drawnDown = await model.diagram(down, light: light, colors: colors).picture
+            } else {
+                drawnDown = nil
+            }
         }
     }
 }

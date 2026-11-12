@@ -610,6 +610,11 @@ struct CodeBlock: View {
     var folded: Bool { !whole && lines > Self.long }
     var visible: [Span] { folded ? RichText.firstLines(spans, Self.shown) : spans }
 
+    /// "Code, rust, 2 lines".
+    var spokenLabel: String {
+        ["Code", language.isEmpty ? "" : language, lines == 1 ? "1 line" : "\(lines) lines"].filter { !$0.isEmpty }.joined(separator: ", ")
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
@@ -640,7 +645,6 @@ struct CodeBlock: View {
                         ForEach(Array(CodeLines.lines(visible).enumerated()), id: \.offset) { _, line in
                             WrappedLine(indent: line.indent, font: Style.mono(13)) {
                                 Text(Style.attributed(line.spans.isEmpty ? [Span(" ")] : RichText.breakable(line.spans), p, size: 15, inCode: true))
-                                    .accessibilityLabel(RichText.plain(line.spans))
                             }
                         }
                     }
@@ -657,6 +661,10 @@ struct CodeBlock: View {
                     }
                 }
             }
+            // Spoken as one: what it is, then the code itself.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(spokenLabel)
+            .accessibilityValue(RichText.plain(visible))
             .mask {
                 // Fading out where it's cut.
                 LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: folded ? 0.75 : 1),

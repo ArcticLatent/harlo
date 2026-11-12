@@ -298,6 +298,18 @@ public struct Wiki: Equatable, Sendable {
         return b == 0 ? when + " · up to date" : when + " · \(b) " + (b == 1 ? "commit" : "commits") + " since"
     }
 
+    /// Filler words a search hit doesn't mark ("how", "the", "to").
+    static let fillerWords: Set<String> = ["the", "a", "an", "and", "or", "of", "to", "in", "is", "it", "for", "on", "with", "as", "at", "by",
+                                           "how", "what", "where", "when", "why", "does", "do", "are", "be", "from", "this", "that"]
+
+    /// The query's words worth marking in a hit, lowercased: not filler
+    /// words, unless the query is nothing else (as the desktop marks them).
+    public static func markWords(_ query: String) -> [String] {
+        let words = query.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init).filter { $0.count > 1 }
+        let kept = words.filter { !fillerWords.contains($0) }
+        return kept.isEmpty ? words : kept
+    }
+
     /// "just now", "5 minutes ago", "yesterday", "3 days ago", from an ISO
     /// time (as the desktop says it).
     public static func ago(_ iso: String, now: Date = Date()) -> String {
@@ -423,6 +435,14 @@ public struct WikiPageText: Equatable, Sendable {
         return (joined.hasPrefix("openwiki/") ? String(joined.dropFirst(9)) : joined, section)
     }
 
+    /// A page's first prose without its top heading (the `<h1>` its text
+    /// starts with), which the screen shows as its title already.
+    public static func withoutTitle(_ html: String) -> String {
+        let text = html.drop { $0.isWhitespace }
+        guard text.hasPrefix("<h1"), let end = text.range(of: "</h1>") else { return html }
+        return String(text[end.upperBound...].drop { $0.isWhitespace })
+    }
+
     /// A link to code (`repo://src/a.rs#L10-L20`): the file and its line.
     public static func code(of link: String) -> (path: String, line: Int)? {
         guard link.hasPrefix("repo://") else { return nil }
@@ -475,5 +495,26 @@ public struct DiagramPicture: Equatable, Sendable {
         self.png = png
         self.width = width
         self.height = height
+    }
+}
+
+extension DiagramPicture {
+    /// A flowchart drawn across (LR or RL) turned to run down (TB), past
+    /// any `%%` lines before it; nil when it isn't one drawn across.
+    public static func down(_ source: String) -> String? {
+        let pattern = #"^(\s*(?:%%[^\n]*\n\s*)*)(flowchart|graph)([ \t]+)(LR|RL)\b"#
+        guard let re = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let all = NSRange(source.startIndex..., in: source)
+        guard re.firstMatch(in: source, range: all) != nil else { return nil }
+        return re.stringByReplacingMatches(in: source, range: all, withTemplate: "$1$2$3TB")
+    }
+
+    /// Whether `down` shows larger than `across` in `width` points (each
+    /// fitted to it, never enlarged), by more than 15%: then it's the one
+    /// to show.
+    public static func showsDown(across: DiagramPicture?, down: DiagramPicture?, width: Double) -> Bool {
+        guard let across, let down, width > 0 else { return false }
+        let fit = { (d: DiagramPicture) in min(1, width / max(1, d.width)) }
+        return fit(down) > 1.15 * fit(across)
     }
 }

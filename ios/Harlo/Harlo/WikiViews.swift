@@ -254,7 +254,7 @@ struct WikiView: View {
     /// weight (the rest stays muted), so it says why it matched.
     func marked(_ text: String) -> AttributedString {
         var out = AttributedString(text)
-        let words = query.lowercased().split { !$0.isLetter && !$0.isNumber }.filter { $0.count > 1 }
+        let words = Wiki.markWords(query)
         guard !words.isEmpty else { return out }
         // (The whole word a match is in: "amended" for "amend".)
         var start: String.Index?
@@ -327,7 +327,7 @@ struct WikiPageView: View {
                     file = WikiFile(path: wiki.file(s.path), line: s.ranges.first?.lowerBound ?? 0)
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(s.path).font(.footnote.monospaced()).foregroundStyle(Color(p.primary)).multilineTextAlignment(.leading)
+                        Text(s.path).font(.footnote.monospaced()).foregroundStyle(Color(p.primary.legible(on: p.background, toward: p.foreground, ratio: 5))).multilineTextAlignment(.leading)
                         let lines = s.ranges.map { $0.count == 1 ? "\($0.lowerBound)" : "\($0.lowerBound)–\($0.upperBound)" }
                         let about = [lines.isEmpty ? "" : "lines " + lines.joined(separator: ", "), s.claims == 0 ? "" : s.claims == 1 ? "cited once" : s.claims == 2 ? "cited twice" : "cited \(s.claims) times"].filter { !$0.isEmpty }
                         if !about.isEmpty {
@@ -352,14 +352,18 @@ struct WikiPageView: View {
                     if let page, !page.error.isEmpty {
                         ContentUnavailableView(title, systemImage: "book.closed", description: Text(page.error))
                     } else if let page {
+                        // (Its summary first, then what kind it is: the title
+                        // is in the bar, so not again at the top of its text.)
+                        if !page.summary.isEmpty {
+                            Text(page.summary).font(.body).foregroundStyle(Color(p.foreground).opacity(0.82))
+                                .accessibilityIdentifier("wikiPageLede")
+                        }
                         if !meta.isEmpty {
                             Text(meta).font(.footnote).foregroundStyle(Color(p.muted)).accessibilityIdentifier("wikiPageMeta")
-                        }
-                        if !page.summary.isEmpty {
-                            Text(page.summary).font(.subheadline).foregroundStyle(Color(p.muted))
+                                .padding(.bottom, 4)
                         }
                         ForEach(page.blocks.indices, id: \.self) { i in
-                            block(page.blocks[i]).id(page.blocks[i].anchor.isEmpty ? "b\(i)" : page.blocks[i].anchor)
+                            block(page.blocks[i], first: i == 0).id(page.blocks[i].anchor.isEmpty ? "b\(i)" : page.blocks[i].anchor)
                         }
                         if !page.sources.isEmpty { sources(page.sources) }
                     } else if failed {
@@ -407,14 +411,14 @@ struct WikiPageView: View {
     }
 
     @ViewBuilder
-    func block(_ b: WikiPageText.Block) -> some View {
+    func block(_ b: WikiPageText.Block, first: Bool = false) -> some View {
         switch b.kind {
         case "mermaid" where model.drawsDiagrams:
             DiagramBlock(source: b.code, code: CodeBlock(spans: [Span(b.code, code: true)], language: "mermaid", raw: b.code))
         case "mermaid", "code":
             CodeBlock(spans: codeSpans(b), language: b.lang, raw: b.code)
         default:
-            RichTextView(blocks: RichText.parse(b.html))
+            RichTextView(blocks: RichText.parse(first ? WikiPageText.withoutTitle(b.html) : b.html))
         }
     }
 

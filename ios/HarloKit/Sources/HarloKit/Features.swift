@@ -746,10 +746,10 @@ public struct RGBA: Codable, Equatable, Sendable {
     }
 
     /// This colour, moved toward `ink` just enough to read as small text on
-    /// `background` (4.5:1): a theme's bright orange on white, say.
-    public func legible(on background: RGBA, toward ink: RGBA) -> RGBA {
+    /// `background` (4.5:1, or `ratio`): a theme's bright orange on white, say.
+    public func legible(on background: RGBA, toward ink: RGBA, ratio: Double = 4.5) -> RGBA {
         var t = 0.0, c = self
-        while c.contrast(with: background) < 4.5 && t < 1 {
+        while c.contrast(with: background) < ratio && t < 1 {
             t += 0.05
             c = mix(ink, t)
         }

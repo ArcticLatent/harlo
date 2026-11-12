@@ -156,11 +156,13 @@ enum Style {
             var font: Font = s.code || inCode ? mono(size - 2, s.bold ? .bold : .regular) : .system(size: prose, weight: s.bold ? .semibold : .regular)
             if s.italic { font = font.italic() }
             a.font = font
+            // (Code's colours a little darker or lighter where a theme's
+            // are only just readable on its well: small mono text.)
             if s.code && !inCode {
                 a.backgroundColor = Color(p.codeBackground)
-                a.foregroundColor = Color(p.inlineCode)
+                a.foregroundColor = Color(p.inlineCode.legible(on: p.codeBackground, toward: p.foreground, ratio: 5))
             }
-            if let c = p.token(s.token) { a.foregroundColor = Color(c) }
+            if let c = p.token(s.token) { a.foregroundColor = Color(s.code || inCode ? c.legible(on: p.codeBackground, toward: p.foreground, ratio: 5) : c) }
             if s.strike { a.strikethroughStyle = Text.LineStyle.single }
             if let l = s.link, let url = URL(string: l) {
                 a.link = url
