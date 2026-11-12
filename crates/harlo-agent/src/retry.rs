@@ -2,8 +2,9 @@
 //! (not a plan used up), a server error or overload, a connection that
 //! didn't open or broke during the reply. [`TRIES`] more times, after 1, 2
 //! and 4 seconds, or as long as the server asked (`Retry-After`, up to
-//! [`MAX_WAIT`]). A refusal that won't change (a bad request, the sign-in,
-//! the context too long, the plan used up) isn't retried.
+//! [`MAX_WAIT`]; asked to wait longer, it stops and says when to try
+//! again). A refusal that won't change (a bad request, the sign-in, the
+//! context too long, the plan used up) isn't retried.
 
 use std::time::Duration;
 
@@ -12,7 +13,7 @@ use crate::responses::{ApiError, Dropped, Failed};
 /// Retries after the first try.
 pub const TRIES: u32 = 3;
 /// The longest wait a server can ask for and still be retried.
-const MAX_WAIT: u64 = 60;
+pub const MAX_WAIT: u64 = 300;
 
 /// Error types that mean the plan (or the account's quota) is used up:
 /// waiting a few seconds won't help.
@@ -31,9 +32,27 @@ const PASSING: &[&str] = &[
     "subscription_sharing_user_unavailable",
 ];
 
-/// `Retry-After` in seconds (a number; a date isn't read).
+/// The wait a server asked for, in seconds: `retry-after-ms`, or
+/// `Retry-After` as seconds or as a date.
 pub fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<u64> {
-    headers.get(reqwest::header::RETRY_AFTER)?.to_str().ok()?.trim().parse().ok()
+    let text = |k| headers.get(k).and_then(|v| v.to_str().ok()).map(str::trim);
+    if let Some(ms) = text("retry-after-ms").and_then(|v| v.parse::<f64>().ok()).filter(|ms| ms.is_finite() && *ms >= 0.0) {
+        return Some((ms / 1000.0).ceil() as u64);
+    }
+    let v = text("retry-after")?;
+    v.parse().ok().or_else(|| {
+        let at = httpdate::parse_http_date(v).ok()?;
+        Some(at.duration_since(std::time::SystemTime::now()).map_or(0, |d| d.as_secs_f64().ceil() as u64))
+    })
+}
+
+/// What's said when a server asks to wait `secs`, longer than
+/// [`MAX_WAIT`]: the request isn't sent again, and when to try.
+pub fn not_waiting(secs: u64, now: i64) -> String {
+    let wait = crate::responses::span(Duration::from_secs(secs));
+    let at = crate::clock::local(now + secs as i64);
+    let day = if secs >= 20 * 3600 { format!("{:04}-{:02}-{:02} ", at.year, at.month, at.day) } else { String::new() };
+    format!("Not retried: the server asked to wait {wait}; try again after {day}{:02}:{:02}", at.hour, at.minute)
 }
 
 /// Why `e` is worth another try (shown to the user), with the wait the
@@ -53,7 +72,7 @@ pub fn transient(e: &anyhow::Error) -> Option<(&'static str, Option<u64>)> {
             503 | 520..=529 => "the server is busy",
             _ => return None,
         };
-        return Some((why, a.retry_after.filter(|s| *s <= MAX_WAIT)));
+        return Some((why, a.retry_after));
     }
     if e.downcast_ref::<Dropped>().is_some() {
         return Some(("the connection broke", None));
@@ -97,7 +116,7 @@ mod tests {
     #[test]
     fn what_is_tried_again() {
         assert_eq!(transient(&api(429, "rate_limit_exceeded", Some(7))), Some(("the server's rate limit", Some(7))));
-        assert_eq!(transient(&api(429, "", Some(600))), Some(("the server's rate limit", None)));
+        assert_eq!(transient(&api(429, "", Some(600))), Some(("the server's rate limit", Some(600))));
         assert!(transient(&api(503, "", None)).is_some());
         assert!(transient(&api(500, "", None)).is_some());
         assert!(transient(&Dropped("closed".into()).into()).is_some());
@@ -116,6 +135,30 @@ mod tests {
         assert!(transient(&long).is_none());
         assert!(transient(&Failed { code: "invalid_prompt".into(), message: "no".into() }.into()).is_none());
         assert!(transient(&anyhow::anyhow!("something else")).is_none());
+    }
+
+    #[test]
+    fn the_wait_asked_for() {
+        use reqwest::header::{HeaderMap, HeaderValue};
+        let h = |pairs: &[(&'static str, &str)]| {
+            let mut m = HeaderMap::new();
+            for (k, v) in pairs {
+                m.insert(*k, HeaderValue::from_str(v).unwrap());
+            }
+            retry_after(&m)
+        };
+        assert_eq!(h(&[("retry-after", "600")]), Some(600));
+        assert_eq!(h(&[("retry-after-ms", "1500"), ("retry-after", "9")]), Some(2), "the finer one wins");
+        let later = httpdate::fmt_http_date(std::time::SystemTime::now() + Duration::from_secs(120));
+        assert!(h(&[("retry-after", &later)]).is_some_and(|s| (118..=121).contains(&s)), "a date");
+        assert_eq!(h(&[("retry-after", "Wed, 21 Oct 2015 07:28:00 GMT")]), Some(0), "a date gone by");
+        assert_eq!(h(&[("retry-after", "soon")]), None);
+        // Too long to wait: said when to try instead.
+        let now = 1_794_063_845;
+        let said = not_waiting(600, now);
+        let at = crate::clock::local(now + 600);
+        assert!(said.starts_with("Not retried: the server asked to wait 10 min; try again after ") && said.ends_with(&format!("{:02}:{:02}", at.hour, at.minute)), "{said}");
+        assert!(not_waiting(2 * 86_400, now).contains(&format!("{:04}-", at.year)), "a day ahead says the date");
     }
 
     #[test]

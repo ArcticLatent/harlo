@@ -1397,6 +1397,10 @@ async fn send(a: Asked<'_>, show: &mut (dyn FnMut(Shown) + Send)) -> Result<(Val
             Err(e) => e,
         };
         let Some((why, asked)) = crate::retry::transient(&e).filter(|_| tried < crate::retry::TRIES) else { return Err(e) };
+        if let Some(secs) = asked.filter(|s| *s > crate::retry::MAX_WAIT) {
+            let said = crate::retry::not_waiting(secs, crate::clock::now().unix);
+            return Err(e.context(said));
+        }
         tried += 1;
         let wait = crate::retry::delay(tried, asked);
         show(Shown::Withdrawn);
@@ -2213,6 +2217,39 @@ mod tests {
         let args = json!({ "path": "." });
         let out = run_calls(&tools, &[("1", "ls", &args), ("2", "ls", &args)], &Extra::default(), &stop).await;
         assert!(out.iter().all(|o| o.failed));
+    }
+
+    #[tokio::test]
+    async fn a_stopped_search_ends_at_once() {
+        let dir = std::env::temp_dir().join(format!("harlo-agent-stop-search-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // A search that never ends by itself: rg reads a pipe nobody writes.
+        let pipe = dir.join("pipe");
+        assert!(std::process::Command::new("mkfifo").arg(&pipe).status().unwrap().success());
+        let running = || std::process::Command::new("pgrep").arg("-f").arg(pipe.to_string_lossy().as_ref()).output().is_ok_and(|o| !o.stdout.is_empty());
+        let tools = Tools::new(dir.clone(), dir.join("spill"));
+        let stop = CancellationToken::new();
+        let stopper = stop.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            stopper.cancel();
+        });
+        let args = json!({ "pattern": "x", "path": "pipe" });
+        let started = std::time::Instant::now();
+        let out = run_calls(&tools, &[("1", "grep", &args)], &Extra::default(), &stop).await;
+        assert!(out[0].failed && started.elapsed() < std::time::Duration::from_secs(2), "stopped at once: {:?}", started.elapsed());
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(!running(), "the search command is gone too");
+        // Not stopped: it ends at its time limit.
+        // SAFETY: only this test reads it with a search that long.
+        unsafe { std::env::set_var("HARLO_AGENT_SEARCH_SECS", "1") };
+        let started = std::time::Instant::now();
+        let out = tools.call("grep", &args).await;
+        assert!(out.failed && out.text.contains("ran past 1 s and was stopped"), "{}", out.text);
+        assert!(started.elapsed() < std::time::Duration::from_secs(3));
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(!running(), "the timed-out command is gone");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     /// harlo answering: a list, a tool's result, an error.

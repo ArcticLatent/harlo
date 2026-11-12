@@ -94,7 +94,7 @@ pub async fn run(url: &str, spill_dir: &Path) -> Outcome {
     let moved = if at != url { format!(" (from {url})") } else { String::new() };
     let mime = kind.split(';').next().unwrap_or_default().trim().to_owned();
     if (mime.starts_with("image/") && mime != "image/svg+xml") || (mime.is_empty() && crate::images::mime_of(&body).is_some()) {
-        return match crate::images::fit(&body) {
+        return match crate::images::fit_apart(body).await {
             Ok(f) if status.is_success() => {
                 let mut out = Outcome::new(format!("[Image: {at}{moved}, {}.]", f.describe()), false);
                 out.images.push(f.block());

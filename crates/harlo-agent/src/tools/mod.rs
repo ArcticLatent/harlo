@@ -38,6 +38,12 @@ fn grep_capped() -> bool {
     std::env::var("HARLO_AGENT_GREP_CAP").map_or(true, |v| v.trim() != "off")
 }
 
+/// How long a grep or find may run: a minute (`HARLO_AGENT_SEARCH_SECS`
+/// sets another).
+fn search_secs() -> u64 {
+    std::env::var("HARLO_AGENT_SEARCH_SECS").ok().and_then(|v| v.trim().parse().ok()).filter(|s| *s > 0).unwrap_or(60)
+}
+
 pub struct Tools {
     pub cwd: PathBuf,
     /// Where long command output is saved.
@@ -360,7 +366,7 @@ impl Tools {
     pub async fn call(&self, name: &str, args: &Value) -> Outcome {
         let s = |k: &str| args[k].as_str().unwrap_or_default();
         match name {
-            "read" => self.read(s("path"), args["offset"].as_u64(), args["limit"].as_u64()),
+            "read" => self.read(s("path"), args["offset"].as_u64(), args["limit"].as_u64()).await,
             "write" | "edit" | "apply_patch" => {
                 let mut out = match name {
                     "write" => self.write(s("path"), s("content")),
@@ -423,7 +429,7 @@ impl Tools {
         }
     }
 
-    fn read(&self, p: &str, offset: Option<u64>, limit: Option<u64>) -> Outcome {
+    async fn read(&self, p: &str, offset: Option<u64>, limit: Option<u64>) -> Outcome {
         if p.trim().is_empty() {
             return fail("Give the file's path.");
         }
@@ -431,14 +437,18 @@ impl Tools {
         if let Some(no) = self.hidden(&path) {
             return no;
         }
-        let bytes = match std::fs::read(&path) {
+        // (Off the async threads: a large file, or a slow disk, doesn't
+        // hold up a stop.)
+        let reading = path.clone();
+        let read = tokio::task::spawn_blocking(move || std::fs::read(reading)).await.unwrap_or_else(|e| Err(std::io::Error::other(e.to_string())));
+        let bytes = match read {
             Ok(b) => b,
             Err(e) if path.is_dir() => return fail(format!("{} is a folder: use ls ({e}).", path.display())),
             Err(e) => return fail(format!("Can't read {}: {e}", path.display())),
         };
         self.remember(&path, &bytes);
         if crate::images::mime_of(&bytes).is_some() {
-            return match crate::images::fit(&bytes) {
+            return match crate::images::fit_apart(bytes).await {
                 Ok(f) => {
                     let mut out = ok(format!("[Image: {}, {}.]", path.display(), f.describe()));
                     out.images.push(f.block());
@@ -727,6 +737,18 @@ impl Tools {
         ok(if out.is_empty() { "(empty folder)".into() } else { out })
     }
 
+    /// Runs a search (rg, grep, find) in the working folder: stopped with
+    /// the call, or after [`search_secs`].
+    async fn search(&self, program: &str, args: &[String]) -> std::io::Result<std::process::Output> {
+        let mut cmd = tokio::process::Command::new(program);
+        cmd.args(args).current_dir(&self.cwd).stdin(std::process::Stdio::null()).kill_on_drop(true);
+        let secs = search_secs();
+        match tokio::time::timeout(std::time::Duration::from_secs(secs), cmd.output()).await {
+            Ok(r) => r,
+            Err(_) => Err(std::io::Error::new(std::io::ErrorKind::TimedOut, format!("The search ran past {secs} s and was stopped: narrow the path, pattern or glob."))),
+        }
+    }
+
     async fn grep(&self, pattern: &str, p: &str, glob: &str, ignore_case: bool) -> Outcome {
         if pattern.is_empty() {
             return fail("Give a pattern.");
@@ -743,8 +765,9 @@ impl Tools {
             args.extend(["-g".into(), glob.into()]);
         }
         args.extend(["-e".into(), pattern.into(), "--".into(), path.to_string_lossy().into_owned()]);
-        let out = match tokio::process::Command::new("rg").args(&args).current_dir(&self.cwd).stdin(std::process::Stdio::null()).output().await {
+        let out = match self.search("rg", &args).await {
             Ok(o) => o,
+            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => return fail(e.to_string()),
             // No ripgrep: grep.
             Err(_) => {
                 let mut g = vec!["-rnI".to_owned()];
@@ -755,8 +778,9 @@ impl Tools {
                     g.push(format!("--include={glob}"));
                 }
                 g.extend(["-E".into(), "-e".into(), pattern.into(), "--".into(), path.to_string_lossy().into_owned()]);
-                match tokio::process::Command::new("grep").args(&g).current_dir(&self.cwd).stdin(std::process::Stdio::null()).output().await {
+                match self.search("grep", &g).await {
                     Ok(o) => o,
+                    Err(e) if e.kind() == std::io::ErrorKind::TimedOut => return fail(e.to_string()),
                     Err(e) => return fail(format!("Can't search: {e}")),
                 }
             }
@@ -836,13 +860,17 @@ impl Tools {
         if let Some(no) = self.hidden(&path) {
             return no;
         }
-        let out = tokio::process::Command::new("rg").args(["--files", "--color", "never", "-g", pattern, "-g", "!.git/", "--"]).arg(&path).current_dir(&self.cwd).stdin(std::process::Stdio::null()).output().await;
-        let text = match out {
+        let at = path.to_string_lossy().into_owned();
+        let rg: Vec<String> = ["--files", "--color", "never", "-g", pattern, "-g", "!.git/", "--", &at].map(str::to_owned).into();
+        let text = match self.search("rg", &rg).await {
             Ok(o) => String::from_utf8_lossy(&o.stdout).into_owned(),
+            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => return fail(e.to_string()),
             Err(_) => {
                 let name = pattern.rsplit('/').next().unwrap_or(pattern);
-                match tokio::process::Command::new("find").arg(&path).args(["-name", name, "-not", "-path", "*/.git/*"]).output().await {
+                let find: Vec<String> = [&at, "-name", name, "-not", "-path", "*/.git/*"].map(str::to_owned).into();
+                match self.search("find", &find).await {
                     Ok(o) => String::from_utf8_lossy(&o.stdout).into_owned(),
+                    Err(e) if e.kind() == std::io::ErrorKind::TimedOut => return fail(e.to_string()),
                     Err(e) => return fail(format!("Can't search: {e}")),
                 }
             }

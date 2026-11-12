@@ -61,6 +61,11 @@ pub fn now() -> Local {
     at(unix_now(), false)
 }
 
+/// `unix` on the local clock.
+pub fn local(unix: i64) -> Local {
+    at(unix, false)
+}
+
 impl Local {
     /// `2026-11-07 (Saturday)`.
     pub fn date(&self) -> String {

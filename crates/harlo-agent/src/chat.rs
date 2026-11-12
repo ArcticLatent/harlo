@@ -4,10 +4,9 @@
 //! Responses API's.
 
 use anyhow::Result;
-use futures_util::StreamExt as _;
 use serde_json::{Value, json};
 
-use crate::responses::{ApiError, Dropped, Failed, client, find_event_end};
+use crate::responses::{ApiError, Dropped, Events, Failed, client, refusal_text, send};
 
 /// A request's body.
 pub fn request(model: &str, instructions: &str, messages: &[Value], tools: &Value, effort: Option<&str>) -> Value {
@@ -257,11 +256,11 @@ pub async fn stream(base: &str, token: Option<&str>, body: &Value, provider: &st
     if let Some(t) = token {
         req = req.bearer_auth(t);
     }
-    let resp = req.send().await.map_err(|e| Dropped(format!("Couldn't reach {base}: {e}")))?;
+    let resp = send(req, base).await?;
     let status = resp.status();
     let retry_after = crate::retry::retry_after(resp.headers());
     if !status.is_success() {
-        let text = resp.text().await.unwrap_or_default();
+        let text = refusal_text(resp).await;
         let body: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
         let said = body["error"]["message"].as_str().or_else(|| body["error"].as_str()).or_else(|| body["message"].as_str()).map(str::to_owned).unwrap_or_else(|| text.chars().take(300).collect());
         let code = body["error"]["type"].as_str().or_else(|| body["error"]["code"].as_str()).unwrap_or_default().to_owned();
@@ -270,30 +269,23 @@ pub async fn stream(base: &str, token: Option<&str>, body: &Value, provider: &st
         return Err(ApiError { status: status.as_u16(), message: format!("{provider} refused the request ({status}): {said}"), code, retry_after, resets_at }.into());
     }
     let mut reply = Reply::default();
-    let mut bytes = resp.bytes_stream();
-    let mut buf: Vec<u8> = Vec::new();
     let mut events = Vec::new();
+    let mut reader = Events::new(resp);
     let mut done = false;
-    while !done && let Some(chunk) = bytes.next().await {
-        buf.extend_from_slice(&chunk.map_err(|e| Dropped(format!("The connection broke during the reply: {e}")))?);
-        while let Some(end) = find_event_end(&buf) {
-            let raw: Vec<u8> = buf.drain(..end.1).collect();
-            let text = String::from_utf8_lossy(&raw[..end.0]);
-            let data: String = text.lines().filter_map(|l| l.strip_prefix("data:")).map(str::trim_start).collect::<Vec<_>>().join("\n");
-            if data == "[DONE]" {
-                done = true;
-                break;
-            }
-            let Ok(chunk) = serde_json::from_str::<Value>(&data) else { continue };
-            if chunk["error"].is_object() || chunk["error"].is_string() {
-                let e = &chunk["error"];
-                let code = e["type"].as_str().or_else(|| e["code"].as_str()).unwrap_or_default().to_owned();
-                return Err(Failed { code, message: format!("{provider}: {}", e["message"].as_str().or_else(|| e.as_str()).unwrap_or("the request failed")) }.into());
-            }
-            reply.take(&chunk, &mut events);
-            for e in events.drain(..) {
-                on(&e);
-            }
+    while let Some(data) = reader.next().await? {
+        if data == "[DONE]" {
+            done = true;
+            break;
+        }
+        let Ok(chunk) = serde_json::from_str::<Value>(&data) else { continue };
+        if chunk["error"].is_object() || chunk["error"].is_string() {
+            let e = &chunk["error"];
+            let code = e["type"].as_str().or_else(|| e["code"].as_str()).unwrap_or_default().to_owned();
+            return Err(Failed { code, message: format!("{provider}: {}", e["message"].as_str().or_else(|| e.as_str()).unwrap_or("the request failed")) }.into());
+        }
+        reply.take(&chunk, &mut events);
+        for e in events.drain(..) {
+            on(&e);
         }
     }
     if !done && reply.finish.is_none() {
@@ -329,6 +321,103 @@ pub async fn stream(base: &str, token: Option<&str>, body: &Value, provider: &st
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// A stand-in model server that answers every request as `how` says:
+    /// "hang" (never answers), "stall" (headers and one event, then
+    /// nothing), "endless" (an event that never ends), "split" (a reply
+    /// whose blank lines come split across writes), "429" (busy, asking
+    /// for a 600 s wait).
+    async fn stand_in(how: &'static str) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut s, _)) = listener.accept().await else { return };
+                tokio::spawn(async move {
+                    let mut buf = vec![0u8; 65536];
+                    let _ = s.read(&mut buf).await;
+                    let sse = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n";
+                    let hello = "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"Hel\"}}]}\n\n";
+                    match how {
+                        "hang" => tokio::time::sleep(std::time::Duration::from_secs(60)).await,
+                        "stall" => {
+                            let _ = s.write_all(format!("{sse}{hello}").as_bytes()).await;
+                            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                        }
+                        "endless" => {
+                            let _ = s.write_all(format!("{sse}data: \"").as_bytes()).await;
+                            let part = vec![b'a'; 1 << 16];
+                            while s.write_all(&part).await.is_ok() {}
+                        }
+                        "split" => {
+                            let _ = s.write_all(sse.as_bytes()).await;
+                            let done = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}]}";
+                            for part in [&hello[..hello.len() - 1], "\n", done, "\r", "\n\r", "\n", "data: [DONE]\r\n\r\n"] {
+                                let _ = s.write_all(part.as_bytes()).await;
+                                let _ = s.flush().await;
+                                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                            }
+                        }
+                        _ => {
+                            let body = "{\"error\":{\"type\":\"rate_limit_exceeded\",\"message\":\"busy\"}}";
+                            let head = format!("HTTP/1.1 429 Too Many Requests\r\nRetry-After: 600\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                            let _ = s.write_all(head.as_bytes()).await;
+                        }
+                    }
+                });
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    async fn ask(how: &'static str) -> (Result<(Value, Value)>, std::time::Duration) {
+        // SAFETY: every test here sets the same value.
+        unsafe { std::env::set_var("HARLO_AGENT_IDLE_SECS", "1") };
+        let base = stand_in(how).await;
+        let started = std::time::Instant::now();
+        let r = stream(&base, None, &json!({}), "stand-in", "m", |_| {}).await;
+        (r, started.elapsed())
+    }
+
+    #[tokio::test]
+    async fn a_server_that_goes_quiet_is_given_up_on() {
+        let (r, took) = ask("hang").await;
+        let e = r.unwrap_err();
+        assert!(e.downcast_ref::<Dropped>().is_some() && e.to_string().contains("sent nothing back for 1 s"), "{e:#}");
+        assert!(took < std::time::Duration::from_secs(5), "{took:?}");
+        let (r, took) = ask("stall").await;
+        let e = r.unwrap_err();
+        assert!(e.downcast_ref::<Dropped>().is_some() && e.to_string().contains("sent nothing for 1 s during the reply"), "{e:#}");
+        assert!(crate::retry::transient(&e).is_some(), "a stall is tried again");
+        assert!(took < std::time::Duration::from_secs(5), "{took:?}");
+    }
+
+    #[tokio::test]
+    async fn an_event_without_end_is_cut_off() {
+        let (r, took) = ask("endless").await;
+        let e = r.unwrap_err();
+        assert!(e.to_string().contains("passed 16 MiB without ending"), "{e:#}");
+        assert!(crate::retry::transient(&e).is_none(), "not sent again");
+        assert!(took < std::time::Duration::from_secs(20), "{took:?}");
+    }
+
+    #[tokio::test]
+    async fn events_split_across_writes_still_read() {
+        let (r, _) = ask("split").await;
+        let (message, _) = r.unwrap();
+        assert_eq!(message["content"][0]["text"], "Hello", "{message}");
+    }
+
+    #[tokio::test]
+    async fn a_long_wait_asked_for_is_said_not_waited() {
+        let (r, took) = ask("429").await;
+        let e = r.unwrap_err();
+        let asked = crate::retry::transient(&e).and_then(|(_, s)| s);
+        assert_eq!(asked, Some(600));
+        assert!(asked.unwrap() > crate::retry::MAX_WAIT, "longer than harlo waits by itself");
+        assert!(took < std::time::Duration::from_secs(5), "{took:?}");
+    }
 
     fn feed(chunks: &[Value]) -> (Vec<Value>, Vec<Value>, Reply) {
         let mut r = Reply::default();

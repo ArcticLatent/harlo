@@ -3,8 +3,9 @@
 //! `stream: true`, the whole history in `input` each time, the system
 //! prompt as `instructions`.
 
+use std::time::Duration;
+
 use anyhow::{Result, anyhow, bail};
-use futures_util::StreamExt as _;
 use serde_json::{Value, json};
 
 /// What a stream says, as it comes. `index`: the item's place in the
@@ -48,10 +49,96 @@ pub fn limits(headers: &reqwest::header::HeaderMap) -> Vec<Value> {
 }
 
 /// One client for every request, so a session's requests reuse their
-/// connection.
+/// connection. A server that doesn't answer the connection in 15 s isn't
+/// waited for, and a connection that died quietly is noticed.
 pub(crate) fn client() -> &'static reqwest::Client {
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-    CLIENT.get_or_init(reqwest::Client::new)
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder().connect_timeout(Duration::from_secs(15)).tcp_keepalive(Duration::from_secs(30)).build().unwrap_or_default()
+    })
+}
+
+/// How long a model server may send nothing (the reply's headers, or the
+/// next part of the reply) before the request counts as stalled: 10
+/// minutes, room for a slow local model reading a long prompt.
+/// `HARLO_AGENT_IDLE_SECS` sets another.
+pub(crate) fn idle() -> Duration {
+    std::env::var("HARLO_AGENT_IDLE_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|s| s.is_finite() && *s > 0.0)
+        .map_or(Duration::from_secs(600), Duration::from_secs_f64)
+}
+
+/// The most one event of a reply may hold before it ends.
+pub(crate) const MAX_EVENT: usize = 16 << 20;
+
+/// `10 min`, `45 s`.
+pub(crate) fn span(d: Duration) -> String {
+    let s = d.as_secs_f64();
+    match () {
+        _ if s >= 2.0 * 3600.0 => format!("{} h", (s / 3600.0).round()),
+        _ if s >= 120.0 => format!("{} min", (s / 60.0).round()),
+        _ if s >= 1.0 => format!("{} s", s.round()),
+        _ => format!("{} ms", d.as_millis()),
+    }
+}
+
+/// Sends a model request: its response, once its headers come (within
+/// [`idle`]).
+pub(crate) async fn send(req: reqwest::RequestBuilder, base: &str) -> Result<reqwest::Response> {
+    let wait = idle();
+    match tokio::time::timeout(wait, req.send()).await {
+        Ok(r) => r.map_err(|e| Dropped(format!("Couldn't reach {base}: {e}")).into()),
+        Err(_) => Err(Dropped(format!("{base} sent nothing back for {}", span(wait))).into()),
+    }
+}
+
+/// A refused request's body, as text (waited for no longer than a reply).
+pub(crate) async fn refusal_text(resp: reqwest::Response) -> String {
+    tokio::time::timeout(idle(), resp.text()).await.ok().and_then(Result::ok).unwrap_or_default()
+}
+
+/// A reply's server-sent events, read as they come.
+pub(crate) struct Events {
+    resp: reqwest::Response,
+    buf: Vec<u8>,
+    /// How much of `buf` has been searched for an event's end.
+    searched: usize,
+    idle: Duration,
+}
+
+impl Events {
+    pub fn new(resp: reqwest::Response) -> Self {
+        Self { resp, buf: Vec::new(), searched: 0, idle: idle() }
+    }
+
+    /// The next event's data (its `data:` lines, joined); None once the
+    /// server has closed the reply. A reply that stalls (nothing for
+    /// [`idle`]) or breaks is [`Dropped`]; an event that grows past
+    /// [`MAX_EVENT`] without ending stops it.
+    pub async fn next(&mut self) -> Result<Option<String>> {
+        loop {
+            if let Some((text, end)) = find_event_end(&self.buf[self.searched..]) {
+                let raw: Vec<u8> = self.buf.drain(..self.searched + end).collect();
+                let text = String::from_utf8_lossy(&raw[..self.searched + text]);
+                self.searched = 0;
+                return Ok(Some(text.lines().filter_map(|l| l.strip_prefix("data:")).map(str::trim_start).collect::<Vec<_>>().join("\n")));
+            }
+            // (Searched once: next time only what's new, from just before
+            // it, as a blank line may come split.)
+            self.searched = self.buf.len().saturating_sub(3);
+            if self.buf.len() > MAX_EVENT {
+                bail!("The reply was stopped: one of its events passed {} MiB without ending", MAX_EVENT >> 20);
+            }
+            match tokio::time::timeout(self.idle, self.resp.chunk()).await {
+                Err(_) => return Err(Dropped(format!("The server sent nothing for {} during the reply", span(self.idle))).into()),
+                Ok(Err(e)) => return Err(Dropped(format!("The connection broke during the reply: {e}")).into()),
+                Ok(Ok(None)) => return Ok(None),
+                Ok(Ok(Some(part))) => self.buf.extend_from_slice(&part),
+            }
+        }
+    }
 }
 
 /// A server's models list as it sends it (`url`: its models address;
@@ -64,7 +151,7 @@ pub async fn models_raw(url: &str, token: Option<&str>, headers: &[(&'static str
     for (k, v) in headers {
         req = req.header(*k, v);
     }
-    let resp = req.send().await.map_err(|e| anyhow!("Couldn't reach {url}: {e}"))?;
+    let resp = req.timeout(Duration::from_secs(30)).send().await.map_err(|e| anyhow!("Couldn't reach {url}: {e}"))?;
     let status = resp.status();
     let body: Value = resp.json().await.unwrap_or(Value::Null);
     if !status.is_success() {
@@ -282,7 +369,7 @@ pub async fn stream(base: &str, token: Option<&str>, affinity: Option<&str>, hea
     if let Some(session) = affinity {
         req = req.header("session-id", session).header("x-client-request-id", session);
     }
-    let resp = req.send().await.map_err(|e| Dropped(format!("Couldn't reach {base}: {e}")))?;
+    let resp = send(req, base).await?;
     let status = resp.status();
     let retry_after = crate::retry::retry_after(resp.headers());
     // (Refused ones too: a used-up window says so.)
@@ -291,53 +378,45 @@ pub async fn stream(base: &str, token: Option<&str>, affinity: Option<&str>, hea
         on(Event::Limits(windows));
     }
     if !status.is_success() {
-        let body: Value = resp.json().await.unwrap_or(Value::Null);
+        let body: Value = serde_json::from_str(&refusal_text(resp).await).unwrap_or(Value::Null);
         let code = body["error"]["type"].as_str().or_else(|| body["error"]["code"].as_str()).unwrap_or_default().to_owned();
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
         let resets_at = body["error"]["resets_at"].as_i64().or_else(|| body["error"]["resets_in_seconds"].as_i64().map(|s| now + s));
         return Err(ApiError { status: status.as_u16(), message: refusal(status.as_u16(), &body), code, retry_after, resets_at }.into());
     }
-    let mut bytes = resp.bytes_stream();
-    let mut buf: Vec<u8> = Vec::new();
-    while let Some(chunk) = bytes.next().await {
-        buf.extend_from_slice(&chunk.map_err(|e| Dropped(format!("The connection broke during the reply: {e}")))?);
-        // Events end with a blank line.
-        while let Some(end) = find_event_end(&buf) {
-            let raw: Vec<u8> = buf.drain(..end.1).collect();
-            let text = String::from_utf8_lossy(&raw[..end.0]);
-            let data: String = text.lines().filter_map(|l| l.strip_prefix("data:")).map(str::trim_start).collect::<Vec<_>>().join("\n");
-            if data.is_empty() || data == "[DONE]" {
-                continue;
+    let mut events = Events::new(resp);
+    while let Some(data) = events.next().await? {
+        if data.is_empty() || data == "[DONE]" {
+            continue;
+        }
+        let Ok(ev) = serde_json::from_str::<Value>(&data) else { continue };
+        match ev["type"].as_str().unwrap_or_default() {
+            "response.output_item.added" => on(Event::Added { index: index(&ev), item: ev["item"].clone() }),
+            "response.output_text.delta" => on(Event::Text { index: index(&ev), delta: delta(&ev) }),
+            "response.reasoning_summary_text.delta" => {
+                on(Event::Reasoning { index: index(&ev), part: ev["summary_index"].as_u64().unwrap_or(0) as usize, delta: delta(&ev) })
             }
-            let Ok(ev) = serde_json::from_str::<Value>(&data) else { continue };
-            match ev["type"].as_str().unwrap_or_default() {
-                "response.output_item.added" => on(Event::Added { index: index(&ev), item: ev["item"].clone() }),
-                "response.output_text.delta" => on(Event::Text { index: index(&ev), delta: delta(&ev) }),
-                "response.reasoning_summary_text.delta" => {
-                    on(Event::Reasoning { index: index(&ev), part: ev["summary_index"].as_u64().unwrap_or(0) as usize, delta: delta(&ev) })
-                }
-                "response.function_call_arguments.delta" => on(Event::Args { index: index(&ev), delta: delta(&ev) }),
-                "response.output_item.done" => on(Event::Item { index: index(&ev), item: ev["item"].clone() }),
-                "response.completed" => {
-                    let output = ev["response"]["output"].as_array().cloned().unwrap_or_default();
-                    on(Event::Completed { usage: ev["response"]["usage"].clone(), output });
-                    return Ok(());
-                }
-                "response.failed" => {
-                    let err = &ev["response"]["error"];
-                    let code = err["code"].as_str().unwrap_or_default();
-                    return Err(Failed { code: code.to_owned(), message: explain(code, err["message"].as_str().unwrap_or("the request failed")) }.into());
-                }
-                "response.incomplete" => {
-                    bail!("The reply was cut off ({})", ev["response"]["incomplete_details"]["reason"].as_str().unwrap_or("no reason given"));
-                }
-                "error" => {
-                    let code = ev["code"].as_str().or_else(|| ev["error"]["code"].as_str()).unwrap_or_default();
-                    let message = ev["message"].as_str().or_else(|| ev["error"]["message"].as_str()).unwrap_or("the request failed");
-                    return Err(Failed { code: code.to_owned(), message: explain(code, message) }.into());
-                }
-                _ => {}
+            "response.function_call_arguments.delta" => on(Event::Args { index: index(&ev), delta: delta(&ev) }),
+            "response.output_item.done" => on(Event::Item { index: index(&ev), item: ev["item"].clone() }),
+            "response.completed" => {
+                let output = ev["response"]["output"].as_array().cloned().unwrap_or_default();
+                on(Event::Completed { usage: ev["response"]["usage"].clone(), output });
+                return Ok(());
             }
+            "response.failed" => {
+                let err = &ev["response"]["error"];
+                let code = err["code"].as_str().unwrap_or_default();
+                return Err(Failed { code: code.to_owned(), message: explain(code, err["message"].as_str().unwrap_or("the request failed")) }.into());
+            }
+            "response.incomplete" => {
+                bail!("The reply was cut off ({})", ev["response"]["incomplete_details"]["reason"].as_str().unwrap_or("no reason given"));
+            }
+            "error" => {
+                let code = ev["code"].as_str().or_else(|| ev["error"]["code"].as_str()).unwrap_or_default();
+                let message = ev["message"].as_str().or_else(|| ev["error"]["message"].as_str()).unwrap_or("the request failed");
+                return Err(Failed { code: code.to_owned(), message: explain(code, message) }.into());
+            }
+            _ => {}
         }
     }
     Err(Dropped("The connection closed before the reply finished".into()).into())

@@ -62,6 +62,12 @@ fn kb(n: usize) -> String {
     if n >= 1 << 20 { format!("{:.1} MB", n as f64 / (1 << 20) as f64) } else { format!("{} KB", n.div_ceil(1024)) }
 }
 
+/// [`fit`], off the async threads (decoding and scaling a large image
+/// takes a while).
+pub async fn fit_apart(bytes: Vec<u8>) -> Result<Fitted, String> {
+    tokio::task::spawn_blocking(move || fit(&bytes)).await.unwrap_or_else(|e| Err(format!("it couldn't be read ({e})")))
+}
+
 /// `bytes` as they'll be sent: as they are when they're small enough,
 /// otherwise scaled down (its first frame, for an animation) and saved
 /// again (a photo as JPEG). Err: why it can't be sent.
