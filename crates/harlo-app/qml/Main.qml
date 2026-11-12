@@ -8469,6 +8469,74 @@ ApplicationWindow {
             win.summary(); Qt.quit() } }
     }
 
+    // A wiki written and used on a real model (scripts/wiki-check real;
+    // it needs a sign-in and spends tokens): --wiki-mode=create or update
+    // runs that with the project's model (--model=) until the run is done
+    // (its session's commands go ahead: nobody is there to approve them);
+    // lookup gives a session of --agent= the question in --prompt-file=.
+    // What happened goes to <selftest>/wiki-real.json.
+    property double realQuiet: 0
+    property bool realStarted: false
+    property int realText: 0
+    property double realBegin: 0
+    SequentialAnimation {
+        id: wikiRealSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "wikireal"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--agent=") !== "claude") Workspace.setProviderEnabled("claude", false)
+            Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            win.wikiProject = JSON.parse(Workspace.projectsJson())[0].id
+            Workspace.setSetting("wiki_" + win.wikiProject, "1")
+            Workspace.setSetting("default_harness", win.argValue("--agent=") || "harlo")
+            if (win.argValue("--model="))
+                Workspace.setSetting("project_model_" + win.wikiProject + "_" + (win.argValue("--agent=") || "harlo"), win.argValue("--model="))
+            const mode = win.argValue("--wiki-mode=")
+            if (mode === "lookup") {
+                win.harloKey = Workspace.newSession(win.wikiProject, win.argValue("--agent=") || "harlo")
+                Workspace.setApprovalMode(win.harloKey, "yolo")
+            } else {
+                win.wikiKeyBefore = Workspace.activeKey
+                const err = Workspace.startWikiRun("project:" + win.wikiProject, mode)
+                if (err !== "") { win.log("not started:", err); Qt.quit() }
+            } } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: win.waitUntil(wikiRealSteps, () => win.harloKey !== "" ? chat.session.modelName !== "" || chat.session.harness === "claude"
+                                                                         : Workspace.activeKey !== win.wikiKeyBefore && Workspace.activeKey !== "", 120000) }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            win.log("session", chat.session.key, chat.session.harness, chat.session.modelName, chat.session.title)
+            if (win.harloKey === "") {
+                win.harloKey = Workspace.activeKey
+                Workspace.setApprovalMode(win.harloKey, "yolo")
+            } else {
+                chat.session.send(TestInput.readFile(win.argValue("--prompt-file=")).trim(), "normal")
+            }
+            win.realStarted = false; win.realQuiet = 0; win.realText = win.chatText().length; win.realBegin = Date.now() } }
+        PauseAnimation { duration: 3000 }
+        ScriptAction { script: win.waitUntil(wikiRealSteps, () => {
+            if (chat.session.key !== win.harloKey) Workspace.open(win.harloKey)
+            const st = JSON.parse(Workspace.wikiJson("project:" + win.wikiProject))
+            const busy = chat.session.status !== "idle" || st.running
+            // (Started: busy, or a reply already there, or idle for 20 s
+            // since: done before it was looked at.)
+            if (busy || win.chatText().length > win.realText + 40 || Date.now() - win.realBegin > 20000) win.realStarted = true
+            if (busy || !win.realStarted || chat.session.hasRequest) { win.realQuiet = 0; return false }
+            if (!win.realQuiet) win.realQuiet = Date.now()
+            return Date.now() - win.realQuiet > 15000
+        }, 3 * 3600 * 1000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            const st = JSON.parse(Workspace.wikiJson("project:" + win.wikiProject))
+            TestInput.writeFile(win.selftestDir + "/wiki-real.json", JSON.stringify({
+                mode: win.argValue("--wiki-mode="), agent: chat.session.harness, model: chat.session.modelName, title: chat.session.title,
+                status: chat.session.status, request: chat.session.hasRequest, wiki: st, chat: win.chatText().slice(-6000) }, null, 1))
+            win.log("done", chat.session.status, st.pages.length, "pages")
+            Qt.quit() } }
+    }
+
     // The wiki's demo project to look at by hand (scripts/wiki-check
     // demo): the project added with Wiki on and the Wiki panel open; it
     // stays open until closed.
