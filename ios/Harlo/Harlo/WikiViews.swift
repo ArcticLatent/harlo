@@ -101,12 +101,16 @@ struct WikiSheet: View {
     @Environment(\.dismiss) private var dismiss
     let session: OpenSession
     @State private var notice: String?
+    /// The pages opened, one path for the whole sheet: a destination of
+    /// the wiki's own (the graph's boxes had one) lost its search field
+    /// when you came back from a page.
+    @State private var path: [WikiLink] = []
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Group {
                 if let wiki = session.wiki, wiki.inProject, wiki.exists, !wiki.loading {
-                    WikiView(wiki: wiki, notice: $notice, showSession: show)
+                    WikiView(wiki: wiki, notice: $notice, showSession: show) { path.append($0) }
                 } else {
                     List {
                         Group {
@@ -129,7 +133,7 @@ struct WikiSheet: View {
                     .navigationBarTitleDisplayMode(.inline)
                 }
             }
-            // A page row or a search hit pushes a WikiLink by value.
+            // A page row, a search hit or a graph box pushes a WikiLink.
             .navigationDestination(for: WikiLink.self) { link in
                 if let wiki = session.wiki { WikiPageView(wiki: wiki, link: link) }
             }
@@ -166,13 +170,14 @@ struct WikiView: View {
     @Binding var notice: String?
     /// Opens the session writing it.
     var showSession: (String) -> Void
+    /// Opens a page (the graph's boxes).
+    var open: (WikiLink) -> Void
     @State private var query = ""
     @State private var hits: WikiHits?
     @State private var searching = false
     @State private var workspace = ""
     @State private var graph = false
     @State private var zoom: ZoomedPicture?
-    @State private var next: WikiLink?
 
     /// The pages by folder, in the wiki's order.
     var groups: [(name: String, pages: [WikiPage])] {
@@ -204,7 +209,7 @@ struct WikiView: View {
                     }
                     if graph && !wiki.mermaid.isEmpty {
                         Section {
-                            PagesGraph(wiki: wiki, zoom: $zoom) { next = $0 }
+                            PagesGraph(wiki: wiki, zoom: $zoom, open: open)
                         } footer: {
                             Text((wiki.graphPages.count < wiki.pages.count ? "The quickstart and the pages it links to or from. " : "") + "An arrow is a link from one page to another. Tap a page to read it, or elsewhere to zoom.")
                         }
@@ -228,7 +233,6 @@ struct WikiView: View {
         .navigationTitle("Wiki")
         .navigationBarTitleDisplayMode(.inline)
         .fullScreenCover(item: $zoom) { z in DiagramZoom(image: z.image, size: z.size, title: "Wiki") }
-        .navigationDestination(item: $next) { l in WikiPageView(wiki: wiki, link: l) }
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search the wiki")
         .onSubmit(of: .search) { Task { await search() } }
         .onChange(of: query) { _, q in

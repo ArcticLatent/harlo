@@ -273,6 +273,9 @@ final class HarloUITests: XCTestCase {
         shot("15b-wiki")
         see("Quickstart")
         see("Architecture")
+        // (Below the fold with large text.)
+        let workflows = element("Workflows")
+        for _ in 0..<3 where !workflows.exists { app.swipeUp() }
         see("Workflows")
         shot("15c-wiki-pages")
         audit("wiki-pages")
@@ -303,8 +306,9 @@ final class HarloUITests: XCTestCase {
         see("lines 1–2, 4–9")
         shot("15g-wiki-sources")
         // Back in the graph: the page read last is ringed, and a page's
-        // box opens it.
+        // box opens it. (The search stays, back from a page.)
         app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.searchFields["Search the wiki"].waitForExistence(timeout: 8), "the search, back from a page")
         tap("Graph")
         let boxes = app.descendants(matching: .any).matching(identifier: "wikiGraphBox")
         let readLast = boxes.matching(NSPredicate(format: "label == %@", "Read Sidebar, read last")).firstMatch
