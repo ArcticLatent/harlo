@@ -160,6 +160,22 @@ Rectangle {
         return kept.length > 0 ? kept : words
     }
 
+    /// Highlighted code (a `<pre>`, spans never crossing a line) as one
+    /// block per line that wraps rather than being cut, each wrapped part
+    /// indented two characters past its line's own indent so a line still
+    /// reads as one.
+    function wrappedCode(html, charWidth) {
+        const m = /^<pre[^>]*>([\s\S]*)<\/pre>$/.exec(html)
+        if (!m) return html
+        // (A span the newline sits in closes on the line it belongs to.)
+        const lines = m[1].replace(/\n((?:<\/span>)+)/g, "$1\n").replace(/\n$/, "").split("\n")
+        return lines.map(line => {
+            const lead = /^[ \t]*/.exec(line.replace(/<[^>]*>/g, ""))[0].replace(/\t/g, "    ").length
+            const hang = Math.round((lead + 2) * charWidth)
+            return "<p style=\"margin:0; margin-left:" + hang + "px; text-indent:-" + hang + "px; white-space:pre-wrap;\">" + (line === "" ? " " : line) + "</p>"
+        }).join("")
+    }
+
     function marked(text, query) {
         const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
         const words = markWords(query)
@@ -252,10 +268,37 @@ Rectangle {
     /// The graph's zoom over its fit (Ctrl+wheel, − and +).
     property real graphZoom: 1
     onGraphSourceChanged: graphZoom = 1
+    /// The whole graph, full size (pan and zoom).
+    function openGraphFull() {
+        if (!graphPic || graphPic.state !== "ready") return
+        viewer.show("Wiki", [{ label: "Graph", url: graphPic.url, width: graphPic.width, height: graphPic.height }], 0, "Graph",
+                    () => Diagrams.openInBrowser(graphShown, Theme.isLight), 2)
+    }
+    /// Wider than the panel: scrolled so the quickstart (else the first
+    /// page) is in view rather than whatever the left edge holds.
+    /// (Once for each graph at each panel width: zooming doesn't jump back.)
+    property string graphCentredFor: ""
+    function centreGraph() {
+        const key = graphShown + "|" + Math.round(graphBox.width)
+        if (!graphImage.ready || graphCentredFor === key || graphImage.boxes.length === 0) return
+        if (graphBox.contentWidth <= graphBox.width + 1) return
+        graphCentredFor = key
+        let i = graphPages.findIndex(p => p.path === "quickstart.md")
+        if (i < 0) i = 0
+        const b = graphImage.boxes.find(x => String(x.id) === "p" + i)
+        if (!b) return
+        // (From the sizes it's laid out to, which may not have reached the
+        // picture yet.)
+        const w = graphImage.Layout.preferredWidth
+        const left = 18 + (Math.max(graphBox.width - 32, w) - w) / 2
+        const centre = left + (b.x + b.w / 2) * w
+        graphBox.contentX = Math.max(0, Math.min(graphBox.contentWidth - graphBox.width, centre - graphBox.width / 2))
+    }
     readonly property bool reading: openPage !== "" || loadingPage !== ""
     readonly property bool showingResults: results !== null || searching
 
     PictureViewer { id: viewer }
+    FontMetrics { id: codeChar; font.family: Theme.mono; font.pixelSize: Theme.mpx(12) }
 
     ColumnLayout {
         anchors.fill: parent
@@ -372,6 +415,9 @@ Rectangle {
             Layout.topMargin: 10
             visible: root.st.exists && root.pages.length > 1 && !root.reading && !root.showingResults
             labels: ["Pages", "Graph"]
+            // (At the size of the app's tabs, not a mockup's small switch.)
+            fontSize: Theme.px(13)
+            segmentPadding: 4
             current: root.mode === "graph" ? 1 : 0
             namePrefix: "wikiView"
             onPicked: i => root.mode = i === 1 ? "graph" : "pages"
@@ -495,6 +541,14 @@ Rectangle {
                 }
                 Item { Layout.fillWidth: true }
             }
+            // An edge under Back once the page has scrolled beneath it.
+            Rectangle {
+                objectName: "wikiBackEdge"
+                Layout.fillWidth: true
+                Layout.topMargin: 4
+                Layout.preferredHeight: 1
+                color: reader.contentY > 1 ? Theme.hairline : "transparent"
+            }
             Flickable {
                 id: reader
                 objectName: "wikiReader"
@@ -614,7 +668,7 @@ Rectangle {
                                     width: parent.width - 20
                                     textFormat: TextEdit.RichText
                                     // (Long lines wrap in a narrow panel rather than being cut.)
-                                    text: codeWell.visible ? (block.modelData.html || "").replace("<pre style=\"margin:0;\">", "<pre style=\"margin:0; white-space:pre-wrap;\">") : ""
+                                    text: codeWell.visible ? root.wrappedCode(block.modelData.html || "", codeChar.advanceWidth("m")) : ""
                                     font.family: Theme.mono
                                     font.pixelSize: Theme.mpx(12)
                                     color: Theme.foreground
@@ -786,6 +840,9 @@ Rectangle {
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar { }
             ScrollBar.horizontal: ScrollBar { }
+            readonly property bool wider: graphImage.ready && contentWidth > width + 1
+            onWidthChanged: Qt.callLater(root.centreGraph)
+            onContentWidthChanged: Qt.callLater(root.centreGraph)
             // Ctrl+wheel zooms; the wheel alone scrolls.
             WheelHandler {
                 acceptedModifiers: Qt.ControlModifier
@@ -827,9 +884,9 @@ Rectangle {
                     Accessible.name: "The wiki's pages and their links"
                     HoverHandler { id: graphHover; cursorShape: Qt.PointingHandCursor }
                     TapHandler {
-                        onTapped: if (graphImage.hoveredBox < 0) viewer.show("Wiki", [{ label: "Graph", url: root.graphPic.url, width: root.graphPic.width, height: root.graphPic.height }], 0, "Graph",
-                                                                             () => Diagrams.openInBrowser(root.graphShown, Theme.isLight), 2)
+                        onTapped: if (graphImage.hoveredBox < 0) root.openGraphFull()
                     }
+                    onBoxesChanged: Qt.callLater(root.centreGraph)
                     ToolTip.visible: graphHover.hovered && hoveredBox < 0
                     ToolTip.text: "Open full size"
                     ToolTip.delay: 600
@@ -893,6 +950,7 @@ Rectangle {
             Label {
                 Layout.fillWidth: true
                 text: (root.graphPages.length < root.pages.length ? "The open page and the pages it links to or from. " : "") + "An arrow is a link from one page to another. Click a page to read it."
+                      + (graphBox.wider ? " It's wider than the panel: scroll sideways, or open it full size." : "")
                 color: Theme.textFaint
                 font.pixelSize: Theme.px(11.5)
                 wrapMode: Text.Wrap
@@ -911,7 +969,8 @@ Rectangle {
                 FlatButton {
                     objectName: "wikiGraphZoom"
                     Layout.minimumWidth: 40
-                    text: Math.round(root.graphZoom * 100) + "%"
+                    // (The size it's drawn at, not the zoom over its fit.)
+                    text: Math.round((graphImage.ready ? graphImage.fit : root.graphZoom) * 100) + "%"
                     font.pixelSize: Theme.px(11)
                     outlined: false
                     padding: 4
@@ -926,6 +985,12 @@ Rectangle {
                     tip: "Zoom in (Ctrl+wheel)"
                     enabled: root.graphZoom < 2.99
                     onClicked: root.graphZoom = Math.min(3, root.graphZoom * 1.25)
+                }
+                ComposerIconButton {
+                    objectName: "wikiGraphFull"
+                    iconName: "fullscreen"; tint: Theme.muted
+                    tip: "Open full size"
+                    onClicked: root.openGraphFull()
                 }
             }
         }

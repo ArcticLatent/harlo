@@ -8183,7 +8183,10 @@ ApplicationWindow {
             win.check(run && run.text === "Update" && run.variant === "primary", "Update, the thing to do when it's behind")
             win.check(win.findName("wikiSwitch", wikiPanel).checked && win.findText("Agents search it, in sessions started from now on.", wikiPanel) !== null, "and whether agents use it (on unless switched off)")
             win.shotWindow("clicks-wiki-pages")
-            win.clickItem(win.findAllNames("wikiPageRow", wikiPanel)[0], "the Quickstart row") } }
+            // (Off the rail first: its button's tooltip can sit over the row.)
+            TestInput.moveTo(win.width / 2, win.height / 2) } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: win.clickItem(win.findAllNames("wikiPageRow", wikiPanel)[0], "the Quickstart row") }
         PauseAnimation { duration: 300 }
         ScriptAction { script: win.waitUntil(wikiPanelSteps, () => wikiPanel.openPage === "quickstart.md" && win.wikiProse("job runner") !== null, 10000) }
         PauseAnimation { duration: 300 }
@@ -8499,6 +8502,8 @@ ApplicationWindow {
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
             win.shotWindow("wiki-demo-sources")
+            const edge = win.findName("wikiBackEdge", wikiPanel)
+            win.check(edge && Qt.colorEqual(edge.color, Theme.hairline), "scrolled, the page has an edge under Back")
             wikiPanel.closePage()
             wikiPanel.mode = "graph" } }
         PauseAnimation { duration: 300 }
@@ -8509,6 +8514,15 @@ ApplicationWindow {
             win.check(boxes === wikiPanel.graphPages.length, "the graph: a box per page (" + boxes + " of " + wikiPanel.graphPages.length + (wikiPanel.graphPic && wikiPanel.graphPic.error ? "; " + wikiPanel.graphPic.error : "") + ")")
             const cap = win.findName("wikiGraphCaption", wikiPanel)
             win.check(!cap || !cap.visible || cap.columns === (wikiPanel.width < 360 ? 1 : 2), "its zoom beside the caption, or under it in a narrow panel")
+            const gbox = win.findName("wikiGraph", wikiPanel), gpic = win.findName("wikiGraphPicture", wikiPanel), zoom = win.findName("wikiGraphZoom", wikiPanel)
+            win.check(gpic && zoom && zoom.text === Math.round(gpic.fit * 100) + "%", "its zoom says the size it's drawn at (" + (zoom ? zoom.text : "-") + ", fit " + (gpic ? gpic.fit.toFixed(2) : "-") + ")")
+            const capText = cap ? cap.children[0].text : ""
+            win.check(!!gbox && gbox.wider === /scroll sideways/.test(capText) && !!win.findName("wikiGraphFull", wikiPanel),
+                      "wider than the panel, its caption says to scroll or open it full size, with a button for that (" + (gbox ? gbox.wider : "-") + ")")
+            const qi = wikiPanel.graphPages.findIndex(p => p.path === "quickstart.md")
+            const qbox = win.findAllNames("wikiGraphBox", wikiPanel).find(b => b.index === qi)
+            const qx = qbox ? qbox.mapToItem(gbox, 0, 0).x : -1
+            win.check(qi < 0 || (qbox && qx >= 0 && qx + qbox.width <= gbox.width + 1), "it opens with the quickstart in view (" + Math.round(qx) + "+" + (qbox ? Math.round(qbox.width) : "-") + " in " + (gbox ? Math.round(gbox.width) + ", scrolled " + Math.round(gbox.contentX) + " of " + Math.round(gbox.contentWidth) : "-") + ")")
             win.shotWindow("wiki-demo-graph")
             wikiPanel.mode = "pages"
             // Each search, as the panel asks it of OpenWiki.

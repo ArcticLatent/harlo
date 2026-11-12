@@ -12,6 +12,8 @@ Rectangle {
     /// objectName prefix for the segments ("<prefix><label>").
     property string namePrefix: ""
     property real fontSize: Theme.px(11.5)
+    /// Each segment's padding above and below its label.
+    property real segmentPadding: 3
     signal picked(int index)
 
     implicitWidth: row.implicitWidth + 4
@@ -37,8 +39,8 @@ Rectangle {
                 outlined: checked
                 variant: "selected"
                 radius: 6
-                padding: 3
-                horizontalPadding: 9
+                padding: seg.segmentPadding
+                horizontalPadding: 9 + (seg.segmentPadding - 3) * 2
                 font.pixelSize: seg.fontSize
                 accent: checked ? Theme.foreground : Theme.textMuted
                 Accessible.role: Accessible.RadioButton
