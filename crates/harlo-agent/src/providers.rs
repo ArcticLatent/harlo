@@ -13,8 +13,13 @@
 //!       "api": "openai-completions" | "openai-responses",
 //!       "apiKey": "…" | "$NAME" (from the environment) | "none",
 //!       "models": ["qwen3", { "id": "…", "name": "…", "contextWindow": 32768,
-//!         "reasoning": true, "thinkingLevelMap": { "off": "none", "low": null, "high": "high" } }] } } }
+//!         "reasoning": true, "thinkingLevelMap": { "off": "none", "low": null, "high": "high" },
+//!         "cost": { "input": 0.4, "output": 1.6, "cacheRead": 0.1 } }] } } }
 //! ```
+//!
+//! `cost`: dollars per million tokens (`cacheRead`: input the cache
+//! served; the input price when it's not given). Without one, a model's
+//! price is what its server's list says (OpenRouter's `pricing`, say).
 //!
 //! `thinkingLevelMap`: the levels offered and the effort each sends (null:
 //! not offered); without it a model that reasons takes the usual levels.
@@ -28,6 +33,7 @@ use anyhow::{Context as _, Result, anyhow, bail};
 use serde_json::Value;
 
 use crate::auth::{self, Sign};
+use crate::used::{Price, Pricing};
 
 /// The plan's provider.
 pub const CHATGPT: &str = "chatgpt";
@@ -89,6 +95,8 @@ pub struct ModelInfo {
     pub efforts: Vec<(String, String)>,
     /// Whether it takes images (None: not said; they're sent).
     pub images: Option<bool>,
+    /// Its price, when the file or its server says it.
+    pub price: Option<Price>,
 }
 
 impl ModelInfo {
@@ -111,6 +119,38 @@ impl Provider {
         self.api == Api::Responses
             && (self.is_plan() || self.id == "openai")
             && std::env::var("HARLO_AGENT_WEB_SEARCH").map_or(true, |v| v.trim() != "off")
+    }
+
+    /// Whether its server is on this computer or its network (it charges
+    /// nothing): a loopback or private address, or a `.local`, `.lan` or
+    /// dotless name.
+    pub fn is_local(&self) -> bool {
+        let rest = self.base_url.split_once("://").map_or(self.base_url.as_str(), |(_, r)| r);
+        let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+        let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+        let host = match host.strip_prefix('[') {
+            Some(v6) => v6.split(']').next().unwrap_or_default(),
+            None => host.rsplit_once(':').filter(|(_, port)| port.chars().all(|c| c.is_ascii_digit())).map_or(host, |(h, _)| h),
+        }
+        .to_ascii_lowercase();
+        match host.parse::<std::net::IpAddr>() {
+            Ok(std::net::IpAddr::V4(a)) => a.is_loopback() || a.is_private() || a.is_link_local(),
+            Ok(std::net::IpAddr::V6(a)) => a.is_loopback() || (a.segments()[0] & 0xfe00) == 0xfc00 || (a.segments()[0] & 0xffc0) == 0xfe80,
+            Err(_) => host == "localhost" || [".localhost", ".local", ".lan", ".internal", ".home.arpa"].iter().any(|s| host.ends_with(s)) || (!host.is_empty() && !host.contains('.')),
+        }
+    }
+
+    /// What `model` (its id here) costs, by what the file says of it (the
+    /// server's list's price, when known, as `listed`).
+    pub fn pricing(&self, model: &str, listed: Option<Price>) -> Pricing {
+        if self.is_plan() {
+            return Pricing::Plan;
+        }
+        match self.models.iter().find(|m| m.id == model).and_then(|m| m.price).or(listed) {
+            Some(p) => Pricing::Priced(p),
+            None if self.is_local() => Pricing::Local,
+            None => Pricing::Unknown,
+        }
     }
 
     /// Which sign-in, for a plan's.
@@ -261,10 +301,28 @@ fn parse_provider(id: &str, p: &Value) -> Result<Provider> {
                 _ => Vec::new(),
             };
             let images = m["input"].as_array().map(|i| i.iter().any(|t| t == "image"));
-            Some(ModelInfo { provider: id.clone(), id: mid, name, context_window: m["contextWindow"].as_u64().unwrap_or(0), levels, efforts, images })
+            Some(ModelInfo { provider: id.clone(), id: mid, name, context_window: m["contextWindow"].as_u64().unwrap_or(0), levels, efforts, images, price: file_price(&m["cost"]) })
         })
         .collect();
     Ok(Provider { name: p["name"].as_str().filter(|s| !s.is_empty()).unwrap_or(&id).to_owned(), id, base_url, api, key, models })
+}
+
+/// A model's `cost` in the file: dollars per million tokens.
+fn file_price(cost: &Value) -> Option<Price> {
+    let rate = |k: &str| cost[k].as_f64().filter(|r| r.is_finite() && *r >= 0.0);
+    let (input, output) = (rate("input")?, rate("output")?);
+    Some(Price { input, output, cached: rate("cacheRead").unwrap_or(input) })
+}
+
+/// A model's price as its server lists it: OpenRouter's `pricing`,
+/// dollars a token as strings (a negative: it varies, so unknown).
+fn listed_price(pricing: &Value) -> Option<Price> {
+    let rate = |k: &str| {
+        let v = &pricing[k];
+        v.as_str().and_then(|s| s.trim().parse::<f64>().ok()).or_else(|| v.as_f64()).filter(|r| r.is_finite() && *r >= 0.0).map(|r| r * 1e6)
+    };
+    let (input, output) = (rate("prompt")?, rate("completion")?);
+    Some(Price { input, output, cached: rate("input_cache_read").unwrap_or(input) })
 }
 
 /// A models list as a server sends it: a plan's (`models`, only those to
@@ -289,6 +347,7 @@ pub fn parse_models(provider: &str, body: &Value) -> Vec<ModelInfo> {
         levels: levels(m),
         efforts: Vec::new(),
         images: images(m),
+        price: listed_price(&m["pricing"]),
     };
     // (The plan's list has slugs; llama.cpp sends an Ollama-style `models`
     // beside its `data`.)
@@ -398,7 +457,7 @@ mod tests {
     fn providers_from_the_file() {
         let p = parse_provider("llamacpp", &json!({ "name": "llama.cpp", "baseUrl": "http://127.0.0.1:8090/v1/", "apiKey": "none", "models": ["a", { "id": "b", "name": "Bee", "contextWindow": 8192, "reasoning": true }] })).unwrap();
         assert_eq!((p.base_url.as_str(), p.api, p.key.clone()), ("http://127.0.0.1:8090/v1", Api::Chat, Key::None));
-        assert_eq!(p.models[0], ModelInfo { provider: "llamacpp".into(), id: "a".into(), name: "a".into(), context_window: 0, levels: vec![], efforts: vec![], images: None });
+        assert_eq!(p.models[0], ModelInfo { provider: "llamacpp".into(), id: "a".into(), name: "a".into(), context_window: 0, levels: vec![], efforts: vec![], images: None, price: None });
         assert_eq!((p.models[1].name.as_str(), p.models[1].context_window, p.models[1].levels.len()), ("Bee", 8192, 4));
         assert_eq!((p.effort("a", Some("high")), p.effort("b", Some("high")), p.effort("b", None)), (None, Some("high".into()), None));
         let p = parse_provider("x", &json!({ "baseUrl": "https://x/v1", "api": "openai-responses", "apiKey": "${X_KEY}" })).unwrap();
@@ -407,6 +466,35 @@ mod tests {
         assert!(parse_provider("a/b", &json!({ "baseUrl": "u" })).is_err());
         assert!(parse_provider("a", &json!({})).is_err());
         assert!(parse_provider("a", &json!({ "baseUrl": "u", "api": "soap" })).is_err());
+    }
+
+    #[test]
+    fn what_a_model_costs() {
+        let file = parse_provider("gw", &json!({ "baseUrl": "https://gw.example.com/v1", "models": [
+            { "id": "priced", "cost": { "input": 0.4, "output": 1.6, "cacheRead": 0.1 } },
+            { "id": "no-cache-price", "cost": { "input": 3, "output": 15 } },
+            { "id": "half", "cost": { "input": 3 } }, "plain"] })).unwrap();
+        assert_eq!(file.pricing("priced", None), Pricing::Priced(Price { input: 0.4, output: 1.6, cached: 0.1 }));
+        assert_eq!(file.pricing("no-cache-price", None), Pricing::Priced(Price { input: 3.0, output: 15.0, cached: 3.0 }));
+        // Half a price, or none: unknown, unless its server lists one.
+        assert_eq!(file.pricing("half", None), Pricing::Unknown);
+        assert_eq!(file.pricing("plain", None), Pricing::Unknown);
+        let listed = parse_models("openrouter", &json!({ "data": [
+            { "id": "a/b", "pricing": { "prompt": "0.000003", "completion": "0.000015", "input_cache_read": "0.0000003" } },
+            { "id": "auto", "pricing": { "prompt": "-1", "completion": "-1" } }] }));
+        let p = listed[0].price.unwrap();
+        assert!((p.input - 3.0).abs() < 1e-9 && (p.output - 15.0).abs() < 1e-9 && (p.cached - 0.3).abs() < 1e-9, "{p:?}");
+        assert_eq!(listed[1].price, None, "it varies: unknown");
+        assert_eq!(file.pricing("plain", listed[0].price), Pricing::Priced(p));
+        // A server here or on the network: nothing extra; a plan's: in the plan.
+        for url in ["http://127.0.0.1:8090/v1", "http://localhost:11434/v1", "http://192.168.1.20:8000/v1", "http://[::1]:8080/v1", "http://gpu:8000/v1", "http://box.local/v1", "http://10.0.0.5/v1"] {
+            assert_eq!(parse_provider("l", &json!({ "baseUrl": url })).unwrap().pricing("m", None), Pricing::Local, "{url}");
+        }
+        for url in ["https://openrouter.ai/api/v1", "https://8.8.8.8/v1", "https://user@api.example.com:443/v1"] {
+            assert_eq!(parse_provider("o", &json!({ "baseUrl": url })).unwrap().pricing("m", None), Pricing::Unknown, "{url}");
+        }
+        let plan = Provider { id: CHATGPT.into(), name: "ChatGPT".into(), base_url: auth::RESOURCE.into(), api: Api::Responses, key: Key::Plan(Sign::Plan), models: Vec::new() };
+        assert_eq!(plan.pricing("gpt", None), Pricing::Plan);
     }
 
     /// As Settings → Model servers writes it (pi's layout).
@@ -427,7 +515,7 @@ mod tests {
     #[test]
     fn models_lists_and_names() {
         let plan = parse_models(CHATGPT, &json!({ "models": [{ "slug": "m1", "display_name": "M1", "context_window": 500000, "supported_reasoning_levels": [{ "effort": "low" }] }, { "slug": "hidden", "visibility": "hide" }] }));
-        assert_eq!(plan, vec![ModelInfo { provider: CHATGPT.into(), id: "m1".into(), name: "M1".into(), context_window: 500000, levels: vec!["low".into()], efforts: vec![], images: None }]);
+        assert_eq!(plan, vec![ModelInfo { provider: CHATGPT.into(), id: "m1".into(), name: "M1".into(), context_window: 500000, levels: vec!["low".into()], efforts: vec![], images: None, price: None }]);
         // llama.cpp: ids are the files' paths; named by the file.
         let paths = parse_models("llamacpp", &json!({ "models": [{ "name": "/m/Qwen3-4B-Q4_K_M.gguf" }], "data": [
             { "id": "/home/u/models/Qwen3-4B-Q4_K_M.gguf" },

@@ -1350,7 +1350,7 @@ impl ChatSession {
                     self.as_mut().set_model_name(QString::from(&m.model));
                     self.as_mut().set_model_id(QString::from(&m.model_id));
                     self.as_mut().set_thinking(QString::from(&m.thinking));
-                    let (text, fraction) = context_summary(m.context_tokens, m.context_window, m.compact_at, m.cost);
+                    let (text, fraction) = context_summary(m.context_tokens, m.context_window, m.compact_at, m.cost, &m.cost_kind);
                     self.as_mut().set_context_text(QString::from(&text));
                     self.as_mut().set_context_fraction(fraction);
                     let compact = if m.context_window > 0 { m.compact_at as f64 / m.context_window as f64 } else { 0.0 };
@@ -1575,8 +1575,10 @@ fn k(n: u64) -> String {
     if n >= 1000 { format!("{}k", (n + 500) / 1000) } else { n.to_string() }
 }
 
-/// What the context bar's tooltip says.
-fn context_summary(tokens: u64, window: u64, compact_at: u64, cost: f64) -> (String, f64) {
+/// What the context bar's tooltip says: the context, and the cost as far
+/// as it's known (a plan's or a local server's: nothing extra, so nothing
+/// said).
+fn context_summary(tokens: u64, window: u64, compact_at: u64, cost: f64, kind: &str) -> (String, f64) {
     let mut parts = Vec::new();
     let mut fraction = 0.0;
     if window > 0 {
@@ -1586,8 +1588,11 @@ fn context_summary(tokens: u64, window: u64, compact_at: u64, cost: f64) -> (Str
             parts.push(format!("compacts at {}", k(compact_at)));
         }
     }
-    if cost > 0.0 {
-        parts.push(format!("${cost:.2}"));
+    match kind {
+        "unknown" => parts.push("cost unknown (the model has no price)".into()),
+        "partly" => parts.push(format!("at least ${cost:.2} (some requests' costs unknown)")),
+        _ if cost > 0.0 => parts.push(format!("${cost:.2}")),
+        _ => {}
     }
     (parts.join(" · "), fraction)
 }

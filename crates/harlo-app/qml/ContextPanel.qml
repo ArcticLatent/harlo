@@ -191,10 +191,22 @@ Rectangle {
                     wrapMode: Text.Wrap
                     textFormat: Text.StyledText
                     readonly property int results: body.r.toolResults || 0
+                    // What it cost, as far as that's known: in a plan or on a
+                    // local server nothing extra; with no price, unknown.
+                    readonly property string cost: {
+                        const c = "$" + Number(body.r.cost || 0).toFixed(2)
+                        switch (body.r.costKind || "") {
+                        case "plan": return "in your plan"
+                        case "local": return "no charge (local server)"
+                        case "unknown": return "cost unknown (no price)"
+                        case "partly": return "at least " + c
+                        default: return c
+                        }
+                    }
                     text: "<b>" + root.fmt(body.r.messages) + "</b> " + (body.r.messages === 1 ? "message" : "messages") + ": "
                         + root.fmt(body.r.user) + " yours, " + root.fmt(body.r.assistant) + (body.r.assistant === 1 ? " reply" : " replies")
                         + (results > 0 ? ", " + root.fmt(results) + (results === 1 ? " tool result" : " tool results") : "")
-                        + " · " + "$" + Number(body.r.cost || 0).toFixed(2)
+                        + " · " + cost
                     color: Theme.textMuted
                     font.pixelSize: Theme.px(13)
                 }

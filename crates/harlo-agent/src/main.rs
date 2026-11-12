@@ -59,6 +59,7 @@ mod task;
 mod todo;
 mod tools;
 mod usage;
+mod used;
 
 use std::io::Write as _;
 use std::process::ExitCode;
@@ -469,8 +470,15 @@ async fn ask(prompt: &str, images: &[serde_json::Value], model: Option<String>, 
         eprintln!("\x1b[0m\x1b[33mStopped.\x1b[0m");
     }
     let t = &agent.totals;
+    // (What it cost, as far as that's known.)
+    let cost = match t.cost_kind() {
+        "priced" => format!(" · ${:.4}", t.cost),
+        "partly" => format!(" · at least ${:.4}", t.cost),
+        "unknown" => " · cost unknown".to_owned(),
+        _ => String::new(),
+    };
     eprintln!(
-        "\x1b[2m[{} request{} · {} in ({} cached, {}%) · {} out · {:.0}s]\x1b[0m",
+        "\x1b[2m[{} request{} · {} in ({} cached, {}%) · {} out{cost} · {:.0}s]\x1b[0m",
         t.requests,
         if t.requests == 1 { "" } else { "s" },
         t.input,

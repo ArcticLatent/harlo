@@ -4171,6 +4171,8 @@ impl Workspace {
         let mut held = serde_json::Map::new();
         let mut costs = serde_json::Map::new();
         let mut stops: Vec<(String, String)> = Vec::new();
+        // Sessions whose costs the limits can't count (all or some).
+        let unpriced = self.spend.values().filter(|s| matches!(s.kind.as_str(), "unknown" | "partly")).count();
         for (key, s) in &self.spend {
             costs.insert(key.clone(), json!(s.cost));
             let own = session_over(&limits, s).map(|o| o.message());
@@ -4191,7 +4193,7 @@ impl Workspace {
             self.as_mut().rust_mut().spend_stopped.insert(key.clone());
             self.as_mut().notify(&key, Note::Event(harlo_core::Notable::Error { message: format!("Stopped: {why}") }));
         }
-        let text = json!({ "limits": limits.to_json(), "today": self.spend_ledger.total, "day": day.unwrap_or_default(), "held": held, "costs": costs }).to_string();
+        let text = json!({ "limits": limits.to_json(), "today": self.spend_ledger.total, "day": day.unwrap_or_default(), "held": held, "costs": costs, "unpriced": unpriced }).to_string();
         if text != self.spend_json.to_string() {
             self.as_mut().set_spend_json(QString::from(&text));
         }
@@ -5706,7 +5708,7 @@ impl Workspace {
         let mut became_idle = false;
         let mut became_busy = false;
         let mut lane_file: Option<PathBuf> = None;
-        let mut cost: Option<f64> = None;
+        let mut cost: Option<(f64, String)> = None;
         let mut notes: Vec<Note> = Vec::new();
         let mut answered = false;
         // Approvals the agent asked for with harlo's tools, answered.
@@ -5726,7 +5728,7 @@ impl Workspace {
                     entry.info.status = s;
                 }
                 SessionUpdate::Meta(m) => {
-                    cost = Some(m.cost);
+                    cost = Some((m.cost, m.cost_kind.clone()));
                     entry.info.session_file = m.session_file.or(entry.info.session_file.take());
                     lane_file = entry.info.session_file.clone();
                     entry.info.name = m.name;
@@ -5804,10 +5806,12 @@ impl Workspace {
                 let _ = db.set_lane_file(run, *idx, &file);
             }
         // What it cost since the last report: the day's too.
-        if let Some(cost) = cost {
+        if let Some((cost, kind)) = cost {
             let today = chrono::Local::now().format("%Y-%m-%d").to_string();
             let mut this = self.as_mut().rust_mut();
-            let added = this.spend.entry(key.to_owned()).or_default().observe(cost);
+            let spend = this.spend.entry(key.to_owned()).or_default();
+            spend.kind = kind;
+            let added = spend.observe(cost);
             if added > 0.0 {
                 this.spend_ledger.add(&today, added);
                 self.save_setting("spend_today", &self.spend_ledger.to_json().to_string());

@@ -76,6 +76,8 @@ struct Shared {
     /// What side questions are asked with while a run has the agent (as
     /// it started).
     aside: Mutex<crate::agent::AsideParts>,
+    /// What the session's requests used and cost (the agent's).
+    spend: Arc<Mutex<crate::used::Used>>,
 }
 
 struct Modes {
@@ -355,6 +357,7 @@ pub async fn serve(keep: Keep, model: Option<String>, effort: Option<String>, ha
         subagents: agent.subagents.clone(),
         wake: Mutex::default(),
         aside: Mutex::default(),
+        spend: agent.spend.clone(),
     });
     agent.gate = Some(Arc::new(Approvals(shared.clone())));
     if harlo_tools {
@@ -639,7 +642,7 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
             let count = |role: &str| v.messages.iter().filter(|m| m["role"] == role).count();
             let calls: usize = v.messages.iter().filter(|m| m["role"] == "assistant").map(|m| m["content"].as_array().map_or(0, |c| c.iter().filter(|b| b["type"] == "toolCall").count())).sum();
             let window = sh.context_window(&v.model);
-            let stats = json!({
+            let mut stats = json!({
                 "sessionFile": v.session_file, "sessionId": v.session_id,
                 "userMessages": count("user"), "assistantMessages": count("assistant"), "toolCalls": calls, "toolResults": count("toolResult"),
                 "totalMessages": v.messages.len(),
@@ -647,8 +650,14 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
                     "tokens": tokens, "contextWindow": window, "compactAt": crate::compact::threshold(window),
                     "percent": if window > 0 { tokens as f64 * 100.0 / window as f64 } else { 0.0 },
                 },
-                "cost": 0.0,
             });
+            // What every request has cost (those whose cost is known), and
+            // what kind of cost that is: plan, local, priced, partly (some
+            // unknown: at least this) or unknown.
+            let spend = *sh.spend.lock().unwrap();
+            stats["cost"] = json!(spend.cost);
+            stats["costKind"] = json!(spend.cost_kind());
+            stats["tokens"] = json!({ "input": spend.input, "cached": spend.cached, "output": spend.output, "requests": spend.requests });
             drop(v);
             reply(Ok(stats))
         }
@@ -839,7 +848,7 @@ async fn side_question(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>,
         Ok(mut a) => (a.aside_parts().await, a.history().to_vec()),
         Err(_) => (sh.aside.lock().unwrap().clone(), sh.view.lock().unwrap().messages.clone()),
     };
-    let sh = sh.clone();
+    let (sh, agent) = (sh.clone(), agent.clone());
     tokio::spawn(async move {
         sh.emit(json!({ "type": "harlo_aside", "question": question, "text": "", "done": false }));
         let shown = sh.clone();
@@ -848,6 +857,11 @@ async fn side_question(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>,
         match crate::agent::aside(&parts, &history, &question, &mut on_text).await {
             Ok(text) => sh.emit(json!({ "type": "harlo_aside", "question": question, "text": text, "done": true })),
             Err(e) => sh.emit(json!({ "type": "harlo_aside", "question": question, "text": "", "done": true, "error": format!("{e:#}") })),
+        }
+        // Its request into the log now, when no run has the agent (a run
+        // does it at its next step).
+        if let Ok(mut a) = agent.try_lock() {
+            let _ = a.settle_side();
         }
     });
 }

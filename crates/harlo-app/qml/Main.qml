@@ -1432,6 +1432,81 @@ ApplicationWindow {
             win.summary(); Qt.quit() } }
     }
 
+    // What Harlo's sessions cost: the scripted model priced in Model
+    // servers ($100 in, $1000 out a million tokens: each of its requests,
+    // 1200 in and 20 out, $0.14), its cost on the context line, /btw's
+    // request counted, the session's limit stopping it, the context
+    // panel's cost; then an online server's price typed in Settings.
+    property string harloSpendKey: ""
+    SequentialAnimation {
+        id: harloSpendSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlospend"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            win.check(Accounts.setServerPrice("harlo", "fake", 100, 1000) === "", "the scripted model gets a price")
+            Workspace.setSpendLimits(0.25, 0)
+            Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: win.harloSpendKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo") }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloSpendSteps, () => chat.session.modelName !== "", 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: win.sendByKeys("hello there") }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloSpendSteps, () => (win.spend().costs || {})[win.harloSpendKey] > 0 && chat.session.status !== "busy", 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            const cost = win.spend().costs[win.harloSpendKey]
+            win.check(Math.abs(cost - 0.14) < 1e-6 && !win.spend().held[win.harloSpendKey], "one request priced: $0.14, under the limit ($" + cost + ")")
+            win.check(chat.session.contextText.indexOf("$0.14") >= 0, "the context line says it (" + chat.session.contextText + ")")
+            win.sendByKeys("/btw what did I say?") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloSpendSteps, () => chat.session.asideJson !== "" && JSON.parse(chat.session.asideJson).done, 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.sendByKeys("and once more") }
+        PauseAnimation { duration: 300 }
+        // ($0.14 each: the prompt, the side question, this one.)
+        ScriptAction { script: win.waitUntil(harloSpendSteps, () => !!win.spend().held[win.harloSpendKey], 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const why = win.spend().held[win.harloSpendKey] || ""
+            win.check(why === "This session has cost $0.42, over its $0.25 limit.", "the side question counted, and past the limit it's held (" + why + ")")
+            win.check(win.findName("spendBanner") !== null, "the chat says so")
+            chat.session.loadContext() } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const r = chat.session.contextJson ? JSON.parse(chat.session.contextJson) : {}
+            win.check(r.costKind === "priced" && Math.abs(r.cost - 0.42) < 1e-6, "the context report has it, priced (" + r.costKind + ", " + r.cost + ")")
+            Workspace.setSpendLimits(0, 0)
+            settingsDialog.openPage("servers") } }
+        PauseAnimation { duration: 800 }
+        // An online server: no price yet, so it says what that means.
+        ScriptAction { script: {
+            win.check(win.findName("serverPrice-fake") === null || !win.findName("serverPrice-fake").visible, "a server on this computer has no price field (nothing extra)")
+            const row = win.findName("serverPrice-gw")
+            win.check(row !== null && row.visible, "an online server has one")
+            win.check(win.findText("No price: what Harlo's sessions on it cost isn't known, so spending limits can't count it.") !== null, "and says what no price means")
+            win.shotPopup(settingsDialog, "clicks-harlo-spend-servers")
+            win.clickItem(win.findName("serverPriceIn-gw"), "price in")
+            TestInput.typeText("3")
+            TestInput.key(Qt.Key_Return, 0) } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            win.clickItem(win.findName("serverPriceOut-gw"), "price out")
+            TestInput.typeText("15")
+            TestInput.key(Qt.Key_Return, 0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloSpendSteps, () => JSON.parse(Accounts.servers("harlo")).some(s => s.name === "gw" && JSON.stringify(s.prices) === "[[3,15]]"), 5000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const gw = JSON.parse(Accounts.servers("harlo")).find(s => s.name === "gw")
+            win.check(gw && JSON.stringify(gw.prices) === "[[3,15]]", "the price is kept for its models (" + (gw ? JSON.stringify(gw.prices) : "no gw") + ")")
+            win.check(win.findText("Harlo counts what its sessions cost at this price.") !== null, "and it says it counts")
+            win.shotPopup(settingsDialog, "clicks-harlo-spend-priced")
+            win.summary(); Qt.quit() } }
+    }
+
     // Spending limits (the demo agent costs $0.25 a prompt): a session past
     // its limit is stopped and held, Allow more lets it go on; the day's
     // limit holds every session, new ones too.

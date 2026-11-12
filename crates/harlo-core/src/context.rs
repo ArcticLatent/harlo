@@ -222,7 +222,7 @@ pub fn report(messages: &[Value], live: Option<(u64, u64, f64)>) -> Value {
 }
 
 /// What a session's requests used: how many, tokens in (cached among
-/// them) and out, and their cost (USD; 0 on a plan).
+/// them) and out, and their cost (USD, of those whose cost is known).
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct Spent {
     pub requests: u64,
@@ -230,20 +230,50 @@ pub struct Spent {
     pub cached: u64,
     pub output: u64,
     pub cost: f64,
+    /// Requests whose cost is known to be unknown (Harlo on a model with
+    /// no price): `cost` leaves them out.
+    pub unpriced: u64,
 }
 
 impl Spent {
     /// "gpt-6.1-sol: 14 requests, 96.3k tokens in (72% cached), 3.4k out"
-    /// (and ", $0.42" when it cost something).
+    /// (and ", $0.42" when it cost something; ", cost unknown" or "at least"
+    /// when some requests' costs aren't known).
     pub fn line(&self, model: &str) -> String {
         let k = |n: u64| if n >= 1000 { format!("{:.1}k", n as f64 / 1000.0) } else { n.to_string() };
         let cached = if self.input > 0 { format!(" ({}% cached)", self.cached * 100 / self.input) } else { String::new() };
         let who = if model.trim().is_empty() { String::new() } else { format!("{}: ", model.trim()) };
         let mut s = format!("{who}{} request{}, {} tokens in{cached}, {} out", self.requests, if self.requests == 1 { "" } else { "s" }, k(self.input), k(self.output));
-        if self.cost > 0.0 {
-            s.push_str(&format!(", ${:.2}", self.cost));
+        match (self.cost > 0.0, self.unpriced > 0) {
+            (true, false) => s.push_str(&format!(", ${:.2}", self.cost)),
+            (true, true) => s.push_str(&format!(", at least ${:.2}", self.cost)),
+            (false, true) => s.push_str(", cost unknown"),
+            (false, false) => {}
         }
         s
+    }
+
+    fn add(&mut self, o: &Spent) {
+        self.requests += o.requests;
+        self.input += o.input;
+        self.cached += o.cached;
+        self.output += o.output;
+        self.cost += o.cost;
+        self.unpriced += o.unpriced;
+    }
+}
+
+/// One logged usage (pi's form) as a request.
+fn spent_of(u: &Value) -> Spent {
+    let read = u["cacheRead"].as_u64().unwrap_or(0);
+    let unknown = u["costKind"] == "unknown";
+    Spent {
+        requests: 1,
+        input: u["input"].as_u64().unwrap_or(0) + read + u["cacheWrite"].as_u64().unwrap_or(0),
+        cached: read,
+        output: u["output"].as_u64().unwrap_or(0),
+        cost: if unknown { 0.0 } else { u["cost"]["total"].as_f64().unwrap_or(0.0) },
+        unpriced: unknown as u64,
     }
 }
 
@@ -251,32 +281,54 @@ impl Spent {
 /// usage).
 pub fn spent(messages: &[Value]) -> Spent {
     let mut s = Spent::default();
-    for m in messages.iter().filter(|m| m["role"] == "assistant") {
-        let Some(u) = usage_of(m) else { continue };
-        s.requests += 1;
-        s.input += u.input + u.cache_read + u.cache_write;
-        s.cached += u.cache_read;
-        s.output += u.output;
-        s.cost += m["usage"]["cost"]["total"].as_f64().unwrap_or(0.0);
+    for m in messages.iter().filter(|m| m["role"] == "assistant" && usage_of(m).is_some()) {
+        s.add(&spent_of(&m["usage"]));
     }
     s
 }
 
+/// One saved entry's request, if it was one: a reply, and Harlo's other
+/// requests (a compaction's summary, a side question, a web search). A
+/// subagent's result carries its totals too, but its own log counts them.
+fn entry_spent(e: &Value) -> Spent {
+    let m = &e["message"];
+    match e["type"].as_str() {
+        Some("message") if m["role"] == "assistant" && usage_of(m).is_some() => spent_of(&m["usage"]),
+        Some("message") if m["role"] == "toolResult" && m["toolName"] == "web_search" && m["details"]["usage"].is_object() => {
+            let u = &m["details"]["usage"];
+            let kinds: Vec<&str> = u["costKinds"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+            Spent {
+                requests: u["requests"].as_u64().unwrap_or(0),
+                input: u["input"].as_u64().unwrap_or(0),
+                cached: u["cached"].as_u64().unwrap_or(0),
+                output: u["output"].as_u64().unwrap_or(0),
+                cost: u["cost"].as_f64().unwrap_or(0.0),
+                unpriced: kinds.contains(&"unknown") as u64,
+            }
+        }
+        Some("compaction" | "harlo_usage") if e["usage"].is_object() => spent_of(&e["usage"]),
+        _ => Spent::default(),
+    }
+}
+
 /// What a saved session (pi's form) used, its subagents' too (their logs
-/// in a folder named after it). None: a remote file, or one not read.
+/// in a folder named after it): every request in it, on any branch. None:
+/// a remote file, or one not read.
 pub fn spent_in_file(path: &std::path::Path) -> Option<Spent> {
     if crate::remote::is_remote(path) {
         return None;
     }
-    let mut total = spent(&harlo_harness::store::read_messages(path).ok()?);
+    let of = |p: &std::path::Path| -> Option<Spent> {
+        let mut s = Spent::default();
+        for e in std::fs::read_to_string(p).ok()?.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()) {
+            s.add(&entry_spent(&e));
+        }
+        Some(s)
+    };
+    let mut total = of(path)?;
     let subs = std::fs::read_dir(path.with_extension("")).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "jsonl"));
     for sub in subs {
-        let s = spent(&harlo_harness::store::read_messages(&sub).unwrap_or_default());
-        total.requests += s.requests;
-        total.input += s.input;
-        total.cached += s.cached;
-        total.output += s.output;
-        total.cost += s.cost;
+        total.add(&of(&sub).unwrap_or_default());
     }
     Some(total)
 }
@@ -326,7 +378,7 @@ mod tests {
         let reply = |input: u64, read: u64, out: u64, cost: f64| json!({ "role": "assistant", "content": [], "usage": { "input": input, "output": out, "cacheRead": read, "cacheWrite": 0, "totalTokens": input + read + out, "cost": { "total": cost } } });
         let msgs = vec![json!({ "role": "user", "content": "hi" }), reply(1000, 3000, 200, 0.0), json!({ "role": "assistant", "content": [] }), reply(500, 3500, 300, 0.0)];
         let s = spent(&msgs);
-        assert_eq!(s, Spent { requests: 2, input: 8000, cached: 6500, output: 500, cost: 0.0 });
+        assert_eq!(s, Spent { requests: 2, input: 8000, cached: 6500, output: 500, cost: 0.0, unpriced: 0 });
         assert_eq!(s.line("gpt-6.1-sol"), "gpt-6.1-sol: 2 requests, 8.0k tokens in (81% cached), 500 out");
         let paid = spent(&[reply(10, 0, 5, 0.4237)]);
         assert_eq!(paid.line(""), "1 request, 10 tokens in (0% cached), 5 out, $0.42");
@@ -347,6 +399,25 @@ mod tests {
         let all = spent_in_file(&dir.join("s.jsonl")).unwrap();
         assert_eq!((all.requests, all.input, all.output), (3, 8100, 510));
         assert!(spent_in_file(&dir.join("missing.jsonl")).is_none());
+
+        // Harlo's other requests count too: a compaction's summary, a side
+        // question, a web search; and a cost it doesn't know is said so.
+        let priced = |input: u64, out: u64, cost: f64| json!({ "input": input, "output": out, "cacheRead": 0, "cacheWrite": 0, "costKind": "priced", "cost": { "total": cost } });
+        let mut text = std::fs::read_to_string(dir.join("s.jsonl")).unwrap();
+        for e in [
+            json!({ "type": "compaction", "id": "c", "summary": "s", "usage": priced(9000, 800, 0.05) }),
+            json!({ "type": "harlo_usage", "id": "b", "source": "btw", "usage": { "input": 400, "output": 40, "cacheRead": 0, "costKind": "unknown" } }),
+            json!({ "type": "message", "id": "w", "message": { "role": "toolResult", "toolName": "web_search", "content": [], "details": { "usage": { "requests": 1, "input": 2000, "cached": 0, "output": 100, "cost": 0.01, "costKinds": ["priced"] } } } }),
+            json!({ "type": "message", "id": "t", "message": { "role": "toolResult", "toolName": "task", "content": [], "details": { "usage": { "requests": 1, "input": 100, "cached": 0, "output": 10 } } } }),
+        ] {
+            text.push_str(&format!("{e}\n"));
+        }
+        std::fs::write(dir.join("s.jsonl"), text).unwrap();
+        let all = spent_in_file(&dir.join("s.jsonl")).unwrap();
+        assert_eq!((all.requests, all.input, all.output, all.unpriced), (6, 8100 + 9000 + 400 + 2000, 510 + 800 + 40 + 100, 1));
+        assert!((all.cost - 0.06).abs() < 1e-9);
+        assert!(all.line("").ends_with(", at least $0.06"), "{}", all.line(""));
+        assert_eq!(spent(&[json!({ "role": "assistant", "content": [], "usage": { "input": 5, "output": 1, "costKind": "unknown" } })]).line(""), "1 request, 5 tokens in (0% cached), 1 out, cost unknown");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

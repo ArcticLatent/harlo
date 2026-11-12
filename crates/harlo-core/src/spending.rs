@@ -70,6 +70,9 @@ pub struct SessionSpend {
     pub seen: Option<f64>,
     pub cost: f64,
     pub extra: f64,
+    /// What its cost is, as its agent says ("unknown" or "partly": the
+    /// limits can't count all of it).
+    pub kind: String,
 }
 
 impl SessionSpend {

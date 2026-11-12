@@ -96,6 +96,10 @@ pub struct SessionMetaInfo {
     pub limit_refused: bool,
     /// Session cost in USD so far.
     pub cost: f64,
+    /// What that cost is, when the agent says (Harlo): "plan" or "local"
+    /// (nothing extra), "priced", "partly" (some requests' costs unknown:
+    /// at least `cost`), "unknown"; "" when it doesn't say.
+    pub cost_kind: String,
 }
 
 /// A slash command the harness accepts in a prompt.
@@ -833,7 +837,9 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                 }
                 Some(Control::ContextReport(reply)) => {
                     let live = (st.meta.context_window > 0).then_some((st.meta.context_tokens, st.meta.context_window, st.meta.cost));
-                    let _ = reply.send(crate::context::report(&st.messages.all(), live));
+                    let mut report = crate::context::report(&st.messages.all(), live);
+                    report["costKind"] = serde_json::json!(st.meta.cost_kind);
+                    let _ = reply.send(report);
                     st.messages.release();
                 }
                 // (A saved session still loading: once it has.)
@@ -1113,6 +1119,7 @@ fn apply_stats(meta: &mut SessionMetaInfo, stats: &Value) {
     meta.context_window = usage["contextWindow"].as_u64().unwrap_or(0);
     meta.compact_at = usage["compactAt"].as_u64().unwrap_or(0);
     meta.cost = stats["cost"].as_f64().unwrap_or(0.0);
+    meta.cost_kind = stats["costKind"].as_str().unwrap_or_default().to_owned();
 }
 
 fn parse_commands(list: &Value) -> Vec<SlashCommand> {

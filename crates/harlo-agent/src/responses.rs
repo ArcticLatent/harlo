@@ -136,21 +136,14 @@ pub fn assistant_message(items: &[Value], provider: &str, model: &str, usage: &V
         }
     }
     let calls = content.iter().any(|b| b["type"] == "toolCall");
-    let input = usage["input_tokens"].as_u64().unwrap_or(0);
-    let cached = usage["input_tokens_details"]["cached_tokens"].as_u64().unwrap_or(0);
-    let output = usage["output_tokens"].as_u64().unwrap_or(0);
     json!({
         "role": "assistant",
         "content": content,
         "api": "openai-responses",
         "provider": provider,
         "model": model,
-        "usage": {
-            "input": input.saturating_sub(cached), "output": output, "cacheRead": cached, "cacheWrite": 0,
-            "reasoning": usage["output_tokens_details"]["reasoning_tokens"].as_u64().unwrap_or(0),
-            "totalTokens": input + output,
-            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 },
-        },
+        // (Its cost: the agent's to say, which knows the model's price.)
+        "usage": crate::used::Used::from_api(&usage).log(&usage, &crate::used::Pricing::Unknown),
         "stopReason": if calls { "toolUse" } else { "stop" },
         "timestamp": crate::session::now_ms(),
     })

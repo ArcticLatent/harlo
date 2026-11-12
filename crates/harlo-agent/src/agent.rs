@@ -18,6 +18,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::providers::{self, Api};
 use crate::session::{Log, Past, now_ms};
+use crate::used::Used;
 use crate::tools::{self, Tools};
 use crate::{chat, compact, responses, stubs};
 
@@ -128,6 +129,12 @@ pub struct AsideParts {
     specs: Value,
     key: String,
     images: bool,
+    /// Its request comes out of the session's budget, and is logged by the
+    /// agent when it next can (it may be in a run).
+    budget: Option<Arc<Budget>>,
+    /// (Each with its usage as the log has it.)
+    side: Arc<Mutex<Vec<(Used, Value)>>>,
+    pricing: crate::used::Pricing,
 }
 
 /// Of the conversation, what a side question takes along (tokens, about).
@@ -179,7 +186,12 @@ pub async fn aside(parts: &AsideParts, history: &[Value], question: &str, on_tex
         }
     };
     let a = Asked { model: &parts.model, effort: parts.effort.as_deref(), instructions: &parts.system, history: &asked, session: &parts.key, specs: &parts.specs, tools: false, images: parts.images, trigger: false };
-    let (reply, _) = send(a, &mut show).await?;
+    let (reply, usage) = send(a, &mut show).await?;
+    let used = Used::from_api(&usage).priced(&parts.pricing);
+    if let Some(b) = &parts.budget {
+        b.spent.fetch_add(used.billed(), std::sync::atomic::Ordering::Relaxed);
+    }
+    parts.side.lock().unwrap().push((used, used.log(&usage, &parts.pricing)));
     let said: String = reply["content"].as_array().into_iter().flatten().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect();
     Ok(if said.trim().is_empty() { text } else { said })
 }
@@ -197,22 +209,67 @@ pub struct Launch {
 
 /// A session's token budget: tokens sent and received, not counting those
 /// the cache served, its subagents' included (they share it).
+#[derive(Default)]
 pub struct Budget {
     pub limit: u64,
     pub spent: std::sync::atomic::AtomicU64,
+    /// What the requests out now (its helpers' at once) are expected to
+    /// spend, held against the limit until they're counted.
+    pub held: std::sync::atomic::AtomicU64,
 }
 
 impl Budget {
-    /// Why no more requests may go, once it's used.
+    /// Why no more requests may go, once it's used (or the rest is held
+    /// by requests already out).
     fn used(&self) -> Option<String> {
-        let spent = self.spent.load(std::sync::atomic::Ordering::Relaxed);
-        (spent >= self.limit).then(|| {
-            format!(
+        self.over(self.held.load(std::sync::atomic::Ordering::Acquire))
+    }
+
+    fn over(&self, held: u64) -> Option<String> {
+        let spent = self.spent.load(std::sync::atomic::Ordering::Acquire);
+        if spent >= self.limit {
+            return Some(format!(
                 "This session used its token budget of {} ({} tokens sent and received, not counting those the cache served), so it makes no more requests.",
+                tokens(self.limit),
+                tokens(spent)
+            ));
+        }
+        (spent + held >= self.limit).then(|| {
+            format!(
+                "This session's token budget of {} is taken: {} used, and requests already out (its helpers') may spend the rest, so it makes no more requests.",
                 tokens(self.limit),
                 tokens(spent)
             )
         })
+    }
+
+    /// Holds a request's expected spend against the budget while it's out
+    /// (until the hold's dropped): refused once what's spent and held
+    /// reaches the limit, so helpers at once can't all pass the check.
+    fn hold(self: &Arc<Self>, tokens: u64) -> Result<Hold, String> {
+        use std::sync::atomic::Ordering;
+        let mut held = self.held.load(Ordering::Acquire);
+        loop {
+            if let Some(why) = self.over(held) {
+                return Err(why);
+            }
+            match self.held.compare_exchange(held, held + tokens, Ordering::AcqRel, Ordering::Acquire) {
+                Ok(_) => return Ok(Hold { budget: self.clone(), tokens }),
+                Err(now) => held = now,
+            }
+        }
+    }
+}
+
+/// A request's expected spend, held against its session's budget.
+struct Hold {
+    budget: Arc<Budget>,
+    tokens: u64,
+}
+
+impl Drop for Hold {
+    fn drop(&mut self) {
+        self.budget.held.fetch_sub(self.tokens, std::sync::atomic::Ordering::AcqRel);
     }
 }
 
@@ -294,6 +351,8 @@ impl Inbox {
 pub struct Known {
     windows: HashMap<String, u64>,
     images: HashMap<String, Option<bool>>,
+    /// Prices as servers list them (None: not listed).
+    prices: HashMap<String, Option<crate::used::Price>>,
 }
 
 impl Known {
@@ -304,6 +363,7 @@ impl Known {
                 self.windows.insert(m.key(), m.context_window);
             }
             self.images.insert(m.key(), m.images);
+            self.prices.insert(m.key(), m.price);
         }
     }
 }
@@ -331,7 +391,12 @@ pub struct Agent {
     /// The model and thinking level the log last recorded.
     logged: (Option<String>, Option<String>),
     /// Totals of this process's requests.
-    pub totals: Totals,
+    pub totals: Used,
+    /// What the session's requests have used and cost, all of them (read
+    /// from its log when it's opened): what its stats say.
+    pub spend: Arc<Mutex<Used>>,
+    /// Side questions' requests, not yet in the totals and the log.
+    side: Arc<Mutex<Vec<(Used, Value)>>>,
     /// The last request's usage (the context's size).
     pub last_usage: Value,
     /// How many of the history's messages that usage covers (its reply
@@ -370,20 +435,13 @@ pub struct Agent {
     pub inbox: Arc<Mutex<Inbox>>,
 }
 
-#[derive(Default)]
-pub struct Totals {
-    pub requests: u64,
-    pub input: u64,
-    pub cached: u64,
-    pub output: u64,
-}
-
 impl Agent {
     /// `past`: what the log already holds (nothing for a new session).
     pub fn new(cwd: PathBuf, log: Log, past: Past, model: String, effort: Option<String>) -> Self {
         let spill = std::env::temp_dir().join("harlo-agent");
         let sandbox = crate::sandbox::for_dir(&cwd);
         let profiles = crate::profiles::find(&cwd, &home(), &crate::auth::config_dir());
+        let spent = crate::session::used(&log.path);
         Agent {
             instructions: instructions(&cwd, sandbox.as_deref()),
             added: String::new(),
@@ -404,7 +462,9 @@ impl Agent {
             told_sandbox: false,
             log,
             logged: (past.model, past.effort),
-            totals: Totals::default(),
+            totals: Used::default(),
+            spend: Arc::new(Mutex::new(spent)),
+            side: Arc::default(),
             last_usage: Value::Null,
             measured: 0,
             gate: None,
@@ -449,6 +509,7 @@ impl Agent {
         self.files = Default::default();
         self.tools.set_aside([], true);
         self.logged = (None, None);
+        self.spent_anew();
     }
 
     /// Goes on in another session (a fork): its log and history.
@@ -460,6 +521,19 @@ impl Agent {
         self.files = past.files;
         self.tools.set_aside(past.originals, true);
         self.logged = (past.model, past.effort);
+        self.spent_anew();
+    }
+
+    /// Another session's: what its log says it used (its budget too), and
+    /// nothing measured of its context yet.
+    fn spent_anew(&mut self) {
+        let used = crate::session::used(&self.log.path);
+        *self.spend.lock().unwrap() = used;
+        if let Some(b) = &self.budget {
+            b.spent.store(used.billed(), std::sync::atomic::Ordering::Release);
+        }
+        self.last_usage = Value::Null;
+        self.measured = 0;
     }
 
     pub fn rename(&mut self, name: &str) -> Result<()> {
@@ -588,6 +662,7 @@ impl Agent {
         let mut repeats = crate::repeats::Repeats::default();
         let max = max_rounds();
         for round in 0..max {
+            self.settle_side()?;
             if round > 0 {
                 self.take_steering(show)?;
                 self.take_notices(show)?;
@@ -681,13 +756,14 @@ impl Agent {
             // (Subagents: what they take from this session, when asked for.)
             let task = names.contains(&"task").then(|| self.task_ctx());
             let key = self.cache_key.clone().unwrap_or_else(|| self.log.id.clone());
+            let pricing = if names.contains(&crate::search::NAME) { self.pricing().await } else { crate::used::Pricing::Unknown };
             let extra = Extra {
                 gate: self.gate.as_deref(),
                 harlo: self.harlo.as_deref().map(|h| (h, self.harlo_tools.as_slice())),
                 allowed: self.allowed,
                 task: task.as_ref(),
                 mcp: self.mcp.as_ref(),
-                search: Some((&self.model, &key)),
+                search: Some((&self.model, &key, pricing)),
             };
             let outcomes = run_calls(&self.tools, &triples, &extra, stop).await;
             handed_over |= hands_over(&names, &outcomes);
@@ -712,20 +788,10 @@ impl Agent {
                     "content": content, "isError": o.failed, "timestamp": now_ms(),
                 });
                 if !o.details.is_null() {
-                    // (Subagents' requests count as this session's.)
-                    let u = &o.details["usage"];
-                    self.totals.requests += u["requests"].as_u64().unwrap_or(0);
-                    self.totals.input += u["input"].as_u64().unwrap_or(0);
-                    self.totals.cached += u["cached"].as_u64().unwrap_or(0);
-                    self.totals.output += u["output"].as_u64().unwrap_or(0);
-                    // (A web search's request comes out of the session's budget;
-                    // subagents take theirs from it themselves.)
-                    if *name == crate::search::NAME
-                        && let Some(b) = &self.budget
-                    {
-                        let spent = u["input"].as_u64().unwrap_or(0).saturating_sub(u["cached"].as_u64().unwrap_or(0)) + u["output"].as_u64().unwrap_or(0);
-                        b.spent.fetch_add(spent, std::sync::atomic::Ordering::Relaxed);
-                    }
+                    // (Subagents' requests count as this session's. A web
+                    // search's comes out of the session's budget; subagents
+                    // take theirs from it themselves.)
+                    self.count(&Used::from_details(&o.details["usage"]), *name == crate::search::NAME);
                     result["details"] = o.details;
                 }
                 self.push(result, show)?;
@@ -823,13 +889,15 @@ impl Agent {
             show(Shown::Notice { level: "warning", text: &format!("Harlo's commands can't run: its sandbox can't start here ({why}). Install bubblewrap, or turn the sandbox off in Settings → Providers → Harlo.") });
             self.told_sandbox = true;
         }
-        if let Some(why) = self.budget.as_ref().and_then(|b| b.used()) {
-            bail!("{why}");
-        }
+        // (Held until it's counted.)
+        let _hold = match self.budget.clone() {
+            Some(b) => Some(b.hold(self.fresh_tokens()).map_err(|why| anyhow::anyhow!(why))?),
+            None => None,
+        };
         let (system, specs) = (self.system(), self.specs());
         let key = self.cache_key.clone().unwrap_or_else(|| self.log.id.clone());
         let asked = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &self.history, session: &key, specs: &specs, tools: true, images, trigger: false };
-        let (message, usage) = match send(asked, show).await {
+        let (mut message, usage) = match send(asked, show).await {
             Err(e) if let Some(back) = self.falls_back(&e) => {
                 // Goes on with the fallback: said, and in the log.
                 let (plan, fb) = (self.model.clone(), self.fallback.clone().unwrap_or_default());
@@ -852,7 +920,11 @@ impl Agent {
             }
             r => r?,
         };
-        self.count(&usage);
+        // (The model that answered: a fallback's, when it took over.)
+        let pricing = self.pricing().await;
+        let used = Used::from_api(&usage).priced(&pricing);
+        message["usage"] = used.log(&usage, &pricing);
+        self.count(&used, true);
         show(Shown::Usage { model: message["model"].as_str().unwrap_or_default(), usage: &usage });
         self.last_usage = usage;
         // (The reply, pushed next, is its output.)
@@ -888,7 +960,7 @@ impl Agent {
         self.task_model = l.task_model.clone();
         self.fallback = l.fallback.clone();
         // (What the session used before, when it goes on.)
-        self.budget = l.budget.map(|limit| Arc::new(Budget { limit, spent: crate::session::spent(&self.log.path).into() }));
+        self.budget = l.budget.map(|limit| Arc::new(Budget { limit, spent: crate::session::used(&self.log.path).billed().into(), ..Budget::default() }));
     }
 
     /// What a side question is asked with, as things are now.
@@ -901,7 +973,22 @@ impl Agent {
             specs: self.specs(),
             key: self.cache_key.clone().unwrap_or_else(|| self.log.id.clone()),
             images,
+            budget: self.budget.clone(),
+            side: self.side.clone(),
+            pricing: self.pricing().await,
         }
+    }
+
+    /// Side questions' requests since the last time: into the totals and
+    /// the log (as `harlo_usage` entries; their words aren't kept).
+    pub fn settle_side(&mut self) -> Result<()> {
+        let done: Vec<(Used, Value)> = std::mem::take(&mut *self.side.lock().unwrap());
+        for (used, logged) in done {
+            self.totals.add(&used);
+            self.spend.lock().unwrap().add(&used);
+            self.log.append(json!({ "type": "harlo_usage", "source": "btw", "usage": logged }))?;
+        }
+        Ok(())
     }
 
     /// The conversation as the model has it.
@@ -1015,14 +1102,14 @@ impl Agent {
         };
     }
 
-    fn count(&mut self, usage: &Value) {
-        let (input, cached, output) = (usage["input_tokens"].as_u64().unwrap_or(0), usage["input_tokens_details"]["cached_tokens"].as_u64().unwrap_or(0), usage["output_tokens"].as_u64().unwrap_or(0));
-        self.totals.requests += 1;
-        self.totals.input += input;
-        self.totals.cached += cached;
-        self.totals.output += output;
-        if let Some(b) = &self.budget {
-            b.spent.fetch_add(input.saturating_sub(cached) + output, std::sync::atomic::Ordering::Relaxed);
+    /// A request of this session's: into its totals, and out of its
+    /// budget (`budgeted`: false when it came out already, as a
+    /// subagent's does).
+    fn count(&mut self, used: &Used, budgeted: bool) {
+        self.totals.add(used);
+        self.spend.lock().unwrap().add(used);
+        if budgeted && let Some(b) = &self.budget {
+            b.spent.fetch_add(used.billed(), std::sync::atomic::Ordering::Relaxed);
         }
     }
 
@@ -1060,10 +1147,23 @@ impl Agent {
             if let Some(m) = list.iter().find(|m| m.id == id) {
                 self.known.windows.insert(self.model.clone(), m.context_window);
                 self.known.images.insert(self.model.clone(), m.images);
+                self.known.prices.insert(self.model.clone(), m.price);
             }
         }
         self.known.windows.entry(self.model.clone()).or_insert(0);
         self.known.images.entry(self.model.clone()).or_insert(None);
+        self.known.prices.entry(self.model.clone()).or_insert(None);
+    }
+
+    /// What the model's requests cost: the plan's, a local server's, a
+    /// price the file or its server's list gives (asked of it once), or
+    /// unknown.
+    async fn pricing(&mut self) -> crate::used::Pricing {
+        let Ok((p, id)) = providers::resolve(&self.model) else { return crate::used::Pricing::Unknown };
+        if !p.is_plan() && !self.known.prices.contains_key(&self.model) {
+            self.ask_models().await;
+        }
+        p.pricing(&id, self.known.prices.get(&self.model).copied().flatten())
     }
 
     /// Whether the context is past where old outputs are set aside: how
@@ -1115,6 +1215,13 @@ impl Agent {
     }
 
     /// The whole request estimated: its instructions, tools and history.
+    /// What the next request is expected to spend of a budget: what the
+    /// cache won't serve, everything since the last request (all of it
+    /// when nothing's measured).
+    fn fresh_tokens(&self) -> u64 {
+        self.next_tokens().saturating_sub(self.last_usage["input_tokens"].as_u64().unwrap_or(0))
+    }
+
     fn estimate_whole(&self) -> u64 {
         compact::estimate_text(&self.system()) + compact::estimate_text(&self.specs().to_string()) + self.history.iter().map(compact::estimate).sum::<u64>()
     }
@@ -1144,6 +1251,7 @@ impl Agent {
         let Some(first_kept) = self.ids.get(cut).cloned() else { return Compacted::Nothing };
         show(Shown::CompactionStart { reason });
         let tokens_before = self.next_tokens();
+        let pricing = self.pricing().await;
         let (system, specs) = (self.system(), self.specs());
         let key = self.cache_key.clone().unwrap_or_else(|| self.log.id.clone());
         let images = self.takes_images().await;
@@ -1164,8 +1272,10 @@ impl Agent {
                     show(Shown::CompactionEnd { reason, result: None, error: None, will_retry: false });
                     return Compacted::Stopped;
                 }
-                Some(Ok((reply, usage))) => {
-                    self.count(&usage);
+                Some(Ok((mut reply, usage))) => {
+                    let used = Used::from_api(&usage).priced(&pricing);
+                    reply["usage"] = used.log(&usage, &pricing);
+                    self.count(&used, true);
                     match reply["content"].as_array().into_iter().flatten().find(|b| b["type"] == "compaction") {
                         Some(b) => {
                             let summary = compact::with_files(&compact::native_note(&self.history[..cut], &self.model), &files);
@@ -1176,7 +1286,11 @@ impl Agent {
                                 "native": { "provider": pid, "model": bare, "item": b["item"] },
                             }));
                         }
-                        None => show(Shown::Notice { level: "info", text: "The server's compaction sent nothing back: summarizing instead." }),
+                        None => {
+                            // (Its request, logged on its own.)
+                            let _ = self.log.append(json!({ "type": "harlo_usage", "source": "compaction", "usage": reply["usage"] }));
+                            show(Shown::Notice { level: "info", text: "The server's compaction sent nothing back: summarizing instead." })
+                        }
                     }
                 }
                 Some(Err(e)) => show(Shown::Notice { level: "info", text: &format!("The server's compaction failed ({e:#}): summarizing instead.") }),
@@ -1200,7 +1314,7 @@ impl Agent {
                     _ = stop.cancelled() => None,
                     r = send(request, &mut quiet) => Some(r),
                 };
-                let (reply, usage) = match sent {
+                let (mut reply, usage) = match sent {
                     None => {
                         show(Shown::CompactionEnd { reason, result: None, error: None, will_retry: false });
                         return Compacted::Stopped;
@@ -1208,13 +1322,21 @@ impl Agent {
                     Some(Err(e)) => return failed(show, format!("{e:#}")),
                     Some(Ok(r)) => r,
                 };
-                self.count(&usage);
+                let used = Used::from_api(&usage).priced(&pricing);
+                reply["usage"] = used.log(&usage, &pricing);
+                self.count(&used, true);
                 let text: String = reply["content"].as_array().into_iter().flatten().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join("");
-                if reply["stopReason"] == "length" {
-                    return failed(show, "The summary was cut off".into());
-                }
-                if text.trim().is_empty() {
-                    return failed(show, "The model wrote no summary".into());
+                let wrong = if reply["stopReason"] == "length" {
+                    Some("The summary was cut off")
+                } else if text.trim().is_empty() {
+                    Some("The model wrote no summary")
+                } else {
+                    None
+                };
+                if let Some(why) = wrong {
+                    // (Its request, logged on its own.)
+                    let _ = self.log.append(json!({ "type": "harlo_usage", "source": "compaction", "usage": reply["usage"] }));
+                    return failed(show, why.into());
                 }
                 let summary = compact::with_files(&text, &files);
                 json!({
@@ -1440,7 +1562,7 @@ struct Extra<'a> {
     task: Option<&'a crate::task::Ctx>,
     mcp: Option<&'a crate::mcp::Mcp>,
     /// The session's model and cache key, for web searches.
-    search: Option<(&'a str, &'a str)>,
+    search: Option<(&'a str, &'a str, crate::used::Pricing)>,
 }
 
 impl Extra<'_> {
@@ -1452,7 +1574,7 @@ impl Extra<'_> {
 }
 
 /// A web search: a request of its own, with the server's search in it.
-async fn web_search(args: &Value, model: &str, key: &str) -> tools::Outcome {
+async fn web_search(args: &Value, model: &str, key: &str, pricing: &crate::used::Pricing) -> tools::Outcome {
     let Some(query) = args["query"].as_str().map(str::trim).filter(|q| !q.is_empty()) else {
         return tools::Outcome::new("Say what to search for in query.", true);
     };
@@ -1464,7 +1586,7 @@ async fn web_search(args: &Value, model: &str, key: &str) -> tools::Outcome {
     match send(asked, &mut quiet).await {
         Ok((reply, usage)) => {
             let mut o = tools::Outcome::new(crate::search::findings(&reply), false);
-            o.details = json!({ "usage": crate::search::usage(&usage) });
+            o.details = json!({ "usage": Used::from_api(&usage).priced(pricing).details() });
             o
         }
         Err(e) => tools::Outcome::new(format!("The search failed: {e:#}"), true),
@@ -1472,11 +1594,11 @@ async fn web_search(args: &Value, model: &str, key: &str) -> tools::Outcome {
 }
 
 /// A call of ours or of an MCP server's.
-async fn call_tool(tools: &Tools, mcp: Option<&crate::mcp::Mcp>, search: Option<(&str, &str)>, name: &str, args: &Value) -> tools::Outcome {
+async fn call_tool(tools: &Tools, mcp: Option<&crate::mcp::Mcp>, search: Option<(&str, &str, crate::used::Pricing)>, name: &str, args: &Value) -> tools::Outcome {
     if name == crate::search::NAME
-        && let Some((model, key)) = search
+        && let Some((model, key, pricing)) = search
     {
-        return web_search(args, model, key).await;
+        return web_search(args, model, key, &pricing).await;
     }
     if name == "run_code" {
         let mut specs: Vec<Value> = tools::specs().as_array().cloned().unwrap_or_default();
@@ -1920,13 +2042,84 @@ mod tests {
     }
 
     #[test]
+    fn every_request_is_read_back_after_a_restart() {
+        let dir = std::env::temp_dir().join(format!("harlo-agent-used-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("s.jsonl");
+        let mut agent = Agent::new(dir.clone(), Log::new(&dir, &dir), Past::default(), "test/m".into(), None);
+        agent.log.path = path.clone();
+        agent.budget = Some(Arc::new(Budget { limit: 1_000_000, ..Budget::default() }));
+        let api = |input: u64, cached: u64, output: u64| json!({ "input_tokens": input, "input_tokens_details": { "cached_tokens": cached }, "output_tokens": output });
+        let price = crate::used::Pricing::Priced(crate::used::Price { input: 1.0, output: 4.0, cached: 0.1 });
+        let mut want = Used::default();
+        let mut spend = |agent: &mut Agent, u: &Value| {
+            let used = Used::from_api(u).priced(&price);
+            agent.count(&used, true);
+            want.add(&used);
+            used
+        };
+        // A reply, a compaction's summary, a web search, a side question.
+        let reply = spend(&mut agent, &api(5_000, 4_000, 300));
+        agent.log.append(json!({ "type": "message", "message": { "role": "assistant", "content": [], "usage": reply.log(&api(5_000, 4_000, 300), &price) } })).unwrap();
+        let summary = spend(&mut agent, &api(9_000, 0, 800));
+        agent.log.append(json!({ "type": "compaction", "summary": "s", "firstKeptEntryId": "x", "tokensBefore": 9_000, "usage": summary.log(&api(9_000, 0, 800), &price) })).unwrap();
+        let search = spend(&mut agent, &api(2_000, 0, 150));
+        agent.log.append(json!({ "type": "message", "message": { "role": "toolResult", "toolName": crate::search::NAME, "content": [], "details": { "usage": search.details() } } })).unwrap();
+        let parts = AsideParts { budget: agent.budget.clone(), side: agent.side.clone(), ..AsideParts::default() };
+        let btw = api(6_000, 5_000, 40);
+        let asked = Used::from_api(&btw).priced(&price);
+        parts.budget.as_ref().unwrap().spent.fetch_add(asked.billed(), std::sync::atomic::Ordering::Relaxed);
+        parts.side.lock().unwrap().push((asked, asked.log(&btw, &price)));
+        want.add(&asked);
+        agent.settle_side().unwrap();
+        assert!(agent.side.lock().unwrap().is_empty(), "logged once");
+        // A helper's log beside the session's; its result carries its
+        // totals, which aren't counted twice.
+        let (h1, h2) = (Used { requests: 1, input: 1_000, output: 100, ..Used::default() }.priced(&price), Used { requests: 1, input: 2_000, cached: 1_000, output: 100, ..Used::default() }.priced(&price));
+        let mut helper = h1;
+        helper.add(&h2);
+        want.add(&helper);
+        std::fs::create_dir_all(path.with_extension("")).unwrap();
+        let line = |u: &Used| json!({ "type": "message", "id": "h", "message": { "role": "assistant", "usage": u.log(&json!({}), &price) } }).to_string();
+        std::fs::write(path.with_extension("").join("h.jsonl"), format!("{}\n{}\n", line(&h1), line(&h2))).unwrap();
+        agent.log.append(json!({ "type": "message", "message": { "role": "toolResult", "toolName": "task", "content": [], "details": { "usage": helper.details() } } })).unwrap();
+        agent.budget.as_ref().unwrap().spent.fetch_add(helper.billed(), std::sync::atomic::Ordering::Relaxed);
+        // After a restart: what the log says is what was counted.
+        let read = crate::session::used(&path);
+        assert_eq!((read.requests, read.input, read.cached, read.output, read.cost_kind()), (want.requests, want.input, want.cached, want.output, "priced"));
+        assert!(read.cost > 0.0 && (read.cost - want.cost).abs() < 1e-12, "{} vs {}", read.cost, want.cost);
+        assert_eq!(read.billed(), agent.budget.as_ref().unwrap().spent.load(std::sync::atomic::Ordering::Relaxed));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn token_counts() {
         assert_eq!([parse_tokens("400k"), parse_tokens("2M"), parse_tokens("1.5m"), parse_tokens("400_000"), parse_tokens("x"), parse_tokens("0")], [Some(400_000), Some(2_000_000), Some(1_500_000), Some(400_000), None, None]);
         assert_eq!([tokens(950), tokens(412_345), tokens(2_000_000), tokens(1_250_000)], ["950", "412k", "2m", "1.2m"]);
-        let b = Budget { limit: 1000, spent: 999.into() };
+        let b = Budget { limit: 1000, spent: 999.into(), ..Budget::default() };
         assert!(b.used().is_none());
         b.spent.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         assert!(b.used().unwrap().starts_with("This session used its token budget of 1k (1k tokens"));
+    }
+
+    #[test]
+    fn helpers_at_once_hold_the_budget() {
+        // Four helpers ask at once, each expecting 4k: three go (one may
+        // cross the line, as a lone request may), the fourth is refused.
+        let b = Arc::new(Budget { limit: 10_000, ..Budget::default() });
+        let holds: Vec<_> = (0..4).map(|_| b.hold(4_000)).collect();
+        assert_eq!(holds.iter().filter(|h| h.is_ok()).count(), 3);
+        assert!(holds[3].as_ref().err().unwrap().contains("requests already out"), "{:?}", holds[3].as_ref().err());
+        // Counted as they end: the holds go, what they spent stays.
+        b.spent.fetch_add(2_500, std::sync::atomic::Ordering::Relaxed);
+        drop(holds);
+        assert_eq!(b.held.load(std::sync::atomic::Ordering::Relaxed), 0);
+        assert!(b.hold(4_000).is_ok(), "the rest is free again");
+        // Parallel for real: never more than three out.
+        let b = Arc::new(Budget { limit: 10_000, ..Budget::default() });
+        let passed: usize = std::thread::scope(|s| (0..8).map(|_| s.spawn(|| b.hold(4_000).map(std::mem::forget).is_ok())).collect::<Vec<_>>().into_iter().map(|t| t.join().unwrap() as usize).sum());
+        assert_eq!(passed, 3);
     }
 
     #[test]

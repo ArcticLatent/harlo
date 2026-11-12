@@ -40,17 +40,6 @@ pub fn findings(reply: &Value) -> String {
     if text.is_empty() { "The search found nothing to report.".into() } else { text.to_owned() }
 }
 
-/// The request's usage as a tool result's `details.usage` (which the
-/// session counts as its own).
-pub fn usage(usage: &Value) -> Value {
-    json!({
-        "requests": 1,
-        "input": usage["input_tokens"].as_u64().unwrap_or(0),
-        "cached": usage["input_tokens_details"]["cached_tokens"].as_u64().unwrap_or(0),
-        "output": usage["output_tokens"].as_u64().unwrap_or(0),
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -60,12 +49,6 @@ mod tests {
         let reply = json!({ "content": [{ "type": "webSearch", "query": "q" }, { "type": "text", "text": " Rust 1.99 is out ([blog](https://blog.rust-lang.org)).\n" }] });
         assert_eq!(findings(&reply), "Rust 1.99 is out ([blog](https://blog.rust-lang.org)).");
         assert_eq!(findings(&json!({ "content": [] })), "The search found nothing to report.");
-    }
-
-    #[test]
-    fn usage_is_counted_as_a_request() {
-        let u = json!({ "input_tokens": 5000, "input_tokens_details": { "cached_tokens": 0 }, "output_tokens": 300 });
-        assert_eq!(usage(&u), json!({ "requests": 1, "input": 5000, "cached": 0, "output": 300 }));
     }
 
     #[test]

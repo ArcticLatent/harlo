@@ -573,7 +573,15 @@ Popup {
                     SectionHeader {
                         title: "Spending limits"
                         subtitle: "Today so far, since midnight: $" + (spendLimits.spend.today || 0).toFixed(2) + " in harlo's sessions. Past a limit, harlo stops the run until you allow more."
-                        more: "Costs are what Claude Code reports, checked at the end of each turn. Harlo's sessions report none: Settings → Providers → Harlo has a token budget per helper instead. Empty: no limit."
+                        more: "Costs are what the agents report: Claude Code at the end of each turn, Harlo after each request. Harlo on a ChatGPT plan or on a model server on your network costs nothing extra. On a model with no price its cost isn't known, so the limits can't count it: give the server a price in Model servers. Empty: no limit."
+                    }
+                    // (Sessions open now whose costs the limits can't count.)
+                    Hint {
+                        objectName: "spendUnpriced"
+                        visible: (spendLimits.spend.unpriced || 0) > 0
+                        Layout.bottomMargin: 8
+                        text: (spendLimits.spend.unpriced === 1 ? "One session open now runs" : spendLimits.spend.unpriced + " sessions open now run")
+                            + " on a model with no price, so the limits don't count what it costs. Give its server a price in Model servers."
                     }
                     Group {
                         SettingRow {
@@ -3190,7 +3198,7 @@ Popup {
                     for (const sv of JSON.parse(Accounts.servers(a.id))) {
                         const same = rows.find(r => r.name === sv.name && r.baseUrl === sv.baseUrl)
                         if (same) { same.agents.push(a.label); same.agentIds.push(a.id) }
-                        else rows.push({ name: sv.name, baseUrl: sv.baseUrl, models: sv.models, place: sv.place, managed: sv.managed, engine: sv.engine || "", contexts: sv.contexts || [], agents: [a.label], agentIds: [a.id] })
+                        else rows.push({ name: sv.name, baseUrl: sv.baseUrl, models: sv.models, place: sv.place, managed: sv.managed, engine: sv.engine || "", contexts: sv.contexts || [], prices: sv.prices || [], agents: [a.label], agentIds: [a.id] })
                     }
                 }
                 // Set up by harlo, in no agent yet.
@@ -3212,14 +3220,19 @@ Popup {
             function describe(row) {
                 const lines = row.models.map((id, i) => {
                     const c = (row.contexts || [])[i]
+                    const p = (row.prices || [])[i]
                     // (Ollama says it only while running: harlo writes it down then.)
                     return Theme.modelLabel(id) + " · " + (c > 0 ? Math.round(c / 1024) + "k context" : row.managed ? "context set when it starts" : "context not given")
+                        + (p ? " · $" + srv.rate(p[0]) + " in, $" + srv.rate(p[1]) + " out per million tokens" : "")
                 })
                 if (lines.length === 0) lines.push("No models yet")
                 const where = row.baseUrl.replace(/^https?:\/\//, "").replace(/\/v1\/?$/, "")
                 if (row.via) return lines.join("\n") + "\nOn " + row.via + ", through the SSH connection (" + where + " here)"
                 return lines.join("\n") + "\n" + where + (row.engine ? " · in agents as “" + row.name + "”" : "")
             }
+            // A price as typed: "3", "0.25", "1.10".
+            function rate(v) { return Number(v) % 1 === 0 ? String(Number(v)) : String(Number(Number(v).toFixed(4))) }
+            function amount(t) { const v = parseFloat(String(t).replace(/[$,\s]/g, "")); return isFinite(v) && v > 0 ? v : 0 }
             ModelServerDialog { id: modelServerDialog; onAdded: { Accounts.loadServers(); Workspace.refreshProviders() } }
             // A server one agent has, added to another as it is there.
             function copy(row, agent) {
@@ -3462,6 +3475,54 @@ Popup {
                             Label {
                                 Layout.fillWidth: true
                                 text: srv.describe(serverItem.modelData) + (serverItem.modelData.place === "online" ? "\nOnline service" : "")
+                                color: Theme.muted
+                                font.pixelSize: Theme.px(12)
+                                wrapMode: Text.Wrap
+                            }
+                            // An online server's price (Harlo's): what its
+                            // list says, or one you give; without one, what
+                            // its sessions cost isn't known.
+                            RowLayout {
+                                id: priceRow
+                                objectName: "serverPrice-" + serverItem.modelData.name
+                                visible: !serverItem.local && serverItem.modelData.agentIds.includes("harlo")
+                                Layout.topMargin: 6
+                                spacing: 6
+                                readonly property var prices: serverItem.modelData.prices || []
+                                // (The same for every model: shown to change.)
+                                readonly property var shared: prices.length > 0 && prices.every(p => JSON.stringify(p) === JSON.stringify(prices[0])) ? prices[0] : null
+                                function save() {
+                                    const err = Accounts.setServerPrice("harlo", serverItem.modelData.name, srv.amount(priceIn.text), srv.amount(priceOut.text))
+                                    if (err !== "") Workspace.showNotice(err, true)
+                                    Accounts.loadServers()
+                                }
+                                Label { text: "Price per million tokens"; color: Theme.muted; font.pixelSize: Theme.px(12) }
+                                AppTextField {
+                                    id: priceIn
+                                    objectName: "serverPriceIn-" + serverItem.modelData.name
+                                    implicitWidth: 76
+                                    placeholderText: "in"
+                                    text: priceRow.shared ? srv.rate(priceRow.shared[0]) : ""
+                                    leftPadding: 22
+                                    Label { x: 10; anchors.verticalCenter: parent.verticalCenter; text: "$"; color: Theme.muted; font.pixelSize: Theme.px(12) }
+                                    onEditingFinished: if (srv.amount(text) !== (priceRow.shared ? priceRow.shared[0] : 0)) priceRow.save()
+                                }
+                                AppTextField {
+                                    id: priceOut
+                                    objectName: "serverPriceOut-" + serverItem.modelData.name
+                                    implicitWidth: 76
+                                    placeholderText: "out"
+                                    text: priceRow.shared ? srv.rate(priceRow.shared[1]) : ""
+                                    leftPadding: 22
+                                    Label { x: 10; anchors.verticalCenter: parent.verticalCenter; text: "$"; color: Theme.muted; font.pixelSize: Theme.px(12) }
+                                    onEditingFinished: if (srv.amount(text) !== (priceRow.shared ? priceRow.shared[1] : 0)) priceRow.save()
+                                }
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                visible: priceRow.visible
+                                text: priceRow.prices.some(p => p) ? (priceRow.shared ? "Harlo counts what its sessions cost at this price." : "Each model at the price its server lists; a price here sets them all.")
+                                    : "No price: what Harlo's sessions on it cost isn't known, so spending limits can't count it."
                                 color: Theme.muted
                                 font.pixelSize: Theme.px(12)
                                 wrapMode: Text.Wrap

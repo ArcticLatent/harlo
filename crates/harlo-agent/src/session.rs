@@ -16,6 +16,8 @@ use std::time::SystemTime;
 use anyhow::{Context as _, Result, bail};
 use serde_json::{Value, json};
 
+use crate::used::Used;
+
 /// `$XDG_DATA_HOME/harlo-agent/sessions` (or `~/.local/share/…`).
 pub fn root() -> Option<PathBuf> {
     let data = std::env::var_os("XDG_DATA_HOME")
@@ -75,23 +77,32 @@ pub struct Loaded {
     pub originals: Vec<(String, crate::tools::Original)>,
 }
 
-/// What a session's log (and its subagents', beside it) says it used:
-/// tokens sent and received, not counting those the cache served.
-pub fn spent(path: &Path) -> u64 {
+/// What a session's log (and its subagents', beside it) says its requests
+/// used: replies, compactions, web searches and side questions.
+pub fn used(path: &Path) -> Used {
+    let mut all = Used::default();
     if path.as_os_str().is_empty() {
-        return 0;
+        return all;
     }
-    let of = |p: &Path| -> u64 {
-        std::fs::read_to_string(p)
-            .unwrap_or_default()
-            .lines()
-            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-            .filter(|e| e["type"] == "message" && e["message"]["role"] == "assistant")
-            .map(|e| e["message"]["usage"]["input"].as_u64().unwrap_or(0) + e["message"]["usage"]["output"].as_u64().unwrap_or(0))
-            .sum()
-    };
-    let subs: u64 = std::fs::read_dir(path.with_extension("")).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "jsonl")).map(|p| of(&p)).sum();
-    of(path) + subs
+    let subs = std::fs::read_dir(path.with_extension("")).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "jsonl"));
+    for p in std::iter::once(path.to_path_buf()).chain(subs) {
+        for e in std::fs::read_to_string(&p).unwrap_or_default().lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()) {
+            all.add(&entry_used(&e));
+        }
+    }
+    all
+}
+
+/// One log entry's request, if it was one. (A subagent's result carries
+/// its totals too, but its own log beside this one counts them.)
+fn entry_used(e: &Value) -> Used {
+    let m = &e["message"];
+    match e["type"].as_str() {
+        Some("message") if m["role"] == "assistant" && m["usage"].is_object() => Used::from_log(&m["usage"]),
+        Some("message") if m["role"] == "toolResult" && m["toolName"] == crate::search::NAME && m["details"]["usage"].is_object() => Used::from_details(&m["details"]["usage"]),
+        Some("compaction" | "harlo_usage") if e["usage"].is_object() => Used::from_log(&e["usage"]),
+        _ => Used::default(),
+    }
 }
 
 /// What a session holds for the agent going on with it.

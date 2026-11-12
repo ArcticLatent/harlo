@@ -317,7 +317,7 @@ fn event(key: &str, u: &SessionUpdate) -> Option<Value> {
     Some(match u {
         SessionUpdate::Status(s) => json!({ "ev": "status", "key": key, "status": s.as_str() }),
         SessionUpdate::Meta(m) => json!({ "ev": "meta", "key": key, "title": if m.name.is_empty() { &m.first_message } else { &m.name }, "model": m.model,
-            "modelId": m.model_id, "thinking": m.thinking, "contextTokens": m.context_tokens, "contextWindow": m.context_window, "cost": m.cost,
+            "modelId": m.model_id, "thinking": m.thinking, "contextTokens": m.context_tokens, "contextWindow": m.context_window, "cost": m.cost, "costKind": m.cost_kind,
             // Where it compacts on its own (0 not known); its plan's limit used up.
             "compactAt": m.compact_at, "limitRefused": m.limit_refused }),
         SessionUpdate::Commands(list) => json!({ "ev": "commands", "key": key,

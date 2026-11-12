@@ -305,9 +305,6 @@ pub async fn stream(base: &str, token: Option<&str>, body: &Value, provider: &st
     }
     let usage = usage(&reply.usage);
     let calls = content.iter().any(|b| b["type"] == "toolCall");
-    let input = usage["input_tokens"].as_u64().unwrap_or(0);
-    let cached = usage["input_tokens_details"]["cached_tokens"].as_u64().unwrap_or(0);
-    let output = usage["output_tokens"].as_u64().unwrap_or(0);
     // (Cut off at the length limit, calls or not: its calls may be
     // incomplete, and aren't run.)
     let stop = match reply.finish.as_deref() {
@@ -321,12 +318,8 @@ pub async fn stream(base: &str, token: Option<&str>, body: &Value, provider: &st
         "api": "openai-completions",
         "provider": provider,
         "model": model,
-        "usage": {
-            "input": input.saturating_sub(cached), "output": output, "cacheRead": cached, "cacheWrite": 0,
-            "reasoning": usage["output_tokens_details"]["reasoning_tokens"].as_u64().unwrap_or(0),
-            "totalTokens": input + output,
-            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 },
-        },
+        // (Its cost: the agent's to say, which knows the model's price.)
+        "usage": crate::used::Used::from_api(&usage).log(&usage, &crate::used::Pricing::Unknown),
         "stopReason": stop,
         "timestamp": crate::session::now_ms(),
     });

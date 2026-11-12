@@ -4,7 +4,8 @@
 //! (`/models`) and adds the models you pick to Harlo's config, so they show
 //! in harlo's model lists: `$XDG_CONFIG_HOME/harlo-agent/providers.json`,
 //! `providers.<name>`: `baseUrl`, `api`, `apiKey`, `models: [{ id,
-//! contextWindow }]`.
+//! contextWindow, cost }]` (`cost`: dollars per million tokens, when the
+//! server lists its prices or you give one).
 //!
 //! The rest of the file stays as it was (its JSON keeps its order). A name
 //! already there isn't replaced.
@@ -28,6 +29,9 @@ pub struct Found {
     /// offered, where the others have only on and off. For writing an agent's
     /// file.
     pub levels: bool,
+    /// Its price, dollars per million tokens: input, output, input the
+    /// cache served (when the server lists it, or you gave one).
+    pub price: Option<[f64; 3]>,
 }
 
 /// What a server serves, and the address its models answer at.
@@ -93,11 +97,33 @@ fn models_in(v: &Value) -> Option<Vec<Found>> {
                 .find_map(|k| m[*k].as_u64())
                 .or_else(|| m["meta"]["n_ctx"].as_u64())
                 .filter(|n| *n > 0);
-            (!id.is_empty()).then(|| Found { id: id.to_owned(), context, ..Default::default() })
+            (!id.is_empty()).then(|| Found { id: id.to_owned(), context, price: listed_price(&m["pricing"]), ..Default::default() })
         })
         .collect();
     out.dedup_by(|a, b| a.id == b.id);
     Some(out)
+}
+
+/// A model's price as its server lists it (OpenRouter's `pricing`: dollars
+/// a token, as strings; a negative: it varies, so none).
+fn listed_price(pricing: &Value) -> Option<[f64; 3]> {
+    let rate = |k: &str| {
+        let v = &pricing[k];
+        v.as_str().and_then(|s| s.trim().parse::<f64>().ok()).or_else(|| v.as_f64()).filter(|r| r.is_finite() && *r >= 0.0).map(|r| r * 1e6)
+    };
+    let (input, output) = (rate("prompt")?, rate("completion")?);
+    Some([input, output, rate("input_cache_read").unwrap_or(input)])
+}
+
+/// A model's `cost` in the agent's file.
+fn file_price(cost: &Value) -> Option<[f64; 3]> {
+    let rate = |k: &str| cost[k].as_f64().filter(|r| r.is_finite() && *r >= 0.0);
+    let (input, output) = (rate("input")?, rate("output")?);
+    Some([input, output, rate("cacheRead").unwrap_or(input)])
+}
+
+fn cost_of(price: [f64; 3]) -> Value {
+    json!({ "input": price[0], "output": price[1], "cacheRead": price[2] })
 }
 
 /// Asks the server what it serves (blocking): `<url>/models`, then
@@ -210,7 +236,8 @@ fn details_in(all: &Value, name: &str) -> Option<(String, String, Vec<Found>)> {
     let key = p["apiKey"].as_str().filter(|k| *k != "none").unwrap_or_default().to_owned();
     let context = |id: &str| -> Option<u64> { p["models"].as_array()?.iter().find(|m| m["id"] == id)?["contextWindow"].as_u64() };
     let reasoning = |id: &str| -> bool { p["models"].as_array().and_then(|a| a.iter().find(|m| m["id"] == id)).and_then(|m| m["reasoning"].as_bool()).unwrap_or(false) };
-    let models = server.models.iter().map(|id| Found { id: id.clone(), context: context(id), reasoning: reasoning(id), ..Default::default() }).collect();
+    let price = |id: &str| -> Option<[f64; 3]> { p["models"].as_array()?.iter().find(|m| m["id"] == id).and_then(|m| file_price(&m["cost"])) };
+    let models = server.models.iter().map(|id| Found { id: id.clone(), context: context(id), reasoning: reasoning(id), price: price(id), ..Default::default() }).collect();
     Some((server.base_url, key, models))
 }
 
@@ -236,6 +263,44 @@ fn set_context_in(kind: HarnessKind, file: &Path, name: &str, context: u64) -> R
     let out = serde_json::to_string_pretty(&v).unwrap_or_default() + "\n";
     write(file, &out).map_err(|e| format!("Couldn't write {shown}: {e}"))?;
     Ok(true)
+}
+
+/// Sets the price of a server's models in the agent's file, dollars per
+/// million tokens in and out (None: no price, so its cost is unknown).
+pub fn set_price(kind: HarnessKind, name: &str, price: Option<(f64, f64)>) -> Result<(), String> {
+    let f = file(kind).ok_or("harlo can't change this agent's model servers.")?;
+    set_price_in(&f, name, price)
+}
+
+fn set_price_in(file: &Path, name: &str, price: Option<(f64, f64)>) -> Result<(), String> {
+    let shown = file.display();
+    let text = std::fs::read_to_string(file).map_err(|e| format!("Couldn't read {shown}: {e}"))?;
+    let mut v: Value = serde_json::from_str(&text).map_err(|e| format!("{shown} isn't valid JSON ({e})"))?;
+    let Some(models) = v["providers"].get_mut(name).and_then(|p| p.get_mut("models")).and_then(Value::as_array_mut) else {
+        return Err(format!("There's no server called {name}"));
+    };
+    for m in models.iter_mut() {
+        // (A bare id becomes an entry, to carry its price.)
+        if let Value::String(id) = m {
+            *m = json!({ "id": id.clone() });
+        }
+        match (price, m.as_object_mut()) {
+            (Some((input, output)), Some(o)) => {
+                o.insert("cost".into(), json!({ "input": input, "output": output }));
+            }
+            (None, Some(o)) => {
+                o.remove("cost");
+            }
+            _ => {}
+        }
+    }
+    write(file, &(serde_json::to_string_pretty(&v).unwrap_or_default() + "\n")).map_err(|e| format!("Couldn't write {shown}: {e}"))
+}
+
+/// What a server's models cost as the agent's file has it, in its
+/// models' order (None: no price).
+pub fn prices(kind: HarnessKind, name: &str) -> Vec<Option<[f64; 3]>> {
+    details(kind, name).map(|(_, _, m)| m.iter().map(|m| m.price).collect()).unwrap_or_default()
 }
 
 /// The thinking levels for a model that thinks (null: not offered).
@@ -386,6 +451,9 @@ fn entry_with(text: &str, name: &str, base_url: &str, key: &str, models: &[Found
             e.insert("id".into(), json!(m.id));
             if let Some(c) = m.context {
                 e.insert("contextWindow".into(), json!(c));
+            }
+            if let Some(price) = m.price {
+                e.insert("cost".into(), cost_of(price));
             }
             // A model that thinks: "off" sends "none" (else it sends
             // nothing and the model thinks anyway); its levels in between
@@ -767,6 +835,33 @@ mod tests {
     }
 
     #[test]
+    fn prices_as_listed_or_given() {
+        let openrouter = json!({ "data": [
+            { "id": "a/b", "context_length": 200000, "pricing": { "prompt": "0.000003", "completion": "0.000015", "input_cache_read": "0.0000003" } },
+            { "id": "auto", "pricing": { "prompt": "-1", "completion": "-1" } }] });
+        let found = models_in(&openrouter).unwrap();
+        let p = found[0].price.unwrap();
+        assert!((p[0] - 3.0).abs() < 1e-9 && (p[1] - 15.0).abs() < 1e-9 && (p[2] - 0.3).abs() < 1e-9, "{p:?}");
+        assert_eq!(found[1].price, None, "it varies: none");
+        // Added: kept in the file, read back.
+        let dir = std::env::temp_dir().join(format!("harlo-prices-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("providers.json");
+        add_to(HarnessKind::Harlo, &f, "or", "https://openrouter.ai/api/v1", "$OR_KEY", &found, &[]).unwrap();
+        let back = details_in(&providers_in(HarnessKind::Harlo, &f), "or").unwrap().2;
+        assert_eq!((back[0].price, back[1].price), (found[0].price, None));
+        // Given by hand: every model of it; taken away again.
+        set_price_in(&f, "or", Some((1.25, 10.0))).unwrap();
+        let back = details_in(&providers_in(HarnessKind::Harlo, &f), "or").unwrap().2;
+        assert!(back.iter().all(|m| m.price == Some([1.25, 10.0, 1.25])), "{back:?}");
+        set_price_in(&f, "or", None).unwrap();
+        assert!(details_in(&providers_in(HarnessKind::Harlo, &f), "or").unwrap().2.iter().all(|m| m.price.is_none()));
+        assert!(set_price_in(&f, "nope", None).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn reads_what_servers_list() {
         let vllm = json!({ "object": "list", "data": [{ "id": "Qwen/Qwen3-32B", "max_model_len": 32768 }, { "id": "Qwen/Qwen3-32B" }] });
         assert_eq!(models_in(&vllm).unwrap(), vec![found("Qwen/Qwen3-32B", Some(32768))]);
@@ -905,7 +1000,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("harlo-model-servers-harlo-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let f = dir.join("providers.json");
-        let thinks = Found { id: "qwen3".into(), context: Some(32768), reasoning: true, levels: false };
+        let thinks = Found { id: "qwen3".into(), context: Some(32768), reasoning: true, levels: false, price: None };
         add_to(HarnessKind::Harlo, &f, "llamacpp", "http://127.0.0.1:8090/v1", "", &[thinks.clone(), found("plain", None)], &["chatgpt".into()]).unwrap();
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&f).unwrap()).unwrap();
         assert_eq!(

@@ -345,8 +345,7 @@ async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaph
     } else {
         done.text = last_text(agent.messages());
     }
-    let t = &agent.totals;
-    done.usage = json!({ "requests": t.requests, "input": t.input, "cached": t.cached, "output": t.output });
+    done.usage = agent.totals.details();
     ctx.running.lock().unwrap().remove(&id);
     let shown: String = done.text.chars().take(RESULT_SHOWN).collect();
     ctx.tell(json!({ "type": "subagent_lifecycle", "payload": { "id": id, "status": done.status, "result": shown, "usage": done.usage } }));
