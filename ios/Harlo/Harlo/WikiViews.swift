@@ -306,7 +306,7 @@ struct WikiPageView: View {
     }
 
     /// Where in the code the page comes from: each file opens at the
-    /// first lines its claims cite.
+    /// first lines its facts cite.
     func sources(_ list: [WikiPageText.Source]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Sources")
@@ -321,7 +321,7 @@ struct WikiPageView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(s.path).font(.footnote.monospaced()).foregroundStyle(Color(p.primary)).multilineTextAlignment(.leading)
                         let lines = s.ranges.map { $0.count == 1 ? "\($0.lowerBound)" : "\($0.lowerBound)–\($0.upperBound)" }
-                        let about = [lines.isEmpty ? "" : "lines " + lines.joined(separator: ", "), s.claims == 0 ? "" : "\(s.claims) \(s.claims == 1 ? "claim" : "claims")"].filter { !$0.isEmpty }
+                        let about = [lines.isEmpty ? "" : "lines " + lines.joined(separator: ", "), s.claims == 0 ? "" : s.claims == 1 ? "cited once" : s.claims == 2 ? "cited twice" : "cited \(s.claims) times"].filter { !$0.isEmpty }
                         if !about.isEmpty {
                             Text(about.joined(separator: " · ")).font(.caption).foregroundStyle(Color(p.muted)).multilineTextAlignment(.leading)
                         }

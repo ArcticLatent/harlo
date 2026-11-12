@@ -691,7 +691,7 @@ Rectangle {
                         }
                     }
                     // Where in the code the page comes from: its sources and
-                    // the lines its claims cite, each opening the file there.
+                    // the lines its facts cite, each opening the file there.
                     Label {
                         Layout.fillWidth: true
                         Layout.topMargin: 14
@@ -715,9 +715,10 @@ Rectangle {
                                 const p = modelData.path, e = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
                                 const lines = (modelData.ranges || []).map(r => "<a href=\"repo://" + encodeURI(p) + "#L" + r[0] + "-L" + r[1] + "\">" + (r[0] === r[1] ? r[0] : r[0] + "–" + r[1]) + "</a>")
                                 const first = (modelData.ranges || [])[0]
-                                return Theme.htmlStyle + "<a href=\"repo://" + encodeURI(p) + (first ? "#L" + first[0] : "") + "\">" + e(p) + "</a>"
+                                const cited = modelData.claims === 1 ? "cited once" : modelData.claims === 2 ? "cited twice" : "cited " + modelData.claims + " times"
+                                return Theme.htmlStyle + "<a href=\"repo://" + encodeURI(p) + (first ? "#L" + first[0] : "") + "\" style=\"font-family:'" + Theme.mono + "';font-size:" + Theme.mpx(12) + "px;\">" + e(p) + "</a>"
                                     + (lines.length ? " <span style=\"color:" + Theme.textFaint + "\">lines</span> " + lines.join(", ") : "")
-                                    + (modelData.claims ? " <span style=\"color:" + Theme.textFaint + "\">· " + modelData.claims + (modelData.claims === 1 ? " claim" : " claims") + "</span>" : "")
+                                    + (modelData.claims ? " <span style=\"color:" + Theme.textFaint + "\">· " + cited + "</span>" : "")
                             }
                             font.family: Theme.uiFont
                             font.pixelSize: Theme.px(12.5)

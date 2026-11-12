@@ -2629,7 +2629,7 @@ Popup {
                     function set(name, on) { Workspace.setSetting(name + "_" + pid, on ? "1" : "0"); rev++ }
                     SettingRow {
                         title: "Wiki"
-                        detail: "A wiki of this project in openwiki/, written by your agent from the code. With this on (as it is unless you switch it off), agents search it and read the sections they need."
+                        detail: "A wiki of this project in openwiki/, written by your agent from the code. Agents search it and read the sections they need. On unless you switch it off."
                         more: "Create and update it from the Wiki panel (right edge); each run spends your model's tokens. It's made with OpenWiki, which comes with harlo."
                         icon: "book-open"
                         AppSwitch {
