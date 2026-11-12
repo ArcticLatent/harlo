@@ -305,7 +305,9 @@ final class HarloUITests: XCTestCase {
         see("Rebuilding rows")
         shot("15f-wiki-search")
         hit.tap()
-        see("checked against the code")
+        // (Opened at the section found, its heading on screen.)
+        XCTAssertTrue(app.navigationBars["Sidebar"].waitForExistence(timeout: 8), "the result opens its page")
+        see("Rebuilding rows")
     }
 
     func test10OtherModelAndMention() {
