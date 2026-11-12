@@ -193,10 +193,33 @@ Rectangle {
         shown.forEach((p, i) => p.links.forEach(l => { if (at.has(l)) out += "  p" + i + " --> p" + at.get(l) + "\n" }))
         return out
     }
-    readonly property var graphPic: mode === "graph" && graphSource !== "" && Diagrams.revision >= 0
-        ? JSON.parse(Diagrams.diagram(graphSource, Theme.isLight, JSON.stringify({ background: String(Theme.canvas), surface: String(Theme.raised), text: String(Theme.foreground),
-                                                                                   muted: String(Theme.muted), accent: String(Theme.primary), font: Theme.uiFont })))
-        : null
+    // Drawn both across and down: the panel shows whichever it fits
+    // larger (a chain of pages reads down a narrow panel, many pages off
+    // one read across).
+    readonly property string graphSourceDown: graphSource.replace(/^flowchart LR/, "flowchart TB")
+    function drawGraph(source) {
+        return mode === "graph" && source !== "" && Diagrams.revision >= 0
+            ? JSON.parse(Diagrams.diagram(source, Theme.isLight, JSON.stringify({ background: String(Theme.canvas), surface: String(Theme.raised), text: String(Theme.foreground),
+                                                                                  muted: String(Theme.muted), accent: String(Theme.primary), font: Theme.uiFont })))
+            : null
+    }
+    readonly property var graphAcross: drawGraph(graphSource)
+    readonly property var graphDown: drawGraph(graphSourceDown)
+    readonly property real graphRoom: Math.max(1, graphBox.width - 32)
+    readonly property bool graphDownward: !!graphAcross && !!graphDown && graphAcross.state === "ready" && graphDown.state === "ready"
+        && Math.min(1, graphRoom / Math.max(1, graphDown.width)) > 1.15 * Math.min(1, graphRoom / Math.max(1, graphAcross.width))
+    readonly property var graphPic: {
+        const a = graphAcross, b = graphDown
+        if (!a) return null
+        if (!b || b.state === "failed") return a
+        if (a.state === "failed") return b
+        if (a.state !== "ready" || b.state !== "ready") return { state: "drawing" }
+        return graphDownward ? b : a
+    }
+    readonly property string graphShown: graphDownward ? graphSourceDown : graphSource
+    /// The graph's zoom over its fit (Ctrl+wheel, − and +).
+    property real graphZoom: 1
+    onGraphSourceChanged: graphZoom = 1
     readonly property bool reading: openPage !== "" || loadingPage !== ""
     readonly property bool showingResults: results !== null || searching
 
@@ -554,7 +577,8 @@ Rectangle {
                                                                                                                         muted: String(Theme.muted), accent: String(Theme.primary), font: Theme.uiFont })))
                                     : null
                                 readonly property bool ready: !!pic && pic.state === "ready"
-                                readonly property real fit: ready ? Math.min(1, parent.width / Math.max(1, pic.width)) : 1
+                                // (Never under 0.7, its labels' readable size: wider, it scrolls sideways.)
+                                readonly property real fit: ready ? Math.max(0.7, Math.min(1, parent.width / Math.max(1, pic.width))) : 1
                                 visible: block.kind === "mermaid"
                                 width: parent.width
                                 height: !visible ? 0 : ready ? Math.round(pic.height * fit) : diagramNote.implicitHeight
@@ -567,25 +591,66 @@ Rectangle {
                                     font.pixelSize: Theme.px(12)
                                     wrapMode: Text.Wrap
                                 }
-                                Image {
-                                    anchors.horizontalCenter: parent.horizontalCenter
+                                // (Wider than the page, it scrolls sideways.)
+                                Flickable {
+                                    id: diagramScroll
+                                    width: parent.width
+                                    height: diagramImage.height
                                     visible: diagram.ready
-                                    width: diagram.ready ? Math.round(diagram.pic.width * diagram.fit) : 0
-                                    height: diagram.ready ? Math.round(diagram.pic.height * diagram.fit) : 0
-                                    source: diagram.ready ? diagram.pic.url : ""
-                                    sourceSize.width: width * 2
-                                    fillMode: Image.PreserveAspectFit
-                                    smooth: true
-                                    mipmap: true
-                                    asynchronous: true
-                                    cache: false
-                                    Accessible.role: Accessible.Graphic
-                                    Accessible.name: "Diagram"
-                                    HoverHandler { id: diagramHover; cursorShape: Qt.PointingHandCursor }
-                                    TapHandler { onTapped: viewer.show(root.pageView.title, [{ label: "Diagram", url: diagram.pic.url, width: diagram.pic.width, height: diagram.pic.height }], 0, "Diagram", () => Diagrams.openInBrowser(block.modelData.code, Theme.isLight), 2) }
-                                    ToolTip.visible: diagramHover.hovered
-                                    ToolTip.text: "Open full size"
-                                    ToolTip.delay: 600
+                                    contentWidth: diagramImage.width
+                                    contentHeight: diagramImage.height
+                                    flickableDirection: Flickable.HorizontalFlick
+                                    interactive: contentWidth > width
+                                    boundsBehavior: Flickable.StopAtBounds
+                                    clip: true
+                                    ScrollBar.horizontal: ScrollBar { policy: diagramScroll.contentWidth > diagramScroll.width ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff }
+                                    Image {
+                                        id: diagramImage
+                                        x: Math.max(0, (diagramScroll.width - width) / 2)
+                                        visible: diagram.ready
+                                        width: diagram.ready ? Math.round(diagram.pic.width * diagram.fit) : 0
+                                        height: diagram.ready ? Math.round(diagram.pic.height * diagram.fit) : 0
+                                        source: diagram.ready ? diagram.pic.url : ""
+                                        sourceSize.width: width * 2
+                                        fillMode: Image.PreserveAspectFit
+                                        smooth: true
+                                        mipmap: true
+                                        asynchronous: true
+                                        cache: false
+                                        Accessible.role: Accessible.Graphic
+                                        Accessible.name: "Diagram"
+                                        HoverHandler { id: diagramHover; cursorShape: Qt.PointingHandCursor }
+                                        TapHandler { onTapped: viewer.show(root.pageView.title, [{ label: "Diagram", url: diagram.pic.url, width: diagram.pic.width, height: diagram.pic.height }], 0, "Diagram", () => Diagrams.openInBrowser(block.modelData.code, Theme.isLight), 2) }
+                                        ToolTip.visible: diagramHover.hovered
+                                        ToolTip.text: "Open full size"
+                                        ToolTip.delay: 600
+                                    }
+                                }
+                                // More to the side: that edge fades out.
+                                Rectangle {
+                                    visible: diagramScroll.contentX > 1
+                                    x: diagramScroll.x
+                                    y: diagramScroll.y
+                                    width: 18
+                                    height: diagramScroll.height
+                                    gradient: Gradient {
+                                        orientation: Gradient.Horizontal
+                                        GradientStop { position: 0; color: Theme.canvas }
+                                        GradientStop { position: 1; color: Qt.rgba(Theme.canvas.r, Theme.canvas.g, Theme.canvas.b, 0) }
+                                    }
+                                }
+                                Rectangle {
+                                    objectName: "wikiMoreRight"
+                                    visible: diagramScroll.visible && diagramScroll.contentX + diagramScroll.width < diagramScroll.contentWidth - 1
+                                    x: diagramScroll.x + diagramScroll.width - width
+                                    y: diagramScroll.y
+                                    width: 28
+                                    height: diagramScroll.height
+                                    gradient: Gradient {
+                                        orientation: Gradient.Horizontal
+                                        GradientStop { position: 0; color: Qt.rgba(Theme.canvas.r, Theme.canvas.g, Theme.canvas.b, 0) }
+                                        GradientStop { position: 1; color: Theme.canvas }
+                                    }
                                 }
                             }
                         }
@@ -641,16 +706,25 @@ Rectangle {
             objectName: "wikiGraph"
             Layout.fillWidth: true
             Layout.fillHeight: true
+            // (As tall as the graph: its caption sits under it.)
+            Layout.maximumHeight: graphCol.implicitHeight + 16
             Layout.topMargin: 10
             visible: root.mode === "graph" && root.st.exists && !root.reading && !root.showingResults
             clip: true
             contentHeight: graphCol.implicitHeight + 16
+            contentWidth: Math.max(width, graphImage.Layout.preferredWidth + 32)
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar { }
+            ScrollBar.horizontal: ScrollBar { }
+            // Ctrl+wheel zooms; the wheel alone scrolls.
+            WheelHandler {
+                acceptedModifiers: Qt.ControlModifier
+                onWheel: event => root.graphZoom = Math.max(0.5, Math.min(3, root.graphZoom * (event.angleDelta.y > 0 ? 1.15 : 1 / 1.15)))
+            }
             ColumnLayout {
                 id: graphCol
                 x: 18
-                width: graphBox.width - 32
+                width: Math.max(graphBox.width - 32, graphImage.Layout.preferredWidth)
                 spacing: 8
                 Label {
                     Layout.fillWidth: true
@@ -664,7 +738,10 @@ Rectangle {
                     id: graphImage
                     objectName: "wikiGraphPicture"
                     readonly property bool ready: !!root.graphPic && root.graphPic.state === "ready"
-                    readonly property real fit: ready ? Math.min(1, graphCol.width / Math.max(1, root.graphPic.width)) : 1
+                    // Fitted to the panel, but never so small its names drop
+                    // under the readable size (16px labels at 0.7: 11px); wider
+                    // than the panel, it scrolls sideways.
+                    readonly property real fit: ready ? Math.max(0.7, Math.min(1, root.graphRoom / Math.max(1, root.graphPic.width))) * root.graphZoom : 1
                     visible: ready
                     Layout.alignment: Qt.AlignHCenter
                     Layout.preferredWidth: ready ? Math.round(root.graphPic.width * fit) : 0
@@ -681,14 +758,14 @@ Rectangle {
                     HoverHandler { id: graphHover; cursorShape: Qt.PointingHandCursor }
                     TapHandler {
                         onTapped: if (graphImage.hoveredBox < 0) viewer.show("Wiki", [{ label: "Graph", url: root.graphPic.url, width: root.graphPic.width, height: root.graphPic.height }], 0, "Graph",
-                                                                             () => Diagrams.openInBrowser(root.graphSource, Theme.isLight), 2)
+                                                                             () => Diagrams.openInBrowser(root.graphShown, Theme.isLight), 2)
                     }
                     ToolTip.visible: graphHover.hovered && hoveredBox < 0
                     ToolTip.text: "Open full size"
                     ToolTip.delay: 600
                     // Each page's box opens it.
                     property int hoveredBox: -1
-                    readonly property var boxes: ready ? JSON.parse(Diagrams.boxes(root.graphSource)) : []
+                    readonly property var boxes: ready ? JSON.parse(Diagrams.boxes(root.graphShown)) : []
                     Repeater {
                         model: graphImage.boxes
                         Item {
@@ -728,13 +805,83 @@ Rectangle {
                         }
                     }
                 }
-                Label {
-                    Layout.fillWidth: true
-                    visible: graphImage.visible
-                    text: (root.graphPages.length < root.pages.length ? "The open page and the pages it links to or from. " : "") + "An arrow is a link from one page to another. Click a page to read it."
-                    color: Theme.textFaint
-                    font.pixelSize: Theme.px(11.5)
-                    wrapMode: Text.Wrap
+            }
+        }
+
+        // The graph's caption and zoom, kept in view under it.
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.leftMargin: 18
+            Layout.rightMargin: 14
+            Layout.bottomMargin: 8
+            visible: graphBox.visible && graphImage.visible
+            spacing: 2
+            Label {
+                Layout.fillWidth: true
+                text: (root.graphPages.length < root.pages.length ? "The open page and the pages it links to or from. " : "") + "An arrow is a link from one page to another. Click a page to read it."
+                color: Theme.textFaint
+                font.pixelSize: Theme.px(11.5)
+                wrapMode: Text.Wrap
+            }
+            ComposerIconButton {
+                objectName: "wikiGraphZoomOut"
+                Layout.alignment: Qt.AlignTop
+                iconName: "subtract"; tint: Theme.muted
+                tip: "Zoom out (Ctrl+wheel)"
+                enabled: root.graphZoom > 0.51
+                onClicked: root.graphZoom = Math.max(0.5, root.graphZoom / 1.25)
+            }
+            FlatButton {
+                objectName: "wikiGraphZoom"
+                Layout.alignment: Qt.AlignTop
+                Layout.minimumWidth: 40
+                text: Math.round(root.graphZoom * 100) + "%"
+                font.pixelSize: Theme.px(11)
+                outlined: false
+                padding: 4
+                ToolTip.visible: hovered
+                ToolTip.text: "Fit the panel"
+                ToolTip.delay: 600
+                onClicked: root.graphZoom = 1
+            }
+            ComposerIconButton {
+                objectName: "wikiGraphZoomIn"
+                Layout.alignment: Qt.AlignTop
+                iconName: "add"; tint: Theme.muted
+                tip: "Zoom in (Ctrl+wheel)"
+                enabled: root.graphZoom < 2.99
+                onClicked: root.graphZoom = Math.min(3, root.graphZoom * 1.25)
+            }
+        }
+        // (Over the graph: its sides fade while there's more.)
+        Item {
+            Layout.preferredHeight: 0
+            Layout.fillWidth: true
+            visible: graphBox.visible
+            // More to the side: that edge fades out.
+            Rectangle {
+                visible: graphBox.contentX > 1
+                x: 0
+                y: graphBox.y - parent.y
+                width: 18
+                height: graphBox.height
+                gradient: Gradient {
+                    orientation: Gradient.Horizontal
+                    GradientStop { position: 0; color: Theme.canvas }
+                    GradientStop { position: 1; color: Qt.rgba(Theme.canvas.r, Theme.canvas.g, Theme.canvas.b, 0) }
+                }
+            }
+            Rectangle {
+                objectName: "wikiMoreRight"
+                visible: graphBox.visible && graphBox.contentX + graphBox.width < graphBox.contentWidth - 1
+                x: graphBox.width - width
+                y: graphBox.y - parent.y
+                width: 28
+                height: graphBox.height
+                gradient: Gradient {
+                    orientation: Gradient.Horizontal
+                    GradientStop { position: 0; color: Qt.rgba(Theme.canvas.r, Theme.canvas.g, Theme.canvas.b, 0) }
+                    GradientStop { position: 1; color: Theme.canvas }
                 }
             }
         }
@@ -810,7 +957,7 @@ Rectangle {
             color: Theme.textMuted
             font.pixelSize: Theme.px(12.5)
         }
-        Item { Layout.fillHeight: true; visible: !list.visible && !graphBox.visible && !hitList.visible && !(root.reading && root.st.exists) }
+        Item { Layout.fillHeight: true; visible: !list.visible && !hitList.visible && !(root.reading && root.st.exists) }
 
         // ---- how fresh it is, and its runs ----
         Rectangle { Layout.fillWidth: true; height: 1; color: Theme.hairline; visible: footer.visible }
