@@ -100,9 +100,13 @@ pub struct SidebarInput<'a> {
     pub other_collapsed: bool,
     /// Project ids (and -1 for the other group) whose full list is shown.
     pub expanded: &'a [i64],
-    /// Project ids whose Settled shelf is open.
+    /// Project ids whose Settled shelf is open (and whose Wiki shelf is,
+    /// as the id plus `WIKI_SHELF`).
     pub shelves_open: &'a [i64],
 }
+
+/// A project's Wiki shelf in `shelves_open`: its project's id plus this.
+pub const WIKI_SHELF: i64 = 1 << 40;
 
 struct Entry {
     branch: String,
@@ -311,13 +315,18 @@ pub fn build(input: &SidebarInput<'_>) -> Vec<SidebarRow> {
         });
         if !collapsed {
             push_sessions(&mut rows, &sessions, p.id, false, filtering || input.expanded.contains(&p.id));
-            if !shelf.is_empty() {
-                let open = filtering || input.shelves_open.contains(&p.id);
+            // Finished wiki runs on a shelf of their own, after Settled.
+            let (wiki, shelf): (Vec<&Entry>, Vec<&Entry>) = shelf.into_iter().partition(|e| e.settled == "wiki");
+            for (shelf, key, title, open_id) in [(shelf, "shelf", "Settled", p.id), (wiki, "wikishelf", "Wiki", p.id + WIKI_SHELF)] {
+                if shelf.is_empty() {
+                    continue;
+                }
+                let open = filtering || input.shelves_open.contains(&open_id);
                 rows.push(SidebarRow {
                     kind: SidebarKind::Shelf,
-                    key: format!("shelf:{}", p.id),
+                    key: format!("{key}:{}", p.id),
                     project_id: p.id,
-                    title: "Settled".into(),
+                    title: title.into(),
                     subtitle: String::new(),
                     harness: String::new(),
                     status: String::new(),
@@ -741,6 +750,33 @@ mod tests {
         assert_eq!(rows(&[1], "")[4], row(SidebarKind::Session, "done", 0, "merged"));
         // Searching finds them on the shelf.
         assert_eq!(rows(&[], "don"), [row(SidebarKind::Project, "w", 0, ""), row(SidebarKind::Shelf, "Settled", 1, ""), row(SidebarKind::Session, "done", 0, "merged")]);
+    }
+
+    #[test]
+    fn finished_wiki_runs_have_a_shelf_of_their_own() {
+        let projects = [project(1, "/w")];
+        let sessions = [session("/s/a", "/w", "helper", 300), session("/s/b", "/w", "Wiki: create", 200), session("/s/c", "/w", "current", 0)];
+        let now = unix(SystemTime::now());
+        let mut meta = HashMap::new();
+        meta.insert(PathBuf::from("/s/a"), SessionMeta { settled_why: "helper".into(), settled_at: now, ..Default::default() });
+        meta.insert(PathBuf::from("/s/b"), SessionMeta { settled_why: "wiki".into(), settled_at: now, ..Default::default() });
+        let rows = |open: &[i64]| {
+            build(&SidebarInput { projects: &projects, worktrees: &[], sessions: &sessions, live: &[], meta: &meta, filter: "", show_archived: false, other_collapsed: false, expanded: &[], shelves_open: open })
+                .into_iter()
+                .map(|r| (r.kind, r.key.split(':').next().unwrap_or_default().to_owned(), r.title, r.count))
+                .collect::<Vec<_>>()
+        };
+        let row = |k, key: &str, t: &str, c| (k, key.to_owned(), t.to_owned(), c);
+        assert_eq!(rows(&[]), [
+            row(SidebarKind::Project, "project", "w", 1),
+            row(SidebarKind::Session, "/s/c", "current", 0),
+            row(SidebarKind::Shelf, "shelf", "Settled", 1),
+            row(SidebarKind::Shelf, "wikishelf", "Wiki", 1),
+        ]);
+        // Each opens on its own.
+        let open = rows(&[1 + WIKI_SHELF]);
+        assert_eq!(open[3..].iter().map(|r| r.2.as_str()).collect::<Vec<_>>(), ["Wiki", "Wiki: create"]);
+        assert_eq!(rows(&[1])[3].2, "helper");
     }
 
     #[test]

@@ -44,8 +44,22 @@ Rectangle {
         session.planMode = false
         session.send("Build it: work through the plan, step by step.", "normal")
     }
-    // Open to begin with: the plan is what you'd look at (fold it by hand).
+    // Open while it has steps to do: the plan is what you'd look at. A
+    // finished one folds to "All done" (as it's reopened, and as its last
+    // step ends); folding or opening it by hand holds for that session.
     property bool expanded: true
+    readonly property bool allDone: steps.length > 0 && finished === steps.length
+    readonly property string sessionKey: session ? session.key : ""
+    /// By session: true folded by hand, false opened by hand.
+    property var foldedByHand: ({})
+    function settleFold() {
+        const k = sessionKey
+        expanded = k in foldedByHand ? !foldedByHand[k] : !allDone
+        editing = -1
+    }
+    onSessionKeyChanged: settleFold()
+    onAllDoneChanged: settleFold()
+    Component.onCompleted: settleFold()
     /// The most its steps take before they scroll.
     property real maxStepsHeight: 320
     /// The step being edited (its id; -1 none, 0 a new one).
@@ -155,7 +169,13 @@ Rectangle {
                 implicitWidth: 24
                 implicitHeight: 24
                 padding: 0
-                onClicked: { root.expanded = !root.expanded; root.editing = -1 }
+                onClicked: {
+                    root.expanded = !root.expanded
+                    root.editing = -1
+                    const hand = root.foldedByHand
+                    hand[root.sessionKey] = !root.expanded
+                    root.foldedByHand = hand
+                }
                 contentItem: Item { Icon { anchors.centerIn: parent; name: "arrow-down-s"; rotation: root.expanded ? 180 : 0; color: toggle.hovered ? Theme.foreground : Theme.muted; implicitWidth: 18; implicitHeight: 18 } }
                 background: Rectangle { radius: 5; color: toggle.hovered ? Theme.hover : "transparent" }
                 ToolTip.visible: hovered

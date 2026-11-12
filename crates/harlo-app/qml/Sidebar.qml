@@ -220,12 +220,13 @@ Rectangle {
         AppMenuItem { text: "Remove project…"; danger: true; onTriggered: removeProjectDialog.ask(projectMenu.projectId, projectMenu.name) }
     }
 
-    // A Settled shelf's.
+    // A Settled (or Wiki) shelf's.
     AppMenu {
         id: shelfMenu
         property int projectId: -1
         property int sessions: 0
-        AppMenuItem { objectName: "shelfArchiveAll"; text: "Archive all " + shelfMenu.sessions; onTriggered: Workspace.archiveShelf(shelfMenu.projectId) }
+        property bool wiki: false
+        AppMenuItem { objectName: "shelfArchiveAll"; text: "Archive all " + shelfMenu.sessions; onTriggered: Workspace.archiveShelf(shelfMenu.projectId, shelfMenu.wiki) }
     }
 
     AppMenu {
@@ -578,12 +579,15 @@ Rectangle {
                         onClicked: Workspace.showMore(projectId)
                     }
                 }
-                // A project's Settled shelf: its finished worktree sessions.
+                // A project's Settled shelf (its finished helpers and
+                // worktree sessions), or its Wiki shelf (finished wiki runs).
                 DelegateChoice {
                     roleValue: "shelf"
                     ItemDelegate {
                         id: shelfRow
                         required property string rowKey
+                        required property string title
+                        readonly property bool wiki: rowKey.startsWith("wikishelf:")
                         required property bool collapsed
                         required property int count
                         required property int projectId
@@ -596,13 +600,15 @@ Rectangle {
                         rightInset: 6
                         hoverEnabled: list.dragId < 0
                         ToolTip.visible: hovered
-                        ToolTip.text: "Finished helpers, and worktree sessions that are merged,\nclosed or quiet for a week. Working in one brings it back.\nArchived after 30 days here; right-click to archive all now."
+                        ToolTip.text: shelfRow.wiki
+                            ? "Wiki runs that are done. Working in one brings it back.\nArchived after 30 days here; right-click to archive all now."
+                            : "Finished helpers, and worktree sessions that are merged,\nclosed or quiet for a week. Working in one brings it back.\nArchived after 30 days here; right-click to archive all now."
                         ToolTip.delay: 700
                         contentItem: RowLayout {
                             spacing: 6
                             Icon { name: shelfRow.collapsed ? "arrow-right-s" : "arrow-down-s"; color: Theme.textFaint; implicitWidth: 13; implicitHeight: 13 }
-                            Icon { name: "archive-stack"; color: Theme.textFaint; implicitWidth: 13; implicitHeight: 13 }
-                            Label { Layout.fillWidth: true; text: "Settled · " + shelfRow.count; color: Theme.muted; font.pixelSize: Theme.px(12); elide: Text.ElideRight }
+                            Icon { name: shelfRow.wiki ? "book-open" : "archive-stack"; color: Theme.textFaint; implicitWidth: 13; implicitHeight: 13 }
+                            Label { Layout.fillWidth: true; text: shelfRow.title + " · " + shelfRow.count; color: Theme.muted; font.pixelSize: Theme.px(12); elide: Text.ElideRight }
                         }
                         background: Rectangle { radius: 8; color: shelfRow.hovered ? Theme.hover : "transparent" }
                         onClicked: Workspace.toggleCollapsed(rowKey)
@@ -611,6 +617,7 @@ Rectangle {
                             onTapped: {
                                 shelfMenu.projectId = shelfRow.projectId
                                 shelfMenu.sessions = shelfRow.count
+                                shelfMenu.wiki = shelfRow.wiki
                                 shelfMenu.popup()
                             }
                         }

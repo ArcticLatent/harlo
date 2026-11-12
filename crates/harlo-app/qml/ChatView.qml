@@ -707,6 +707,9 @@ Rectangle {
                 return r.optionDetails || []
             }
             readonly property bool detailed: session.requestMethod === "select" && details.some(d => d && d.description)
+            // A plan to approve comes as Markdown: drawn as a reply is.
+            readonly property bool markdown: visible && session.requestJson !== "" && !!JSON.parse(session.requestJson).markdown
+            readonly property var blocks: markdown ? JSON.parse(Workspace.markdownBlocks(session.requestMessage)) : []
             // An approval shown on its tool row: just a reminder here.
             readonly property bool inlineApproval: session.requestIsApproval && session.approvalRow !== ""
             implicitHeight: reqCol.implicitHeight + 24
@@ -745,12 +748,80 @@ Rectangle {
                     font.weight: Font.DemiBold
                     wrapMode: Text.Wrap
                 }
-                Label {
+                // What's asked (a plan to approve can run long): it scrolls
+                // past part of the window, so the answers stay in view.
+                Flickable {
+                    id: reqScroll
+                    objectName: "requestScroll"
                     Layout.fillWidth: true
-                    visible: text !== "" && !requestDock.inlineApproval
-                    text: session.requestMessage
-                    color: Theme.muted
-                    wrapMode: Text.Wrap
+                    visible: session.requestMessage !== "" && !requestDock.inlineApproval
+                    readonly property bool scrolls: contentHeight > height + 1
+                    Layout.preferredHeight: Math.min(contentHeight, Math.max(140, root.height * 0.45))
+                    contentWidth: width
+                    contentHeight: reqBody.implicitHeight
+                    clip: true
+                    boundsBehavior: Flickable.StopAtBounds
+                    ScrollBar.vertical: ScrollBar { policy: reqScroll.scrolls ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff }
+                    ColumnLayout {
+                        id: reqBody
+                        width: reqScroll.width - (reqScroll.scrolls ? 14 : 0)
+                        spacing: 8
+                        Label {
+                            Layout.fillWidth: true
+                            visible: !requestDock.markdown
+                            text: session.requestMessage
+                            color: Theme.muted
+                            wrapMode: Text.Wrap
+                        }
+                        Repeater {
+                            model: requestDock.blocks
+                            Item {
+                                id: reqBlock
+                                required property var modelData
+                                Layout.fillWidth: true
+                                implicitHeight: modelData.kind === "code" ? reqCode.height : reqProse.implicitHeight
+                                TextEdit {
+                                    id: reqProse
+                                    objectName: "requestProse"
+                                    visible: reqBlock.modelData.kind !== "code"
+                                    width: parent.width
+                                    textFormat: TextEdit.RichText
+                                    text: visible ? Theme.htmlStyle + Theme.proseHtml(reqBlock.modelData.html, -1, true) : ""
+                                    font.family: Theme.uiFont
+                                    font.pixelSize: Theme.px(13.5)
+                                    color: Theme.foreground
+                                    selectionColor: Theme.selection
+                                    selectedTextColor: Theme.foreground
+                                    readOnly: true
+                                    selectByMouse: true
+                                    wrapMode: TextEdit.Wrap
+                                }
+                                Rectangle {
+                                    id: reqCode
+                                    visible: reqBlock.modelData.kind === "code"
+                                    width: parent.width
+                                    height: visible ? reqCodeText.implicitHeight + 16 : 0
+                                    radius: 6
+                                    color: Theme.codeBg
+                                    TextEdit {
+                                        id: reqCodeText
+                                        x: 10
+                                        y: 8
+                                        width: parent.width - 20
+                                        textFormat: TextEdit.RichText
+                                        text: reqCode.visible ? reqBlock.modelData.html : ""
+                                        font.family: Theme.mono
+                                        font.pixelSize: Theme.mpx(12)
+                                        color: Theme.foreground
+                                        selectionColor: Theme.selection
+                                        readOnly: true
+                                        selectByMouse: true
+                                        wrapMode: TextEdit.Wrap
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 TextArea {
                     id: reqInput

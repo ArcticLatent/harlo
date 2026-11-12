@@ -54,6 +54,7 @@ pub fn why_text(why: &str) -> &'static str {
         "closed" => "Pull request closed",
         "quiet" => "No activity for a week",
         "helper" => "Done as a helper",
+        "wiki" => "A finished wiki run",
         _ => "",
     }
 }

@@ -1455,7 +1455,7 @@ fn ask(shared: &Arc<Shared>, request_id: String, req: &Value) {
         }),
         "ExitPlanMode" => json!({
             "type": "extension_ui_request", "id": ui_id, "method": "select", "title": "Claude's plan is ready",
-            "message": input["plan"].as_str().unwrap_or_default(), "options": ["Start with this plan", "Keep planning"],
+            "message": input["plan"].as_str().unwrap_or_default(), "markdown": true, "options": ["Start with this plan", "Keep planning"],
         }),
         _ => {
             let detail = ["command", "file_path", "path", "url", "pattern", "query"]

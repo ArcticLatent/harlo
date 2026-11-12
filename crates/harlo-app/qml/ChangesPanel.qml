@@ -392,7 +392,10 @@ Rectangle {
             objectName: "requestRow"
             readonly property var req: git.requestJson !== "" ? JSON.parse(git.requestJson) : ({ state: "none" })
             readonly property bool has: (req.url || "") !== ""
-            visible: git.isRepo && git.upstream !== "" && (req.state === "ready" || req.state === "creating") && req.head !== req.base
+            // (While it's looked up again, as the panel opens: what it
+            // knew stays, rather than the row going for a moment.)
+            readonly property bool known: req.state === "ready" || req.state === "creating" || req.state === "loading" && (req.label || "") !== ""
+            visible: git.isRepo && git.upstream !== "" && known && req.head !== req.base
             Layout.fillWidth: true
             Layout.minimumWidth: 0
             Layout.leftMargin: 14
@@ -414,6 +417,8 @@ Rectangle {
                 text: requestRow.has ? "Open" : "Create " + (requestRow.req.word || "pull request")
                 font.pixelSize: Theme.px(11.5)
                 accent: requestRow.has ? Theme.foreground : Theme.primary
+                // (Creating one waits for the look-up.)
+                enabled: requestRow.has || requestRow.req.state === "ready"
                 onClicked: requestRow.has ? Qt.openUrlExternally(requestRow.req.url) : requestDialog.show()
             }
         }

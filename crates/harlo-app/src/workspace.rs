@@ -168,7 +168,7 @@ pub mod qobject {
         fn put_back(self: Pin<&mut Workspace>, key: &QString);
         /// Archives everything on a project's Settled shelf.
         #[qinvokable]
-        fn archive_shelf(self: Pin<&mut Workspace>, project_id: i32);
+        fn archive_shelf(self: Pin<&mut Workspace>, project_id: i32, wiki: bool);
         /// A session's shared plan: `{ enabled, commits, steps: [{ id,
         /// title, detail, status, summary, commit, commitNote,
         /// editedByUser }] }` (`enabled`: the plan is on for its project).
@@ -289,6 +289,10 @@ pub mod qobject {
         /// Copies a session as Markdown (`clipboardText`).
         #[qinvokable]
         fn copy_markdown(self: Pin<&mut Workspace>, key: &QString);
+        /// Markdown as harlo draws a reply's: `[{ kind: "prose"|"code",
+        /// html, code, lang }]` (a plan to approve, say).
+        #[qinvokable]
+        fn markdown_blocks(self: &Workspace, text: &QString) -> QString;
         /// Self-tests only: a phone's request (`{op, …}`) and harlo's answer.
         #[qinvokable]
         fn phone_test_call(self: Pin<&mut Workspace>, json: &QString) -> QString;
@@ -1951,7 +1955,9 @@ impl Workspace {
 
     pub fn toggle_collapsed(mut self: Pin<&mut Self>, key: &QString) {
         let key = key.to_string();
-        if let Some(id) = key.strip_prefix("shelf:").and_then(|s| s.parse::<i64>().ok()) {
+        let shelf = key.strip_prefix("shelf:").and_then(|s| s.parse::<i64>().ok());
+        let wiki_shelf = key.strip_prefix("wikishelf:").and_then(|s| s.parse::<i64>().ok()).map(|id| id + sidebar::WIKI_SHELF);
+        if let Some(id) = shelf.or(wiki_shelf) {
             let open = &mut self.as_mut().rust_mut().shelves_open;
             match open.iter().position(|p| *p == id) {
                 Some(i) => {
@@ -2903,7 +2909,7 @@ impl Workspace {
         self.update_meta(&key.to_string(), |m| m.settled_why.clear());
     }
 
-    pub fn archive_shelf(mut self: Pin<&mut Self>, project_id: i32) {
+    pub fn archive_shelf(mut self: Pin<&mut Self>, project_id: i32, wiki: bool) {
         let id = i64::from(project_id);
         let Some(project) = self.projects.iter().find(|p| p.id == id).cloned().map(|mut p| { p.collapsed = false; p }) else { return };
         let sessions: Vec<SessionInfo> = self.sessions.values().filter(|s| self.here(&s.path)).cloned().collect();
@@ -2918,15 +2924,12 @@ impl Workspace {
             show_archived: false,
             other_collapsed: true,
             expanded: &[id],
-            shelves_open: &[id],
+            shelves_open: &[id, id + sidebar::WIKI_SHELF],
         });
-        // The rows after its shelf's.
+        // The rows on that shelf (Settled, or Wiki).
         let files: Vec<PathBuf> = rows
             .iter()
-            .skip_while(|r| r.kind != SidebarKind::Shelf)
-            .skip(1)
-            .take_while(|r| r.kind == SidebarKind::Session)
-            .filter(|r| !r.settled.is_empty())
+            .filter(|r| r.kind == SidebarKind::Session && !r.settled.is_empty() && (r.settled == "wiki") == wiki)
             .filter_map(|r| self.file_for_key(&r.key))
             .collect();
         for file in files {
@@ -3170,6 +3173,7 @@ impl Workspace {
         // Settled for 30 days, untouched: archived (unless that's off).
         let archive_old = self.setting_str("archive_settled") != "0";
         let mut old: Vec<PathBuf> = Vec::new();
+        let mut wiki_runs: Vec<(PathBuf, i64)> = Vec::new();
         for s in self.sessions.values() {
             let meta = self.meta.get(&s.path).cloned().unwrap_or_default();
             let modified = unix(s.modified);
@@ -3184,6 +3188,11 @@ impl Workspace {
             if meta.archived || meta.pinned || meta.settled_at == modified || live.contains(&s.path) {
                 continue;
             }
+            // A wiki run from before harlo restarted (named by harlo).
+            if matches!(s.name.as_str(), "Wiki: create" | "Wiki: update" | "Wiki: continue") {
+                wiki_runs.push((s.path.clone(), modified));
+                continue;
+            }
             let Some(w) = self.worktrees.iter().filter(|w| !w.removed && s.cwd.starts_with(&w.path)).max_by_key(|w| w.path.components().count()) else { continue };
             if harlo_core::remote::is_remote(&w.path) || !w.path.is_dir() {
                 continue;
@@ -3196,6 +3205,14 @@ impl Workspace {
         for file in old {
             let mut meta = self.meta.get(&file).cloned().unwrap_or_default();
             meta.archived = true;
+            let r = self.db().map(|db| db.set_session_meta(&file, &meta)).transpose();
+            self.as_mut().report(r);
+            self.as_mut().rust_mut().meta.insert(file, meta);
+        }
+        for (file, modified) in wiki_runs {
+            let mut meta = self.meta.get(&file).cloned().unwrap_or_default();
+            meta.settled_why = "wiki".into();
+            meta.settled_at = modified;
             let r = self.db().map(|db| db.set_session_meta(&file, &meta)).transpose();
             self.as_mut().report(r);
             self.as_mut().rust_mut().meta.insert(file, meta);
@@ -3920,6 +3937,15 @@ impl Workspace {
                 Err(e) => this.set_notice_text(&format!("Couldn't save it: {e}"), true),
             });
         });
+    }
+
+    pub fn markdown_blocks(&self, text: &QString) -> QString {
+        let blocks = harlo_core::markdown::MarkdownRenderer::default().render(&text.to_string());
+        let out: Vec<serde_json::Value> = blocks
+            .iter()
+            .map(|b| json!({ "kind": if b.kind == harlo_core::markdown::MdBlockKind::Code { "code" } else { "prose" }, "html": b.html, "code": b.code, "lang": b.lang }))
+            .collect();
+        QString::from(&serde_json::Value::Array(out).to_string())
     }
 
     pub fn copy_markdown(mut self: Pin<&mut Self>, key: &QString) {
@@ -5661,6 +5687,11 @@ impl Workspace {
                 self.as_mut().settle_helper(key);
             }
         }
+        // A wiki run whose turn ended: onto the Wiki shelf (once you've
+        // left it, when you're looking at it).
+        if became_idle && self.wiki_sessions.contains(key) {
+            self.as_mut().settle_helper(key);
+        }
         // A run lane's session file: remember it for the run.
         if let Some(file) = lane_file
             && let (Some((run, idx)), Some(db)) = (self.lane_keys.get(key), &self.db) {
@@ -6151,6 +6182,7 @@ impl Workspace {
         let projects: Vec<Project> = self.projects.iter().cloned().map(|mut p| { p.collapsed = false; p }).collect();
         let mut expanded: Vec<i64> = projects.iter().map(|p| p.id).collect();
         expanded.push(-1);
+        let shelves: Vec<i64> = projects.iter().flat_map(|p| [p.id, p.id + sidebar::WIKI_SHELF]).collect();
         let rows = sidebar::build(&SidebarInput {
             projects: &projects,
             worktrees: &self.worktrees,
@@ -6162,7 +6194,7 @@ impl Workspace {
             other_collapsed: false,
             expanded: &expanded,
             // (Settled sessions too: a phone that shows them, as a shelf.)
-            shelves_open: &expanded,
+            shelves_open: &shelves,
         });
         // Helpers under the sessions that started them, as here.
         let parents = self.helper_parents();
@@ -7782,9 +7814,11 @@ impl Workspace {
         self.as_mut().rust_mut().settle_later.remove(key);
         // (A little after now: its last writes may land a moment later.)
         let at = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0) + 5;
+        // (A wiki run that's done: on the Wiki shelf.)
+        let why = if self.wiki_sessions.contains(key) { "wiki" } else { "helper" };
         self.as_mut().update_meta(key, |m| {
             if !m.pinned && !m.archived {
-                m.settled_why = "helper".into();
+                m.settled_why = why.into();
                 m.settled_at = at;
             }
         });

@@ -2688,6 +2688,27 @@ ApplicationWindow {
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
             win.check(!chat.session.hasRequest && win.chatText().indexOf("remembering acceptEdits") >= 0, "Always allow hands Claude its suggestion back (" + win.chatText().slice(-60) + ")")
+            win.sendByKeys("plan it please") } }
+        // A long plan to approve: drawn as Markdown, scrolling in its card,
+        // its answers in view.
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            const scroll = win.findName("requestScroll")
+            const start = win.findText("Start with this plan")
+            const prose = win.findAllNames("requestProse", scroll || win.contentItem).map(t => t.getText(0, t.length))
+            win.check(chat.session.hasRequest && scroll !== null && scroll.scrolls && scroll.height <= Math.max(140, chat.height * 0.45) + 1, "a long plan scrolls in its card (" + (scroll ? Math.round(scroll.height) + " of " + Math.round(scroll.contentHeight) : "none") + ")")
+            win.check(start !== null && start.mapToItem(null, 0, start.height).y <= win.height && win.findText("Keep planning") !== null, "its answers stay in view")
+            win.check(prose.some(t => t === "Context") && !prose.some(t => t.indexOf("## ") >= 0) && prose.some(t => t.indexOf("Step 1.") >= 0 && t.indexOf("**") < 0), "it reads as Markdown: headings and a list, not ## or ** (" + prose.slice(0, 3).join(" | ") + ")")
+            win.shotWindow("clicks-claude-plan")
+            if (scroll) scroll.contentY = scroll.contentHeight - scroll.height } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const last = win.findAllNames("requestProse", win.findName("requestScroll")).find(t => t.getText(0, t.length) === "The last line of the plan.")
+            win.check(last !== null && last !== undefined, "scrolled down, its end shows")
+            win.clickText("Start with this plan") } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            win.check(!chat.session.hasRequest && win.chatText().indexOf("Plan approved.") >= 0, "Start with this plan approves it (" + win.chatText().slice(-60) + ")")
             win.sendByKeys("ask me which database") } }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
@@ -4994,7 +5015,10 @@ ApplicationWindow {
         ScriptAction { script: {
             const n = win.lastNote()
             win.check(n.kind === "ci" && n.title === "Checks failed: Pull request #7" && n.body.startsWith("1 of 2 checks failed: lint"), "harlo notifies when the checks finish (" + Workspace.lastNotification + ")")
-            git.loadRequest() } }
+            git.loadRequest()
+            // (Looked up again, as when the panel opens: the row stays.)
+            const row = win.findName("requestRow")
+            win.check(JSON.parse(git.requestJson).state === "loading" && row !== null && row.visible, "while it's looked up again the request row stays (" + JSON.parse(git.requestJson).state + ")") } }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
             win.check(win.findName("checksSummary").text === "Failed: lint", "the panel shows what failed")
@@ -8133,6 +8157,18 @@ ApplicationWindow {
             win.check((TestInput.readFile(cwd + "/AGENTS.md") || "").indexOf("OPENWIKI:START") >= 0, "and its block in AGENTS.md")
             win.check(TestInput.readFile(cwd + "/.github/workflows/openwiki-update.yml") === "" && TestInput.listDir(cwd + "/.github") === "", "but not OpenWiki's daily update workflow")
             win.shotWindow("clicks-harlo-wiki-create")
+            // Done, and left: on the project's Wiki shelf, folded.
+            Workspace.open(win.wikiKeyBefore) } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            const shelf = win.findName("shelfRow-wikishelf:" + win.wikiProject)
+            win.check(shelf !== null && shelf.collapsed && shelf.title === "Wiki" && shelf.count === 1, "the finished run goes on the Wiki shelf (" + (shelf ? shelf.title + " · " + shelf.count : "none") + ")")
+            win.check(win.findName("shelfRow-shelf:" + win.wikiProject) === null, "not on Settled")
+            if (shelf) win.clickItem(shelf, "the Wiki shelf") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const rows = win.findAllNames("sessionRow", win.contentItem)
+            win.check(rows.some(r => r.title === "Wiki: create" && r.settled !== ""), "opened, it shows the run (" + rows.map(r => r.title + (r.settled ? " [" + r.settled + "]" : "")).join(", ") + ")")
             win.summary(); Qt.quit() } }
     }
     property string wikiKeyBefore: ""
@@ -9274,7 +9310,16 @@ ApplicationWindow {
             win.check(kids.length === 3 && kids.every(k => k.used && k.used.tokens > 0), "each helper shows what it used (" + JSON.stringify(kids.map(k => k.used)) + ")")
             const total = kids.reduce((t, k) => t + k.used.tokens, 0)
             win.check(win.findContaining("Helpers · all done · " + (total / 1000).toFixed(1) + "k tokens") !== null, "and the Subagents box")
-            win.shotWindow("clicks-review-done") } }
+            win.shotWindow("clicks-review-done")
+            // A finished plan folds to "All done" (a reopened session too).
+            win.check(!chat.planDock.expanded && win.findText("All done", chat.planDock) !== null, "the finished plan folds to All done")
+            win.clickItem(win.findName("planToggle", chat.planDock), "the plan's fold") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(chat.planDock.expanded && win.findText("Write helper.txt", chat.planDock) !== null, "opened by hand, it shows its steps")
+            chat.planDock.settleFold()
+            win.check(chat.planDock.expanded, "and stays open for that session")
+            win.clickItem(win.findName("planToggle", chat.planDock), "fold it again") } }
         // The project's Team: its helpers' agent, and its reviewer on
         // another model (the next run's reviews use it).
         PauseAnimation { duration: 300 }
