@@ -177,7 +177,9 @@ extension HarloModel {
             "architecture/sessions.md": ["path": "architecture/sessions.md", "title": "Sessions", "type": "architecture", "description": .string(page.summary),
                                          "verified": .string(ISO8601DateFormatter().string(from: Date().addingTimeInterval(-86400))),
                                          "blocks": [["kind": "prose", "html": "<h1>Sessions</h1><p>A session starts its agent in <a href=\"repo://crates/harlo-core/src/session.rs#L31-L40\">session.rs</a> and keeps its rows by key. Back to the <a href=\"../quickstart.md\">quickstart</a>.</p>", "anchor": "sessions"],
-                                                    ["kind": "code", "html": "<pre><code>let key = registry::start(kind, cwd);</code></pre>", "code": "let key = registry::start(kind, cwd);", "lang": "rust"]]],
+                                                    ["kind": "code", "html": "<pre><code>let key = registry::start(kind, cwd);</code></pre>", "code": "let key = registry::start(kind, cwd);", "lang": "rust"]],
+                                         "sources": [["path": "crates/harlo-core/src/session.rs", "ranges": [[31, 40], [88, 102]], "claims": 3],
+                                                     ["path": "crates/harlo-app/src/registry.rs", "ranges": [], "claims": 0]]],
         ]
         return WikiPageText(text[page.path] ?? ["path": .string(page.path), "title": .string(page.title), "type": .string(page.kind), "description": .string(page.summary),
                                                 "blocks": [["kind": "prose", "html": .string("<h1>\(page.title)</h1><p>\(page.summary)</p>")]]])

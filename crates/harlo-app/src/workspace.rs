@@ -832,7 +832,12 @@ pub(crate) fn wiki_page_at(cwd: &Path, page: &str) -> serde_json::Value {
     let root = harlo_core::openwiki::root_of(cwd);
     let shown = page.trim_start_matches("openwiki/").to_owned();
     match harlo_core::openwiki::read(&root, &shown) {
-        Ok(text) => harlo_core::openwiki::page_view(&shown, &text),
+        Ok(text) => {
+            let mut v = harlo_core::openwiki::page_view(&shown, &text);
+            // (Where in the code it comes from: its sources and claims.)
+            v["sources"] = json!(harlo_core::openwiki::sources_of(&text, harlo_core::openwiki::claims(&root, &shown).as_deref()));
+            v
+        }
         Err(e) => json!({ "path": shown, "error": e }),
     }
 }

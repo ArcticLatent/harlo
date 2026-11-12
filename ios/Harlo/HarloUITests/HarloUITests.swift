@@ -294,6 +294,13 @@ final class HarloUITests: XCTestCase {
         see("Diagram", timeout: 15)
         shot("15e-wiki-page")
         audit("wiki-page")
+        // Its sources: the files and lines its claims come from.
+        let source = app.descendants(matching: .any)["wikiSource"].firstMatch
+        for _ in 0..<6 where !(source.exists && source.isHittable) { app.swipeUp() }
+        XCTAssertTrue(source.waitForExistence(timeout: 5), "the page's sources")
+        see("src/sidebar.rs")
+        see("lines 1–2, 4–9")
+        shot("15g-wiki-sources")
         // A search: OpenWiki's sections, a result opening its page.
         app.navigationBars.buttons.element(boundBy: 0).tap()
         let field = app.searchFields["Search the wiki"]

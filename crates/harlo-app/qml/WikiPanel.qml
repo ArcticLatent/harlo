@@ -590,6 +590,47 @@ Rectangle {
                             }
                         }
                     }
+                    // Where in the code the page comes from: its sources and
+                    // the lines its claims cite, each opening the file there.
+                    Label {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 14
+                        Layout.bottomMargin: 2
+                        visible: sourceRows.count > 0
+                        text: "Sources"
+                        color: Theme.textMuted
+                        font.pixelSize: Theme.px(12)
+                        font.weight: Font.DemiBold
+                    }
+                    Repeater {
+                        id: sourceRows
+                        model: root.pageView && !root.pageView.error ? root.pageView.sources || [] : []
+                        TextEdit {
+                            required property var modelData
+                            objectName: "wikiSource"
+                            Layout.fillWidth: true
+                            Layout.topMargin: 2
+                            textFormat: TextEdit.RichText
+                            text: {
+                                const p = modelData.path, e = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                                const lines = (modelData.ranges || []).map(r => "<a href=\"repo://" + encodeURI(p) + "#L" + r[0] + "-L" + r[1] + "\">" + (r[0] === r[1] ? r[0] : r[0] + "–" + r[1]) + "</a>")
+                                const first = (modelData.ranges || [])[0]
+                                return Theme.htmlStyle + "<a href=\"repo://" + encodeURI(p) + (first ? "#L" + first[0] : "") + "\">" + e(p) + "</a>"
+                                    + (lines.length ? " <span style=\"color:" + Theme.textFaint + "\">lines</span> " + lines.join(", ") : "")
+                                    + (modelData.claims ? " <span style=\"color:" + Theme.textFaint + "\">· " + modelData.claims + (modelData.claims === 1 ? " claim" : " claims") + "</span>" : "")
+                            }
+                            font.family: Theme.uiFont
+                            font.pixelSize: Theme.px(12.5)
+                            color: Theme.foreground
+                            selectionColor: Theme.selection
+                            selectedTextColor: Theme.foreground
+                            readOnly: true
+                            selectByMouse: true
+                            wrapMode: TextEdit.Wrap
+                            onLinkActivated: link => root.follow(link)
+                            HoverHandler { cursorShape: parent.hoveredLink ? Qt.PointingHandCursor : Qt.IBeamCursor }
+                        }
+                    }
                 }
             }
         }

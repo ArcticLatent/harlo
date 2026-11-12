@@ -690,6 +690,7 @@ func record(_ link: String, to path: String) async {
     for page in s.wiki?.pages ?? [] { _ = await model.wikiPage(page.path) }
     let sidebarPage = await model.wikiPage("architecture/sidebar.md")
     check(sidebarPage?.blocks.map(\.kind).contains("mermaid") == true && sidebarPage?.blocks.map(\.kind).contains("code") == true, "a page in blocks (\(sidebarPage?.blocks.map(\.kind) ?? []))")
+    check(sidebarPage?.sources.map(\.path) == ["src/sidebar.rs", "src/projects.rs"] && sidebarPage?.sources.first?.ranges == [1...2, 4...9], "its sources, the lines its claims cite (\(sidebarPage?.sources.map { "\($0.path) \($0.ranges)" } ?? []))")
     // (Its graph and its page's diagram: drawn at the end.)
     let wikiDiagrams = [s.wiki?.mermaid ?? ""] + (sidebarPage?.blocks.filter { $0.kind == "mermaid" }.map(\.code) ?? [])
     let found = await model.searchWiki("rebuilds the whole list")

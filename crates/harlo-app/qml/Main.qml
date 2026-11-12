@@ -8104,6 +8104,7 @@ ApplicationWindow {
             win.check((TestInput.readFile(cwd + "/openwiki/quickstart.md") || "").indexOf("greets the reader") >= 0, "the page is written")
             win.check((TestInput.readFile(cwd + "/openwiki/.last-update.json") || "").indexOf("gitHead") >= 0, "OpenWiki records the update")
             win.check((TestInput.readFile(cwd + "/AGENTS.md") || "").indexOf("OPENWIKI:START") >= 0, "and its block in AGENTS.md")
+            win.check(TestInput.readFile(cwd + "/.github/workflows/openwiki-update.yml") === "" && TestInput.listDir(cwd + "/.github") === "", "but not OpenWiki's daily update workflow")
             win.shotWindow("clicks-harlo-wiki-create")
             win.summary(); Qt.quit() } }
     }
@@ -8404,6 +8405,16 @@ ApplicationWindow {
                                  }
                              }
                          }
+                         // (Its sources: files and the lines its claims cite.)
+                         for (const src of v.sources || []) {
+                             win.demoCode++
+                             const text = win.demoFile(src.path)
+                             const last = Math.max(1, ...(src.ranges || []).map(r => r[1]))
+                             if (text === "" || text.split("\n").length < last) win.demoProblems.code.push(p + " → source " + src.path + " L" + last)
+                         }
+                         // (Shown under the page, a link each.)
+                         if ((v.sources || []).length && win.findAllNames("wikiSource", wikiPanel).length !== v.sources.length)
+                             win.demoProblems.code.push(p + ": " + win.findAllNames("wikiSource", wikiPanel).length + " of " + v.sources.length + " sources shown")
                          if (!win.demoBest || v.blocks.length > 6) win.demoBest = p
                      }, 30000) } }
         PauseAnimation { duration: 200 }
@@ -8413,7 +8424,7 @@ ApplicationWindow {
             const pr = win.demoProblems
             win.check(pr.opened.length === 0, "every page opens (" + win.demoPages.length + " read" + (pr.opened.length ? "; " + pr.opened.join("; ") : "") + ")")
             win.check(pr.links.length === 0, "every link to a page goes to one (" + win.demoLinks + " links" + (pr.links.length ? "; broken: " + pr.links.join("; ") : "") + ")")
-            win.check(win.demoCode > 0 && pr.code.length === 0, "every link to code goes to a file and lines that are there (" + win.demoCode + " links" + (pr.code.length ? "; broken: " + pr.code.join("; ") : "") + ")")
+            win.check(win.demoCode > 0 && pr.code.length === 0, "every link to code (and source) goes to a file and lines that are there (" + win.demoCode + " links" + (pr.code.length ? "; broken: " + pr.code.join("; ") : "") + ")")
             win.check(pr.diagrams.length === 0, "every diagram draws (" + win.demoDiagrams + (pr.diagrams.length ? "; failed: " + pr.diagrams.join("; ") : "") + ")")
             wikiPanel.openWiki(win.demoBest, "", false) } }
         PauseAnimation { duration: 300 }

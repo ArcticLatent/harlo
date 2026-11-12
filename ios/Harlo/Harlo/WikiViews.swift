@@ -285,6 +285,38 @@ struct WikiPageView: View {
         return [kind, checked].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
+    /// Where in the code the page comes from: each file opens at the
+    /// first lines its claims cite.
+    func sources(_ list: [WikiPageText.Source]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Sources")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color(p.muted))
+                .padding(.bottom, 2)
+                .accessibilityAddTraits(.isHeader)
+            ForEach(list, id: \.path) { s in
+                Button {
+                    file = WikiFile(path: wiki.file(s.path), line: s.ranges.first?.lowerBound ?? 0)
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(s.path).font(.footnote.monospaced()).foregroundStyle(Color(p.primary)).multilineTextAlignment(.leading)
+                        let lines = s.ranges.map { $0.count == 1 ? "\($0.lowerBound)" : "\($0.lowerBound)–\($0.upperBound)" }
+                        let about = [lines.isEmpty ? "" : "lines " + lines.joined(separator: ", "), s.claims == 0 ? "" : "\(s.claims) \(s.claims == 1 ? "claim" : "claims")"].filter { !$0.isEmpty }
+                        if !about.isEmpty {
+                            Text(about.joined(separator: " · ")).font(.caption).foregroundStyle(Color(p.muted)).multilineTextAlignment(.leading)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("wikiSource")
+                .accessibilityHint("Opens the file")
+            }
+        }
+        .padding(.top, 8)
+    }
+
     var body: some View {
         ScrollViewReader { reader in
             ScrollView {
@@ -301,6 +333,7 @@ struct WikiPageView: View {
                         ForEach(page.blocks.indices, id: \.self) { i in
                             block(page.blocks[i]).id(page.blocks[i].anchor.isEmpty ? "b\(i)" : page.blocks[i].anchor)
                         }
+                        if !page.sources.isEmpty { sources(page.sources) }
                     } else if failed {
                         ContentUnavailableView(title, systemImage: "book.closed", description: Text("The page couldn't be read."))
                     } else {

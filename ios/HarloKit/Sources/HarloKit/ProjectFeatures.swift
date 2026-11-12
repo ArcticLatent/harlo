@@ -356,8 +356,26 @@ public struct WikiPageText: Equatable, Sendable {
     /// When it was last checked against the code (ISO 8601; "" never).
     public var verified: String
     public var blocks: [Block]
+    /// Where in the code it comes from: its sources and the lines its
+    /// claims cite, by file.
+    public var sources: [Source]
     /// Why it couldn't be read ("" when it was).
     public var error: String
+
+    /// A file the page is drawn from: the line ranges cited (none: the
+    /// whole file) and how many of its claims cite it.
+    public struct Source: Equatable, Sendable {
+        public var path: String
+        public var ranges: [ClosedRange<Int>]
+        public var claims: Int
+
+        /// A link to it ("repo://path#L10-L15"), at a range or the file.
+        public func link(_ range: ClosedRange<Int>? = nil) -> String {
+            let p = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path
+            guard let r = range ?? ranges.first else { return "repo://\(p)" }
+            return "repo://\(p)#L\(r.lowerBound)-L\(r.upperBound)"
+        }
+    }
 
     /// Prose (HTML, as a reply's), code (`code`, in `lang`) or a Mermaid
     /// diagram; `anchor` names a heading's section.
@@ -377,6 +395,15 @@ public struct WikiPageText: Equatable, Sendable {
         verified = v["verified"].text
         error = v["error"].text
         blocks = (v["blocks"].array ?? []).map { Block(kind: $0["kind"].text, html: $0["html"].text, code: $0["code"].text, lang: $0["lang"].text, anchor: $0["anchor"].text) }
+        sources = (v["sources"].array ?? []).compactMap { s in
+            let path = s["path"].text
+            guard !path.isEmpty else { return nil }
+            let ranges: [ClosedRange<Int>] = (s["ranges"].array ?? []).compactMap { r in
+                guard let a = r.array, a.count == 2, let from = a[0].int.map(Int.init), let to = a[1].int.map(Int.init), from >= 1, to >= from else { return nil }
+                return from...to
+            }
+            return Source(path: path, ranges: ranges, claims: Int(s["claims"].int ?? 0))
+        }
     }
 
     /// The page a link in it opens ("../quickstart.md#x" from

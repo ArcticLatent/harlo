@@ -439,7 +439,57 @@ pub fn call(root: &Path, tool: &str, mut args: Value) -> Result<Value> {
     }
     // (Writing a page checks its claims against the code: it can take a while.)
     let timeout = Duration::from_secs(if READ_TOOLS.contains(&tool) { 90 } else { 600 });
-    server.call(tool, args, timeout)
+    let answer = server.call(tool, args, timeout);
+    // A new wiki's first step also writes a GitHub workflow that updates it
+    // every day on an API key, with tracing on: not wanted here (updates
+    // are yours to start, telemetry is off). It goes once the run is done
+    // (before, OpenWiki would see its source change), unless git tracks it
+    // (one you keep).
+    if tool == "openwiki_finish" && file_exists(root, WORKFLOW) && !tracked(root, WORKFLOW) {
+        remove_new_file(root, WORKFLOW);
+    }
+    answer
+}
+
+/// Whether git tracks `rel` in the repository at `root`.
+fn tracked(root: &Path, rel: &str) -> bool {
+    match remote::split(root) {
+        Some((host, dir)) => remote::host(&host)
+            .and_then(|h| remote::run(&h, &format!("git -C {} ls-files --error-unmatch -- {} >/dev/null 2>&1", remote::quote_path(&dir), remote::quote_path(rel)), Duration::from_secs(30)).ok())
+            .is_some_and(|o| o.status.success()),
+        None => Command::new("git").arg("-C").arg(root).args(["ls-files", "--error-unmatch", "--", rel]).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success()),
+    }
+}
+
+/// The scheduled-update workflow OpenWiki writes into a repository.
+const WORKFLOW: &str = ".github/workflows/openwiki-update.yml";
+
+fn file_exists(root: &Path, rel: &str) -> bool {
+    match remote::split(root) {
+        Some((host, dir)) => remote::host(&host)
+            .and_then(|h| remote::run(&h, &format!("test -e {}", remote::quote_path(&format!("{dir}/{rel}"))), Duration::from_secs(30)).ok())
+            .is_some_and(|o| o.status.success()),
+        None => root.join(rel).exists(),
+    }
+}
+
+/// Removes a file, then its folders up to `root` that it leaves empty.
+fn remove_new_file(root: &Path, rel: &str) {
+    let dirs: Vec<&str> = rel.rmatch_indices('/').map(|(i, _)| &rel[..i]).collect();
+    match remote::split(root) {
+        Some((host, dir)) => {
+            let Some(h) = remote::host(&host) else { return };
+            let q = |r: &str| remote::quote_path(&format!("{dir}/{r}"));
+            let rmdirs: Vec<String> = dirs.iter().map(|d| format!("rmdir {} 2>/dev/null", q(d))).collect();
+            let _ = remote::run(&h, &format!("rm -f {}; {}; true", q(rel), rmdirs.join("; ")), Duration::from_secs(30));
+        }
+        None => {
+            let _ = std::fs::remove_file(root.join(rel));
+            for d in dirs {
+                let _ = std::fs::remove_dir(root.join(d));
+            }
+        }
+    }
 }
 
 /// Whether the runtime starts and has its tools: "openwiki 0.9.0", else
@@ -813,6 +863,82 @@ fn search_in(texts: &[(String, String)], query: &str, limit: usize) -> Vec<Value
 /// `description`, `verified`), then its body as blocks of rich text
 /// (`prose`, `code` highlighted, or `mermaid` with its source), a heading's
 /// block with its anchor.
+/// What OpenWiki recorded of a page's claims (`.claims/<page>.json`), if
+/// any: their evidence is where in the code each one comes from.
+pub fn claims(root: &Path, page: &str) -> Option<String> {
+    let page = page.trim_start_matches("openwiki/");
+    let stem = page.strip_suffix(".md")?;
+    if stem.split('/').any(|c| c.is_empty() || c == ".." || c.starts_with('.')) {
+        return None;
+    }
+    read_file(root, &format!("{DIR}/.claims/{stem}.json"))
+}
+
+/// The code a page is drawn from: the files its frontmatter's `sources`
+/// name and its claims' evidence cites, in that order, each with the line
+/// ranges cited (merged) and how many claims cite it: `[{ path, ranges:
+/// [[from, to]], claims }]`.
+pub fn sources_of(text: &str, claims: Option<&str>) -> Vec<Value> {
+    let mut files: Vec<(String, Vec<(u64, u64)>, usize)> = Vec::new();
+    fn add(files: &mut Vec<(String, Vec<(u64, u64)>, usize)>, resource: &str, claim: bool) {
+        let Some(rest) = resource.trim().trim_matches(|c| c == '"' || c == '\'').strip_prefix("repo://") else { return };
+        let (path, frag) = rest.split_once('#').unwrap_or((rest, ""));
+        if path.is_empty() {
+            return;
+        }
+        let at = match files.iter().position(|f| f.0 == path) {
+            Some(i) => i,
+            None => {
+                files.push((path.to_owned(), Vec::new(), 0));
+                files.len() - 1
+            }
+        };
+        let line = |s: &str| s.trim_start_matches('L').parse::<u64>().ok();
+        let range = match frag.split_once('-') {
+            Some((a, b)) => line(a).zip(line(b)),
+            None => line(frag).map(|a| (a, a)),
+        };
+        if let Some(r) = range.filter(|(a, b)| *a > 0 && b >= a) {
+            files[at].1.push(r);
+        }
+        if claim {
+            files[at].2 += 1;
+        }
+    }
+    let (front, _) = split_front(text);
+    for line in front.lines() {
+        if let Some((_, v)) = line.split_once("resource:") {
+            add(&mut files, v, false);
+        }
+    }
+    if let Some(c) = claims.and_then(|c| serde_json::from_str::<Value>(c).ok()) {
+        for claim in c["claims"].as_array().into_iter().flatten() {
+            // (A claim citing a file twice counts once for it.)
+            let mut cited: Vec<String> = Vec::new();
+            for e in claim["evidence"].as_array().into_iter().flatten() {
+                let r = e["resource"].as_str().unwrap_or_default();
+                let path = r.strip_prefix("repo://").map(|p| p.split('#').next().unwrap_or_default().to_owned()).unwrap_or_default();
+                add(&mut files, r, !cited.contains(&path));
+                cited.push(path);
+            }
+        }
+    }
+    files
+        .into_iter()
+        .map(|(path, mut ranges, claims)| {
+            ranges.sort_unstable();
+            let mut merged: Vec<(u64, u64)> = Vec::new();
+            for (a, b) in ranges {
+                match merged.last_mut() {
+                    Some(last) if a <= last.1 + 1 => last.1 = last.1.max(b),
+                    _ => merged.push((a, b)),
+                }
+            }
+            json!({ "path": path, "ranges": merged.iter().map(|(a, b)| json!([a, b])).collect::<Vec<_>>(), "claims": claims })
+        })
+        .collect()
+}
+
 pub fn page_view(path: &str, text: &str) -> Value {
     let page = describe(path, text);
     let (_, body) = split_front(text);
@@ -956,6 +1082,29 @@ mod tests {
         let names: Vec<&str> = tools.as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert_eq!(names, OFFERED);
         assert!(tools.to_string().find("\"root\"").is_none(), "harlo fills in root");
+    }
+
+    #[test]
+    fn sources_from_frontmatter_and_claims() {
+        let text = "---\ntype: workflow\nsources:\n  - id: a\n    resource: repo://src/orders.rs\n  - id: b\n    resource: repo://src/ledger.rs\n---\n# Orders\n";
+        let claims = r#"{"claims":[
+            {"evidence":[{"resource":"repo://src/orders.rs#L10-L15"},{"resource":"repo://src/orders.rs#L14-L20"},{"resource":"repo://tests/t.rs#L3"}]},
+            {"evidence":[{"resource":"repo://src/orders.rs#L40-L41"},{"resource":"repo://src/ledger.rs"}]}]}"#;
+        let s = sources_of(text, Some(claims));
+        assert_eq!(s.iter().map(|f| f["path"].as_str().unwrap()).collect::<Vec<_>>(), ["src/orders.rs", "src/ledger.rs", "tests/t.rs"], "the frontmatter's first, then the claims'");
+        assert_eq!(s[0]["ranges"], json!([[10, 20], [40, 41]]), "overlapping ranges merged");
+        assert_eq!(s[0]["claims"], 2);
+        assert_eq!(s[1]["ranges"], json!([]), "a whole file");
+        assert_eq!(s[2]["ranges"], json!([[3, 3]]));
+        assert_eq!(sources_of("# No frontmatter\n", None), Vec::<Value>::new());
+        assert!(claims_path_ok());
+    }
+
+    fn claims_path_ok() -> bool {
+        let (root, _g) = fixture();
+        std::fs::create_dir_all(root.join("openwiki/.claims/architecture")).unwrap();
+        std::fs::write(root.join("openwiki/.claims/architecture/jobs.json"), "{}").unwrap();
+        claims(&root, "openwiki/architecture/jobs.md").as_deref() == Some("{}") && claims(&root, "../x.md").is_none() && claims(&root, "x.txt").is_none()
     }
 
     #[test]

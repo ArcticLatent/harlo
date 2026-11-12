@@ -1114,6 +1114,19 @@ final class PlanTests: XCTestCase {
         XCTAssertNil(plan.steps.first { $0.id == 3 })
     }
 
+    func testWikiPageSources() {
+        let page = WikiPageText(["path": "workflows/orders.md", "title": "Orders", "blocks": [],
+                                 "sources": [["path": "src/order book.rs", "ranges": [[10, 20], [40, 40], [5, 2]], "claims": 2],
+                                             ["path": "src/ledger.rs", "ranges": [], "claims": 0], ["path": "", "ranges": []]]])
+        XCTAssertEqual(page.sources.map(\.path), ["src/order book.rs", "src/ledger.rs"], "a source without a path is left out")
+        XCTAssertEqual(page.sources[0].ranges, [10...20, 40...40], "a backwards range is left out")
+        XCTAssertEqual(page.sources[0].claims, 2)
+        XCTAssertEqual(page.sources[0].link(), "repo://src/order%20book.rs#L10-L20")
+        XCTAssertEqual(WikiPageText.code(of: page.sources[0].link(40...40))?.line, 40)
+        XCTAssertEqual(page.sources[1].link(), "repo://src/ledger.rs")
+        XCTAssertTrue(WikiPageText(["path": "x.md"]).sources.isEmpty)
+    }
+
     func testWikiAndThePlanEvent() throws {
         let iso = ISO8601DateFormatter()
         let now = iso.date(from: "2026-11-11T12:00:00Z")!
@@ -1354,6 +1367,8 @@ final class RecordingTests: XCTestCase {
         XCTAssertEqual(page?.kind, "architecture")
         XCTAssertTrue(page?.blocks.contains { $0.kind == "mermaid" } == true)
         XCTAssertEqual(page?.page(of: "../quickstart.md")?.path, "quickstart.md")
+        XCTAssertEqual(page?.sources.map(\.path), ["src/sidebar.rs", "src/projects.rs"])
+        XCTAssertEqual(page?.sources.first?.claims, 2)
         let found = await m.searchWiki("rebuilds the whole list")
         XCTAssertEqual(found?.hits.first?.heading, "Rebuilding rows")
         // Its graph and its page's diagram drawn, in the phone's colours.
