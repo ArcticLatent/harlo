@@ -288,7 +288,16 @@ final class HarloUITests: XCTestCase {
         see("The wiki's pages and their links", timeout: 15)
         shot("15d-wiki-graph")
         tap("Pages")
-        tap("Sidebar")
+        // (The page's row, once the list is back from the graph; a tap
+        // while it switches can land nowhere, so again if the page isn't up.)
+        let row = app.descendants(matching: .any).matching(identifier: "wikiPage")
+            .matching(NSPredicate(format: "label BEGINSWITH %@", "Sidebar")).firstMatch
+        let meta = app.descendants(matching: .any)["wikiPageMeta"]
+        XCTAssertTrue(row.waitForExistence(timeout: 8), "the Sidebar page's row")
+        for _ in 0..<3 where !meta.exists {
+            if row.exists && row.isHittable { row.tap() }
+            _ = meta.waitForExistence(timeout: 5)
+        }
         see("checked against the code")
         see("Rebuilding rows")
         see("Diagram", timeout: 15)
