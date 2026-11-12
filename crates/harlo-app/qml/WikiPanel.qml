@@ -505,28 +505,41 @@ Rectangle {
                         wrapMode: Text.Wrap
                         font.pixelSize: Theme.px(12.5)
                     }
-                    // What the page is: its kind, when it was checked against
-                    // the code, and its summary.
+                    // The page's title, its summary as the lede, then what
+                    // it is: its kind and when it was checked against the code.
+                    Label {
+                        objectName: "wikiPageTitle"
+                        Layout.fillWidth: true
+                        Layout.topMargin: 6
+                        visible: text !== ""
+                        text: root.pageView && !root.pageView.error ? root.pageView.title || "" : ""
+                        color: Theme.text
+                        font.pixelSize: Theme.px(21)
+                        font.weight: Font.DemiBold
+                        wrapMode: Text.Wrap
+                    }
+                    Label {
+                        objectName: "wikiPageLede"
+                        Layout.fillWidth: true
+                        Layout.topMargin: 6
+                        visible: text !== ""
+                        text: root.pageView && !root.pageView.error ? root.pageView.description || "" : ""
+                        color: Theme.textMuted
+                        font.pixelSize: Theme.px(14)
+                        lineHeight: 1.15
+                        wrapMode: Text.Wrap
+                    }
                     Label {
                         objectName: "wikiPageMeta"
                         Layout.fillWidth: true
-                        Layout.topMargin: 4
+                        Layout.topMargin: 8
+                        Layout.bottomMargin: 10
                         visible: text !== ""
                         text: !root.pageView || root.pageView.error ? "" : [root.pageView.type ? root.pageView.type.charAt(0).toUpperCase() + root.pageView.type.slice(1) : "",
                                                                            root.pageView.verified ? "checked against the code " + root.ago(root.pageView.verified) : ""].filter(x => x !== "").join(" · ")
                         color: Theme.textFaint
                         font.pixelSize: Theme.px(11.5)
                         elide: Text.ElideRight
-                    }
-                    Label {
-                        Layout.fillWidth: true
-                        Layout.topMargin: 4
-                        Layout.bottomMargin: 6
-                        visible: text !== ""
-                        text: root.pageView && !root.pageView.error ? root.pageView.description || "" : ""
-                        color: Theme.textMuted
-                        font.pixelSize: Theme.px(12.5)
-                        wrapMode: Text.Wrap
                     }
                     Repeater {
                         id: blocks
@@ -537,8 +550,15 @@ Rectangle {
                             required property int index
                             readonly property string anchor: modelData.anchor || ""
                             readonly property string kind: modelData.kind
+                            // (A heading opens its block: the room above it,
+                            // as Prose gives it, is the block's, since a
+                            // document's first line gets none.)
+                            readonly property int level: kind === "prose" && /^<h[1-6]/.test(modelData.html || "") ? Number(modelData.html.charAt(2)) : 0
+                            // (The page's own title is drawn above it.)
+                            readonly property string html: kind !== "prose" ? "" : index === 0 ? (modelData.html || "").replace(/^<h1[^>]*>[\s\S]*?<\/h1>\s*/, "") : modelData.html || ""
                             Layout.fillWidth: true
-                            Layout.topMargin: kind === "prose" ? 0 : 8
+                            visible: kind !== "prose" || html.trim() !== ""
+                            Layout.topMargin: kind !== "prose" ? 8 : level === 0 || index === 0 && level === 1 ? 0 : [0, 24, 22, 18, 16, 14, 14][level]
                             Layout.bottomMargin: kind === "prose" ? 0 : 8
                             implicitHeight: kind === "prose" ? prose.implicitHeight : kind === "code" ? codeWell.height : diagram.height
                             TextEdit {
@@ -547,7 +567,7 @@ Rectangle {
                                 visible: block.kind === "prose"
                                 width: parent.width
                                 textFormat: TextEdit.RichText
-                                text: visible ? Theme.htmlStyle + Theme.proseHtml(block.modelData.html, -1, block.index === 0) : ""
+                                text: visible ? Theme.htmlStyle + Theme.proseHtml(block.html, -1, true) : ""
                                 font.family: Theme.uiFont
                                 font.pixelSize: Theme.px(13.5)
                                 color: Theme.foreground

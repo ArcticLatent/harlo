@@ -8171,6 +8171,10 @@ ApplicationWindow {
             const meta = win.findName("wikiPageMeta", wikiPanel)
             win.check(meta && meta.text === "Overview", "a page says what kind it is (" + (meta ? meta.text : "") + ")")
             win.check(win.findText("Where to start.", wikiPanel) !== null, "and its summary")
+            const title = win.findName("wikiPageTitle", wikiPanel), lede = win.findName("wikiPageLede", wikiPanel)
+            win.check(title && title.text === "Quickstart" && lede && title.y < lede.y && lede.y < meta.y
+                      && win.findAllNames("wikiProse", wikiPanel).every(t => !t.visible || t.text.indexOf(">Quickstart<") < 0),
+                      "its title first, then its summary and kind, the title not again in its text")
             win.clickLink(win.wikiProse("job runner"), "job runner") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: win.waitUntil(wikiPanelSteps, () => wikiPanel.openPage === "architecture/jobs.md", 10000) }
