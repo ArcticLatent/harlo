@@ -313,6 +313,9 @@ pub struct Agent {
     pub effort: Option<String>,
     cwd: PathBuf,
     instructions: String,
+    /// What was added to them for this agent (a subagent's profile): kept
+    /// when they're read again from the project.
+    added: String,
     tools: Tools,
     history: Vec<Value>,
     /// Each message's entry id in the log.
@@ -331,6 +334,9 @@ pub struct Agent {
     pub totals: Totals,
     /// The last request's usage (the context's size).
     pub last_usage: Value,
+    /// How many of the history's messages that usage covers (its reply
+    /// counted as output): those after it are new since.
+    measured: usize,
     pub gate: Option<Arc<dyn Gate>>,
     pub harlo: Option<Arc<dyn Harlo>>,
     /// A subagent's tools (None: all of them, and `task`).
@@ -380,6 +386,7 @@ impl Agent {
         let profiles = crate::profiles::find(&cwd, &home(), &crate::auth::config_dir());
         Agent {
             instructions: instructions(&cwd, sandbox.as_deref()),
+            added: String::new(),
             tools: {
                 let mut t = Tools::new(cwd.clone(), spill);
                 t.set_aside(past.originals, true);
@@ -399,6 +406,7 @@ impl Agent {
             logged: (past.model, past.effort),
             totals: Totals::default(),
             last_usage: Value::Null,
+            measured: 0,
             gate: None,
             harlo: None,
             allowed: None,
@@ -834,6 +842,10 @@ impl Agent {
                 self.log.append(json!({ "type": "model_change", "provider": provider, "modelId": id }))?;
                 self.logged.0 = Some(self.model.clone());
                 show(Shown::ModelChanged(&self.model));
+                // (A smaller window: made to fit first, as an overflow is.)
+                if self.full().await {
+                    bail!("The conversation is longer than {}'s context window allows: it's made shorter first.", self.model);
+                }
                 let images = self.takes_images().await;
                 let asked = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &self.history, session: &key, specs: &specs, tools: true, images, trigger: false };
                 send(asked, show).await?
@@ -843,6 +855,8 @@ impl Agent {
         self.count(&usage);
         show(Shown::Usage { model: message["model"].as_str().unwrap_or_default(), usage: &usage });
         self.last_usage = usage;
+        // (The reply, pushed next, is its output.)
+        self.measured = self.history.len() + 1;
         Ok(message)
     }
 
@@ -903,6 +917,13 @@ impl Agent {
 
     pub fn add_instructions(&mut self, text: &str) {
         self.instructions.push_str(text);
+        self.added.push_str(text);
+    }
+
+    /// The project's instructions as they are now (after a compaction),
+    /// and what was added for this agent.
+    fn reread_instructions(&mut self) {
+        self.instructions = instructions(&self.cwd, self.tools.sandbox.as_deref()) + &self.added;
     }
 
     /// Starts the MCP servers configured (once; not for a subagent), or
@@ -1048,7 +1069,7 @@ impl Agent {
     /// Whether the context is past where old outputs are set aside: how
     /// much of the newest conversation to keep as it is.
     async fn set_aside_point(&mut self) -> Option<u64> {
-        let tokens = self.context_tokens();
+        let tokens = self.next_tokens();
         if tokens == 0 {
             return None;
         }
@@ -1061,7 +1082,7 @@ impl Agent {
     /// tokens as they are; `context`: the context's size (0: the last
     /// request's). The tokens freed (0: not enough to be worth it).
     fn set_aside(&mut self, keep: u64, context: u64, show: &mut (dyn FnMut(Shown) + Send)) -> Result<u64> {
-        let context = if context == 0 { self.context_tokens() } else { context };
+        let context = if context == 0 { self.next_tokens() } else { context };
         let (picked, saved) = stubs::pick(&self.history, keep, context);
         if picked.is_empty() {
             return Ok(0);
@@ -1077,14 +1098,30 @@ impl Agent {
         let after = context.saturating_sub(saved);
         if context > 0 {
             self.last_usage = json!({ "input_tokens": after, "output_tokens": 0 });
+            self.measured = self.history.len();
         }
         show(Shown::SetAside { count: picked.len(), saved, after });
         Ok(saved)
     }
 
-    /// Whether the context is past where it's compacted.
+    /// The next request's size: the last one measured plus what's been
+    /// added since (estimated); with none measured (a resumed session, a
+    /// server that sends no usage), the whole request estimated.
+    pub fn next_tokens(&self) -> u64 {
+        match self.last_usage["input_tokens"].as_u64() {
+            Some(_) => self.context_tokens() + self.history.get(self.measured..).unwrap_or_default().iter().map(compact::estimate).sum::<u64>(),
+            None => self.estimate_whole(),
+        }
+    }
+
+    /// The whole request estimated: its instructions, tools and history.
+    fn estimate_whole(&self) -> u64 {
+        compact::estimate_text(&self.system()) + compact::estimate_text(&self.specs().to_string()) + self.history.iter().map(compact::estimate).sum::<u64>()
+    }
+
+    /// Whether the next request is past where the context is compacted.
     async fn full(&mut self) -> bool {
-        let tokens = self.context_tokens();
+        let tokens = self.next_tokens();
         if tokens == 0 {
             return false;
         }
@@ -1106,11 +1143,7 @@ impl Agent {
         }
         let Some(first_kept) = self.ids.get(cut).cloned() else { return Compacted::Nothing };
         show(Shown::CompactionStart { reason });
-        // (The last request's count when there was one since the start.)
-        let tokens_before = match self.context_tokens() {
-            0 => compact::estimate(&json!(self.instructions)) + self.history.iter().map(compact::estimate).sum::<u64>(),
-            n => n,
-        };
+        let tokens_before = self.next_tokens();
         let (system, specs) = (self.system(), self.specs());
         let key = self.cache_key.clone().unwrap_or_else(|| self.log.id.clone());
         let images = self.takes_images().await;
@@ -1200,10 +1233,10 @@ impl Agent {
         self.history.splice(..cut, [crate::session::summary_message(&entry)]);
         self.ids.splice(..cut, [id]);
         self.files = files;
-        // The project's instructions as they are now.
-        self.instructions = instructions(&self.cwd, self.tools.sandbox.as_deref());
-        let after = compact::estimate(&json!(self.instructions)) + self.history.iter().map(compact::estimate).sum::<u64>();
+        self.reread_instructions();
+        let after = self.estimate_whole();
         self.last_usage = json!({ "input_tokens": after, "output_tokens": 0 });
+        self.measured = self.history.len();
         let result = json!({ "summary": summary, "firstKeptEntryId": first_kept, "tokensBefore": tokens_before, "estimatedTokensAfter": after });
         show(Shown::CompactionEnd { reason, result: Some(&result), error: None, will_retry: reason == "overflow" });
         Compacted::Done(result)
@@ -1838,6 +1871,52 @@ mod tests {
         assert_eq!(settled_prefix(&h), 4);
         assert_eq!(settled_prefix(&h[..4]), 4);
         assert_eq!(settled_prefix(&h[..2]), 1);
+    }
+
+    #[test]
+    fn a_profile_outlasts_rereading_the_instructions() {
+        let cwd = std::env::temp_dir().join(format!("harlo-agent-profile-{}", std::process::id()));
+        std::fs::create_dir_all(&cwd).unwrap();
+        std::fs::write(cwd.join("AGENTS.md"), "Project rule one.").unwrap();
+        let mut agent = Agent::new(cwd.clone(), crate::session::Log::ephemeral(&cwd), crate::session::Past::default(), "test/m".into(), None);
+        agent.add_instructions("\n<agent_profile name=\"reviewer\">\nOnly review.\n</agent_profile>\n");
+        // (A compaction reads the project's again: a rule changed meanwhile.)
+        std::fs::write(cwd.join("AGENTS.md"), "Project rule two.").unwrap();
+        agent.reread_instructions();
+        let system = agent.system();
+        assert!(system.contains("Project rule two.") && !system.contains("Project rule one."), "the project's as they are now");
+        assert_eq!(system.matches("<agent_profile name=\"reviewer\">").count(), 1, "the profile kept, once: {system}");
+        let _ = std::fs::remove_dir_all(&cwd);
+    }
+
+    #[tokio::test]
+    async fn the_next_request_is_sized_before_it_goes() {
+        let cwd = std::env::temp_dir();
+        let mut agent = Agent::new(cwd.clone(), crate::session::Log::ephemeral(&cwd), crate::session::Past::default(), "test/small".into(), None);
+        agent.known.windows.insert("test/small".into(), 40_000);
+        // Nothing measured yet (a new or resumed session): the whole request
+        // estimated, its instructions counted (not 4 tokens).
+        agent.instructions = "x".repeat(40_000);
+        let alone = agent.next_tokens();
+        assert!(alone >= 10_000, "instructions counted: {alone}");
+        agent.instructions.clear();
+        agent.history = vec![json!({ "role": "user", "content": "y".repeat(160_000) })];
+        assert!(agent.full().await, "a resumed nearly-full session compacts before its first request");
+        // Measured: the last request, plus what's been added since.
+        agent.history = vec![json!({ "role": "user", "content": "go" })];
+        agent.last_usage = json!({ "input_tokens": 1_000, "output_tokens": 100 });
+        agent.measured = agent.history.len();
+        assert_eq!(agent.next_tokens(), 1_100);
+        assert!(!agent.full().await);
+        for i in 0..3 {
+            agent.history.push(json!({ "role": "toolResult", "toolCallId": format!("c{i}"), "content": "z".repeat(40_000) }));
+        }
+        let next = agent.next_tokens();
+        assert!(next > 30_000, "three large tool results counted: {next}");
+        assert!(agent.full().await, "they make the next request too big, before it's sent");
+        // A server that sent no usage: unknown, so the whole is estimated.
+        agent.last_usage = json!({});
+        assert!(agent.next_tokens() > 30_000);
     }
 
     #[test]

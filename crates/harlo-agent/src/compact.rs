@@ -67,6 +67,12 @@ pub fn estimate(m: &Value) -> u64 {
     (chars as u64).div_ceil(4) + 4
 }
 
+/// Roughly how many tokens a piece of text is (instructions, tool
+/// schemas), as `estimate` counts a message's.
+pub fn estimate_text(text: &str) -> u64 {
+    (text.len() as u64).div_ceil(4) + 4
+}
+
 /// Where to cut `history` to keep its newest `keep` tokens: the index of
 /// the first message kept (one of the user's or the model's, so no call is
 /// parted from its result). None when there's nothing worth summarizing.

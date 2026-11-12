@@ -19,8 +19,84 @@ use crate::sandbox::Sandbox;
 pub const MAX_LINES: usize = 600;
 pub const MAX_BYTES: usize = 16 * 1024;
 const DEFAULT_TIMEOUT: u64 = 120;
-/// Kept in memory at most (the rest still goes to the file).
+/// Kept in memory at most; past that the output streams to its file, with
+/// its last TAIL_BYTES kept for showing the end.
 const KEEP_BYTES: usize = 16 * 1024 * 1024;
+const TAIL_BYTES: usize = 256 * 1024;
+
+/// A command's output as it comes: all of it while it's small; past
+/// KEEP_BYTES its start, the whole of it in a file, and its end.
+struct Collected {
+    all: Vec<u8>,
+    total: usize,
+    lines: usize,
+    spill: Option<(std::fs::File, String)>,
+    tail: std::collections::VecDeque<u8>,
+    /// The file couldn't be made: what's past `all` is lost.
+    lost: bool,
+}
+
+impl Collected {
+    fn new() -> Self {
+        Collected { all: Vec::new(), total: 0, lines: 0, spill: None, tail: std::collections::VecDeque::new(), lost: false }
+    }
+
+    fn take(&mut self, b: &[u8], dir: &Path) {
+        use std::io::Write;
+        self.total += b.len();
+        self.lines += b.iter().filter(|c| **c == b'\n').count();
+        if self.spill.is_none() && !self.lost && self.all.len() + b.len() <= KEEP_BYTES {
+            self.all.extend_from_slice(b);
+            return;
+        }
+        if self.spill.is_none() && !self.lost {
+            match open_spill(dir).and_then(|(mut f, path)| f.write_all(&self.all).ok().map(|_| (f, path))) {
+                Some(spill) => {
+                    // (The end so far, for output only just past the limit.)
+                    self.tail.extend(&self.all[self.all.len().saturating_sub(TAIL_BYTES)..]);
+                    self.spill = Some(spill);
+                }
+                None => self.lost = true,
+            }
+        }
+        match &mut self.spill {
+            Some((f, _)) => {
+                let _ = f.write_all(b);
+                self.tail.extend(b);
+                let over = self.tail.len().saturating_sub(TAIL_BYTES);
+                self.tail.drain(..over);
+            }
+            None => {}
+        }
+    }
+
+    /// What the model sees of it.
+    fn shown(self, spill_dir: &Path) -> String {
+        let head = String::from_utf8_lossy(&self.all).into_owned();
+        match &self.spill {
+            None => shorten(&head, self.total, spill_dir),
+            Some((_, path)) => {
+                let tail_bytes: Vec<u8> = self.tail.iter().copied().collect();
+                let tail = String::from_utf8_lossy(&tail_bytes).into_owned();
+                // (The first line of the end may be cut part way: left out.)
+                let tail_lines: Vec<&str> = tail.lines().skip(1).collect();
+                let head_lines: Vec<&str> = head.lines().collect();
+                let count = self.lines + usize::from(!head.is_empty() && !tail.ends_with('\n'));
+                cut_view(&head_lines, &tail_lines, false, count, Some(path.clone()), String::new())
+            }
+        }
+    }
+}
+
+fn open_spill(dir: &Path) -> Option<(std::fs::File, String)> {
+    std::fs::create_dir_all(dir).ok()?;
+    let mut b = [0u8; 6];
+    getrandom::fill(&mut b).ok()?;
+    let name: String = b.iter().map(|x| format!("{x:02x}")).collect();
+    let path = dir.join(format!("output-{name}.log"));
+    let f = std::fs::File::create(&path).ok()?;
+    Some((f, path.to_string_lossy().into_owned()))
+}
 
 const ENV: &[(&str, &str)] = &[
     ("PAGER", "cat"),
@@ -99,42 +175,40 @@ pub async fn run(command: &str, cwd: &Path, timeout: Option<u64>, spill_dir: &Pa
     };
     let mut group = Group(child.id().map(|p| p as i32));
     let (mut out, mut err) = (child.stdout.take().expect("piped"), child.stderr.take().expect("piped"));
-    // Both streams into one, as they come.
+    // Both streams into one, as they come (kept outside the work, so a
+    // timeout still has what it printed).
+    let mut got = Collected::new();
     let collect = async {
-        let mut all: Vec<u8> = Vec::new();
-        let mut total = 0usize;
         let (mut b1, mut b2) = ([0u8; 8192], [0u8; 8192]);
         let (mut o_open, mut e_open) = (true, true);
         while o_open || e_open {
             tokio::select! {
-                n = out.read(&mut b1), if o_open => match n { Ok(0) | Err(_) => o_open = false, Ok(n) => { total += n; if all.len() < KEEP_BYTES { all.extend_from_slice(&b1[..n]); } } },
-                n = err.read(&mut b2), if e_open => match n { Ok(0) | Err(_) => e_open = false, Ok(n) => { total += n; if all.len() < KEEP_BYTES { all.extend_from_slice(&b2[..n]); } } },
+                n = out.read(&mut b1), if o_open => match n { Ok(0) | Err(_) => o_open = false, Ok(n) => got.take(&b1[..n], spill_dir) },
+                n = err.read(&mut b2), if e_open => match n { Ok(0) | Err(_) => e_open = false, Ok(n) => got.take(&b2[..n], spill_dir) },
             }
         }
-        (all, total)
     };
     let work = async {
-        let (bytes, total) = collect.await;
-        let status = child.wait().await;
-        (bytes, total, status)
+        collect.await;
+        child.wait().await
     };
-    let (bytes, total, status, timed_out) = match tokio::time::timeout(Duration::from_secs(secs), work).await {
-        Ok((b, t, s)) => (b, t, s.ok(), false),
+    let (status, timed_out) = match tokio::time::timeout(Duration::from_secs(secs), work).await {
+        Ok(s) => (s.ok(), false),
         Err(_) => {
             group.kill(libc::SIGTERM);
             tokio::time::sleep(Duration::from_millis(1500)).await;
             group.kill(libc::SIGKILL);
-            (Vec::new(), 0, None, true)
+            (None, true)
         }
     };
     // Finished: anything it left in the background goes too.
     group.kill(libc::SIGKILL);
     group.0 = None;
     if timed_out {
-        return (format!("The command was stopped after {secs} seconds, with everything it started. If it needs longer and isn't waiting for input, run it again with a larger timeout."), true);
+        let printed = if got.total == 0 { "It printed nothing.".to_owned() } else { format!("What it printed:\n{}", got.shown(spill_dir)) };
+        return (format!("The command was stopped after {secs} seconds, with everything it started. If it needs longer and isn't waiting for input, run it again with a larger timeout. {printed}"), true);
     }
-    let text = String::from_utf8_lossy(&bytes).into_owned();
-    let mut shown = shorten(&text, total, spill_dir);
+    let mut shown = got.shown(spill_dir);
     let code = status.and_then(|s| s.code());
     let failed = code != Some(0);
     match code {
@@ -156,12 +230,19 @@ pub fn shorten(text: &str, total: usize, spill_dir: &Path) -> String {
         return text.trim_end_matches('\n').to_owned();
     }
     let file = save(text, spill_dir);
+    let more = if total > text.len() { format!(" (and {} more bytes not kept)", total - text.len()) } else { String::new() };
+    cut_view(&lines, &lines, true, lines.len(), file, more)
+}
+
+/// The start of `head` and the end of `tail` (one text: `same`, so they
+/// don't overlap), with notices at the top and at the cut.
+fn cut_view(head_src: &[&str], tail_src: &[&str], same: bool, count: usize, file: Option<String>, more: String) -> String {
     // A quarter for the start, the rest for the end (errors are usually last).
     let (head_lines, head_bytes) = (MAX_LINES / 4, MAX_BYTES / 4);
     let (tail_lines, tail_bytes) = (MAX_LINES - head_lines, MAX_BYTES - head_bytes);
     let mut head = Vec::new();
     let mut size = 0;
-    for l in &lines {
+    for l in head_src {
         if head.len() >= head_lines || size + l.len() + 1 > head_bytes {
             break;
         }
@@ -170,7 +251,7 @@ pub fn shorten(text: &str, total: usize, spill_dir: &Path) -> String {
     }
     let mut tail = Vec::new();
     size = 0;
-    for l in lines.iter().skip(head.len()).rev() {
+    for l in tail_src.iter().skip(if same { head.len() } else { 0 }).rev() {
         if tail.len() >= tail_lines || size + l.len() + 1 > tail_bytes {
             break;
         }
@@ -178,15 +259,13 @@ pub fn shorten(text: &str, total: usize, spill_dir: &Path) -> String {
         tail.push(*l);
     }
     tail.reverse();
-    let cut = lines.len() - head.len() - tail.len();
+    let cut = count.saturating_sub(head.len() + tail.len());
     let saved = match &file {
         Some(p) => format!("The whole output is in {p} (read it with offset and limit, or grep it)."),
         None => "The whole output couldn't be saved.".into(),
     };
-    let more = if total > text.len() { format!(" (and {} more bytes not kept)", total - text.len()) } else { String::new() };
     format!(
-        "[Output shortened: {} lines{more}; showing the first {} and the last {}. {saved}]\n{}\n[… {cut} lines cut here …]\n{}",
-        lines.len(),
+        "[Output shortened: {count} lines{more}; showing the first {} and the last {}. {saved}]\n{}\n[… {cut} lines cut here …]\n{}",
         head.len(),
         tail.len(),
         head.join("\n"),
@@ -229,6 +308,28 @@ mod tests {
         assert!(failed && out.contains("stopped after 1 seconds"), "{out}");
         tokio::time::sleep(Duration::from_secs(4)).await;
         assert!(!marker.exists(), "the background child was left running");
+    }
+
+    #[tokio::test]
+    async fn a_timeout_keeps_what_was_printed() {
+        let dir = std::env::temp_dir();
+        let (out, failed) = run("echo 'error: E0308 mismatched types'; sleep 30", &dir, Some(1), &dir, None).await;
+        assert!(failed && out.contains("stopped after 1 seconds") && out.contains("What it printed:") && out.contains("error: E0308"), "{out}");
+        let (out, _) = run("sleep 30", &dir, Some(1), &dir, None).await;
+        assert!(out.contains("It printed nothing."), "{out}");
+    }
+
+    #[tokio::test]
+    async fn output_past_the_memory_limit_keeps_its_end() {
+        let spill = std::env::temp_dir().join(format!("harlo-agent-spill-{}", std::process::id()));
+        // 20 MiB of lines, then the line that matters.
+        let cmd = "yes 0123456789012345678901234567890123456789012345678901234567890123 | head -c 20971520; echo; echo 'FINAL: test x failed'";
+        let (out, failed) = run(cmd, &std::env::temp_dir(), Some(60), &spill, None).await;
+        assert!(!failed && out.contains("FINAL: test x failed") && !out.contains("not kept"), "the real end shown: {}", &out[out.len().saturating_sub(300)..]);
+        let file = out.split("The whole output is in ").nth(1).and_then(|r| r.split(' ').next()).expect("a file");
+        let saved = std::fs::read(file).unwrap();
+        assert!(saved.len() > 20 * 1024 * 1024 && String::from_utf8_lossy(&saved[saved.len() - 64..]).contains("FINAL: test x failed"), "the whole output in the file");
+        let _ = std::fs::remove_dir_all(&spill);
     }
 
     /// In the sandbox (where bubblewrap works here): what it can change and
