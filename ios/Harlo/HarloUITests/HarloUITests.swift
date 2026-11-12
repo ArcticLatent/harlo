@@ -292,6 +292,10 @@ final class HarloUITests: XCTestCase {
         let row = app.descendants(matching: .any).matching(identifier: "wikiPage")
             .matching(NSPredicate(format: "label BEGINSWITH %@", "Sidebar")).firstMatch
         let meta = app.descendants(matching: .any)["wikiPageMeta"]
+        // (Below the fold with large text: a list makes rows as they come
+        // into view.)
+        _ = row.waitForExistence(timeout: 3)
+        for _ in 0..<4 where !(row.exists && row.isHittable) { app.swipeUp() }
         XCTAssertTrue(row.waitForExistence(timeout: 8), "the Sidebar page's row")
         for _ in 0..<3 where !meta.exists {
             if row.exists && row.isHittable { row.tap() }
@@ -313,6 +317,7 @@ final class HarloUITests: XCTestCase {
         // box opens it. (The search stays, back from a page.)
         app.navigationBars.buttons.element(boundBy: 0).tap()
         XCTAssertTrue(app.searchFields["Search the wiki"].waitForExistence(timeout: 8), "the search, back from a page")
+        for _ in 0..<4 where !(pick.exists && pick.isHittable) { app.swipeDown() }
         tap("Graph")
         let boxes = app.descendants(matching: .any).matching(identifier: "wikiGraphBox")
         let readLast = boxes.matching(NSPredicate(format: "label == %@", "Read Sidebar, read last")).firstMatch
