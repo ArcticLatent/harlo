@@ -127,10 +127,20 @@ pub fn writing_tools(server: &Server) -> Vec<Value> {
         .collect()
 }
 
+/// The rules of a repository's `.openwikiignore` (comments and blank lines
+/// left out).
+pub fn ignored(root: &Path) -> Vec<String> {
+    read_file(root, ".openwikiignore")
+        .map(|t| t.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).map(str::to_owned).collect())
+        .unwrap_or_default()
+}
+
 /// A wiki session's first message: what to do (`mode`: "create",
-/// "update", or "continue" an interrupted run of `run_mode`), then
-/// OpenWiki's own steps from the bundled version's skill.
-pub fn run_prompt(rt: &Runtime, mode: &str, run_mode: &str) -> String {
+/// "update", or "continue" an interrupted run of `run_mode`), the paths
+/// `.openwikiignore` keeps out (`ignored`: OpenWiki's own command line
+/// blocks reading them, but the session reads with its agent's tools, so
+/// it's told), then OpenWiki's own steps from the bundled version's skill.
+pub fn run_prompt(rt: &Runtime, mode: &str, run_mode: &str, ignored: &[String]) -> String {
     let ask = match mode {
         "create" => "Create this repository's wiki with OpenWiki: call openwiki_begin with mode \"init\".".to_owned(),
         "update" => "Update this repository's wiki with OpenWiki, so it matches the code again: call openwiki_begin with mode \"update\".".to_owned(),
@@ -139,7 +149,15 @@ pub fn run_prompt(rt: &Runtime, mode: &str, run_mode: &str) -> String {
     let skill = rt.skill().unwrap_or_default();
     let steps = skill.find("## Required sequence").map(|i| &skill[i..]).unwrap_or("Follow the openwiki tools' descriptions: begin, plan, then each page in turn, then finish.");
     // (harlo's message: shown as harlo's line, the whole text a click away.)
-    format!("{}{ask}\n\nharlo fills in `root` for every openwiki tool, so leave it out (and skip resolving the top-level). Write only the wiki: never change the code. OpenWiki's steps:\n\n{steps}", crate::transcript::HARLO_PREFIX)
+    let keep_out = if ignored.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n\nThis repository's .openwikiignore keeps these paths out of the wiki: {}. Don't read, search, run or cite anything under them, and don't describe them; on an update, plan every page that mentions them and take that out.",
+            ignored.iter().map(|r| format!("`{r}`")).collect::<Vec<_>>().join(", ")
+        )
+    };
+    format!("{}{ask}{keep_out}\n\nharlo fills in `root` for every openwiki tool, so leave it out (and skip resolving the top-level). Write only the wiki: never change the code. OpenWiki's steps:\n\n{steps}", crate::transcript::HARLO_PREFIX)
 }
 
 // ---- The runtime ----
@@ -1380,15 +1398,22 @@ esac; done"#
         assert_eq!(names.len(), 8);
         assert!(names.contains(&"openwiki_submit_page") && names.contains(&"openwiki_search") && !names.contains(&"openwiki_list_wikis"));
         let rt = Runtime { dir: "/nowhere".into() };
-        let p = run_prompt(&rt, "create", "");
+        let p = run_prompt(&rt, "create", "", &[]);
         assert!(p.contains("mode \"init\"") && p.contains("leave it out") && p.contains("never change the code"));
+        assert!(!p.contains(".openwikiignore keeps"), "nothing ignored: not a word about it");
+        let (root, _gone) = fixture();
+        std::fs::write(root.join(".openwikiignore"), "# local tools\nscripts/\n\nTESTING.md\n").unwrap();
+        let rules = ignored(&root);
+        assert_eq!(rules, ["scripts/", "TESTING.md"]);
+        let kept = run_prompt(&rt, "update", "", &rules);
+        assert!(kept.contains("keeps these paths out of the wiki: `scripts/`, `TESTING.md`") && kept.contains("plan every page that mentions them"), "{kept}");
         // (Sent as harlo's: shown as its line, in words.)
         let said = p.strip_prefix(crate::transcript::HARLO_PREFIX).expect("harlo's message");
         assert!(crate::orchestration::said_plainly(said).starts_with("Wiki: create. The agent writes"));
-        assert!(run_prompt(&rt, "continue", "init").contains("mode \"init\""));
-        assert!(run_prompt(&rt, "continue", "update").contains("mode \"update\""));
+        assert!(run_prompt(&rt, "continue", "init", &[]).contains("mode \"init\""));
+        assert!(run_prompt(&rt, "continue", "update", &[]).contains("mode \"update\""));
         if let Some(rt) = runtime() {
-            assert!(run_prompt(&rt, "update", "").contains("openwiki_submit_plan"));
+            assert!(run_prompt(&rt, "update", "", &[]).contains("openwiki_submit_plan"));
         }
     }
 

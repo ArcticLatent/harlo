@@ -2364,12 +2364,13 @@ impl Workspace {
             let host = harlo_core::remote::host_of(&root);
             let ready = harlo_core::openwiki::server(host.as_deref());
             let run_mode = harlo_core::openwiki::state(&root).run.map(|r| r.mode).unwrap_or_default();
+            let ignored = harlo_core::openwiki::ignored(&root);
             let _ = thread.queue(move |mut this| {
                 if let Err(e) = ready {
                     this.as_mut().set_notice_text(&format!("OpenWiki didn't start: {e:#}"), true);
                     return;
                 }
-                let prompt = harlo_core::openwiki::run_prompt(&rt, &mode, &run_mode);
+                let prompt = harlo_core::openwiki::run_prompt(&rt, &mode, &run_mode, &ignored);
                 let title = match mode.as_str() { "create" => "Wiki: create", "update" => "Wiki: update", _ => "Wiki: continue" };
                 let cwd_of_run = root.clone();
                 let key = this.as_mut().start_session_budget(kind, root, &model, "", true, None);
