@@ -8080,6 +8080,8 @@ ApplicationWindow {
             // Creating the wiki: a session of its own runs OpenWiki's steps
             // with the writing tools, which only it gets.
             Workspace.setSetting("default_harness", "harlo")
+            // (Written with the project's model for Harlo.)
+            Workspace.setSetting("project_model_" + win.wikiProject + "_harlo", "fake/fake-helper")
             win.wikiRequests = win.modelRequests().length
             win.wikiKeyBefore = Workspace.activeKey
             win.check(Workspace.startWikiRun("project:" + win.wikiProject, "create") === "", "Create starts") } }
@@ -8094,6 +8096,7 @@ ApplicationWindow {
             win.check(["openwiki_begin", "openwiki_submit_plan", "openwiki_next_page", "openwiki_submit_page", "openwiki_finish"].every(n => names.some(m => m.endsWith(n))), "the wiki session gets OpenWiki's writing tools (" + names.filter(n => n.indexOf("openwiki") >= 0).join(", ") + ")")
             win.check(asked.indexOf("Create this repository's wiki with OpenWiki") >= 0 && asked.indexOf("Required sequence") >= 0, "and OpenWiki's own steps as its prompt")
             win.check(chat.session.title === "Wiki: create", "titled Wiki: create (" + chat.session.title + ")")
+            win.check(reqs.length > 0 && reqs.every(r => r.model === "fake-helper"), "with the project's model (" + reqs.map(r => r.model).filter((m, i, a) => a.indexOf(m) === i).join(", ") + ")")
             win.check(Workspace.approvalMode(Workspace.activeKey) === "write", "its writes go ahead (the write mode); commands still ask (" + Workspace.approvalMode(Workspace.activeKey) + ")")
             const said = win.chatText()
             win.check(said.indexOf("Wiki: complete") >= 0, "the run finishes (" + said.slice(said.lastIndexOf("Wiki:"), said.lastIndexOf("Wiki:") + 300) + ")")
@@ -8463,6 +8466,100 @@ ApplicationWindow {
             const t = win.lastToolResult()
             win.check(t.length > 80 && !/error|not found|Invalid/i.test(t.slice(0, 120)), "and reads what it found (" + win.demoBest + ": " + t.slice(0, 160) + ")")
             win.shotWindow("wiki-demo-session")
+            win.summary(); Qt.quit() } }
+    }
+
+    // The wiki on another machine (the test's SSH server; the demo project
+    // there): the bundled OpenWiki goes into the host's cache once, its
+    // server starts there over SSH, the panel lists, reads and searches the
+    // pages there, and a Harlo session there searches and reads them.
+    function hostOpenWiki() {
+        const cache = win.selftestDir + "/sshd/home/.cache/harlo"
+        return TestInput.listDir(cache).split("\n").filter(n => n.startsWith("openwiki-")).map(n => cache + "/" + n)
+    }
+    SequentialAnimation {
+        id: wikiRemoteSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlowikiremote"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            if (win.argValue("--theme-mode=")) Workspace.chooseThemeMode(win.argValue("--theme-mode="))
+            Workspace.setProviderEnabled("claude", false)
+            win.check(Remotes.saveHost("", "box", "ssh " + win.argValue("--ssh=")) === "", "the host is saved")
+            Remotes.connectHost("box") } }
+        ScriptAction { script: win.waitUntil(wikiRemoteSteps, () => JSON.parse(Remotes.hostsJson())[0].state === "connected", 30000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            win.check(win.hostOpenWiki().length === 0, "no OpenWiki on box yet")
+            Workspace.addProject("ssh://box" + win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const p = Workspace.projectList().map(l => l.split("\t")).find(p => p[1] === "repo")
+            win.wikiProject = p ? Number(p[0]) : -1
+            win.check(Workspace.instance === "box" && win.wikiProject >= 0 && p[2] === "harlo", "the demo project on box, with Harlo there")
+            Workspace.setSetting("wiki_" + win.wikiProject, "1")
+            win.harloKey = Workspace.newSession(win.wikiProject, "harlo")
+            Workspace.setApprovalMode(win.harloKey, "yolo")
+            windowSettings.rightMode = "wiki" } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: win.waitUntil(wikiRemoteSteps, () => wikiPanel.pages.length > 0 && !wikiPanel.st.loading, 30000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const pages = wikiPanel.pages, fresh = win.findName("wikiFreshness", wikiPanel)
+            win.check(wikiPanel.st.host === "box" && wikiPanel.st.root === "ssh://box" + win.argValue("--cwd="), "the panel reads the wiki on box (" + wikiPanel.st.root + ")")
+            win.check(pages.length === 6 && pages[0].path === "quickstart.md", "its pages, the quickstart first (" + pages.map(p => p.path).join(", ") + ")")
+            win.check(fresh && fresh.text.endsWith("· 1 commit since"), "how far behind box's code (" + (fresh ? fresh.text : "") + ")")
+            win.shotWindow("wiki-remote-pages")
+            wikiPanel.openWiki("architecture/orders.md", "refunds", false) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(wikiRemoteSteps, () => wikiPanel.openPage === "architecture/orders.md" && wikiPanel.loadingPage === "" && wikiPanel.pageView
+                                              && (wikiPanel.pageView.blocks || []).filter(b => b.kind === "mermaid").every(b => JSON.parse(Diagrams.diagram(b.code, Theme.isLight, "{}")).state !== "drawing"), 20000) }
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: {
+            const v = wikiPanel.pageView, blocks = v.blocks || []
+            win.check(!v.error && v.title === "Orders" && blocks.length > 5, "a page read from box (" + (v.error || v.title + ", " + blocks.length + " blocks") + ")")
+            const mer = blocks.filter(b => b.kind === "mermaid")
+            const drawn = mer.length ? JSON.parse(Diagrams.diagram(mer[0].code, Theme.isLight, "{}")) : {}
+            win.check(mer.length === 1 && drawn.state === "ready" && win.findAllNames("wikiDiagram", wikiPanel).length >= 1, "its diagram drawn (" + mer.length + ", " + drawn.state + " " + (drawn.error || "") + ", " + win.findAllNames("wikiDiagram", wikiPanel).length + " shown)")
+            win.check(blocks.some(b => String(b.html || "").indexOf("repo://shipyard/orders/service.py#L") >= 0), "its links to box's code")
+            win.shotWindow("wiki-remote-reader")
+            wikiPanel.closePage()
+            wikiPanel.search("assorted pallet weight") } }
+        PauseAnimation { duration: 300 }
+        // (The first search puts OpenWiki on box: some 250 MB over SSH.)
+        ScriptAction { script: win.waitUntil(wikiRemoteSteps, () => !wikiPanel.searching && wikiPanel.query === "assorted pallet weight", 150000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const r = wikiPanel.results || {}, hits = (r.hits || []).map(h => h.page.replace(/^openwiki\//, ""))
+            win.check(!r.plain && hits[0] === "architecture/manifest.md", "OpenWiki on box finds the page (" + (r.plain ? "plain text search: " : "") + hits.slice(0, 3).join(", ") + (r.error ? " " + r.error : "") + ")")
+            const ow = win.hostOpenWiki()
+            win.check(ow.length === 1 && TestInput.listDir(ow[0] + "/bin").split("\n").indexOf("node") >= 0 && TestInput.readFile(ow[0] + "/VERSION") !== "", "put in box's cache, once (" + ow.join(", ") + ")")
+            win.check(TestInput.listDir(win.selftestDir + "/data/harlo").split("\n").every(n => !n.startsWith("openwiki")), "nothing of it in this computer's data")
+            win.shotWindow("wiki-remote-search")
+            wikiPanel.search("") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(wikiRemoteSteps, () => chat.session.modelName !== "", 30000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            win.check(chat.session.harness === "harlo" && chat.session.cwd === "ssh://box" + win.argValue("--cwd="), "a Harlo session on box (" + chat.session.cwd + ")")
+            win.sendWiki("search the wiki for how to add a new report") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(wikiRemoteSteps, () => win.wikiAnswered(), 60000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const t = win.lastToolResult()
+            const found = /openwiki\/([\w\/.-]+\.md)#([\w-]*)/.exec(t)
+            win.check(found !== null && found[1] === "workflows/reports.md", "the session searches the wiki on box (" + t.slice(0, 200) + ")")
+            win.demoBest = found ? found[1] + "#" + found[2] : "quickstart.md"
+            win.sendWiki("read the wiki at openwiki/" + win.demoBest) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(wikiRemoteSteps, () => win.wikiAnswered(), 60000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const t = win.lastToolResult()
+            win.check(t.length > 80 && t.indexOf("register") >= 0 && !/error|not found|Invalid/i.test(t.slice(0, 120)), "and reads it (" + win.demoBest + ": " + t.slice(0, 160) + ")")
+            win.check(win.hostOpenWiki().length === 1, "the same OpenWiki on box served both")
+            win.shotWindow("wiki-remote-session")
             win.summary(); Qt.quit() } }
     }
 

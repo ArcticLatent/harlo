@@ -78,6 +78,10 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "writeFile"]
         fn write_file(self: &TestInput, path: &QString, text: &QString) -> bool;
+        /// A folder's entries, sorted, a line each ("" if it can't be read).
+        #[qinvokable]
+        #[cxx_name = "listDir"]
+        fn list_dir(self: &TestInput, path: &QString) -> QString;
     }
 }
 
@@ -125,6 +129,14 @@ impl qobject::TestInput {
 
     pub fn read_file(&self, path: &QString) -> QString {
         QString::from(&std::fs::read_to_string(path.to_string()).unwrap_or_default())
+    }
+
+    pub fn list_dir(&self, path: &QString) -> QString {
+        let mut names: Vec<String> = std::fs::read_dir(path.to_string())
+            .map(|d| d.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+            .unwrap_or_default();
+        names.sort();
+        QString::from(&names.join("\n"))
     }
 
     pub fn type_text(&self, text: &QString) {

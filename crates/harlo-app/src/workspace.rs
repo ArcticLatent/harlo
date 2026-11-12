@@ -2323,6 +2323,18 @@ impl Workspace {
         });
     }
 
+    /// The model a session started for a project gets when none is picked:
+    /// the project's own for that agent (Settings → Projects), else the
+    /// agent's default from Settings (not on another machine: its agent's
+    /// own there); "" the agent's own.
+    fn model_for(&self, project: Option<i64>, kind: HarnessKind, cwd: &Path) -> String {
+        let own = project.map(|p| self.setting_str(&format!("project_model_{p}_{}", kind.as_str()))).unwrap_or_default();
+        if !own.is_empty() || harlo_core::remote::host_of(cwd).is_some() {
+            return own;
+        }
+        self.setting_str(&format!("default_model_{}", kind.as_str()))
+    }
+
     pub fn start_wiki_run(self: Pin<&mut Self>, key: &QString, mode: &QString) -> QString {
         let mode = mode.to_string();
         let Some((cwd, project)) = self.wiki_folder(&key.to_string()) else {
@@ -2335,6 +2347,8 @@ impl Workspace {
         let Some(kind) = HarnessKind::parse(&kind) else {
             return QString::from("Pick a default agent first (Settings → General).");
         };
+        // (The project's model, as a new session from the phone gets.)
+        let model = self.model_for(Some(project), kind, &cwd);
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
             let root = harlo_core::openwiki::root_of(&cwd);
@@ -2349,7 +2363,7 @@ impl Workspace {
                 let prompt = harlo_core::openwiki::run_prompt(&rt, &mode, &run_mode);
                 let title = match mode.as_str() { "create" => "Wiki: create", "update" => "Wiki: update", _ => "Wiki: continue" };
                 let cwd_of_run = root.clone();
-                let key = this.as_mut().start_session_budget(kind, root, "", "", true, None);
+                let key = this.as_mut().start_session_budget(kind, root, &model, "", true, None);
                 this.as_mut().rust_mut().wiki_sessions.insert(key.clone());
                 if let Some(live) = registry::get(&key) {
                     live.handle.send_raw(json!({ "type": "set_session_name", "name": title }));
@@ -5852,11 +5866,8 @@ impl Workspace {
                 // (Settings → Projects), else the agent's default from
                 // Settings (the setup guide; not on another machine: its
                 // agent's own).
-                let remote = harlo_core::remote::host_of(&cwd).is_some();
-                let own = project.as_ref().map(|p| self.setting_str(&format!("project_model_{}_{}", p.id, kind.as_str()))).unwrap_or_default();
                 let model = match text("model") {
-                    m if m.is_empty() && !own.is_empty() => own,
-                    m if m.is_empty() && !remote => self.setting_str(&format!("default_model_{}", kind.as_str())),
+                    m if m.is_empty() => self.model_for(project.as_ref().map(|p| p.id), kind, &cwd),
                     m => m,
                 };
                 let key = self.as_mut().start_session_with(kind, cwd, &model, false);
