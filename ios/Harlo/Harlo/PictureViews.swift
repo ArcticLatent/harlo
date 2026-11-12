@@ -216,6 +216,8 @@ struct PictureViewer: View {
             }
             Button("Done") { dismiss() }
                 .font(.body.weight(.semibold))
+                // (Whole at any size: the title gives way, not Done.)
+                .fixedSize()
                 .frame(minHeight: 44)
                 .accessibilityIdentifier("pictureDone")
         }
