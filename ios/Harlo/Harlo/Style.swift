@@ -437,7 +437,9 @@ struct StatusPill: View {
                 }
                 Text(l.text).scaledFont(13, .medium)
             }
-            .foregroundStyle(Color(l.color))
+            // (Its words darkened just enough to read on its own tint over
+            // the card: a theme's accent alone can be too light there.)
+            .foregroundStyle(Color(l.color.legible(on: p.raised.mix(l.color, 0.13), toward: p.foreground)))
             .padding(.horizontal, 10)
             .frame(minHeight: 28)
             .background(Capsule().fill(Color(l.color).opacity(0.13)))
