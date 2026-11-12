@@ -127,6 +127,7 @@ struct WikiView: View {
     @State private var searching = false
     @State private var workspace = ""
     @State private var graph = false
+    @State private var zoom: ZoomedPicture?
 
     /// The pages by folder, in the wiki's order.
     var groups: [(name: String, pages: [WikiPage])] {
@@ -153,7 +154,7 @@ struct WikiView: View {
                     }
                     if graph && !wiki.mermaid.isEmpty {
                         Section {
-                            PagesGraph(source: wiki.mermaid)
+                            PagesGraph(source: wiki.mermaid, zoom: $zoom)
                         } footer: {
                             Text((wiki.graphPages.count < wiki.pages.count ? "The quickstart and the pages it links to or from. " : "") + "An arrow is a link from one page to another. Tap it to zoom.")
                         }
@@ -177,6 +178,7 @@ struct WikiView: View {
         .navigationTitle("Wiki")
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: WikiLink.self) { link in WikiPageView(wiki: wiki, link: link) }
+        .fullScreenCover(item: $zoom) { z in DiagramZoom(image: z.image, size: z.size, title: "Wiki") }
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search the wiki")
         .onSubmit(of: .search) { Task { await search() } }
         .onChange(of: query) { _, q in

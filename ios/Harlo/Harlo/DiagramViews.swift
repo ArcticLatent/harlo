@@ -133,23 +133,32 @@ struct DiagramZoom: View {
     }
 }
 
+/// A drawn picture opened to zoom (Identifiable, for `fullScreenCover`).
+struct ZoomedPicture: Identifiable {
+    let id = UUID()
+    let image: UIImage
+    let size: CGSize
+}
+
 /// The wiki's pages and their links, drawn by harlo (as a reply's
-/// diagram): fitted to the row, tap to zoom.
+/// diagram): fitted to the row, tap to zoom. (The zoom is presented by
+/// the screen, outside the list: a cover on a row the list then drops,
+/// as switching back to Pages does, left the next page push stuck.)
 struct PagesGraph: View {
     @Environment(HarloModel.self) private var model
     @Environment(\.palette) private var p
     let source: String
+    @Binding var zoom: ZoomedPicture?
     @State private var picture: DiagramPicture?
     @State private var why = ""
     @State private var loading = true
-    @State private var zoomed = false
 
     var light: Bool { p.background.luminance > 0.5 }
 
     var body: some View {
         Group {
             if let d = picture, let image = UIImage(data: d.png) {
-                Button { zoomed = true } label: {
+                Button { zoom = ZoomedPicture(image: image, size: CGSize(width: d.width, height: d.height)) } label: {
                     Image(uiImage: image)
                         .resizable()
                         .interpolation(.high)
@@ -161,9 +170,6 @@ struct PagesGraph: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("The wiki's pages and their links")
                 .accessibilityHint("Opens it to zoom")
-                .fullScreenCover(isPresented: $zoomed) {
-                    DiagramZoom(image: image, size: CGSize(width: d.width, height: d.height), title: "Wiki")
-                }
             } else if loading {
                 HStack(spacing: 8) {
                     ProgressView()
