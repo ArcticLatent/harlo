@@ -5,7 +5,7 @@ description: How Harlo hosts OpenWiki locally and over SSH, supplies repository-
 tags: [openwiki, documentation, mcp, remote]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-12T17:20:25.384Z
+    at: 2026-11-12T20:55:29.850Z
 sources:
   - id: openwiki-source-22e4ea3417daf80d96080fd6
     resource: repo://crates/harlo-app/src/workspace.rs
@@ -15,7 +15,7 @@ sources:
     resource: repo://packaging/openwiki/fetch.sh
   - id: openwiki-source-f4e64e1831b7842380c11a41
     resource: repo://packaging/openwiki/patches/ignored-evidence-unresolved.patch
-generated: { by: "harlo", at: "2026-11-12T17:20:25.384Z" }
+generated: { by: "harlo", at: "2026-11-12T20:55:29.850Z" }
 ---
 
 # OpenWiki integration and wiki lifecycle
@@ -58,11 +58,19 @@ The package's lifecycle tools own queue state and claim reconciliation. The host
 
 One integration-specific cleanup matters operationally: after an `openwiki_finish` call, Harlo removes a newly generated, untracked `.github/workflows/openwiki-update.yml`. A tracked workflow is preserved. This avoids opting the repository into automatic API-key-funded updates merely by creating a wiki; do not confuse this cleanup with user-requested source changes.
 
+## Update offers after default-branch changes
+
+The desktop checks local wiki-enabled projects after startup and then every minute. It offers an update rather than starting generation automatically. Core resolves the default branch from `origin/HEAD`, falling back to local `main` or `master`, and examines its local branch tip against the last wiki update. The checkout must already contain that tip. A pending or interrupted wiki run suppresses the offer in favor of continuation.
+
+An offer requires new commits affecting files cited by page provenance or claims; wiki-only and agent-instruction-only changes are excluded from the counted history. The displayed commit count covers the qualifying history, not just commits touching cited files. Uncited changes alone do not trigger an offer. This is a targeted reminder, not a complete freshness audit.
+
+Accepting or declining records the tip in the project's `wiki_seen_<id>` setting and removes the offer until the branch moves again. Accepting invokes the ordinary update-session path; it does not bypass runtime checks or the durable queue. Remote projects are not polled for these offers.
+
 ## Browsing without the tool runtime
 
 The desktop can still read Markdown frontmatter, page links, `.run.json` progress, `.last-update.json` freshness, and plain-text section search without Node. Generated `index.md`, `log.md`, and `INSTRUCTIONS.md` are not treated as independent ordinary pages. Quickstart sorts first. This lightweight browser is distinct from the OpenWiki server's richer retrieval and generation operations.
 
-The safe page reader rejects parent traversal and hidden claim paths. Provenance and claims can be presented through dedicated parsing helpers instead of exposing arbitrary files as pages.
+The same exclusion of generated page names applies inside subfolders, both in page listings and lightweight search. The safe page reader rejects parent traversal and hidden claim paths. Provenance and claims can be presented through dedicated parsing helpers instead of exposing arbitrary files as pages.
 
 ## Extension and verification
 
@@ -71,6 +79,8 @@ The safe page reader rejects parent traversal and hidden claim paths. Provenance
 Keep server schemas authoritative when adding lifecycle tools, and preserve caller-derived root selection. Cross-machine changes need both runtime deployment and the remote command path checked; local browsing alone does not demonstrate that remote tool execution works.
 
 Focused tests in `openwiki.rs` cover page/link order, rejected reads, durable-state/progress parsing, section search, response normalization, and the absence of `root` in offered retrieval schemas:
+
+`merged_code_the_wiki_cites_offers_an_update` additionally exercises cited versus uncited changes, already-seen tips, checkouts missing the new work, and suppression during a run.
 
 ```sh
 cargo test -p harlo-core --no-default-features openwiki

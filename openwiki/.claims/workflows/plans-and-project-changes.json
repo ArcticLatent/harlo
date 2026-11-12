@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:767cf1a9ef99aacce918d170512f61464818bb25f57646f53502c6693ffa97cc",
+  "pageVersion": "sha256:1ae2d5791b875710679cff7ed5b5d5397e1dc9d0c85b2e5bd95eb909af07e0ec",
   "claims": [
     {
       "id": "claim_c7fdc8541d3d42b989d9897f9fe0c5ca",
@@ -85,10 +85,34 @@
           "version": "repo-lines-v1:sha256:bcb8a8f0db1ef9bfecb9675c414a49028add4fb8e46eb28a51b0e363c0104dd3:eyJzZWxlY3RlZExpbmVDb3VudCI6MzcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU0NmI3YjVlNDBjZjEyODZmNmQ3MDNiMjA5Nzk2MGVjNDViNjAzYTQyZTU5YjFjZjhiYTc1ZDRkYmE3OGI1ZGEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImEwMGRiMDQwZjI5MDliZjk3OGZmMGE5NTZhNTVlODNjNjUzNDE4ZGU2YmI2OGY4MDQxZGE5NzZmOGQzZDIyNzAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJiNTBkMWMyNjBjN2Y0ZDRkZmMwNTczNGUxMTZlNWQ5MmIxZWZiMzRkMTc3MjRkNzQzZDZjODdiZGJmNzkxM2IifQ"
         }
       ]
+    },
+    {
+      "id": "claim_a292864d9e11463eb3cf3ce326a2c0cd",
+      "statement": "The desktop plan dock defaults to expanded for unfinished plans and folded when all nonempty steps are done or skipped, with per-session manual overrides held in the dock's presentation state.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-app/qml/PlanDock.qml#L169-L181",
+          "version": "repo-lines-v1:sha256:9278d51dc5a553eebdc96653ff72cec525f09e60126bc72fc567ff878b592fd6:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjEzZWFmOWUwNzcxZjNmNjc2ZThiOTViODJiYzMwYzFmM2Y5NGQ0NWNiNGI3NmNmYWM4OWM1MmI3NmYyNzAyZWMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQwMTdkMzZiNjE1ZjYzNzJiZmZmNTFmZDBhYTBmZDVhYjY3ZjhlZjA3ZTgyZTI1MTc5NzUzNDZlMzlmOTViODgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjMTY2ZWUyMGY2MGY5MDk2ZTk3YTllZjU0MmMyY2M5Y2UxZjBlZDhjNzFjY2MwZWQ5NmQ5YjY4NDgxZTUzMmQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImViNjczNzU1OTRhOWJlYzNkNmQwNDM0OTQyN2ExMzllZTNjZDk1MDMwZjUzYjQ3MGU0ZWYzZTU5MjY4NmViODkifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-app/qml/PlanDock.qml#L25-L62",
+          "version": "repo-lines-v1:sha256:231a782c15cb8ef61ab2768b8836c5112e45a5b41650e8f9a4d7879f54d7cd44:eyJzZWxlY3RlZExpbmVDb3VudCI6MzgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBiNjMwY2YxNTNjZTRhNDg3MGU3N2U3ZmMyOTU4MGUyN2Q3Y2I2ZWNhOTJlNmZlMmJkMzE0ZTQ2MDBlNDg3ZWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU3Nzc4ZGE1YzdiNDZjZDFiZTc4MDU2N2VkOWEwOGY4OWRkYzlkYmQ3YTQ1ZWJiMDQ4N2RmOGQ5MDlhN2JkZDYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImFhMTFmMmNlZDkzZDg5ZmNiNzkzYWVjODQzNTY3YThjYTkwNDk0OGNjMDhmMGIzYTI3MmRiMDg2YTdiN2RlODgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjMzM2NlNDIzMmZhZTA3NGFjYmRjMmZhODYzOGIzNzUzODBjYzFhMDJlMzdjNzcxM2M5NjFlMGMwMWQwNzljNGUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_d7d2b3d98a8f4746bc3f1ae6c5d5616f",
+      "statement": "The Changes panel preserves a known request row during loading but permits creating a request only when lookup is ready, while an existing URL remains openable.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-app/qml/ChangesPanel.qml#L392-L423",
+          "version": "repo-lines-v1:sha256:b8e50b968be2882a93b733340f874e1a11dbfcc8c8175d6acc882a37f3578d5c:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVhZDI2OTMxNzhmMTA0MmZmOTcwNjhhOTE4N2MwYjEyNTU5N2U1Y2Y5ZGY0MzdkY2Y2NTIyMWIxYTkzNWMzNTAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU1MjJjNDJjZDE5YzZkMDNkODA4YzQ1MjcyMDU1MjgyNWI3ZWExYzViNDkxYjIxODUxMWNhYzc0MTVjZjlkOWIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNmODcxNDg1ZGMwMzBiZTk4YmQyNjlmYWY5ZDEwMmUwOWQzM2RhY2FmYTY4NWIzNTc2NTQxMWNlNjE0NDk5OWIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQxMGZkOGE3MTc4ZmIxZmNmNzI2OThjZjE4NDU3ZmI4MTBjYzI4NGJmYmFjMDNmMDdiMTBhYTIzYzFhZjE3MWMifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-12T16:14:28.541Z"
+    "at": "2026-11-12T20:55:29.850Z"
   }
 }

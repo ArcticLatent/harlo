@@ -5,8 +5,12 @@ description: How session-scoped orchestration tools update shared plans and safe
 tags: [workflow, plans, orchestration, git, worktrees]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-12T16:14:28.541Z
+    at: 2026-11-12T20:55:29.850Z
 sources:
+  - id: openwiki-source-c5e0556ff4a54e3a14503a14
+    resource: repo://crates/harlo-app/qml/ChangesPanel.qml
+  - id: openwiki-source-0120ee12ce1363bc8be995c8
+    resource: repo://crates/harlo-app/qml/PlanDock.qml
   - id: openwiki-source-707e4f109038162ab1383c58
     resource: repo://crates/harlo-app/src/plans.rs
   - id: openwiki-source-3da8c8a8e687e436a4a8c49a
@@ -15,7 +19,7 @@ sources:
     resource: repo://crates/harlo-core/src/orchestration.rs
   - id: openwiki-source-75bcb97e87a29c42db5d4dfd
     resource: repo://crates/harlo-core/src/plan.rs
-generated: { by: "harlo", at: "2026-11-12T16:14:28.541Z" }
+generated: { by: "harlo", at: "2026-11-12T20:55:29.850Z" }
 ---
 
 # Plans, helpers, and project changes
@@ -41,6 +45,8 @@ The intended ordinary flow is:
 
 For helper runs, `alongside` joins the preceding step's entire stage. Stages run sequentially; members of a stage can run together. Therefore, marking a step alongside is a dependency assertion: it must not require the output of another member of that stage.
 
+The desktop plan dock opens unfinished plans by default and folds a nonempty plan when every step is done or skipped. Manual folding or opening overrides that default per session within the dock's lifetime; it is presentation state, not a persisted plan mutation. Switching sessions or completion state also closes any step editor.
+
 ## Optional per-step commits are conservative
 
 Finishing a step does **not** always commit. The project must enable step commits, the step must not be skipped, and a start snapshot must exist. The snapshot records HEAD, hashes of dirty files, and start time.
@@ -58,6 +64,8 @@ This is deliberately more conservative than “commit all current changes.” Pr
 ## Git, turn undo, and helper worktrees
 
 Core uses the user's Git CLI so normal configuration, credentials, hooks, and signing apply. Git operations are serialized per repository to avoid index-lock races; porcelain-v2 status and parsed diffs support individual-hunk staging/reversion.
+
+The Changes panel retains a known pull-request row while its lookup refreshes, avoiding a disappearing row on reopening. An existing URL remains openable, but creating a new request is disabled until lookup reaches `ready`; retained display data is not treated as permission to create during loading.
 
 Turn undo is separate from step commits: snapshots under `refs/harlo/turns/<worktree-key>/` record state before turns, and separate undo refs preserve state before undo. Worktree-qualified prefixes prevent one checkout's snapshot being mistaken for another's.
 

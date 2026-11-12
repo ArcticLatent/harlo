@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:a2c3a78db057f44ccfe7f9b472ce9e59bca24a040304f226c56be4006cee86ac",
+  "pageVersion": "sha256:d96edc3fd121b7b948bb3ea9542b67b32e7b2d419fb6914df7cb95ddd61663a2",
   "claims": [
     {
       "id": "claim_6d0f3938d02847d89bfea69668b3d4ca",
@@ -73,10 +73,46 @@
           "version": "repo-lines-v1:sha256:5298a9edd5a1d885db40e8e4e6bf6ed8a5a7bca9ead688b893957cbf21da240d:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiM2EwYmQ1YjU5ZDk1YTkwNTE0NWYxYzMzMDE4NGQyZTUxMTBjYWQ3OTgyMDMyNjU5NDA1ZTkzNjc2MzMxOGRmMCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiOTU3NDEwZmRhNmE0YWU0ZWI5MjljN2I5ZTI2NjJjMjU0YjI2NGViY2QxOTljNzY3ZjdkZjE4NmU5NGNkZDhkZSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNDE1MTllZjk1OTI5ZGVjOWUxMjE1NDZlNDc4MzQ0ZDZjYTU3NjZmYTliNTFkMzJiM2ZkN2E2NGFlYzgyMTE0YyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOTFiYmU1ZGQxODY0MTMzNTFjZDNkMjZlZjVjMDQyYmZkZTlmOGI4MGY3NGZjOWVlYTZlYTQ4NDk0OTE1ODMxYiJ9"
         }
       ]
+    },
+    {
+      "id": "claim_4503544ea4b04eeb8dd387c3e8bae8d4",
+      "statement": "The phone opens Wiki independently from the plan in a single navigation-stack sheet whose stable root and once-per-sheet load preserve search on return from pages; page rows, graph links and search hits share navigation.",
+      "evidence": [
+        {
+          "resource": "repo://ios/Harlo/Harlo/SessionView.swift#L400-L413",
+          "version": "repo-lines-v1:sha256:c221ba133dca735be7a66f95f8c6d61316b2c1a33cfd51338242130d49916f95:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImExMTAyZDg0Mjc3ODEyOWNlNjhkZTkzNTU1NTFmODhjOWJjNDZjYzY5OTAzOGJlYzBjNWUxZmQwMDkyYTQyYWUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJmMzUwNzc5ZmY2N2YyMmY3NDk2ZjMyMjczZjI5ODdmMjAxOWQ4ZTBkYzAyYTllODFkNGU2NmY4NjUzNjA3YmEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjYyYjJmYzVkNjdmOGZhZTBkMWNmOTQyMDYwNDJkNjg3NGE5MmMzN2JkZTE2MjIyMDgwNjY0ZmFlM2U4Njk4YTEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVjMDllNWY5MDcwY2ZmOGY0OWYzZTBlNDIxYTczNWNhOTVmODEwMDRmM2JiYTBmMzI2N2Y2NjRmNDc3MWJmZTYifQ"
+        },
+        {
+          "resource": "repo://ios/Harlo/Harlo/WikiViews.swift#L174-L227",
+          "version": "repo-lines-v1:sha256:a0bb5aeceb244b218a128a81f73b26afaf461156e43b15b73adf64c94eb45ff0:eyJzZWxlY3RlZExpbmVDb3VudCI6NTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNiYTQxMjgyYjkyN2Y1MzU3ODhjMzBmOWVhNzYyYWNkZjQ0YzQwYmY5OGM5YzU5OWViOWI2NzJmODgzNjY1MWEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFjNWQ1YTk4YmY4MmI4OTk2MDQ0ZmVjOGRjNjI3MzZhMGY0ZjIxODNmNTk1NDkzNjI3Mzk2OThjZGZlNGY4MDgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNlMDdmM2QyMzMzODA0NDcxY2NmNTQ0MTMwNTUwZjE1NjYwMzkzZDVlZjE2NjQ1OTgzYTNkNjEwN2YwNDllYzkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjNjYjg4NDc5NzFhY2VmOTU4YTUzOTdlNDRjMTRkNjE0YWExNzRlOWVkOTU0ODA4Zjg0MTkzZWVjNzk0NjRmNWUifQ"
+        },
+        {
+          "resource": "repo://ios/Harlo/Harlo/WikiViews.swift#L96-L139",
+          "version": "repo-lines-v1:sha256:1b46609e06b18dbcc5a8675a3f1374cf0f0a70b764e455d0262341a5e54aa35e:eyJzZWxlY3RlZExpbmVDb3VudCI6NDQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY2NzliYTg2ODc0YjkwMDQ3MzM2Y2E2OTM3OTliNDkzMmVmODcxOGVhZDJlOTc0OTdkOWJjMWFkYmU1OGRjY2QiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE5ZTc2MzU1Y2YxMTk5NDgwYzNmOTk4MzZiMTQ4NmM4NDFkODkxZmFhZDkwNGM2MDhlMDkzMDIyZDM3NTdhZWUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjM3NTNkN2EyYWVmNWFkMjMxNWZkZDUwYTk5Zjg0NzEyYzc5N2Y3ZDVjYjRlNTE1NDYyYmRkYjMxNmIxNTYxZGQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_d6e5bf1f7de147148ca9236f3ce5db07",
+      "statement": "The phone wiki sheet exposes freshness and generation actions, shows a no-project message outside projects, and dismisses itself when opening the desktop wiki-writing session.",
+      "evidence": [
+        {
+          "resource": "repo://ios/Harlo/Harlo/WikiViews.swift#L1-L91",
+          "version": "repo-lines-v1:sha256:e595bef80c8de74611990602c7b83e661b309639016b1ad2d6eb9f93ffff9eb5:eyJzZWxlY3RlZExpbmVDb3VudCI6OTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkyY2QxYTk5YzdlNWYyMWFlNTRjY2I5MmYwYjliNzYwOTcxZWNlZDZhN2E3Mjk0NTM5YzE1MWE0N2U3MTk5NWMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA5OTk5NWNmODUxYmFhZmViYmU1OWM0MjFjODgxMTEwMGY2YzVhZGM2ZjdiNzYxODhjZTg0ODRhM2E4ZjRjZmUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjE0NTZhMGIxMThmNGRiYTIyNmYxMTk2NTJjY2MwYjljODdmOTBkZjljNTYwM2RkYWVjZWRmNjA3OWFlOWRiODUifQ"
+        },
+        {
+          "resource": "repo://ios/Harlo/Harlo/WikiViews.swift#L133-L139",
+          "version": "repo-lines-v1:sha256:4a1bb0f3a2c2a3f2e8c469636227ae296ca4e07804d204fdc6fc41d41d67fcf6:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNDEyY2EzNDVjY2Y3NWJmOWMwODA2YmNlNjk1YmU4ZGU4MDhiNzk5ODQyNTFhN2E1NGQyMDJjZjYxMDFkZDQ1MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMjZmNzJkNjhjZjg2MzA4ZTljYjU0OWQ2NGU2MTM0NzY4ODZmOWU2NzhiNDkzOTZkZmM4ODM5ODVjZmVkM2U0OCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMzc1M2Q3YTJhZWY1YWQyMzE1ZmRkNTBhOTlmODQ3MTJjNzk3ZjdkNWNiNGU1MTU0NjJiZGRiMzE2YjE1NjFkZCJ9"
+        },
+        {
+          "resource": "repo://ios/Harlo/Harlo/WikiViews.swift#L174-L188",
+          "version": "repo-lines-v1:sha256:f8a33881db4352d02dbd60018c205598c8e44bc8f44d94415579b0ff4c9d7548:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNiYTQxMjgyYjkyN2Y1MzU3ODhjMzBmOWVhNzYyYWNkZjQ0YzQwYmY5OGM5YzU5OWViOWI2NzJmODgzNjY1MWEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhhNjJhMjIzNDg3NTcwODlkOGQwMzEyZGRhY2FkZmExNjRkOTVhMmI5NzI2MDVhOWVkODFlYzEwMDI1NzFkNmQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNlMDdmM2QyMzMzODA0NDcxY2NmNTQ0MTMwNTUwZjE1NjYwMzkzZDVlZjE2NjQ1OTgzYTNkNjEwN2YwNDllYzkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjEwNTEyMmFiZGJjNjJlYTdjYmViNjgzOGUwZmJmYmU5NWJkYmExYTU3NmE3M2ZkNjU1OTU1OWIwOWRhZjk0NGMifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-12T17:20:25.384Z"
+    "at": "2026-11-12T20:55:29.850Z"
   }
 }

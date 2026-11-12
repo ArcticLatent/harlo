@@ -5,10 +5,14 @@ description: How agent protocols become shared live sessions, durable conversati
 tags: [architecture, sessions, persistence, desktop]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-12T16:14:28.541Z
+    at: 2026-11-12T20:55:29.850Z
 sources:
+  - id: openwiki-source-eda83df6b22941ed75ede295
+    resource: repo://crates/harlo-app/qml/ChatView.qml
   - id: openwiki-source-941abaef21aa1042a4672f7a
     resource: repo://crates/harlo-app/src/chat_session.rs
+  - id: openwiki-source-22e4ea3417daf80d96080fd6
+    resource: repo://crates/harlo-app/src/workspace.rs
   - id: openwiki-source-6d4abd836eef5afa84bffc33
     resource: repo://crates/harlo-code/src/lib.rs
   - id: openwiki-source-aa0d9221c1e01ca9decebdae
@@ -17,13 +21,15 @@ sources:
     resource: repo://crates/harlo-core/src/lib.rs
   - id: openwiki-source-4db2ffefa327cd504d9b5a66
     resource: repo://crates/harlo-core/src/session.rs
+  - id: openwiki-source-30ea8db2e7a53b0003af9129
+    resource: repo://crates/harlo-core/src/sidebar.rs
   - id: openwiki-source-322c82102553742bfacf73ab
     resource: repo://crates/harlo-harness/src/claude_run.rs
   - id: openwiki-source-3ef6360b45fa7169c94b35d3
     resource: repo://crates/harlo-harness/src/lib.rs
   - id: openwiki-source-07a69ae82a0e133d3de748f1
     resource: repo://crates/harlo-harness/src/store.rs
-generated: { by: "harlo", at: "2026-11-12T16:14:28.541Z" }
+generated: { by: "harlo", at: "2026-11-12T20:55:29.850Z" }
 ---
 
 # Sessions, persistence, and desktop presentation
@@ -75,7 +81,15 @@ The database is not a replacement transcript store. The harness store builds sid
 
 When diagnosing missing history, first separate discovery of the agent's file from the app's project/visibility metadata. When diagnosing stale rendering, compare the reducer's rows with the subscriber snapshot before changing the protocol adapter.
 
+## Finished wiki sessions and approval presentation
+
+Finished wiki sessions use a separate **Wiki** shelf after **Settled**, with independent expansion state. The workspace marks an idle wiki session with the `wiki` settlement reason, deferring settlement while it is the active view or lacks a saved file. Disabled session settling, pinning, and archiving remain respected. This is session organization, not proof that the durable [OpenWiki run](../integrations/openwiki.md) completed successfully.
+
+Approval messages marked as Markdown are rendered through the core Markdown renderer into prose and code blocks. The request body scrolls within a bounded region so long plans do not push the answer controls out of view; ordinary non-Markdown requests retain plain text presentation.
+
 ## Focused verification
+
+- `finished_wiki_runs_have_a_shelf_of_their_own` checks separate Wiki shelf grouping and expansion.
 
 - `session::tests::demo_run_reaches_subscribers` exercises idle → busy → idle, resulting user/tool/code rows, and equality of a late subscriber's snapshot with accumulated deltas.
 - `idle_session_restarts_when_used_again` verifies that an idle agent can stop to reload configuration and restart on the next prompt.

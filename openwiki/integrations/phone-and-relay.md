@@ -5,7 +5,7 @@ description: Device authorization, replay-resistant NaCl channels, session subsc
 tags: [phone, ios, encryption, relay, apns]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-12T17:20:25.384Z
+    at: 2026-11-12T20:55:29.850Z
 sources:
   - id: openwiki-source-3e5d9e2412052022c04ac0ec
     resource: repo://crates/harlo-apns/src/lib.rs
@@ -19,9 +19,13 @@ sources:
     resource: repo://crates/harlo-core/src/phone.rs
   - id: openwiki-source-f6c0ec21414aa65ae7ca1f61
     resource: repo://crates/harlo-relay/src/lib.rs
+  - id: openwiki-source-2a9076f4b9c96d8d098111b9
+    resource: repo://ios/Harlo/Harlo/SessionView.swift
+  - id: openwiki-source-7d63dd608fb68281fc2c1857
+    resource: repo://ios/Harlo/Harlo/WikiViews.swift
   - id: openwiki-source-8c23df65e9f6a257e8c67c14
     resource: repo://ios/HarloKit/Sources/HarloKit/Client.swift
-generated: { by: "harlo", at: "2026-11-12T17:20:25.384Z" }
+generated: { by: "harlo", at: "2026-11-12T20:55:29.850Z" }
 ---
 
 # Phone pairing, encrypted transport, and relay
@@ -52,6 +56,14 @@ Each sealed connection message contains the connection ID, a monotonically incre
 Phone requests carry `{id, op, …}` and receive correlated replies; asynchronous updates carry `{ev, …}`. Operations include listing/opening sessions, send/abort/answer, project/session creation, modes, models, files, diffs, and branches. A phone opening a session subscribes to the existing session handle, receiving reset/row/status/meta/request updates rather than running a parallel agent.
 
 The workspace bridge owns actions requiring desktop application state, including making a session live without switching the visible tab, starting one, renaming/archiving, and sending with plan-mode context. Its watch channel publishes the session list only when it changes. See [sessions and desktop](../architecture/sessions-and-desktop.md) for snapshot/delta semantics.
+
+## Wiki access from a phone session
+
+The session menu opens **Wiki** in its own sheet, independently of the shared plan. A single navigation stack owns page links from rows, search hits, and graph boxes. The wiki view stays at the root even while loading or when no wiki exists, preserving the search field when returning from a page. Loading is requested once per sheet instance rather than on every page return.
+
+The sheet presents freshness and update/continue actions with the page browser, or creation guidance when the repository has no wiki. Sessions outside a Harlo project instead show that no project wiki is available. Opening the session writing the wiki dismisses the sheet and opens that session; generation still runs on the computer through the [OpenWiki lifecycle](openwiki.md), not on the phone.
+
+The UI test `test09bWiki` covers menu access, page and graph navigation, provenance, return-to-search behavior, and search results.
 
 ## Relay trust and deployment
 

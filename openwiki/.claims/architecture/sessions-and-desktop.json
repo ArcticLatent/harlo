@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:4652849effcb4c87a74bd7d17e60277b8c05c49e59c7a6a5dda8f24f3122f3b9",
+  "pageVersion": "sha256:2ae0cfc917fd1e7c52d3c605f5e0b578cc0dd02b99a8f29a556a920a44e241ee",
   "claims": [
     {
       "id": "claim_372c141472fb4274ac9fa038c2951ee3",
@@ -81,10 +81,38 @@
           "version": "repo-lines-v1:sha256:f36825baa2c1be4ca5ad58e3edea5fe8480a4841a4c9dd8edc85f506c49f93c7:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiM2MxZDIzOGMwMGE0ZGQxYzIxNDQ1Nzk2NjRmMTQ4OTFkMDI3ZjgzNDdjYzcwY2E0NjAxNTY3NDBiMGM3YTEzYiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMTNjMTQwZDlkNGI4OGJmZjliZjc5NzI0Njk4ODY3OTNiYjFiMDk4NzM4OGQ5YmQ5YmIyMjc1NzJlODllZTU4OSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNjBlZGYzYjA3NmY4MDZkYWEyY2ZhNmMyODBiNDkzOTk2NTY5MGM0NjQ2MTk5OWNhMmFiMzgyMzQ5Zjg5MjcxZCJ9"
         }
       ]
+    },
+    {
+      "id": "claim_27df9c285d554dadb7be6b8885845289",
+      "statement": "Finished wiki sessions have a separately expandable Wiki shelf after Settled; workspace settlement defers active or unsaved sessions and respects disabling, pinning and archiving.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-app/src/workspace.rs#L7912-L7930",
+          "version": "repo-lines-v1:sha256:892eecf63f30e036d3dd7b0ef731f17b35e57d752d28f05c7535a82784a2c53e:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNmYjkxMjRjZDJlYzJlNTFhYmUzYzE5MTM0Y2JjYzE0NjU3ZTkzYWQzYThhMjA3NGU3MDJlNGJlZmM3NzY1ZTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5YzEzNTkwNjY1NjMyM2QxYzVlYTQxNjU0ZWU2NmFmYjU4NWFjZGNmYWVhY2ExMjFkNWUzMGJmMTkzZWVkZDciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk5OWJkZWZlZWFjYTYzNDBlMDI5MGRjODZlODg5Yzg5ZDVlMTg5YWE1YmE0NGI1ODViM2I3MDczNGY0YTYyZDgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjkyM2VhMWVmZTRhYzFhZTU2YTRmMzAxOTZiNGRkNDkyZmM1YThhNDAzYTE0YzM2MmMxZDllNWZhNzU5YmFhNDIifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-core/src/sidebar.rs#L316-L350",
+          "version": "repo-lines-v1:sha256:58e5fd7c2055a3e71fe4a93509c268edd6d65a43d58ca77fe516c14b37c2f6d7:eyJzZWxlY3RlZExpbmVDb3VudCI6MzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc3ZDg2MjE3YTg3NWEyNTI5NDQ2NjllNWQxN2JlOTYzZWMxOGZiMmIzNzA3NmEzMTJjNTg2NGU0NmI0MGMwOTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU1MjJjNDJjZDE5YzZkMDNkODA4YzQ1MjcyMDU1MjgyNWI3ZWExYzViNDkxYjIxODUxMWNhYzc0MTVjZjlkOWIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRlNTg5NmYxOTE0NTNiMTA3YjkzZmJmN2U5ODU1NDBiM2Q2MzU5YzJhMTgxMDU1YmIyOTg0ZDM4YmYwNWYyNDUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVmMWU2YmQ1MmUxOWM0Nzc0ZWU5YjRkM2QyZTg5NWM3MDA3MWVmZjg4YmViZWU1NTc1MTNhNjMwMGM1MmIyMGQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_7660ebf54f5a4a81af1b60a229d99015",
+      "statement": "Markdown approval requests use rendered prose/code blocks in a bounded scrolling request body while non-Markdown requests retain plain text.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-app/qml/ChatView.qml#L707-L827",
+          "version": "repo-lines-v1:sha256:e1e04961992ad1bc1ea10aa59327b30b79bfa923551dea065afc06bdeab9629a:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIxLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiIzOTZhNDEyODU0NGFiMTg5YmVlYjEyM2YyM2JmMzE4MDU2MTYxMDkzOWQ4MDk0ZTVjNzk1Y2Q0ZGE3ODgwOWZiIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiJiMWU1NDRjNWI1ZWFjNGUyMjM5MDEyMjVhODY1ZjI4YjFhY2Y3MWE4MWE5NTQ4ODJiY2Q0OWRkYzMxNDBkYzVlIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiIyYTU2OGNhMTMxZGRkNDI1OWNhMzg4NGNlNDJlNGE2OGZhNmZlYjYzOGIzZDJlODQ3Mzk3ZGJkMDk2ODcwMDAwIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiIzYWQ4MzI5ODkwM2U3ODJjNTNhNzg5NzVjOWQzYjczZWQxMWM0YjIzODFkYjMwODVmM2NjODUyNmE2OWI1ZTIwIn0"
+        },
+        {
+          "resource": "repo://crates/harlo-app/src/workspace.rs#L4048-L4056",
+          "version": "repo-lines-v1:sha256:e634696c7e02781364fce1f89b518d9215f6df48cfb0b4e4ae3c830c97fe271a:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOWZjOWJlMmNlOWE3NTdkNGVhYmIxZWY2MWFiYmQxYzBmMGVhMTc2ZjVhMzhhNjYzM2M2ODM3Njk4MGI2NTM4NyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYTJjYzBkNDRkZGUzOTEwMThhNDU5YzA2YjA5MGVlZWM4ZGY1MDQxODgyOTczMjAyZDBhNzY1ZmM5MzU2NGNhNiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNjIyNjNmNzYyZTY2MzlmNmU3OGEyMzQxOTM4NzQzMDE5ZDJlZTY3NmM3YjExMDhmNmU1ZDdlOGM4ZTFiNGQ1NiJ9"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-12T16:14:28.541Z"
+    "at": "2026-11-12T20:55:29.850Z"
   }
 }
