@@ -88,6 +88,17 @@ fn main() {
     if !std::env::args().any(|a| a == "--check-start") && instance::forward_to_running() {
         return;
     }
+    // (A package's check also starts its OpenWiki: Node and its native
+    // module run there.)
+    if std::env::args().any(|a| a == "--check-start") {
+        match harlo_core::openwiki::check() {
+            Ok(v) => eprintln!("check-start: {v}"),
+            Err(e) => {
+                eprintln!("check-start: OpenWiki doesn't start: {e:#}");
+                std::process::exit(1);
+            }
+        }
+    }
     // harlo was called piqt: its data and settings move over (once), before
     // anything opens them, and not while piqt itself still has them open.
     if harlo_core::migrate::needed() && harlo_core::migrate::piqt_running() {

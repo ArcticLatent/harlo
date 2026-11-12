@@ -28,6 +28,7 @@ pub mod markdown;
 pub mod mcp;
 pub mod mcp_catalog;
 pub mod model_servers;
+pub mod openwiki;
 pub mod orchestration;
 pub mod migrate;
 pub mod mcp_probe;
