@@ -150,9 +150,19 @@ Rectangle {
     /// A hit's snippet as styled text, the query's words in the text
     /// colour and medium weight (the rest stays muted), as session search
     /// marks its matches.
+    /// The query's words worth marking in a hit: not filler words ("how",
+    /// "the", "to"), unless the query is nothing else.
+    readonly property var fillerWords: ["the", "a", "an", "and", "or", "of", "to", "in", "is", "it", "for", "on", "with", "as", "at", "by",
+                                        "how", "what", "where", "when", "why", "does", "do", "are", "be", "from", "this", "that"]
+    function markWords(query) {
+        const words = query.toLowerCase().split(/[^0-9A-Za-z\u00C0-\uFFFF]+/).filter(w => w.length > 1)
+        const kept = words.filter(w => fillerWords.indexOf(w) < 0)
+        return kept.length > 0 ? kept : words
+    }
+
     function marked(text, query) {
         const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-        const words = query.toLowerCase().split(/[^0-9A-Za-z\u00C0-\uFFFF]+/).filter(w => w.length > 1)
+        const words = markWords(query)
         if (words.length === 0) return esc(text)
         // (The whole word a match is in: "amended" for "amend".)
         const re = new RegExp("([0-9A-Za-z\u00C0-\uFFFF]*(?:" + words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")[0-9A-Za-z\u00C0-\uFFFF]*)", "gi")
@@ -603,7 +613,8 @@ Rectangle {
                                     y: 8
                                     width: parent.width - 20
                                     textFormat: TextEdit.RichText
-                                    text: codeWell.visible ? block.modelData.html : ""
+                                    // (Long lines wrap in a narrow panel rather than being cut.)
+                                    text: codeWell.visible ? (block.modelData.html || "").replace("<pre style=\"margin:0;\">", "<pre style=\"margin:0; white-space:pre-wrap;\">") : ""
                                     font.family: Theme.mono
                                     font.pixelSize: Theme.mpx(12)
                                     color: Theme.foreground

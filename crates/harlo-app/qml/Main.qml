@@ -8207,6 +8207,9 @@ ApplicationWindow {
             win.check(win.findAllNames("wikiDiagram", wikiPanel).some(d => d.ready), "its diagram drawn as a picture")
             const code = win.findAllNames("wikiCode", wikiPanel)
             win.check(code.length === 1 && code[0].children[0].getText(0, code[0].children[0].length).indexOf("run-jobs --retries 3") >= 0, "its code in a code well")
+            const codeText = code.length === 1 ? code[0].children[0] : null
+            win.check(codeText && codeText.contentWidth <= codeText.width + 1 && codeText.lineCount > 1,
+                      "its long line wrapped in the well, not cut (" + (codeText ? Math.round(codeText.contentWidth) + " in " + Math.round(codeText.width) + ", " + codeText.lineCount + " lines" : "") + ")")
             win.check(win.findName("wikiPageMeta", wikiPanel).text === "Architecture", "and its kind")
             win.shotWindow("clicks-wiki-reader")
             win.clickLink(win.wikiProse("starts in"), "README.md") } }
@@ -8244,6 +8247,9 @@ ApplicationWindow {
             win.check(snip && snip.visible && /<b><font[^>]*>(failed|job|retried)<\/font><\/b>/i.test(snip.text)
                       && hits.every(h => !/-->|\| *-{3}/.test(h.modelData.snippet)),
                       "its text says why it matched, the query's words marked, no diagram or table syntax (" + (snip ? snip.text : "-") + ")")
+            const fill = wikiPanel.marked("How a job is retried", "how is a job retried")
+            win.check(fill.split("<b>").length === 3 && fill.indexOf(">job<") > 0 && fill.indexOf(">retried<") > 0 && wikiPanel.marked("How it works", "how").split("<b>").length === 2,
+                      "filler words left unmarked, unless the query is only those (" + fill + ")")
             win.shotWindow("clicks-wiki-search")
             win.clickItem(hits[0], "the first result") } }
         PauseAnimation { duration: 300 }
