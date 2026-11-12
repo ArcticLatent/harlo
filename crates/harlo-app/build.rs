@@ -100,6 +100,7 @@ fn main() {
                 "qml/DiffView.qml",
                 "qml/UpdateToasts.qml",
                 "qml/PhoneFirewallToast.qml",
+                "qml/WikiOfferToast.qml",
                 "qml/AddHostDialog.qml",
                 "qml/ModelServerDialog.qml",
                 "qml/SetupServerDialog.qml",

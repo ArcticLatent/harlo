@@ -824,6 +824,88 @@ pub fn state(root: &Path) -> State {
     State { exists, run, last, behind }
 }
 
+/// The code the wiki's facts come from: every page's sources and the files
+/// its claims cite (repository paths).
+pub fn cited_files(root: &Path) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for page in pages(root) {
+        let Ok(text) = read(root, &page.path) else { continue };
+        for f in sources_of(&text, claims(root, &page.path).as_deref()) {
+            if let Some(path) = f["path"].as_str().filter(|p| !out.iter().any(|o| o == p)) {
+                out.push(path.to_owned());
+            }
+        }
+    }
+    out
+}
+
+/// The default branch's new code the wiki describes, for an offer to
+/// update it: the branch, its tip, how many of its commits the wiki's
+/// last update hasn't seen (past its own files), and the cited files they
+/// change.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MergeOffer {
+    pub branch: String,
+    pub tip: String,
+    pub commits: u32,
+    pub files: Vec<String>,
+}
+
+/// The repository's default branch here: the remote's HEAD, else a main
+/// or master it has.
+fn default_branch(root: &Path) -> Option<String> {
+    let head = crate::git::output_in(root, &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
+    if let Some((_, b)) = head.trim().split_once('/').filter(|(_, b)| !b.is_empty()) {
+        return Some(b.to_owned());
+    }
+    ["main", "master"].into_iter().find(|b| !crate::git::output_in(root, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{b}")]).trim().is_empty()).map(str::to_owned)
+}
+
+/// Whether to offer updating the wiki under `root` (on this computer), as
+/// its default branch moves: merged work there changes code the wiki cites
+/// and this checkout has it (so an update here would read it). Returns the
+/// branch's tip, to pass as `seen` next time (an unmoved branch offers
+/// nothing again; "" while this checkout lacks it), and the offer, if any. None while a run is under way or
+/// stopped part way (its Continue shows instead).
+pub fn merge_offer(root: &Path, seen: &str) -> (String, Option<MergeOffer>) {
+    if remote::split(root).is_some() || !root.join(DIR).is_dir() {
+        return (String::new(), None);
+    }
+    let Some(branch) = default_branch(root) else { return (String::new(), None) };
+    let tip = crate::git::output_in(root, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")]).trim().to_owned();
+    if tip.is_empty() || tip == seen {
+        return (tip, None);
+    }
+    let st = state(root);
+    let Some(last) = st.last.filter(|l| !l.head.is_empty()) else { return (tip, None) };
+    if st.run.is_some() {
+        return (tip, None);
+    }
+    // (Not in this checkout yet: not seen either, so the offer can come
+    // once it is.)
+    if crate::git::output_in(root, &["merge-base", &tip, "HEAD"]).trim() != tip {
+        return (String::new(), None);
+    }
+    let range = format!("{}..{tip}", last.head);
+    let past = [".", ":!openwiki", ":!AGENTS.md", ":!CLAUDE.md"];
+    let mut count = vec!["rev-list", "--count", range.as_str(), "--"];
+    count.extend(past);
+    let commits: u32 = crate::git::output_in(root, &count).trim().parse().unwrap_or(0);
+    let mut log = vec!["log", "--name-only", "--format=", range.as_str(), "--"];
+    log.extend(past);
+    let cited = cited_files(root);
+    let mut files: Vec<String> = Vec::new();
+    for f in crate::git::output_in(root, &log).lines().map(str::trim).filter(|f| !f.is_empty()) {
+        if cited.iter().any(|c| c == f) && !files.iter().any(|x| x == f) {
+            files.push(f.to_owned());
+        }
+    }
+    if commits == 0 || files.is_empty() {
+        return (tip, None);
+    }
+    (tip.clone(), Some(MergeOffer { branch, tip, commits, files }))
+}
+
 fn run_of(v: &Value) -> Run {
     let pages = v["plan"]["pages"].as_array().cloned().unwrap_or_default();
     Run {
@@ -1215,6 +1297,60 @@ mod tests {
         assert!(read(&root, "../Cargo.toml").is_err());
         assert!(read(&root, ".claims/x.md").is_err());
         assert!(read(&root, "nope.md").is_err());
+    }
+
+    #[test]
+    fn merged_code_the_wiki_cites_offers_an_update() {
+        let dir = crate::scratch::Scratch::new(std::env::temp_dir().join(format!("harlo-openwiki-offer-{}", std::process::id())));
+        let git = |args: &[&str]| -> String {
+            let out = std::process::Command::new("git").args(args).current_dir(&*dir).env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_SYSTEM", "/dev/null").output().unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+            String::from_utf8_lossy(&out.stdout).trim().to_owned()
+        };
+        git(&["init", "-q", "-b", "main"]);
+        git(&["config", "user.name", "t"]);
+        git(&["config", "user.email", "t@t"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        let write = |path: &str, text: &str| {
+            let p = dir.join(path);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, text).unwrap();
+        };
+        write("src/a.rs", "fn a() {}\n");
+        write("src/b.rs", "fn b() {}\n");
+        // A page whose one claim cites src/a.rs.
+        write("openwiki/quickstart.md", "# Quickstart\nA does a.\n");
+        write("openwiki/.claims/quickstart.json", r#"{"claims":[{"evidence":[{"resource":"repo://src/a.rs#L1-L1"}]}]}"#);
+        git(&["add", "."]);
+        git(&["commit", "-q", "-m", "wiki"]);
+        let head = git(&["rev-parse", "HEAD"]);
+        write("openwiki/.last-update.json", &format!(r#"{{"updatedAt":"2026-11-12T10:00:00Z","gitHead":"{head}","status":"complete"}}"#));
+        assert_eq!(cited_files(&dir), ["src/a.rs"]);
+        // Code it doesn't cite: nothing to offer, but the tip is seen.
+        write("src/b.rs", "fn b() { 1; }\n");
+        git(&["commit", "-q", "-am", "b"]);
+        let (tip, offer) = merge_offer(&dir, "");
+        assert_eq!(tip, git(&["rev-parse", "HEAD"]));
+        assert_eq!(offer, None);
+        // Merged work that changes code it cites.
+        git(&["checkout", "-q", "-b", "work"]);
+        write("src/a.rs", "fn a() { 2; }\n");
+        git(&["commit", "-q", "-am", "a"]);
+        git(&["checkout", "-q", "main"]);
+        git(&["merge", "-q", "--no-ff", "-m", "Merge work", "work"]);
+        let (tip, offer) = merge_offer(&dir, &tip);
+        let offer = offer.expect("an offer");
+        // (Two commits changed code; the merge itself adds none.)
+        assert_eq!((offer.branch.as_str(), offer.tip.as_str(), offer.commits, offer.files.as_slice()), ("main", tip.as_str(), 2, &["src/a.rs".to_owned()][..]));
+        // Seen: not again until main moves.
+        assert_eq!(merge_offer(&dir, &tip).1, None);
+        // A checkout without main's new work: an update here wouldn't read it.
+        git(&["checkout", "-q", "-b", "old", &head]);
+        assert_eq!(merge_offer(&dir, ""), (String::new(), None));
+        git(&["checkout", "-q", "main"]);
+        // While a run is under way: its own progress shows instead.
+        write("openwiki/.run.json", r#"{"schemaVersion":1,"mode":"update","phase":"generating","plan":{"pages":[]}}"#);
+        assert_eq!(merge_offer(&dir, "").1, None);
     }
 
     #[test]

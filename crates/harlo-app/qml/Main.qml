@@ -826,7 +826,17 @@ ApplicationWindow {
         onMcpSignedIn: (scope, server) => Mcp.test(scope, server)
     }
     // The firewall stops a paired phone on one of harlo's addresses.
+    // Merged work the wiki describes: an offer to update it, above.
+    WikiOfferToast {
+        objectName: "wikiOfferToast"
+        anchors.right: updateToasts.right
+        anchors.bottom: phoneFirewallToast.top
+        anchors.bottomMargin: phoneFirewallToast.height > 0 || updateToasts.height > 0 ? 8 : 0
+        width: updateToasts.width
+        z: 60
+    }
     PhoneFirewallToast {
+        id: phoneFirewallToast
         objectName: "phoneFirewallToast"
         anchors.right: updateToasts.right
         anchors.bottom: updateToasts.top
@@ -8618,6 +8628,55 @@ ApplicationWindow {
             const t = win.lastToolResult()
             win.check(t.length > 80 && !/error|not found|Invalid/i.test(t.slice(0, 120)), "and reads what it found (" + win.demoBest + ": " + t.slice(0, 160) + ")")
             win.shotWindow("wiki-demo-session")
+            win.summary(); Qt.quit() } }
+    }
+
+    // Merged work changing code the wiki cites: an offer in the corner to
+    // update it; Not now holds until main moves again; Update starts the
+    // update's session.
+    SequentialAnimation {
+        id: wikiOfferSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlowikioffer"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            if (win.argValue("--theme-mode=")) Workspace.chooseThemeMode(win.argValue("--theme-mode="))
+            Workspace.setSetting("default_harness", "harlo")
+            Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            win.wikiProject = JSON.parse(Workspace.projectsJson())[0].id
+            Workspace.setSetting("project_model_" + win.wikiProject + "_harlo", "fake/fake-helper")
+            Workspace.checkWikiOffers() } }
+        ScriptAction { script: win.waitUntil(wikiOfferSteps, () => win.findName("wikiOffer-" + win.wikiProject) !== null, 10000) }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const toast = win.findName("wikiOffer-" + win.wikiProject)
+            const text = toast ? win.findName("wikiOfferText", toast).text : ""
+            win.check(text.indexOf("2 commits on main since its last update change a.rs.") === 0, "an offer: main's commits since the update, and only the cited file they change (" + text + ")")
+            win.check(win.findText("Merged work changes what repo's wiki describes", toast) !== null, "naming the project")
+            win.shotWindow("clicks-harlo-wiki-offer")
+            win.clickItem(win.findName("wikiOfferLater", toast), "Not now") } }
+        ScriptAction { script: win.waitUntil(wikiOfferSteps, () => win.findName("wikiOffer-" + win.wikiProject) === null, 5000) }
+        ScriptAction { script: {
+            win.check(win.findName("wikiOffer-" + win.wikiProject) === null, "Not now: it goes")
+            Workspace.checkWikiOffers() } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            win.check(win.findName("wikiOffer-" + win.wikiProject) === null, "and doesn't come back while main stays where it is")
+            // (As if main had moved since.)
+            Workspace.setSetting("wiki_seen_" + win.wikiProject, "")
+            Workspace.checkWikiOffers() } }
+        ScriptAction { script: win.waitUntil(wikiOfferSteps, () => win.findName("wikiOffer-" + win.wikiProject) !== null, 10000) }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            win.wikiKeyBefore = Workspace.activeKey
+            win.clickItem(win.findName("wikiOfferUpdate", win.findName("wikiOffer-" + win.wikiProject)), "Update the wiki") } }
+        ScriptAction { script: win.waitUntil(wikiOfferSteps, () => Workspace.activeKey !== win.wikiKeyBefore && chat.session.key === Workspace.activeKey && chat.session.title === "Wiki: update", 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(chat.session.title === "Wiki: update", "Update starts the update's session (" + chat.session.title + ")")
+            win.check(win.findName("wikiOffer-" + win.wikiProject) === null, "and the offer goes")
             win.summary(); Qt.quit() } }
     }
 

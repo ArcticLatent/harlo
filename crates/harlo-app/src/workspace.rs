@@ -96,6 +96,10 @@ pub mod qobject {
         /// today, day ("" or why the day's limit holds every session),
         /// held: { key: why }, costs: { key: dollars } }`.
         #[qproperty(QString, spend_json, cxx_name = "spendJson")]
+        /// Offers to update a project's wiki, as its default branch takes
+        /// in work changing code the wiki describes: `[{ project, name,
+        /// branch, commits, files }]`.
+        #[qproperty(QString, wiki_offers_json, cxx_name = "wikiOffersJson")]
         /// Bumped when projects change (Settings → Projects follows it).
         #[qproperty(i32, projects_revision, cxx_name = "projectsRevision")]
         /// Bumped when a provider's check finishes (Settings → Providers).
@@ -184,6 +188,17 @@ pub mod qobject {
         /// "" when it's on its way, else why not.
         #[qinvokable]
         fn start_wiki_run(self: Pin<&mut Workspace>, key: &QString, mode: &QString) -> QString;
+        /// An offer to update a project's wiki taken: the update starts
+        /// (as start_wiki_run's "update"), and the offer goes until its
+        /// default branch moves again. "" when it's on its way, else why not.
+        #[qinvokable]
+        fn take_wiki_offer(self: Pin<&mut Workspace>, project_id: i32) -> QString;
+        /// Not now: the offer goes until the default branch moves again.
+        #[qinvokable]
+        fn decline_wiki_offer(self: Pin<&mut Workspace>, project_id: i32);
+        /// Looks for those offers now (harlo does every minute).
+        #[qinvokable]
+        fn check_wiki_offers(self: Pin<&mut Workspace>);
         /// The wiki of a session's repository (`key`: a session, or
         /// `project:<id>`): `{ root, project, enabled, exists, runtime,
         /// pages: [{ path, title, description, type, verified, links }],
@@ -971,6 +986,11 @@ pub struct WorkspaceRust {
     templates_json: QString,
     clipboard_text: QString,
     spend_json: QString,
+    wiki_offers_json: QString,
+    /// Those offers, by project.
+    wiki_offers: Vec<(i64, harlo_core::openwiki::MergeOffer)>,
+    /// Looking for them now.
+    wiki_offer_checking: bool,
     spend_limits: harlo_core::spending::Limits,
     spend_ledger: harlo_core::spending::Ledger,
     /// Live sessions' spending, by key.
@@ -1345,6 +1365,18 @@ impl cxx_qt::Initialize for Workspace {
                     break;
                 }
                 tokio::time::sleep(WORKTREE_INTERVAL).await;
+            }
+        });
+
+        // Offers to update a wiki, as merged work lands: now and then.
+        let offer_thread = self.qt_thread();
+        crate::runtime().spawn(async move {
+            tokio::time::sleep(Duration::from_secs(20)).await;
+            loop {
+                if offer_thread.queue(|this| this.check_wiki_offers()).is_err() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_secs(60)).await;
             }
         });
 
@@ -2393,6 +2425,80 @@ impl Workspace {
             });
         });
         QString::default()
+    }
+
+    /// Looks for merged work a project's wiki should take in (projects
+    /// on this computer with the wiki on): an offer for each, until it's
+    /// taken or declined or the default branch moves again.
+    pub fn check_wiki_offers(mut self: Pin<&mut Self>) {
+        if self.wiki_offer_checking {
+            return;
+        }
+        let projects: Vec<(i64, PathBuf, String)> = self
+            .projects
+            .iter()
+            .filter(|p| !harlo_core::remote::is_remote(&p.path) && self.wiki_on(p.id))
+            .map(|p| (p.id, p.path.clone(), self.setting_str(&format!("wiki_seen_{}", p.id))))
+            .collect();
+        if projects.is_empty() && self.wiki_offers.is_empty() {
+            return;
+        }
+        self.as_mut().rust_mut().wiki_offer_checking = true;
+        let thread = self.qt_thread();
+        crate::runtime().spawn_blocking(move || {
+            let found: Vec<(i64, String, Option<harlo_core::openwiki::MergeOffer>)> = projects
+                .into_iter()
+                .map(|(id, path, seen)| {
+                    let (tip, offer) = harlo_core::openwiki::merge_offer(&harlo_core::openwiki::root_of(&path), &seen);
+                    (id, tip, offer)
+                })
+                .collect();
+            let _ = thread.queue(move |mut this| {
+                this.as_mut().rust_mut().wiki_offer_checking = false;
+                let mut offers: Vec<(i64, harlo_core::openwiki::MergeOffer)> = Vec::new();
+                for (id, tip, offer) in found {
+                    match offer {
+                        Some(o) => offers.push((id, o)),
+                        // (Nothing to offer at this tip: seen.)
+                        None if !tip.is_empty() => this.save_setting(&format!("wiki_seen_{id}"), &tip),
+                        None => {}
+                    }
+                }
+                this.as_mut().set_wiki_offers(offers);
+            });
+        });
+    }
+
+    fn set_wiki_offers(mut self: Pin<&mut Self>, offers: Vec<(i64, harlo_core::openwiki::MergeOffer)>) {
+        let list: Vec<serde_json::Value> = offers
+            .iter()
+            .map(|(id, o)| {
+                let name = self.projects.iter().find(|p| p.id == *id).map(|p| p.name.clone()).unwrap_or_default();
+                json!({ "project": id, "name": name, "branch": o.branch, "commits": o.commits, "files": o.files })
+            })
+            .collect();
+        self.as_mut().rust_mut().wiki_offers = offers;
+        self.as_mut().set_wiki_offers_json(QString::from(&serde_json::Value::Array(list).to_string()));
+    }
+
+    /// An offer gone (taken or declined): its tip is seen.
+    fn settle_wiki_offer(self: Pin<&mut Self>, project: i64) {
+        let mut offers = self.wiki_offers.clone();
+        if let Some(i) = offers.iter().position(|(id, _)| *id == project) {
+            let (_, o) = offers.remove(i);
+            self.save_setting(&format!("wiki_seen_{project}"), &o.tip);
+        }
+        self.set_wiki_offers(offers);
+    }
+
+    pub fn take_wiki_offer(mut self: Pin<&mut Self>, project_id: i32) -> QString {
+        let project = i64::from(project_id);
+        self.as_mut().settle_wiki_offer(project);
+        self.start_wiki_run(&QString::from(&format!("project:{project}")), &QString::from("update"))
+    }
+
+    pub fn decline_wiki_offer(self: Pin<&mut Self>, project_id: i32) {
+        self.settle_wiki_offer(i64::from(project_id));
     }
 
     pub fn set_default_instance_to(mut self: Pin<&mut Self>, name: &QString) {
