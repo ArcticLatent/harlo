@@ -8100,6 +8100,10 @@ ApplicationWindow {
             win.check(reqs.length > 0 && reqs.every(r => r.model === "fake-helper"), "with the project's model (" + reqs.map(r => r.model).filter((m, i, a) => a.indexOf(m) === i).join(", ") + ")")
             win.check(Workspace.approvalMode(Workspace.activeKey) === "write", "its writes go ahead (the write mode); commands still ask (" + Workspace.approvalMode(Workspace.activeKey) + ")")
             const said = win.chatText()
+            win.check(JSON.parse(chat.session.userPrompts()).length === 0 && win.findText("Wiki: create. The agent writes this project's wiki from its code, a page at a time.", chat.transcript) !== null,
+                      "it opens with harlo's line, not OpenWiki's text as your message")
+            win.check(win.findText("a new wiki", chat.transcript) !== null && win.findText("1 page planned", chat.transcript) !== null,
+                      "its steps say what they did (a new wiki, 1 page planned), not a run's id")
             win.check(said.indexOf("Wiki: complete") >= 0, "the run finishes (" + said.slice(said.lastIndexOf("Wiki:"), said.lastIndexOf("Wiki:") + 300) + ")")
             const cwd = win.argValue("--cwd=")
             win.check((TestInput.readFile(cwd + "/openwiki/quickstart.md") || "").indexOf("greets the reader") >= 0, "the page is written")

@@ -451,6 +451,16 @@ pub fn said_plainly(said: &str) -> String {
         let review = said.split_once("The review:").map(|(_, r)| r).unwrap_or_default();
         return format!("The review found problems: {}", first(review));
     }
+    // A wiki run harlo started (openwiki::run_prompt).
+    if said.starts_with("Create this repository's wiki with OpenWiki") {
+        return "Wiki: create. The agent writes this project's wiki from its code, a page at a time.".into();
+    }
+    if said.starts_with("Update this repository's wiki with OpenWiki") {
+        return "Wiki: update. The agent brings the wiki in line with the code again.".into();
+    }
+    if said.starts_with("Continue the OpenWiki run") {
+        return "Wiki: continue. The agent finishes the wiki run that stopped part way.".into();
+    }
     if said.starts_with("You're a helper:") {
         return "Started as a helper, with the task below.".into();
     }

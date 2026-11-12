@@ -138,7 +138,8 @@ pub fn run_prompt(rt: &Runtime, mode: &str, run_mode: &str) -> String {
     };
     let skill = rt.skill().unwrap_or_default();
     let steps = skill.find("## Required sequence").map(|i| &skill[i..]).unwrap_or("Follow the openwiki tools' descriptions: begin, plan, then each page in turn, then finish.");
-    format!("{ask}\n\nharlo fills in `root` for every openwiki tool, so leave it out (and skip resolving the top-level). Write only the wiki: never change the code. OpenWiki's steps:\n\n{steps}")
+    // (harlo's message: shown as harlo's line, the whole text a click away.)
+    format!("{}{ask}\n\nharlo fills in `root` for every openwiki tool, so leave it out (and skip resolving the top-level). Write only the wiki: never change the code. OpenWiki's steps:\n\n{steps}", crate::transcript::HARLO_PREFIX)
 }
 
 // ---- The runtime ----
@@ -1213,6 +1214,9 @@ esac; done"#
         let rt = Runtime { dir: "/nowhere".into() };
         let p = run_prompt(&rt, "create", "");
         assert!(p.contains("mode \"init\"") && p.contains("leave it out") && p.contains("never change the code"));
+        // (Sent as harlo's: shown as its line, in words.)
+        let said = p.strip_prefix(crate::transcript::HARLO_PREFIX).expect("harlo's message");
+        assert!(crate::orchestration::said_plainly(said).starts_with("Wiki: create. The agent writes"));
         assert!(run_prompt(&rt, "continue", "init").contains("mode \"init\""));
         assert!(run_prompt(&rt, "continue", "update").contains("mode \"update\""));
         if let Some(rt) = runtime() {

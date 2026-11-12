@@ -733,7 +733,7 @@ impl Transcript {
                             let mut r = row(format!("{id}:{bi}"), RowKind::Tool);
                             r.title = name.clone();
                             r.call_id = call_id.clone();
-                            r.subtitle = summarize_args(args);
+                            r.subtitle = wiki_step(name, args).unwrap_or_else(|| summarize_args(args));
                             if let Some(command) = args["command"].as_str().filter(|_| crate::tool_facts::is_shell(name)) {
                                 r.command = command.chars().take(COMMAND_DISPLAY_CHARS).collect();
                                 r.label = args["description"].as_str().map(|d| first_line(d, 200)).unwrap_or_default();
@@ -943,6 +943,35 @@ fn md_rows(blocks: &[Arc<crate::markdown::MdBlock>]) -> Vec<(usize, RowKind, Str
         }
     }
     out
+}
+
+/// An OpenWiki writing step in words: what it did, never the run's or a
+/// page job's id (`None`: not one of them).
+fn wiki_step(name: &str, args: &Value) -> Option<String> {
+    let tool = name.rsplit_once("openwiki_").map(|(_, t)| t)?;
+    let count = |key: &str| args[key].as_array().map_or(0, Vec::len);
+    let n = |k: usize, one: &str, many: &str| format!("{k} {}", if k == 1 { one } else { many });
+    Some(match tool {
+        "begin" => match args["mode"].as_str() {
+            Some("init") => "a new wiki".to_owned(),
+            Some("update") => "an update".to_owned(),
+            _ => String::new(),
+        },
+        "submit_plan" => {
+            let (pages, gone) = (count("pages"), count("deletePages"));
+            let mut s = n(pages, "page planned", "pages planned");
+            if gone > 0 {
+                s += &format!(", {} to remove", n(gone, "page", "pages"));
+            }
+            s
+        }
+        "submit_page" => match count("claims") + count("confirmedClaimIds") {
+            0 => String::new(),
+            k => n(k, "fact tied to the code", "facts tied to the code"),
+        },
+        "next_page" | "inspect_page_claims" | "finish" => String::new(),
+        _ => return None,
+    })
 }
 
 fn summarize_args(args: &Value) -> String {
@@ -1518,6 +1547,13 @@ mod tests {
         assert_eq!(summarize_args(&json!({"why":"The helper's part can go on beside mine.","helpers":[{"agent":"harlo"}]})), "The helper's part can go on beside mine.");
         assert_eq!(summarize_args(&json!({"node":"/obj/a","depth":2,"flags":{"a":1}})), "/obj/a");
         assert_eq!(summarize_args(&json!({"x":1,"y":true,"list":[1,2]})), "x=1  y=true");
+        // OpenWiki's writing steps: what they did, never a run's id.
+        let run = "380ad742-68a0-4f95-a5a9-529de7132d1e";
+        assert_eq!(wiki_step("mcp__harlo__openwiki_begin", &json!({"mode":"init"})).as_deref(), Some("a new wiki"));
+        assert_eq!(wiki_step("openwiki_submit_plan", &json!({"runId":run,"pages":[{"path":"a"},{"path":"b"}],"deletePages":["c"]})).as_deref(), Some("2 pages planned, 1 page to remove"));
+        assert_eq!(wiki_step("openwiki_next_page", &json!({"runId":run})).as_deref(), Some(""));
+        assert_eq!(wiki_step("openwiki_submit_page", &json!({"runId":run,"jobId":run,"claims":[{"statement":"x"}]})).as_deref(), Some("1 fact tied to the code"));
+        assert_eq!(wiki_step("openwiki_search", &json!({"query":"refunds"})), None);
     }
 
     #[test]
