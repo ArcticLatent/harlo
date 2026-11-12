@@ -119,7 +119,7 @@ pub fn tool(tool: &str, args: &Value, ctx: &Value) -> Result<Value, String> {
             let outcome: Result<Option<String>, String> = match &step.start {
                 None => Err("plan_start wasn't called for it, so harlo doesn't know what it changed.".into()),
                 Some(start) => {
-                    let root = harlo_core::specs::root_of(&cwd);
+                    let root = harlo_core::git::repo_root(&cwd).unwrap_or_else(|| cwd.clone());
                     let busy_elsewhere = ctx["others"].as_array().into_iter().flatten().any(|o| {
                         Path::new(o["cwd"].as_str().unwrap_or_default()).starts_with(&root) && o["last"].as_i64().unwrap_or(0) >= start.at
                     });

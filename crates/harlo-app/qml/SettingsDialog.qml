@@ -36,7 +36,7 @@ Popup {
         { id: "voice", title: "Voice", icon: "mic", group: "harlo", keywords: "voice speech dictation microphone mic whisper transcribe speak" },
         { id: "shortcuts", title: "Shortcuts", icon: "command", group: "harlo", keywords: "keyboard keys hotkeys" },
         { id: "usage", title: "Usage", icon: "bar-chart-2", group: "harlo", keywords: "stats statistics tokens cost models tools" },
-        { id: "projects", title: "Projects", icon: "folder-3", group: "workspace", keywords: "project icon colour color name harness setup remove specs spec plan steps commit review" },
+        { id: "projects", title: "Projects", icon: "folder-3", group: "workspace", keywords: "project icon colour color name harness setup remove wiki openwiki docs plan steps commit review" },
         { id: "worktrees", title: "Worktrees", icon: "git-branch", group: "workspace", keywords: "worktree folder location branch settled shelf finished merged closed pull request quiet archive" },
         { id: "git", title: "Git", icon: "git-repository", group: "workspace", keywords: "undo snapshot turn revert rollback github gitlab forgejo codeberg gitea hosting sign in login token credentials changes count repository hidden sidebar uncommitted commit message model ai" },
         { id: "schedules", title: "Schedules", icon: "history", group: "workspace", keywords: "schedule scheduled prompt cron timer daily weekday every hour morning automatic run" },
@@ -2609,10 +2609,10 @@ Popup {
                     FlatButton { text: "Cancel"; outlined: false; font.pixelSize: Theme.px(12); onClicked: setupArea.text = proj.p.setup }
                 }
                 Rule { visible: proj.p !== null }
-                // Specs and the shared plan.
+                // The shared plan.
                 SectionHeader {
                     visible: proj.p !== null
-                    title: "Specs and plans"
+                    title: "Plans"
                     subtitle: "Tools that help this project's agents plan and keep track."
                     more: "Every agent gets them, through harlo's tools (Settings → Orchestration). Sessions started afterwards get them."
                 }
@@ -2625,18 +2625,7 @@ Popup {
                     function on(name) { return rev >= 0 && pid >= 0 && Workspace.setting(name + "_" + pid) === "1" }
                     function set(name, on) { Workspace.setSetting(name + "_" + pid, on ? "1" : "0"); rev++ }
                     SettingRow {
-                        title: "Specs"
-                        detail: "SPEC.md files beside the code say what each part is for, how it behaves and why. Agents read them before changing code and keep them true in the same change, so the project's intent outlives the chats. The Specs panel (right edge) lists them."
-                        icon: "file-text"
-                        AppSwitch {
-                            objectName: "projectSpecs"
-                            checked: featureGroup.on("specs")
-                            onToggled: featureGroup.set("specs", checked)
-                        }
-                    }
-                    SettingRow {
                         id: planRow
-                        divider: true
                         title: "Shared plan"
                         detail: "For a bigger task the agent writes a plan of steps and works through it."
                         more: "You add, change, reorder or skip steps at any time (above the message box), and it reads them before each step. On by default in a git repository."

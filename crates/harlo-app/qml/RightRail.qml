@@ -24,7 +24,6 @@ Rectangle {
         { mode: "changes", icon: "git-branch", label: "Changes", keys: Keymap.seq("changesPanel") },
         { mode: "files", icon: "folders", label: "Files", keys: Keymap.seq("filesPanel") },
         { mode: "notes", icon: "note", label: "Notes", keys: Keymap.seq("notesPanel") },
-        { mode: "specs", icon: "file-text", label: "Specs: the project's SPEC.md files", keys: "" },
     ]
 
     Column {

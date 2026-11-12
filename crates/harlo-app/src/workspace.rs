@@ -177,11 +177,6 @@ pub mod qobject {
         /// A session's title, as the sidebar shows it ("" when unknown).
         #[qinvokable]
         fn session_title(self: &Workspace, key: &QString) -> QString;
-        /// The specs of a session's repository (`key`: a session, or
-        /// `project:<id>`): `{ root, project (its id, -1 outside one),
-        /// enabled, specs: [{ path, title, summary }] }`.
-        #[qinvokable]
-        fn specs_json(self: &Workspace, key: &QString) -> QString;
         /// Your edit of a session's plan: `{ op: "add", title, detail,
         /// after }`, `{ op: "edit", id, title, detail }`, `{ op: "remove",
         /// id }`, `{ op: "shift", id, by }`, `{ op: "skip", id, skipped }`,
@@ -697,11 +692,6 @@ pub mod qobject {
         #[qsignal]
         #[cxx_name = "worktreeInfoReady"]
         fn worktree_info_ready(self: Pin<&mut Workspace>, key: &QString, json: &QString);
-        /// What specsJson says about another machine's project was read
-        /// again, and changed.
-        #[qsignal]
-        #[cxx_name = "specsReady"]
-        fn specs_ready(self: Pin<&mut Workspace>);
         /// A project's branches (`request_branches`), current first.
         #[qsignal]
         #[cxx_name = "branchesReady"]
@@ -767,7 +757,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::{QByteArray, QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QStringList, QVariant, QVector};
@@ -2719,12 +2709,12 @@ impl Workspace {
         self.rebuild();
     }
 
-    /// What a session's project has on: `(cwd, specs, plan, commits)`
+    /// What a session's project has on: `(cwd, wiki, plan, commits)`
     /// (sessions in a harlo project only).
     fn features_of(&self, key: &str) -> Option<(PathBuf, bool, bool, bool)> {
         let (cwd, project) = self.project_of(key)?;
         let on = |k: &str| self.setting_str(&format!("{k}_{project}")) == "1";
-        Some((cwd, on("specs"), self.plan_on(project as i32), self.plan_commits_on(project as i32)))
+        Some((cwd, on("wiki"), self.plan_on(project as i32), self.plan_commits_on(project as i32)))
     }
 
     /// harlo commits a project's finished plan steps: as set, else (by
@@ -2842,74 +2832,6 @@ impl Workspace {
         QString::from(&v.to_string())
     }
 
-    pub fn specs_json(&self, key: &QString) -> QString {
-        let key = key.to_string();
-        let none = || QString::from(&json!({ "root": "", "project": -1, "enabled": false, "specs": [] }).to_string());
-        // A project itself (the new-session page): its folder.
-        let found = match key.strip_prefix("project:").and_then(|id| id.parse::<i64>().ok()) {
-            Some(id) => self
-                .projects
-                .iter()
-                .find(|p| p.id == id)
-                .map(|p| (p.path.clone(), self.setting_str(&format!("specs_{id}")) == "1")),
-            None => self.features_of(&key).map(|(cwd, specs, ..)| (cwd, specs)),
-        };
-        let Some((cwd, enabled)) = found else { return none() };
-        let project = self
-            .worktrees
-            .iter()
-            .filter(|w| cwd.starts_with(&w.path))
-            .max_by_key(|w| w.path.components().count())
-            .map(|w| w.project_id)
-            .or_else(|| self.projects.iter().filter(|p| cwd.starts_with(&p.path)).max_by_key(|p| p.path.components().count()).map(|p| p.id))
-            .unwrap_or(-1);
-        let read = |cwd: &Path| {
-            let root = harlo_core::specs::root_of(cwd);
-            let g = harlo_core::specs::graph(&root);
-            let specs: Vec<serde_json::Value> = g
-                .specs
-                .iter()
-                .zip(&g.depths)
-                .map(|(s, depth)| json!({ "path": s.path, "id": s.id, "title": s.title, "summary": s.summary, "type": s.kind, "status": s.status, "depth": depth, "links": s.links.len() }))
-                .collect();
-            json!({ "root": root.to_string_lossy(), "specs": specs, "problems": g.problems, "mermaid": if g.specs.len() > 1 { g.mermaid() } else { String::new() } })
-        };
-        if !harlo_core::remote::is_remote(&cwd) {
-            let found = read(&cwd);
-            return QString::from(&json!({ "root": found["root"], "project": project, "enabled": enabled, "specs": found["specs"], "problems": found["problems"], "mermaid": found["mermaid"] }).to_string());
-        }
-        // Another machine's: what was read of them, read again in the
-        // background (specsReady says when).
-        static READ: OnceLock<Mutex<HashMap<PathBuf, (Instant, Option<serde_json::Value>)>>> = OnceLock::new();
-        let read_list = READ.get_or_init(Default::default);
-        let (fresh, cached) = read_list.lock().unwrap().get(&cwd).map_or((false, None), |(at, v)| (at.elapsed() < Duration::from_secs(5), v.clone()));
-        if !fresh && !harlo_core::remote::is_disconnected(&harlo_core::remote::host_of(&cwd).unwrap_or_default()) {
-            read_list.lock().unwrap().insert(cwd.clone(), (Instant::now(), cached.clone()));
-            let (thread, cwd) = (self.qt_thread(), cwd.clone());
-            crate::runtime().spawn_blocking(move || {
-                let found = read(&cwd);
-                let changed = read_list.lock().unwrap().insert(cwd, (Instant::now(), Some(found.clone()))).and_then(|(_, v)| v).as_ref() != Some(&found);
-                if changed {
-                    let _ = thread.queue(|mut this| this.as_mut().specs_ready());
-                }
-            });
-        }
-        let host = harlo_core::remote::host_of(&cwd).unwrap_or_default();
-        QString::from(
-            &json!({
-                "root": cached.as_ref().map_or_else(|| json!(cwd.to_string_lossy()), |c| c["root"].clone()),
-                "project": project,
-                "enabled": enabled,
-                "specs": cached.as_ref().map_or(json!([]), |c| c["specs"].clone()),
-                "problems": cached.as_ref().map_or(json!([]), |c| c["problems"].clone()),
-                "mermaid": cached.as_ref().map_or(json!(""), |c| c["mermaid"].clone()),
-                "loading": cached.is_none(),
-                "host": host,
-            })
-            .to_string(),
-        )
-    }
-
     pub fn plan_edit(mut self: Pin<&mut Self>, key: &QString, op: &QString) {
         let key = key.to_string();
         let op: serde_json::Value = serde_json::from_str(&op.to_string()).unwrap_or_default();
@@ -2956,7 +2878,7 @@ impl Workspace {
         }
         let prompt = format!(
             "Review one step of another agent's work: commit {sha} in {folder}, \"{title}\"{summary}. See it with `git show {sha}`. \
-             Check it does what the step says, and look for bugs, missed cases, broken behavior elsewhere, and specs (SPEC.md files) it should have updated. \
+             Check it does what the step says, and look for bugs, missed cases, broken behavior elsewhere, and docs it should have updated. \
              Don't change any files. Reply with what you found, most serious first, each with the file and line; or say it looks right.",
             sha = step.commit,
             folder = cwd.display(),
@@ -5900,7 +5822,6 @@ impl Workspace {
                     _ => json!({ "ok": true }),
                 }
             }
-            "specs" => serde_json::from_str(&self.specs_json(&QString::from(&key)).to_string()).unwrap_or_default(),
             // A settled session back among the others.
             "putBack" => {
                 self.as_mut().put_back(&QString::from(&key));
@@ -6435,7 +6356,7 @@ impl Workspace {
             return Ok(json!(true));
         }
         // The caller's tools, and what they're for: harlo's, and its
-        // project's specs and plan when they're on.
+        // project's plan when it's on.
         let features = caller.as_deref().and_then(|c| self.features_of(c));
         // (A helper: it reports to its parent, and offers no splits.)
         let helper = caller.as_ref().and_then(|c| self.orch_children.get(c)).is_some_and(|c| c.notify);
@@ -6446,10 +6367,7 @@ impl Workspace {
             if helper {
                 tools.extend(harlo_core::orchestration::helper_tools().as_array().cloned().unwrap_or_default());
             }
-            if let Some((_, specs, plan, commits)) = &features {
-                if *specs {
-                    tools.extend(harlo_core::specs::tools().as_array().cloned().unwrap_or_default());
-                }
+            if let Some((_, _wiki, plan, commits)) = &features {
                 if *plan {
                     tools.extend(harlo_core::plan::tools(*commits).as_array().cloned().unwrap_or_default());
                 }
@@ -6458,10 +6376,7 @@ impl Workspace {
         }
         if tool == harlo_core::orchestration::INSTRUCTIONS {
             let mut text = format!("{} {}\n\n{}", harlo_core::orchestration::BASE_INSTRUCTIONS, harlo_core::orchestration::when_to_start(starting), harlo_core::orchestration::DIAGRAMS);
-            if let Some((_, specs, plan, commits)) = &features {
-                if *specs {
-                    text = format!("{text}\n\n{}", harlo_core::specs::INSTRUCTIONS);
-                }
+            if let Some((_, _wiki, plan, commits)) = &features {
                 if *plan {
                     // (Claude Code plans in its own flow: its plan question.)
                     let own_flow = caller.as_ref().and_then(|c| self.live.get(c)).is_some_and(|e| e.info.harness == "claude");
@@ -6470,16 +6385,13 @@ impl Workspace {
             }
             return Ok(json!(text));
         }
-        // Specs and the plan: done off this thread (crate::orchestration),
-        // with what it needs from here.
-        if tool.starts_with("spec_") || tool.starts_with("plan_") {
-            let (Some(caller), Some((cwd, specs, plan, commits))) = (caller.as_deref(), &features) else {
-                return Err("Specs and the shared plan are for sessions in a harlo project on this computer.".into());
+        // The plan: done off this thread (crate::orchestration), with what
+        // it needs from here.
+        if tool.starts_with("plan_") {
+            let (Some(caller), Some((cwd, _wiki, plan, commits))) = (caller.as_deref(), &features) else {
+                return Err("The shared plan is for sessions in a harlo project on this computer.".into());
             };
-            if tool.starts_with("spec_") && !specs {
-                return Err("Specs are off for this project (its settings in harlo).".into());
-            }
-            if tool.starts_with("plan_") && !plan {
+            if !plan {
                 return Err("The shared plan is off for this project (its settings in harlo).".into());
             }
             // A plan running with helpers is harlo's to hand out.

@@ -52,7 +52,6 @@ pub mod session;
 pub mod signin;
 pub mod sidebar;
 pub mod spending;
-pub mod specs;
 pub mod splitdiff;
 pub mod starters;
 pub mod subagents;

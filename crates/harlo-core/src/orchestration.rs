@@ -577,7 +577,7 @@ pub const TOOLS: &str = "_tools";
 /// What the bridge asks for what a session's tools are for.
 pub const INSTRUCTIONS: &str = "_instructions";
 
-/// What harlo's tools are for, before a project's specs and plan.
+/// What harlo's tools are for, before a project's wiki and plan.
 pub const BASE_INSTRUCTIONS: &str = "harlo's sessions: start other coding agents, send them messages, read their replies.";
 
 /// What the bridge sends harlo for a tool call (one line), and harlo's
@@ -616,7 +616,7 @@ pub fn run_bridge() {
         let Some(id) = msg.get("id").cloned() else { continue };
         let reply = |result: Value| json!({ "jsonrpc": "2.0", "id": id, "result": result });
         let answer = match msg["method"].as_str().unwrap_or_default() {
-            // What this session's tools are for (the project's specs and
+            // What this session's tools are for (the project's wiki and
             // plan add to it).
             "initialize" => {
                 let said = ask_harlo(&call_line(&session, INSTRUCTIONS, &json!({}))).filter(|a| a["ok"] == true);

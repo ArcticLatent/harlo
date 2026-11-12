@@ -359,11 +359,13 @@ Item {
     }
     // A tool's name, the same for every agent: "bash" and "Bash" both
     // "Bash", "web_search" "Web search" (an MCP tool's as Theme says).
-    // The shared plan's tools and the specs', by what they do.
+    // The shared plan's tools and the wiki's, by what they do.
     readonly property var planTools: ({ plan_set: "Plan", plan_read: "Read the plan", plan_start: "Start a step", plan_done: "Finish a step",
-                                        spec_graph: "Look at the specs", spec_list: "List the specs", spec_search: "Search the specs", spec_read: "Read a spec", spec_validate: "Check the specs" })
+                                        openwiki_search: "Search the wiki", openwiki_read: "Read the wiki", openwiki_list_workspaces: "List wiki workspaces", openwiki_list_wikis: "List linked wikis",
+                                        openwiki_begin: "Start the wiki run", openwiki_submit_plan: "Plan the wiki", openwiki_next_page: "Next wiki page",
+                                        openwiki_inspect_page_claims: "Check a page's claims", openwiki_submit_page: "Write a wiki page", openwiki_finish: "Finish the wiki" })
     function toolName(t) {
-        const p = /^(?:mcp__harlo__|harlo_)?((?:plan|spec)_[a-z]+)$/.exec(t || "")
+        const p = /^(?:mcp__harlo__|harlo_)?((?:plan|openwiki)_[a-z_]+)$/.exec(t || "")
         if (p && planTools[p[1]]) return planTools[p[1]]
         const l = Theme.toolLabel(t)
         return /^[a-z][a-z_]*$/.test(l) ? (l.charAt(0).toUpperCase() + l.slice(1)).replace(/_/g, " ") : l

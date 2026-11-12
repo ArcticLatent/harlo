@@ -1059,7 +1059,7 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
                         });
                         Value::Null
                     }
-                    "projects" | "sessionMentions" | "limitOf" | "resumeAtReset" | "cancelResume" | "modes" | "setModes" | "rename" | "archive" | "pin" | "putBack" | "reviewStep" | "specs" | "theme" | "setAvatar" => crate::phone_bridge::call(msg.clone()).await,
+                    "projects" | "sessionMentions" | "limitOf" | "resumeAtReset" | "cancelResume" | "modes" | "setModes" | "rename" | "archive" | "pin" | "putBack" | "reviewStep" | "theme" | "setAvatar" => crate::phone_bridge::call(msg.clone()).await,
                     "plan" | "planEdit" | "planRun" | "planStop" | "helpers" | "answerHelper" => {
                         wants_plans = true;
                         crate::phone_bridge::call(msg.clone()).await
