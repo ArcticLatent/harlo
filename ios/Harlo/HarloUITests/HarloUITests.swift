@@ -319,7 +319,9 @@ final class HarloUITests: XCTestCase {
         XCTAssertTrue(field.waitForExistence(timeout: 8), "the wiki's search")
         field.tap()
         field.typeText("rebuilds the whole list\n")
-        let hit = app.descendants(matching: .any)["wikiHit"]
+        // (Several sections match: the one with the words.)
+        let hit = app.descendants(matching: .any).matching(identifier: "wikiHit")
+            .matching(NSPredicate(format: "label BEGINSWITH %@", "Rebuilding rows")).firstMatch
         XCTAssertTrue(hit.waitForExistence(timeout: 8), "a search result")
         see("Rebuilding rows")
         shot("15f-wiki-search")
