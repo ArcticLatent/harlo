@@ -757,6 +757,10 @@ impl Transcript {
                             r.ended = run.ended_at;
                             if run.ended {
                                 (r.result, r.diff) = crate::tool_facts::facts(name, args, &run.output, run.is_error);
+                                // (The page OpenWiki gave, once it answered.)
+                                if let Some(page) = wiki_next(name, &run.output).filter(|_| !run.is_error) {
+                                    r.subtitle = page;
+                                }
                             }
                             // Pictures it returned; else picture files it
                             // names (in what it was asked; in what it said
@@ -972,6 +976,23 @@ fn wiki_step(name: &str, args: &Value) -> Option<String> {
         "next_page" | "inspect_page_claims" | "finish" => String::new(),
         _ => return None,
     })
+}
+
+/// What openwiki_next_page gave: the page to write next ("Orders"), or
+/// "none left" when the plan's pages are done.
+fn wiki_next(name: &str, output: &str) -> Option<String> {
+    if !name.ends_with("openwiki_next_page") {
+        return None;
+    }
+    let v: Value = serde_json::from_str(output.get(output.find('{')?..)?.trim()).ok()?;
+    match v["status"].as_str()? {
+        "complete" => Some("none left".to_owned()),
+        "pending" => {
+            let job = &v["job"];
+            job["title"].as_str().or_else(|| job["path"].as_str()).filter(|t| !t.is_empty()).map(str::to_owned)
+        }
+        _ => None,
+    }
 }
 
 fn summarize_args(args: &Value) -> String {
@@ -1554,6 +1575,10 @@ mod tests {
         assert_eq!(wiki_step("openwiki_next_page", &json!({"runId":run})).as_deref(), Some(""));
         assert_eq!(wiki_step("openwiki_submit_page", &json!({"runId":run,"jobId":run,"claims":[{"statement":"x"}]})).as_deref(), Some("1 fact tied to the code"));
         assert_eq!(wiki_step("openwiki_search", &json!({"query":"refunds"})), None);
+        assert_eq!(wiki_next("mcp__harlo__openwiki_next_page", r#"{"status":"pending","job":{"id":"j1","path":"architecture/orders.md","title":"Orders"}}"#).as_deref(), Some("Orders"));
+        assert_eq!(wiki_next("openwiki_next_page", r#"{"status":"complete"}"#).as_deref(), Some("none left"));
+        assert_eq!(wiki_next("openwiki_next_page", "not json"), None);
+        assert_eq!(wiki_next("openwiki_finish", r#"{"status":"complete"}"#), None);
     }
 
     #[test]

@@ -1010,6 +1010,11 @@ fn readable_snippet(text: &str, words: &[String]) -> String {
     if ["mermaid", "flowchart", "graph", "sequenceDiagram", "classDiagram", "stateDiagram", "erDiagram"].contains(&first) || text.contains("-->") || text.contains("->>") {
         return String::new();
     }
+    // (A table, flattened by OpenWiki: its header rule left as "--- ---".
+    // Its run-on cells say little; the caller falls back to the summary.)
+    if text.split_whitespace().filter(|t| t.len() >= 3 && t.chars().all(|c| matches!(c, '-' | ':'))).count() >= 2 {
+        return String::new();
+    }
     let tokens: Vec<String> = text
         .split_whitespace()
         .filter(|t| !t.chars().all(|c| matches!(c, '-' | ':' | '|' | '=' | '`' | '*' | '#' | '>')))
@@ -1185,9 +1190,9 @@ mod tests {
         // are left out.)
         let drawn = search_hits(&json!({"results": [{"ref": ["openwiki/s.md#flow"], "content": "Sidebar\nSection: Flow\nHow rows are kept.\nmermaid flowchart LR A[Rows] --> B[Cache]"}]}), "rows");
         assert_eq!(drawn["hits"][0]["snippet"], "How rows are kept.");
-        let table = search_hits(&json!({"results": [{"ref": ["openwiki/s.md#kinds"], "content": "Sidebar\nKinds\n Kind Meaning --- --- row A shown row "}]}), "row");
-        assert_eq!(table["hits"][0]["heading"], "");
-        assert_eq!(table["hits"][0]["snippet"], "Kind Meaning row A shown row");
+        let table = search_hits(&json!({"results": [{"ref": ["openwiki/s.md#kinds"], "content": "Sidebar\nSection: Kinds\nHow rows are kept.\n Kind Meaning --- --- row A shown row "}]}), "row");
+        assert_eq!(table["hits"][0]["heading"], "Kinds");
+        assert_eq!(table["hits"][0]["snippet"], "How rows are kept.");
         // (A long excerpt is cut around the first match.)
         let long = format!("{} the cache is rebuilt here {}", "word ".repeat(80), "tail ".repeat(80));
         let cut = readable_snippet(&long, &query_words("cache"));

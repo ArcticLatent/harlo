@@ -8111,6 +8111,8 @@ ApplicationWindow {
                       "it opens with harlo's line, not OpenWiki's text as your message")
             win.check(win.findText("a new wiki", chat.transcript) !== null && win.findText("1 page planned", chat.transcript) !== null,
                       "its steps say what they did (a new wiki, 1 page planned), not a run's id")
+            win.check(win.findText("none left", chat.transcript) !== null && win.findText("type: overview", chat.transcript) === null,
+                      "the next page step says what it got (none left at the end), and the page's write shows its text, not its YAML header")
             win.check(said.indexOf("Wiki: complete") >= 0, "the run finishes (" + said.slice(said.lastIndexOf("Wiki:"), said.lastIndexOf("Wiki:") + 300) + ")")
             const cwd = win.argValue("--cwd=")
             win.check((TestInput.readFile(cwd + "/openwiki/quickstart.md") || "").indexOf("greets the reader") >= 0, "the page is written")

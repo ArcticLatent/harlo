@@ -21,7 +21,11 @@ pub fn facts(name: &str, args: &Value, output: &str, is_error: bool) -> (String,
     } else if short == "write" || lower.contains("write") || lower.contains("create") {
         if let Some(content) = text_arg(args, &["content", "contents", "file_text", "text"]) {
             let lines: Vec<&str> = content.lines().collect();
-            let diff = lines.iter().take(DIFF_LINES).map(|l| format!("+{l}")).collect::<Vec<_>>().join("\n");
+            // (A wiki page's preview starts at its text, past the YAML
+            // header OpenWiki reads.)
+            let wiki_page = text_arg(args, &["path", "file_path", "filename"]).is_some_and(|p| p.contains("openwiki/") && p.ends_with(".md"));
+            let skip = if wiki_page && lines.first() == Some(&"---") { lines.iter().skip(1).position(|l| *l == "---").map_or(0, |i| i + 2) } else { 0 };
+            let diff = lines.iter().skip(skip).skip_while(|l| l.trim().is_empty()).take(DIFF_LINES).map(|l| format!("+{l}")).collect::<Vec<_>>().join("\n");
             return (format!("+{}", lines.len()), diff);
         }
     } else if is_shell(name) {
@@ -203,6 +207,17 @@ mod tests {
         assert_eq!(facts("read", &none, big, false).0, "900 lines");
         let outline = "[src/x.rs is 9000 lines (300 KB), more than one read shows. Its outline follows (line: definition): read the parts you need with offset and limit (up to 2000 lines), or grep it.]\n12: impl Ledger {";
         assert_eq!(facts("read", &none, outline, false).0, "9000 lines, outline");
+    }
+
+    #[test]
+    fn a_wiki_page_write_previews_its_text() {
+        let page = json!({ "path": "openwiki/quickstart.md", "content": "---\ntype: overview\ntitle: Quickstart\n---\n\n# Quickstart\nWhere to start." });
+        let (result, diff) = facts("write", &page, "", false);
+        assert_eq!(result, "+7");
+        assert_eq!(diff, "+# Quickstart\n+Where to start.");
+        // (Other files keep their first lines.)
+        let other = json!({ "path": "notes.md", "content": "---\na: 1\n---\nx" });
+        assert!(facts("write", &other, "", false).1.starts_with("+---"));
     }
 
     #[test]
