@@ -35,8 +35,14 @@ pub const DIR: &str = "openwiki";
 pub const READ_TOOLS: [&str; 4] = ["openwiki_search", "openwiki_read", "openwiki_list_workspaces", "openwiki_list_wikis"];
 /// The tools that write one (a wiki session's only).
 pub const WRITE_TOOLS: [&str; 6] = ["openwiki_begin", "openwiki_submit_plan", "openwiki_next_page", "openwiki_inspect_page_claims", "openwiki_submit_page", "openwiki_finish"];
-/// Files in the folder that aren't pages of their own.
+/// Files in the folder that aren't pages of their own (an index.md in any
+/// folder: OpenWiki's list of that folder's pages, titled "Files").
 const NOT_PAGES: [&str; 3] = ["index.md", "log.md", "INSTRUCTIONS.md"];
+
+/// A page of its own, not one of NOT_PAGES (in any folder).
+fn is_page(path: &str) -> bool {
+    !NOT_PAGES.contains(&path.rsplit('/').next().unwrap_or(path))
+}
 const CLI: &str = "node_modules/openwiki/dist/cli/cli.js";
 const SKILL: &str = "node_modules/openwiki/integrations/openwiki/SKILL.md";
 const PROTOCOL: &str = "2025-06-18";
@@ -601,7 +607,7 @@ pub struct Page {
 /// The wiki's pages under `root` (here or on its host): quickstart first,
 /// then the top folder's, then each folder's, by path.
 pub fn pages(root: &Path) -> Vec<Page> {
-    let mut pages: Vec<Page> = load(root).iter().filter(|(p, _)| !NOT_PAGES.contains(&p.as_str())).map(|(p, t)| describe(p, t)).collect();
+    let mut pages: Vec<Page> = load(root).iter().filter(|(p, _)| is_page(p)).map(|(p, t)| describe(p, t)).collect();
     pages.sort_by_key(|p| (p.path != "quickstart.md", p.path.contains('/'), p.path.clone()));
     let known: Vec<String> = pages.iter().map(|p| p.path.clone()).collect();
     for p in &mut pages {
@@ -847,7 +853,7 @@ fn search_in(texts: &[(String, String)], query: &str, limit: usize) -> Vec<Value
         return Vec::new();
     }
     let mut hits: Vec<(usize, Value)> = Vec::new();
-    for (path, text) in texts.iter().filter(|(p, _)| !NOT_PAGES.contains(&p.as_str())) {
+    for (path, text) in texts.iter().filter(|(p, _)| is_page(p)) {
         let (_, body) = split_front(text);
         let mut heading = String::new();
         let mut section = String::new();
@@ -1177,6 +1183,8 @@ mod tests {
         std::fs::write(w.join("architecture/jobs.md"), "---\ntype: architecture\ndescription: \"How jobs run.\"\nverified:\n  by: openwiki/0.9.0\n  at: 2026-11-12T10:00:00Z\n---\n# Jobs\nBack to [start](../quickstart.md).\n## Retry control\nA failed job is retried three times with backoff.\n").unwrap();
         std::fs::write(w.join("architecture/queue.md"), "# The queue\nJobs wait here; see [missing](gone.md).\n").unwrap();
         std::fs::write(w.join(".claims/x.md"), "# not a page\n").unwrap();
+        // (A folder's list of its pages, not a page.)
+        std::fs::write(w.join("architecture/index.md"), "# Files\n\n- [Jobs](jobs.md)\n").unwrap();
         std::fs::write(w.join(".last-update.json"), r#"{"updatedAt":"2026-11-12T10:00:00Z","command":"init","gitHead":"abc123","model":"harlo","status":"complete"}"#).unwrap();
         std::fs::write(w.join(".run.json"), r#"{"schemaVersion":1,"mode":"update","phase":"generating","startedAt":"2026-11-12T11:00:00Z","plan":{"pages":[{"id":"a","status":"complete"},{"id":"b","status":"skipped"},{"id":"c","status":"pending"}],"deletePages":[]}}"#).unwrap();
         (root.clone(), Gone(root))
