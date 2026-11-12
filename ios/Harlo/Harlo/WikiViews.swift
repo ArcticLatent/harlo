@@ -1,9 +1,9 @@
 import HarloKit
 import SwiftUI
 
-/// The plan sheet's Wiki: the repository's wiki (OpenWiki's, in openwiki/)
-/// to read, how fresh it is against the code, and a run that writes it,
-/// started on the computer. Without one, what it is and Create.
+/// The wiki sheet's top: how fresh the repository's wiki (OpenWiki's, in
+/// openwiki/) is against the code, and a run that writes it, started on
+/// the computer. Without one, what it is and Create.
 struct WikiSection: View {
     @Environment(HarloModel.self) private var model
     @Environment(\.palette) private var p
@@ -33,19 +33,6 @@ struct WikiSection: View {
                     runButton("create", "Create wiki", "book")
                 }
             } else {
-                NavigationLink(value: WikiOpen()) {
-                    Label {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Read the wiki").font(.body.weight(.medium))
-                            Text(wiki.pages.count == 1 ? "1 page" : "\(wiki.pages.count) pages")
-                                .font(.footnote)
-                                .foregroundStyle(Color(p.muted))
-                        }
-                    } icon: {
-                        Image(systemName: "book").foregroundStyle(Color(p.primary))
-                    }
-                }
-                .accessibilityIdentifier("wikiOpen")
                 VStack(alignment: .leading, spacing: 6) {
                     Text(wiki.freshness())
                         .font(.subheadline)
@@ -64,8 +51,6 @@ struct WikiSection: View {
                               wiki.run != nil ? "play.circle" : "arrow.clockwise")
                 }
             }
-        } header: {
-            Text("Wiki")
         } footer: {
             Text(!wiki.exists
                  ? "It's written in a session on your computer you can watch, and spends that agent's tokens. The pages land in openwiki/ for you to review in Changes."
@@ -108,10 +93,63 @@ struct WikiSection: View {
     }
 }
 
-/// The wiki's screen, pushed by value: its page rows and search hits push
-/// WikiLinks, and a stack mixing a pushed view with value links left those
-/// rows doing nothing when tapped, so the plan sheet's stack declares both.
-struct WikiOpen: Hashable {}
+/// The session menu's Wiki: the wiki's pages (how fresh they are and
+/// Update on top), or what a wiki is and Create when there's none yet.
+struct WikiSheet: View {
+    @Environment(HarloModel.self) private var model
+    @Environment(\.palette) private var p
+    @Environment(\.dismiss) private var dismiss
+    let session: OpenSession
+    @State private var notice: String?
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let wiki = session.wiki, wiki.inProject, wiki.exists, !wiki.loading {
+                    WikiView(wiki: wiki, notice: $notice, showSession: show)
+                } else {
+                    List {
+                        Group {
+                            if let wiki = session.wiki, !wiki.inProject {
+                                Text("This session isn't in one of harlo's projects, so it has no wiki.")
+                                    .foregroundStyle(Color(p.muted))
+                            } else if let wiki = session.wiki {
+                                WikiSection(wiki: wiki, notice: $notice, showSession: show)
+                            } else {
+                                HStack(spacing: 8) {
+                                    ProgressView()
+                                    Text("Reading the wiki…").font(.subheadline).foregroundStyle(Color(p.muted))
+                                }
+                            }
+                        }
+                        .listRowBackground(Color(p.elevated))
+                    }
+                    .screen()
+                    .navigationTitle("Wiki")
+                    .navigationBarTitleDisplayMode(.inline)
+                }
+            }
+            // A page row or a search hit pushes a WikiLink by value.
+            .navigationDestination(for: WikiLink.self) { link in
+                if let wiki = session.wiki { WikiPageView(wiki: wiki, link: link) }
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
+            }
+            .alert(notice ?? "", isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
+                Button("OK", role: .cancel) {}
+            }
+            .task { await model.loadWiki() }
+        }
+        .modifier(Themed())
+    }
+
+    /// Opens the session writing the wiki.
+    func show(_ key: String) {
+        dismiss()
+        _ = model.openHelper(key)
+    }
+}
 
 /// A page to open, at a section ("" its top).
 struct WikiLink: Hashable {
@@ -125,6 +163,9 @@ struct WikiView: View {
     @Environment(HarloModel.self) private var model
     @Environment(\.palette) private var p
     let wiki: Wiki
+    @Binding var notice: String?
+    /// Opens the session writing it.
+    var showSession: (String) -> Void
     @State private var query = ""
     @State private var hits: WikiHits?
     @State private var searching = false
@@ -148,6 +189,7 @@ struct WikiView: View {
                 if !query.isEmpty && (hits != nil || searching) {
                     results
                 } else {
+                    WikiSection(wiki: wiki, notice: $notice, showSession: showSession)
                     if !wiki.mermaid.isEmpty {
                         Picker("Show", selection: $graph) {
                             Text("Pages").tag(false)

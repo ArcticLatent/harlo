@@ -88,24 +88,12 @@ struct PlanSheet: View {
                             Text("Plan")
                         }
                     }
-                    if model.hasWiki, let wiki = session.wiki, wiki.inProject {
-                        WikiSection(wiki: wiki, notice: $notice) { key in
-                            dismiss()
-                            model.openHelper(key)
-                        }
-                    }
                 }
                 .listRowBackground(Color(p.elevated))
             }
             .screen()
             .navigationTitle("Plan")
             .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(for: WikiOpen.self) { _ in
-                if let wiki = session.wiki { WikiView(wiki: wiki) }
-            }
-            .navigationDestination(for: WikiLink.self) { link in
-                if let wiki = session.wiki { WikiPageView(wiki: wiki, link: link) }
-            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
                 if plan?.enabled == true {
@@ -119,7 +107,6 @@ struct PlanSheet: View {
             .alert(notice ?? "", isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
                 Button("OK", role: .cancel) {}
             }
-            .task { await model.loadWiki() }
         }
         .modifier(Themed())
     }

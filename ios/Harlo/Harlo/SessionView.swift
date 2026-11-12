@@ -318,7 +318,14 @@ struct SessionContent: View {
                         Button {
                             sheet = .plan
                         } label: {
-                            Label("Plan and wiki", systemImage: "list.bullet.clipboard")
+                            Label("Plan", systemImage: "list.bullet.clipboard")
+                        }
+                    }
+                    if model.hasWiki && session.wiki?.inProject != false {
+                        Button {
+                            sheet = .wiki
+                        } label: {
+                            Label("Wiki", systemImage: "book")
                         }
                     }
                     if !session.todos.isEmpty || !session.subagents.isEmpty || !session.helpers.isEmpty {
@@ -400,6 +407,7 @@ struct SessionContent: View {
                 case .branches: BranchesView(busy: session.busy) { branch = $0 }
                 case .changes: ChangesView()
                 case .plan: PlanSheet(session: session)
+                case .wiki: WikiSheet(session: session)
                 case .activity: ActivityView(session: session)
                 case .actions: ActionLogView(session: session)
                 case .share(let url): ShareSheet(items: [url])
@@ -523,7 +531,7 @@ extension SessionContent {
 
 /// The sheets a session opens.
 enum SessionSheet: Identifiable {
-    case changes, activity, models, actions, plan
+    case changes, activity, models, actions, plan, wiki
     /// The session as a Markdown file, to share.
     case share(URL)
     /// What waits on you in other sessions.
@@ -542,6 +550,7 @@ enum SessionSheet: Identifiable {
         case .branches: return "branches"
         case .changes: return "changes"
         case .plan: return "plan"
+        case .wiki: return "wiki"
         case .activity: return "activity"
         case .actions: return "actions"
         case .share(let url): return "share:\(url.path)"

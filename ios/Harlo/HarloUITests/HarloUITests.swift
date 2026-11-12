@@ -259,29 +259,18 @@ final class HarloUITests: XCTestCase {
         audit("plan")
     }
 
-    /// The project's wiki from the plan's sheet: how fresh it is, its
+    /// The project's wiki from the session menu: how fresh it is, its
     /// pages by folder, a page (a diagram drawn, code in a well), the
     /// pages' graph, and a search that opens its section.
     func test09bWiki() {
         launch("plan")
         openMain()
-        let line = element("of 3 done")
-        XCTAssertTrue(line.waitForExistence(timeout: 8), "the plan's line")
-        for _ in 0..<2 {
-            line.tap()
-            if app.navigationBars["Plan"].waitForExistence(timeout: 4) { break }
-        }
-        let open = app.descendants(matching: .any)["wikiOpen"]
-        for _ in 0..<6 where !(open.exists && open.isHittable) { app.swipeUp() }
-        XCTAssertTrue(open.waitForExistence(timeout: 8), "the plan's sheet has the wiki")
-        // (On the small phone the Update row is below the fold.)
-        let update = element("Update the wiki")
-        for _ in 0..<3 where !(update.exists && update.isHittable) { app.swipeUp() }
+        app.buttons["Session menu"].tap()
+        tap("Wiki")
+        XCTAssertTrue(app.navigationBars["Wiki"].waitForExistence(timeout: 8), "the wiki opens")
         see("1 commit since")
         see("Update the wiki")
-        shot("15b-plan-wiki")
-        open.tap()
-        XCTAssertTrue(app.navigationBars["Wiki"].waitForExistence(timeout: 8), "the wiki opens")
+        shot("15b-wiki")
         see("Quickstart")
         see("Architecture")
         see("Workflows")
