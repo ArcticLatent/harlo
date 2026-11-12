@@ -8469,6 +8469,20 @@ ApplicationWindow {
             win.summary(); Qt.quit() } }
     }
 
+    // The wiki's demo project to look at by hand (scripts/wiki-check
+    // demo): the project added with Wiki on and the Wiki panel open; it
+    // stays open until closed.
+    SequentialAnimation {
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "wikidemoshow"
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: Workspace.addProject(win.argValue("--cwd=")) }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const p = JSON.parse(Workspace.projectsJson())[0]
+            if (p) Workspace.setSetting("wiki_" + p.id, "1")
+            windowSettings.rightMode = "wiki" } }
+    }
+
     // The wiki on another machine (the test's SSH server; the demo project
     // there): the bundled OpenWiki goes into the host's cache once, its
     // server starts there over SSH, the panel lists, reads and searches the
