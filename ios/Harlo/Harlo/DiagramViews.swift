@@ -52,7 +52,8 @@ struct DiagramBlock: View {
                             .aspectRatio(CGSize(width: max(d.width, 1), height: max(d.height, 1)), contentMode: .fit)
                             .frame(maxWidth: d.width, alignment: .leading)
                             .padding(10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            // (Drawn down, it's narrow: centred in its card.)
+                            .frame(maxWidth: .infinity, alignment: d == drawnDown ? .center : .leading)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Diagram")

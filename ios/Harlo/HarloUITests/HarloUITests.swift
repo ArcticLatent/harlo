@@ -329,6 +329,11 @@ final class HarloUITests: XCTestCase {
         // (Opened at the section found, its heading on screen.)
         XCTAssertTrue(app.navigationBars["Sidebar"].waitForExistence(timeout: 8), "the result opens its page")
         see("Rebuilding rows")
+        // A link in its text to the code opens the file there.
+        let code = app.links.matching(NSPredicate(format: "label CONTAINS %@", "sidebar.rs")).firstMatch
+        XCTAssertTrue(code.waitForExistence(timeout: 8), "the page's link to the code")
+        code.tap()
+        see("In src")
     }
 
     func test10OtherModelAndMention() {

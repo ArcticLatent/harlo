@@ -54,6 +54,15 @@ public enum RichText {
         return blocks(root.children)
     }
 
+    /// Whether links other than web and mail ones are kept (a wiki page's
+    /// links to its other pages and to code, which its view opens itself).
+    @TaskLocal static var keepsAnyLink = false
+
+    /// `parse`, keeping every link but script ones (a wiki page's).
+    public static func parse(_ html: String, keepingAnyLink: Bool) -> [RichBlock] {
+        $keepsAnyLink.withValue(keepingAnyLink) { parse(html) }
+    }
+
     /// Plain text of spans (copying, accessibility).
     public static func plain(_ spans: [Span]) -> String { spans.map(\.text).joined() }
 
@@ -262,7 +271,11 @@ public enum RichText {
                 case "em", "i": s.italic = true
                 case "code": s.code = true
                 case "del", "s", "strike": s.strike = true
-                case "a": s.link = attrs["href"].flatMap { $0.hasPrefix("http://") || $0.hasPrefix("https://") || $0.hasPrefix("mailto:") ? $0 : nil }
+                case "a": s.link = attrs["href"].flatMap { h in
+                    let lower = h.lowercased()
+                    if lower.hasPrefix("http://") || lower.hasPrefix("https://") || lower.hasPrefix("mailto:") { return h }
+                    return keepsAnyLink && !h.isEmpty && !lower.hasPrefix("javascript:") && !lower.hasPrefix("data:") ? h : nil
+                }
                 case "span":
                     if let c = attrs["class"], c.hasPrefix("s"), let n = Int(c.dropFirst()) { s.token = n }
                 case "br":

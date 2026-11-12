@@ -418,7 +418,8 @@ struct WikiPageView: View {
         case "mermaid", "code":
             CodeBlock(spans: codeSpans(b), language: b.lang, raw: b.code)
         default:
-            RichTextView(blocks: RichText.parse(first ? WikiPageText.withoutTitle(b.html) : b.html))
+            // (Its links to other pages and to code kept: the page opens them.)
+            RichTextView(blocks: RichText.parse(first ? WikiPageText.withoutTitle(b.html) : b.html, keepingAnyLink: true))
         }
     }
 

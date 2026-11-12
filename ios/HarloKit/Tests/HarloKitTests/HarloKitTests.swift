@@ -1285,6 +1285,17 @@ final class ReplayTests: XCTestCase {
         XCTAssertNotNil(r.answer("diagram", ["source": "flowchart TD\n  x --> y", "light": true, "colors": [:]])["error"].string)
     }
 
+    func testAWikiPageKeepsItsOwnLinks() {
+        let html = #"<p>See <a href="../quickstart.md">the start</a>, <a href="repo://src/a.rs#L4-L9">a.rs</a> and <a href="javascript:x()">this</a>.</p>"#
+        let links = { (blocks: [RichBlock]) -> [String] in
+            guard case .paragraph(let spans)? = blocks.first else { return [] }
+            return spans.compactMap(\.link)
+        }
+        // A reply keeps web links only; a wiki page its own too.
+        XCTAssertEqual(links(RichText.parse(html)), [])
+        XCTAssertEqual(links(RichText.parse(html, keepingAnyLink: true)), ["../quickstart.md", "repo://src/a.rs#L4-L9"])
+    }
+
     func testAWikiPageDoesNotRepeatItsTitle() {
         XCTAssertEqual(WikiPageText.withoutTitle("<h1 id=\"sidebar\">Sidebar</h1>\n<p>Rows.</p>"), "<p>Rows.</p>")
         XCTAssertEqual(WikiPageText.withoutTitle("<h2>Rows</h2><p>x</p>"), "<h2>Rows</h2><p>x</p>")
