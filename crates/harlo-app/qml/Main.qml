@@ -4461,6 +4461,7 @@ ApplicationWindow {
     property real perfOpen: 0
     property real holdY: 0
     property var harloJobCard: null
+    property string harloRightWas: ""
     property var wrapBox: null
 
     property var keyHead: null
@@ -7913,6 +7914,18 @@ ApplicationWindow {
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
             win.check(win.findName("asideCard") === null, "dismissing it hides the card")
+            win.sendByKeys("quote 2>&1; and <b>bold</b> here") } }
+        PauseAnimation { duration: 300 }
+        // A reply quoting a shell redirect: its Context row shows it as
+        // text (unescaped, "&1;" read as markup and Qt warned).
+        ScriptAction { script: win.waitUntil(harloSteps, () => win.chatText().indexOf("ok: quote") >= 0, 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: { win.harloRightWas = windowSettings.rightMode; windowSettings.rightMode = "context" } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: {
+            const rows = win.findAllNames("contextRowLabel", win.contentItem).map(l => l.text)
+            win.check(rows.some(t => t.indexOf("ok: quote 2>&amp;1; and &lt;b>bold&lt;/b> here") >= 0), "a reply's Context row shows its 2>&1; and <b> as text (" + rows.slice(-2).join(" | ").slice(0, 200) + ")")
+            windowSettings.rightMode = win.harloRightWas
             win.sendByKeys("run the build in the background") } }
         PauseAnimation { duration: 300 }
         // A background job: the turn ends at once; its end starts a run.

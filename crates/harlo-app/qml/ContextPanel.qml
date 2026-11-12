@@ -296,8 +296,10 @@ Rectangle {
                             spacing: 8
                             Label {
                                 Layout.fillWidth: true
+                                objectName: "contextRowLabel"
                                 textFormat: Text.StyledText
-                                text: modelData.kind === "user" ? "<b>You:</b> " + modelData.label.replace(/&/g, "&amp;").replace(/</g, "&lt;") : modelData.label
+                                // (Escaped: a reply's "2>&1;" would read as markup.)
+                                text: (modelData.kind === "user" ? "<b>You:</b> " : "") + modelData.label.replace(/&/g, "&amp;").replace(/</g, "&lt;")
                                 color: modelData.kind === "idle" ? Theme.textMuted : modelData.error ? Theme.error : Theme.text
                                 elide: Text.ElideRight
                                 font.pixelSize: Theme.px(13)

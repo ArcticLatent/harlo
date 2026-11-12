@@ -993,7 +993,7 @@ Item {
                     text: {
                         const faint = s => s === "" ? "" : "<font color='" + Theme.rgb(Theme.textFaint) + "'>" + s + "</font>"
                         let r = card.newFile ? (card.lineCount === 1 ? "1 line" : card.lineCount + " lines")
-                              : card.result.replace(/^\+(\d+) −(\d+)$/, "<font color='" + Theme.rgb(Theme.diffAdd) + "'>+$1</font> <font color='" + Theme.rgb(Theme.diffRemove) + "'>−$2</font>")
+                              : card.result.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/^\+(\d+) −(\d+)$/, "<font color='" + Theme.rgb(Theme.diffAdd) + "'>+$1</font> <font color='" + Theme.rgb(Theme.diffRemove) + "'>−$2</font>")
                         if (card.failed && r !== "") r = "<font color='" + Theme.rgb(Theme.error) + "'>" + r + "</font>"
                         return [r, faint(root.seconds(card.took))].filter(x => x !== "").join("&nbsp;&nbsp;")
                     }
