@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:1445d231fd7a9fdcdc40ed150f79929949eb2143ea968af8bae68af47bb98858",
+  "claims": [
+    {
+      "id": "claim_ea1bf621379e44639b09b0e1d96fa523",
+      "statement": "Harlo runs a bundled OpenWiki Node MCP server on demand per machine, including remote hosts, and caches live servers.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/openwiki.rs#L394-L428",
+          "version": "repo-lines-v1:sha256:edc31ffb23a91c1157635d6faef510d44de08d47ff44ad147e641017a4400897:eyJzZWxlY3RlZExpbmVDb3VudCI6MzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgwMDQzYzY5MjMzMzgzOGIwMzZiNmYwM2FiMmY2N2Y0ZmEyYjIzZDIyYTQwMWViNjFlMTY3NjM0NTVhMGM4NWMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRmZjQ5ZTA3Mjk3YzUzMjViMzBkZGZkODQxZGE2MjNmZDI1NzQ1NWZkZmZmYjg5MmZhYTczNTExMzI2OGMwOTIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI4NzA3NmZiYzdkNTVjMmMyMjA5NGFhNzA2YTU5MDdlOGFhYzU3OTM1M2ZiOTE0NGY3Mzc5NDI3ZTZkNDI2NjIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjljMDA0YmVjZGUyNTRhNGE0MGViMTIyNDRjMmVmNGU3MjY2NDM5MTkyZGZmMTdiZmFiZTdmMTgxZTExYzdlOWUifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-core/src/openwiki.rs#L6-L13",
+          "version": "repo-lines-v1:sha256:5f8c362553f83b20c958a7cc906111f6e14003b18517390758e18c5e748aeb39:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOGI1ZTU2ZmY2NjhlMzIyOTJhNzEwYTE1YWYwN2QxOTRjOThlODdiY2Y2ZGJjYjAxNjBlYjFlMzYxNzQzODIzMSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYmMwZTNlNTU5OWY0MTIyZDhiN2QzMmMxNzRjNmRkY2UwMmYyOTRjYjIyMTI2MmEyNGE4NTkyZDkzMGI0MDE0MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNjBlOWJlYWMwZmQyNTY0NmJkYjE5YzU3ZjRhMTYzMTRhYjE1ZmFhYWY4YjlkYjgyNzI4MzQwZmQ0MzFmNjVlOSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNTU2ZjQ5OWQwMzk5N2M3Y2ExYmY5OWJhYjgyZmZmZjEyNWZjMzE0MDQyYzFkMzBjZjhhYjFiMjExYzNjYzk1OCJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_edd303492f354b69878b8872e33b6801",
+      "statement": "Telemetry defaults off and changing its setting restarts servers; disabled servers receive OPENWIKI_TELEMETRY_DISABLED and DO_NOT_TRACK.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/openwiki.rs#L229-L242",
+          "version": "repo-lines-v1:sha256:c525aa2083b755ba852b4ead079000287d2650c3afc00f593fde5f93a173e0a2:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ3ZDQ1MGE0ZjJhOGRhYTQxMDcyNDA2MDAwNDBhNzU1NzEwMGYzYTY3YWM1MzA2MzZjYjM5MzRjN2NmZTFlMGUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQzZDBkYThhZjBmNjI4OWJjMTU0NjY4MzExZDZhM2YzMjU2NWE1MWNkMWZhNzM5NmFhMzVmYTc4ZDk4ODZhZjIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjYyNTYwMGQyYTQ0YmMwMjU4NzQ4YzdkYjNjODM5YWY1OWVkODBjMDczNTBhNWQ1ODAyOGYxNjY0MGVkYmJhZTkifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-core/src/openwiki.rs#L405-L418",
+          "version": "repo-lines-v1:sha256:e6773b886a8460868f52470bbf161931914afe25c1875c4491d76433060143a3:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlmNmFhMmE5OWQzNGRhMGViNzQ2ODFlOGM2MGEyMGJmNjUxY2JmNTg0ZjI0NTQ4NDNmOTc1MzE1MTk0ZTdlZTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE2NjVhZDM1NmZmNWM2MzBiNGNiYTJmOGIzMTkwNDJlZDE0MDc2NTBmM2RjZTgxYzcxOTYyZDk4YWRmMjYyZDAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImEyZmE4ZTgzYzY2YWI3NzIzMmJmMjI4MjRkN2IxNmFmNmY1NTczODlkMmNmYjM3MzM5NWRjZDJlYWNmOWZiOWQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjBjMjMxODYzNDZjODc3OWU2MDVhMjMxYjU0ODgxNWYwMWIxYjhjODgxNThjMzJhYjJlNTI2NTU4ODYzZWVmNDQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_88f4c33cb3f943fba115f281cce0ba3e",
+      "statement": "Ordinary sessions receive search/read; writing tools strip root from schemas and dispatch injects the repository root only for tools that accept it, with read/write timeouts of 90/600 seconds.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/openwiki.rs#L109-L127",
+          "version": "repo-lines-v1:sha256:58c130c3a9d3632692adb1052daa7b5bfabcd32171a070d6c03bd10932dd70ae:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI2ZDg5OWY0ZjEzZDIxNDkwMzhhNjA3ZWUxY2VjYmJjMTg3Y2I2MjQ4ODE0YjM5MzA5YmU1ZThkNmY5YTQyZDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYxYTAxZGEzYjY3NzFiMjQwNDU2MTNhMmVmNjM5MTQzYjA4NjIwNjlmNzNjZmVlNWYzNGY4OTZhZTg0MjVjZWQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRmMmZhNTgwMjhiNGUwMDA1Y2JlYzgyZmEzYjI4M2Y4ZmMzMGE4ZWJkNWQwMzM3ZTdmODcyNzNmMjcwMmQwOTAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdlZjk3ODczNmNlZjVjOWExYjdjZDE1OGJkYzI5OTA0NTYzODM0NzM5OGE0MzEyOTk4ODg2NGE2MTAxYjZkMTUifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-core/src/openwiki.rs#L437-L461",
+          "version": "repo-lines-v1:sha256:e6a919295120a50e8448dc03fc2eb6a79b172ef286cee8d98e488ecc592cf214:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2Mjc5ODdhYmRiODMyMThlMWEyMzJlODhkNWQ0MjFhZjkzNjY1MDgxYTZlYWI3ODVhNjU0ZWFiMGIxZjhjMzYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNlNmMwMmI2MTU3MDcyMjgwY2M0YTI1MzU3ZjJkOGNmMGI3ZjY0ZGFhNjI3ZDQ3YTBjYTIxYWU3MzQ1NmU1MWQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjAwNjFlOTQ5Y2YzZWQ2Yjg1ZjBmMzI0NTBkMmI0YmRjMDQwY2VmZWMzYWU2ZjcxZDFkMDQ1MGZiOWZhYjU5ZmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI5MjgzNzA2MTA0ODY1MDhkYzVkYmUyMTgzOWYwOWExYWE2NTFkMWMxMDlmZTBjZTlhMDExNGFjYTY3MDljYmIifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-core/src/openwiki.rs#L44-L52",
+          "version": "repo-lines-v1:sha256:ac21eee35f026074c209a3e56d82fbf5af1cede95d366488b03e0914e02cdf6a:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNmQzODc1ODFlMzMzMjkwMjk4OGFiMmQxZmRhNDhkMGQyZGY2NzU1YWFiYWFhNDY2ZDVlYjQzOGRiNTk1OWM3NiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMWRmNzc4YzQ3MGI1OTU5NDcxODBiNThmYzM1ZTlhMjJmNzJlNjAzNjhmZGI4ZTM3NWE3NTZmZWQ2YjJlNDliYiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYjgwN2Q4MDIzMzUyOWNkZWY1YWY0MGFhMGFkYzczZWEyMjAyY2ZmY2E0ZmY0MTlmNjQ1OTIyNTEzYWJlODZkYSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNjc0ZmUzMGZkNmJjMTkxY2Y1Mjg5ZWIyZjk0ZjgxMmRiYWMxOWI4MmMzYzNlOGUyOWRiMjdjMWZhMjM5ZDY3MiJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_312bf65bb4804a0ebbdaacbb7649f78f",
+      "statement": "Wiki prompts distinguish create, update and durable continuation and embed the bundled skill while restricting work to the wiki.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/openwiki.rs#L130-L161",
+          "version": "repo-lines-v1:sha256:5bcee7460c6c47410799cdebf2483f1a27f64e9ea0289b323bcf22965458f2f9:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY4NDIxMzA4MmVjZmJjOGViMTFiZjAyODQ3ZDBjOGVhYjYzZjc3N2EwOWU5ZGE5NGQ4ODVhMGU3NjQxMGM2YzYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ4ODU5MjEwZWJjYjEyY2Y2OGM2MTYyMjJmYzU2MGMxZjY4ZTJmYTMxZjYzMDQ5M2RmODA5NTg4ODdkNTdhZjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjIzM2FhMDUzOTU2MDQ0MGY3ZjVhNmY4NjRhN2VmNWRlMzdiYzBmYTgwMjQ3OTAyMjk0NmRjODFhNDU4MjY0MjMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_d2145f590bc34cc19c76cd733d700ba7",
+      "statement": "After finish dispatch Harlo removes the generated OpenWiki update workflow only if it exists and is untracked.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/openwiki.rs#L462-L470",
+          "version": "repo-lines-v1:sha256:b6c83bb57c39ea360d3f326ddb2b14e9333eeb4341c42279a0902e1e89e96212:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMGVlZGVkNjQyNjI5ZGQzMzM1NTExYzA0ZDM5NWY1NGRiOTM2MDRmMTA5ZDIxYjZmY2Q4YjYxMDQ4NjdkMmYwNCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiM2M1MDExYjcxYzI1NWRlZTkxMWE0NzVkZGFjNzhlZDBlZjVlMjNlMDkwMTJlOGQwNDhjNTkyM2MyMGJhMmFmYyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMjNjZWI3MTUxYTcxNWU2MjgwNDc0YTlhMTVhZWIzOTY4MDc5YjkyNDQ1OTI3Mjk2NmZiYWFkZWExMmNjOTMzOCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNzZjZGY3Y2U4YTBlOWVjMzkzNGJhOTM0MTQ3Y2QyYTZlYjFlMDc5NmNjYTNkN2YzYTc5NGNjN2UwNTRlZjk0YSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_ead146cd8dda4d6c8e547abee6309e5e",
+      "statement": "Wiki browsing supports frontmatter, links, progress, freshness and text search without Node; tests verify page ordering, path rejection and section retrieval.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/openwiki.rs#L1185-L1247",
+          "version": "repo-lines-v1:sha256:92a42e8bb63b4173e1f4a655f8b18dcbc5a6b4f61905038d56bd6e229b1eaf4e:eyJzZWxlY3RlZExpbmVDb3VudCI6NjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkyYjVlZGY1OTQ5Y2ZlYTY3ODIyY2Y2OTExMzIzNjNkNjhkNmYxZTE2OWY1ZTBkNGY3YzE0ZTVmYTFlNmQ0ZTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImYxNDJjM2YwYzcxNDE0NmM4MTAxOTYyMGYxYzcyMDRiOWZiMGFhOWMyZmUyNjliZTJhMWU3MzNiOGE0MThkNmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImM1YTUzMDZhNWMxY2Y2NzY2ZjgzYWZkMzAxYmUzZmI1YmMyZWFjZjQxMzI2OTk5MjEzZTE2ZDg4NzVmMzBjZjkifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-core/src/openwiki.rs#L15-L17",
+          "version": "repo-lines-v1:sha256:b8b39086224d62adb4cd3a030e8c2e05118d4ff78d048eb41742f927e1dd90a9:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYmI0ZGRkN2ZmMmI2N2FiMTczMGIxMGIyMDQyZjJkNjVlYjU5OTU4NzljNTU2MTlmMzA4N2Y3NTczNThjNzJiOSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiOGVhOGZhNjFiNTdhYmZiNTZlNTUxY2RiNzcxNjk4YzcyOTgzZTI4ZWQyZGNiODY4NmQzOThhZTQ0YzU0NGFjYyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMjk0YjE1ZjlkNDhmMGJhMzdjYTFjZTNhOTQ2MzkzNWU3YTk2NTUzMjUyMjY4ZDZlMTZkY2I1YjAzNGRhOTU4NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZjQzYWIzMGRjZTUxMmU4NDExMjAxMmNjNzc0YTU3YmM2MTk0NTU3Njg1ZjIzZGFkYzE5MGVlNDI5YmYyY2E4YiJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_57fdb4c0d0eb4370b58693182a0cf0e2",
+      "statement": "Wiki session startup reads nonblank, noncomment ignore rules and includes instructions forbidding access or description of excluded resources and requiring updates to remove their existing wiki mentions.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-app/src/workspace.rs#L2362-L2374",
+          "version": "repo-lines-v1:sha256:937800acd053073b4e55cc1ab45c0fe1d69b697abe5f776b8ca3bb531b256914:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjYyZDI5MDRhNWJkMTg0MjYzNDczMjdjMGM2NDVlNTdlNWVlYzk5NWRiOGU1MzljMzA1YjI4NGJiMjM5NDQzMGMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJlYzM5MTJhMWRiNDg3ZDM5OTVkYmYxYmJiYWI0MjNkODdkMjFiOWRhZGUxZmVlZmY1ZjRmOTIxMzIwZDdlOGYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIyNWRiYTAxOWU1OGM0ZTE4NTY2NTAzMTIyNmRlYTExMWZhNzA2Y2U0YThhNzI4ZmZjOTdmOWIxMjAyZWViYzYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjZjMjIxOTBlNTBkMWE5YjM4Y2M4ZDFiNDQ1ZTNmYjQ3NDE3YjNkZWQzYzA2NGIxODdkMWYxNDRjYmZiYWJlMmUifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-core/src/openwiki.rs#L130-L162",
+          "version": "repo-lines-v1:sha256:951cf1c41e088b69c8b6cbcc4d11408825c889a889fb5acec29aed118ab0e3c0:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY4NDIxMzA4MmVjZmJjOGViMTFiZjAyODQ3ZDBjOGVhYjYzZjc3N2EwOWU5ZGE5NGQ4ODVhMGU3NjQxMGM2YzYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ4ODU5MjEwZWJjYjEyY2Y2OGM2MTYyMjJmYzU2MGMxZjY4ZTJmYTMxZjYzMDQ5M2RmODA5NTg4ODdkNTdhZjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjIyYjNiNDRjMDFmMjg3ODExMGNkODc4NGYyYWY3ZjZmMWY1ZWMwN2E4NDY0NWU4ZDU2NjY3NTBmYmU4NjhjYzgifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_ebcb1a6465e24229acb9d8188f891cdd",
+      "statement": "The bundled OpenWiki preflight patch treats evidence excluded by .openwikiignore like security-refused evidence so claims can be reconciled instead of aborting; other resource errors still propagate.",
+      "evidence": [
+        {
+          "resource": "repo://packaging/openwiki/patches/ignored-evidence-unresolved.patch",
+          "version": "repo-file-v1:sha256:84d855bf42356cc38aad6e4f24fcea663839dfa0368ba6ca19b22c9ed3ecd827"
+        }
+      ]
+    },
+    {
+      "id": "claim_d1a00853d4694e62b0d07fafc4efc09f",
+      "statement": "Runtime preparation hashes bundled patch contents into VERSION, applies patches after package installation, and fails if a patch does not apply.",
+      "evidence": [
+        {
+          "resource": "repo://packaging/openwiki/fetch.sh#L58-L78",
+          "version": "repo-lines-v1:sha256:e20d03a3a56c8b741f30b392b1e02572b6937f193b888ae66ff29f9d0a40ea36:eyJzZWxlY3RlZExpbmVDb3VudCI6MjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVkY2M3ZGFhZjdhYzU4YWM0YzgwNjU0NDFlMDQzNTg3YTVmN2JjNmUyNzgwZDQ3ZDFlZTU1MDUyYTMxZjhkNTQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlmNDkyZTZlYmMzY2U2NDI3ODJhOTgxNDcyMjU1YjZkZWM5Y2Q3NzExYmRlNmQ2ZTY5ZTUzYjBiMTU0ODI1NTciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjMxMGU2ZTRjOTM4OGNlMjhkZjBhMzkxNjE2NzgzZTQzMDNlOTBhNGQxYmRhNGMzZGYzNjA4Yjg2ZTFiNmI5ODUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRkMWVlMGQ5Y2RkODUxMjZmMjM1MzNiMjAwZjM1ODRjZGYwZmZlNmE5ZWFhMzZiMmZjYjk4OWEzYzA2M2EyNmUifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-12T17:20:25.384Z"
+  }
+}

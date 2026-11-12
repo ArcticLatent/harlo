@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:01e9dd685008e26828701bff74e6c6c09aec7fb45d32035f87a4e9d5788c17d6",
+  "claims": [
+    {
+      "id": "claim_7a207a8ae4594d9ba376628ea349a6b4",
+      "statement": "The contributor workflow requires Rust and Qt plus cmake/clang, offers Demo sessions without installed agents, and recommends scratch HOME/XDG directories for isolated UI work.",
+      "evidence": [
+        {
+          "resource": "repo://CONTRIBUTING.md#L64-L84",
+          "version": "repo-lines-v1:sha256:7ef246131e1e63190c4a8ba1d2c2a55e8f8f21bea86da852243aa8b63a530985:eyJzZWxlY3RlZExpbmVDb3VudCI6MjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZiNDA5Nzk4N2MxM2EzNDQ1YTI5NWIzMzJmNWM4NGVjNTk2MTc0NDQ4Y2E3MzJiYWE2MTA4OTU2MGU0NGQ1NTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZjYzZiMzE3MWE4ZDk3YWY1YmZhYzM5MDExZTIyN2U0MzE1YTc4NmNmNzhjZWIwMWJlNzMyYmUzZWVlZjRiMzgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk3YTQ4NDA3M2IwNWI4Yzc3NGNiMWFlZjBkNmY5ODhjNmE1NmM0MTMwNWNjNjM5ZmE5NzNlODkyNmMyMTAzZjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE5NTVjMGE0NDRjYTMzZjFlZmZjN2E4ZjYyYzM5ZjNmMTM3ZGViYjljZDM3ZDliYWIzMWQ4ZDFlZmQ5Y2Y2YTcifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_df14254ebdad415484e840449ee155e5",
+      "statement": "Release publication depends on build/install jobs, is tag-only, checks Cargo version against the tag, signs the manifest, and publishes GitHub assets.",
+      "evidence": [
+        {
+          "resource": "repo://.github/workflows/release.yml#L186-L232",
+          "version": "repo-lines-v1:sha256:d6912a8cb2ca8b982965167f8b71b9ecbd6c071960abc7a5a5bf676eb61102ec:eyJzZWxlY3RlZExpbmVDb3VudCI6NDcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU4MjU0YzkxNmE0NDgxMjNlMmQzZDk1ZWJhYTJlNGIxZGIwZmE3YjU0M2UxMmMzZTFiMTFjZjM2MjE2ZjIwMGEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgzYjRhM2UzNzBmYjA4MzkxNGFmNGQ2NjZiYjNiNzkwNDQwYjk4OTQ2NGYwMWQyODExODliZDRiZTM3ZDI0ZTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBlNGVkNWMzYTI1ZGZkMGVkZmNiMGVkMDYyZGFkMzg4YjE2ZDQzMzQwY2UyYTJiYzgyMjNhNTM0NGM4YzJjMDYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_8eb9457b574d4d5c8f2d37eca44bd744",
+      "statement": "Update signing uses a domain-separated, NUL-delimited payload with sorted assets and a non-shipped private-key signer, while clients carry the public key and support a test environment override.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-update-signing/src/lib.rs#L1-L14",
+          "version": "repo-lines-v1:sha256:3b198c1c6b4462830503241e92094893346c875279b793c84ff3c10331ebb5a9:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRjNWRiMTQyOTBhYjdiMDE2ZTYyZTY0NWI0NmI0OWM1ZmYxN2M4NGQ2N2ZmOTA1MTUyY2Y1YmY3OWM5YTE1MTgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA1MGVkMTY4NjBmNjJmZTQxNjdhYWYxYzU4MjkyOTY2MmFhMDY4OGZhM2E5MzIzNGQwZGRlMDM2ZTk1NGJkZDkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImIyMDA5Y2Q2MWFhZGI2ODIyMmFkOWE5ZmY3NjU5ZTkxZWUxZTA4ZmFlMDMzNmMxZGI4MzcyODRmMDhlNmQ1YjEifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-update-signing/src/lib.rs#L20-L60",
+          "version": "repo-lines-v1:sha256:90331684f111f675fd3ad2aba21748d140609047de10fb546a89703aa5444e65:eyJzZWxlY3RlZExpbmVDb3VudCI6NDEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI2Yjg2NGVmZjEyOTQ2ZTMzZDY5ODE3NzcyYjNmZDkxMjFmZWM0OGIwZGE2MGVjZGI0MzRlOWI0ODdmMTk3MDciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkzZWUwYTVmMDNhOGQ3NGIzNDVjNmQ5MWFkZDA2YTUwYzJmNzBhOGMyOGRiMTRmNDBkNDA3Nzg5MWNkZmI2MjUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA0NjY5MjViZDIwYTU5MTY0NjM1YzVjYjNhNGY1MmVkN2YxNWUxNmYzNzJiNjBkM2NiMDhjY2Y2YjhkOWYxY2UiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE4MjI5NmE4MDhmYzZlMzczNjRlMzg2OGQ2Y2IwNGVhOThkODdlZTI4ODM2YjJlNGRmN2M5MmE5OGEzYTYwYjMifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-update-signing/src/lib.rs#L78-L84",
+          "version": "repo-lines-v1:sha256:12f54808ed0a5b77431093c752920b2e988faa0fe908adfabf7fb32e536794b2:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZWY4ZjE5MmI5NTA4MzUyZDBiNDQyNWNkOTUyYTQ4MGQxMTA0ZDRhYmVjY2UyMmFlYzM3Y2RlOTBmODI2ZjBmMiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNDEyY2EzNDVjY2Y3NWJmOWMwODA2YmNlNjk1YmU4ZGU4MDhiNzk5ODQyNTFhN2E1NGQyMDJjZjYxMDFkZDQ1MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYmM5ODY5YmFiZTU3OGNjZDA3MTg5MWY2NWRjMWI2MmMzMzM2ZGQ1MjhjZDkzNGY1YjdmOTE2MWZjOGY3NWU3MCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiN2JjOThkNmIwZGM0OTJjNTAxNmRmMTA4MDVhM2E1NGViOWMxODRhNWE2MTM3ZTdmNGJlY2ZhMGMyMjA1NTBkMCJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_e1c226626e2a4ccfaca2806819a69992",
+      "statement": "Core accepts release manifests only after signature verification and repository/tag consistency checks, and desktop installation rejects downloaded packages with mismatched SHA-256.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-app/src/updates.rs#L213-L226",
+          "version": "repo-lines-v1:sha256:adbaff524c86860c859dfb41d704a542c43a969c3ce432f53caad410248ff6a8:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcxYWE2ZDgwNmRlMmU1MTg5YWVkOWViZTEwNTAyMDJmNWU2NGZhODdmOGI3MjFiMjQ4NmE4OGFhYjI5ZDE1MDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImYyNjBhNDJiODU0MTZlMDQzMDI4ZWI4YzM4Y2RlZTc0MzQ4MjM5MDEyY2ZlMWQzNWZjYjE2ODBiMmI4OTAyMGMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU2ZWZhNzMwMDQ3MzdmNmM5Y2ExMGQ0YzM5Mjk1ZWU5MDg0NTcwZDI3Y2Y1NjFlNjc4YzNhZjg4Y2IzMzNhNTQifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-core/src/updates.rs#L60-L84",
+          "version": "repo-lines-v1:sha256:d3958a56b2f5cfa5375380211093a0701d289dc5a0ea32d4a00d61278d63efbb:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjExM2M0MTY5MWRjYjRiZWFlZmI2ZTU5YTEyMDlkYzk4NWMyMzM2ZTU3M2YyMDc5MTc3MTJhMTYzNGUwNDhhNGIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjAyNWZhZDBiNWNkZThjNTMwYzIwMzkzZGFiZWFjYzAwOTk2MGIxMTY4NTRlOWZkY2ZiNTVmZDFjZjQ4OTJmYTkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhjYTc0NDM3ZWNkN2ViMzJiMzdmZTRkNWM4OGE1MDY3NjhiOGExMGE5MjY2Y2QwMTBiMDIzNzNkNDlmYTNiMzQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_cb726a6a3092470abb40a088ecea91b6",
+      "statement": "The documented release script updates Cargo versions, commits, tags, pushes and follows the release; iPhone releases are separate.",
+      "evidence": [
+        {
+          "resource": "repo://docs/releasing.md#L6-L39",
+          "version": "repo-lines-v1:sha256:4f9933e46e506f7e8a1e8328463fffea423744e0cea91481da23bfa1f0dd6ddb:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUzYTNkMmFlYzIxN2U1NzkzODg3YzlhNTYzNGRlNGRkYTU0ZTFiNTA4NDBhNjNiYjJiZTU4YzJkNjAwZDFlZGYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU3YzAxZDFjNDRjZjdhNmI5ODc3Y2VjOGY3NjgyZjRkOWY5MDMwMWQ5OWQ4ODFmNzY1OGViYjBkY2NjNmFiOGEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVhMTY3ZmM3ZDBhOGMwOTQxMTYxZjZiMmM1NDAwMTBiNjdiZDZkYzY0NjBkMGVkNzliZTljNDhhNjUzNGZmZTgifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-12T17:20:25.384Z"
+  }
+}

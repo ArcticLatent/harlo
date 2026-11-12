@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:5c19662076357202358c0f507bb307e7edbbe1f743cdc0b01cc2f8d639f02680",
+  "claims": [
+    {
+      "id": "claim_292a16b40b5241b4ac361dda40dea2cd",
+      "statement": "Harlo is a Rust edition-2024 Cargo workspace over crates/* using Qt/cxx-qt for its desktop.",
+      "evidence": [
+        {
+          "resource": "repo://Cargo.toml#L1-L25",
+          "version": "repo-lines-v1:sha256:1c9379b2ff66c9b5701b5626b82ef768e4241f6b84dd9e7a2bbf3bc43a6e6745:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQzNGUxMDJjODYxZjk5NGQyYWFjZTkxMTRkMzkyZGJjMTYyMTkwZTAwYmU4ZmUzNTdkNDcyMTUwY2E0Mzk2MTQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ3OTg5ZDQwMjc5NWNjNDIzZjc1ODJhYTczY2NmN2M1M2RmZTZiZmM4MjlmMzlmZTRlZDc2ZmQyMzhlMDZmNDAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjNiYWUwMjgxYWM0ODQ5MGZjNjc3NWRmMWUyY2I4OTYyNzAyODI4Zjk1NTMwYzcyZmIzMzJiODJhZTJlNWU5MzEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_f0ac0c41888a47ad9305bf1e7318fa96",
+      "statement": "Contributors can run Demo without installed agents or model credits and isolate tests with HOME or XDG directories; the HarloKit Swift package builds/tests separately from the XcodeGen SwiftUI app.",
+      "evidence": [
+        {
+          "resource": "repo://CONTRIBUTING.md#L64-L84",
+          "version": "repo-lines-v1:sha256:7ef246131e1e63190c4a8ba1d2c2a55e8f8f21bea86da852243aa8b63a530985:eyJzZWxlY3RlZExpbmVDb3VudCI6MjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZiNDA5Nzk4N2MxM2EzNDQ1YTI5NWIzMzJmNWM4NGVjNTk2MTc0NDQ4Y2E3MzJiYWE2MTA4OTU2MGU0NGQ1NTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZjYzZiMzE3MWE4ZDk3YWY1YmZhYzM5MDExZTIyN2U0MzE1YTc4NmNmNzhjZWIwMWJlNzMyYmUzZWVlZjRiMzgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk3YTQ4NDA3M2IwNWI4Yzc3NGNiMWFlZjBkNmY5ODhjNmE1NmM0MTMwNWNjNjM5ZmE5NzNlODkyNmMyMTAzZjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE5NTVjMGE0NDRjYTMzZjFlZmZjN2E4ZjYyYzM5ZjNmMTM3ZGViYjljZDM3ZDliYWIzMWQ4ZDFlZmQ5Y2Y2YTcifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_430039a06bea460cb28790aa605c004e",
+      "statement": "The repository separates normalized agent protocols in harness, Qt-independent core logic, and desktop QML bridges, with non-Qt logic intended for core or harness.",
+      "evidence": [
+        {
+          "resource": "repo://CONTRIBUTING.md#L86-L97",
+          "version": "repo-lines-v1:sha256:50bb5fff9db9300806dbca6a440ecc1c7990451ba62fd575925a3c0235a7e2d5:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU2NzllMDk0YzU2MjJhYjIwY2ExYjg3Y2I1Y2MxZjM4MWY1YWZkMTdhM2QxMTZmZDhhN2I4Yjg2MjM0YmZmN2QiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRhNDljMDdkNDA5OWNkYTE2YjIxYjczNzA4NGZiNDU1YzFhZmMzZmY0OTkyZjg5YjcyZjU1N2MyMGNkNDA3NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjAwYmE4N2ViOTU5YjU1M2NiN2IzNTRjNzRiZTI0OGRkNDE1ZGUwOGJlNWQ2YmI2MTQ2Y2U1NWQyNTJiM2Q3YzQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVjYzNkNDBhZjhiMDAxMWE1MTc4MGI1Y2YwOGRkYjZlMWQ0MDdlNmE1ZjNjMzEzNTg1MzRjYTU3NmM4MjAwMmMifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-harness/src/lib.rs#L1-L18",
+          "version": "repo-lines-v1:sha256:21777f87b710afef66708de636b08f036ab485f0847a845c70d2d550ebe6cdb1:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZmZmZjYzc5ZWJkOTlmNzc2MTY2M2VmOWI0MjgxYjc1ZTdlZWY4MGMwODgyNWIwZjE2MmYwMDM2NmNlZDRlZjkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZlYWY4Y2MxZDM1OTI1ZDU5OGNiYzVmODA5ZmZhNWQwYTkwNWI3MzdjZTFmYmQzNmFkZDZkZGViNDJmMWJjNmUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJjMzIzZTg4NzU3ZjM4MzFkMjAyMGU5ZTA3OTdhOTZlMzRkYWM3NDYwMDcxZjMwZWMwZWE4MTVhZGVmZWYyMWMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_68bff8a1ad33400b97ee12f1764758f6",
+      "statement": "Application metadata is separate from agent conversation files, and remote Harlo agents retain their own machine-local sign-ins, settings and sessions.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/agent_host.rs#L1-L5",
+          "version": "repo-lines-v1:sha256:07fa556bce3f1f3b3cf025917343d021eaace503fd6f051e276ad5df1f11cf2e:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZGIzMGY4ZDgzNWQxNzVhMjVhNWZkMzM3ZmNhZDU2NTU2YjEwN2E3ZDE2ZWYyOWU3OGEyOTE1Njg2MTdkMjk1ZSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYWRhYmE0Zjg1M2VkMDgxMjAzZTMxMzdhYTUwZmFkNDc3MTk4NWYxOGVjM2M4N2JkMmU2OGNiNzFlZTZjNDIxMSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYWM1ZTJmMmE5ODJjYzAyOGJiMzUxMDFiODMzZTVlMmZlMjE3OGU3Y2EwYjAyYWNjZjU5ZTE4NDFmMWIxYWI2MCJ9"
+        },
+        {
+          "resource": "repo://crates/harlo-core/src/db.rs#L1-L2",
+          "version": "repo-lines-v1:sha256:75b0cb1d3b946e9c6d7dded754c186cc6f894cd7308bd756e3b1edd7f2f1f96b:eyJzZWxlY3RlZExpbmVDb3VudCI6MiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNmY0ZmFiYjM5MDIzZjQ2YmUxMWI3ZjI3N2VhZmI1MjIyNjU4MmEyZDgwZTNmZjVhOTdlYWE5OGJjMDY4MDZjMyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNDAwMDZmODhkMTcyZTZkYjdhNDEzNDVjM2VhMzY2MWNjY2VhNTEzZWEzYzVhZTE2ZTk1MDhkYmMwYjA1MDQyNCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNWVlZjJkNzJiYjAzZjdmOWVjZmYzODk1N2E3NjBmMGFhOTEyYjZiYWM0ZDQxNzNkNTk3NzNjYzliMjQ2MDY5MiJ9"
+        },
+        {
+          "resource": "repo://crates/harlo-harness/src/store.rs#L1-L9",
+          "version": "repo-lines-v1:sha256:8e3b42f555d2c5f2e1cb99ee99462637ab1e4fbc6dcef36d82ab8759f357dc6a:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMGQyMWFiYjU4ZGQzMWFjNTk4MDA0MDYyZGIwODQyYzdiN2E4N2VhOGU2ZjcxMDRiMGU4YzY2M2UzY2MyZWNkYSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZjA2NTczN2UwNzFmOWZiY2RmNTRiOGFkMzhlNjZlNGI2ZjFmOWZhMWMwMWVkNmFmOWQ5NjY0ZDIyMmE5NjQwMyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYzE4YjhlMTQyOWY2ODc2MzEyYzQ0MGMwZDdkMDkyYThkZTliMGM5N2JmNDJjZWExYjgyODJjYjFiODBiZmEzOSJ9"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-12T16:14:28.541Z"
+  }
+}

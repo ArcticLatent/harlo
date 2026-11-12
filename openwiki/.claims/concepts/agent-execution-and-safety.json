@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:df255209639937504035170b4425ef6d1af8686147aeeb6060c445774ae477bc",
+  "claims": [
+    {
+      "id": "claim_f2e5edb5ea144848b99636cceee494eb",
+      "statement": "The agent derives resumed model history from its JSONL log, skips crash-truncated lines, and records compaction without deleting older messages or splitting call-result pairs.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-agent/src/compact.rs#L1-L15",
+          "version": "repo-lines-v1:sha256:765070127cfb0b2b444dc82b2946f9d3ebf41330181209f9833a305573375a2f:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE1NTM3ODIxZWY5ZTUwM2FlNWRiMjhkMjlkNzc3NjZhYTIzMDM2OTUzNjQzYjgwOWI3ZDEzNDkwMTM3OTk1MDkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE5YzA0Njk1MTg5YWQ2ZTA2MzAzOTdkYTYwM2NiMmNiZDk3NzlhZTU0NDdmNzZiM2YwNmFjOThkNmE3ODU2YWMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijc3YTE2YWZhNDMxN2ZiNDcyOTc3ZTk4YTMwZDQ4NDllZDM1MjUzNDcwM2QzYTBhMDUxOWMxMmQyY2Q4MmRmZGMifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-agent/src/session.rs#L1-L9",
+          "version": "repo-lines-v1:sha256:8c93d3fe46509436423b59c109641dd9acd5b4bf1b8fb6fff7035bb8d358214e:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMjZlMWMyZDM2NWViNjM2ZjRmOWRmNDdhYWJjYmQwMTliNzkxMjE3OWI5YjcwZDRhMTU5NjViOWFiOThiZWM5MSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiM2IwMDE4Zjc5N2Y1MjUwYTAxZDVhZjU2NDgzOWFmZTVhNzk5ODhjY2Y2YTJmNmMxZWU0MDYwNTgzZjIzYjFmZSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZGNmMjhjZTQxNWVmNTVmYTkwZGJiMzk2ZmMwNDc1NzMwYmVkNDlkYTEyZmJlN2Q3MWEzNTJiM2MzMTg1NjI2NCJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_f6205f9f3dd14283b23809571366e5f2",
+      "statement": "Entirely read-only permitted tool batches run concurrently, while other batches execute in order and distinguish interrupted calls from calls not run.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L1464-L1504",
+          "version": "repo-lines-v1:sha256:c46877da3fce3d847f3e5640ff933921d3da2a24d08a2f1e32f13bfc0dd10054:eyJzZWxlY3RlZExpbmVDb3VudCI6NDEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcwZjdlYjQzOTc0ZDc1MzA0MTI2Y2IxNjMzOGIyOTc1NWMxMDVhOGJkYTI4N2M3ZGEyZjYxYTk5ODBhZjI3MjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE0YzU1ZmM2MGI4ZGIwMzg4OGZmN2Q2ODBjZDhkODI2NzQ2YTNhOWRjYjZiMTU4MzAxN2I5YjA3N2RhOWUxYjIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImMyNzdkNDJkOWI4YTk4ODg1ZTRlZDFjM2YwM2RkOTBhNzExYTAxOWQyN2FmNjQwNTNiMWE0NTY2Njc0ZDI1YWIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjllZjkyOTI5MzRmNjA1NmE5ZDFkZjM3NTdiYzJjNDZiNzM0Y2M0ZTQ4ZWNhYmE1ZDI4YmI1YjZjNTEyN2RiY2UifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_0776477ec00f489f99dad683245a7402",
+      "statement": "RPC plan gating rejects file mutations and mutating MCP calls; outside-sandbox bash asks every time while sandboxing is on, regardless of the normal approval mode.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-agent/src/rpc.rs#L194-L230",
+          "version": "repo-lines-v1:sha256:a66ae7745b72c18c9b5b49e86b539d1aa8200232ab75326da45fb7597868b5e8:eyJzZWxlY3RlZExpbmVDb3VudCI6MzcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjYyMWNmMjcwNDhjOTFiZDlkMmYzN2NjNjViZjZlNjk5ODA0OTEyNDAwNTViMDZhNGJkYWVhYTcxOGI5NGI2NGYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFjZGE2NmQyYjY1ODZkZGUzNzBlMzYzMjM3YWZkMzFiYjM4ZTllNWEwZWNlNDc5YjU4ZTY0NjhlM2FjZTQ5YzciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE5ZTc2MzU1Y2YxMTk5NDgwYzNmOTk4MzZiMTQ4NmM4NDFkODkxZmFhZDkwNGM2MDhlMDkzMDIyZDM3NTdhZWUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjkwOTI1MDBlN2QwZGI2YWYxZWFjODhkMGY4NmI0MzAzYTQ1MGFhOWQwOTExZmIwOTQ1YWQ4YjAxZjZmOTY4Y2YifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_1786565866eb4543b90e309ce94c719e",
+      "statement": "Sandboxing defaults on, is configured by CLI then environment and user sandbox.json, and refuses commands if the machine cannot sandbox; file tools follow the same access view.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-agent/src/sandbox.rs#L1-L9",
+          "version": "repo-lines-v1:sha256:3ed02df6c6c5288f6050b58fffb0d05a7c62d3579831b386b06ee3419b556fc3:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYWMxYmFjMzNlNzY5N2Y0Y2IyNDE5ZTY3YTJjZDA1NTY4NDVjODJmNTY0Yzg5Y2VhOWIxYmQ0ODMxZDM3NTBhYiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNDg0OWRiNjU0NTFhMTVkZjY1MzJhZmIxM2FiMmZkOTRmYTk1NTgzYTdkYjYzMjczZDJiMGQ1YmVjZmJkMTNmMyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMWYxZjViYWE4OWM1NDdmNzUwMzAxYWUwZjgzZmQ4NmE4OWU4YmQ1YjkwNzhhYjVjMDYyNjZkNTg3MWQ2NTE5ZSJ9"
+        },
+        {
+          "resource": "repo://crates/harlo-agent/src/sandbox.rs#L37-L54",
+          "version": "repo-lines-v1:sha256:f44f947fb75012fd4adb65facdf82f94d574a394e1982e45314c10b2f328a64a:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRmNDYxYjM3MDUwYWQzNjM0MTI0ZmUzMzk4YzcxZDUyZDgxYTYxODM3NWNjYjU5OWE2Y2UyOTVlYzBkOWRhMGEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJkZTFmYTJmNzBlNGYxNjY3NGQ5NTZjNTMzZjg3NWI4YTk3NzdjYTVkNmMyODkyMGM2NGUwY2ZhNDM3NGY0YjUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImM4N2FiNjQwYjViNmE2YjdjZjI3ZWJlOTg2OTljMDgwOTMyYjg5Yjg1NWE3NWZkNTQ1ODBlNGMwMjllZTcwZDgifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_4d99ec610d9c4de7b7d1c824fb040ac6",
+      "statement": "File edits and overwrites are refused after an observed file changes until reread, using recorded size, modification time and hash.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-agent/src/tools/mod.rs#L1-L7",
+          "version": "repo-lines-v1:sha256:6fed4edddc37d275df8df9d569581b124125abc8f59131be75226d5cd3f69918:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYWU1ZmJhOTFjOGM5YmQ2ZWI3NzZhN2NjYjY0YzU0OTVmOGVmZjkxNWJjYzM2ZjczYjE4M2M3MGY2YjgyYjQ1NCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZmY2NzIzMGQyYzNhNGNjMmNkNGFhMmFhNTk1YTIyZjdmYjNmNTNiYTQxN2E2Mjc5ZjkxZGVmNzdjNjJmMjBlNiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiM2UwOTU2MWY4OWY4YTU4YzI4ODc5ZDFjZDQ0ODI4MDc0OTYyZGVjOTk0YWY5MTNlYmYwZTM3YTYwNmYxMjI1MyJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_c09bd9a2ebfc48f18c14ef596e377c05",
+      "statement": "In-process task subagents have restricted tools, cannot recursively delegate or use desktop tools, share approval and cancellation, and run at most four at a time.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-agent/src/task.rs#L1-L16",
+          "version": "repo-lines-v1:sha256:f22e5f05df6b751f848590094ef5fddba79df67f58f1c6503eea004f719b0cd0:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI1MTExM2YyYzRhZWNiNjg4NWVmODJiN2U0NTVhNjM4YTFlNGM4OGE2ZjY3ZGIzNmViYjBjZjEyMjFjMDYzMjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJiODc2ZGQwNTk0ZWMxOGY4MzliZDQwMjEwZmQ3NmI0OTQ5ZWNhYTYwOThhNjNhMzNlODczMmJiMjgwMjBkMmQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQyOWQxYTZjY2Q0MzNiZTkyMTVkY2IxZGQ4NmY1MzY0ZTUwZjFkYjhiYTIyNmE5Y2U1NzlkYmU5Y2MyMWE0NmIifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-agent/src/task.rs#L31-L39",
+          "version": "repo-lines-v1:sha256:966b10cc19b8ef23e1cdae70c485ba690229852515df2af6e828da94baca0896:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOWJkZDAxZDYwMTMwNzFhNmU5YzYyMTg5M2FhMWNjYWZkZjdiYmU4MTQ0ZjczYTc4OGM2Y2NlZjdkMzQzZWRhZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMjcyNThkMjY0YzQ3ODY1ZjdhYjk4M2I5NjQ1Zjk2ZjI3YjZlNzE2ZDI0MzVjYTMxY2JmYzlmNDVjODJmZmRhZiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMGNmZTg3OTQ5ZDM3ZDJmNzNlZTg1OTUwODM2ZjFhMjU3ZWU5MmI1MTQ1ZDBhNTQyNDg5YmMwMmJkOWFlOTVjOSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNGZlZjU0M2ExY2IxNGZkNTMzZDEwNjhmYjdmZTIwNGExN2Q5NmI1ZDYzODNlY2I1NzM3MjZkZWUxMzdlMjY5ZSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_e908e9bbe308488a82d40b82de3ba4af",
+      "statement": "Sandbox tests cover hidden secrets through symlinks and parent traversal and prevent broad working directories from making the whole home writable.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-agent/src/sandbox.rs#L500-L543",
+          "version": "repo-lines-v1:sha256:400ad3b873da82405c24db313d36f23654cbabe6e03cd361eda272d148f58a31:eyJzZWxlY3RlZExpbmVDb3VudCI6NDQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkyYjVlZGY1OTQ5Y2ZlYTY3ODIyY2Y2OTExMzIzNjNkNjhkNmYxZTE2OWY1ZTBkNGY3YzE0ZTVmYTFlNmQ0ZTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZlZTU0ZWQ1NDY1MDNiZWI3NTFmODg0NjU4ZDdiY2ZlZjYxMWYyZjU5NGEzYzU2MGMwYWJlM2Y0NWVjMzEzYmQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjMyMWE4MjA5OWI4ODVhNTc3YmU1MTVjMDdiMjJjZjU2NzRiNGNmMTFkM2I5ZWZmYTI4MjhhNjQyOGJlOWU1NjgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImEwMGRiMDQwZjI5MDliZjk3OGZmMGE5NTZhNTVlODNjNjUzNDE4ZGU2YmI2OGY4MDQxZGE5NzZmOGQzZDIyNzAifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_eb0357fa598146e79053686f357def62",
+      "statement": "Provider settings support Responses and chat-completions endpoints and are reread for each request.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-agent/src/providers.rs#L1-L22",
+          "version": "repo-lines-v1:sha256:2f7030cdf6a16724ec1fcd40af1a375c360e8b14b5d5d36fa8aea3cfa6ffb73a:eyJzZWxlY3RlZExpbmVDb3VudCI6MjIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc1ZGE1ODgwYmEyODMzNTMxZTFkOGMzZTM0MmRkOTRjMDRhMTAxMDAwNWQ5ZDUwOTBhZDA1ZmExYWJjYjk2NGEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc0OThjZjM4YTk0MjgxNGQ4NzQzZjM4NzQ0Y2NkMzQ4ZGFlODEwMTAzNTE4MzJjYmNmZmE0YjhlMzQwNzRlNzMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjM3ZTc2N2UyMjljNTdmZjAyYWM0MzY4OTJkMDA1NTFhN2VkNTVkYzU3MWIwZWFmN2VmN2IwMzY1MzdlZGVjOGMifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-12T17:20:25.384Z"
+  }
+}

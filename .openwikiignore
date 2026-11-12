@@ -1,0 +1,10 @@
+# Kept on this machine only (as in .gitignore): out of the wiki too.
+/reference/
+/scripts/
+/PLAN.md
+/HARNESS-PLAN.md
+/TESTING.md
+/docs/hands-on-checklist.md
+/PRODUCT.md
+/DESIGN.md
+/.impeccable/

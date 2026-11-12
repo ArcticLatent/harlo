@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:767cf1a9ef99aacce918d170512f61464818bb25f57646f53502c6693ffa97cc",
+  "claims": [
+    {
+      "id": "claim_c7fdc8541d3d42b989d9897f9fe0c5ca",
+      "statement": "The MCP bridge forwards session-identified tools over a data-directory-specific local socket and offers no tools without a running desktop; default helper policy offers a split for user decision.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/orchestration.rs#L1-L50",
+          "version": "repo-lines-v1:sha256:f857e8cd6411b02660c4745890ab71c981490ea6b2b2051bfd3e9368d6489eca:eyJzZWxlY3RlZExpbmVDb3VudCI6NTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg1ZTkwNGU5N2MwYjlhNzQwODgyYmE2M2EwMmNlNDdjNmQ3ODJhZGQzMTg4NDA2YmZiMzBkY2MxMmNhMmFjNTIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUyMjY2ODNkOTdhOTY3YWU4ZDg3MjJlNDBiNjM3OWE0YmU4YzVkMTc5MTA0OTQ1MDczNDJkOTgwM2RlOTZhMTQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk5OWJkZWZlZWFjYTYzNDBlMDI5MGRjODZlODg5Yzg5ZDVlMTg5YWE1YmE0NGI1ODViM2I3MDczNGY0YTYyZDgifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_040004435562403a8c89f667a46170b1",
+      "statement": "Desktop plan persistence serializes UI and agent mutations under a mutex and stores a file per session in the app data plans directory.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-app/src/plans.rs#L1-L48",
+          "version": "repo-lines-v1:sha256:7e694a007bd5b4d4a88b015a109f5fda129fbcecda773bf95d3fc5f56a661142:eyJzZWxlY3RlZExpbmVDb3VudCI6NDgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQwZjA4NmYwNjUyMDA5ZjVjYTU0OTI3YWEwNGE0YjkwZWNmNzA2ZjNiYTRiMWQxMWQ2NzZiMDZjNTI3NDk4NDkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNlNDdlNzY2ZjcwMmJmNmJjNjI5NGZhMWU5MzhhN2M4ZTg2ODM4NmFkZTc3YWIwYTVlOTVlNzRmMWJjZGJkZWUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_b60aedc6fcec4e3cb287f6026e3450ed",
+      "statement": "Plan set replaces pending steps but retains active/finished ones, and alongside groups a step with the previous step's stage.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/plan.rs#L132-L160",
+          "version": "repo-lines-v1:sha256:3f7632f6ffabe8151eb6a6adbb4a9ac127bc1c48d9475c9897bf85adf4aaf36b:eyJzZWxlY3RlZExpbmVDb3VudCI6MjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg5YzViNzMxYjEzNjBmODFhYWExYWUzNDhkMjUyYjhhOTMxY2M4NTE5NTMxNTgxMzc5YzVjMjY3ODIxZDEzZTgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijc5OGY3NGI3ZDRjZTMyMTk2MWJmYWUyYzBmNTNkZjE1NTc3OWZmOTEwYmRiZmFmZjhjZmY0NjRiNjk2N2Q2ZWEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjNkNjhjYzY4YTllMjYzNTY0Mzk1ZTEwYWRmMjEyZjI1MWI0ZTliMWJjNzhlYmI0NjNlNmMwY2FhMTkyMzdmYTQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_01a30f08da9e4e4a9f0ad80af02d67fc",
+      "statement": "Optional step commits refuse moved HEAD, changes mixed with pre-existing dirty files, missing baselines and overlapping recorded session work, leaving uncommitted changes with an explanation.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-app/src/plans.rs#L112-L145",
+          "version": "repo-lines-v1:sha256:456787431561e375d6852060702f8fc4271563e051ec5a57644a21ccb060e56f:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc1MGYxMDQxMGYyMmRmMTAxYTI5N2JiYzhiOWM3MDc2N2NkOGYyZjQwODg5MjQ4ZGQxODM3MDI0Y2I3ZjM1NzciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBjNjQ3OWNjMjMwNDQwZmQ0MWU4MjI0MjE4Njc5Njk4NTU5ZDI4OTNiZDY3YjQzODBhZmFiODExYjM4YTU1YWEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZlZDQ3NDY3NzkzODZhMWE1NzUwY2ViNjk4NzZhMWJhYzBkZGQ3M2Q0OTg0ZDA2Y2E2ZWFkNjE1MTIwOWIzOWYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ0ZGJkNjg4OWVjNzk1ZDg1ZTA5ZDA5MmYxODBkMjhkNzY4ZTRjNWI3N2EyMDQyMjhmNmRkMDE0NmFhNTQ5ZmEifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-core/src/plan.rs#L353-L384",
+          "version": "repo-lines-v1:sha256:95853d9ffd7f53276549e22f60fdaf6cd4f06dd0b685fb825ee1870e6387d849:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBjNjU4YWU2N2IzYzVkMjQ0YjY3MzUxMzQ2YzBlNGI1NjhhMThjYTZlYTI2MmRhYzczZTU3Njg5YjJlMTA1YWEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjliOWI0M2YyMDdkYzEwNTVjNGY5N2E1NDc0MjFhYzU3ZTIxMTI1MzcxODkyMjA0ZmQxNzU5OGRiZjBkODkxMTkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjZlOTU1MDBmMDM1MTAyYTk1MzQwMWY2NDU5YzhlMmE0ZWFlZmM1NzQ1NzFjZmQ2OWU5YWI4OTg5OTk3NDgzNzMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_b48b32d3e44f45368ac603f5c82682a1",
+      "statement": "Bring-over applies committed, uncommitted and untracked helper work as unstaged uncommitted changes, requires the same repository, and leaves conflicting files unchanged.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/git.rs#L1398-L1440",
+          "version": "repo-lines-v1:sha256:ff3c9871d0d97946b9fdfcdcdbeee388862132344b0ad9e9732f1bf03feb2d09:eyJzZWxlY3RlZExpbmVDb3VudCI6NDMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMyYmExYzI5ZjcxMjkzZmM4ZTVmZDI5NTQyOGYzOGExYTBkNGZkYWRlYmUwY2ZiY2Y2YzYyNDVjMjZmYzI5OWUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjZhODM5NzdlNmUyMmYxN2MxOWNlZjJlOGFjZmY2ZmQ1ODcwYjE2MjlhNWVlNDc3NGVlY2Y0ODUzYWMwMGM3NzciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjczNDZjOTE5NDkzMjc0OTBkYzMxY2I5ZTUwOTA4MDcxNTE1ODUyZTk3OGMxYjYxNzg4NzVmY2M5YzUzNjZlNzkifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_9439b1ff7f1a4beb9856dbc49485b3a1",
+      "statement": "Turn snapshot refs are scoped by worktree path so shared repository refs do not mix undo baselines between checkouts.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/git.rs#L971-L1009",
+          "version": "repo-lines-v1:sha256:f943fcf532f5247762573ddcbcac4f4f6f99e42505e8f1400a43b3894bcbea69:eyJzZWxlY3RlZExpbmVDb3VudCI6MzksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZlOWZkMTk1MTIyNjlhYzgzZTAyZWY5YmFjNWVhYzMxNDlkZDJiZGM1NjJlMzExMmNjYTAzY2IzY2JiOGRlMWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ1NmM4ZGZlNThlZWE2ZWI0N2M5ZWMxODY5ZDAwZmMyMjY4YjJlMWMyZGM5NWI0MjViNjQ2ZjUwOWMyOGIxYTUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjM1ZjZmNDY2ZTU5Y2ZjMzA3MDNjNDVmNzJhZjY1ZGU1NGFjMzYzZDM1NGNjMWEzMzMwMzUwYWNkNDUyNDM0YzQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVlOTUwMTdhMTQ1MGJlMTA2ODBhOTJhNTM5Y2JhZTQyNDFjMGY2MDdlOTVhODViNWMxZDMzNTk0MGRjYzNlNmYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_2085d14a0424486ea066b007b7d7ccf4",
+      "statement": "Git integration uses the user's Git CLI and serializes operations per repository, supporting porcelain status and hunk-level changes.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/git.rs#L1-L6",
+          "version": "repo-lines-v1:sha256:1f4724a65d20377c963c1bfc229025748558aea04704c7d3aff27c4f7186790f:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMmJhMDcyOWE4ZTdlZTVhOWY0ZDc5ZjhhNDc1NWJjZjYxYjhhN2RhZjRmYTY2NjUzZTcyNzI1MTliYzEwNGVhOSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDk4MGVkMTBhODNhNzMwNzM5NWJlMzJmZTQ4MjgzMGUxZjc2YWRiNTVlYjM3YjEyMWFkYzQwM2RjOTQ1NDZkNiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOTdiZWY5YzE1Njk1MzgyNzlhODRjZmJlYTJlZTViMzBiMjczODIwMTkzODdiOTgxM2RmYjE2YmE3NGM1YTA4MCJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_1a01e64856ce494bbb9927bb1b40adc5",
+      "statement": "The step-commit test proves preservation of unrelated pre-existing changes and refusal on mixed dirty files or a moved branch.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/plan.rs#L639-L675",
+          "version": "repo-lines-v1:sha256:bcb8a8f0db1ef9bfecb9675c414a49028add4fb8e46eb28a51b0e363c0104dd3:eyJzZWxlY3RlZExpbmVDb3VudCI6MzcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU0NmI3YjVlNDBjZjEyODZmNmQ3MDNiMjA5Nzk2MGVjNDViNjAzYTQyZTU5YjFjZjhiYTc1ZDRkYmE3OGI1ZGEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImEwMGRiMDQwZjI5MDliZjk3OGZmMGE5NTZhNTVlODNjNjUzNDE4ZGU2YmI2OGY4MDQxZGE5NzZmOGQzZDIyNzAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJiNTBkMWMyNjBjN2Y0ZDRkZmMwNTczNGUxMTZlNWQ5MmIxZWZiMzRkMTc3MjRkNzQzZDZjODdiZGJmNzkxM2IifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-12T16:14:28.541Z"
+  }
+}

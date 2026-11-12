@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:4652849effcb4c87a74bd7d17e60277b8c05c49e59c7a6a5dda8f24f3122f3b9",
+  "claims": [
+    {
+      "id": "claim_372c141472fb4274ac9fa038c2951ee3",
+      "statement": "The harness normalizes Harlo RPC and Claude stream-json into a shared event vocabulary consumed by Qt-independent core logic.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/lib.rs#L1-L3",
+          "version": "repo-lines-v1:sha256:7cb2218635059cbb74d4ab4ae4572135d3c4475b6c1cd1741d6e82510ad9e11c:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMTY5MjMzMjNiZjJkZTliZGNkMzJlYmQ1YTU5YmJiOTFkYTVhZmU3MmZiZDBjZDc3YWExZmE3NGE5N2M0MWVhYiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDZhNzdhM2M1MTdlMTFiMDc0MzNmNTNhNTA0Y2Q1YjZmY2I4ZDI0MDczNmIwNWUzZGVlNWI1MTAxMzZiOWZmZCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYzU5NDlmZDY5NDg5MmQyYmUzMDQzZjQxODgzNDA3MTM5N2YwNmZkNzYxMjUxNzg3ODBjZDM4YmI2YmU4NTcxNyJ9"
+        },
+        {
+          "resource": "repo://crates/harlo-harness/src/claude_run.rs#L1-L5",
+          "version": "repo-lines-v1:sha256:0f88f588642453d4192da46f4017c4c4c632e41da74f66e224e1489e3f822da7:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYWEwNzVkZTYxNWQyYTdmNGEzOGYxODk1NzdkYzVjY2ZjZGQ4MmU1YzM4YWQ1YjNiODFkMmM5ODRjNzNiODc0YiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiY2YwZmExMmVkODQ0Zjc3YzUyM2M5NzU3ODc3YzhlNzE3YTJkYmNmMTkyM2Q0NDhlZDgxZGQwNDE3N2FiYTVhZCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOTdiZWY5YzE1Njk1MzgyNzlhODRjZmJlYTJlZTViMzBiMjczODIwMTkzODdiOTgxM2RmYjE2YmE3NGM1YTA4MCJ9"
+        },
+        {
+          "resource": "repo://crates/harlo-harness/src/lib.rs#L1-L18",
+          "version": "repo-lines-v1:sha256:21777f87b710afef66708de636b08f036ab485f0847a845c70d2d550ebe6cdb1:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZmZmZjYzc5ZWJkOTlmNzc2MTY2M2VmOWI0MjgxYjc1ZTdlZWY4MGMwODgyNWIwZjE2MmYwMDM2NmNlZDRlZjkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZlYWY4Y2MxZDM1OTI1ZDU5OGNiYzVmODA5ZmZhNWQwYTkwNWI3MzdjZTFmYmQzNmFkZDZkZGViNDJmMWJjNmUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJjMzIzZTg4NzU3ZjM4MzFkMjAyMGU5ZTA3OTdhOTZlMzRkYWM3NDYwMDcxZjMwZWMwZWE4MTVhZGVmZWYyMWMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_e6ed5eb12ae8469f90554f4b3b13b503",
+      "statement": "SessionHandle queues controls, can open saved history without starting a harness, and gives subscribers snapshots before deltas; active stream flushing is batched at 100 ms.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/session.rs#L18-L21",
+          "version": "repo-lines-v1:sha256:e5630195493f5d754dd8c999c6fc1155e599b7f5da11399983917a4107a41cca:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMWVlMjRjZjNiY2I3MmIxODIwNzdiODVlNGZjYjliM2M4MGY1NDBlM2EzNzE0MGM5YzdmYTYwNzc5YzA0NGQ5MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYWNkMzM0NTA5MzA4MDU0NTRhMzk4MjU0OGZkZmUwMDA5YjdlZTY4NzE1ODk3NGMyYzNlNDNlNzYxZGM2NWJhNCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZDBiMDk4Nzg3OGQwYjA1NmJjNjc5Y2VlNWRhZmE1MmMyNTk5NmZmMGE5NzNmMWE3NGRkMmM3YjZiZDlmMzI3YSJ9"
+        },
+        {
+          "resource": "repo://crates/harlo-core/src/session.rs#L194-L248",
+          "version": "repo-lines-v1:sha256:7f173ad2018b4ffb81a97ec99b4178622ab104241fee43f3cbc41f6ffdc45c43:eyJzZWxlY3RlZExpbmVDb3VudCI6NTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijc4NGQ1OGE5NGUyMjAyNzk5MWFlYmY2Y2EyNDQzN2IyZTNiZWVhOTgyNDM4YTI2ZjNjMThmNDhiZDMyMmNhOTYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjUxYWUzMTRlMWE4NDJkODk3Y2ZlZDA1YWNhODU2YmFjZTkzYWNkY2MxNDc4NWQwZTlkMjI3MzU2OTEyMjE2ODYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_18cd3bcad4d04713a935aa778ea59cec",
+      "statement": "ChatSession queues updates to the Qt thread and rejects old-binding updates using a generation counter, unsubscribing on rebind or drop.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-app/src/chat_session.rs#L438-L474",
+          "version": "repo-lines-v1:sha256:832dbaa0edfa76215643eb07f0e6fa58e33a6ac04a66528fa929b959c35077be:eyJzZWxlY3RlZExpbmVDb3VudCI6MzcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgyM2NkN2EzM2RhZDg0OTAyYTRkYjQ1NDhhNDE4YmE5OWZmZjBkZDZiYmYyZTk5ZWFhNTE2MTA2YzZmYWUwZTAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE5NTMwMzU3NTVkNWEwZmE2NWVhNzBmMmVlOTY2NTUwYjcyZjQwMDFhMjhlMTEyZDFlZjk1YmQyNTk0M2IzZDkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE3ZmJiNTA1NThhMTk4NTRlMWYzMTdjOThkYTRmMzM0OGJmNGJjOWQ0NzI2MGI4YzFiYjk3ZDcxZGJjYzY3NDEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVlNDE0MjRjZjY5Mjk2MWY1NTljZmJlMTViNWIzY2M1MzA0YmM1MWRiMWJhMjI1NGU0MmJjYzZhYWUxMDg3MzEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_b2b9d89f11b44ec98661a32b0dd8466a",
+      "statement": "Harlo's database stores application metadata separately from agent conversation files, and Harlo session discovery reads the head and tail of large JSONL files.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/db.rs#L1-L2",
+          "version": "repo-lines-v1:sha256:75b0cb1d3b946e9c6d7dded754c186cc6f894cd7308bd756e3b1edd7f2f1f96b:eyJzZWxlY3RlZExpbmVDb3VudCI6MiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNmY0ZmFiYjM5MDIzZjQ2YmUxMWI3ZjI3N2VhZmI1MjIyNjU4MmEyZDgwZTNmZjVhOTdlYWE5OGJjMDY4MDZjMyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNDAwMDZmODhkMTcyZTZkYjdhNDEzNDVjM2VhMzY2MWNjY2VhNTEzZWEzYzVhZTE2ZTk1MDhkYmMwYjA1MDQyNCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNWVlZjJkNzJiYjAzZjdmOWVjZmYzODk1N2E3NjBmMGFhOTEyYjZiYWM0ZDQxNzNkNTk3NzNjYzliMjQ2MDY5MiJ9"
+        },
+        {
+          "resource": "repo://crates/harlo-core/src/db.rs#L69-L136",
+          "version": "repo-lines-v1:sha256:f2f31ed426074b43fab087ad9c6a050ff564ff60c90f6736d49a595b7ade3d0e:eyJzZWxlY3RlZExpbmVDb3VudCI6NjgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ5M2YzNjI2MGFlMGRhNzdmNDMwNzk1MjJkNzM4YjUwYzg4NmI2MWVlNzYwYzZmMDM2MzczYWExY2E1ODg2YmUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVlNDQzNTQ5MmE2NWQ1NzA4ODY4Y2EwYzVmZjQxMzcyNGQxNzQ3YWE0YjJiOTU1NTc4MWRjZjYzMjUyMzQ2MDQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE3NTdkODA3MjZhNGRjODYxMWY1YmUzZDY4NWQwYTUwNzNmN2IyOGIwYTRlOTNiOGZmOWRlMGZjYWJlZjc0ODEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRkOTc5N2I2ODgyNWUzM2JjOGU2MzNkYjVmZWRmYmZiNWMyOGJiODljNjU1MjIzYmU1MDUwZTRjMzRjZDhkMzQifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-harness/src/store.rs#L1-L24",
+          "version": "repo-lines-v1:sha256:a8b7f91a7250d30e81f318c7a1df00c95ae86b97d70b1f732e2dadd9f5181166:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBkMjFhYmI1OGRkMzFhYzU5ODAwNDA2MmRiMDg0MmM3YjdhODdlYThlNmY3MTA0YjBlOGM2NjNlM2NjMmVjZGEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUwMzEyODMwM2ZhOWQyMzI3Mjg3MTQ0ZDhkZDZkZmVhMjRlYzE3MDI1MzlkNzkwYjVhODgzODk0ZjQwMzEwNDMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFjNDBjNGRmYjYzY2RlMTIwNThjNmFmZTY5NmIyODcwZTYxNWVkNTI1YjI3ODE0ZDM3MmU3MjFkZDBmMmY5NDgifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_6c06216be079441c9ef94c8cb0f25a74",
+      "statement": "The demo session test checks lifecycle transitions and verifies that a late subscriber receives the same rows as the existing subscriber.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/session.rs#L1828-L1856",
+          "version": "repo-lines-v1:sha256:7f83080c084605398c98125f6d5e730d9d1a5949483703f7d9ed88e1eea5078c:eyJzZWxlY3RlZExpbmVDb3VudCI6MjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkxY2M0MDY4N2QyNDRlOWRhZjkxY2VkNDY1MjMyNjU2OWE0ZmI2ZGZjODFkMDNmYmU3MjNhNWVhM2NjYmU5ZGYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI0YjhhZWY1MWIzZGRkNDc1ZDRmODA0Mjc4MmNhNWExOGNkOGJlZDZiZGE5ZTg2NzE4Mzk4NmI5N2FiMzk5MDciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjgxNDdmNDdkODE1NGU0ZTQ4NTRmMWVjMDFjNjU3NzJiYWYxNGFjZDhkNzdmNzIzNTBlMDYwMTUyYTQ1MmE5NzIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJjZWMxMjA1ZWJhZjlmZmU1MWU2NWEzYmIzMmExODcyMjQ0NGQzNmYyZmVkM2E1YjkzODM1NzU4ZWY0ZjgyYmUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_7b120893407e4721a8030b5036ee75af",
+      "statement": "harlo-code draws code without Qt while the desktop CodeView presents the image and forwards user input.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-code/src/lib.rs#L1-L3",
+          "version": "repo-lines-v1:sha256:f36825baa2c1be4ca5ad58e3edea5fe8480a4841a4c9dd8edc85f506c49f93c7:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiM2MxZDIzOGMwMGE0ZGQxYzIxNDQ1Nzk2NjRmMTQ4OTFkMDI3ZjgzNDdjYzcwY2E0NjAxNTY3NDBiMGM3YTEzYiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMTNjMTQwZDlkNGI4OGJmZjliZjc5NzI0Njk4ODY3OTNiYjFiMDk4NzM4OGQ5YmQ5YmIyMjc1NzJlODllZTU4OSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNjBlZGYzYjA3NmY4MDZkYWEyY2ZhNmMyODBiNDkzOTk2NTY5MGM0NjQ2MTk5OWNhMmFiMzgyMzQ5Zjg5MjcxZCJ9"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-12T16:14:28.541Z"
+  }
+}

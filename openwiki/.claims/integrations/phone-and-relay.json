@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:a2c3a78db057f44ccfe7f9b472ce9e59bca24a040304f226c56be4006cee86ac",
+  "claims": [
+    {
+      "id": "claim_6d0f3938d02847d89bfea69668b3d4ca",
+      "statement": "Phone pairing registers a public key with a one-time code, later authorizes by that key, and boxes post-handshake traffic with NaCl; revoking the device removes authorization.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-app/src/phone_server.rs#L1-L15",
+          "version": "repo-lines-v1:sha256:28b0bd281840b5777e3ea55c82efb2b8c6d2c3774a0db15b4703c9df5592b205:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY5MWJhNmZiMTZkNjU0OTgwZGEyYzkzMDYzYjMxMzc0MjUzMWUxZmIwMGI1MjNiZGE4M2Y3MDU1NzkxYWYyZmUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdjNDBhMjVkNjA4NTExODM1OGQzNjNiYjA3M2UzZjQ1ZTMwYWYwZjAyODFjMzRjM2JhNTg4MGI5MGM4NjYwYTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFlNWViNzllZWY5ZTJhYmJmNTE2ZGVkYmJlMTk0OTdjZmVkY2E1MTRjYmMwNTRkMDQ3MjA0NWRhMzA5MDg4YTkifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-core/src/phone.rs#L1-L18",
+          "version": "repo-lines-v1:sha256:6f2ca5d5cd947efeca72c96ed52877280898ce95a0f12ec305770229a0e356fa:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA4ODgwMGQyYmE1YmQwMmJmZDgzYmZiMTk0NmRlMmUxNjhhZWUxNzY1NWFhNDIxMTFiMmZhNTFmMTI2MWJlMWUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM5MDkxMzE0YjljZmJmMTk4ODE3NmViY2M0MTQ5NGY2ZTQ0Y2QzYmY1OGM1YTJjYjk0ZTdhNTJjZWQwYzFhZWIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVlZWYyZDcyYmIwM2Y3ZjllY2ZmMzg5NTdhNzYwZjBhYTkxMmI2YmFjNGQ0MTczZDU5NzczY2M5YjI0NjA2OTIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_e613a9e73ab6407cb06c213d90ed9884",
+      "statement": "Encrypted connection frames reject mismatched connection IDs and non-increasing sequence numbers, preventing cross-connection and same-connection replay.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/phone.rs#L428-L460",
+          "version": "repo-lines-v1:sha256:5d56985ef637f483c7732a906fbcdc468407e3143d49ee77629d0e2aa07b1358:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUwNTY1ODQxMDgxYzdjODEyZDU0MDBlZTQwZGI3NWE0M2Q3YmNlMjg0MzBhYzQ3YzA0ZjBiZTgzNGM4MDhhN2UiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIyM2FkMGIyNDhmNzEzMTgwOTE4Mjc4OGJmMjU4ODVlYWIwNWRiODg0MjM5OGUxMGY2NjBmYTQyZDU3Y2Q5OTkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdiYzk4ZDZiMGRjNDkyYzUwMTZkZjEwODA1YTNhNTRlYjljMTg0YTVhNjEzN2U3ZjRiZWNmYTBjMjIwNTUwZDAifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-core/src/phone.rs#L487-L510",
+          "version": "repo-lines-v1:sha256:289ee98fc715b2d88ca60c2b9a4677cc06e7b80edeead28e6a9f727ddb70cc47:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkyYjVlZGY1OTQ5Y2ZlYTY3ODIyY2Y2OTExMzIzNjNkNjhkNmYxZTE2OWY1ZTBkNGY3YzE0ZTVmYTFlNmQ0ZTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI2ZDM2OGRhZDMxMWYyYjc2Y2I5YjBhYWU1ZGRkYjQ1NDA0YWE4ZGI0OGJlN2MzY2VjY2FlNmMzZTNkOWE2ODkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjcwYTRkYjI4OWQzZjU3YzA2MmJiYzA5ZDU1ZTgzNGI3NTVkZDVhMzI5ZGJmZjliMjI3NmM3ZGIwMjM3ZTM4NjAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImEwMGRiMDQwZjI5MDliZjk3OGZmMGE5NTZhNTVlODNjNjUzNDE4ZGU2YmI2OGY4MDQxZGE5NzZmOGQzZDIyNzAifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_d5339796068b4099abe8f042d540af26",
+      "statement": "The phone bridge delegates workspace operations such as session creation and activation without changing the desktop tab and publishes changed session lists through a watch channel.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-app/src/phone_bridge.rs#L1-L30",
+          "version": "repo-lines-v1:sha256:e6732f132820a643b1337a2fac943711ee650cbde329096f3693a4e0b36aec02:eyJzZWxlY3RlZExpbmVDb3VudCI6MzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI4ZWM2NjMxM2I0MmNmNGM5MmRmMjZlYWQwODA2ZTBlY2MzZGY5Nzk0ODI2YjFlZGNmNzY4MTQ5ZmJlNjdhNDEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQwODQ4OGZkNDM0YjViZmM0MzkzMzQ4ZDhiYmM5ZjZmZGIyNmRmNDI5NDg5NjkyZDE1MzZlNTA5NDczZjc5OTciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRlYTliZDdkMzUwZTZhMWZkOGYxYTI0MzcwYWI0NzA1YTQ5NDMwOTQyODM1OWUyZDMwZThjYjBjODJmOGM3MTcifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_a859292471014890b665c636aa7ce63d",
+      "statement": "The relay multiplexes opaque host/phone traffic with secret-derived routing IDs, sees network metadata, and imposes connection and traffic limits without storing conversations.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-relay/src/lib.rs#L1-L34",
+          "version": "repo-lines-v1:sha256:0be9503131f0516f3eebc46b0c95fe8cf86537bc1c0fbfc7d94a2a3ed560b4f4:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg3NDhjOWI3ZGZiMjNjMDZhNWUxZTVmN2IwZWEyNWNhMmZmMjg2ZDdmY2M4ZmM1ZTQyNmJiYzA4M2JlMzQ0YmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg1YmZjNWE3ZWQ3MGI5NTM3ZDAwNDM5MDk2YmYyZDlmYWM0OTk0OTYzM2MxN2I4N2U4MjRmYzlhODI2NGIwY2MiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImIxYThjZWM5NDRlZWVkYWNjY2JhZTkxZWE0YjM3ZmMwZWJiNDgxZTVhMDQwOGRjNDEyYjJjN2I3ZmU5ZjZkZTYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_e806c11b132c4ff2a0a7107daa26e983",
+      "statement": "Push requires the app team's APNs key at the relay, carries phone-sealed notification content, and is suppressed for currently connected phones; Live Activity payloads are also sealed.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-apns/src/lib.rs#L1-L13",
+          "version": "repo-lines-v1:sha256:9ab1c992e0476a0f437d6863fb2266da2f9d68cba2da34431bc6c3fae2460101:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJlMTYzNzVmMTc3MTVhMjI5ZTI1MWZmNDYzMzljODI1NzhhMDZjZjNhNjA1OTg0ZGU2ZGEzMTU0MDg3ZmYzYWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE3ZjMzOTg2NzE0MTllOGU5M2Y0OGM1MjYyNjUxN2ExOTMyNzFhMjFjMzc2YWJkYzc5OWJiODUyM2EwMTZkY2EiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjcxYzhkNmExMzNlNzQ5NmQwZWE4OGQyZWY5ZTY0MjA1YzY4ZTZjODE5MWEwMGQwM2NjZTIxNDRjNjQ5MWU1MmQifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-app/src/phone_push.rs#L1-L10",
+          "version": "repo-lines-v1:sha256:8bf1293981b8fe1e0d3d77c053ed9a24446e429b56d24391cd7862c5fcc3f364:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjYwYzMzZDNkM2VjOTQwOTI3ODliOGQ5NzBjZjg3ODA4M2UwY2NlNzc5YjM5Mjg4MmM4ZDNjMmFjZDc2OTg2YmQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFhMmRhOWM3NjE5NzAzNmJlZWU4OTk0ZDg3N2Q4N2M1YWVjMTJmNjUxZTJiODc2NzA1MGQ5MDIxM2Q0M2IzZWUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFlODdmNGNlZjczYjhmNWI1YmI4NzQ4MDc4YjZmMThiNGZmMjBjNjg5NjRiMTIxMjA3ZGE4NGIyZWE0YTVhMTkifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_4d0bf436b2854783b332166204fe9c96",
+      "statement": "HarloClient owns one encrypted connection and leaves reconnection to its caller.",
+      "evidence": [
+        {
+          "resource": "repo://ios/HarloKit/Sources/HarloKit/Client.swift#L19-L23",
+          "version": "repo-lines-v1:sha256:5298a9edd5a1d885db40e8e4e6bf6ed8a5a7bca9ead688b893957cbf21da240d:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiM2EwYmQ1YjU5ZDk1YTkwNTE0NWYxYzMzMDE4NGQyZTUxMTBjYWQ3OTgyMDMyNjU5NDA1ZTkzNjc2MzMxOGRmMCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiOTU3NDEwZmRhNmE0YWU0ZWI5MjljN2I5ZTI2NjJjMjU0YjI2NGViY2QxOTljNzY3ZjdkZjE4NmU5NGNkZDhkZSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNDE1MTllZjk1OTI5ZGVjOWUxMjE1NDZlNDc4MzQ0ZDZjYTU3NjZmYTliNTFkMzJiM2ZkN2E2NGFlYzgyMTE0YyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOTFiYmU1ZGQxODY0MTMzNTFjZDNkMjZlZjVjMDQyYmZkZTlmOGI4MGY3NGZjOWVlYTZlYTQ4NDk0OTE1ODMxYiJ9"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-12T17:20:25.384Z"
+  }
+}
