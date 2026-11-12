@@ -690,6 +690,8 @@ func record(_ link: String, to path: String) async {
     for page in s.wiki?.pages ?? [] { _ = await model.wikiPage(page.path) }
     let sidebarPage = await model.wikiPage("architecture/sidebar.md")
     check(sidebarPage?.blocks.map(\.kind).contains("mermaid") == true && sidebarPage?.blocks.map(\.kind).contains("code") == true, "a page in blocks (\(sidebarPage?.blocks.map(\.kind) ?? []))")
+    // (Its graph and its page's diagram: drawn at the end.)
+    let wikiDiagrams = [s.wiki?.mermaid ?? ""] + (sidebarPage?.blocks.filter { $0.kind == "mermaid" }.map(\.code) ?? [])
     let found = await model.searchWiki("rebuilds the whole list")
     check(found?.hits.first?.page == "openwiki/architecture/sidebar.md" && found?.hits.first?.heading == "Rebuilding rows" && found?.plain == false, "OpenWiki's search finds the section (\(found?.hits.first.map { "\($0.page)#\($0.section)" } ?? "none"))")
     rec.scene("plan")
@@ -719,6 +721,21 @@ func record(_ link: String, to path: String) async {
             }
         }
         rec.scene("pictures")
+    }
+    // The wiki's graph and its page's diagram, light and dark, for
+    // ios-record.sh to draw with harlo and add to the recording
+    // (HARLO_RECORD_DIAGRAMS): Foundation's WebSocket on Linux cuts a
+    // message at 16 KB, and the connection with it.
+    if let wanted = ProcessInfo.processInfo.environment["HARLO_RECORD_DIAGRAMS"], let out = Recorder(path: wanted) {
+        var asked = 0
+        for source in wikiDiagrams where !source.isEmpty {
+            for light in [true, false] {
+                let colors = light ? ["background": "#ffffff", "text": "#1c1d21"] : ["background": "#212227", "text": "#e6e6e9"]
+                out.write(["source": .string(source), "light": .bool(light), "colors": .object(colors.mapValues { .string($0) })])
+                asked += 1
+            }
+        }
+        check(asked == 4, "the wiki's graph and its page's diagram, light and dark, to draw (\(asked))")
     }
     Recorder.shared = nil
 }

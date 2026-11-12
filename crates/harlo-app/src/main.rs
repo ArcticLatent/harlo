@@ -81,6 +81,12 @@ fn main() {
     if std::env::args().nth(1).as_deref() == Some("--check-diagram") {
         std::process::exit(diagrams::check());
     }
+    // (`--draw-diagram <source file> light|dark [colours]`: what the phone
+    // gets for a diagram, for the phone's recordings.)
+    if std::env::args().nth(1).as_deref() == Some("--draw-diagram") {
+        let args: Vec<String> = std::env::args().skip(2).collect();
+        std::process::exit(diagrams::draw_for_phone(&args));
+    }
     // Already running? Hand over (show the window / toggle the drop-down).
     // Checked first, so a launch that only hands over keeps the running
     // instance's log intact.

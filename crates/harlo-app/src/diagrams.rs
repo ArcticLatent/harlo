@@ -431,6 +431,29 @@ pub fn for_phone(source: &str, light: bool, colors: &Value) -> Result<(Vec<u8>, 
     Ok((png, w / 2, h / 2))
 }
 
+/// `harlo --draw-diagram <source file> light|dark [colours JSON]`: prints
+/// the phone's reply for that diagram (`{ png, width, height }`, or
+/// `{ error }`), as the phone's `diagram` call gets it.
+pub fn draw_for_phone(args: &[String]) -> i32 {
+    use base64::Engine as _;
+    let Some(source) = args.first().and_then(|f| std::fs::read_to_string(f).ok()) else {
+        eprintln!("harlo --draw-diagram <source file> light|dark [colours JSON]");
+        return 2;
+    };
+    let light = args.get(1).is_some_and(|m| m == "light");
+    let colors = args.get(2).and_then(|c| serde_json::from_str(c).ok()).unwrap_or(Value::Null);
+    match for_phone(&source, light, &colors) {
+        Ok((png, w, h)) => {
+            println!("{}", serde_json::json!({ "png": base64::engine::general_purpose::STANDARD.encode(png), "width": w, "height": h }));
+            0
+        }
+        Err(e) => {
+            println!("{}", serde_json::json!({ "error": e }));
+            1
+        }
+    }
+}
+
 /// `harlo --check-diagram`: draws a small diagram and says how it went
 /// (the release checks it on each system).
 pub fn check() -> i32 {

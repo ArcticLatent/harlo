@@ -1258,6 +1258,20 @@ final class ReplayTests: XCTestCase {
         XCTAssertNotNil(r.answer("diff", [:])["error"].string)
     }
 
+    func testDiagramsAnswerTheirOwnSource() throws {
+        let rec = [
+            ##"{"call":"diagram","args":{"source":"flowchart LR\n  a --> b","light":true,"colors":{"background":"#ffffff"}},"reply":{"png":"light-ab"}}"##,
+            ##"{"call":"diagram","args":{"source":"flowchart LR\n  a --> b","light":false,"colors":{"background":"#212227"}},"reply":{"png":"dark-ab"}}"##,
+            #"{"scene":"one"}"#,
+        ].joined(separator: "\n")
+        let r = try Replay(recording: rec, scene: "one")
+        // The phone's own colours: the same diagram, in its mode.
+        XCTAssertEqual(r.answer("diagram", ["source": "flowchart LR\n  a --> b", "light": false, "colors": ["background": "#1a1b1f"]])["png"].text, "dark-ab")
+        XCTAssertEqual(r.answer("diagram", ["source": "flowchart LR\n  a --> b", "light": true, "colors": [:]])["png"].text, "light-ab")
+        // Another diagram never gets this one's picture.
+        XCTAssertNotNil(r.answer("diagram", ["source": "flowchart TD\n  x --> y", "light": true, "colors": [:]])["error"].string)
+    }
+
     func testTheAppShowsTheRecordingAtAScene() async throws {
         let m = HarloModel.replaying(try Replay(recording: Self.recording, scene: "approval"))
         XCTAssertTrue(m.replaying)
@@ -1342,6 +1356,13 @@ final class RecordingTests: XCTestCase {
         XCTAssertEqual(page?.page(of: "../quickstart.md")?.path, "quickstart.md")
         let found = await m.searchWiki("rebuilds the whole list")
         XCTAssertEqual(found?.hits.first?.heading, "Rebuilding rows")
+        // Its graph and its page's diagram drawn, in the phone's colours.
+        for source in [s.wiki?.mermaid ?? "", page?.blocks.first { $0.kind == "mermaid" }?.code ?? ""] {
+            for light in [true, false] {
+                let d = await m.diagram(source, light: light, colors: ["background": light ? "#fafafa" : "#101010"])
+                XCTAssertGreaterThan(d.picture?.width ?? 0, 100, "\(source.prefix(30)) \(light): \(d.why)")
+            }
+        }
         XCTAssertTrue(tools(s).contains { ToolName.words($0.title, running: false) == "dice roll" })
         (m, s) = try await open("helpers")
         XCTAssertTrue(s.rows.contains { $0.fromHarlo && !$0.label.isEmpty })

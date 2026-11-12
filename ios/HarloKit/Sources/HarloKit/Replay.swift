@@ -84,12 +84,20 @@ public struct Replay: Sendable {
 
     /// harlo's answer to `op` with `args`: the last one recorded before the
     /// scene with the same arguments, else with the same request, else
-    /// (after the scene) the first; else an error.
+    /// (after the scene) the first; else an error. (A diagram: only one of
+    /// the same source.)
     public func answer(_ op: String, _ args: JSON) -> JSON {
         let same = calls.filter { $0.op == op }
         let exact = same.filter { $0.args == args }
         // A session started rather than opened: it's live under its key.
         if op == "open", exact.isEmpty { return ["key": args["key"], "harness": ""] }
+        // A diagram: the same one drawn, in the same mode if it was (the
+        // colours are the phone's own).
+        if op == "diagram" {
+            let drawn = same.filter { $0.args["source"] == args["source"] }
+            if let r = exact.last ?? drawn.last(where: { $0.args["light"] == args["light"] }) ?? drawn.last { return r.reply }
+            return ["error": .string("Not in the recording: this diagram")]
+        }
         if let r = exact.last(where: \.before) ?? same.last(where: \.before) ?? exact.first ?? same.first { return r.reply }
         return ["error": .string("Not in the recording: \(op)")]
     }
