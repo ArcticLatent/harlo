@@ -7999,7 +7999,8 @@ ApplicationWindow {
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
             win.wikiProject = JSON.parse(Workspace.projectsJson())[0].id
-            Workspace.setSetting("wiki_" + win.wikiProject, "1")
+            // (Wiki left as it comes: on, the project having a wiki.)
+            win.check(Workspace.setting("wiki_" + win.wikiProject) === "", "the Wiki setting not set")
             win.harloKey = Workspace.newSession(win.wikiProject, "harlo")
             Workspace.setApprovalMode(win.harloKey, "yolo") } }
         PauseAnimation { duration: 300 }
@@ -8013,7 +8014,7 @@ ApplicationWindow {
             const first = win.modelRequests()[0] || {}
             const names = (first.tools || []).map(t => t.function.name)
             const wiki = names.filter(n => n.indexOf("openwiki") >= 0)
-            win.check(wiki.length === 2 && wiki.some(n => n.endsWith("openwiki_search")) && wiki.some(n => n.endsWith("openwiki_read")), "Wiki on: search and read reach Harlo, and no other wiki tool (" + wiki.join(", ") + ")")
+            win.check(wiki.length === 2 && wiki.some(n => n.endsWith("openwiki_search")) && wiki.some(n => n.endsWith("openwiki_read")), "Wiki on (as it comes): search and read reach Harlo, and no other wiki tool (" + wiki.join(", ") + ")")
             const tool = (first.tools || []).find(t => t.function.name.endsWith("openwiki_search"))
             win.check(tool && JSON.stringify(tool.function.parameters).indexOf("root") < 0, "without root: harlo fills in the repository")
             const said = JSON.stringify((first.messages || []).filter(m => m.role === "system"))
@@ -8156,7 +8157,7 @@ ApplicationWindow {
             win.check(fresh && fresh.text === "Updated just now · 1 commit since", "how fresh it is, against the code (" + (fresh ? fresh.text : "") + ")")
             const run = win.findName("wikiRun", wikiPanel)
             win.check(run && run.text === "Update" && run.variant === "primary", "Update, the thing to do when it's behind")
-            win.check(!win.findName("wikiSwitch", wikiPanel).checked && win.findText("Agents don't use it yet.", wikiPanel) !== null, "and whether agents use it (not yet)")
+            win.check(win.findName("wikiSwitch", wikiPanel).checked && win.findText("Agents search it, in sessions started from now on.", wikiPanel) !== null, "and whether agents use it (on unless switched off)")
             win.shotWindow("clicks-wiki-pages")
             win.clickItem(win.findAllNames("wikiPageRow", wikiPanel)[0], "the Quickstart row") } }
         PauseAnimation { duration: 300 }
@@ -8992,8 +8993,8 @@ ApplicationWindow {
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
             const project = JSON.parse(Workspace.projectsJson())[0].id
-            // (--wiki=on: the project's wiki, its reading tools on.)
-            if (win.argValue("--wiki=") === "on") Workspace.setSetting("wiki_" + project, "1")
+            // (--wiki=on|off: the project's wiki's reading tools, on or off.)
+            if (win.argValue("--wiki=") !== "") Workspace.setSetting("wiki_" + project, win.argValue("--wiki=") === "on" ? "1" : "0")
             win.harloKey = Workspace.newSession(project, "harlo")
             Workspace.setApprovalMode(win.harloKey, "yolo") } }
         PauseAnimation { duration: 300 }

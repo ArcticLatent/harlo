@@ -2249,7 +2249,7 @@ impl Workspace {
         let Some((cwd, project)) = self.wiki_folder(&key) else {
             return QString::from(&json!({ "root": "", "project": -1, "enabled": false, "exists": false, "pages": [] }).to_string());
         };
-        let enabled = self.setting_str(&format!("wiki_{project}")) == "1";
+        let enabled = self.wiki_on(project);
         // (A wiki session at work in this repository: busy, or asking.)
         let writer = self.wiki_sessions.iter().find(|k| {
             self.live.get(*k).is_some_and(|e| {
@@ -2938,8 +2938,13 @@ impl Workspace {
     /// (sessions in a harlo project only).
     fn features_of(&self, key: &str) -> Option<(PathBuf, bool, bool, bool)> {
         let (cwd, project) = self.project_of(key)?;
-        let on = |k: &str| self.setting_str(&format!("{k}_{project}")) == "1";
-        Some((cwd, on("wiki"), self.plan_on(project as i32), self.plan_commits_on(project as i32)))
+        Some((cwd, self.wiki_on(project), self.plan_on(project as i32), self.plan_commits_on(project as i32)))
+    }
+
+    /// A project's agents use its wiki (when it has one) unless its Wiki
+    /// setting is switched off.
+    fn wiki_on(&self, project: i64) -> bool {
+        self.setting_str(&format!("wiki_{project}")) != "0"
     }
 
     /// harlo commits a project's finished plan steps: as set, else (by

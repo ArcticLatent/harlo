@@ -71,7 +71,7 @@ struct WikiSection: View {
         } footer: {
             Text(!wiki.exists
                  ? "It's written in a session on your computer you can watch, and spends that agent's tokens. The pages land in openwiki/ for you to review in Changes."
-                 : wiki.enabled ? "Agents search it in sessions started from now on." : "Agents don't use it yet: harlo's Wiki panel on the computer turns it on.")
+                 : wiki.enabled ? "Agents search it in sessions started from now on." : "Agents don't use it: switched off in harlo's Wiki panel on the computer.")
         }
         // While a run writes it: how far along, now and then.
         .task(id: wiki.running) {

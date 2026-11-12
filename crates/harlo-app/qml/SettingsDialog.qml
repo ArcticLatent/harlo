@@ -2622,16 +2622,19 @@ Popup {
                     // (Re-read when another project is picked, or a switch moves.)
                     readonly property int pid: proj.p ? proj.p.id : -1
                     property int rev: 0
-                    function on(name) { return rev >= 0 && pid >= 0 && Workspace.setting(name + "_" + pid) === "1" }
+                    function on(name, byDefault) {
+                        const v = rev >= 0 && pid >= 0 ? Workspace.setting(name + "_" + pid) : "0"
+                        return v === "" ? !!byDefault : v === "1"
+                    }
                     function set(name, on) { Workspace.setSetting(name + "_" + pid, on ? "1" : "0"); rev++ }
                     SettingRow {
                         title: "Wiki"
-                        detail: "A wiki of this project in openwiki/, written by your agent from the code. With this on, agents search it and read the sections they need."
+                        detail: "A wiki of this project in openwiki/, written by your agent from the code. With this on (as it is unless you switch it off), agents search it and read the sections they need."
                         more: "Create and update it from the Wiki panel (right edge); each run spends your model's tokens. It's made with OpenWiki, which comes with harlo."
                         icon: "book-open"
                         AppSwitch {
                             objectName: "projectWiki"
-                            checked: featureGroup.on("wiki")
+                            checked: featureGroup.on("wiki", true)
                             onToggled: featureGroup.set("wiki", checked)
                         }
                     }

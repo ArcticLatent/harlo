@@ -890,7 +890,7 @@ Rectangle {
                 Label {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
-                    text: root.st.enabled ? "Agents search it, in sessions started from now on." : "Agents don't use it yet."
+                    text: root.st.enabled ? "Agents search it, in sessions started from now on." : "Agents don't use it: switched off for this project."
                     color: Theme.textFaint
                     font.pixelSize: Theme.px(11.5)
                 }
