@@ -8216,6 +8216,10 @@ ApplicationWindow {
             win.check(hits[0].modelData.page.endsWith("architecture/jobs.md") && hits[0].modelData.section === "retry-control" && !wikiPanel.results.plain,
                       "OpenWiki's search finds the section (" + JSON.stringify(hits[0].modelData) + ")")
             win.check(win.findText("Retry control", wikiPanel) !== null, "shown by its heading")
+            const snip = win.findName("wikiHitSnippet", hits[0])
+            win.check(snip && snip.visible && /<b><font[^>]*>(failed|job|retried)<\/font><\/b>/i.test(snip.text)
+                      && hits.every(h => !/-->|\| *-{3}/.test(h.modelData.snippet)),
+                      "its text says why it matched, the query's words marked, no diagram or table syntax (" + (snip ? snip.text : "-") + ")")
             win.shotWindow("clicks-wiki-search")
             win.clickItem(hits[0], "the first result") } }
         PauseAnimation { duration: 300 }

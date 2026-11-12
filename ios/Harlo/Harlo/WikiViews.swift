@@ -229,7 +229,7 @@ struct WikiView: View {
                                     Text(title(of: hit.page)).font(.caption).foregroundStyle(Color(p.muted))
                                 }
                                 if !hit.snippet.isEmpty {
-                                    Text(hit.snippet).font(.footnote).foregroundStyle(Color(p.muted)).lineLimit(3)
+                                    Text(marked(hit.snippet)).font(.footnote).foregroundStyle(Color(p.muted)).lineLimit(3)
                                 }
                             }
                             .padding(.vertical, 2)
@@ -246,6 +246,22 @@ struct WikiView: View {
     func title(of page: String) -> String {
         let path = page.hasPrefix("openwiki/") ? String(page.dropFirst(9)) : page
         return wiki.pages.first { $0.path == path }?.title ?? path
+    }
+
+    /// A hit's text with the query's words in the text colour and medium
+    /// weight (the rest stays muted), so it says why it matched.
+    func marked(_ text: String) -> AttributedString {
+        var out = AttributedString(text)
+        let words = query.lowercased().split { !$0.isLetter && !$0.isNumber }.filter { $0.count > 1 }
+        for w in words {
+            var from = out.startIndex
+            while from < out.endIndex, let r = out[from...].range(of: String(w), options: .caseInsensitive) {
+                out[r].foregroundColor = Color(p.foreground)
+                out[r].font = .footnote.weight(.semibold)
+                from = r.upperBound
+            }
+        }
+        return out
     }
 
     func search() async {

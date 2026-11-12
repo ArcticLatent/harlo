@@ -139,6 +139,19 @@ Rectangle {
         Workspace.requestWikiSearch(root.sessionKey, root.query, root.workspace)
     }
 
+    /// A hit's snippet as styled text, the query's words in the text
+    /// colour and medium weight (the rest stays muted), as session search
+    /// marks its matches.
+    function marked(text, query) {
+        const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        const words = query.toLowerCase().split(/[^0-9A-Za-z\u00C0-\uFFFF]+/).filter(w => w.length > 1)
+        if (words.length === 0) return esc(text)
+        const re = new RegExp("(" + words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")", "gi")
+        return text.split(re).map((part, i) => i % 2 === 1
+            ? "<b><font color='" + Theme.rgb(Theme.text) + "'>" + esc(part) + "</font></b>"
+            : esc(part)).join("")
+    }
+
     // ---- what's shown ----
 
     /// A folder's name as a heading ("architecture" → "Architecture").
@@ -425,8 +438,10 @@ Rectangle {
                     }
                     Label {
                         Layout.fillWidth: true
-                        visible: text !== ""
-                        text: hit.modelData.snippet
+                        visible: hit.modelData.snippet !== ""
+                        objectName: "wikiHitSnippet"
+                        text: root.marked(hit.modelData.snippet, root.query)
+                        textFormat: Text.StyledText
                         color: Theme.textMuted
                         font.pixelSize: Theme.px(12)
                         wrapMode: Text.Wrap

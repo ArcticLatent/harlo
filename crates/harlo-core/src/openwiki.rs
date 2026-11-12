@@ -824,7 +824,7 @@ pub fn search_text(root: &Path, query: &str, limit: usize) -> Vec<Value> {
 }
 
 fn search_in(texts: &[(String, String)], query: &str, limit: usize) -> Vec<Value> {
-    let words: Vec<String> = query.split(|c: char| !c.is_alphanumeric()).filter(|w| w.len() > 1).map(str::to_lowercase).collect();
+    let words = query_words(query);
     if words.is_empty() {
         return Vec::new();
     }
@@ -839,7 +839,7 @@ fn search_in(texts: &[(String, String)], query: &str, limit: usize) -> Vec<Value
             let all = words.iter().all(|w| lower.contains(w.as_str()) || heading.to_lowercase().contains(w.as_str()));
             if score > 0 {
                 let line = section.lines().find(|l| words.iter().any(|w| l.to_lowercase().contains(w.as_str()))).unwrap_or_default().trim();
-                let snippet: String = line.chars().take(200).collect();
+                let snippet = readable_snippet(line.trim_start_matches(|c| matches!(c, '-' | '*' | '>' | ' ')), &words);
                 hits.push((score + if all { 100 } else { 0 }, json!({"page": format!("{DIR}/{path}"), "section": anchor(heading), "heading": heading, "snippet": snippet})));
             }
         };
@@ -964,7 +964,8 @@ pub fn page_view(path: &str, text: &str) -> Value {
 /// OpenWiki's search answer as the panel shows it: `{hits: [{page,
 /// section, heading, snippet, wiki}], workspaces: [{id, name}]}` (the
 /// workspaces when it asks which one).
-pub fn search_hits(answer: &Value) -> Value {
+pub fn search_hits(answer: &Value, query: &str) -> Value {
+    let words = query_words(query);
     let hits: Vec<Value> = answer["results"]
         .as_array()
         .into_iter()
@@ -973,21 +974,74 @@ pub fn search_hits(answer: &Value) -> Value {
             let rf = r["ref"].as_array().and_then(|a| a.first()).and_then(Value::as_str).or_else(|| r["ref"].as_str())?;
             let (page, section) = rf.split_once('#').unwrap_or((rf, ""));
             let content = r["content"].as_str().unwrap_or_default();
-            // (Its page, by path or title, then "Section: <heading>", then
-            // its text.)
-            let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
-            let at = lines.iter().take(3).position(|l| l.starts_with("Section: "));
-            let heading = at.map(|i| lines[i]["Section: ".len()..].trim().to_owned()).unwrap_or_default();
-            let rest: Vec<&str> = match at {
-                Some(i) => lines[i + 1..].to_vec(),
-                None => lines.into_iter().skip_while(|l| l.trim() == page).collect(),
+            // (OpenWiki's lines: the page's title, "Section: <heading>" when
+            // there is one, the page's description, then the excerpt that
+            // matched, already made one line.)
+            let mut lines: Vec<&str> = content.lines().map(str::trim).filter(|l| !l.is_empty()).skip(1).collect();
+            let heading = match lines.first().and_then(|l| l.strip_prefix("Section: ")) {
+                Some(h) => {
+                    let h = h.trim().to_owned();
+                    lines.remove(0);
+                    h
+                }
+                None => String::new(),
             };
-            let snippet: String = rest.iter().map(|l| l.trim()).filter(|l| !l.is_empty()).collect::<Vec<_>>().join(" ").chars().take(240).collect();
+            // (The excerpt, else the description when the excerpt was a
+            // diagram's or a table's syntax.)
+            let snippet = lines.iter().rev().map(|l| readable_snippet(l, &words)).find(|s| !s.is_empty()).unwrap_or_default();
             Some(json!({ "page": page, "section": section, "heading": heading, "snippet": snippet, "wiki": r["wiki"].as_str().unwrap_or_default() }))
         })
         .collect();
     let workspaces: Vec<Value> = answer["workspaces"].as_array().into_iter().flatten().map(|w| json!({ "id": w["id"], "name": w["name"] })).collect();
     json!({ "hits": hits, "workspaces": workspaces })
+}
+
+/// A query's words, lowercase, as the searches and the snippets match them.
+fn query_words(query: &str) -> Vec<String> {
+    query.split(|c: char| !c.is_alphanumeric()).filter(|w| w.len() > 1).map(str::to_lowercase).collect()
+}
+
+/// A search hit's text as it reads: no table rules or Markdown marks, no
+/// diagram source (it comes back empty), and at most about 200 characters
+/// around the first of the query's words, with "…" where it was cut.
+fn readable_snippet(text: &str, words: &[String]) -> String {
+    let text = text.trim();
+    let first = text.split_whitespace().next().unwrap_or_default();
+    if ["mermaid", "flowchart", "graph", "sequenceDiagram", "classDiagram", "stateDiagram", "erDiagram"].contains(&first) || text.contains("-->") || text.contains("->>") {
+        return String::new();
+    }
+    let tokens: Vec<String> = text
+        .split_whitespace()
+        .filter(|t| !t.chars().all(|c| matches!(c, '-' | ':' | '|' | '=' | '`' | '*' | '#' | '>')))
+        .map(|t| t.trim_matches(|c| matches!(c, '`' | '*' | '|')).to_owned())
+        .filter(|t| !t.is_empty())
+        .collect();
+    const ROOM: usize = 200;
+    let total: usize = tokens.iter().map(|t| t.chars().count() + 1).sum();
+    if total <= ROOM + 1 {
+        return tokens.join(" ");
+    }
+    // (Start a few words before the first match, so it has some lead-in.)
+    let hit = tokens.iter().position(|t| { let t = t.to_lowercase(); words.iter().any(|w| t.contains(w.as_str())) }).unwrap_or(0);
+    let mut start = hit.saturating_sub(6);
+    let mut out: Vec<&str> = Vec::new();
+    let mut used = 0;
+    for t in &tokens[start..] {
+        let n = t.chars().count() + 1;
+        if used + n > ROOM && !out.is_empty() {
+            break;
+        }
+        out.push(t);
+        used += n;
+    }
+    // (Near the end: take earlier words to fill the room.)
+    while start > 0 && used + tokens[start - 1].chars().count() + 1 <= ROOM {
+        start -= 1;
+        used += tokens[start].chars().count() + 1;
+        out.insert(0, &tokens[start]);
+    }
+    let end = start + out.len();
+    format!("{}{}{}", if start > 0 { "…" } else { "" }, out.join(" "), if end < tokens.len() { "…" } else { "" })
 }
 
 /// A heading's anchor, as GitHub makes them ("Retry control" → "retry-control").
@@ -1118,16 +1172,28 @@ mod tests {
         assert_eq!(anchors, ["jobs", "retry-control"]);
         assert!(blocks.iter().any(|b| b["kind"] == "mermaid" && b["code"].as_str().unwrap().contains("A --> B")));
         assert!(blocks.iter().any(|b| b["kind"] == "code" && b["lang"] == "rust"));
-        let hits = search_hits(&json!({"results": [{"kind": "section", "ref": ["openwiki/architecture/jobs.md#retry-control"], "content": "openwiki/architecture/jobs.md\nSection: Retry control\nHow jobs run.\nA failed job is retried."}]}));
+        let hits = search_hits(&json!({"results": [{"kind": "section", "ref": ["openwiki/architecture/jobs.md#retry-control"], "content": "openwiki/architecture/jobs.md\nSection: Retry control\nHow jobs run.\nA failed job is retried."}]}), "retried");
         assert_eq!(hits["hits"][0]["page"], "openwiki/architecture/jobs.md");
         assert_eq!(hits["hits"][0]["section"], "retry-control");
         assert_eq!(hits["hits"][0]["heading"], "Retry control");
-        assert_eq!(hits["hits"][0]["snippet"], "How jobs run. A failed job is retried.");
-        // (A page with a title: its title first.)
-        let titled = search_hits(&json!({"results": [{"ref": ["openwiki/s.md#rows"], "content": "Sidebar\nSection: Rebuilding rows\nHow rows are kept.\nrebuild clears them."}]}));
+        // (The excerpt only: not the title or the description.)
+        assert_eq!(hits["hits"][0]["snippet"], "A failed job is retried.");
+        let titled = search_hits(&json!({"results": [{"ref": ["openwiki/s.md#rows"], "content": "Sidebar\nSection: Rebuilding rows\nHow rows are kept.\nrebuild clears them."}]}), "rebuild");
         assert_eq!(titled["hits"][0]["heading"], "Rebuilding rows");
-        assert_eq!(titled["hits"][0]["snippet"], "How rows are kept. rebuild clears them.");
-        let asked = search_hits(&json!({"status": "workspace_required", "workspaces": [{"id": "w1", "name": "Team", "wikiCount": 2}]}));
+        assert_eq!(titled["hits"][0]["snippet"], "rebuild clears them.");
+        // (A diagram's source gives way to the description; a table's rules
+        // are left out.)
+        let drawn = search_hits(&json!({"results": [{"ref": ["openwiki/s.md#flow"], "content": "Sidebar\nSection: Flow\nHow rows are kept.\nmermaid flowchart LR A[Rows] --> B[Cache]"}]}), "rows");
+        assert_eq!(drawn["hits"][0]["snippet"], "How rows are kept.");
+        let table = search_hits(&json!({"results": [{"ref": ["openwiki/s.md#kinds"], "content": "Sidebar\nKinds\n Kind Meaning --- --- row A shown row "}]}), "row");
+        assert_eq!(table["hits"][0]["heading"], "");
+        assert_eq!(table["hits"][0]["snippet"], "Kind Meaning row A shown row");
+        // (A long excerpt is cut around the first match.)
+        let long = format!("{} the cache is rebuilt here {}", "word ".repeat(80), "tail ".repeat(80));
+        let cut = readable_snippet(&long, &query_words("cache"));
+        assert!(cut.starts_with('…') && cut.ends_with('…') && cut.contains("the cache is rebuilt") && cut.chars().count() <= 203, "{cut}");
+        assert_eq!(readable_snippet("short `code` and **bold** | x |", &[]), "short code and bold x");
+        let asked = search_hits(&json!({"status": "workspace_required", "workspaces": [{"id": "w1", "name": "Team", "wikiCount": 2}]}), "");
         assert_eq!(asked["workspaces"][0]["name"], "Team");
     }
 
