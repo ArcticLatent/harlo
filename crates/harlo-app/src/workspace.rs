@@ -177,6 +177,13 @@ pub mod qobject {
         /// A session's title, as the sidebar shows it ("" when unknown).
         #[qinvokable]
         fn session_title(self: &Workspace, key: &QString) -> QString;
+        /// Starts a session that writes the wiki of a session's repository
+        /// (`key`: a session, or `project:<id>`): `mode` "create",
+        /// "update" or "continue". OpenWiki starts first (put on the
+        /// machine when it's another); the session follows and shows.
+        /// "" when it's on its way, else why not.
+        #[qinvokable]
+        fn start_wiki_run(self: Pin<&mut Workspace>, key: &QString, mode: &QString) -> QString;
         /// Your edit of a session's plan: `{ op: "add", title, detail,
         /// after }`, `{ op: "edit", id, title, detail }`, `{ op: "remove",
         /// id }`, `{ op: "shift", id, by }`, `{ op: "skip", id, skipped }`,
@@ -943,6 +950,9 @@ pub struct WorkspaceRust {
     /// Sessions you stopped, with their helpers: a helper whose worktree
     /// is still being made doesn't start (until the session works again).
     halted: HashSet<String>,
+    /// Sessions harlo started to write a wiki: they get OpenWiki's writing
+    /// tools.
+    wiki_sessions: HashSet<String>,
     /// Sessions harlo asked to send a diagram again, fixed: their next
     /// reply isn't checked (once, never a loop).
     diagram_asked: HashSet<String>,
@@ -2158,6 +2168,57 @@ impl Workspace {
 
     pub fn show_notice(self: Pin<&mut Self>, text: &QString, error: bool) {
         self.set_notice_text(&text.to_string(), error);
+    }
+
+    /// The folder a wiki action is for: a session's, or a project's
+    /// (`project:<id>`), with its project.
+    fn wiki_folder(&self, key: &str) -> Option<(PathBuf, i64)> {
+        match key.strip_prefix("project:").and_then(|id| id.parse::<i64>().ok()) {
+            Some(id) => self.projects.iter().find(|p| p.id == id).map(|p| (p.path.clone(), id)),
+            None => self.project_of(key),
+        }
+    }
+
+    pub fn start_wiki_run(self: Pin<&mut Self>, key: &QString, mode: &QString) -> QString {
+        let mode = mode.to_string();
+        let Some((cwd, project)) = self.wiki_folder(&key.to_string()) else {
+            return QString::from("The wiki is for a harlo project's sessions.");
+        };
+        let Some(rt) = harlo_core::openwiki::runtime() else {
+            return QString::from("This harlo has no OpenWiki: reinstall harlo.");
+        };
+        let kind = self.projects.iter().find(|p| p.id == project).map(|p| p.harness.clone()).filter(|h| !h.is_empty()).unwrap_or_else(|| self.default_harness());
+        let Some(kind) = HarnessKind::parse(&kind) else {
+            return QString::from("Pick a default agent first (Settings → General).");
+        };
+        let thread = self.qt_thread();
+        crate::runtime().spawn_blocking(move || {
+            let root = harlo_core::openwiki::root_of(&cwd);
+            let host = harlo_core::remote::host_of(&root);
+            let ready = harlo_core::openwiki::server(host.as_deref());
+            let run_mode = harlo_core::openwiki::state(&root).run.map(|r| r.mode).unwrap_or_default();
+            let _ = thread.queue(move |mut this| {
+                if let Err(e) = ready {
+                    this.as_mut().set_notice_text(&format!("OpenWiki didn't start: {e:#}"), true);
+                    return;
+                }
+                let prompt = harlo_core::openwiki::run_prompt(&rt, &mode, &run_mode);
+                let title = match mode.as_str() { "create" => "Wiki: create", "update" => "Wiki: update", _ => "Wiki: continue" };
+                let cwd_of_run = root.clone();
+                let key = this.as_mut().start_session_budget(kind, root, "", "", true, None);
+                this.as_mut().rust_mut().wiki_sessions.insert(key.clone());
+                if let Some(live) = registry::get(&key) {
+                    live.handle.send_raw(json!({ "type": "set_session_name", "name": title }));
+                }
+                // (It writes a page at a time, all in openwiki/: its writes
+                // go ahead and land in Changes; commands still ask.)
+                if has_shield(kind.as_str(), &cwd_of_run) {
+                    this.as_mut().set_approval_mode(&QString::from(&key), &QString::from("write"));
+                }
+                send_first_prompt(&key, FirstPrompt { text: prompt, ..Default::default() }, Some(this.qt_thread()));
+            });
+        });
+        QString::default()
     }
 
     pub fn set_default_instance_to(mut self: Pin<&mut Self>, name: &QString) {
@@ -6371,8 +6432,17 @@ impl Workspace {
             if helper {
                 tools.extend(harlo_core::orchestration::helper_tools().as_array().cloned().unwrap_or_default());
             }
+            let writing = caller.as_ref().is_some_and(|c| self.wiki_sessions.contains(c));
             if let Some((cwd, wiki, plan, commits)) = &features {
-                if *wiki && harlo_core::openwiki::has_wiki(cwd) {
+                // (A wiki session: OpenWiki's tools as its server lists them,
+                // started before the session was.)
+                if writing {
+                    let host = harlo_core::remote::host_of(cwd);
+                    match harlo_core::openwiki::server(host.as_deref()) {
+                        Ok(s) => tools.extend(harlo_core::openwiki::writing_tools(&s)),
+                        Err(e) => tracing::warn!("wiki session: OpenWiki: {e:#}"),
+                    }
+                } else if *wiki && harlo_core::openwiki::has_wiki(cwd) {
                     tools.extend(harlo_core::openwiki::reading_tools().as_array().cloned().unwrap_or_default());
                 }
                 if *plan {
@@ -6383,8 +6453,9 @@ impl Workspace {
         }
         if tool == harlo_core::orchestration::INSTRUCTIONS {
             let mut text = format!("{} {}\n\n{}", harlo_core::orchestration::BASE_INSTRUCTIONS, harlo_core::orchestration::when_to_start(starting), harlo_core::orchestration::DIAGRAMS);
+            let writing = caller.as_ref().is_some_and(|c| self.wiki_sessions.contains(c));
             if let Some((cwd, wiki, plan, commits)) = &features {
-                if *wiki && harlo_core::openwiki::has_wiki(cwd) {
+                if *wiki && !writing && harlo_core::openwiki::has_wiki(cwd) {
                     text = format!("{text}\n\n{}", harlo_core::openwiki::READ_INSTRUCTIONS);
                 }
                 if *plan {
@@ -6400,8 +6471,18 @@ impl Workspace {
             let Some((cwd, wiki, ..)) = &features else {
                 return Err("The wiki is for sessions in a harlo project.".into());
             };
-            if !*wiki || !harlo_core::openwiki::OFFERED.contains(&tool) {
-                return Err("The wiki is off for this project (its settings in harlo).".into());
+            let writing = caller.as_ref().is_some_and(|c| self.wiki_sessions.contains(c));
+            let allowed = if writing {
+                harlo_core::openwiki::OFFERED.contains(&tool) || harlo_core::openwiki::WRITE_TOOLS.contains(&tool)
+            } else {
+                *wiki && harlo_core::openwiki::OFFERED.contains(&tool)
+            };
+            if !allowed {
+                return Err(if harlo_core::openwiki::WRITE_TOOLS.contains(&tool) {
+                    "Only a wiki session harlo starts (its Wiki panel) writes the wiki.".to_owned()
+                } else {
+                    "The wiki is off for this project (its settings in harlo).".to_owned()
+                });
             }
             return Ok(json!({ "_defer": true, "cwd": cwd.to_string_lossy() }));
         }

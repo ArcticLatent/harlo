@@ -106,6 +106,41 @@ pub fn has_wiki(folder: &Path) -> bool {
     remote::is_remote(folder) || root_of(folder).join(DIR).is_dir()
 }
 
+/// What a wiki-writing session gets: OpenWiki's reading and writing tools,
+/// as its server lists them (their descriptions are its lifecycle), with
+/// `root` taken out (harlo fills it in).
+pub fn writing_tools(server: &Server) -> Vec<Value> {
+    OFFERED
+        .iter()
+        .chain(&WRITE_TOOLS)
+        .filter_map(|n| server.tool(n))
+        .map(|t| {
+            let mut t = t.clone();
+            if let Some(o) = t.pointer_mut("/inputSchema/properties").and_then(Value::as_object_mut) {
+                o.remove("root");
+            }
+            if let Some(r) = t.pointer_mut("/inputSchema/required").and_then(Value::as_array_mut) {
+                r.retain(|v| v != "root");
+            }
+            t
+        })
+        .collect()
+}
+
+/// A wiki session's first message: what to do (`mode`: "create",
+/// "update", or "continue" an interrupted run of `run_mode`), then
+/// OpenWiki's own steps from the bundled version's skill.
+pub fn run_prompt(rt: &Runtime, mode: &str, run_mode: &str) -> String {
+    let ask = match mode {
+        "create" => "Create this repository's wiki with OpenWiki: call openwiki_begin with mode \"init\".".to_owned(),
+        "update" => "Update this repository's wiki with OpenWiki, so it matches the code again: call openwiki_begin with mode \"update\".".to_owned(),
+        _ => format!("Continue the OpenWiki run that stopped part way in this repository: call openwiki_begin with mode \"{}\", then go on from where its queue is.", if run_mode == "init" { "init" } else { "update" }),
+    };
+    let skill = rt.skill().unwrap_or_default();
+    let steps = skill.find("## Required sequence").map(|i| &skill[i..]).unwrap_or("Follow the openwiki tools' descriptions: begin, plan, then each page in turn, then finish.");
+    format!("{ask}\n\nharlo fills in `root` for every openwiki tool, so leave it out (and skip resolving the top-level). Write only the wiki: never change the code. OpenWiki's steps:\n\n{steps}")
+}
+
 // ---- The runtime ----
 
 /// harlo's OpenWiki: a folder with `bin/node`, the package, and `VERSION`
@@ -381,7 +416,8 @@ pub fn stop_all() {
 }
 
 /// Calls an OpenWiki tool for the repository at `root` (here or on its
-/// host), `root` filled in as OpenWiki wants it.
+/// host), `root` filled in as OpenWiki wants it (for the tools that take
+/// one).
 pub fn call(root: &Path, tool: &str, mut args: Value) -> Result<Value> {
     let (host, dir) = match remote::split(root) {
         Some((h, d)) => (Some(h), d),
@@ -390,10 +426,20 @@ pub fn call(root: &Path, tool: &str, mut args: Value) -> Result<Value> {
     if !args.is_object() {
         args = json!({});
     }
-    args["root"] = Value::String(dir);
+    let server = server(host.as_deref())?;
+    // (Only the tools that take one: a run's later steps go by its id.)
+    match args.as_object_mut() {
+        Some(o) if server.tool(tool).is_some_and(|t| t.pointer("/inputSchema/properties/root").is_some()) => {
+            o.insert("root".into(), Value::String(dir));
+        }
+        Some(o) => {
+            o.remove("root");
+        }
+        None => {}
+    }
     // (Writing a page checks its claims against the code: it can take a while.)
     let timeout = Duration::from_secs(if READ_TOOLS.contains(&tool) { 90 } else { 600 });
-    server(host.as_deref())?.call(tool, args, timeout)
+    server.call(tool, args, timeout)
 }
 
 /// Whether the runtime starts and has its tools: "openwiki 0.9.0", else
@@ -927,6 +973,24 @@ esac; done"#
         let r = s.call("openwiki_read", json!({"root": root, "page": "openwiki/architecture/jobs.md", "sections": ["retry-control"]}), Duration::from_secs(60)).unwrap();
         assert!(r.to_string().contains("three times"), "{r}");
         assert!(rt.skill().unwrap().contains("openwiki_begin"));
+    }
+
+    #[test]
+    fn writing_session_tools_and_prompt() {
+        let all: Vec<&str> = READ_TOOLS.iter().chain(&WRITE_TOOLS).copied().collect();
+        let s = Server::start(stand_in(&all)).unwrap();
+        let tools = writing_tools(&s);
+        let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+        assert_eq!(names.len(), 8);
+        assert!(names.contains(&"openwiki_submit_page") && names.contains(&"openwiki_search") && !names.contains(&"openwiki_list_wikis"));
+        let rt = Runtime { dir: "/nowhere".into() };
+        let p = run_prompt(&rt, "create", "");
+        assert!(p.contains("mode \"init\"") && p.contains("leave it out") && p.contains("never change the code"));
+        assert!(run_prompt(&rt, "continue", "init").contains("mode \"init\""));
+        assert!(run_prompt(&rt, "continue", "update").contains("mode \"update\""));
+        if let Some(rt) = runtime() {
+            assert!(run_prompt(&rt, "update", "").contains("openwiki_submit_plan"));
+        }
     }
 
     #[test]

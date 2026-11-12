@@ -8066,8 +8066,34 @@ ApplicationWindow {
         PauseAnimation { duration: 200 }
         ScriptAction { script: {
             win.check(win.chatText().indexOf("Wiki tools: none; wiki not told") >= 0, "nor for Claude Code (" + win.chatText().slice(-120) + ")")
+            // Creating the wiki: a session of its own runs OpenWiki's steps
+            // with the writing tools, which only it gets.
+            Workspace.setSetting("default_harness", "harlo")
+            win.wikiRequests = win.modelRequests().length
+            win.wikiKeyBefore = Workspace.activeKey
+            win.check(Workspace.startWikiRun("project:" + win.wikiProject, "create") === "", "Create starts") } }
+        ScriptAction { script: win.waitUntil(harloWikiSteps, () => Workspace.activeKey !== win.wikiKeyBefore && chat.session.key === Workspace.activeKey, 20000) }
+        ScriptAction { script: win.waitUntil(harloWikiSteps, () => /Wiki: (complete|no update|the page|unexpected)/.test(win.chatText()) && chat.session.status === "idle", 60000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const reqs = win.modelRequests().slice(win.wikiRequests)
+            const first = reqs[0] || {}
+            const names = (first.tools || []).map(t => t.function.name)
+            const asked = JSON.stringify(first.messages || [])
+            win.check(["openwiki_begin", "openwiki_submit_plan", "openwiki_next_page", "openwiki_submit_page", "openwiki_finish"].every(n => names.some(m => m.endsWith(n))), "the wiki session gets OpenWiki's writing tools (" + names.filter(n => n.indexOf("openwiki") >= 0).join(", ") + ")")
+            win.check(asked.indexOf("Create this repository's wiki with OpenWiki") >= 0 && asked.indexOf("Required sequence") >= 0, "and OpenWiki's own steps as its prompt")
+            win.check(chat.session.title === "Wiki: create", "titled Wiki: create (" + chat.session.title + ")")
+            win.check(Workspace.approvalMode(Workspace.activeKey) === "write", "its writes go ahead (the write mode); commands still ask (" + Workspace.approvalMode(Workspace.activeKey) + ")")
+            const said = win.chatText()
+            win.check(said.indexOf("Wiki: complete") >= 0, "the run finishes (" + said.slice(said.lastIndexOf("Wiki:"), said.lastIndexOf("Wiki:") + 300) + ")")
+            const cwd = win.argValue("--cwd=")
+            win.check((TestInput.readFile(cwd + "/openwiki/quickstart.md") || "").indexOf("greets the reader") >= 0, "the page is written")
+            win.check((TestInput.readFile(cwd + "/openwiki/.last-update.json") || "").indexOf("gitHead") >= 0, "OpenWiki records the update")
+            win.check((TestInput.readFile(cwd + "/AGENTS.md") || "").indexOf("OPENWIKI:START") >= 0, "and its block in AGENTS.md")
+            win.shotWindow("clicks-harlo-wiki-create")
             win.summary(); Qt.quit() } }
     }
+    property string wikiKeyBefore: ""
 
     // A diagram that doesn't parse: harlo tells the agent what's wrong
     // when its turn ends and it sends the diagram again, fixed, drawn as a
