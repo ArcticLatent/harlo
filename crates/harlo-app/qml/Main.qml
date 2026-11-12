@@ -321,6 +321,11 @@ ApplicationWindow {
         if (terminal.terminalFocused) terminal.closeTab(terminal.entry.active)
     }
     function togglePanel(mode) { windowSettings.rightMode = windowSettings.rightMode === mode ? "" : mode }
+    /// The Wiki panel, its search ready to type in (closed if it's open).
+    function toggleWiki() {
+        togglePanel("wiki")
+        if (windowSettings.rightMode === "wiki") Qt.callLater(() => wikiPanel.focusSearch())
+    }
     function toggleChanges() { togglePanel("changes") }
 
     function argValue(prefix) {
@@ -639,6 +644,7 @@ ApplicationWindow {
             { id: "changesPanel", seq: Keymap.seq("changesPanel"), label: "Changes panel", group: panels, icon: "git-branch", run: () => win.togglePanel("changes") },
             { id: "filesPanel", seq: Keymap.seq("filesPanel"), label: "Files panel", group: panels, icon: "folders", run: () => win.togglePanel("files") },
             { id: "notesPanel", seq: Keymap.seq("notesPanel"), label: "Notes panel", group: panels, icon: "note", run: () => win.togglePanel("notes") },
+            { id: "wikiPanel", seq: Keymap.seq("wikiPanel"), label: "Wiki panel", group: panels, icon: "book-open", run: () => win.toggleWiki() },
             { id: "terminal", seq: Keymap.seq("terminal"), label: "Terminal", group: panels, icon: "terminal-box", run: () => win.toggleTerminal() },
             { id: "newTerminalTab", seq: Keymap.seq("newTerminalTab"), label: "New terminal tab", group: panels, icon: "add", run: () => win.newTerminalTab() },
             { id: "closeTerminalTab", seq: Keymap.seq("closeTerminalTab"), label: "Close the terminal tab", group: panels, icon: "close", run: () => win.closeTerminalTab() },
@@ -731,6 +737,7 @@ ApplicationWindow {
         acts.push({ title: "Activity panel", icon: "list-check-2", hint: Keymap.seq("activityPanel"), run: () => win.togglePanel("activity") })
         acts.push({ title: "Files panel", icon: "folders", hint: Keymap.seq("filesPanel"), run: () => win.togglePanel("files") })
         acts.push({ title: "Notes panel", icon: "note", hint: Keymap.seq("notesPanel"), run: () => win.togglePanel("notes") })
+        acts.push({ title: "Wiki panel", icon: "book-open", hint: Keymap.seq("wikiPanel"), run: () => win.toggleWiki() })
         if (chat.session.key !== "") {
             acts.push({ title: "Export session as Markdown…", icon: "file-text", run: () => win.exportMarkdown(chat.session.key, chat.session.title) })
             acts.push({ title: "Copy session as Markdown", icon: "file-copy", run: () => Workspace.copyMarkdown(chat.session.key) })
@@ -8155,6 +8162,17 @@ ApplicationWindow {
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             win.check(windowSettings.rightMode === "wiki", "the rail opens the Wiki panel")
+            TestInput.key(Qt.Key_K, Qt.ControlModifier | Qt.ShiftModifier) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(windowSettings.rightMode === "", "Ctrl+Shift+K closes it")
+            TestInput.key(Qt.Key_K, Qt.ControlModifier | Qt.ShiftModifier) } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: win.waitUntil(wikiPanelSteps, () => win.wikiRows().length === 3, 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(windowSettings.rightMode === "wiki" && win.findName("wikiSearch", wikiPanel).activeFocus, "and opens it again, its search ready to type in")
+            win.check(win.shortcutList.some(x => x.id === "wikiPanel" && x.seq === "Ctrl+Shift+K" && x.group === "Panels"), "listed with the other panels' shortcuts")
             win.check(JSON.stringify(win.wikiRows()) === JSON.stringify(["Quickstart", "Jobs", "Releasing"]), "its pages, the quickstart first (" + JSON.stringify(win.wikiRows()) + ")")
             win.check(win.findText("Architecture", wikiPanel) !== null && win.findText("Workflows", wikiPanel) !== null, "grouped by folder")
             const fresh = win.findName("wikiFreshness", wikiPanel)

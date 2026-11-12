@@ -132,6 +132,14 @@ Rectangle {
 
     // ---- searching ----
 
+    /// The search field focused, when the wiki has pages to search (once
+    /// the panel and its pages show, when they don't yet).
+    property bool searchWanted: false
+    function focusSearch() {
+        searchWanted = !searchField.visible
+        if (searchField.visible) searchField.forceActiveFocus()
+    }
+
     function search(text) {
         root.query = text.trim()
         if (root.query === "") { root.results = null; root.searching = false; return }
@@ -327,6 +335,7 @@ Rectangle {
             Layout.rightMargin: 14
             Layout.topMargin: 12
             visible: root.st.exists && root.pages.length > 0
+            onVisibleChanged: if (visible && root.searchWanted) { root.searchWanted = false; forceActiveFocus() }
             placeholderText: "Search the wiki"
             leftPadding: 30
             rightPadding: text !== "" ? 30 : 10
