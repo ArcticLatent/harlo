@@ -456,14 +456,14 @@ async fn stopped_models(agent: String, host: String, models: Vec<String>) -> std
     .unwrap_or_default()
 }
 
-/// A Mermaid diagram drawn for the phone: `{ png (base64), width, height }`
-/// (points), in the phone's colours (`colors`: `{ background, surface,
-/// text, muted, accent }`).
+/// A Mermaid diagram drawn for the phone: `{ png (base64), width, height,
+/// boxes }` (points; a flowchart's boxes as fractions of the picture, to
+/// tap), in the phone's colours (`colors`: `{ background, surface, text,
+/// muted, accent }`).
 async fn diagram(msg: &Value) -> Value {
-    use base64::Engine as _;
     let (source, light, colors) = (msg["source"].as_str().unwrap_or_default().to_owned(), msg["light"].as_bool().unwrap_or(false), msg["colors"].clone());
-    match tokio::task::spawn_blocking(move || crate::diagrams::for_phone(&source, light, &colors)).await {
-        Ok(Ok((png, w, h))) => json!({ "png": base64::engine::general_purpose::STANDARD.encode(png), "width": w, "height": h }),
+    match tokio::task::spawn_blocking(move || crate::diagrams::phone_reply(&source, light, &colors)).await {
+        Ok(Ok(drawn)) => drawn,
         Ok(Err(e)) => json!({ "error": e }),
         Err(_) => json!({ "error": "merman couldn't draw this diagram." }),
     }

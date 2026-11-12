@@ -131,6 +131,7 @@ struct WikiView: View {
     @State private var workspace = ""
     @State private var graph = false
     @State private var zoom: ZoomedPicture?
+    @State private var next: WikiLink?
 
     /// The pages by folder, in the wiki's order.
     var groups: [(name: String, pages: [WikiPage])] {
@@ -154,12 +155,16 @@ struct WikiView: View {
                         }
                         .pickerStyle(.segmented)
                         .accessibilityIdentifier("wikiPagesGraph")
+                        // On the screen, above the list: not in a card.
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
+                        .listRowSeparator(.hidden)
                     }
                     if graph && !wiki.mermaid.isEmpty {
                         Section {
-                            PagesGraph(source: wiki.mermaid, zoom: $zoom)
+                            PagesGraph(wiki: wiki, zoom: $zoom) { next = $0 }
                         } footer: {
-                            Text((wiki.graphPages.count < wiki.pages.count ? "The quickstart and the pages it links to or from. " : "") + "An arrow is a link from one page to another. Tap it to zoom.")
+                            Text((wiki.graphPages.count < wiki.pages.count ? "The quickstart and the pages it links to or from. " : "") + "An arrow is a link from one page to another. Tap a page to read it, or elsewhere to zoom.")
                         }
                     } else {
                         ForEach(groups, id: \.name) { g in
@@ -181,6 +186,7 @@ struct WikiView: View {
         .navigationTitle("Wiki")
         .navigationBarTitleDisplayMode(.inline)
         .fullScreenCover(item: $zoom) { z in DiagramZoom(image: z.image, size: z.size, title: "Wiki") }
+        .navigationDestination(item: $next) { l in WikiPageView(wiki: wiki, link: l) }
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search the wiki")
         .onSubmit(of: .search) { Task { await search() } }
         .onChange(of: query) { _, q in
@@ -400,6 +406,7 @@ struct WikiPageView: View {
             return .systemAction
         })
         .task {
+            model.wikiReadLast[wiki.root] = link.path
             page = await model.wikiPage(link.path)
             failed = page == nil
             if !link.section.isEmpty {

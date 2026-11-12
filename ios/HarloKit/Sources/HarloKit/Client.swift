@@ -366,7 +366,7 @@ public actor HarloClient {
     public func diagram(_ source: String, light: Bool, colors: [String: String]) async throws -> DiagramPicture {
         let r = try check(await call("diagram", ["source": .string(source), "light": .bool(light), "colors": .object(colors.mapValues { .string($0) })]))
         guard let png = Data(base64Encoded: r["png"].text), !png.isEmpty else { throw HarloError.closed("harlo sent no picture.") }
-        return DiagramPicture(png: png, width: r["width"].double ?? 0, height: r["height"].double ?? 0)
+        return DiagramPicture(png: png, width: r["width"].double ?? 0, height: r["height"].double ?? 0, boxes: DiagramPicture.boxes(r["boxes"]))
     }
 
     /// A picture a session shows (`Row.images`), or a picture file in its

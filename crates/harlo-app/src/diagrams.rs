@@ -431,20 +431,29 @@ pub fn for_phone(source: &str, light: bool, colors: &Value) -> Result<(Vec<u8>, 
     Ok((png, w / 2, h / 2))
 }
 
+/// The phone's reply for a diagram: `{ png (base64), width, height, boxes }`,
+/// a flowchart's boxes (see `boxes`) to tap; Err as `for_phone`'s.
+pub fn phone_reply(source: &str, light: bool, colors: &Value) -> Result<Value, String> {
+    use base64::Engine as _;
+    let (png, w, h) = for_phone(source, light, colors)?;
+    let flowchart = source.lines().map(str::trim).find(|l| !l.is_empty() && !l.starts_with("%%")).is_some_and(|l| l.starts_with("flowchart") || l.starts_with("graph"));
+    let boxes = if flowchart { node_boxes(source) } else { vec![] };
+    Ok(serde_json::json!({ "png": base64::engine::general_purpose::STANDARD.encode(png), "width": w, "height": h, "boxes": boxes }))
+}
+
 /// `harlo --draw-diagram <source file> light|dark [colours JSON]`: prints
-/// the phone's reply for that diagram (`{ png, width, height }`, or
+/// the phone's reply for that diagram (`{ png, width, height, boxes }`, or
 /// `{ error }`), as the phone's `diagram` call gets it.
 pub fn draw_for_phone(args: &[String]) -> i32 {
-    use base64::Engine as _;
     let Some(source) = args.first().and_then(|f| std::fs::read_to_string(f).ok()) else {
         eprintln!("harlo --draw-diagram <source file> light|dark [colours JSON]");
         return 2;
     };
     let light = args.get(1).is_some_and(|m| m == "light");
     let colors = args.get(2).and_then(|c| serde_json::from_str(c).ok()).unwrap_or(Value::Null);
-    match for_phone(&source, light, &colors) {
-        Ok((png, w, h)) => {
-            println!("{}", serde_json::json!({ "png": base64::engine::general_purpose::STANDARD.encode(png), "width": w, "height": h }));
+    match phone_reply(&source, light, &colors) {
+        Ok(reply) => {
+            println!("{reply}");
             0
         }
         Err(e) => {
@@ -486,6 +495,16 @@ mod tests {
         assert_eq!(script_json(&json!({ "s": "</script><b>" })), r#"{"s":"<\/script><b>"}"#);
         let png = [0x89, b'P', b'N', b'G', 13, 10, 26, 10, 0, 0, 0, 13, b'I', b'H', b'D', b'R', 0, 0, 2, 0, 0, 0, 1, 0];
         assert_eq!(png_size(&png), Some((512, 256)));
+    }
+
+    #[test]
+    fn the_phone_gets_a_flowcharts_boxes_to_tap() {
+        let r = phone_reply("%% pages\nflowchart LR\n  p0[\"Quickstart\"]\n  p1[\"Store\"]\n  p0 --> p1\n", false, &json!({})).unwrap();
+        let ids: Vec<&str> = r["boxes"].as_array().unwrap().iter().map(|b| b["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, ["p0", "p1"]);
+        assert!(r["width"].as_u64().unwrap() > 0 && !r["png"].as_str().unwrap().is_empty());
+        let pie = phone_reply("pie\n  \"a\": 1\n  \"b\": 2\n", false, &json!({})).unwrap();
+        assert_eq!(pie["boxes"], json!([]));
     }
 
     #[test]

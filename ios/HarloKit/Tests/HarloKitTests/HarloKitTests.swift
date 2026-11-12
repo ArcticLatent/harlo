@@ -1151,6 +1151,12 @@ final class PlanTests: XCTestCase {
         XCTAssertEqual(Wiki(["root": "/home/me/shop"]).file("src/a.rs"), "/home/me/shop/src/a.rs")
         let big = Wiki(["project": 3, "pages": .array([["path": "quickstart.md", "title": "Q", "links": ["p1.md"]]] + (1...45).map { ["path": .string("p\($0).md"), "title": .string("P\($0)"), "links": $0 == 2 ? ["quickstart.md"] : []] })])
         XCTAssertEqual(big.graphPages.map(\.path), ["quickstart.md", "p1.md", "p2.md"], "a big wiki: the quickstart and its neighbours")
+        XCTAssertEqual(big.graphPage("p2")?.path, "p2.md", "a graph box is its page among those shown")
+        XCTAssertNil(big.graphPage("p3"), "past those shown: none")
+        XCTAssertNil(big.graphPage("quickstart"), "an id not like p<n>: none")
+        let sent: JSON = [["id": "p0", "x": .double(0.1), "y": .double(0.2), "w": .double(0.3), "h": .double(0.1)], ["id": "", "x": .double(0.0), "y": .double(0.0), "w": .double(1.0), "h": .double(1.0)], ["id": "p1", "x": .double(0.5), "y": .double(0.5), "w": .double(0.0), "h": .double(0.1)]]
+        let boxes = DiagramPicture.boxes(sent)
+        XCTAssertEqual(boxes, [DiagramPicture.Box(id: "p0", x: 0.1, y: 0.2, w: 0.3, h: 0.1)], "boxes without an id or a size are left out")
         // A run writing it, and one that stopped part way.
         let running = Wiki(["project": 3, "exists": true, "running": true, "session": "live:9", "run": ["phase": "generating", "done": 2, "total": 5]])
         XCTAssertEqual(running.freshness(now: now), "Writing pages: 2 of 5")

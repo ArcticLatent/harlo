@@ -313,8 +313,21 @@ final class HarloUITests: XCTestCase {
         see("src/sidebar.rs")
         see("lines 1–2, 4–9")
         shot("15g-wiki-sources")
-        // A search: OpenWiki's sections, a result opening its page.
+        // Back in the graph: the page read last is ringed, and a page's
+        // box opens it.
         app.navigationBars.buttons.element(boundBy: 0).tap()
+        tap("Graph")
+        let boxes = app.descendants(matching: .any).matching(identifier: "wikiGraphBox")
+        let readLast = boxes.matching(NSPredicate(format: "label == %@", "Read Sidebar, read last")).firstMatch
+        XCTAssertTrue(readLast.waitForExistence(timeout: 15), "the graph rings the page read last")
+        shot("15h-wiki-graph-read-last")
+        let quick = boxes.matching(NSPredicate(format: "label == %@", "Read Quickstart")).firstMatch
+        XCTAssertTrue(quick.waitForExistence(timeout: 5), "the quickstart's box")
+        quick.tap()
+        XCTAssertTrue(app.navigationBars["Quickstart"].waitForExistence(timeout: 8), "a box opens its page")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        tap("Pages")
+        // A search: OpenWiki's sections, a result opening its page.
         let field = app.searchFields["Search the wiki"]
         XCTAssertTrue(field.waitForExistence(timeout: 8), "the wiki's search")
         field.tap()

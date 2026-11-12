@@ -354,6 +354,13 @@ public struct Wiki: Equatable, Sendable {
         return out
     }
 
+    /// The page a graph box is (its node "p3" is the fourth of `graphPages`).
+    public func graphPage(_ id: String) -> WikiPage? {
+        guard id.hasPrefix("p"), let i = Int(id.dropFirst()) else { return nil }
+        let shown = graphPages
+        return shown.indices.contains(i) ? shown[i] : nil
+    }
+
     /// A file a code link names, in the repository ("src/a.rs" →
     /// "/home/me/shop/src/a.rs").
     public func file(_ path: String) -> String { root.isEmpty ? path : root + "/" + path }
@@ -490,11 +497,38 @@ public struct DiagramPicture: Equatable, Sendable {
     /// Its size in points (the picture has twice the pixels).
     public var width: Double
     public var height: Double
+    /// A flowchart's boxes, to tap.
+    public var boxes: [Box]
 
-    public init(png: Data, width: Double, height: Double) {
+    /// A box: its node's id and where it is, as fractions of the
+    /// picture's width and height.
+    public struct Box: Equatable, Sendable {
+        public var id: String
+        public var x, y, w, h: Double
+
+        public init(id: String, x: Double, y: Double, w: Double, h: Double) {
+            self.id = id
+            self.x = x
+            self.y = y
+            self.w = w
+            self.h = h
+        }
+    }
+
+    public init(png: Data, width: Double, height: Double, boxes: [Box] = []) {
         self.png = png
         self.width = width
         self.height = height
+        self.boxes = boxes
+    }
+
+    /// The boxes as harlo sends them (`[{ id, x, y, w, h }]`), any without
+    /// an id or a size left out.
+    public static func boxes(_ v: JSON) -> [Box] {
+        (v.array ?? []).compactMap { b in
+            guard !b["id"].text.isEmpty, let x = b["x"].double, let y = b["y"].double, let w = b["w"].double, let h = b["h"].double, w > 0, h > 0 else { return nil }
+            return Box(id: b["id"].text, x: x, y: y, w: w, h: h)
+        }
     }
 }
 

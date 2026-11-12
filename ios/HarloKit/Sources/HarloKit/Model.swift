@@ -917,6 +917,9 @@ public final class HarloModel {
 
     /// A page of the open session's wiki (nil: it couldn't be asked; a
     /// page that can't be read says why in its `error`).
+    /// The wiki page read last, by wiki (its root): its graph rings it.
+    public var wikiReadLast: [String: String] = [:]
+
     public func wikiPage(_ path: String) async -> WikiPageText? {
         if demo || samples != nil { return Self.sampleWikiPage(path) }
         guard features.contains("wiki") else { return nil }
