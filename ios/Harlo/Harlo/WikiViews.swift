@@ -101,49 +101,32 @@ struct WikiSheet: View {
     @Environment(\.dismiss) private var dismiss
     let session: OpenSession
     @State private var notice: String?
-    /// The pages opened, one path for the whole sheet: a destination of
-    /// the wiki's own (the graph's boxes had one) lost its search field
-    /// when you came back from a page.
+    /// The pages opened: one path for the whole sheet.
     @State private var path: [WikiLink] = []
+    /// Read once, as the sheet opens (not each time a page closes).
+    @State private var loaded = false
 
     var body: some View {
+        // The wiki's screen is always the root, whatever state the wiki is
+        // in: inside a branch at the root, its search field went when you
+        // came back from a page.
         NavigationStack(path: $path) {
-            Group {
-                if let wiki = session.wiki, wiki.inProject, wiki.exists, !wiki.loading {
-                    WikiView(wiki: wiki, notice: $notice, showSession: show) { path.append($0) }
-                } else {
-                    List {
-                        Group {
-                            if let wiki = session.wiki, !wiki.inProject {
-                                Text("This session isn't in one of harlo's projects, so it has no wiki.")
-                                    .foregroundStyle(Color(p.muted))
-                            } else if let wiki = session.wiki {
-                                WikiSection(wiki: wiki, notice: $notice, showSession: show)
-                            } else {
-                                HStack(spacing: 8) {
-                                    ProgressView()
-                                    Text("Reading the wiki…").font(.subheadline).foregroundStyle(Color(p.muted))
-                                }
-                            }
-                        }
-                        .listRowBackground(Color(p.elevated))
-                    }
-                    .screen()
-                    .navigationTitle("Wiki")
-                    .navigationBarTitleDisplayMode(.inline)
+            WikiView(wiki: session.wiki ?? Wiki(exists: false, loading: true), notice: $notice, showSession: show) { path.append($0) }
+                // A page row, a search hit or a graph box pushes a WikiLink.
+                .navigationDestination(for: WikiLink.self) { link in
+                    if let wiki = session.wiki { WikiPageView(wiki: wiki, link: link) }
                 }
-            }
-            // A page row, a search hit or a graph box pushes a WikiLink.
-            .navigationDestination(for: WikiLink.self) { link in
-                if let wiki = session.wiki { WikiPageView(wiki: wiki, link: link) }
-            }
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
-            }
-            .alert(notice ?? "", isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
-                Button("OK", role: .cancel) {}
-            }
-            .task { await model.loadWiki() }
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
+                }
+                .alert(notice ?? "", isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
+                    Button("OK", role: .cancel) {}
+                }
+                .task {
+                    guard !loaded else { return }
+                    loaded = true
+                    await model.loadWiki()
+                }
         }
         .modifier(Themed())
     }
@@ -191,7 +174,13 @@ struct WikiView: View {
     var body: some View {
         List {
             Group {
-                if !query.isEmpty && (hits != nil || searching) {
+                if !wiki.inProject {
+                    Text("This session isn't in one of harlo's projects, so it has no wiki.")
+                        .foregroundStyle(Color(p.muted))
+                } else if !wiki.exists || wiki.loading {
+                    // (Reading it, or what a wiki is and Create.)
+                    WikiSection(wiki: wiki, notice: $notice, showSession: showSession)
+                } else if !query.isEmpty && (hits != nil || searching) {
                     results
                 } else {
                     WikiSection(wiki: wiki, notice: $notice, showSession: showSession)
