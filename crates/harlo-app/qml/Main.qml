@@ -8535,6 +8535,9 @@ ApplicationWindow {
                          const plain = !!(wikiPanel.results && wikiPanel.results.plain)
                          const good = hits.length > 0 && !plain && (q.pages.length === 0 || q.pages.some(p => hits.slice(0, 3).indexOf(p) >= 0))
                          if (!good) win.demoProblems.search.push("“" + q.q + "” → " + (plain ? "(plain) " : "") + (hits.slice(0, 3).join(", ") || "nothing"))
+                         // (No hit reads as a flattened code block.)
+                         const code = ok && wikiPanel.results ? wikiPanel.results.hits.find(h => /(^|\s)(python|rust|sh|bash|js|ts)\s+\S*[(@{=]/.test(h.snippet)) : null
+                         if (code) win.demoProblems.search.push("“" + q.q + "” shows code: " + code.snippet.slice(0, 60))
                      }, 30000) } }
         PauseAnimation { duration: 200 }
         ScriptAction { script: win.waitUntil(wikiDemoSteps, () => walker.done, 300000) }

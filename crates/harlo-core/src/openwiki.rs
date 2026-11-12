@@ -1079,13 +1079,29 @@ fn readable_snippet(text: &str, words: &[String]) -> String {
         .filter(|t| !t.is_empty())
         // (Punctuation OpenWiki left on its own where a code mark was:
         // "raises OrderLocked ." reads "raises OrderLocked.")
+        // (And an opening bracket left on its own joins the word after it.)
         .fold(Vec::new(), |mut out: Vec<String>, t| {
             match out.last_mut() {
-                Some(last) if t.starts_with(['.', ',', ';', ':', '!', '?', ')']) => last.push_str(&t),
+                Some(last) if t.starts_with(['.', ',', ';', ':', '!', '?', ')', ']']) || last == "(" || last == "[" => last.push_str(&t),
                 _ => out.push(t),
             }
             out
         });
+    // (A code block, flattened by OpenWiki: its language word, then the code
+    // run together. The words before it stay; with none, the caller falls
+    // back to the summary.)
+    let mut tokens = tokens;
+    if let Some(i) = tokens.iter().enumerate().position(|(i, t)| {
+        CODE_LANGS.contains(&t.as_str()) && tokens[i + 1..].iter().take(8).any(|n| n.contains(['(', '{', '=', ';', '@']) || ["def", "fn", "class", "let", "const", "import", "func"].contains(&n.as_str()))
+    }) {
+        if i < 4 {
+            return String::new();
+        }
+        tokens.truncate(i);
+        if let Some(last) = tokens.last_mut() {
+            last.push('…');
+        }
+    }
     const ROOM: usize = 200;
     let total: usize = tokens.iter().map(|t| t.chars().count() + 1).sum();
     if total <= ROOM + 1 {
@@ -1113,6 +1129,9 @@ fn readable_snippet(text: &str, words: &[String]) -> String {
     let end = start + out.len();
     format!("{}{}{}", if start > 0 { "…" } else { "" }, out.join(" "), if end < tokens.len() { "…" } else { "" })
 }
+
+/// A code block's language word, as it opens a block OpenWiki flattened.
+const CODE_LANGS: [&str; 24] = ["python", "py", "rust", "rs", "sh", "bash", "shell", "zsh", "js", "javascript", "ts", "typescript", "tsx", "jsx", "json", "toml", "yaml", "yml", "go", "java", "kotlin", "swift", "sql", "ruby"];
 
 /// A heading's anchor, as GitHub makes them ("Retry control" → "retry-control").
 pub fn anchor(heading: &str) -> String {
@@ -1255,7 +1274,12 @@ mod tests {
         assert_eq!(named["hits"][0]["snippet"], "place_order stores the order; to place_order twice is fine");
         // (Its spaced form is plain words on the page: left alone.)
         assert_eq!(named["hits"][1]["snippet"], "the pay order step");
-        assert_eq!(readable_snippet("it raises `OrderLocked` . Then ( see `x` ) , done", &[]), "it raises OrderLocked. Then ( see x), done");
+        assert_eq!(readable_snippet("it raises `OrderLocked` . Then ( see `x` ) , done", &[]), "it raises OrderLocked. Then (see x), done");
+        // A flattened code block: the words before it, else nothing (the summary).
+        assert_eq!(readable_snippet("python @report(\"open_pallets\") def open_pallets(): return rows", &[]), "");
+        assert_eq!(readable_snippet("A report is a function registered by name: python @report(\"x\") def x(): pass", &[]), "A report is a function registered by name:…");
+        // (A sentence that only mentions a language stays.)
+        assert_eq!(readable_snippet("the tool is written in rust and runs fast", &[]), "the tool is written in rust and runs fast");
         let titled = search_hits(&json!({"results": [{"ref": ["openwiki/s.md#rows"], "content": "Sidebar\nSection: Rebuilding rows\nHow rows are kept.\nrebuild clears them."}]}), "rebuild");
         assert_eq!(titled["hits"][0]["heading"], "Rebuilding rows");
         assert_eq!(titled["hits"][0]["snippet"], "rebuild clears them.");
