@@ -274,6 +274,9 @@ final class HarloUITests: XCTestCase {
         let open = app.descendants(matching: .any)["wikiOpen"]
         for _ in 0..<6 where !(open.exists && open.isHittable) { app.swipeUp() }
         XCTAssertTrue(open.waitForExistence(timeout: 8), "the plan's sheet has the wiki")
+        // (On the small phone the Update row is below the fold.)
+        let update = element("Update the wiki")
+        for _ in 0..<3 where !(update.exists && update.isHittable) { app.swipeUp() }
         see("1 commit since")
         see("Update the wiki")
         shot("15b-plan-wiki")

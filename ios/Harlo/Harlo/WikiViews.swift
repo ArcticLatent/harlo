@@ -33,9 +33,7 @@ struct WikiSection: View {
                     runButton("create", "Create wiki", "book")
                 }
             } else {
-                NavigationLink {
-                    WikiView(wiki: wiki)
-                } label: {
+                NavigationLink(value: WikiOpen()) {
                     Label {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Read the wiki").font(.body.weight(.medium))
@@ -110,6 +108,11 @@ struct WikiSection: View {
     }
 }
 
+/// The wiki's screen, pushed by value: its page rows and search hits push
+/// WikiLinks, and a stack mixing a pushed view with value links left those
+/// rows doing nothing when tapped, so the plan sheet's stack declares both.
+struct WikiOpen: Hashable {}
+
 /// A page to open, at a section ("" its top).
 struct WikiLink: Hashable {
     var path: String
@@ -177,7 +180,6 @@ struct WikiView: View {
         .screen()
         .navigationTitle("Wiki")
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(for: WikiLink.self) { link in WikiPageView(wiki: wiki, link: link) }
         .fullScreenCover(item: $zoom) { z in DiagramZoom(image: z.image, size: z.size, title: "Wiki") }
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search the wiki")
         .onSubmit(of: .search) { Task { await search() } }

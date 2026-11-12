@@ -100,6 +100,12 @@ struct PlanSheet: View {
             .screen()
             .navigationTitle("Plan")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(for: WikiOpen.self) { _ in
+                if let wiki = session.wiki { WikiView(wiki: wiki) }
+            }
+            .navigationDestination(for: WikiLink.self) { link in
+                if let wiki = session.wiki { WikiPageView(wiki: wiki, link: link) }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
                 if plan?.enabled == true {
