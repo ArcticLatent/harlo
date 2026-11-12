@@ -617,10 +617,23 @@ Rectangle {
                             Item {
                                 id: diagram
                                 objectName: "wikiDiagram"
-                                readonly property var pic: block.kind === "mermaid" && Diagrams.revision >= 0
-                                    ? JSON.parse(Diagrams.diagram(block.modelData.code, Theme.isLight, JSON.stringify({ background: String(Theme.canvas), surface: String(Theme.raised), text: String(Theme.foreground),
-                                                                                                                        muted: String(Theme.muted), accent: String(Theme.primary), font: Theme.uiFont })))
-                                    : null
+                                // (A flowchart drawn across is drawn down as well, and
+                                // shown down when that fits the panel larger, as the
+                                // graph is.)
+                                readonly property string source: block.kind === "mermaid" ? block.modelData.code || "" : ""
+                                readonly property string sourceDown: source.replace(/^(\s*(?:%%[^\n]*\n\s*)*)(flowchart|graph)([ \t]+)(LR|RL)\b/, "$1$2$3TB")
+                                function draw(src) {
+                                    return src !== "" && Diagrams.revision >= 0
+                                        ? JSON.parse(Diagrams.diagram(src, Theme.isLight, JSON.stringify({ background: String(Theme.canvas), surface: String(Theme.raised), text: String(Theme.foreground),
+                                                                                                           muted: String(Theme.muted), accent: String(Theme.primary), font: Theme.uiFont })))
+                                        : null
+                                }
+                                readonly property var across: draw(source)
+                                readonly property var down: sourceDown !== source ? draw(sourceDown) : null
+                                readonly property bool downward: !!across && !!down && across.state === "ready" && down.state === "ready"
+                                    && Math.min(1, parent.width / Math.max(1, down.width)) > 1.15 * Math.min(1, parent.width / Math.max(1, across.width))
+                                readonly property var pic: downward ? down : across
+                                readonly property string shownSource: downward ? sourceDown : source
                                 readonly property bool ready: !!pic && pic.state === "ready"
                                 // (Never under 0.7, its labels' readable size: wider, it scrolls sideways.)
                                 readonly property real fit: ready ? Math.max(0.7, Math.min(1, parent.width / Math.max(1, pic.width))) : 1
@@ -665,7 +678,7 @@ Rectangle {
                                         Accessible.role: Accessible.Graphic
                                         Accessible.name: "Diagram"
                                         HoverHandler { id: diagramHover; cursorShape: Qt.PointingHandCursor }
-                                        TapHandler { onTapped: viewer.show(root.pageView.title, [{ label: "Diagram", url: diagram.pic.url, width: diagram.pic.width, height: diagram.pic.height }], 0, "Diagram", () => Diagrams.openInBrowser(block.modelData.code, Theme.isLight), 2) }
+                                        TapHandler { onTapped: viewer.show(root.pageView.title, [{ label: "Diagram", url: diagram.pic.url, width: diagram.pic.width, height: diagram.pic.height }], 0, "Diagram", () => Diagrams.openInBrowser(diagram.shownSource, Theme.isLight), 2) }
                                         ToolTip.visible: diagramHover.hovered
                                         ToolTip.text: "Open full size"
                                         ToolTip.delay: 600
@@ -854,14 +867,18 @@ Rectangle {
             }
         }
 
-        // The graph's caption and zoom, kept in view under it.
-        RowLayout {
+        // The graph's caption and zoom, kept in view under it (the zoom
+        // under the caption in a narrow panel).
+        GridLayout {
+            objectName: "wikiGraphCaption"
             Layout.fillWidth: true
             Layout.leftMargin: 18
             Layout.rightMargin: 14
             Layout.bottomMargin: 8
             visible: graphBox.visible && graphImage.visible
-            spacing: 2
+            columns: root.width < 360 ? 1 : 2
+            columnSpacing: 6
+            rowSpacing: 2
             Label {
                 Layout.fillWidth: true
                 text: (root.graphPages.length < root.pages.length ? "The open page and the pages it links to or from. " : "") + "An arrow is a link from one page to another. Click a page to read it."
@@ -869,34 +886,36 @@ Rectangle {
                 font.pixelSize: Theme.px(11.5)
                 wrapMode: Text.Wrap
             }
-            ComposerIconButton {
-                objectName: "wikiGraphZoomOut"
-                Layout.alignment: Qt.AlignTop
-                iconName: "subtract"; tint: Theme.muted
-                tip: "Zoom out (Ctrl+wheel)"
-                enabled: root.graphZoom > 0.51
-                onClicked: root.graphZoom = Math.max(0.5, root.graphZoom / 1.25)
-            }
-            FlatButton {
-                objectName: "wikiGraphZoom"
-                Layout.alignment: Qt.AlignTop
-                Layout.minimumWidth: 40
-                text: Math.round(root.graphZoom * 100) + "%"
-                font.pixelSize: Theme.px(11)
-                outlined: false
-                padding: 4
-                ToolTip.visible: hovered
-                ToolTip.text: "Fit the panel"
-                ToolTip.delay: 600
-                onClicked: root.graphZoom = 1
-            }
-            ComposerIconButton {
-                objectName: "wikiGraphZoomIn"
-                Layout.alignment: Qt.AlignTop
-                iconName: "add"; tint: Theme.muted
-                tip: "Zoom in (Ctrl+wheel)"
-                enabled: root.graphZoom < 2.99
-                onClicked: root.graphZoom = Math.min(3, root.graphZoom * 1.25)
+            RowLayout {
+                Layout.alignment: Qt.AlignTop | (root.width < 360 ? Qt.AlignLeft : Qt.AlignRight)
+                Layout.leftMargin: root.width < 360 ? -6 : 0
+                spacing: 2
+                ComposerIconButton {
+                    objectName: "wikiGraphZoomOut"
+                    iconName: "subtract"; tint: Theme.muted
+                    tip: "Zoom out (Ctrl+wheel)"
+                    enabled: root.graphZoom > 0.51
+                    onClicked: root.graphZoom = Math.max(0.5, root.graphZoom / 1.25)
+                }
+                FlatButton {
+                    objectName: "wikiGraphZoom"
+                    Layout.minimumWidth: 40
+                    text: Math.round(root.graphZoom * 100) + "%"
+                    font.pixelSize: Theme.px(11)
+                    outlined: false
+                    padding: 4
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Fit the panel"
+                    ToolTip.delay: 600
+                    onClicked: root.graphZoom = 1
+                }
+                ComposerIconButton {
+                    objectName: "wikiGraphZoomIn"
+                    iconName: "add"; tint: Theme.muted
+                    tip: "Zoom in (Ctrl+wheel)"
+                    enabled: root.graphZoom < 2.99
+                    onClicked: root.graphZoom = Math.min(3, root.graphZoom * 1.25)
+                }
             }
         }
         // (Over the graph: its sides fade while there's more.)

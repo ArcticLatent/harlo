@@ -8481,6 +8481,10 @@ ApplicationWindow {
         PauseAnimation { duration: 1200 }
         ScriptAction { script: {
             win.shotWindow("wiki-demo-reader")
+            // (A flowchart drawn across shows down when that fits larger.)
+            const drawn = win.findAllNames("wikiDiagram", wikiPanel).filter(d => d.ready)
+            win.check(drawn.every(d => !d.down || d.down.state !== "ready" || d.fit + 0.001 >= Math.max(0.7, Math.min(1, d.width / Math.max(1, d.across.width)))),
+                      "its diagrams shown the way they fit larger (" + drawn.map(d => d.downward ? "down" : "across").join(", ") + ")")
             // (Its end: the files and lines it comes from.)
             const reader = win.findName("wikiReader", wikiPanel)
             if (reader) reader.contentY = Math.max(0, reader.contentHeight - reader.height) } }
@@ -8495,6 +8499,8 @@ ApplicationWindow {
         ScriptAction { script: {
             const boxes = win.findAllNames("wikiGraphBox", wikiPanel).length
             win.check(boxes === wikiPanel.graphPages.length, "the graph: a box per page (" + boxes + " of " + wikiPanel.graphPages.length + (wikiPanel.graphPic && wikiPanel.graphPic.error ? "; " + wikiPanel.graphPic.error : "") + ")")
+            const cap = win.findName("wikiGraphCaption", wikiPanel)
+            win.check(!cap || !cap.visible || cap.columns === (wikiPanel.width < 360 ? 1 : 2), "its zoom beside the caption, or under it in a narrow panel")
             win.shotWindow("wiki-demo-graph")
             wikiPanel.mode = "pages"
             // Each search, as the panel asks it of OpenWiki.
