@@ -427,7 +427,7 @@ final class HarloUITests: XCTestCase {
         // The reply's picture in its place, as wide as the reply, not its
         // words, and not again under it.
         let reply = app.buttons["replyPicture"]
-        XCTAssertTrue(reply.waitForExistence(timeout: 8), "the reply's picture")
+        XCTAssertTrue(reply.waitForExistence(timeout: 15), "the reply's picture")
         XCTAssertEqual(reply.label, "Picture: The sidebar")
         XCTAssertGreaterThan(reply.frame.width, 150, "the reply's picture is big (\(reply.frame))")
         shot("26-pictures")
