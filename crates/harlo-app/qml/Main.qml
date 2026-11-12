@@ -8288,6 +8288,24 @@ ApplicationWindow {
             win.check(win.findName("wikiRun", wikiPanel).variant === "outline", "Update is quiet then")
             win.check(win.findText("Agents search it, in sessions started from now on.", wikiPanel) !== null, "and agents use it")
             win.shotWindow("clicks-wiki-created")
+            win.clickItem(win.findName("wikiSwitch", wikiPanel), "the panel's Wiki switch") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(Workspace.setting("wiki_" + win.wikiProject2) === "0" && win.findText("Agents don't use it: switched off for this project.", wikiPanel) !== null, "switched off, it says so")
+            win.shotWindow("clicks-wiki-off")
+            settingsDialog.projectId = win.wikiProject2
+            settingsDialog.openPage("projects") } }
+        PauseAnimation { duration: 700 }
+        ScriptAction { script: {
+            // (Settings → Projects: its Wiki row, scrolled to.)
+            const sw = win.findName("projectWiki", settingsDialog.contentItem)
+            const f = win.findName("settingsPage", settingsDialog.contentItem)
+            if (sw && f) f.contentY = Math.max(0, Math.min(sw.mapToItem(f.contentItem, 0, 0).y - 160, f.contentHeight - f.height))
+            win.check(sw !== null && !sw.checked, "Settings shows it off too") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.shotWindow("clicks-wiki-settings")
+            settingsDialog.close()
             win.summary(); Qt.quit() } }
     }
 
@@ -8433,6 +8451,12 @@ ApplicationWindow {
         PauseAnimation { duration: 1200 }
         ScriptAction { script: {
             win.shotWindow("wiki-demo-reader")
+            // (Its end: the files and lines it comes from.)
+            const reader = win.findName("wikiReader", wikiPanel)
+            if (reader) reader.contentY = Math.max(0, reader.contentHeight - reader.height) } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            win.shotWindow("wiki-demo-sources")
             wikiPanel.closePage()
             wikiPanel.mode = "graph" } }
         PauseAnimation { duration: 300 }
