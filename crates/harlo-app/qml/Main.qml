@@ -540,6 +540,15 @@ ApplicationWindow {
                             c.focusInput()
                         }
                     }
+                    WikiPanel {
+                        id: wikiPanel
+                        anchors.fill: parent
+                        // (On the new-session page: the project picked there.)
+                        sessionKey: chat.isDraft ? "project:" + chat.draftView.projectId : chat.session.key
+                        visible: rightPanel.shownMode === "wiki"
+                        onCloseRequested: windowSettings.rightMode = ""
+                        onOpenFileRequested: (path, line) => chat.requestOpenFileAt(path, line)
+                    }
                     FilesPanel {
                         id: files
                         anchors.fill: parent
@@ -3725,7 +3734,9 @@ ApplicationWindow {
         PauseAnimation { duration: 1200 }
         ScriptAction { script: { win.critShot("right-files"); windowSettings.rightMode = "notes" } }
         PauseAnimation { duration: 1200 }
-        ScriptAction { script: { win.critShot("right-notes"); windowSettings.rightMode = "context"; Workspace.chooseThemeMode("light") } }
+        ScriptAction { script: { win.critShot("right-notes"); windowSettings.rightMode = "wiki" } }
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: { win.critShot("right-wiki"); windowSettings.rightMode = "context"; Workspace.chooseThemeMode("light") } }
         PauseAnimation { duration: 1200 }
         ScriptAction { script: { win.critShot("right-context-light"); Workspace.chooseThemeMode("dark"); windowSettings.rightMode = "" } }
         PauseAnimation { duration: 800 }
@@ -8094,6 +8105,186 @@ ApplicationWindow {
             win.summary(); Qt.quit() } }
     }
     property string wikiKeyBefore: ""
+
+    // The Wiki panel: a project's pages by folder, each read with its
+    // diagram and code, links between pages followed (and Back), a link to
+    // code opening the file, a search, the graph whose boxes open pages,
+    // how fresh it is, an interrupted run's Continue; and a project with
+    // none, whose Create runs a wiki session and then shows its pages.
+    property int wikiProject2: -1
+    /// Clicks the words of a link in a page's text.
+    function clickLink(edit, words) {
+        if (!edit) { win.check(false, "find the text with " + words); return }
+        win.scrollIntoView(edit)
+        const i = edit.getText(0, edit.length).indexOf(words)
+        const r = edit.positionToRectangle(i + 2)
+        const p = edit.mapToItem(null, r.x + 2, r.y + r.height / 2)
+        TestInput.click(p.x, p.y)
+    }
+    function wikiProse(words) { return win.findAllNames("wikiProse", wikiPanel).find(t => t.getText(0, t.length).indexOf(words) >= 0) || null }
+    function wikiRows() { return win.findAllNames("wikiPageRow", wikiPanel).map(r => r.modelData.title) }
+    SequentialAnimation {
+        id: wikiPanelSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlowikipanel"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            if (win.argValue("--theme-mode=")) Workspace.chooseThemeMode(win.argValue("--theme-mode="))
+            Workspace.setSetting("default_harness", "harlo")
+            Workspace.addProject(win.argValue("--cwd="))
+            Workspace.addProject(win.argValue("--cwd=").replace(/\/repo$/, "/repo2")) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const ps = JSON.parse(Workspace.projectsJson())
+            win.wikiProject = ps.find(p => p.folder === "repo").id
+            win.wikiProject2 = ps.find(p => p.folder === "repo2").id
+            win.harloKey = Workspace.newSession(win.wikiProject, "harlo") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: win.clickItem(win.findName("rail-wiki"), "the rail's Wiki") }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(wikiPanelSteps, () => win.wikiRows().length === 3, 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(windowSettings.rightMode === "wiki", "the rail opens the Wiki panel")
+            win.check(JSON.stringify(win.wikiRows()) === JSON.stringify(["Quickstart", "Jobs", "Releasing"]), "its pages, the quickstart first (" + JSON.stringify(win.wikiRows()) + ")")
+            win.check(win.findText("Architecture", wikiPanel) !== null && win.findText("Workflows", wikiPanel) !== null, "grouped by folder")
+            const fresh = win.findName("wikiFreshness", wikiPanel)
+            win.check(fresh && fresh.text === "Updated just now · 1 commit since", "how fresh it is, against the code (" + (fresh ? fresh.text : "") + ")")
+            const run = win.findName("wikiRun", wikiPanel)
+            win.check(run && run.text === "Update" && run.variant === "primary", "Update, the thing to do when it's behind")
+            win.check(!win.findName("wikiSwitch", wikiPanel).checked && win.findText("Agents don't use it yet.", wikiPanel) !== null, "and whether agents use it (not yet)")
+            win.shotWindow("clicks-wiki-pages")
+            win.clickItem(win.findAllNames("wikiPageRow", wikiPanel)[0], "the Quickstart row") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(wikiPanelSteps, () => wikiPanel.openPage === "quickstart.md" && win.wikiProse("job runner") !== null, 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const meta = win.findName("wikiPageMeta", wikiPanel)
+            win.check(meta && meta.text === "Overview", "a page says what kind it is (" + (meta ? meta.text : "") + ")")
+            win.check(win.findText("Where to start.", wikiPanel) !== null, "and its summary")
+            win.clickLink(win.wikiProse("job runner"), "job runner") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(wikiPanelSteps, () => wikiPanel.openPage === "architecture/jobs.md", 10000) }
+        ScriptAction { script: win.waitUntil(wikiPanelSteps, () => win.findAllNames("wikiDiagram", wikiPanel).some(d => d.ready), 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(true, "a link to another page opens it in the panel")
+            const back = win.findName("wikiBack", wikiPanel)
+            win.check(back && back.text === "← Quickstart", "with Back to the page before (" + (back ? back.text : "") + ")")
+            win.check(win.findAllNames("wikiDiagram", wikiPanel).some(d => d.ready), "its diagram drawn as a picture")
+            const code = win.findAllNames("wikiCode", wikiPanel)
+            win.check(code.length === 1 && code[0].children[0].getText(0, code[0].children[0].length).indexOf("run-jobs --retries 3") >= 0, "its code in a code well")
+            win.check(win.findName("wikiPageMeta", wikiPanel).text === "Architecture", "and its kind")
+            win.shotWindow("clicks-wiki-reader")
+            win.clickLink(win.wikiProse("starts in"), "README.md") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(wikiPanelSteps, () => Workspace.activeKey.endsWith("/repo/README.md"), 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(Workspace.activeKey === "file:" + win.argValue("--cwd=") + "/README.md", "a link to code opens the file (" + Workspace.activeKey + ")")
+            Workspace.open(win.harloKey) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            win.check(wikiPanel.openPage === "architecture/jobs.md", "and back in the session the page is still open")
+            win.clickItem(win.findName("wikiBack", wikiPanel), "Back") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(wikiPanelSteps, () => wikiPanel.openPage === "quickstart.md" && wikiPanel.loadingPage === "", 10000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            win.check(win.findName("wikiBack", wikiPanel).text === "← Pages", "Back returns to it, then to the pages")
+            win.clickItem(win.findName("wikiBack", wikiPanel), "Back") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(win.wikiRows().length === 3, "the pages again")
+            win.clickItem(win.findName("wikiSearch", wikiPanel), "the search field")
+            TestInput.typeText("failed job retried")
+            TestInput.key(Qt.Key_Return, 0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(wikiPanelSteps, () => !wikiPanel.searching && win.findAllNames("wikiHit", wikiPanel).length > 0, 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const hits = win.findAllNames("wikiHit", wikiPanel)
+            win.check(hits[0].modelData.page.endsWith("architecture/jobs.md") && hits[0].modelData.section === "retry-control" && !wikiPanel.results.plain,
+                      "OpenWiki's search finds the section (" + JSON.stringify(hits[0].modelData) + ")")
+            win.check(win.findText("Retry control", wikiPanel) !== null, "shown by its heading")
+            win.shotWindow("clicks-wiki-search")
+            win.clickItem(hits[0], "the first result") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(wikiPanelSteps, () => wikiPanel.openPage === "architecture/jobs.md" && wikiPanel.loadingPage === "", 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(win.findName("wikiBack", wikiPanel).text === "← Results", "a result opens its page, with Back to the results")
+            win.clickItem(win.findName("wikiBack", wikiPanel), "Back") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(win.findAllNames("wikiHit", wikiPanel).length > 0, "the results again")
+            win.clickItem(win.findName("wikiSearch", wikiPanel), "the search field")
+            TestInput.key(Qt.Key_Escape, 0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(win.wikiRows().length === 3 && win.findName("wikiSearch", wikiPanel).text === "", "Escape clears the search")
+            win.clickItem(win.findName("wikiViewGraph", wikiPanel), "Graph") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(wikiPanelSteps, () => win.findAllNames("wikiGraphBox", wikiPanel).length === 3, 20000) }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            win.check(win.findAllNames("wikiGraphBox", wikiPanel).length === 3, "the graph: a box per page, to click")
+            win.check(wikiPanel.graphSource.indexOf("p0 --> p1") >= 0 && wikiPanel.graphSource.indexOf("p2 --> p1") >= 0, "and an arrow per link (" + wikiPanel.graphSource.replace(/\n/g, " ") + ")")
+            win.shotWindow("clicks-wiki-graph")
+            const box = win.findAllNames("wikiGraphBox", wikiPanel).find(b => b.page.path === "workflows/release.md")
+            win.clickItem(box, "the Releasing box") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(wikiPanelSteps, () => wikiPanel.openPage === "workflows/release.md" && wikiPanel.loadingPage === "", 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const meta = win.findName("wikiPageMeta", wikiPanel)
+            win.check(meta.text.indexOf("Workflow · checked against the code ") === 0, "a box opens its page, which says when it was checked (" + meta.text + ")")
+            // A link to a section of another page: opened at it.
+            win.clickLink(win.wikiProse("the jobs"), "the jobs") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(wikiPanelSteps, () => wikiPanel.openPage === "architecture/jobs.md" && wikiPanel.loadingPage === "", 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(win.findName("wikiBack", wikiPanel).text === "← Releasing", "a link to a section opens its page")
+            // A run that stopped part way: Continue.
+            const cwd = win.argValue("--cwd=")
+            TestInput.writeFile(cwd + "/openwiki/.run.json", JSON.stringify({ mode: "update", phase: "generating", startedAt: new Date().toISOString(),
+                plan: { pages: [{ path: "/openwiki/quickstart.md", status: "complete" }, { path: "/openwiki/a.md", status: "pending" }, { path: "/openwiki/b.md", status: "pending" }] } }))
+            wikiPanel.load() } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const fresh = win.findName("wikiFreshness", wikiPanel)
+            win.check(fresh && fresh.text === "A run stopped part way (1 of 3 pages).", "a run that stopped part way says so (" + (fresh ? fresh.text : "") + ")")
+            win.check(win.findName("wikiRun", wikiPanel).text === "Continue", "with Continue")
+            TestInput.writeFile(win.argValue("--cwd=") + "/openwiki/.run.json", "")   // (unreadable: no run)
+            // A project without a wiki: what it is, and Create.
+            win.harloKey = Workspace.newSession(win.wikiProject2, "harlo") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: win.waitUntil(wikiPanelSteps, () => win.findName("wikiCreate", wikiPanel) !== null, 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(win.findText("No wiki yet", wikiPanel) !== null && win.findName("wikiCreate", wikiPanel).enabled, "a project without one: what a wiki is, and Create")
+            win.check(wikiPanel.openPage === "" && win.findName("wikiSearch", wikiPanel) === null, "another repository starts afresh")
+            win.shotWindow("clicks-wiki-empty")
+            win.wikiKeyBefore = Workspace.activeKey
+            win.clickItem(win.findName("wikiCreate", wikiPanel), "Create wiki") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(wikiPanelSteps, () => Workspace.activeKey !== win.wikiKeyBefore && chat.session.key === Workspace.activeKey, 20000) }
+        ScriptAction { script: win.waitUntil(wikiPanelSteps, () => /Wiki: (complete|no update|the page|unexpected)/.test(win.chatText()) && chat.session.status === "idle", 60000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(wikiPanelSteps, () => win.wikiRows().length === 1, 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(chat.session.title === "Wiki: create" && win.chatText().indexOf("Wiki: complete") >= 0, "Create runs a wiki session (" + chat.session.title + ")")
+            win.check(Workspace.setting("wiki_" + win.wikiProject2) === "1", "and turns the wiki on for the project's agents")
+            win.check(JSON.stringify(win.wikiRows()) === JSON.stringify(["Quickstart"]), "its page shows in the panel (" + JSON.stringify(win.wikiRows()) + ")")
+            const fresh = win.findName("wikiFreshness", wikiPanel)
+            win.check(fresh && fresh.text === "Updated just now · up to date", "up to date (" + (fresh ? fresh.text : "") + ")")
+            win.check(win.findName("wikiRun", wikiPanel).variant === "outline", "Update is quiet then")
+            win.check(win.findText("Agents search it, in sessions started from now on.", wikiPanel) !== null, "and agents use it")
+            win.shotWindow("clicks-wiki-created")
+            win.summary(); Qt.quit() } }
+    }
 
     // A diagram that doesn't parse: harlo tells the agent what's wrong
     // when its turn ends and it sends the diagram again, fixed, drawn as a

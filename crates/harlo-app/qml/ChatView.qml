@@ -123,6 +123,11 @@ Rectangle {
         if (path === filePath) { Workspace.openFileTab(path); return }
         guardUnsaved(() => Workspace.openFileTab(path))
     }
+    /// A file at a line (0: as it opens).
+    function requestOpenFileAt(path, line) {
+        if (line > 0) fileEditor.showLine(path, line)
+        requestOpenFile(path)
+    }
     function requestCloseTab(key) {
         if (key.startsWith("file:") && key === Workspace.activeKey)
             guardUnsaved(() => Workspace.closeTab(key))

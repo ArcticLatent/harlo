@@ -24,6 +24,7 @@ Rectangle {
         { mode: "changes", icon: "git-branch", label: "Changes", keys: Keymap.seq("changesPanel") },
         { mode: "files", icon: "folders", label: "Files", keys: Keymap.seq("filesPanel") },
         { mode: "notes", icon: "note", label: "Notes", keys: Keymap.seq("notesPanel") },
+        { mode: "wiki", icon: "book-open", label: "Wiki: the project's documentation, written from its code", keys: "" },
     ]
 
     Column {

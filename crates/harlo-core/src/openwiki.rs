@@ -808,6 +808,60 @@ fn search_in(texts: &[(String, String)], query: &str, limit: usize) -> Vec<Value
     hits.into_iter().take(limit).map(|(_, v)| v).collect()
 }
 
+/// A page for reading: what its frontmatter says (`title`, `type`,
+/// `description`, `verified`), then its body as blocks of rich text
+/// (`prose`, `code` highlighted, or `mermaid` with its source), a heading's
+/// block with its anchor.
+pub fn page_view(path: &str, text: &str) -> Value {
+    let page = describe(path, text);
+    let (_, body) = split_front(text);
+    let mut renderer = crate::markdown::MarkdownRenderer::default();
+    let blocks: Vec<Value> = renderer
+        .render(body)
+        .iter()
+        .map(|b| {
+            let kind = match b.kind {
+                crate::markdown::MdBlockKind::Code if b.lang == "mermaid" => "mermaid",
+                crate::markdown::MdBlockKind::Code => "code",
+                crate::markdown::MdBlockKind::Prose => "prose",
+            };
+            let heading = b.html.starts_with("<h") && b.html.as_bytes().get(2).is_some_and(u8::is_ascii_digit);
+            let anchor = if heading { anchor(&crate::markdown::plain_text(&b.html)) } else { String::new() };
+            json!({ "kind": kind, "html": b.html, "code": b.code, "lang": b.lang, "anchor": anchor })
+        })
+        .collect();
+    json!({ "path": path, "title": page.title, "type": page.kind, "description": page.description, "verified": page.verified, "blocks": blocks })
+}
+
+/// OpenWiki's search answer as the panel shows it: `{hits: [{page,
+/// section, heading, snippet, wiki}], workspaces: [{id, name}]}` (the
+/// workspaces when it asks which one).
+pub fn search_hits(answer: &Value) -> Value {
+    let hits: Vec<Value> = answer["results"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|r| {
+            let rf = r["ref"].as_array().and_then(|a| a.first()).and_then(Value::as_str).or_else(|| r["ref"].as_str())?;
+            let (page, section) = rf.split_once('#').unwrap_or((rf, ""));
+            let content = r["content"].as_str().unwrap_or_default();
+            let mut lines = content.lines().skip_while(|l| l.trim() == page || l.trim().is_empty());
+            let mut heading = String::new();
+            let mut rest: Vec<&str> = Vec::new();
+            for l in lines.by_ref() {
+                match l.strip_prefix("Section: ") {
+                    Some(h) if heading.is_empty() && rest.is_empty() => heading = h.trim().to_owned(),
+                    _ => rest.push(l),
+                }
+            }
+            let snippet: String = rest.iter().map(|l| l.trim()).filter(|l| !l.is_empty()).collect::<Vec<_>>().join(" ").chars().take(240).collect();
+            Some(json!({ "page": page, "section": section, "heading": heading, "snippet": snippet, "wiki": r["wiki"].as_str().unwrap_or_default() }))
+        })
+        .collect();
+    let workspaces: Vec<Value> = answer["workspaces"].as_array().into_iter().flatten().map(|w| json!({ "id": w["id"], "name": w["name"] })).collect();
+    json!({ "hits": hits, "workspaces": workspaces })
+}
+
 /// A heading's anchor, as GitHub makes them ("Retry control" → "retry-control").
 pub fn anchor(heading: &str) -> String {
     heading.trim().to_lowercase().chars().filter_map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { Some(c) } else if c == ' ' { Some('-') } else { None }).collect()
@@ -901,6 +955,25 @@ mod tests {
         let names: Vec<&str> = tools.as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert_eq!(names, OFFERED);
         assert!(tools.to_string().find("\"root\"").is_none(), "harlo fills in root");
+    }
+
+    #[test]
+    fn page_view_and_hits() {
+        let v = page_view("architecture/jobs.md", "---\ntype: architecture\ndescription: How jobs run.\n---\n# Jobs\n\nText.\n\n## Retry control\n\nThree times.\n\n```mermaid\nflowchart TD\n  A --> B\n```\n\n```rust\nfn x() {}\n```\n");
+        assert_eq!(v["type"], "architecture");
+        assert_eq!(v["title"], "Jobs");
+        let blocks = v["blocks"].as_array().unwrap();
+        let anchors: Vec<&str> = blocks.iter().map(|b| b["anchor"].as_str().unwrap()).filter(|a| !a.is_empty()).collect();
+        assert_eq!(anchors, ["jobs", "retry-control"]);
+        assert!(blocks.iter().any(|b| b["kind"] == "mermaid" && b["code"].as_str().unwrap().contains("A --> B")));
+        assert!(blocks.iter().any(|b| b["kind"] == "code" && b["lang"] == "rust"));
+        let hits = search_hits(&json!({"results": [{"kind": "section", "ref": ["openwiki/architecture/jobs.md#retry-control"], "content": "openwiki/architecture/jobs.md\nSection: Retry control\nHow jobs run.\nA failed job is retried."}]}));
+        assert_eq!(hits["hits"][0]["page"], "openwiki/architecture/jobs.md");
+        assert_eq!(hits["hits"][0]["section"], "retry-control");
+        assert_eq!(hits["hits"][0]["heading"], "Retry control");
+        assert_eq!(hits["hits"][0]["snippet"], "How jobs run. A failed job is retried.");
+        let asked = search_hits(&json!({"status": "workspace_required", "workspaces": [{"id": "w1", "name": "Team", "wikiCount": 2}]}));
+        assert_eq!(asked["workspaces"][0]["name"], "Team");
     }
 
     #[test]

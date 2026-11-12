@@ -184,6 +184,20 @@ pub mod qobject {
         /// "" when it's on its way, else why not.
         #[qinvokable]
         fn start_wiki_run(self: Pin<&mut Workspace>, key: &QString, mode: &QString) -> QString;
+        /// The wiki of a session's repository (`key`: a session, or
+        /// `project:<id>`): `{ root, project, enabled, exists, runtime,
+        /// pages: [{ path, title, description, type, verified, links }],
+        /// run, last, behind, loading, host, running }` (`running`: a wiki
+        /// session of harlo's is open there).
+        #[qinvokable]
+        fn wiki_json(self: &Workspace, key: &QString) -> QString;
+        /// A page of it for reading (`wikiPageReady` brings it).
+        #[qinvokable]
+        fn request_wiki_page(self: &Workspace, key: &QString, page: &QString);
+        /// Searches it with OpenWiki, else by its words (`wikiSearchReady`
+        /// brings the hits); `workspace` when OpenWiki asked which.
+        #[qinvokable]
+        fn request_wiki_search(self: &Workspace, key: &QString, query: &QString, workspace: &QString);
         /// Your edit of a session's plan: `{ op: "add", title, detail,
         /// after }`, `{ op: "edit", id, title, detail }`, `{ op: "remove",
         /// id }`, `{ op: "shift", id, by }`, `{ op: "skip", id, skipped }`,
@@ -699,6 +713,21 @@ pub mod qobject {
         #[qsignal]
         #[cxx_name = "worktreeInfoReady"]
         fn worktree_info_ready(self: Pin<&mut Workspace>, key: &QString, json: &QString);
+        /// What wikiJson says about another machine's project was read
+        /// again, and changed.
+        #[qsignal]
+        #[cxx_name = "wikiReady"]
+        fn wiki_ready(self: Pin<&mut Workspace>);
+        /// A page asked for with requestWikiPage: `{ path, title, type,
+        /// description, verified, blocks }`, or `{ path, error }`.
+        #[qsignal]
+        #[cxx_name = "wikiPageReady"]
+        fn wiki_page_ready(self: Pin<&mut Workspace>, page: &QString, json: &QString);
+        /// A search's hits: `{ hits, workspaces, plain }` (`plain`: by its
+        /// words, OpenWiki couldn't run), or `{ error }`.
+        #[qsignal]
+        #[cxx_name = "wikiSearchReady"]
+        fn wiki_search_ready(self: Pin<&mut Workspace>, query: &QString, json: &QString);
         /// A project's branches (`request_branches`), current first.
         #[qsignal]
         #[cxx_name = "branchesReady"]
@@ -764,7 +793,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::{QByteArray, QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QStringList, QVariant, QVector};
@@ -2177,6 +2206,108 @@ impl Workspace {
             Some(id) => self.projects.iter().find(|p| p.id == id).map(|p| (p.path.clone(), id)),
             None => self.project_of(key),
         }
+    }
+
+    pub fn wiki_json(&self, key: &QString) -> QString {
+        let key = key.to_string();
+        let Some((cwd, project)) = self.wiki_folder(&key) else {
+            return QString::from(&json!({ "root": "", "project": -1, "enabled": false, "exists": false, "pages": [] }).to_string());
+        };
+        let enabled = self.setting_str(&format!("wiki_{project}")) == "1";
+        // (A wiki session at work in this repository: busy, or asking.)
+        let writer = self.wiki_sessions.iter().find(|k| {
+            self.live.get(*k).is_some_and(|e| {
+                (e.info.cwd.starts_with(&cwd) || cwd.starts_with(&e.info.cwd))
+                    && (matches!(e.info.status, harlo_core::session::SessionStatus::Busy | harlo_core::session::SessionStatus::Starting) || e.info.needs_input)
+            })
+        });
+        let running = writer.is_some();
+        let writer = writer.cloned().unwrap_or_default();
+        let read = |cwd: &Path| {
+            let root = harlo_core::openwiki::root_of(cwd);
+            let pages: Vec<serde_json::Value> = harlo_core::openwiki::pages(&root)
+                .iter()
+                .map(|p| json!({ "path": p.path, "title": p.title, "description": p.description, "type": p.kind, "verified": p.verified, "links": p.links }))
+                .collect();
+            let st = harlo_core::openwiki::state(&root);
+            json!({
+                "root": root.to_string_lossy(),
+                "exists": st.exists,
+                "pages": pages,
+                "run": st.run.map(|r| json!({ "mode": r.mode, "phase": r.phase, "done": r.done, "total": r.total, "started": r.started })),
+                "last": st.last.map(|l| json!({ "at": l.at, "status": l.status, "model": l.model })),
+                "behind": st.behind,
+            })
+        };
+        let with = |mut v: serde_json::Value, loading: bool| {
+            v["project"] = json!(project);
+            v["enabled"] = json!(enabled);
+            v["running"] = json!(running);
+            v["session"] = json!(writer);
+            v["runtime"] = json!(harlo_core::openwiki::runtime().is_some());
+            v["loading"] = json!(loading);
+            v["host"] = json!(harlo_core::remote::host_of(&cwd).unwrap_or_default());
+            QString::from(&v.to_string())
+        };
+        if !harlo_core::remote::is_remote(&cwd) {
+            return with(read(&cwd), false);
+        }
+        // Another machine's: what was read of it, read again in the
+        // background (wikiReady says when).
+        static READ: OnceLock<Mutex<HashMap<PathBuf, (Instant, Option<serde_json::Value>)>>> = OnceLock::new();
+        let read_list = READ.get_or_init(Default::default);
+        let (fresh, cached) = read_list.lock().unwrap().get(&cwd).map_or((false, None), |(at, v)| (at.elapsed() < Duration::from_secs(5), v.clone()));
+        if !fresh && !harlo_core::remote::is_disconnected(&harlo_core::remote::host_of(&cwd).unwrap_or_default()) {
+            read_list.lock().unwrap().insert(cwd.clone(), (Instant::now(), cached.clone()));
+            let (thread, cwd) = (self.qt_thread(), cwd.clone());
+            crate::runtime().spawn_blocking(move || {
+                let found = read(&cwd);
+                let changed = read_list.lock().unwrap().insert(cwd, (Instant::now(), Some(found.clone()))).and_then(|(_, v)| v).as_ref() != Some(&found);
+                if changed {
+                    let _ = thread.queue(|mut this| this.as_mut().wiki_ready());
+                }
+            });
+        }
+        let loading = cached.is_none();
+        with(cached.unwrap_or_else(|| json!({ "root": cwd.to_string_lossy(), "exists": false, "pages": [] })), loading)
+    }
+
+    pub fn request_wiki_page(&self, key: &QString, page: &QString) {
+        let page = page.to_string();
+        let Some((cwd, _)) = self.wiki_folder(&key.to_string()) else { return };
+        let thread = self.qt_thread();
+        crate::runtime().spawn_blocking(move || {
+            let root = harlo_core::openwiki::root_of(&cwd);
+            let shown = page.trim_start_matches("openwiki/").to_owned();
+            let v = match harlo_core::openwiki::read(&root, &shown) {
+                Ok(text) => harlo_core::openwiki::page_view(&shown, &text),
+                Err(e) => json!({ "path": shown, "error": e }),
+            };
+            let _ = thread.queue(move |mut this| this.as_mut().wiki_page_ready(&QString::from(&page), &QString::from(&v.to_string())));
+        });
+    }
+
+    pub fn request_wiki_search(&self, key: &QString, query: &QString, workspace: &QString) {
+        let (query, workspace) = (query.to_string(), workspace.to_string());
+        let Some((cwd, _)) = self.wiki_folder(&key.to_string()) else { return };
+        let thread = self.qt_thread();
+        crate::runtime().spawn_blocking(move || {
+            let root = harlo_core::openwiki::root_of(&cwd);
+            let mut args = json!({ "query": query, "limit": 12 });
+            if !workspace.is_empty() {
+                args["workspace"] = json!(workspace);
+            }
+            let found = harlo_core::openwiki::call(&root, "openwiki_search", args).map_err(|e| format!("{e:#}")).and_then(|r| harlo_core::openwiki::answer(&r));
+            let v = match found {
+                Ok(answer) => harlo_core::openwiki::search_hits(&answer),
+                // (OpenWiki couldn't run: the pages' own words.)
+                Err(e) => {
+                    tracing::warn!("wiki search: {e}");
+                    json!({ "hits": harlo_core::openwiki::search_text(&root, &query, 12), "workspaces": [], "plain": true })
+                }
+            };
+            let _ = thread.queue(move |mut this| this.as_mut().wiki_search_ready(&QString::from(&query), &QString::from(&v.to_string())));
+        });
     }
 
     pub fn start_wiki_run(self: Pin<&mut Self>, key: &QString, mode: &QString) -> QString {

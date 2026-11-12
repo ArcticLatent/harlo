@@ -105,6 +105,7 @@ fn main() {
                 "qml/SetupServerDialog.qml",
                 "qml/AddProjectDialog.qml",
                 "qml/RemoveProjectDialog.qml",
+                "qml/WikiPanel.qml",
                 "qml/OptionsCards.qml",
                 "qml/MockupView.qml",
                 "qml/PictureViewer.qml",
