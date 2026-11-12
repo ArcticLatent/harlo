@@ -184,8 +184,9 @@ struct SessionContent: View {
                 VStack(spacing: 0) {
                     ActivityLine(session: session)
                     LimitLine(session: session)
-                    CompactLine(session: session)
                     ActivityBar(session: session) { sheet = $0 }
+                    // (Under the plan's card: beside the context bar it's about.)
+                    CompactLine(session: session)
                     if let aside = session.aside {
                         AsideCard(aside: aside, folded: $asideFolded) { session.aside = nil }
                     }
