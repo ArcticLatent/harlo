@@ -693,7 +693,8 @@ fn read_file(root: &Path, rel: &str) -> Option<String> {
             let out = remote::run(&host, &format!("cat -- {}", remote::quote_path(&format!("{dir}/{rel}"))), Duration::from_secs(30)).ok()?;
             out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
         }
-        None => std::fs::read_to_string(root.join(rel)).ok(),
+        // (As over SSH: what isn't UTF-8 shown with replacement marks.)
+        None => std::fs::read(root.join(rel)).ok().map(|b| String::from_utf8_lossy(&b).into_owned()),
     }
 }
 

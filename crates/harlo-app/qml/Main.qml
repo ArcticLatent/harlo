@@ -8286,6 +8286,186 @@ ApplicationWindow {
             win.summary(); Qt.quit() } }
     }
 
+    // Goes through `items` one at a time: start(item), then once ready(item)
+    // (or `ms` pass), finish(item, ready); `walker.done` after the last.
+    Timer {
+        id: walker
+        interval: 150
+        repeat: true
+        property var items: []
+        property int at: -1
+        property var startFn: null
+        property var readyFn: null
+        property var finishFn: null
+        property double since: 0
+        property int ms: 20000
+        property bool done: true
+        onTriggered: {
+            if (at >= 0 && at < items.length) {
+                const ok = !!readyFn(items[at])
+                if (!ok && Date.now() - since < ms) return
+                finishFn(items[at], ok)
+            }
+            at++
+            if (at >= items.length) { stop(); done = true; return }
+            since = Date.now()
+            startFn(items[at])
+        }
+    }
+    function walk(items, start, ready, finish, ms) {
+        walker.items = items; walker.at = -1; walker.startFn = start; walker.readyFn = ready; walker.finishFn = finish
+        walker.ms = ms || 20000; walker.done = false; walker.start()
+    }
+
+    // A wiki checked whole (scripts/wiki-check: the demo project, with the
+    // hand-written wiki or one an agent wrote): the panel lists its pages,
+    // the quickstart first, and how far behind the code it is; every page
+    // opens; every link to a page goes to one, every link to code to a file
+    // and lines that are there, every diagram draws; the graph has a box
+    // per page; OpenWiki's search finds the pages that answer each of
+    // wiki-queries.json; and a Harlo session searches and reads it.
+    property var demoPages: []
+    property var demoProblems: ({ opened: [], links: [], code: [], diagrams: [], search: [] })
+    property int demoLinks: 0
+    property int demoCode: 0
+    property int demoDiagrams: 0
+    property var demoQueries: []
+    property string demoBest: ""
+    function demoFile(path) { return TestInput.readFile(win.argValue("--cwd=") + "/" + path) }
+    SequentialAnimation {
+        id: wikiDemoSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlowikidemo"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            if (win.argValue("--theme-mode=")) Workspace.chooseThemeMode(win.argValue("--theme-mode="))
+            Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            win.wikiProject = JSON.parse(Workspace.projectsJson())[0].id
+            Workspace.setSetting("wiki_" + win.wikiProject, "1")
+            win.harloKey = Workspace.newSession(win.wikiProject, "harlo")
+            Workspace.setApprovalMode(win.harloKey, "yolo")
+            windowSettings.rightMode = "wiki" } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: win.waitUntil(wikiDemoSteps, () => wikiPanel.pages.length > 0, 15000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const pages = wikiPanel.pages
+            win.demoPages = pages.map(p => p.path)
+            win.check(pages.length >= 3, "the wiki has pages (" + pages.length + ": " + win.demoPages.join(", ") + ")")
+            win.check(pages[0].path === "quickstart.md", "the quickstart first (" + pages[0].path + ")")
+            win.check(pages.every(p => p.title !== ""), "every page has a title")
+            const behind = Number(win.argValue("--wiki-behind=") || "-1")
+            const fresh = win.findName("wikiFreshness", wikiPanel)
+            if (behind >= 0)
+                win.check(fresh && fresh.text.endsWith(behind === 0 ? "· up to date" : "· " + behind + (behind === 1 ? " commit" : " commits") + " since"), "how far behind the code (" + (fresh ? fresh.text : "") + ")")
+            win.demoQueries = JSON.parse(TestInput.readFile(win.argValue("--wiki-queries=")) || "[]")
+            win.shotWindow("wiki-demo-pages")
+            // Every page, opened in the panel and checked.
+            win.walk(win.demoPages, p => wikiPanel.openWiki(p, "", false),
+                     p => {
+                         if (wikiPanel.openPage !== p || wikiPanel.loadingPage !== "" || !wikiPanel.pageView) return false
+                         // (Its diagrams drawn, or failed.)
+                         return wikiPanel.pageView.error || (wikiPanel.pageView.blocks || []).filter(b => b.kind === "mermaid").every(b => {
+                             const d = JSON.parse(Diagrams.diagram(b.code, Theme.isLight, "{}"))
+                             return d.state !== "drawing"
+                         })
+                     },
+                     (p, ok) => {
+                         const v = wikiPanel.pageView
+                         if (!ok || !v || v.error || (v.blocks || []).length === 0) { win.demoProblems.opened.push(p + ": " + (v ? v.error || "no text" : "didn't open")); return }
+                         const dir = p.split("/").slice(0, -1)
+                         for (const b of v.blocks) {
+                             if (b.kind === "mermaid") {
+                                 win.demoDiagrams++
+                                 const d = JSON.parse(Diagrams.diagram(b.code, Theme.isLight, "{}"))
+                                 if (d.state !== "ready") win.demoProblems.diagrams.push(p + ": " + (d.error || d.state))
+                             }
+                             // (No matchAll in Qt's JavaScript.)
+                             const hrefs = /href="([^"]+)"/g
+                             for (let m = hrefs.exec(String(b.html || "")); m !== null; m = hrefs.exec(String(b.html || ""))) {
+                                 const href = m[1].replace(/&amp;/g, "&")
+                                 if (href.startsWith("repo://")) {
+                                     win.demoCode++
+                                     const c = /^repo:\/\/([^#]+)(?:#L(\d+)(?:-L(\d+))?)?/.exec(href)
+                                     const text = c ? win.demoFile(decodeURIComponent(c[1])) : ""
+                                     const last = c && c[3] ? Number(c[3]) : c && c[2] ? Number(c[2]) : 1
+                                     if (text === "" || text.split("\n").length < last) win.demoProblems.code.push(p + " → " + href)
+                                 } else if (/\.md(#|$)/.test(href) && !/^[a-z]+:/.test(href)) {
+                                     win.demoLinks++
+                                     const parts = href.startsWith("/") ? [] : dir.slice()
+                                     for (const s of href.split("#")[0].split("/")) { if (s === "..") parts.pop(); else if (s !== "." && s !== "") parts.push(s) }
+                                     const to = parts.join("/").replace(/^openwiki\//, "")
+                                     if (win.demoPages.indexOf(to) < 0) win.demoProblems.links.push(p + " → " + href)
+                                 }
+                             }
+                         }
+                         if (!win.demoBest || v.blocks.length > 6) win.demoBest = p
+                     }, 30000) } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: win.waitUntil(wikiDemoSteps, () => walker.done, 600000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            const pr = win.demoProblems
+            win.check(pr.opened.length === 0, "every page opens (" + win.demoPages.length + " read" + (pr.opened.length ? "; " + pr.opened.join("; ") : "") + ")")
+            win.check(pr.links.length === 0, "every link to a page goes to one (" + win.demoLinks + " links" + (pr.links.length ? "; broken: " + pr.links.join("; ") : "") + ")")
+            win.check(win.demoCode > 0 && pr.code.length === 0, "every link to code goes to a file and lines that are there (" + win.demoCode + " links" + (pr.code.length ? "; broken: " + pr.code.join("; ") : "") + ")")
+            win.check(pr.diagrams.length === 0, "every diagram draws (" + win.demoDiagrams + (pr.diagrams.length ? "; failed: " + pr.diagrams.join("; ") : "") + ")")
+            wikiPanel.openWiki(win.demoBest, "", false) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(wikiDemoSteps, () => wikiPanel.openPage === win.demoBest && wikiPanel.loadingPage === "", 10000) }
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: {
+            win.shotWindow("wiki-demo-reader")
+            wikiPanel.closePage()
+            wikiPanel.mode = "graph" } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(wikiDemoSteps, () => win.findAllNames("wikiGraphBox", wikiPanel).length > 0 || (wikiPanel.graphPic && wikiPanel.graphPic.state === "failed"), 30000) }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const boxes = win.findAllNames("wikiGraphBox", wikiPanel).length
+            win.check(boxes === wikiPanel.graphPages.length, "the graph: a box per page (" + boxes + " of " + wikiPanel.graphPages.length + (wikiPanel.graphPic && wikiPanel.graphPic.error ? "; " + wikiPanel.graphPic.error : "") + ")")
+            win.shotWindow("wiki-demo-graph")
+            wikiPanel.mode = "pages"
+            // Each search, as the panel asks it of OpenWiki.
+            win.walk(win.demoQueries, q => wikiPanel.search(q.q), q => !wikiPanel.searching && wikiPanel.query === q.q,
+                     (q, ok) => {
+                         const hits = ok && wikiPanel.results ? wikiPanel.results.hits.map(h => h.page.replace(/^openwiki\//, "")) : []
+                         const plain = !!(wikiPanel.results && wikiPanel.results.plain)
+                         const good = hits.length > 0 && !plain && (q.pages.length === 0 || q.pages.some(p => hits.slice(0, 3).indexOf(p) >= 0))
+                         if (!good) win.demoProblems.search.push("“" + q.q + "” → " + (plain ? "(plain) " : "") + (hits.slice(0, 3).join(", ") || "nothing"))
+                     }, 30000) } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: win.waitUntil(wikiDemoSteps, () => walker.done, 300000) }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            win.check(win.demoProblems.search.length === 0, "OpenWiki's search finds the page for each question (" + win.demoQueries.length + (win.demoProblems.search.length ? "; missed: " + win.demoProblems.search.join("; ") : "") + ")")
+            win.shotWindow("wiki-demo-search")
+            wikiPanel.search("") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(wikiDemoSteps, () => chat.session.modelName !== "", 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: win.sendWiki("search the wiki for " + (win.demoQueries[0] ? win.demoQueries[0].q : "orders")) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(wikiDemoSteps, () => win.wikiAnswered(), 30000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const t = win.lastToolResult()
+            const found = /openwiki\/([\w\/.-]+\.md)#([\w-]*)/.exec(t)
+            win.check(found !== null, "a Harlo session searches it (" + t.slice(0, 200) + ")")
+            win.demoBest = found ? found[1] + "#" + found[2] : "quickstart.md"
+            win.sendWiki("read the wiki at openwiki/" + win.demoBest) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(wikiDemoSteps, () => win.wikiAnswered(), 30000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const t = win.lastToolResult()
+            win.check(t.length > 80 && !/error|not found|Invalid/i.test(t.slice(0, 120)), "and reads what it found (" + win.demoBest + ": " + t.slice(0, 160) + ")")
+            win.shotWindow("wiki-demo-session")
+            win.summary(); Qt.quit() } }
+    }
+
     // A diagram that doesn't parse: harlo tells the agent what's wrong
     // when its turn ends and it sends the diagram again, fixed, drawn as a
     // picture; one sent broken again isn't asked about a second time.
