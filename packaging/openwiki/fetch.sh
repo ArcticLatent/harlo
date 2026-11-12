@@ -9,8 +9,9 @@
 # DEST/bin/node, DEST/node_modules/openwiki/dist/cli/cli.js, and
 # DEST/LICENSES (Node's, OpenWiki's, every package's). DEST/VERSION says
 # what's in it; a DEST already holding these versions is left as it is.
-# For this machine's architecture (x86_64 or aarch64). Needs curl, tar, xz
-# and the network. The Node download is kept in
+# harlo's fixes to OpenWiki (patches/) are applied over the package.
+# For this machine's architecture (x86_64 or aarch64). Needs curl, tar, xz,
+# patch and the network. The Node download is kept in
 # ${XDG_CACHE_HOME:-~/.cache}/harlo-build and checked against node.env's
 # SHA-256.
 set -euo pipefail
@@ -52,7 +53,9 @@ fi
 
 dest=$arg
 openwiki=$(sed -n 's/.*"openwiki": "\(.*\)".*/\1/p' "$here/package.json" | head -n 1)
-want="openwiki $openwiki, node $NODE_VERSION $arch, lock $(sha256sum "$here/package-lock.json" | cut -c1-16)"
+# (harlo's fixes to OpenWiki, applied after the install: patches/*.patch.)
+patches=$(cat "$here"/patches/*.patch 2>/dev/null | sha256sum | cut -c1-16)
+want="openwiki $openwiki, node $NODE_VERSION $arch, lock $(sha256sum "$here/package-lock.json" | cut -c1-16), patches $patches"
 if [ -f "$dest/VERSION" ] && [ "$(cat "$dest/VERSION")" = "$want" ] && [ -x "$dest/bin/node" ]; then
     exit 0
 fi
@@ -65,6 +68,10 @@ cp "$here/package.json" "$here/package-lock.json" "$dest/"
 # (Its own Node fetches better-sqlite3's prebuilt binary for this Node.)
 (cd "$dest" && npm ci --omit=dev --no-audit --no-fund >/dev/null 2>&1)
 [ -f "$dest/node_modules/better-sqlite3/build/Release/better_sqlite3.node" ] || { echo "fetch.sh: better-sqlite3's binary wasn't installed" >&2; exit 1; }
+for p in "$here"/patches/*.patch; do
+    [ -f "$p" ] || continue
+    patch -s -p1 -d "$dest/node_modules/openwiki" < "$p" || { echo "fetch.sh: $(basename "$p") didn't apply" >&2; exit 1; }
+done
 cp "$dest/node_modules/openwiki/LICENSE" "$dest/LICENSES/openwiki.txt"
 # Every package's licence, in one file.
 "$dest/bin/node" -e '

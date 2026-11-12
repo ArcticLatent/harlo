@@ -1387,6 +1387,11 @@ esac; done"#
         let r = s.call("openwiki_read", json!({"root": root, "page": "openwiki/architecture/jobs.md", "sections": ["retry-control"]}), Duration::from_secs(60)).unwrap();
         assert!(r.to_string().contains("three times"), "{r}");
         assert!(rt.skill().unwrap().contains("openwiki_begin"));
+        // harlo's fix: a fact citing a newly ignored path is rechecked by
+        // the update rather than aborting it (packaging/openwiki/patches).
+        assert!(rt.version().contains(", patches "), "{}", rt.version());
+        let preflight = std::fs::read_to_string(rt.dir.join("node_modules/openwiki/dist/claims/brains/code/preflight.js")).unwrap();
+        assert!(preflight.contains("excluded by .openwikiignore"), "the bundled OpenWiki lacks harlo's patch");
     }
 
     #[test]
