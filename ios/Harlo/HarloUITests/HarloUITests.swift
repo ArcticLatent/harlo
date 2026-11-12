@@ -259,6 +259,55 @@ final class HarloUITests: XCTestCase {
         audit("plan")
     }
 
+    /// The project's wiki from the plan's sheet: how fresh it is, its
+    /// pages by folder, a page (a diagram drawn, code in a well), the
+    /// pages' graph, and a search that opens its section.
+    func test09bWiki() {
+        launch("plan")
+        openMain()
+        let line = element("of 3 done")
+        XCTAssertTrue(line.waitForExistence(timeout: 8), "the plan's line")
+        for _ in 0..<2 {
+            line.tap()
+            if app.navigationBars["Plan"].waitForExistence(timeout: 4) { break }
+        }
+        let open = app.descendants(matching: .any)["wikiOpen"]
+        for _ in 0..<6 where !(open.exists && open.isHittable) { app.swipeUp() }
+        XCTAssertTrue(open.waitForExistence(timeout: 8), "the plan's sheet has the wiki")
+        see("1 commit since")
+        see("Update the wiki")
+        shot("15b-plan-wiki")
+        open.tap()
+        XCTAssertTrue(app.navigationBars["Wiki"].waitForExistence(timeout: 8), "the wiki opens")
+        see("Quickstart")
+        see("Architecture")
+        see("Workflows")
+        shot("15c-wiki-pages")
+        audit("wiki-pages")
+        tap("Graph")
+        see("The wiki's pages and their links", timeout: 15)
+        shot("15d-wiki-graph")
+        tap("Pages")
+        tap("Sidebar")
+        see("checked against the code")
+        see("Rebuilding rows")
+        see("Diagram", timeout: 15)
+        shot("15e-wiki-page")
+        audit("wiki-page")
+        // A search: OpenWiki's sections, a result opening its page.
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        let field = app.searchFields["Search the wiki"]
+        XCTAssertTrue(field.waitForExistence(timeout: 8), "the wiki's search")
+        field.tap()
+        field.typeText("rebuilds the whole list\n")
+        let hit = app.descendants(matching: .any)["wikiHit"]
+        XCTAssertTrue(hit.waitForExistence(timeout: 8), "a search result")
+        see("Rebuilding rows")
+        shot("15f-wiki-search")
+        hit.tap()
+        see("checked against the code")
+    }
+
     func test10OtherModelAndMention() {
         launch("end")
         openMain()

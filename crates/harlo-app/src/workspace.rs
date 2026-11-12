@@ -825,6 +825,37 @@ fn where_on_host(path: &Path) -> String {
 /// The folder a harlo writes branch previews in, by its process id.
 const BRANCH_PREVIEW: &str = "harlo-branch-preview-";
 
+/// A page of the wiki of the repository `cwd` is in, for reading
+/// (`openwiki/x.md` or `x.md`): its kind, summary and blocks (blocking: the
+/// repository may be another machine's).
+pub(crate) fn wiki_page_at(cwd: &Path, page: &str) -> serde_json::Value {
+    let root = harlo_core::openwiki::root_of(cwd);
+    let shown = page.trim_start_matches("openwiki/").to_owned();
+    match harlo_core::openwiki::read(&root, &shown) {
+        Ok(text) => harlo_core::openwiki::page_view(&shown, &text),
+        Err(e) => json!({ "path": shown, "error": e }),
+    }
+}
+
+/// A search of that wiki: OpenWiki's ranked sections, or the pages' own
+/// words when it can't run (`plain`). Blocking.
+pub(crate) fn wiki_search_at(cwd: &Path, query: &str, workspace: &str) -> serde_json::Value {
+    let root = harlo_core::openwiki::root_of(cwd);
+    let mut args = json!({ "query": query, "limit": 12 });
+    if !workspace.is_empty() {
+        args["workspace"] = json!(workspace);
+    }
+    let found = harlo_core::openwiki::call(&root, "openwiki_search", args).map_err(|e| format!("{e:#}")).and_then(|r| harlo_core::openwiki::answer(&r));
+    match found {
+        Ok(answer) => harlo_core::openwiki::search_hits(&answer),
+        // (OpenWiki couldn't run: the pages' own words.)
+        Err(e) => {
+            tracing::warn!("wiki search: {e}");
+            json!({ "hits": harlo_core::openwiki::search_text(&root, query, 12), "workspaces": [], "plain": true })
+        }
+    }
+}
+
 /// Removes the branch previews of harlos no longer running (each writes
 /// them in its own folder and nothing else removes it). Elsewhere than
 /// Linux, ones a day old.
@@ -2277,12 +2308,7 @@ impl Workspace {
         let Some((cwd, _)) = self.wiki_folder(&key.to_string()) else { return };
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
-            let root = harlo_core::openwiki::root_of(&cwd);
-            let shown = page.trim_start_matches("openwiki/").to_owned();
-            let v = match harlo_core::openwiki::read(&root, &shown) {
-                Ok(text) => harlo_core::openwiki::page_view(&shown, &text),
-                Err(e) => json!({ "path": shown, "error": e }),
-            };
+            let v = wiki_page_at(&cwd, &page);
             let _ = thread.queue(move |mut this| this.as_mut().wiki_page_ready(&QString::from(&page), &QString::from(&v.to_string())));
         });
     }
@@ -2292,20 +2318,7 @@ impl Workspace {
         let Some((cwd, _)) = self.wiki_folder(&key.to_string()) else { return };
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
-            let root = harlo_core::openwiki::root_of(&cwd);
-            let mut args = json!({ "query": query, "limit": 12 });
-            if !workspace.is_empty() {
-                args["workspace"] = json!(workspace);
-            }
-            let found = harlo_core::openwiki::call(&root, "openwiki_search", args).map_err(|e| format!("{e:#}")).and_then(|r| harlo_core::openwiki::answer(&r));
-            let v = match found {
-                Ok(answer) => harlo_core::openwiki::search_hits(&answer),
-                // (OpenWiki couldn't run: the pages' own words.)
-                Err(e) => {
-                    tracing::warn!("wiki search: {e}");
-                    json!({ "hits": harlo_core::openwiki::search_text(&root, &query, 12), "workspaces": [], "plain": true })
-                }
-            };
+            let v = wiki_search_at(&cwd, &query, &workspace);
             let _ = thread.queue(move |mut this| this.as_mut().wiki_search_ready(&QString::from(&query), &QString::from(&v.to_string())));
         });
     }
@@ -6030,6 +6043,29 @@ impl Workspace {
                 let on = msg["pinned"].as_bool().unwrap_or(true);
                 self.as_mut().update_meta(&key, |m| m.pinned = on);
                 json!({ "ok": true })
+            }
+            // The wiki of the session's repository: its pages and how fresh
+            // it is (a page and a search are read off this thread), and a
+            // run started from the phone, as from the Wiki panel.
+            "wiki" => serde_json::from_str(&self.wiki_json(&QString::from(&key)).to_string()).unwrap_or_default(),
+            "wikiFolder" => match self.wiki_folder(&key) {
+                Some((cwd, _)) => json!({ "cwd": cwd.to_string_lossy() }),
+                None => fail("The wiki is for a harlo project's sessions."),
+            },
+            "wikiRun" => {
+                let mode = text("mode");
+                if !["create", "update", "continue"].contains(&mode.as_str()) {
+                    return fail("harlo doesn't know that wiki run.");
+                }
+                if mode == "create" {
+                    if let Some((_, project)) = self.wiki_folder(&key) {
+                        self.as_mut().set_setting(&QString::from(&format!("wiki_{project}")), &QString::from("1"));
+                    }
+                }
+                match self.as_mut().start_wiki_run(&QString::from(&key), &QString::from(&mode)).to_string() {
+                    e if !e.is_empty() => fail(&e),
+                    _ => json!({ "ok": true }),
+                }
             }
             "theme" => self.phone_theme(),
             // The phone picked your penguin: the left rail's too.

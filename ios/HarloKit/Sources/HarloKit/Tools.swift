@@ -26,10 +26,12 @@ public enum ToolName {
         "plan_set": "Plan", "plan_read": "Read the plan", "plan_start": "Start a step", "plan_done": "Finish a step",
     ]
 
-    /// The project's specs' tools.
-    static let specs: [String: String] = [
-        "spec_graph": "Look at the specs", "spec_list": "List the specs", "spec_search": "Search the specs", "spec_read": "Read a spec",
-        "spec_validate": "Check the specs",
+    /// The project wiki's tools (OpenWiki's).
+    static let wiki: [String: String] = [
+        "openwiki_search": "Search the wiki", "openwiki_read": "Read the wiki", "openwiki_list_workspaces": "List wiki workspaces",
+        "openwiki_list_wikis": "List linked wikis", "openwiki_begin": "Start the wiki run", "openwiki_submit_plan": "Plan the wiki",
+        "openwiki_next_page": "Next wiki page", "openwiki_inspect_page_claims": "Check a page's claims", "openwiki_submit_page": "Write a wiki page",
+        "openwiki_finish": "Finish the wiki",
     ]
 
     /// A tool's name without harlo's prefix (`mcp__harlo__x`, `harlo_x`;
@@ -55,7 +57,7 @@ public enum ToolName {
     /// "context-mode ctx execute", "harlo: start a session".
     public static func words(_ tool: String, running: Bool) -> String {
         let h = harloTool(tool)
-        if let said = plan[h] ?? specs[h] ?? harlo[h] { return said }
+        if let said = plan[h] ?? wiki[h] ?? harlo[h] { return said }
         if let m = mcp(tool) { return m.server + " " + m.tool.replacingOccurrences(of: "_", with: " ") }
         let pick = { (now: String, done: String) in running ? now : done }
         switch tool.lowercased() {
@@ -92,7 +94,7 @@ public enum ToolName {
     public static func symbol(_ tool: String) -> String {
         let h = harloTool(tool)
         if plan[h] != nil { return "checklist" }
-        if specs[h] != nil { return "doc.text.magnifyingglass" }
+        if wiki[h] != nil { return "book" }
         if harlo[h] != nil { return "person.2" }
         if mcp(tool) != nil { return "puzzlepiece.extension" }
         switch tool.lowercased() {

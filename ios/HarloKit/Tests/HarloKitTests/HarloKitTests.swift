@@ -577,10 +577,11 @@ final class ModelPartsTests: XCTestCase {
         XCTAssertEqual(ToolName.symbol("bring_over"), "person.2")
         XCTAssertEqual(ToolName.words("mcp__harlo__plan_done", running: false), "Finish a step")
         XCTAssertEqual(ToolName.words("plan_set", running: false), "Plan")
-        // The specs' tools, by Harlo's names and Claude's.
-        XCTAssertEqual(ToolName.words("spec_read", running: false), "Read a spec")
-        XCTAssertEqual(ToolName.words("mcp__harlo__spec_graph", running: false), "Look at the specs")
-        XCTAssertEqual(ToolName.symbol("spec_search"), "doc.text.magnifyingglass")
+        // The wiki's tools, by Harlo's names and Claude's.
+        XCTAssertEqual(ToolName.words("openwiki_read", running: false), "Read the wiki")
+        XCTAssertEqual(ToolName.words("mcp__harlo__openwiki_search", running: false), "Search the wiki")
+        XCTAssertEqual(ToolName.words("openwiki_submit_page", running: false), "Write a wiki page")
+        XCTAssertEqual(ToolName.symbol("openwiki_search"), "book")
         // An MCP server's.
         XCTAssertEqual(ToolName.words("mcp__context-mode__ctx_execute", running: false), "context-mode ctx execute")
         XCTAssertEqual(ToolName.symbol("mcp__context-mode__ctx_execute"), "puzzlepiece.extension")
@@ -1113,21 +1114,74 @@ final class PlanTests: XCTestCase {
         XCTAssertNil(plan.steps.first { $0.id == 3 })
     }
 
-    func testSpecsAndThePlanEvent() {
-        let specs = Specs(["enabled": true, "specs": [["path": "SPEC.md", "title": "harlo", "summary": "s"]]])
-        // The tree: depth, type, status; what's wrong in the links.
-        let tree = Specs(["enabled": true, "specs": [["path": "SPEC.md", "title": "harlo", "type": "product", "depth": 0],
-                                                     ["path": "core/SPEC.md", "title": "core", "status": "stale", "depth": 1]],
-                          "problems": ["core/SPEC.md: depends-on `x` isn't a spec"], "mermaid": "flowchart TD\n  s0[\"harlo\"]\n"])
-        XCTAssertEqual(tree.specs.map(\.depth), [0, 1])
-        XCTAssertEqual(tree.specs[0].kind, "product")
-        XCTAssertEqual(tree.specs[1].status, "stale")
-        XCTAssertEqual(tree.problems, ["core/SPEC.md: depends-on `x` isn't a spec"])
-        XCTAssertEqual(tree.spec(of: tree.problems[0])?.title, "core", "a problem opens its spec")
-        XCTAssertNil(tree.spec(of: "parents go round in a circle"))
-        XCTAssertTrue(tree.mermaid.hasPrefix("flowchart TD"))
-        XCTAssertEqual(specs.mermaid, "", "an older harlo sends no graph")
-        XCTAssertEqual(specs.specs.first?.path, "SPEC.md")
+    func testWikiAndThePlanEvent() throws {
+        let iso = ISO8601DateFormatter()
+        let now = iso.date(from: "2026-11-11T12:00:00Z")!
+        let wiki = Wiki(["project": 3, "enabled": true, "exists": true, "runtime": true,
+                         "pages": [["path": "quickstart.md", "title": "Quickstart", "description": "Where to start.", "type": "overview", "links": ["architecture/jobs.md"]],
+                                   ["path": "architecture/jobs.md", "title": "Jobs", "type": "architecture", "links": []]],
+                         "last": ["at": "2026-11-08T12:00:00Z", "status": "complete"], "behind": 4, "run": nil])
+        XCTAssertTrue(wiki.inProject && wiki.enabled && wiki.canWrite)
+        XCTAssertEqual(wiki.pages.map(\.title), ["Quickstart", "Jobs"])
+        XCTAssertEqual(wiki.pages.map(\.group), ["", "Architecture"], "grouped by folder")
+        XCTAssertEqual(wiki.pages[0].links, ["architecture/jobs.md"])
+        XCTAssertEqual(wiki.freshness(now: now), "Updated 3 days ago · 4 commits since")
+        XCTAssertTrue(wiki.wantsUpdate, "behind: Update is the thing to do")
+        var up = wiki
+        up.behind = 0
+        XCTAssertEqual(up.freshness(now: now), "Updated 3 days ago · up to date")
+        XCTAssertFalse(up.wantsUpdate)
+        // Its graph, as the desktop draws it; code links' files in the
+        // repository.
+        XCTAssertEqual(wiki.mermaid, "flowchart LR\n  p0[\"Quickstart\"]\n  p1[\"Jobs\"]\n  p0 --> p1\n")
+        XCTAssertEqual(Wiki(["project": 3, "pages": [["path": "a.md", "title": "A"]]]).mermaid, "", "one page: no graph")
+        XCTAssertEqual(Wiki(["root": "/home/me/shop"]).file("src/a.rs"), "/home/me/shop/src/a.rs")
+        let big = Wiki(["project": 3, "pages": .array([["path": "quickstart.md", "title": "Q", "links": ["p1.md"]]] + (1...45).map { ["path": .string("p\($0).md"), "title": .string("P\($0)"), "links": $0 == 2 ? ["quickstart.md"] : []] })])
+        XCTAssertEqual(big.graphPages.map(\.path), ["quickstart.md", "p1.md", "p2.md"], "a big wiki: the quickstart and its neighbours")
+        // A run writing it, and one that stopped part way.
+        let running = Wiki(["project": 3, "exists": true, "running": true, "session": "live:9", "run": ["phase": "generating", "done": 2, "total": 5]])
+        XCTAssertEqual(running.freshness(now: now), "Writing pages: 2 of 5")
+        XCTAssertEqual(running.session, "live:9")
+        XCTAssertEqual(Wiki(["project": 3, "run": ["phase": "planning", "done": 0, "total": 0], "running": true]).freshness(now: now), "Planning the wiki…")
+        let stopped = Wiki(["project": 3, "exists": true, "run": ["phase": "generating", "done": 1, "total": 3]])
+        XCTAssertEqual(stopped.freshness(now: now), "A run stopped part way (1 of 3 pages).")
+        XCTAssertTrue(stopped.wantsUpdate)
+        // None, and outside a project.
+        XCTAssertEqual(Wiki(["project": 3, "exists": false]).freshness(now: now), "Not written by OpenWiki yet.")
+        XCTAssertFalse(Wiki(["project": -1, "pages": []]).inProject)
+        XCTAssertEqual(Wiki.ago("2026-11-11T11:59:00Z", now: now), "just now")
+        XCTAssertEqual(Wiki.ago("2026-11-10T12:00:00Z", now: now), "yesterday")
+        XCTAssertEqual(Wiki.ago("2026-11-11T07:00:00.000Z", now: now), "5 hours ago")
+
+        // A page: what it is, its blocks, where its links go.
+        let page = WikiPageText(["path": "architecture/jobs.md", "title": "Jobs", "type": "architecture", "description": "How jobs run.", "verified": "2026-11-01T10:00:00Z",
+                                 "blocks": [["kind": "prose", "html": "<h1>Jobs</h1>", "anchor": "jobs"], ["kind": "mermaid", "code": "flowchart LR\n a --> b"],
+                                            ["kind": "code", "html": "<pre><code>run</code></pre>", "code": "run", "lang": "sh"]]])
+        XCTAssertEqual(page.blocks.map(\.kind), ["prose", "mermaid", "code"])
+        XCTAssertEqual(page.blocks[0].anchor, "jobs")
+        XCTAssertEqual(page.blocks[2].lang, "sh")
+        XCTAssertEqual(page.error, "")
+        XCTAssertEqual(page.page(of: "../quickstart.md")?.path, "quickstart.md")
+        XCTAssertEqual(page.page(of: "../workflows/release.md#steps")?.path, "workflows/release.md")
+        XCTAssertEqual(page.page(of: "../workflows/release.md#steps")?.section, "steps")
+        XCTAssertEqual(page.page(of: "#retry-control")?.path, "architecture/jobs.md", "a section of this page")
+        XCTAssertEqual(page.page(of: "/openwiki/quickstart.md")?.path, "quickstart.md")
+        XCTAssertNil(page.page(of: "https://example.com/a.md"))
+        XCTAssertNil(page.page(of: "repo://src/a.rs#L1"))
+        XCTAssertNil(page.page(of: "src/main.rs"), "not a page")
+        XCTAssertEqual(WikiPageText.code(of: "repo://src/job%20runner.rs#L12-L20")?.path, "src/job runner.rs")
+        XCTAssertEqual(WikiPageText.code(of: "repo://src/a.rs#L12-L20")?.line, 12)
+        XCTAssertEqual(WikiPageText.code(of: "repo://README.md")?.line, 0)
+        XCTAssertNil(WikiPageText.code(of: "../a.md"))
+        XCTAssertEqual(WikiPageText(["path": "x.md", "error": "There's no such page."]).error, "There's no such page.")
+
+        // A search: sections, best first; or the workspaces to choose.
+        let hits = WikiHits(["hits": [["page": "openwiki/architecture/jobs.md", "section": "retry-control", "heading": "Retry control", "snippet": "retried three times"]], "workspaces": []])
+        XCTAssertEqual(hits.hits.first?.heading, "Retry control")
+        XCTAssertFalse(hits.plain)
+        let choose = WikiHits(["hits": [], "workspaces": [["id": "w1", "name": "Shop"]]])
+        XCTAssertEqual(choose.workspaces.first?.name, "Shop")
+        XCTAssertTrue(WikiHits(["hits": [], "plain": true]).plain)
         if case .plan(let key)? = Event(["ev": "plan", "key": "live:1"]) { XCTAssertEqual(key, "live:1") } else { XCTFail("a plan event") }
     }
 
@@ -1275,10 +1329,19 @@ final class RecordingTests: XCTestCase {
         (m, s) = try await open("plan")
         for _ in 0..<250 where (s.plan?.steps.count ?? 0) < 3 { try await Task.sleep(nanoseconds: 20_000_000) }
         XCTAssertEqual(s.plan?.steps.count, 3)
-        // The plan's sheet reads the specs as it opens: none in the
-        // recording, and no alert for it (one would close the sheet).
-        await m.loadSpecs()
-        XCTAssertNil(m.alert, "specs that can't be read say nothing")
+        // The plan's sheet reads the project's wiki as it opens: its
+        // pages, one commit behind; a page in blocks; a search.
+        await m.loadWiki()
+        XCTAssertNil(m.alert)
+        XCTAssertEqual(s.wiki?.pages.map(\.title), ["Quickstart", "Sidebar", "Releasing"])
+        XCTAssertEqual(s.wiki?.behind, 1)
+        XCTAssertTrue(s.wiki?.freshness().hasSuffix("· 1 commit since") == true, s.wiki?.freshness() ?? "")
+        let page = await m.wikiPage("architecture/sidebar.md")
+        XCTAssertEqual(page?.kind, "architecture")
+        XCTAssertTrue(page?.blocks.contains { $0.kind == "mermaid" } == true)
+        XCTAssertEqual(page?.page(of: "../quickstart.md")?.path, "quickstart.md")
+        let found = await m.searchWiki("rebuilds the whole list")
+        XCTAssertEqual(found?.hits.first?.heading, "Rebuilding rows")
         XCTAssertTrue(tools(s).contains { ToolName.words($0.title, running: false) == "dice roll" })
         (m, s) = try await open("helpers")
         XCTAssertTrue(s.rows.contains { $0.fromHarlo && !$0.label.isEmpty })

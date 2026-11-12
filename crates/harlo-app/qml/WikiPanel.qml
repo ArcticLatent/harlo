@@ -160,7 +160,7 @@ Rectangle {
         const s = Math.max(0, (Date.now() - t) / 1000)
         if (s < 90) return "just now"
         if (s < 3600) return Math.round(s / 60) + " minutes ago"
-        if (s < 86400 * 1.5) return Math.round(s / 3600) === 1 ? "an hour ago" : Math.round(s / 3600) + " hours ago"
+        if (s < 86400) return Math.round(s / 3600) === 1 ? "an hour ago" : Math.round(s / 3600) + " hours ago"
         if (s < 86400 * 45) return Math.round(s / 86400) === 1 ? "yesterday" : Math.round(s / 86400) + " days ago"
         return new Date(t).toLocaleDateString(Qt.locale(), Locale.ShortFormat)
     }

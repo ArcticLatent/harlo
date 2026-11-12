@@ -340,9 +340,25 @@ public actor HarloClient {
         try check(await call("reviewStep", ["key": .string(key), "id": .int(step), "agent": .string(agent)]))
     }
 
-    /// The specs of a session's repository.
-    public func specs(_ key: String) async throws -> Specs {
-        Specs(try check(await call("specs", ["key": .string(key)])))
+    /// The wiki of a session's repository: its pages and how fresh it is.
+    public func wiki(_ key: String) async throws -> Wiki {
+        Wiki(try check(await call("wiki", ["key": .string(key)])))
+    }
+
+    /// A page of that wiki ("architecture/jobs.md"), to read.
+    public func wikiPage(_ key: String, page: String) async throws -> WikiPageText {
+        WikiPageText(try check(await call("wikiPage", ["key": .string(key), "page": .string(page)])))
+    }
+
+    /// A search of that wiki (in one of its workspaces, when it asked).
+    public func wikiSearch(_ key: String, query: String, workspace: String = "") async throws -> WikiHits {
+        WikiHits(try check(await call("wikiSearch", ["key": .string(key), "query": .string(query), "workspace": .string(workspace)])))
+    }
+
+    /// Starts a session on the computer that writes the wiki ("create",
+    /// "update" or "continue").
+    public func wikiRun(_ key: String, mode: String) async throws {
+        try check(await call("wikiRun", ["key": .string(key), "mode": .string(mode)]))
     }
 
     /// A Mermaid diagram drawn by harlo, in these colours (`background`,

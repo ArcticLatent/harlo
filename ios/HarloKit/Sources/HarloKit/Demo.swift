@@ -159,10 +159,34 @@ extension HarloModel {
         return p
     }
 
-    nonisolated static let sampleSpecs = Specs(specs: [
-        Spec(path: "SPEC.md", title: "harlo", summary: "What harlo is and how its parts fit.", kind: "product"),
-        Spec(path: "crates/harlo-core/SPEC.md", title: "harlo-core", summary: "Sessions, transcripts and the sidebar.", kind: "module", depth: 1),
-    ])
+    nonisolated static let sampleWiki = Wiki(pages: [
+        WikiPage(path: "quickstart.md", title: "Quickstart", summary: "Where to start: what harlo is and how its parts fit.", kind: "overview",
+                 links: ["architecture/sessions.md"]),
+        WikiPage(path: "architecture/sessions.md", title: "Sessions", summary: "How a session runs an agent and streams its transcript.", kind: "architecture",
+                 links: ["quickstart.md"]),
+        WikiPage(path: "workflows/release.md", title: "Releasing", summary: "How a release is built, signed and published.", kind: "workflow",
+                 links: ["architecture/sessions.md"]),
+    ], updatedAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3 * 86400)), behind: 4)
+
+    nonisolated static func sampleWikiPage(_ path: String) -> WikiPageText {
+        let page = sampleWiki.pages.first { $0.path == path } ?? sampleWiki.pages[0]
+        let text: [String: JSON] = [
+            "quickstart.md": ["path": "quickstart.md", "title": "Quickstart", "type": "overview", "description": "Where to start: what harlo is and how its parts fit.",
+                              "blocks": [["kind": "prose", "html": "<h1>Quickstart</h1><p>harlo runs coding agents in <a href=\"architecture/sessions.md\">sessions</a>, each streaming its transcript to the desktop and the phone.</p>"],
+                                         ["kind": "mermaid", "code": "flowchart LR\n  phone --> desktop --> agent"]]],
+            "architecture/sessions.md": ["path": "architecture/sessions.md", "title": "Sessions", "type": "architecture", "description": .string(page.summary),
+                                         "verified": .string(ISO8601DateFormatter().string(from: Date().addingTimeInterval(-86400))),
+                                         "blocks": [["kind": "prose", "html": "<h1>Sessions</h1><p>A session starts its agent in <a href=\"repo://crates/harlo-core/src/session.rs#L31-L40\">session.rs</a> and keeps its rows by key. Back to the <a href=\"../quickstart.md\">quickstart</a>.</p>", "anchor": "sessions"],
+                                                    ["kind": "code", "html": "<pre><code>let key = registry::start(kind, cwd);</code></pre>", "code": "let key = registry::start(kind, cwd);", "lang": "rust"]]],
+        ]
+        return WikiPageText(text[page.path] ?? ["path": .string(page.path), "title": .string(page.title), "type": .string(page.kind), "description": .string(page.summary),
+                                                "blocks": [["kind": "prose", "html": .string("<h1>\(page.title)</h1><p>\(page.summary)</p>")]]])
+    }
+
+    nonisolated static func sampleWikiHits(_ query: String) -> WikiHits {
+        WikiHits(["hits": [["page": "openwiki/architecture/sessions.md", "section": "sessions", "heading": "Sessions",
+                            "snippet": "A session starts its agent and keeps its rows by key."]]])
+    }
 
     nonisolated static func samplePlan() -> Plan {
         var plan = Plan(steps: [

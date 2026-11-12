@@ -66,12 +66,12 @@ func run(_ link: String) async {
     let choices = await model.newSessionChoices()
     check(choices?.hosts.isEmpty == true && choices?.machines.map(\.host) == [""], "a new session's places: this computer only (\(choices?.machines.map(\.host) ?? []))")
     check(model.sessions.allSatisfy { $0.host.isEmpty }, "its sessions run on this computer")
-    // The plan and specs (a session outside a project has neither), and a
+    // The plan and wiki (a session outside a project has neither), and a
     // diagram harlo draws for the phone.
     check(model.hasPlans && s.plan?.enabled == false && s.plan?.steps.isEmpty == true, "a session outside a project: its plan is off (\(String(describing: s.plan)))")
     check(model.runsPlans && model.features.contains("helpers") && s.helpers.isEmpty, "harlo runs plans with helpers, and this session started none (\(s.helpers.count))")
-    await model.loadSpecs()
-    check(s.specs != nil, "its specs can be asked for (\(s.specs?.specs.count ?? -1))")
+    await model.loadWiki()
+    check(model.hasWiki && s.wiki != nil && s.wiki?.inProject == false && s.wiki?.pages.isEmpty == true, "its wiki can be asked for: none outside a project (\(String(describing: s.wiki)))")
     let drawn = await model.diagram("flowchart LR\n  A[phone] --> B[harlo]", light: true, colors: ["background": "#ffffff", "text": "#111111"])
     check((drawn.picture?.width ?? 0) > 50 && UInt8(drawn.picture?.png.dropFirst().first ?? 0) == UInt8(ascii: "P"), "harlo draws a Mermaid diagram for the phone (\(drawn.picture.map { "\(Int($0.width))x\(Int($0.height)), \($0.png.count) bytes" } ?? drawn.why))")
     let bad = await model.diagram("not a diagram at all", light: false, colors: [:])
@@ -683,6 +683,15 @@ func record(_ link: String, to path: String) async {
     let planned = await turn("Plan the rest of the work.")
     _ = await waitFor(5) { (s.plan?.steps.count ?? 0) >= 3 }
     check(planned && (s.plan?.steps.count ?? 0) >= 3, "a plan (\(s.plan?.steps.map(\.title) ?? []))")
+    // The project's wiki, as the plan's sheet shows it: its pages and how
+    // fresh, each page read, a search OpenWiki answers.
+    await model.loadWiki()
+    check(s.wiki?.pages.map(\.title) == ["Quickstart", "Sidebar", "Releasing"] && s.wiki?.behind == 1, "the wiki's pages, one commit behind (\(String(describing: s.wiki)))")
+    for page in s.wiki?.pages ?? [] { _ = await model.wikiPage(page.path) }
+    let sidebarPage = await model.wikiPage("architecture/sidebar.md")
+    check(sidebarPage?.blocks.map(\.kind).contains("mermaid") == true && sidebarPage?.blocks.map(\.kind).contains("code") == true, "a page in blocks (\(sidebarPage?.blocks.map(\.kind) ?? []))")
+    let found = await model.searchWiki("rebuilds the whole list")
+    check(found?.hits.first?.page == "openwiki/architecture/sidebar.md" && found?.hits.first?.heading == "Rebuilding rows" && found?.plain == false, "OpenWiki's search finds the section (\(found?.hits.first.map { "\($0.page)#\($0.section)" } ?? "none"))")
     rec.scene("plan")
     let helped = await turn("Have a helper update the changelog.", 90) { s in s.rows.contains { $0.html.contains("changelog entry is in") } }
     check(helped, "a helper's change brought over (\(s.rows.suffix(4).map { "\($0.kind) \($0.title) \($0.text.prefix(30))" }))")

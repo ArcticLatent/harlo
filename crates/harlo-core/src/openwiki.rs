@@ -845,15 +845,15 @@ pub fn search_hits(answer: &Value) -> Value {
             let rf = r["ref"].as_array().and_then(|a| a.first()).and_then(Value::as_str).or_else(|| r["ref"].as_str())?;
             let (page, section) = rf.split_once('#').unwrap_or((rf, ""));
             let content = r["content"].as_str().unwrap_or_default();
-            let mut lines = content.lines().skip_while(|l| l.trim() == page || l.trim().is_empty());
-            let mut heading = String::new();
-            let mut rest: Vec<&str> = Vec::new();
-            for l in lines.by_ref() {
-                match l.strip_prefix("Section: ") {
-                    Some(h) if heading.is_empty() && rest.is_empty() => heading = h.trim().to_owned(),
-                    _ => rest.push(l),
-                }
-            }
+            // (Its page, by path or title, then "Section: <heading>", then
+            // its text.)
+            let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
+            let at = lines.iter().take(3).position(|l| l.starts_with("Section: "));
+            let heading = at.map(|i| lines[i]["Section: ".len()..].trim().to_owned()).unwrap_or_default();
+            let rest: Vec<&str> = match at {
+                Some(i) => lines[i + 1..].to_vec(),
+                None => lines.into_iter().skip_while(|l| l.trim() == page).collect(),
+            };
             let snippet: String = rest.iter().map(|l| l.trim()).filter(|l| !l.is_empty()).collect::<Vec<_>>().join(" ").chars().take(240).collect();
             Some(json!({ "page": page, "section": section, "heading": heading, "snippet": snippet, "wiki": r["wiki"].as_str().unwrap_or_default() }))
         })
@@ -972,6 +972,10 @@ mod tests {
         assert_eq!(hits["hits"][0]["section"], "retry-control");
         assert_eq!(hits["hits"][0]["heading"], "Retry control");
         assert_eq!(hits["hits"][0]["snippet"], "How jobs run. A failed job is retried.");
+        // (A page with a title: its title first.)
+        let titled = search_hits(&json!({"results": [{"ref": ["openwiki/s.md#rows"], "content": "Sidebar\nSection: Rebuilding rows\nHow rows are kept.\nrebuild clears them."}]}));
+        assert_eq!(titled["hits"][0]["heading"], "Rebuilding rows");
+        assert_eq!(titled["hits"][0]["snippet"], "How rows are kept. rebuild clears them.");
         let asked = search_hits(&json!({"status": "workspace_required", "workspaces": [{"id": "w1", "name": "Team", "wikiCount": 2}]}));
         assert_eq!(asked["workspaces"][0]["name"], "Team");
     }

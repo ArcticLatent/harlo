@@ -182,65 +182,258 @@ public enum PlanEdit: Sendable {
     }
 }
 
-/// A spec of the session's repository (SPEC.md and the like), where it
-/// sits in their tree.
-public struct Spec: Equatable, Sendable, Identifiable {
-    /// From the repository's root.
+/// A page of the session's repository's wiki (OpenWiki's, in openwiki/).
+public struct WikiPage: Equatable, Sendable, Identifiable {
+    /// Within openwiki/ ("architecture/jobs.md").
     public var path: String
     public var title: String
     public var summary: String
-    /// Its type ("product", "module", …; "" when it doesn't say).
-    public var kind: String
-    /// Its status (draft, active, stale, done, deprecated; "" when it
+    /// Its kind ("overview", "architecture", "workflow", …; "" when it
     /// doesn't say).
-    public var status: String
-    /// How deep in the tree: under its parent.
-    public var depth: Int
+    public var kind: String
+    /// The pages it links to.
+    public var links: [String]
     public var id: String { path }
 
-    public init(path: String, title: String, summary: String = "", kind: String = "", status: String = "", depth: Int = 0) {
+    public init(path: String, title: String, summary: String = "", kind: String = "", links: [String] = []) {
         self.path = path
         self.title = title
         self.summary = summary
         self.kind = kind
-        self.status = status
-        self.depth = depth
+        self.links = links
+    }
+
+    /// Its folder as a heading ("architecture/jobs.md" → "Architecture";
+    /// "" at the top).
+    public var group: String {
+        guard let slash = path.lastIndex(of: "/") else { return "" }
+        let folder = path[..<slash].split(separator: "/").last.map(String.init) ?? ""
+        let words = folder.replacingOccurrences(of: "-", with: " ").replacingOccurrences(of: "_", with: " ")
+        return words.prefix(1).uppercased() + words.dropFirst()
     }
 }
 
-/// The specs of a session's repository, in tree order.
-public struct Specs: Equatable, Sendable {
-    /// Specs are on for its project.
+/// The wiki of a session's repository: its pages (the quickstart first),
+/// how fresh it is, and a run writing it.
+public struct Wiki: Equatable, Sendable {
+    /// Inside a harlo project (a wiki is a project's).
+    public var inProject: Bool
+    /// Its agents use it (the project's Wiki setting).
     public var enabled: Bool
-    public var specs: [Spec]
-    /// What doesn't hold in their links ("web/SPEC.md: its parent `x`
-    /// isn't a spec").
-    public var problems: [String]
-    /// The graph as a Mermaid flowchart, for a picture of it ("" with one
-    /// spec, or from an older harlo).
-    public var mermaid: String
+    public var exists: Bool
+    public var pages: [WikiPage]
+    /// A run that's writing it, or stopped part way: pages done of all.
+    public var run: Run?
+    /// When it was last brought up to date (ISO 8601; "" never).
+    public var updatedAt: String
+    /// Commits to the code since (nil: not known).
+    public var behind: Int?
+    /// A wiki session is at work on it.
+    public var running: Bool
+    /// That session's key.
+    public var session: String
+    /// This harlo has OpenWiki to write it.
+    public var canWrite: Bool
+    /// Still being read on another machine.
+    public var loading: Bool
+    /// The repository's folder (on its machine): code links' files are in it.
+    public var root: String
+
+    public struct Run: Equatable, Sendable {
+        public var phase: String
+        public var done: Int
+        public var total: Int
+        public init(phase: String = "", done: Int = 0, total: Int = 0) {
+            self.phase = phase
+            self.done = done
+            self.total = total
+        }
+    }
 
     public init(_ v: JSON) {
+        inProject = (v["project"].int ?? -1) >= 0
         enabled = v["enabled"].bool ?? false
-        mermaid = v["mermaid"].text
-        specs = (v["specs"].array ?? []).map {
-            Spec(path: $0["path"].text, title: $0["title"].text, summary: $0["summary"].text, kind: $0["type"].text, status: $0["status"].text, depth: $0["depth"].int.map(Int.init) ?? 0)
+        exists = v["exists"].bool ?? false
+        pages = (v["pages"].array ?? []).map {
+            WikiPage(path: $0["path"].text, title: $0["title"].text, summary: $0["description"].text, kind: $0["type"].text, links: ($0["links"].array ?? []).map(\.text))
         }
-        problems = (v["problems"].array ?? []).map(\.text)
+        run = v["run"].object == nil ? nil : Run(phase: v["run"]["phase"].text, done: Int(v["run"]["done"].int ?? 0), total: Int(v["run"]["total"].int ?? 0))
+        updatedAt = v["last"]["at"].text
+        behind = v["behind"].int.map(Int.init)
+        running = v["running"].bool ?? false
+        session = v["session"].text
+        canWrite = v["runtime"].bool ?? false
+        loading = v["loading"].bool ?? false
+        root = v["root"].text
     }
 
-    public init(specs: [Spec] = [], enabled: Bool = true, problems: [String] = [], mermaid: String = "") {
+    public init(pages: [WikiPage] = [], inProject: Bool = true, enabled: Bool = true, exists: Bool = true, run: Run? = nil, updatedAt: String = "",
+                behind: Int? = nil, running: Bool = false, session: String = "", canWrite: Bool = true, loading: Bool = false, root: String = "")
+    {
+        self.root = root
+        self.pages = pages
+        self.inProject = inProject
         self.enabled = enabled
-        self.specs = specs
-        self.problems = problems
-        self.mermaid = mermaid
+        self.exists = exists
+        self.run = run
+        self.updatedAt = updatedAt
+        self.behind = behind
+        self.running = running
+        self.session = session
+        self.canWrite = canWrite
+        self.loading = loading
     }
 
-    /// The spec a problem is about ("src/SPEC.md: …"), if it's one of these.
-    public func spec(of problem: String) -> Spec? {
-        guard let colon = problem.range(of: ": ") else { return nil }
-        let path = String(problem[..<colon.lowerBound])
-        return specs.first { $0.path == path }
+    /// Its freshness in words: "Writing pages: 2 of 5", "Updated 3 days ago
+    /// · 4 commits since", "A run stopped part way (1 of 3 pages).".
+    public func freshness(now: Date = Date()) -> String {
+        if let r = run, running {
+            return r.phase == "planning" || r.total == 0 ? "Planning the wiki…" : "Writing pages: \(r.done) of \(r.total)"
+        }
+        if let r = run { return "A run stopped part way" + (r.total > 0 ? " (\(r.done) of \(r.total) pages)." : ".") }
+        if running { return "Starting a run…" }
+        guard !updatedAt.isEmpty else { return "Not written by OpenWiki yet." }
+        let when = "Updated " + Wiki.ago(updatedAt, now: now)
+        guard let b = behind else { return when }
+        return b == 0 ? when + " · up to date" : when + " · \(b) " + (b == 1 ? "commit" : "commits") + " since"
+    }
+
+    /// "just now", "5 minutes ago", "yesterday", "3 days ago", from an ISO
+    /// time (as the desktop says it).
+    public static func ago(_ iso: String, now: Date = Date()) -> String {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let t = f.date(from: iso) ?? ISO8601DateFormatter().date(from: iso) else { return "" }
+        let s = max(0, now.timeIntervalSince(t))
+        if s < 90 { return "just now" }
+        if s < 3600 { return "\(Int((s / 60).rounded())) minutes ago" }
+        if s < 86400 { let h = Int((s / 3600).rounded()); return h == 1 ? "an hour ago" : "\(h) hours ago" }
+        if s < 86400 * 45 { let d = Int((s / 86400).rounded()); return d == 1 ? "yesterday" : "\(d) days ago" }
+        return t.formatted(date: .abbreviated, time: .omitted)
+    }
+
+    /// Update is the thing to do: it's behind the code, or a run stopped.
+    public var wantsUpdate: Bool { run != nil || (behind ?? 0) > 0 }
+
+    /// The pages shown in the graph: all of them, or for a big wiki the
+    /// quickstart (the first) and the pages it links to or from.
+    public var graphPages: [WikiPage] {
+        guard pages.count > 1 else { return [] }
+        guard pages.count > 40, let first = pages.first else { return pages }
+        let near = Set([first.path] + first.links + pages.filter { $0.links.contains(first.path) }.map(\.path))
+        return pages.filter { near.contains($0.path) }
+    }
+
+    /// The pages and their links as a Mermaid flowchart ("" under two
+    /// pages), as the desktop's Wiki panel draws it.
+    public var mermaid: String {
+        let shown = graphPages
+        guard shown.count > 1 else { return "" }
+        let at = Dictionary(shown.enumerated().map { ($1.path, $0) }, uniquingKeysWith: { a, _ in a })
+        var out = "flowchart LR\n"
+        for (i, p) in shown.enumerated() {
+            var title = p.title.replacingOccurrences(of: "\"", with: "#quot;")
+            for c in ["[", "]", "{", "}", "<", ">"] { title = title.replacingOccurrences(of: c, with: " ") }
+            out += "  p\(i)[\"\(title)\"]\n"
+        }
+        for (i, p) in shown.enumerated() {
+            for l in p.links { if let j = at[l] { out += "  p\(i) --> p\(j)\n" } }
+        }
+        return out
+    }
+
+    /// A file a code link names, in the repository ("src/a.rs" →
+    /// "/home/me/shop/src/a.rs").
+    public func file(_ path: String) -> String { root.isEmpty ? path : root + "/" + path }
+}
+
+/// A wiki page as read: what it is, then its text in blocks.
+public struct WikiPageText: Equatable, Sendable {
+    public var path: String
+    public var title: String
+    public var kind: String
+    public var summary: String
+    /// When it was last checked against the code (ISO 8601; "" never).
+    public var verified: String
+    public var blocks: [Block]
+    /// Why it couldn't be read ("" when it was).
+    public var error: String
+
+    /// Prose (HTML, as a reply's), code (`code`, in `lang`) or a Mermaid
+    /// diagram; `anchor` names a heading's section.
+    public struct Block: Equatable, Sendable {
+        public var kind: String
+        public var html: String
+        public var code: String
+        public var lang: String
+        public var anchor: String
+    }
+
+    public init(_ v: JSON) {
+        path = v["path"].text
+        title = v["title"].text
+        kind = v["type"].text
+        summary = v["description"].text
+        verified = v["verified"].text
+        error = v["error"].text
+        blocks = (v["blocks"].array ?? []).map { Block(kind: $0["kind"].text, html: $0["html"].text, code: $0["code"].text, lang: $0["lang"].text, anchor: $0["anchor"].text) }
+    }
+
+    /// The page a link in it opens ("../quickstart.md#x" from
+    /// "architecture/jobs.md" → ("quickstart.md", "x")); nil for a link
+    /// elsewhere (code, the web).
+    public func page(of link: String) -> (path: String, section: String)? {
+        guard !link.contains("://"), !link.hasPrefix("mailto:") else { return nil }
+        let parts = link.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+        let target = parts[0], section = parts.count > 1 ? parts[1] : ""
+        if target.isEmpty { return (path, section) }
+        guard target.hasSuffix(".md") else { return nil }
+        var dirs = target.hasPrefix("/") ? [] : path.split(separator: "/").dropLast().map(String.init)
+        for c in target.split(separator: "/") {
+            if c == ".." { _ = dirs.popLast() } else if c != "." { dirs.append(String(c)) }
+        }
+        let joined = dirs.joined(separator: "/")
+        return (joined.hasPrefix("openwiki/") ? String(joined.dropFirst(9)) : joined, section)
+    }
+
+    /// A link to code (`repo://src/a.rs#L10-L20`): the file and its line.
+    public static func code(of link: String) -> (path: String, line: Int)? {
+        guard link.hasPrefix("repo://") else { return nil }
+        let rest = link.dropFirst(7)
+        let parts = rest.split(separator: "#", maxSplits: 1).map(String.init)
+        guard let path = parts.first?.removingPercentEncoding, !path.isEmpty else { return nil }
+        var line = 0
+        if parts.count > 1, parts[1].hasPrefix("L") {
+            line = Int(parts[1].dropFirst().prefix { $0.isNumber }) ?? 0
+        }
+        return (path, line)
+    }
+}
+
+/// What a wiki search found: sections, best first, or (a wiki linked to
+/// others) the workspaces to pick from.
+public struct WikiHits: Equatable, Sendable {
+    public struct Hit: Equatable, Sendable, Identifiable {
+        /// "openwiki/architecture/jobs.md".
+        public var page: String
+        public var section: String
+        public var heading: String
+        public var snippet: String
+        public var id: String { page + "#" + section }
+    }
+    public var hits: [Hit]
+    public var workspaces: [(id: String, name: String)]
+    /// OpenWiki couldn't run: pages that have the words.
+    public var plain: Bool
+
+    public init(_ v: JSON) {
+        hits = (v["hits"].array ?? []).map { Hit(page: $0["page"].text, section: $0["section"].text, heading: $0["heading"].text, snippet: $0["snippet"].text) }
+        workspaces = (v["workspaces"].array ?? []).map { ($0["id"].text, $0["name"].text) }
+        plain = v["plain"].bool ?? false
+    }
+
+    public static func == (a: WikiHits, b: WikiHits) -> Bool {
+        a.hits == b.hits && a.plain == b.plain && a.workspaces.map(\.id) == b.workspaces.map(\.id)
     }
 }
 

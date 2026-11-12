@@ -150,8 +150,8 @@ public final class OpenSession {
     public internal(set) var plan: Plan?
     /// The helpers it started (sessions of their own in harlo).
     public internal(set) var helpers: [Helper] = []
-    /// Its repository's specs (nil: not asked yet).
-    public internal(set) var specs: Specs?
+    /// Its repository's wiki (nil: not asked yet).
+    public internal(set) var wiki: Wiki?
     /// Your messages a turn can be undone to (row key → snapshot).
     public internal(set) var undoable: [String: String] = [:]
     /// Its folder is a git repository (or holds some): its changes have
@@ -902,14 +902,44 @@ public final class HarloModel {
         return await with { c, k in try await c.reviewStep(k, step: step.id, agent: agent) } != nil
     }
 
-    /// The open session's repository's specs. Quietly: they're extra on
-    /// the plan's sheet, and an alert there (specs on a host that's gone,
-    /// say) could close the sheet it opens with.
-    public func loadSpecs() async {
+    /// harlo has the project wiki for the phone.
+    public var hasWiki: Bool { demo || samples != nil || features.contains("wiki") }
+
+    /// The open session's repository's wiki. Quietly: it's extra on the
+    /// plan's sheet, and an alert there (a wiki on a host that's gone, say)
+    /// could close the sheet it opens with.
+    public func loadWiki() async {
         guard let s = session else { return }
-        if demo || samples != nil { s.specs = Self.sampleSpecs; return }
-        guard features.contains("plan"), let c = client, !s.liveKey.isEmpty else { return }
-        if let specs = try? await c.specs(s.liveKey) { s.specs = specs }
+        if demo || samples != nil { s.wiki = Self.sampleWiki; return }
+        guard features.contains("wiki"), let c = client, !s.liveKey.isEmpty else { return }
+        if let wiki = try? await c.wiki(s.liveKey), session === s { s.wiki = wiki }
+    }
+
+    /// A page of the open session's wiki (nil: it couldn't be asked; a
+    /// page that can't be read says why in its `error`).
+    public func wikiPage(_ path: String) async -> WikiPageText? {
+        if demo || samples != nil { return Self.sampleWikiPage(path) }
+        guard features.contains("wiki") else { return nil }
+        return await with { c, k in try await c.wikiPage(k, page: path) }
+    }
+
+    /// A search of the open session's wiki.
+    public func searchWiki(_ query: String, workspace: String = "") async -> WikiHits? {
+        if demo || samples != nil { return Self.sampleWikiHits(query) }
+        guard features.contains("wiki") else { return nil }
+        return await with { c, k in try await c.wikiSearch(k, query: query, workspace: workspace) }
+    }
+
+    /// Starts a wiki session on the computer ("create", "update",
+    /// "continue"): true when it started.
+    public func runWiki(_ mode: String) async -> Bool {
+        if demo || samples != nil {
+            session?.wiki?.running = true
+            return true
+        }
+        guard await with({ c, k in try await c.wikiRun(k, mode: mode) }) != nil else { return false }
+        await loadWiki()
+        return true
     }
 
     /// Diagrams drawn this run (by source, mode and colours).

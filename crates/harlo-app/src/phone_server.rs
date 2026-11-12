@@ -339,7 +339,7 @@ fn event(key: &str, u: &SessionUpdate) -> Option<Value> {
 /// (sessions say their machine), `settled` (settled sessions, for a phone
 /// that says it shows them), `limits` (plan limits: the `limits` call and
 /// event), `compaction` (a session's meta says where it compacts).
-const FEATURES: &[&str] = &["sessionMentions", "serverStart", "machines", "settled", "limits", "compaction", "connect", "modelServers", "putBack", "stoppedModels", "plan", "diagrams", "visuals", "planRun", "helpers", "answerHelper", "team", "pictures"];
+const FEATURES: &[&str] = &["sessionMentions", "serverStart", "machines", "settled", "limits", "compaction", "connect", "modelServers", "putBack", "stoppedModels", "plan", "diagrams", "visuals", "planRun", "helpers", "answerHelper", "team", "pictures", "wiki"];
 
 /// The session list for one phone: settled sessions only for one that
 /// shows them.
@@ -1059,7 +1059,28 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
                         });
                         Value::Null
                     }
-                    "projects" | "sessionMentions" | "limitOf" | "resumeAtReset" | "cancelResume" | "modes" | "setModes" | "rename" | "archive" | "pin" | "putBack" | "reviewStep" | "theme" | "setAvatar" => crate::phone_bridge::call(msg.clone()).await,
+                    "projects" | "sessionMentions" | "limitOf" | "resumeAtReset" | "cancelResume" | "modes" | "setModes" | "rename" | "archive" | "pin" | "putBack" | "reviewStep" | "theme" | "setAvatar" | "wiki" | "wikiRun" => crate::phone_bridge::call(msg.clone()).await,
+                    // A wiki page or search: the repository from harlo, read off
+                    // the loop (OpenWiki answers a search; a host's over SSH).
+                    "wikiPage" | "wikiSearch" => {
+                        let (msg, later, id) = (msg.clone(), later_tx.clone(), id.clone());
+                        tokio::spawn(async move {
+                            let at = crate::phone_bridge::call(json!({ "op": "wikiFolder", "key": msg["key"] })).await;
+                            let mut reply = match at["cwd"].as_str().map(std::path::PathBuf::from) {
+                                None => at,
+                                Some(cwd) => {
+                                    let text = |k: &str| msg[k].as_str().unwrap_or_default().to_owned();
+                                    let (op, a, b) = (text("op"), text(if msg["op"] == "wikiPage" { "page" } else { "query" }), text("workspace"));
+                                    tokio::task::spawn_blocking(move || if op == "wikiPage" { crate::workspace::wiki_page_at(&cwd, &a) } else { crate::workspace::wiki_search_at(&cwd, &a, &b) })
+                                        .await
+                                        .unwrap_or_else(|_| json!({ "error": "The wiki couldn't be read." }))
+                                }
+                            };
+                            reply["id"] = id;
+                            let _ = later.send(reply);
+                        });
+                        Value::Null
+                    }
                     "plan" | "planEdit" | "planRun" | "planStop" | "helpers" | "answerHelper" => {
                         wants_plans = true;
                         crate::phone_bridge::call(msg.clone()).await

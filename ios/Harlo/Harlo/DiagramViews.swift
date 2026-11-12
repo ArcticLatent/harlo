@@ -133,9 +133,9 @@ struct DiagramZoom: View {
     }
 }
 
-/// The specs' graph, drawn by harlo (as a reply's diagram): fitted to the
-/// row, tap to zoom.
-struct SpecsGraph: View {
+/// The wiki's pages and their links, drawn by harlo (as a reply's
+/// diagram): fitted to the row, tap to zoom.
+struct PagesGraph: View {
     @Environment(HarloModel.self) private var model
     @Environment(\.palette) private var p
     let source: String
@@ -159,10 +159,10 @@ struct SpecsGraph: View {
                         .padding(.vertical, 6)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("The specs' graph")
+                .accessibilityLabel("The wiki's pages and their links")
                 .accessibilityHint("Opens it to zoom")
                 .fullScreenCover(isPresented: $zoomed) {
-                    DiagramZoom(image: image, size: CGSize(width: d.width, height: d.height), title: "Specs")
+                    DiagramZoom(image: image, size: CGSize(width: d.width, height: d.height), title: "Wiki")
                 }
             } else if loading {
                 HStack(spacing: 8) {

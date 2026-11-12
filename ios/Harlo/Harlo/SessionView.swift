@@ -317,7 +317,7 @@ struct SessionContent: View {
                         Button {
                             sheet = .plan
                         } label: {
-                            Label("Plan and specs", systemImage: "list.bullet.clipboard")
+                            Label("Plan and wiki", systemImage: "list.bullet.clipboard")
                         }
                     }
                     if !session.todos.isEmpty || !session.subagents.isEmpty || !session.helpers.isEmpty {
