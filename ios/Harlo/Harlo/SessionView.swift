@@ -712,7 +712,9 @@ struct ContextBar: View {
                         .scaledFont(11.5, .medium)
                         .dynamicTypeSize(...DynamicTypeSize.xxLarge)
                         .monospacedDigit()
-                        .foregroundStyle(Color(way > 0.6 ? tint : p.foreground))
+                        // (Apple's audit flags it whatever its shade, even the full text
+                        // colour: it misreads a menu's label. This one reads 6:1.)
+                        .foregroundStyle(Color(way > 0.6 ? tint : p.foreground.mix(p.background, 0.28)))
                         .fixedSize()
                 }
                 .padding(.horizontal, 16)
