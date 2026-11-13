@@ -124,6 +124,37 @@ impl Loaded {
     }
 }
 
+/// The conversation as it was written, before compactions: the messages
+/// on the branch that ends at the entry `upto` (a compaction), up to the
+/// first one it kept (`first_kept`). Empty when the file can't be read.
+pub fn messages_before(path: &Path, upto: &str, first_kept: &str) -> Vec<Value> {
+    let Ok((_, entries)) = read_entries(path) else { return Vec::new() };
+    let by_id: std::collections::HashMap<&str, &Value> = entries.iter().filter_map(|e| Some((e["id"].as_str()?, e))).collect();
+    let mut branch = Vec::new();
+    let mut at = Some(upto);
+    while let Some(id) = at {
+        let Some(e) = by_id.get(id) else { break };
+        if branch.len() > entries.len() {
+            break; // a loop
+        }
+        branch.push(*e);
+        at = e["parentId"].as_str();
+    }
+    branch.reverse();
+    let mut out = Vec::new();
+    for e in branch {
+        if e["id"] == first_kept {
+            break;
+        }
+        match e["type"].as_str() {
+            Some("message") => out.push(e["message"].clone()),
+            Some("custom_message") => out.push(json!({ "role": "custom", "customType": e["customType"], "content": e["content"], "display": e["display"] })),
+            _ => {}
+        }
+    }
+    out
+}
+
 /// A session file's header and entries.
 fn read_entries(path: &Path) -> Result<(Value, Vec<Value>)> {
     let text = std::fs::read_to_string(path).with_context(|| format!("Couldn't read the session {}", path.display()))?;

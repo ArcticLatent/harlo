@@ -169,25 +169,48 @@ pub fn native(provider: &str) -> bool {
 const NOTE_REQUESTS: usize = 10;
 const NOTE_CHARS: usize = 600;
 
-/// A native compaction's summary, for any other model (and for reading):
-/// what the user asked in the part compacted.
-pub fn native_note(history: &[Value], model: &str) -> String {
-    let asked: Vec<String> = history
+/// The user's requests in the part a native compaction takes (each cut to
+/// [`NOTE_CHARS`]), those an earlier one took first: an earlier note's
+/// requests aren't lost when its item is compacted again.
+pub fn native_requests(history: &[Value]) -> Vec<String> {
+    history
         .iter()
-        .filter(|m| m["role"] == "user")
-        .filter_map(|m| {
+        .flat_map(|m| -> Vec<String> {
+            if m["role"] == "compactionSummary" {
+                return m["native"]["requests"].as_array().into_iter().flatten().filter_map(|r| r.as_str().map(str::to_owned)).collect();
+            }
+            if m["role"] != "user" {
+                return Vec::new();
+            }
             let text = match &m["content"] {
                 Value::String(s) => s.clone(),
                 Value::Array(b) => b.iter().filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join("\n"),
                 _ => String::new(),
             };
             let text = text.trim();
-            (!text.is_empty()).then(|| {
-                let short: String = text.chars().take(NOTE_CHARS).collect();
-                if short.len() < text.len() { format!("{short}…") } else { short }
-            })
+            if text.is_empty() {
+                return Vec::new();
+            }
+            let short: String = text.chars().take(NOTE_CHARS).collect();
+            vec![if short.len() < text.len() { format!("{short}…") } else { short }]
         })
-        .collect();
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .take(KEPT_REQUESTS)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect()
+}
+
+/// The most requests carried from one native compaction to the next.
+const KEPT_REQUESTS: usize = 50;
+
+/// A native compaction's summary, for any other model (and for reading):
+/// what the user asked in the part compacted (`asked`: from
+/// [`native_requests`]).
+pub fn native_note(asked: &[String], model: &str) -> String {
     let mut note = format!("The earlier conversation was compacted by {model}'s own compaction, which only that model can read.");
     if !asked.is_empty() {
         let from = asked.len().saturating_sub(NOTE_REQUESTS);
@@ -204,6 +227,15 @@ pub fn files(history: &[Value], known: &(Vec<String>, Vec<String>)) -> (Vec<Stri
     let mut read: BTreeSet<String> = known.0.iter().cloned().collect();
     let mut changed: BTreeSet<String> = known.1.iter().cloned().collect();
     for b in history.iter().filter(|m| m["role"] == "assistant").flat_map(|m| m["content"].as_array().into_iter().flatten()).filter(|b| b["type"] == "toolCall") {
+        if b["name"] == "apply_patch" {
+            for op in crate::patch::parse(b["arguments"]["input"].as_str().unwrap_or_default()).unwrap_or_default() {
+                changed.insert(op.path().to_owned());
+                if let crate::patch::Op::Update { move_to: Some(to), .. } = op {
+                    changed.insert(to);
+                }
+            }
+            continue;
+        }
         let Some(path) = b["arguments"]["path"].as_str().filter(|p| !p.is_empty()) else { continue };
         match b["name"].as_str() {
             Some("read") => {
@@ -265,11 +297,36 @@ mod tests {
         let u = |t: &str| serde_json::json!({ "role": "user", "content": [{ "type": "text", "text": t }] });
         let mut h: Vec<Value> = (0..12).map(|i| u(&format!("ask {i}"))).collect();
         h.push(u(&"y".repeat(NOTE_CHARS + 10)));
-        let note = native_note(&h, "codex/m");
+        let note = native_note(&native_requests(&h), "codex/m");
         assert!(note.starts_with("The earlier conversation was compacted by codex/m's own compaction"));
         assert!(!note.contains("ask 2\n") && note.contains("- ask 3\n") && note.contains("- ask 11"), "{note}");
         assert!(note.ends_with('…'));
         assert!(!native_note(&[], "x").contains("requests"));
+    }
+
+    #[test]
+    fn requests_survive_a_second_native_compaction() {
+        let u = |t: &str| serde_json::json!({ "role": "user", "content": t });
+        let first = native_requests(&[u("build the parser"), u("and its tests")]);
+        let note = serde_json::json!({ "role": "compactionSummary", "summary": "…", "native": { "requests": first } });
+        let second = native_requests(&[note, u("now the docs")]);
+        assert_eq!(second, ["build the parser", "and its tests", "now the docs"]);
+        let many: Vec<Value> = (0..60).map(|i| u(&format!("r{i}"))).collect();
+        let kept = native_requests(&many);
+        assert_eq!((kept.len(), kept[0].as_str(), kept[49].as_str()), (KEPT_REQUESTS, "r10", "r59"));
+    }
+
+    #[test]
+    fn a_patch_counts_its_files_as_changed() {
+        let call = |name: &str, args: Value| serde_json::json!({ "role": "assistant", "content": [{ "type": "toolCall", "name": name, "arguments": args }] });
+        let h = [
+            call("read", serde_json::json!({ "path": "a.rs" })),
+            call("read", serde_json::json!({ "path": "old.rs" })),
+            call("apply_patch", serde_json::json!({ "input": "*** Begin Patch\n*** Add File: new.rs\n+x\n*** Update File: old.rs\n*** Move to: moved.rs\n@@\n-a\n+b\n*** Delete File: gone.rs\n*** End Patch" })),
+        ];
+        let (read, changed) = files(&h, &(Vec::new(), Vec::new()));
+        assert_eq!(read, ["a.rs"]);
+        assert_eq!(changed, ["gone.rs", "moved.rs", "new.rs", "old.rs"]);
     }
 
     #[test]

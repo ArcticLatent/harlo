@@ -150,6 +150,20 @@ struct Done {
     usage: Value,
     /// Where it worked, when not in the session's folder.
     worktree: Option<crate::isolate::Worktree>,
+    /// What the main agent's told about where it worked.
+    note: String,
+    /// It only looked, but nothing kept its commands from changing files
+    /// (the sandbox is off).
+    unguarded: bool,
+}
+
+/// Two or more writers: each in its own copy of the project, or, when one
+/// can't be made, in the project itself, one at a time.
+struct Writers {
+    base: Option<Arc<crate::isolate::Baseline>>,
+    /// Why there's no copy for any of them.
+    why: Option<String>,
+    turn: tokio::sync::Mutex<()>,
 }
 
 /// Runs the call's tasks: their answers, in order. (Boxed: a run inside
@@ -183,17 +197,21 @@ async fn run_all(args: &Value, call_id: &str, ctx: &Ctx, stop: &CancellationToke
         }
     }
     // Two or more that edit: each in a worktree, when the project allows.
-    let writers = tasks.iter().filter(|t| writes(t, ctx)).count();
-    let base = if writers >= 2 {
+    let writers = if tasks.iter().filter(|t| writes(t, ctx)).count() >= 2 {
         let cwd = ctx.cwd.clone();
-        tokio::task::spawn_blocking(move || crate::isolate::Baseline::take(&cwd)).await.ok().and_then(Result::ok).map(Arc::new)
+        let taken = tokio::task::spawn_blocking(move || crate::isolate::Baseline::take(&cwd)).await.unwrap_or_else(|e| Err(e.to_string()));
+        let (base, why) = match taken {
+            Ok(b) => (Some(Arc::new(b)), None),
+            Err(why) => (None, Some(why)),
+        };
+        Some(Writers { base, why, turn: tokio::sync::Mutex::new(()) })
     } else {
         None
     };
     let slots = tokio::sync::Semaphore::new(AT_ONCE);
-    let mut done: Vec<Done> = join_all(tasks.iter().map(|t| one(t, call_id, ctx, &slots, stop, base.clone()))).await;
+    let mut done: Vec<Done> = join_all(tasks.iter().map(|t| one(t, call_id, ctx, &slots, stop, writers.as_ref()))).await;
     // Their changes, brought back in the order asked.
-    if let Some(base) = &base {
+    if let Some(base) = writers.as_ref().and_then(|w| w.base.as_ref()) {
         for d in &mut done {
             let Some(w) = d.worktree.take() else { continue };
             let b = base.clone();
@@ -214,11 +232,14 @@ async fn run_all(args: &Value, call_id: &str, ctx: &Ctx, stop: &CancellationToke
     let mut total = (0, 0, 0, 0);
     for d in &done {
         let answer = if d.text.trim().is_empty() { "(no answer)" } else { d.text.trim() };
-        text.push_str(&format!("## {} ({})\n{answer}\n\n", d.description, d.status));
+        text.push_str(&format!("## {} ({})\n{answer}{}\n\n", d.description, d.status, d.note));
         total.0 += d.usage["requests"].as_u64().unwrap_or(0);
         total.1 += d.usage["input"].as_u64().unwrap_or(0);
         total.2 += d.usage["cached"].as_u64().unwrap_or(0);
         total.3 += d.usage["output"].as_u64().unwrap_or(0);
+    }
+    if done.iter().any(|d| d.unguarded) {
+        text.push_str("(Harlo's sandbox is off, so the helpers that only looked could have changed files with their commands.)\n\n");
     }
     let progress: Vec<Value> = done
         .iter()
@@ -232,7 +253,7 @@ async fn run_all(args: &Value, call_id: &str, ctx: &Ctx, stop: &CancellationToke
     }
 }
 
-async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaphore, stop: &CancellationToken, base: Option<Arc<crate::isolate::Baseline>>) -> Done {
+async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaphore, stop: &CancellationToken, writers: Option<&Writers>) -> Done {
     let description = task["description"].as_str().map(str::trim).filter(|d| !d.is_empty()).unwrap_or("task").to_owned();
     let prompt = task["prompt"].as_str().unwrap_or_default().to_owned();
     let profile = task["agent"].as_str().and_then(|a| ctx.profiles.iter().find(|p| p.name == a));
@@ -258,7 +279,7 @@ async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaph
         None => None,
     };
     let id = format!("task-{}", hex_id());
-    let mut done = Done { id: id.clone(), description: description.clone(), kind: kind.clone(), prompt: prompt.clone(), status: "aborted", text: String::new(), usage: json!({}), worktree: None };
+    let mut done = Done { id: id.clone(), description: description.clone(), kind: kind.clone(), prompt: prompt.clone(), status: "aborted", text: String::new(), usage: json!({}), worktree: None, note: String::new(), unguarded: false };
     let token = stop.child_token();
     ctx.running.lock().unwrap().insert(id.clone(), token.clone());
     // (Waiting for a free place; stopped while it waits: never started.)
@@ -272,13 +293,36 @@ async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaph
         done.text = "Stopped before it started.".into();
         return done;
     }
-    // (A writer beside others: in its own worktree; none made, in place.)
+    // A writer beside others: in its own worktree; none made, in the
+    // project itself, when no other writer is there.
     let mut cwd = ctx.cwd.clone();
-    if let Some(b) = base.filter(|_| writer) {
-        let name = id.clone();
-        if let Ok(Ok(w)) = tokio::task::spawn_blocking(move || b.worktree(&name)).await {
-            cwd = w.cwd.clone();
-            done.worktree = Some(w);
+    let mut _turn = None;
+    if let Some(w) = writers.filter(|_| writer) {
+        let made = match &w.base {
+            Some(b) => {
+                let (b, name) = (b.clone(), id.clone());
+                tokio::task::spawn_blocking(move || b.worktree(&name)).await.unwrap_or_else(|e| Err(e.to_string()))
+            }
+            None => Err(w.why.clone().unwrap_or_default()),
+        };
+        match made {
+            Ok(tree) => {
+                cwd = tree.cwd.clone();
+                done.worktree = Some(tree);
+            }
+            Err(why) => {
+                _turn = tokio::select! {
+                    biased;
+                    _ = token.cancelled() => None,
+                    t = w.turn.lock() => Some(t),
+                };
+                if _turn.is_none() {
+                    ctx.running.lock().unwrap().remove(&id);
+                    done.text = "Stopped before it started.".into();
+                    return done;
+                }
+                done.note = format!("\n\n(No copy of the project could be made for it ({why}), so it worked in the project itself, while no other writer did.)");
+            }
         }
     }
     let file = ctx.parent_file.as_ref().map(|p| p.with_extension("").join(format!("{id}.jsonl")));
@@ -296,6 +340,10 @@ async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaph
         None => (Past::default(), model, effort),
     };
     let mut agent = Agent::new(cwd, log, past, model, effort);
+    // (One that only looks: its commands can't change the project.)
+    if !writer && !agent.look_only() && allowed.contains(&"bash") {
+        done.unguarded = true;
+    }
     agent.gate = ctx.gate.clone();
     agent.budget = ctx.budget.clone();
     agent.fallback = ctx.fallback.clone();
@@ -310,8 +358,9 @@ async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaph
         agent.fixed = Some((f.system.clone(), f.specs.clone()));
         asked = format!(
             "<subagent>\nYou're now a subagent started from the conversation above, to do one part of it: {description}. The main agent goes on with the rest. \
-             Your tools are {} (others are refused). When you're done, your final message goes back to the main agent as your result: say briefly what you found or did.\n\n{prompt}\n</subagent>",
-            allowed.join(", ")
+             Your tools are {}{} (others are refused). When you're done, your final message goes back to the main agent as your result: say briefly what you found or did.\n\n{prompt}\n</subagent>",
+            allowed.join(", "),
+            if writer { "" } else { ", and the project is read-only for your commands" },
         );
     }
     agent.known = ctx.known.clone();

@@ -117,7 +117,7 @@ const CACHE_VARS: &[&str] = &["XDG_CACHE_HOME", "CARGO_HOME", "RUSTUP_HOME", "GO
 const DROPPED_VARS: &[&str] = &["SSH_AUTH_SOCK", "SSH_AGENT_PID", "GPG_AGENT_INFO", "DBUS_SESSION_BUS_ADDRESS", "DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY"];
 
 /// The sandbox for one working directory, its paths resolved.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Sandbox {
     pub network: bool,
     /// The project: the repository's top folder, or the working directory
@@ -138,6 +138,8 @@ pub struct Sandbox {
     env: Vec<String>,
     /// Why it can't start here (commands are refused).
     pub broken: Option<String>,
+    /// For a helper that only looks: the project read-only too.
+    pub looking: bool,
 }
 
 /// The sandbox for `cwd` under this process's policy (None: it's off).
@@ -235,7 +237,7 @@ impl Sandbox {
         let mut shown: Vec<PathBuf> = SHOWN_IN_HOME.iter().map(|s| home.join(s)).collect();
         shown.push(config.join("skills"));
         let shown = existing(shown);
-        Sandbox { network: p.network, project, project_writable, writable, hidden, shown, env: p.env.clone(), broken: None }
+        Sandbox { network: p.network, project, project_writable, writable, hidden, shown, env: p.env.clone(), broken: None, looking: false }
     }
 
     /// bwrap's arguments to run `bash -c command` in `cwd`.
@@ -320,10 +322,24 @@ impl Sandbox {
         }
     }
 
+    /// The same, for a helper that only looks: the project (and its
+    /// repository's shared folder) read-only, /tmp and caches still
+    /// writable.
+    pub fn looking_only(&self) -> Sandbox {
+        let common = git_folders(&self.project).1.and_then(|c| c.canonicalize().ok());
+        let mut s = self.clone();
+        s.writable.retain(|w| !w.starts_with(&self.project) && Some(w) != common.as_ref());
+        s.looking = true;
+        s
+    }
+
     /// Whether the file tools may change `path` (Err: why not).
     pub fn may_write(&self, path: &Path) -> Result<(), String> {
         self.may_read(path)?;
         let real = resolve(&clean(path));
+        if self.looking && real.starts_with(&self.project) {
+            return Err(format!("{} can't be changed: this helper only looks, so the project is read-only for it.", path.display()));
+        }
         if self.writable.iter().any(|w| real.starts_with(w)) {
             return Ok(());
         }
@@ -342,7 +358,9 @@ impl Sandbox {
         if let Some(why) = &self.broken {
             return format!("Commands can't run on this machine: Harlo's sandbox can't start ({why}). Tell the user if you need to run one.");
         }
-        let changeable = if self.project_writable {
+        let changeable = if self.looking {
+            format!("/tmp and tool caches ({} is read-only: you only look)", self.project.display())
+        } else if self.project_writable {
             format!("{}, /tmp and tool caches", self.project.display())
         } else {
             format!("/tmp and tool caches (this session works in {}, the home folder or above it, which stays read-only: to change a file there, use outside_sandbox for a command and say why)", self.project.display())
@@ -516,6 +534,29 @@ pub mod tests {
         assert!(sb.may_write(Path::new("/tmp/x")).is_ok());
         assert!(sb.may_write(&home.join("other/x")).unwrap_err().contains("outside the folders"));
         assert!(sb.may_write(&home.join("proj/../other/x")).is_err());
+    }
+
+    #[test]
+    fn a_helper_that_only_looks_changes_nothing() {
+        let s = home_outside_tmp("looking");
+        let home = s.0.join("home");
+        let proj = home.join("proj");
+        let sb = Sandbox::new(&on(), &proj, &home, &home.join("none"), None).looking_only();
+        assert!(!sb.writable.iter().any(|w| w.starts_with(&proj)), "{:?}", sb.writable);
+        assert!(sb.may_write(&proj.join("a.rs")).unwrap_err().contains("only looks"));
+        assert!(sb.may_write(Path::new("/tmp/x")).is_ok());
+        assert!(sb.may_read(&proj.join("a.rs")).is_ok());
+        assert!(sb.describe().contains("read-only: you only look"), "{}", sb.describe());
+        if unavailable().is_some() {
+            eprintln!("no bubblewrap here: commands not run");
+            return;
+        }
+        let scratch = format!("/tmp/harlo-looking-{}", std::process::id());
+        let out = std::process::Command::new("bwrap").args(sb.args(&format!("touch made.txt; echo touched=$?; touch {scratch} && echo scratch=ok"), &proj)).output().unwrap();
+        let said = String::from_utf8_lossy(&out.stdout);
+        assert!(!proj.join("made.txt").exists() && said.contains("touched=1"), "{said} {}", String::from_utf8_lossy(&out.stderr));
+        assert!(said.contains("scratch=ok"), "/tmp still writable: {said}");
+        let _ = std::fs::remove_file(scratch);
     }
 
     #[test]

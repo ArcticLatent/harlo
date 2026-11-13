@@ -675,6 +675,12 @@ impl Agent {
             if let Some(keep) = self.set_aside_point().await {
                 self.set_aside(keep, 0, show)?;
             }
+            // Another model after the server's own compaction (which only
+            // the model that made it can read): a summary of its own first.
+            if matches!(self.carry_over(stop, show).await, Compacted::Stopped) {
+                self.stopped(show)?;
+                return Ok(Ended::Stopped);
+            }
             // Near the end of the window: the older part summarized first
             // (if that fails, the request goes as it is).
             if self.full().await && matches!(self.compact("threshold", None, stop, show).await, Compacted::Stopped) {
@@ -1002,6 +1008,15 @@ impl Agent {
         self.tools.lsp = servers;
     }
 
+    /// For a helper that only looks: its commands can't change the
+    /// project. False when there's no sandbox to keep it so.
+    pub fn look_only(&mut self) -> bool {
+        let Some(sb) = self.tools.sandbox.as_ref() else { return false };
+        self.tools.sandbox = Some(Arc::new(sb.looking_only()));
+        self.instructions = instructions(&self.cwd, self.tools.sandbox.as_deref()) + &self.added;
+        true
+    }
+
     pub fn add_instructions(&mut self, text: &str) {
         self.instructions.push_str(text);
         self.added.push_str(text);
@@ -1236,6 +1251,102 @@ impl Agent {
         at > 0 && tokens >= at
     }
 
+    /// When the history starts with a native compaction another model
+    /// made (a switch, or a fallback), this model writes a summary of its
+    /// own in its place, once: from the conversation as the log has it,
+    /// before any compaction, its newest part that fits this model's
+    /// window, with the note's list of the user's requests for what's
+    /// older. Nothing to do (and nothing spent) otherwise; on failure the
+    /// note stands, as before.
+    async fn carry_over(&mut self, stop: &CancellationToken, show: &mut (dyn FnMut(Shown) + Send)) -> Compacted {
+        let Some(first) = self.history.first().filter(|m| m["role"] == "compactionSummary" && m["native"].is_object()).cloned() else { return Compacted::Nothing };
+        let Ok((provider, bare)) = providers::resolve(&self.model) else { return Compacted::Nothing };
+        if first["native"]["provider"] == provider.id.as_str() && first["native"]["model"] == bare.as_str() {
+            return Compacted::Nothing;
+        }
+        let (Some(upto), Some(first_kept)) = (self.ids.first().cloned(), self.ids.get(1).cloned()) else { return Compacted::Nothing };
+        let before = crate::session::messages_before(&self.log.path, &upto, &first_kept);
+        if before.is_empty() || self.budget.as_ref().and_then(|b| b.used()).is_some() {
+            return Compacted::Nothing;
+        }
+        let made_by = format!("{}/{}", first["native"]["provider"].as_str().unwrap_or_default(), first["native"]["model"].as_str().unwrap_or_default());
+        // Its newest part that fits beside the rest of the request.
+        let at = compact::threshold(self.window().await);
+        let rest = compact::estimate_text(&self.system()) + compact::estimate_text(&self.specs().to_string()) + self.history[1..].iter().map(compact::estimate).sum::<u64>();
+        let room = if at == 0 { u64::MAX } else { at.saturating_sub(rest) };
+        let mut from = before.len();
+        let mut size = 0;
+        while from > 0 && size + compact::estimate(&before[from - 1]) <= room {
+            from -= 1;
+            size += compact::estimate(&before[from]);
+        }
+        // (Starting at one of the user's or the model's messages.)
+        while from < before.len() && !matches!(before[from]["role"].as_str(), Some("user" | "assistant")) {
+            from += 1;
+        }
+        if from == before.len() {
+            return Compacted::Nothing;
+        }
+        show(Shown::CompactionStart { reason: "model change" });
+        let mut asked: Vec<Value> = Vec::new();
+        if from > 0 {
+            asked.push(json!({ "role": "compactionSummary", "summary": first["summary"], "tokensBefore": first["tokensBefore"], "timestamp": now_ms() }));
+        }
+        asked.extend(before[from..].iter().cloned());
+        asked.push(json!({ "role": "user", "content": [{ "type": "text", "text": compact::request(None, compact::turn_cut(&self.history, 1).as_deref()) }], "timestamp": now_ms() }));
+        let pricing = self.pricing().await;
+        let (system, specs) = (self.system(), self.specs());
+        let key = self.cache_key.clone().unwrap_or_else(|| self.log.id.clone());
+        let images = self.takes_images().await;
+        let request = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &asked, session: &key, specs: &specs, tools: false, images, trigger: false };
+        let mut quiet = |_: Shown| {};
+        let sent = tokio::select! {
+            biased;
+            _ = stop.cancelled() => None,
+            r = send(request, &mut quiet) => Some(r),
+        };
+        let failed = |show: &mut (dyn FnMut(Shown) + Send), why: String| {
+            let said = format!("{why}; it goes on with {made_by}'s note of the user's requests");
+            show(Shown::CompactionEnd { reason: "model change", result: None, error: Some(&said), will_retry: false });
+            Compacted::Failed(why)
+        };
+        let (mut reply, usage) = match sent {
+            None => {
+                show(Shown::CompactionEnd { reason: "model change", result: None, error: None, will_retry: false });
+                return Compacted::Stopped;
+            }
+            Some(Err(e)) => return failed(show, format!("{e:#}")),
+            Some(Ok(r)) => r,
+        };
+        let used = Used::from_api(&usage).priced(&pricing);
+        reply["usage"] = used.log(&usage, &pricing);
+        self.count(&used, true);
+        let text: String = reply["content"].as_array().into_iter().flatten().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join("");
+        if reply["stopReason"] == "length" || text.trim().is_empty() {
+            let _ = self.log.append(json!({ "type": "harlo_usage", "source": "compaction", "usage": reply["usage"] }));
+            return failed(show, if text.trim().is_empty() { "the model wrote no summary".into() } else { "the summary was cut off".into() });
+        }
+        let summary = compact::with_files(&text, &self.files);
+        let tokens_before = first["tokensBefore"].clone();
+        let entry = json!({
+            "type": "compaction", "summary": summary, "firstKeptEntryId": first_kept, "tokensBefore": tokens_before,
+            "details": { "readFiles": self.files.0, "modifiedFiles": self.files.1 },
+            "usage": reply["usage"],
+        });
+        let id = match self.log.append(entry.clone()) {
+            Ok(id) => id,
+            Err(e) => return failed(show, format!("{e:#}")),
+        };
+        self.history[0] = crate::session::summary_message(&entry);
+        self.ids[0] = id;
+        let after = self.estimate_whole();
+        self.last_usage = json!({ "input_tokens": after, "output_tokens": 0 });
+        self.measured = self.history.len();
+        let result = json!({ "summary": summary, "firstKeptEntryId": first_kept, "tokensBefore": tokens_before, "estimatedTokensAfter": after });
+        show(Shown::CompactionEnd { reason: "model change", result: Some(&result), error: None, will_retry: false });
+        Compacted::Done(result)
+    }
+
     /// Replaces the older part of the history with a summary the model
     /// writes (`focus`: what the user asked it to keep). Shown as it goes,
     /// unless there's too little to summarize.
@@ -1278,12 +1389,13 @@ impl Agent {
                     self.count(&used, true);
                     match reply["content"].as_array().into_iter().flatten().find(|b| b["type"] == "compaction") {
                         Some(b) => {
-                            let summary = compact::with_files(&compact::native_note(&self.history[..cut], &self.model), &files);
+                            let asked = compact::native_requests(&self.history[..cut]);
+                            let summary = compact::with_files(&compact::native_note(&asked, &self.model), &files);
                             entry = Some(json!({
                                 "type": "compaction", "summary": summary, "firstKeptEntryId": first_kept, "tokensBefore": tokens_before,
                                 "details": { "readFiles": files.0, "modifiedFiles": files.1 },
                                 "usage": reply["usage"],
-                                "native": { "provider": pid, "model": bare, "item": b["item"] },
+                                "native": { "provider": pid, "model": bare, "item": b["item"], "requests": asked },
                             }));
                         }
                         None => {
