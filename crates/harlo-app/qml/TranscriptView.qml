@@ -49,6 +49,8 @@ Item {
     readonly property var subagents: session.subagentsJson !== "" ? JSON.parse(session.subagentsJson) : []
 
     function scrollToEnd() { view.follow = true; view.scrollToEnd() }
+    // (Tests: the list itself.)
+    readonly property alias listView: view
     // A picture in the chat (one you sent, a tool returned, a reply has):
     // the image viewer over the conversation, stepping through all of them.
     function showPicture(path) {

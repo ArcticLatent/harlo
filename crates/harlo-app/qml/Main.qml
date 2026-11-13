@@ -1507,6 +1507,108 @@ ApplicationWindow {
             win.summary(); Qt.quit() } }
     }
 
+    // A long session (8500 turns, about 51,000 rows): how long it takes to
+    // open, and the longest frame while it opens, while a long reply streams
+    // in, and while it's scrolled from end to start.
+    Timer {
+        id: longTick
+        interval: 16
+        repeat: true
+        property real last: 0
+        property real worst: 0
+        property int slow: 0
+        property var gaps: []
+        function reset() { last = 0; worst = 0; slow = 0; gaps = [] }
+        onTriggered: { const n = Date.now(); if (last > 0) { worst = Math.max(worst, n - last); if (n - last > 50) { slow++; gaps.push([last - win.longAt, n - last]) } } last = n }
+    }
+    property real longAt: 0
+    // (A turn seen to start and end. The model's log isn't read while it
+    // streams: each request carries the whole 20 MB history.)
+    property bool longBusy: false
+    Connections {
+        target: win.argValue("--scenario=") === "clicksharlolong" ? chat.transcript : null
+        function onCountChanged() {
+            const n = chat.transcript.count
+            if (win.longTimes.shown === undefined && n > 0) win.longTimes.shown = Date.now() - win.longAt
+            if (win.longTimes.all === undefined && n >= win.longTimes.turns * 6) win.longTimes.all = Date.now() - win.longAt
+        }
+    }
+    property bool longDone: false
+    Connections {
+        target: win.argValue("--scenario=") === "clicksharlolong" ? chat.session : null
+        function onStatusChanged() {
+            if (chat.session.status === "busy") win.longBusy = true
+            else if (win.longBusy && chat.session.status === "idle") win.longDone = true
+        }
+    }
+    property var longTimes: ({})
+    Timer {
+        id: longScroll
+        interval: 16
+        repeat: true
+        // (Up half a screen a frame, a fast flick's speed, for 5 s or to the
+        // first row.)
+        property int ticks: 0
+        onTriggered: { const v = chat.transcript.listView; if (++ticks > 300 || v.atYBeginning) { stop(); return } v.contentY -= v.height / 2 }
+    }
+    SequentialAnimation {
+        id: harloLongSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlolong"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const cwd = win.argValue("--cwd=")
+            win.longTimes.turns = Number(TestInput.readFile(win.selftestDir + "/long-turns"))
+            longTick.reset(); longTick.start(); win.longAt = Date.now()
+            // (After this step: opening takes a moment, and the steps after
+            // a long one are caught up at once, a wait among them.)
+            const path = win.selftestDir + "/data/harlo-agent/sessions/--" + cwd.replace(/^\//, "").replace(/\//g, "-") + "--/long0000-0000-0000-0000-000000000000.jsonl"
+            Qt.callLater(() => Workspace.open(path)) } }
+        // (Longer than opening blocks: the wait isn't caught up past.)
+        PauseAnimation { duration: 1500 }
+        // (6 rows a turn.)
+        // (And its agent ready: the rows it read itself replace the file's.)
+        ScriptAction { script: win.waitUntil(harloLongSteps, () => chat.transcript.listView.count >= win.longTimes.turns * 6 && chat.session.status === "idle", 120000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            win.longTimes.rows = chat.transcript.listView.count
+            win.longTimes.openWorst = longTick.worst; win.longTimes.openSlow = longTick.slow
+            win.check(win.longTimes.rows >= win.longTimes.turns * 6, "the whole session is there (" + win.longTimes.rows + " rows)") } }
+        PauseAnimation { duration: 1000 }
+        ScriptAction { script: { longTick.reset(); win.longAt = Date.now(); win.sendByKeys("write a long reply") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloLongSteps, () => win.longDone, 60000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            win.longTimes.stream = Date.now() - win.longAt
+            win.longTimes.streamWorst = longTick.worst; win.longTimes.streamSlow = longTick.slow
+            win.log("long stream gaps", JSON.stringify(longTick.gaps))
+            win.check(chat.transcript.listView.count > win.longTimes.rows + 30, "the long reply is in (" + chat.transcript.listView.count + " rows)")
+            // (Scrolled up as you would: it stops following the end.)
+            chat.transcript.listView.follow = false
+            longTick.reset(); win.longAt = Date.now(); longScroll.ticks = 0; longScroll.start() } }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: win.waitUntil(harloLongSteps, () => !longScroll.running, 60000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            win.longTimes.scroll = Date.now() - win.longAt
+            win.longTimes.scrollWorst = longTick.worst; win.longTimes.scrollSlow = longTick.slow; win.longTimes.scrollTicks = longScroll.ticks
+            longTick.stop()
+            win.log("long session", JSON.stringify(win.longTimes))
+            // (Loose bounds, the numbers logged. Before the rows were
+            // indexed and the prompt rail made only the ticks near its
+            // window, 146 of 301 frames scrolling took over 50 ms, and a
+            // turn's end 270 ms.)
+            win.check(win.longTimes.all < 5000, "it opens in time (all rows in " + win.longTimes.all + " ms)")
+            win.check(win.longTimes.streamWorst < 150, "frames keep coming while the reply streams (longest " + win.longTimes.streamWorst + " ms)")
+            win.check(win.longTimes.scrollSlow < 30 && win.longTimes.scrollWorst < 150, "and while it scrolls up (" + win.longTimes.scrollSlow + " of " + win.longTimes.scrollTicks + " frames over 50 ms, longest " + win.longTimes.scrollWorst + " ms)")
+            win.shot("clicks-harlo-long-session")
+            win.summary(); Qt.quit() } }
+    }
+
     // Stop while a turn's snapshot is still being taken (slowed to 2.5 s):
     // the message never reaches the model and comes back to the box; the
     // next one goes as usual.

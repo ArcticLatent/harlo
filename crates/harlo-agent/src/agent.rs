@@ -932,6 +932,15 @@ impl Agent {
         message["usage"] = used.log(&usage, &pricing);
         self.count(&used, true);
         show(Shown::Usage { model: message["model"].as_str().unwrap_or_default(), usage: &usage });
+        // (Measuring: each request's parts beside what it measured.)
+        if let Some(path) = std::env::var_os("HARLO_AGENT_PROMPT_PARTS") {
+            let line = json!({ "session": self.log.id, "model": self.model, "subagent": self.allowed.is_some() || !self.added.is_empty(),
+                               "measured": used.input, "cached": used.cached, "parts": self.prompt_parts() });
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+                let _ = writeln!(f, "{line}");
+            }
+        }
         self.last_usage = usage;
         // (The reply, pushed next, is its output.)
         self.measured = self.history.len() + 1;
@@ -1101,6 +1110,40 @@ impl Agent {
             list.extend(self.harlo_tools.iter().cloned());
         }
         all
+    }
+
+    /// The request's size by part, estimated (tokens): harlo-agent's own
+    /// instructions, the project's rules, skills, an agent profile, its own
+    /// tools, MCP servers' (their notes too), harlo's (and what harlo
+    /// says), and the conversation. For measuring only
+    /// (`HARLO_AGENT_PROMPT_PARTS`).
+    fn prompt_parts(&self) -> Value {
+        // (Nothing for an empty part.)
+        let est = |t: &str| if t.is_empty() { 0 } else { compact::estimate_text(t) };
+        let tokens = |list: &[&Value]| list.iter().map(|t| est(&t.to_string())).sum::<u64>();
+        let history: u64 = self.history.iter().map(compact::estimate).sum();
+        if self.fixed.is_some() {
+            return json!({ "fixed": est(&self.system()) + est(&self.specs().to_string()), "history": history });
+        }
+        let [head, rules, skills, tail] = instruction_parts(&self.cwd, self.tools.sandbox.as_deref());
+        let mcp_names: Vec<&Value> = self.mcp.as_ref().map(|m| m.specs().iter().map(|t| &t["name"]).collect()).unwrap_or_default();
+        let harlo_names: Vec<&Value> = self.harlo_tools.iter().map(|t| &t["name"]).collect();
+        let specs = self.specs();
+        let list: Vec<&Value> = specs.as_array().map(|l| l.iter().collect()).unwrap_or_default();
+        let of = |names: &[&Value]| list.iter().copied().filter(|t| names.contains(&&t["name"])).collect::<Vec<_>>();
+        let native: Vec<&Value> = list.iter().copied().filter(|t| !mcp_names.contains(&&t["name"]) && !harlo_names.contains(&&t["name"])).collect();
+        let notes = self.mcp.as_ref().map(|m| m.notes()).unwrap_or_default();
+        json!({
+            "base": est(&(head + &tail)),
+            "rules": est(&rules),
+            "skills": est(&skills),
+            "profile": est(&self.added),
+            "native_tools": tokens(&native),
+            "mcp_tools": tokens(&of(&mcp_names)) + est(&notes),
+            "harlo_tools": tokens(&of(&harlo_names)) + est(&self.harlo_text),
+            "history": history,
+            "tools": list.len(),
+        })
     }
 
     /// harlo's tools and what they're for, as harlo says now (none when it
@@ -1954,7 +1997,14 @@ fn harlo_specs(listed: &Value) -> Vec<Value> {
 
 /// The system prompt: short; the project's own instructions after it.
 pub(crate) fn instructions(cwd: &Path, sandbox: Option<&crate::sandbox::Sandbox>) -> String {
-    let mut s = String::from(
+    let [head, rules, skills, tail] = instruction_parts(cwd, sandbox);
+    head + &rules + &skills + &tail
+}
+
+/// The instructions in their parts: harlo-agent's own, the project's rules,
+/// the skills' listing, and where and when it works (its own too).
+fn instruction_parts(cwd: &Path, sandbox: Option<&crate::sandbox::Sandbox>) -> [String; 4] {
+    let head = String::from(
         "You are harlo-agent, a coding agent. You work in the user's project with your tools, and finish the task you're given.\n\
          \n\
          - Look before you change: read a file before editing it. When the task names a file, read it; search (grep, find) only when you don't know where something is.\n\
@@ -1963,6 +2013,7 @@ pub(crate) fn instructions(cwd: &Path, sandbox: Option<&crate::sandbox::Sandbox>
          - When a tool fails, read its message: it says what to do next.\n\
          - Keep going until the task is done, then reply with a short summary of what you changed and anything left open. Be concise.\n",
     );
+    let mut s = String::new();
     for (path, text) in project_instructions(cwd) {
         s.push_str(&format!("\n<project_instructions path=\"{}\">\n{}\n</project_instructions>\n", path.display(), text.trim()));
     }
@@ -1977,7 +2028,8 @@ pub(crate) fn instructions(cwd: &Path, sandbox: Option<&crate::sandbox::Sandbox>
         }
         s.push_str("</project_rules>\n");
     }
-    s.push_str(&crate::skills::listing(&crate::skills::find(cwd, &home(), &crate::auth::config_dir())));
+    let rules = std::mem::take(&mut s);
+    let skills = crate::skills::listing(&crate::skills::find(cwd, &home(), &crate::auth::config_dir()));
     s.push_str(&format!("\nWorking directory: {}\n", cwd.display()));
     // (The day only, so the instructions stay the same all day; the time
     // is a tool.)
@@ -1988,7 +2040,7 @@ pub(crate) fn instructions(cwd: &Path, sandbox: Option<&crate::sandbox::Sandbox>
     if let Some(listing) = listing(cwd) {
         s.push_str(&format!("\nIts files when the session started:\n{listing}\n"));
     }
-    s
+    [head, rules, skills, s]
 }
 
 /// Entries of the working directory shown in the instructions, at most.
@@ -2124,6 +2176,31 @@ mod tests {
         let system = agent.system();
         assert!(system.contains("Project rule two.") && !system.contains("Project rule one."), "the project's as they are now");
         assert_eq!(system.matches("<agent_profile name=\"reviewer\">").count(), 1, "the profile kept, once: {system}");
+        let _ = std::fs::remove_dir_all(&cwd);
+    }
+
+    #[test]
+    fn a_request_is_measured_by_part() {
+        let cwd = std::env::temp_dir().join(format!("harlo-agent-parts-{}", std::process::id()));
+        std::fs::create_dir_all(&cwd).unwrap();
+        std::fs::write(cwd.join("AGENTS.md"), "A project rule. ".repeat(250)).unwrap();
+        let mut agent = Agent::new(cwd.clone(), crate::session::Log::ephemeral(&cwd), crate::session::Past::default(), "test/m".into(), None);
+        agent.add_instructions(&format!("\n<agent_profile name=\"reviewer\">\n{}\n</agent_profile>\n", "Only review. ".repeat(100)));
+        agent.history.push(json!({ "role": "user", "content": [{ "type": "text", "text": "x".repeat(4000) }] }));
+        let p = agent.prompt_parts();
+        let n = |k: &str| p[k].as_u64().unwrap();
+        // (The rule file: 4000 characters, about 1000 tokens with its tag.)
+        assert!((1000..1040).contains(&n("rules")), "{p}");
+        assert!((325..345).contains(&n("profile")), "{p}");
+        assert_eq!(n("history"), 1004);
+        assert!(n("base") > 100 && n("native_tools") > 1000 && n("tools") > 5, "{p}");
+        assert_eq!((n("mcp_tools"), n("harlo_tools")), (0, 0));
+        // The parts add up to the whole request, as it's estimated (the
+        // model's line and a few tokens a part apart).
+        let parts: u64 = ["base", "rules", "skills", "profile", "native_tools", "history"].iter().map(|k| n(k)).sum();
+        let whole = agent.estimate_whole();
+        assert!(parts.abs_diff(whole) < 60, "parts {parts}, whole {whole}");
+        assert_eq!(instructions(&cwd, None), instruction_parts(&cwd, None).concat());
         let _ = std::fs::remove_dir_all(&cwd);
     }
 

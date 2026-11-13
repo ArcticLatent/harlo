@@ -317,7 +317,7 @@ pub mod qobject {
     }
 }
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 /// The entry id of a session's `ordinal`-th user message (counting from 0),
 /// from its file's current branch: what `branch` and `fork` take. Blocking:
@@ -437,9 +437,67 @@ pub struct ChatSessionRust {
     /// Files on a host that edits were numbered from: when each was asked
     /// for, and its text once it came.
     host_files: std::cell::RefCell<std::collections::HashMap<String, (std::time::Instant, Option<Arc<str>>)>>,
+    /// Where each row is (see `RowIndex`), once asked after the rows change.
+    row_index: std::cell::RefCell<Option<RowIndex>>,
     /// The words last sent: back in the composer if Stop comes before
     /// they reach the agent (`SessionUpdate::Unsent`).
     last_sent: String,
+}
+
+/// Where each row is, by its key and by the run (group) it's in. Rows'
+/// delegates ask on every change to the list (a tool row how many reads
+/// follow it in its run, a run box its rows), and a long session has tens
+/// of thousands of rows: built once after the rows change, when first
+/// asked, instead of a pass over every row for each question.
+#[derive(Default)]
+struct RowIndex {
+    keys: HashMap<u64, usize>,
+    groups: HashMap<u64, Vec<usize>>,
+}
+
+fn hash_of(s: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    s.hash(&mut h);
+    h.finish()
+}
+
+impl RowIndex {
+    fn of(rows: &[Arc<Row>]) -> Self {
+        let mut ix = RowIndex::default();
+        for (i, r) in rows.iter().enumerate() {
+            ix.keys.entry(hash_of(&r.key)).or_insert(i);
+            if !r.group.is_empty() {
+                ix.groups.entry(hash_of(&r.group)).or_default().push(i);
+            }
+        }
+        ix
+    }
+}
+
+impl ChatSessionRust {
+    fn indexed<T>(&self, f: impl FnOnce(&RowIndex) -> T) -> T {
+        f(self.row_index.borrow_mut().get_or_insert_with(|| RowIndex::of(&self.rows)))
+    }
+
+    /// The row with `key` (the first, if two have it).
+    fn row_at(&self, key: &str) -> Option<usize> {
+        match self.indexed(|ix| ix.keys.get(&hash_of(key)).copied()) {
+            Some(i) if self.rows.get(i).is_some_and(|r| r.key == key) => Some(i),
+            // (Another key with the same hash: looked for.)
+            Some(_) => self.rows.iter().position(|r| r.key == key),
+            None => None,
+        }
+    }
+
+    /// The rows of a run, in order.
+    fn run_rows(&self, group: &str) -> Vec<&Arc<Row>> {
+        if group.is_empty() {
+            return Vec::new();
+        }
+        let at = self.indexed(|ix| ix.groups.get(&hash_of(group)).cloned().unwrap_or_default());
+        at.into_iter().map(|i| &self.rows[i]).filter(|r| r.group == group).collect()
+    }
 }
 
 struct QtSink {
@@ -480,6 +538,7 @@ impl ChatSession {
         unsafe {
             self.as_mut().begin_reset_model();
             self.as_mut().rust_mut().rows.clear();
+            *self.row_index.borrow_mut() = None;
             self.as_mut().end_reset_model();
         }
         self.as_mut().rust_mut().requests.clear();
@@ -643,7 +702,7 @@ impl ChatSession {
 
     pub fn index_of_key(&self, key: &QString) -> i32 {
         let key = key.to_string();
-        self.rows.iter().position(|r| r.key == key).map_or(-1, |i| i as i32)
+        self.row_at(&key).map_or(-1, |i| i as i32)
     }
 
     pub fn transcript_text(&self) -> QString {
@@ -896,11 +955,7 @@ impl ChatSession {
 
     pub fn answer_after(&self, key: &QString) -> QString {
         let key = key.to_string();
-        let answer = self
-            .rows
-            .iter()
-            .position(|r| r.key == key)
-            .and_then(|at| self.rows[at + 1..].iter().find(|r| r.kind == harlo_core::RowKind::User));
+        let answer = self.row_at(&key).and_then(|at| self.rows[at + 1..].iter().find(|r| r.kind == harlo_core::RowKind::User));
         let json = match answer {
             Some(r) => serde_json::json!({ "answered": true, "text": r.text }),
             None => serde_json::json!({ "answered": false, "text": "" }),
@@ -955,7 +1010,7 @@ impl ChatSession {
     fn undo_target(&self, row_key: &str) -> Option<(String, usize)> {
         let map: Value = serde_json::from_str(&self.undo_json.to_string()).ok()?;
         let snap = map[row_key]["snapshot"].as_str()?.to_owned();
-        let at = self.rows.iter().position(|r| r.key == row_key)?;
+        let at = self.row_at(row_key)?;
         Some((snap, self.rows[at + 1..].iter().filter(|r| r.is_sent()).count()))
     }
 
@@ -1035,9 +1090,8 @@ impl ChatSession {
     pub fn run_json(&self, group: &QString) -> QString {
         let group = group.to_string();
         let rows: Vec<serde_json::Value> = self
-            .rows
-            .iter()
-            .filter(|r| !group.is_empty() && r.group == group)
+            .run_rows(&group)
+            .into_iter()
             .map(|r| {
                 let took = if r.time > 0 && r.ended >= r.time { r.ended - r.time } else { 0 };
                 serde_json::json!({
@@ -1119,7 +1173,7 @@ impl ChatSession {
 
     pub fn call_output(&self, row_key: &QString) -> QString {
         let key = row_key.to_string();
-        match self.rows.iter().find(|r| r.key == key) {
+        match self.row_at(&key).map(|i| &self.rows[i]) {
             Some(r) => QString::from(r.full.as_ref().map(|f| &*f.0).unwrap_or(r.text.as_str())),
             None => QString::default(),
         }
@@ -1130,7 +1184,7 @@ impl ChatSession {
         if group.is_empty() {
             return 0;
         }
-        let run: Vec<_> = self.rows.iter().filter(|r| r.group == group).collect();
+        let run = self.run_rows(&group);
         let Some(at) = run.iter().position(|r| r.key == key) else { return 0 };
         run[at + 1..].iter().filter(|r| r.kind == RowKind::Tool && harlo_core::listing::is_read(&r.title)).count() as i32
     }
@@ -1341,6 +1395,7 @@ impl ChatSession {
                 SessionUpdate::Reset(rows) => unsafe {
                     self.as_mut().begin_reset_model();
                     self.as_mut().rust_mut().rows = rows;
+                    *self.row_index.borrow_mut() = None;
                     self.as_mut().end_reset_model();
                 },
                 SessionUpdate::Rows(changes) => self.as_mut().apply_row_changes(changes),
@@ -1497,22 +1552,27 @@ impl ChatSession {
 
     fn apply_row_changes(mut self: Pin<&mut Self>, changes: Vec<RowChange>) {
         let root = QModelIndex::default();
+        // (The index is dropped as each change lands, before it's told:
+        // views ask at once, mid-way through the changes.)
         for change in changes {
             match change {
                 RowChange::Update { at, row } => {
                     self.as_mut().rust_mut().rows[at] = row;
+                    *self.row_index.borrow_mut() = None;
                     let idx = self.index(at as i32, 0, &root);
                     self.as_mut().data_changed(&idx, &idx, &QVector::<i32>::default());
                 }
                 RowChange::Remove { at, count } => unsafe {
                     self.as_mut().begin_remove_rows(&root, at as i32, (at + count - 1) as i32);
                     self.as_mut().rust_mut().rows.drain(at..at + count);
+                    *self.row_index.borrow_mut() = None;
                     self.as_mut().end_remove_rows();
                 },
                 RowChange::Insert { at, rows } => unsafe {
                     let last = at + rows.len() - 1;
                     self.as_mut().begin_insert_rows(&root, at as i32, last as i32);
                     self.as_mut().rust_mut().rows.splice(at..at, rows);
+                    *self.row_index.borrow_mut() = None;
                     self.as_mut().end_insert_rows();
                 },
             }
@@ -1620,5 +1680,26 @@ fn compact_note(tokens: u64, compact_at: u64) -> String {
     match compact_at.saturating_sub(tokens) {
         0 => "The context is at its limit: it compacts next".to_owned(),
         left => format!("{} tokens left before the context compacts", k(left)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rows_are_found_by_key_and_run() {
+        let row = |key: &str, group: &str| Arc::new(Row { key: key.into(), group: group.into(), ..Row::default() });
+        let mut s = ChatSessionRust::default();
+        s.rows = vec![row("a", ""), row("b", "g1"), row("c", "g1"), row("b", "g2"), row("d", "g2")];
+        // (The first of two with one key, as a search from the start finds.)
+        assert_eq!((s.row_at("b"), s.row_at("d"), s.row_at("x")), (Some(1), Some(4), None));
+        let keys = |s: &ChatSessionRust, g: &str| s.run_rows(g).iter().map(|r| r.key.clone()).collect::<Vec<_>>();
+        assert_eq!((keys(&s, "g1"), keys(&s, "g2"), keys(&s, "")), (vec!["b".to_owned(), "c".into()], vec!["b".to_owned(), "d".into()], vec![]));
+        // Built once, until the rows change.
+        s.rows.insert(0, row("z", "g1"));
+        assert_eq!(s.row_at("z"), None, "the index is the one built before");
+        *s.row_index.borrow_mut() = None;
+        assert_eq!((s.row_at("z"), s.row_at("b"), keys(&s, "g1").len()), (Some(0), Some(2), 3));
     }
 }

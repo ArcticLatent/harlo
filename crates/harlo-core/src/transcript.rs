@@ -1280,6 +1280,55 @@ mod tests {
         crate::listdiff::apply(rows, changes);
     }
 
+    /// A long session's turns (a prompt, a reply with three reads, their
+    /// results, a closing reply), as a harness's history has them.
+    pub(crate) fn long_session(turns: usize) -> Vec<serde_json::Value> {
+        let mut out = Vec::new();
+        for t in 0..turns {
+            out.push(json!({ "role": "user", "content": [{ "type": "text", "text": format!("Look at part {t} and fix what's wrong there, please.") }] }));
+            let calls: Vec<_> = (0..3).map(|c| json!({ "type": "toolCall", "id": format!("c{t}-{c}"), "name": "read", "arguments": { "path": format!("src/part{t}/file{c}.rs") } })).collect();
+            let mut content = vec![json!({ "type": "text", "text": "I'll read the three files first." })];
+            content.extend(calls);
+            out.push(json!({ "role": "assistant", "content": content }));
+            for c in 0..3 {
+                out.push(json!({ "role": "toolResult", "toolCallId": format!("c{t}-{c}"), "toolName": "read", "content": [{ "type": "text", "text": "fn main() {\n    println!(\"hello\");\n}\n".repeat(20) }], "isError": false }));
+            }
+            out.push(json!({ "role": "assistant", "content": [{ "type": "text", "text": format!("Fixed part {t}: the **loop** stopped one short. `cargo test` passes.\n\n- one\n- two") }] }));
+        }
+        out
+    }
+
+    /// How long a streaming flush takes in a long session: a reply's next
+    /// words, then the rows built and diffed against those shown (what the
+    /// session loop does every 100 ms). Release build, by hand:
+    /// `cargo test --release -p harlo-core --lib -- --ignored long_session_flush --nocapture`
+    #[test]
+    #[ignore]
+    fn long_session_flush() {
+        use harlo_harness::{BlockKind, HarnessEvent};
+        for turns in [1_700, 8_500] {
+            let mut t = Transcript::default();
+            let started = std::time::Instant::now();
+            t.load_messages(&long_session(turns));
+            let mut shown = t.rows();
+            let load = started.elapsed();
+            t.apply(&HarnessEvent::MessageStart { id: "s".into(), message: json!({ "role": "assistant", "content": [] }) });
+            t.apply(&HarnessEvent::BlockStart { id: "s".into(), index: 0, kind: BlockKind::Text, tool: None });
+            let mut times = Vec::new();
+            for i in 0..200 {
+                t.apply(&HarnessEvent::BlockDelta { id: "s".into(), index: 0, kind: BlockKind::Text, delta: format!("Line {i} of the reply, with a few more words in it.\n\n") });
+                let at = std::time::Instant::now();
+                let rows = t.rows();
+                let changes = diff_rows(&shown, &rows);
+                shown = rows;
+                times.push(at.elapsed());
+                assert!(!changes.is_empty(), "{i}: {} rows, last {:?}", shown.len(), shown.last());
+            }
+            times.sort();
+            println!("{} rows ({turns} turns): load {:?}; flush median {:?}, 95th {:?}, max {:?}", shown.len(), load, times[100], times[190], times[199]);
+        }
+    }
+
     #[test]
     fn output_kept_from_its_end_starts_at_a_line() {
         let s: String = (1..=2000).map(|i| format!("line {i}\n")).collect();

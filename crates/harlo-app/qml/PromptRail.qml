@@ -27,6 +27,8 @@ Item {
     readonly property int maxStart: Math.max(0, count - visibleCount)
     property int windowStart: 0
     readonly property int start: Math.min(windowStart, maxStart)
+    // The first tick made (see the tape).
+    readonly property int tickBase: visibleCount === 0 ? 0 : Math.max(0, Math.min(count - Math.min(count, visibleCount * 3), (Math.floor(start / visibleCount) - 1) * visibleCount))
     readonly property bool moreAbove: start > 0
     readonly property bool moreBelow: start + visibleCount < count
     /// The prompt under the pointer or keyboard; -1 while the rail is idle.
@@ -154,11 +156,16 @@ Item {
             width: parent.width
             y: -rail.start * rail.pitch
             Behavior on y { NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
+            // Only the ticks around the window are made (a long session
+            // has thousands of prompts, and each tick's bindings ran as
+            // the one in view changed): three windows' worth, moved a whole
+            // window at a time, so a tick keeps its item while it shows.
             Repeater {
-                model: rail.count
+                model: Math.min(rail.count, rail.visibleCount * 3)
                 Item {
                     required property int index
-                    y: index * rail.pitch
+                    readonly property int at: rail.tickBase + index
+                    y: at * rail.pitch
                     width: 28
                     height: rail.pitch
                     Rectangle {
@@ -167,9 +174,9 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         height: 2
                         radius: 1
-                        width: rail.tickWidth(index)
+                        width: rail.tickWidth(parent.at)
                         color: Theme.foreground
-                        opacity: (index === rail.activeIndex ? 1 : index === rail.highlighted ? 0.8 : 0.3) * rail.edgeFade(index)
+                        opacity: (parent.at === rail.activeIndex ? 1 : parent.at === rail.highlighted ? 0.8 : 0.3) * rail.edgeFade(parent.at)
                         Behavior on width { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
                         Behavior on opacity { NumberAnimation { duration: 200 } }
                     }
