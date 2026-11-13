@@ -78,12 +78,12 @@ pub fn tools(starting: Starting) -> Value {
     let mut tools = json!([
         {
             "name": "list_agents",
-            "description": "The coding agents harlo can start sessions with (harlo, claude): their ids and whether they're installed.",
+            "description": "The coding agents harlo can start sessions with: ids and whether they're installed.",
             "inputSchema": s(json!({}), &[]),
         },
         {
             "name": "list_sessions",
-            "description": "harlo's open sessions: each one's id, title, agent, status (busy / idle / waiting for input), folder, and which session started it. With query: past sessions of your folder (or everywhere) whose messages match it, with the passages.",
+            "description": "harlo's open sessions: id, title, agent, status (busy / idle / waiting for input), folder, who started it. With query: past sessions (your folder's, or everywhere) whose messages match, with the passages.",
             "inputSchema": s(json!({
                 "query": { "type": "string", "description": "Words to find in past sessions' messages." },
                 "everywhere": { "type": "boolean", "description": "Every folder's sessions, not just yours." }
@@ -91,39 +91,39 @@ pub fn tools(starting: Starting) -> Value {
         },
         {
             "name": "start_session",
-            "description": format!("Starts a new harlo session with a coding agent and sends it a first prompt. {} It becomes your helper, in your permission mode: the user sees it under your session, and harlo sends you its report when it finishes (unless notify is false), its questions for you, and when it waits for the user. Start every independent helper, then end your turn: harlo wakes you with what comes back; don't poll. The new agent has none of your context: make the prompt a self-contained briefing. A second opinion or a committee member only analyses: end its prompt, and each later message to it, with {NO_EDITS}. A committee's members get the same prompt; where they disagree, send each the other's arguments with send_message until they agree.", when_to_start(starting)),
+            "description": format!("Starts a harlo session with a coding agent and sends it a first prompt (when to: see harlo's instructions). It becomes your helper, in your permission mode, shown under your session; harlo sends you its report when it finishes (unless notify is false), its questions, and when it waits for the user. Start every independent helper, then end your turn: harlo wakes you; don't poll. It has none of your context: make the prompt a self-contained briefing. A second opinion or committee member only analyses: end its prompt, and each later message to it, with {NO_EDITS}. Committee members get the same prompt; where they disagree, pass each the other's arguments with send_message until they agree."),
             "inputSchema": s(json!({
                 "agent": { "type": "string", "description": "harlo or claude (see list_agents)." },
-                "prompt": { "type": "string", "description": "The first message: the task, its context, the relevant files, what's done and what's left." },
-                "title": { "type": "string", "description": "A short name for the session." },
+                "prompt": { "type": "string", "description": "The task, its context, the relevant files, what's done and what's left." },
+                "title": { "type": "string", "description": "A short name." },
                 "model": { "type": "string", "description": "provider/model, if not the agent's default." },
-                "thinking": { "type": "string", "description": "Its thinking level (low, medium, high), if not the agent's default." },
-                "folder": { "type": "string", "description": "Where it works (default: your folder)." },
-                "worktree": { "type": "string", "description": "A new git worktree on this branch name to work in (isolated from your checkout)." },
-                "notify": { "type": "boolean", "description": "Send its report back to you when it finishes, and its questions (default true). False: it's on its own (a handoff)." },
-                "budget": { "type": "string", "description": "For a Harlo session: the most tokens it may use (sent and received, not counting those the cache served, its subagents' included), as 400k or 2m. Past it, it stops and you're told. Default: the user's budget per helper, if they set one." }
+                "thinking": { "type": "string", "description": "low, medium or high, if not the agent's default." },
+                "folder": { "type": "string", "description": "Where it works (default: yours)." },
+                "worktree": { "type": "string", "description": "A new git worktree on this branch, apart from your checkout." },
+                "notify": { "type": "boolean", "description": "Its report and questions come to you (default true); false for a handoff." },
+                "budget": { "type": "string", "description": "Harlo sessions: the most tokens it may use (sent and received, cache hits not counted, its subagents' included), as 400k or 2m; past it, it stops and you're told. Default: the user's per-helper budget." }
             }), &["agent", "prompt"]),
         },
         {
             "name": "send_message",
-            "description": "Sends a follow-up message to a harlo session (queued if it's busy): more work for a helper, or the answer to its question. To tell all your helpers the same thing (a change of plan, stop and report), send it to \"helpers\".",
+            "description": "Sends a harlo session a message (queued if it's busy): more work for a helper, or an answer to its question. \"helpers\" sends it to all your open helpers (a change of plan, stop and report).",
             "inputSchema": s(json!({
-                "session": { "type": "string", "description": "The session's id (from start_session or list_sessions), or \"helpers\": every helper you started that's still open." },
+                "session": { "type": "string", "description": "Its id, or \"helpers\"." },
                 "message": { "type": "string" }
             }), &["session", "message"]),
         },
         {
             "name": "read_session",
-            "description": "A harlo session's status and its last reply (or the last few messages); a past one's latest messages too (its @session id).",
+            "description": "A harlo session's status and last reply (or its latest messages); past ones too (by @session id).",
             "inputSchema": s(json!({
                 "session": { "type": "string" },
-                "messages": { "type": "integer", "description": "How many of its latest messages to return (default 1: the last reply)." }
+                "messages": { "type": "integer", "description": "How many latest messages (default 1: the last reply)." }
             }), &["session"]),
         },
         {
             "name": "bring_over",
-            "description": "Brings your helper's work over from its worktree to your folder: what it changed since its worktree started (its commits, and its uncommitted and new files), as uncommitted changes here. Nothing is committed. Files that don't fit your current version (you, or another helper, changed the same lines) are left alone and named: merge those by hand from the helper's worktree. Look over its work first; for a helper working in your own folder there's nothing to bring.",
-            "inputSchema": s(json!({ "session": { "type": "string", "description": "Your helper's session id." } }), &["session"]),
+            "description": "Brings a helper's work from its worktree into your folder as uncommitted changes (its commits, uncommitted and new files since it started). Files where you or another helper changed the same lines are left alone and named: merge those by hand. Look over its work first; a helper in your own folder has nothing to bring.",
+            "inputSchema": s(json!({ "session": { "type": "string", "description": "Your helper's id." } }), &["session"]),
         },
         {
             "name": "stop_session",
@@ -132,9 +132,9 @@ pub fn tools(starting: Starting) -> Value {
         },
         {
             "name": "request_approval",
-            "description": "Asks the user to decide something only they may decide (to go ahead with a risky or irreversible step, or a choice that's theirs). harlo shows it in your session and on their phone, and notifies them; no agent can answer it. Then end your turn: their answer comes to you as a message.",
+            "description": "Asks the user to decide something only they may (a risky or irreversible step, or a choice that's theirs). harlo shows it in your session and on their phone and notifies them; no agent can answer it. Then end your turn: their answer comes as a message.",
             "inputSchema": s(json!({
-                "question": { "type": "string", "description": "What they decide, with what they need to know to decide it." },
+                "question": { "type": "string", "description": "The decision, with what they need to know." },
                 "options": { "type": "array", "items": { "type": "string" }, "description": "Their choices (default: Approve, Reject)." }
             }), &["question"]),
         }
@@ -144,18 +144,18 @@ pub fn tools(starting: Starting) -> Value {
     {
         list.push(json!({
             "name": "propose_helpers",
-            "description": format!("Offers the user a split of your task into helpers that work at the same time. harlo shows them why and what each helper would do; if they agree, harlo starts the helpers (as start_session does: your helpers, in your permission mode, reporting back to you). Then end your turn: harlo tells you their answer, with the helpers' ids if it started them, and their reports come to you as they finish; don't poll. If they say no, do the work yourself. At most {MAX_PROPOSED} helpers."),
+            "description": format!("Offers the user a split of your task into helpers working at the same time (at most {MAX_PROPOSED}). harlo shows why and what each would do; if they agree, harlo starts them as start_session would (your helpers, your permission mode, reporting to you). Then end your turn: harlo tells you their answer (with the helpers' ids) and sends their reports as they finish; don't poll. If they say no, do the work yourself."),
             "inputSchema": s(json!({
                 "why": { "type": "string", "description": "Why splitting helps, in a sentence or two (for the user)." },
                 "helpers": {
                     "type": "array",
-                    "description": "The helpers, one per part.",
+                    "description": "One per part.",
                     "items": s(json!({
                         "title": { "type": "string", "description": "A short name for the part." },
-                        "prompt": { "type": "string", "description": "Its first message, a self-contained briefing (it has none of your context): the part, the relevant files, what \"done\" looks like, what not to touch." },
-                        "agent": { "type": "string", "description": "harlo or claude. Leave it (and model) out for the project's usual helpers (the user's choice), unless a part needs another agent or model." },
+                        "prompt": { "type": "string", "description": "Its first message, a self-contained briefing: the part, the relevant files, what \"done\" looks like, what not to touch." },
+                        "agent": { "type": "string", "description": "harlo or claude; leave it and model out for the user's usual helpers, unless a part needs another." },
                         "model": { "type": "string", "description": "provider/model, if not the agent's default." },
-                        "worktree": { "type": "string", "description": "A new git worktree on this branch name to work in (for parts that edit files)." }
+                        "worktree": { "type": "string", "description": "A new git worktree on this branch (for parts that edit files)." }
                     }), &["title", "prompt"])
                 }
             }), &["why", "helpers"]),
@@ -881,9 +881,11 @@ mod tests {
         let t = "Allow tool: write\nPath: a.py\nContent: x";
         assert_eq!(waiting_what(t, t, true), "approval to use write (Path: a.py)");
         // When to start sessions: as the setting says.
+        // (In harlo's instructions only: start_session's description doesn't repeat it.)
+        assert!(when_to_start(Starting::WhenAsked).contains("only when the user asks") && !when_to_start(Starting::OnTheirOwn).contains("only when"));
+        assert!(when_to_start(Starting::Offer).contains("offer the split with propose_helpers"));
         let start = |st: Starting| tools(st).as_array().unwrap().iter().find(|t| t["name"] == "start_session").unwrap()["description"].as_str().unwrap().to_owned();
-        assert!(start(Starting::WhenAsked).contains("only when the user asks") && !start(Starting::OnTheirOwn).contains("only when"));
-        assert!(start(Starting::Offer).contains("offer the split with propose_helpers"));
+        assert!([Starting::WhenAsked, Starting::Offer, Starting::OnTheirOwn].iter().all(|st| !start(*st).contains(when_to_start(*st))));
         // A helper doesn't offer splits of its own part.
         assert_eq!(Starting::Offer.for_session(true), Starting::WhenAsked);
         assert_eq!(Starting::Offer.for_session(false), Starting::Offer);

@@ -489,7 +489,7 @@ pub fn tools(commits: bool) -> Value {
     json!([
         {
             "name": "plan_read",
-            "description": format!("The shared plan of this session: its steps, with their ids and statuses (pending, active, done, skipped), and which ones the user edited. Read it before each step. {}", instructions(commits, false)),
+            "description": "The shared plan: its steps with ids and statuses (pending, active, done, skipped), and which ones the user edited. Read it before each step (how plans work: harlo's instructions).",
             "inputSchema": s(json!({}), &[]),
             "annotations": { "readOnlyHint": true },
         },
@@ -500,7 +500,7 @@ pub fn tools(commits: bool) -> Value {
                 "steps": { "type": "array", "items": { "type": "object", "properties": {
                     "title": { "type": "string", "description": "The step's outcome, short." },
                     "detail": { "type": "string", "description": "How, or what to watch for (optional)." },
-                    "alongside": { "type": "boolean", "description": "It can be done at the same time as the step before it, when the plan runs with helpers: it joins the group that step runs in (steps marked alongside one after another run together), so only when it needs none of their work (default false)." }
+                    "alongside": { "type": "boolean", "description": "It can run at the same time as the step before it, when the plan runs with helpers (it joins that step's group): only when it needs none of the group's work (default false)." }
                 }, "required": ["title"] } }
             }), &["steps"]),
         },

@@ -1143,6 +1143,10 @@ impl Agent {
             "harlo_tools": tokens(&of(&harlo_names)) + est(&self.harlo_text),
             "history": history,
             "tools": list.len(),
+            // (Each tool's size, and harlo's text apart: what to trim.)
+            "by_tool": list.iter().map(|t| (t["name"].as_str().unwrap_or_default().to_owned(), json!(est(&t.to_string())))).collect::<serde_json::Map<_, _>>(),
+            "harlo_text": est(&self.harlo_text),
+            "mcp_notes": est(&notes),
         })
     }
 
