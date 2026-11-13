@@ -26,6 +26,61 @@ public struct Choice: Equatable, Sendable, Identifiable {
 }
 
 public enum Visuals {
+    /// One line of a card (its name, a pro or con) as styled runs, its
+    /// Markdown drawn: `code`, **bold**, *italic*, ~~struck~~, web links
+    /// (the computer draws them alike). Marks that don't close stay as text.
+    public static func spans(_ line: String) -> [Span] {
+        let c = Array(line)
+        var out: [Span] = []
+        func add(_ s: Span) {
+            if s.text.isEmpty { return }
+            if let last = out.last, last.sameStyle(s) { out[out.count - 1].text += s.text } else { out.append(s) }
+        }
+        /// Where `mark` next starts at or after `from`, with text before it.
+        func find(_ mark: [Character], _ from: Int) -> Int? {
+            var j = from
+            while j + mark.count <= c.count {
+                if Array(c[j ..< j + mark.count]) == mark && j > from { return j }
+                j += 1
+            }
+            return nil
+        }
+        var i = 0
+        var bold = false, italic = false, strike = false
+        while i < c.count {
+            let ch = c[i]
+            let next: Character? = i + 1 < c.count ? c[i + 1] : nil
+            if ch == "\\", let n = next, "`*_~[]()\\".contains(n) {
+                add(Span(String(n), bold: bold, italic: italic, strike: strike)); i += 2; continue
+            }
+            if ch == "`", let end = find(["`"], i + 1) {
+                add(Span(String(c[i + 1 ..< end]), code: true)); i = end + 1; continue
+            }
+            if ch == "*" && next == "*" && (bold || find(["*", "*"], i + 2) != nil) {
+                bold.toggle(); i += 2; continue
+            }
+            if ch == "~" && next == "~" && (strike || find(["~", "~"], i + 2) != nil) {
+                strike.toggle(); i += 2; continue
+            }
+            if ch == "*", italic || (next.map { !$0.isWhitespace } ?? false) && find(["*"], i + 1) != nil {
+                italic.toggle(); i += 1; continue
+            }
+            if ch == "[", let close = find(["]", "("], i + 1), let end = c[(close + 2)...].firstIndex(of: ")") {
+                let url = String(c[(close + 2) ..< end])
+                if url.hasPrefix("http://") || url.hasPrefix("https://") {
+                    add(Span(String(c[(i + 1) ..< close]), bold: bold, italic: italic, strike: strike, link: url))
+                    i = end + 1; continue
+                }
+            }
+            add(Span(String(ch), bold: bold, italic: italic, strike: strike))
+            i += 1
+        }
+        return out.isEmpty ? [Span(line)] : out
+    }
+
+    /// A line's words without its Markdown marks (to read aloud).
+    public static func plain(_ line: String) -> String { RichText.plain(spans(line)) }
+
     /// An ```options block's choices: `## name` (with `(recommended)` on
     /// the one to pick), lines about it, `+ pro` and `- con` lines; nil
     /// when it has fewer than two.

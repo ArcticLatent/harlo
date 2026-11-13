@@ -9204,6 +9204,11 @@ ApplicationWindow {
             const marked = win.findAllNames("optionRecommended", chat.transcript)
             win.check(cards.length === 2 && marked.length === 1, "the options are drawn as cards, the recommended one marked (" + cards.length + ", " + marked.length + ")")
             win.check(win.findText("nothing to restore", chat.transcript) !== null && win.findText("the list still redraws", chat.transcript) !== null, "with their pros and cons")
+            const about = win.findAllNames("optionAbout", chat.transcript).find(l => l.text.indexOf("key") >= 0)
+            win.check(about && about.textFormat === Text.RichText && about.text.indexOf("<code>key</code>") >= 0 && about.text.indexOf("`") < 0,
+                      "a card's Markdown is drawn: `key` as code, no backticks (" + (about ? about.text.replace(/^<style>.*<\/style>/, "") : "none") + ")")
+            const plainOne = win.findAllNames("optionAbout", chat.transcript).find(l => l.text === "Smaller change.")
+            win.check(plainOne && plainOne.textFormat === Text.PlainText, "a line with no marks stays plain text")
             win.shotWindow("clicks-harlo-options")
             win.clickText("Code", chat.transcript) } }
         PauseAnimation { duration: 400 }

@@ -246,7 +246,16 @@ pub fn for_phone(source: &str, cwd: &Path) -> Value {
 impl Visuals {
     pub fn options(&self, source: &QString) -> QString {
         let v = match visuals::options(&source.to_string()) {
-            Ok(choices) => json!({ "choices": choices.iter().map(|c| json!({ "name": c.name, "recommended": c.recommended, "about": c.about, "pros": c.pros, "cons": c.cons })).collect::<Vec<_>>() }),
+            // (Each line also as rich text, its Markdown drawn: `code`,
+            // **bold**, links; the name plain too, to read aloud.)
+            Ok(choices) => {
+                let html = |t: &str| harlo_core::markdown::inline_html(t);
+                let all = |l: &[String]| l.iter().map(|t| html(t)).collect::<Vec<_>>();
+                json!({ "choices": choices.iter().map(|c| json!({
+                    "name": c.name, "recommended": c.recommended, "about": c.about, "pros": c.pros, "cons": c.cons,
+                    "plain": harlo_core::markdown::plain_text(&html(&c.name)), "nameHtml": html(&c.name), "aboutHtml": html(&c.about),
+                    "prosHtml": all(&c.pros), "consHtml": all(&c.cons) })).collect::<Vec<_>>() })
+            }
             Err(e) => json!({ "error": format!("These options can't be drawn: {e}.") }),
         };
         QString::from(&v.to_string())

@@ -324,6 +324,21 @@ pub fn escape_into(out: &mut String, s: &str) {
     }
 }
 
+/// One line of Markdown (a card's name, a pro or con) as inline rich text:
+/// code, emphasis, links, without the paragraph around it. Raw HTML in it
+/// shows as text, as in a reply.
+pub fn inline_html(text: &str) -> String {
+    let events = Parser::new_ext(text, options()).filter_map(|e| match e {
+        Event::Start(Tag::Paragraph) | Event::End(TagEnd::Paragraph) => None,
+        Event::Html(s) | Event::InlineHtml(s) => Some(Event::Text(s)),
+        Event::InlineMath(s) | Event::DisplayMath(s) => Some(Event::Code(s)),
+        other => Some(other),
+    });
+    let mut html = String::new();
+    pulldown_cmark::html::push_html(&mut html, events);
+    html.trim_end().to_owned()
+}
+
 /// How much of a still-streaming text to show.
 ///
 /// Reveal only complete lines, so paragraphs don't reflow on every token.
@@ -399,6 +414,14 @@ mod tests {
         assert_eq!(blocks[3].lang, "rust");
         assert_eq!(blocks[3].code, "fn main() {}");
         assert!(blocks[3].html.contains("<span class=\"s2\">fn</span>"), "{}", blocks[3].html);
+    }
+
+    #[test]
+    fn inline_lines_keep_their_marks_without_a_paragraph() {
+        assert_eq!(inline_html("every report gets `--format csv`"), "every report gets <code>--format csv</code>");
+        assert_eq!(inline_html("**fast** and [docs](https://x.dev)"), "<strong>fast</strong> and <a href=\"https://x.dev\">docs</a>");
+        assert_eq!(inline_html("a <b>tag</b> & more"), "a &lt;b&gt;tag&lt;/b&gt; &amp; more");
+        assert_eq!(plain_text(&inline_html("A `csv` format")), "A csv format");
     }
 
     #[test]

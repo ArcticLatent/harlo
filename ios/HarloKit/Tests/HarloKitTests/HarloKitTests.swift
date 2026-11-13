@@ -1468,6 +1468,16 @@ final class VisualsTests: XCTestCase {
         XCTAssertNil(Visuals.options("Just prose."))
     }
 
+    func testOptionLinesDrawTheirMarkdown() {
+        XCTAssertEqual(Visuals.spans("every report gets `--format csv`"), [Span("every report gets "), Span("--format csv", code: true)])
+        XCTAssertEqual(Visuals.spans("**fast**, [docs](https://x.dev)"), [Span("fast", bold: true), Span(", "), Span("docs", link: "https://x.dev")])
+        XCTAssertEqual(Visuals.spans("no marks here"), [Span("no marks here")])
+        XCTAssertEqual(Visuals.plain("A `csv` format"), "A csv format")
+        XCTAssertEqual(Visuals.spans("2 * 3 * 4, an `open tick, snake_case_name"), [Span("2 * 3 * 4, an `open tick, snake_case_name")])
+        XCTAssertEqual(Visuals.spans("*quick* and ~~old~~"), [Span("quick", italic: true), Span(" and "), Span("old", strike: true)])
+        XCTAssertEqual(Visuals.spans("[file](src/a.rs)"), [Span("[file](src/a.rs)")])
+    }
+
     func testMockupPictures() {
         let png = Data([0x89, 0x50, 0x4E, 0x47]).base64EncodedString()
         let m = MockupPictures(["title": "Settings", "after": ["png": .string(png), "width": 640, "height": 400], "before": ["error": "mockups/old.html isn't there."]])

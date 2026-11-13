@@ -17,12 +17,17 @@ GridLayout {
     /// What you wrote next, if anything: a choice's name marks that card.
     property string answer: ""
     signal chosen(string name)
+    /// A line's text for a label: its rich text when its Markdown marks
+    /// anything (`code`, **bold**, a link), else the line as it is.
+    function shown(plain, html) { return html && html.indexOf("<") >= 0 ? Theme.htmlStyle + html : plain }
+    function format(html) { return html && html.indexOf("<") >= 0 ? Text.RichText : Text.PlainText }
+    function openLink(link) { if (/^https?:/.test(link)) Qt.openUrlExternally(link) }
     function norm(t) { return String(t).replace(/[\s.!]+$/, "").replace(/^\s+/, "").toLowerCase() }
     readonly property int chosenIndex: {
         const a = norm(answer)
         if (a === "") return -1
         for (let i = 0; i < choices.length; i++)
-            if (norm(choices[i].name) === a) return i
+            if (norm(choices[i].name) === a || norm(choices[i].plain || "") === a) return i
         return -1
     }
     columns: width >= 620 ? Math.min(choices.length, 3) : 1
@@ -59,7 +64,7 @@ GridLayout {
                 anchors.bottomMargin: 11
                 text: "Choose"
                 variant: card.modelData.recommended ? "primary" : "outline"
-                Accessible.name: "Choose " + card.modelData.name
+                Accessible.name: "Choose " + (card.modelData.plain || card.modelData.name)
                 onClicked: cards.chosen(card.modelData.name)
                 Keys.onReturnPressed: cards.chosen(card.modelData.name)
                 Keys.onEnterPressed: cards.chosen(card.modelData.name)
@@ -74,8 +79,11 @@ GridLayout {
                     Layout.fillWidth: true
                     spacing: 8
                     Label {
+                        objectName: "optionName"
                         Layout.fillWidth: true
-                        text: card.modelData.name
+                        text: cards.shown(card.modelData.name, card.modelData.nameHtml)
+                        textFormat: cards.format(card.modelData.nameHtml)
+                        onLinkActivated: link => cards.openLink(link)
                         color: Theme.text
                         font.pixelSize: Theme.px(14)
                         font.weight: Font.Medium
@@ -101,9 +109,12 @@ GridLayout {
                     }
                 }
                 Label {
+                    objectName: "optionAbout"
                     Layout.fillWidth: true
-                    visible: text !== ""
-                    text: card.modelData.about
+                    visible: card.modelData.about !== ""
+                    text: cards.shown(card.modelData.about, card.modelData.aboutHtml)
+                    textFormat: cards.format(card.modelData.aboutHtml)
+                    onLinkActivated: link => cards.openLink(link)
                     color: Theme.textMuted
                     font.pixelSize: Theme.px(13)
                     wrapMode: Text.Wrap
@@ -111,21 +122,43 @@ GridLayout {
                 Repeater {
                     model: card.modelData.pros
                     RowLayout {
+                        id: point
                         required property string modelData
+                        required property int index
+                        readonly property string html: (card.modelData.prosHtml || [])[index] || ""
                         Layout.fillWidth: true
                         spacing: 7
                         Label { Layout.alignment: Qt.AlignTop; text: "+"; color: Theme.success; font.pixelSize: Theme.px(13); font.weight: Font.Medium }
-                        Label { Layout.fillWidth: true; text: parent.modelData; color: Theme.text; font.pixelSize: Theme.px(13); wrapMode: Text.Wrap }
+                        Label {
+                            Layout.fillWidth: true
+                            text: cards.shown(point.modelData, point.html)
+                            textFormat: cards.format(point.html)
+                            onLinkActivated: link => cards.openLink(link)
+                            color: Theme.text
+                            font.pixelSize: Theme.px(13)
+                            wrapMode: Text.Wrap
+                        }
                     }
                 }
                 Repeater {
                     model: card.modelData.cons
                     RowLayout {
+                        id: point
                         required property string modelData
+                        required property int index
+                        readonly property string html: (card.modelData.consHtml || [])[index] || ""
                         Layout.fillWidth: true
                         spacing: 7
                         Label { Layout.alignment: Qt.AlignTop; text: "−"; color: Theme.error; font.pixelSize: Theme.px(13); font.weight: Font.Medium }
-                        Label { Layout.fillWidth: true; text: parent.modelData; color: Theme.text; font.pixelSize: Theme.px(13); wrapMode: Text.Wrap }
+                        Label {
+                            Layout.fillWidth: true
+                            text: cards.shown(point.modelData, point.html)
+                            textFormat: cards.format(point.html)
+                            onLinkActivated: link => cards.openLink(link)
+                            color: Theme.text
+                            font.pixelSize: Theme.px(13)
+                            wrapMode: Text.Wrap
+                        }
                     }
                 }
             }

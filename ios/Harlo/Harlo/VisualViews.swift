@@ -8,6 +8,7 @@ import UIKit
 /// button that sends its name; the one you chose stays marked.
 struct OptionsBlock: View {
     @Environment(\.palette) private var p
+    @Environment(\.dynamicTypeSize) private var typeSize
     let choices: [Choice]
     let code: CodeBlock
     /// What you wrote next (nil while nothing has followed).
@@ -23,7 +24,7 @@ struct OptionsBlock: View {
 
     var chosen: String? {
         guard let a = answer.map(Self.norm), !a.isEmpty else { return nil }
-        return choices.first { Self.norm($0.name) == a }?.name
+        return choices.first { Self.norm($0.name) == a || Self.norm(Visuals.plain($0.name)) == a }?.name
     }
 
     var body: some View {
@@ -45,8 +46,8 @@ struct OptionsBlock: View {
         let marked = picked || (c.recommended && chosen == nil)
         return VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(c.name)
-                    .font(.body.weight(.semibold))
+                // (Its Markdown drawn: `code` as code; the rest semibold.)
+                Text(Style.attributed(Visuals.spans(c.name).map { var s = $0; s.bold = s.bold || !s.code; return s }, p, size: 17, typeSize: typeSize))
                     .foregroundStyle(Color(p.foreground))
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if picked {
@@ -60,8 +61,7 @@ struct OptionsBlock: View {
                 }
             }
             if !c.about.isEmpty {
-                Text(c.about)
-                    .font(.subheadline)
+                Text(Style.attributed(Visuals.spans(c.about), p, size: 15, typeSize: typeSize))
                     .foregroundStyle(Color(p.muted))
             }
             ForEach(Array(c.pros.enumerated()), id: \.offset) { _, t in point("+", t, p.success) }
@@ -81,7 +81,7 @@ struct OptionsBlock: View {
                 }
                 .buttonStyle(.plain)
                 .padding(.top, 4)
-                .accessibilityLabel("Choose \(c.name)")
+                .accessibilityLabel("Choose \(Visuals.plain(c.name))")
                 .accessibilityIdentifier("optionChoose")
             }
         }
@@ -92,7 +92,7 @@ struct OptionsBlock: View {
             .strokeBorder(Color(marked ? p.primary : p.hairline), lineWidth: picked ? 2 : marked ? 1.5 : 1))
         .opacity(chosen != nil && !picked ? 0.55 : 1)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(picked ? "\(c.name), chosen" : c.recommended ? "\(c.name), recommended" : c.name)
+        .accessibilityLabel(picked ? "\(Visuals.plain(c.name)), chosen" : c.recommended ? "\(Visuals.plain(c.name)), recommended" : Visuals.plain(c.name))
     }
 
     func point(_ mark: String, _ text: String, _ color: RGBA) -> some View {
@@ -101,8 +101,7 @@ struct OptionsBlock: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Color(color))
                 .accessibilityLabel(mark == "+" ? "For:" : "Against:")
-            Text(text)
-                .font(.subheadline)
+            Text(Style.attributed(Visuals.spans(text), p, size: 15, typeSize: typeSize))
                 .foregroundStyle(Color(p.foreground))
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
