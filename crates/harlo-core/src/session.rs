@@ -1772,7 +1772,7 @@ mod tests {
         assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::Status(SessionStatus::Idle))).await);
         handle.send_raw(json!({ "type": "harlo_set_modes", "approval": "yolo", "plan": false }));
         handle.send_raw(json!({ "type": "set_thinking_level", "level": "low" }));
-        let brief = crate::orchestration::helper_brief("main", "Create add.py with a function add(a, b) that returns their sum.");
+        let brief = crate::orchestration::helper_brief("main", "Create add.py with a function add(a, b) that returns their sum.", true);
         handle.prompt(&brief, Vec::new(), SendMode::Normal);
         let mut reports: Vec<Result<crate::orchestration::Report, String>> = Vec::new();
         let mut file = None;

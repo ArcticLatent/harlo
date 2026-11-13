@@ -260,7 +260,7 @@ pub fn helper_tools() -> Value {
         },
         {
             "name": "ask_parent",
-            "description": "Asks the session that started you a question the task doesn't settle. Then end your turn: harlo wakes you with its answer. (For what only the user may decide, use request_approval.)",
+            "description": "Asks the session that started you a question the task doesn't settle. Then end your turn: harlo wakes you with its answer. (For what only the user may decide, ask the user instead.)",
             "inputSchema": s(json!({ "question": { "type": "string" } }), &["question"]),
         }
     ])
@@ -292,14 +292,16 @@ impl Report {
 }
 
 /// What a helper's first message starts with: what it is, and how its
-/// result goes back (harlo's tools).
-pub fn helper_brief(parent: &str, task: &str) -> String {
+/// result goes back (harlo's tools). `own_ask`: it asks the user with its
+/// own ask tool (a Harlo session), not request_approval.
+pub fn helper_brief(parent: &str, task: &str, own_ask: bool) -> String {
     let parent = if parent.trim().is_empty() { String::new() } else { format!(" (\"{}\")", parent.trim()) };
+    let user = if own_ask { "ask them with ask (it waits for their answer)" } else { "call request_approval, then end your turn" };
     format!(
         "[harlo] You're a helper: another agent's session{parent} started you with the task below, and harlo sends it your result.\n\
          - Do only this task, yourself: start no helper sessions unless it asks.\n\
          - When the task leaves a decision open, call harlo's ask_parent tool with your question, then end your turn: the answer comes to you as a message.\n\
-         - For what only the user may decide (going ahead with a risky or irreversible step, a choice that's theirs), call request_approval, then end your turn.\n\
+         - For what only the user may decide (going ahead with a risky or irreversible step, a choice that's theirs), {user}.\n\
          - When you're done, or can't go on, call report_done once: outcome succeeded or failed (never hide a failure in the summary), a three-sentence summary (what you did, what you found, what's left), and the files you changed. Then end your turn.\n\n\
          The task:\n\n{task}"
     )
@@ -843,7 +845,7 @@ mod tests {
         assert_eq!(said(waiting_message("Harlo", "Helper", "live:2", "approval to use bash: ls")), "Helper is waiting for you: approval to use bash: ls");
         assert_eq!(said(proposal_answer(None)), "You turned down the split: the agent does the work itself.");
         assert_eq!(said(worktree_failed("Helper", "b1", "busy")), "Helper didn't start: its worktree couldn't be made.");
-        assert!(!said(helper_brief("Main", "Do it")).contains("harlo sends"));
+        assert!(!said(helper_brief("Main", "Do it", false)).contains("harlo sends"));
         // Nothing internal left in any of them.
         for m in [finished_message("Claude", "Helper", "live:2", None, Some("Hi"), None, None), question_message("Harlo", "H", "live:9", "Q")] {
             let plain = said(m);
@@ -867,9 +869,12 @@ mod tests {
         let m = finished_message("Harlo", "T", "k", Some(&r), None, None, Some("gpt-6.1-sol: 3 requests, 9.1k tokens in (70% cached), 400 out"));
         assert!(m.ends_with("Files changed: a.rs, b.rs\n\nUsed: gpt-6.1-sol: 3 requests, 9.1k tokens in (70% cached), 400 out"), "{m}");
         // The brief: what it is, harlo's tools, then the task.
-        let b = helper_brief("Lead", "Do X");
-        assert!(b.contains("session (\"Lead\") started you") && b.contains("report_done") && b.ends_with("The task:\n\nDo X"));
-        assert!(!helper_brief("", "Do X").contains("session ("));
+        let b = helper_brief("Lead", "Do X", false);
+        assert!(b.contains("session (\"Lead\") started you") && b.contains("report_done") && b.contains("call request_approval") && b.ends_with("The task:\n\nDo X"));
+        assert!(!helper_brief("", "Do X", false).contains("session ("));
+        // (A Harlo helper asks the user with its own ask.)
+        let b = helper_brief("Lead", "Do X", true);
+        assert!(b.contains("ask them with ask") && !b.contains("request_approval"));
         assert!(worktree_note("helper/x", "/p").contains("a new git worktree on branch helper/x, your own copy of the project apart from its main checkout (/p)"));
         assert!(approval_answer("Merge?", &json!({ "value": "Approve" })).ends_with("(\"Merge?\"): Approve"));
         assert!(approval_answer("Merge?", &json!({ "cancelled": true })).contains("dismissed"));

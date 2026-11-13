@@ -67,14 +67,14 @@ pub fn spec(profiles: &[crate::profiles::Profile]) -> Value {
         let listed: Vec<String> = profiles.iter().take(crate::profiles::LISTED).map(|p| format!("{}: {}", p.name, p.description.trim())).collect();
         format!(" agent names one of these profiles instead of kind (its instructions and tools, maybe its model): {}.", listed.join("; "))
     };
-    let fresh = if forks() { ", starting fresh (none of this conversation: their prompts must say everything they need)" } else { "" };
+    let fresh = if forks() { ", starting fresh (their prompts must say everything they need)" } else { "" };
     let copies = format!(
-        "general may also edit and write files; in a git project, two or more general tasks in one call each work in their own copy of the files{fresh}, \
-         and their changes are brought back here when they finish (any that clash with another's are kept aside, and the result says where)."
+        "general may also edit and write; in a git project, two or more general tasks in one call each get their own copy of the files{fresh}, \
+         and their changes come back here when they finish (any that clash are kept aside; the result says where)."
     );
     let description = format!(
-        "{} Several run at the same time. Use it for independent parts worth doing in parallel, or a search through much of the code that would fill your context; \
-         not for a quick look you can do yourself. kind explore (default) reads, searches and runs commands but changes no files; {copies}{agents}",
+        "{} For independent parts worth doing in parallel, or a search through much of the code that would fill your context; \
+         not for a quick look. kind explore (default) reads, searches and runs commands, changing no files; {copies}{agents}",
         if forks() { FORK_START } else { FRESH_START }
     );
     json!({
@@ -88,9 +88,9 @@ pub fn spec(profiles: &[crate::profiles::Profile]) -> Value {
                     "description": { "type": "string", "description": "A few words, shown to the user" },
                     "prompt": { "type": "string", "description": if forks() { "Which part it does and what to report (everything it needs, for general tasks side by side)" } else { "The whole task, self-contained" } },
                     "kind": { "type": "string", "enum": ["explore", "general"] },
-                    "agent": { "type": "string", "description": "An agent profile's name, instead of kind" },
-                    "model": { "type": "string", "description": "provider/model to run it on, if not the subagents' default (a smaller one for simple work, a stronger one for hard)" },
-                    "effort": { "type": "string", "enum": ["off", "minimal", "low", "medium", "high", "xhigh"], "description": "Its reasoning effort, if not the default" },
+                    "agent": { "type": "string", "description": "A profile's name, instead of kind" },
+                    "model": { "type": "string", "description": "provider/model, if not the subagents' default (smaller for simple work, stronger for hard)" },
+                    "effort": { "type": "string", "enum": ["off", "minimal", "low", "medium", "high", "xhigh"], "description": "If not the default" },
                 },
                 "required": ["description", "prompt"], "additionalProperties": false,
             } } },
@@ -126,9 +126,9 @@ pub struct Ctx {
     pub fork: Option<Arc<Fork>>,
 }
 
-const FRESH_START: &str = "Runs subagents: each takes one task with a fresh context (none of this conversation, so its prompt must say everything it needs: \
+const FRESH_START: &str = "Runs subagents, at the same time: each starts fresh (its prompt must say everything it needs: \
                            the goal, paths, what to report), works with its own tools, and its final message comes back to you.";
-const FORK_START: &str = "Runs subagents: each starts from this conversation as it is now (it knows what you know, so its prompt needn't repeat it: \
+const FORK_START: &str = "Runs subagents, at the same time: each starts from this conversation (its prompt needn't repeat what you know: \
                           say which part it does and what to report), works with its own tools, and its final message comes back to you.";
 
 impl Ctx {

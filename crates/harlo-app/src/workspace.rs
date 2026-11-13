@@ -6817,6 +6817,11 @@ impl Workspace {
         let starting = self.agents_starting().for_session(helper);
         if tool == harlo_core::orchestration::TOOLS {
             let mut tools = harlo_core::orchestration::tools(starting).as_array().cloned().unwrap_or_default();
+            // (A Harlo session asks the user with its own ask tool: the same
+            // question card, notifications and phone.)
+            if caller.as_ref().and_then(|c| self.live.get(c)).is_some_and(|e| e.info.harness == "harlo") {
+                tools.retain(|t| t["name"] != "request_approval");
+            }
             // A helper: its report and its questions for its parent.
             if helper {
                 tools.extend(harlo_core::orchestration::helper_tools().as_array().cloned().unwrap_or_default());
@@ -7055,7 +7060,7 @@ impl Workspace {
                     (Some(p), false) => format!("{prompt}{}", harlo_core::orchestration::worktree_note(&branch, &p.path.to_string_lossy())),
                     _ => prompt,
                 };
-                let prompt = if notify { harlo_core::orchestration::helper_brief(&self.title_of(&parent), &prompt) } else { prompt };
+                let prompt = if notify { harlo_core::orchestration::helper_brief(&self.title_of(&parent), &prompt, kind.as_str() == "harlo") } else { prompt };
                 // In a new worktree: made in the background; it shows when ready.
                 if !branch.is_empty() {
                     let Some(project) = project else {
@@ -7618,7 +7623,7 @@ impl Workspace {
             let title = format!("Step {n}: {}", step.title);
             let branch = if together { format!("plan/{}-{id}-{stamp}", git::branch_slug(&step.title).chars().take(30).collect::<String>().trim_matches('-')) } else { String::new() };
             let task = harlo_core::plan::step_prompt(&plan, id, &merge, commits, together);
-            let prompt = harlo_core::orchestration::helper_brief(&owner_title, &task);
+            let prompt = harlo_core::orchestration::helper_brief(&owner_title, &task, agent.as_str() == "harlo");
             if let Err(e) = crate::plans::update(file.as_deref(), owner, |p| p.hand_out(id, "", &branch)) {
                 tracing::warn!("plan run: {e}");
                 continue;

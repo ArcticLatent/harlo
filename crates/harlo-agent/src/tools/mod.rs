@@ -172,41 +172,41 @@ pub fn specs() -> Value {
                 "parameters": { "type": "object", "properties": properties, "required": required, "additionalProperties": false } })
     };
     json!([
-        f("read", "Read a text file. Shows up to 2000 lines (50 KB) from `offset` (1-based line); says how to read on when there's more. A file longer than that, read without offset or limit, shows its first 250 lines and its size: grep it for what you need, or read a range.",
+        f("read", "Read a text file: up to 2000 lines (50 KB) from `offset` (1-based line), saying how to read on. A longer file read without offset or limit shows its first 250 lines and its size: grep it, or read a range.",
           json!({ "path": { "type": "string", "description": "Relative to the working directory, or absolute" }, "offset": { "type": "integer" }, "limit": { "type": "integer" } }), &["path"]),
         f("write", "Create a file, or replace a whole file you've read in this session. Makes missing folders. To change part of a file, use edit.",
           json!({ "path": { "type": "string" }, "content": { "type": "string" } }), &["path", "content"]),
-        f("edit", "Replace text in a file. Each edit's old_text must match exactly one place in the file as it is now (copy it from read, with enough lines around it to be unique); all edits apply together. Refused if the file changed since you last read it.",
+        f("edit", "Replace text in a file. Each old_text must match exactly one place in the file as it is now (copy it from read, with enough lines around it to be unique); edits apply together. Refused if the file changed since you read it.",
           json!({ "path": { "type": "string" }, "edits": { "type": "array", "items": { "type": "object", "properties": { "old_text": { "type": "string" }, "new_text": { "type": "string" } }, "required": ["old_text", "new_text"], "additionalProperties": false } } }), &["path", "edits"]),
-        f("bash", "Run a bash command in the working directory. It can't read input (stdin is closed; pagers and editors are off). Times out after 120 s unless `timeout` (seconds) says otherwise. Long output shows its start and end, with the whole of it saved to a file. Don't edit files with it: use edit or write. \
-                   With background: true it runs in the background (a server, a watcher, a long test run): you get its job id at once and are told when it ends (it times out after 30 min unless timeout says otherwise, up to 2 h); jobs shows its output, waits for it or stops it. Don't add & yourself.",
+        f("bash", "Run a bash command in the working directory. No input (stdin closed; pagers and editors off). Times out after 120 s unless `timeout` (seconds) says otherwise. Long output shows its start and end, all of it saved to a file. Don't edit files with it: use edit or write. \
+                   background: true runs it in the background (a server, a watcher, a long test run): you get its job id at once and are told when it ends (timeout 30 min by default, up to 2 h); jobs shows its output, waits for it or stops it. Don't add & yourself.",
           json!({ "command": { "type": "string" }, "timeout": { "type": "integer" }, "background": { "type": "boolean" },
-                  "outside_sandbox": { "type": "boolean", "description": "Run it outside the sandbox. Only when it failed because of the sandbox and really needs what the sandbox hides or protects (e.g. git push over SSH); say why first. The user is asked every time." } }), &["command"]),
-        f("grep", "Search file contents for a regular expression (ripgrep syntax; respects .gitignore). Shows file:line: text; many matches: the first, a count per file, and all of them in a file.",
+                  "outside_sandbox": { "type": "boolean", "description": "Run outside the sandbox: only when it failed because of the sandbox and really needs what it hides or protects (e.g. git push over SSH); say why first. The user is asked every time." } }), &["command"]),
+        f("grep", "Search file contents for a regular expression (ripgrep syntax, respects .gitignore). Shows file:line: text; with many matches, the first, a count per file, and all of them in a file.",
           json!({ "pattern": { "type": "string" }, "path": { "type": "string" }, "glob": { "type": "string", "description": "Only files matching this, e.g. *.rs" }, "ignore_case": { "type": "boolean" } }), &["pattern"]),
         f("find", "Find files by name with a glob (e.g. **/*.toml), respecting .gitignore. Up to 500.",
           json!({ "pattern": { "type": "string" }, "path": { "type": "string" } }), &["pattern"]),
         f("ls", "List a folder (folders end with /). Up to 500 entries.",
           json!({ "path": { "type": "string" } }), &[]),
-        f("fetch", "Read a web page or file at a URL (http or https): a page comes back as Markdown (its main part, without menus), text and JSON as they are, an image is shown, another kind of file is saved for you to open with a command. Up to 50 KB is shown; all of a longer page is saved to a file to read on. \
-                    For documentation, an API's reference, an issue or a changelog: what the project doesn't have.",
+        f("fetch", "Read a URL (http or https): a page as Markdown (its main part), text and JSON as they are, an image shown, another file saved for you to open with a command. Up to 50 KB shown; a longer page is saved whole to a file. \
+                    For documentation, API references, issues, changelogs: what the project doesn't have.",
           json!({ "url": { "type": "string" } }), &["url"]),
-        f("jobs", "Background commands (started by bash with background: true): list them, see one's output (its last lines), wait for one to end (up to timeout seconds, 60 by default), or stop one with everything it started.",
-          json!({ "action": { "type": "string", "enum": ["list", "output", "wait", "stop"] }, "id": { "type": "string", "description": "The job's id (j1, j2…), for output, wait and stop" },
-                  "lines": { "type": "integer", "description": "How many of the last lines to show (50 by default)" }, "timeout": { "type": "integer" } }), &["action"]),
-        f("ask", "Ask the user questions and wait for their answers: harlo shows them as a card with your options to pick from, and a field for their own answer. \
-               For a decision that's theirs, or one the task leaves open and that changes what you'd do (which approach, what to keep, what they meant); not for what you can find out yourself, or to ask leave for what they already asked for. \
-               One to four questions, each with two to six options (put the one you recommend first). The answer comes back as text.",
+        f("jobs", "Background commands (bash with background: true): list them, see one's last lines, wait for one to end (timeout seconds, 60 by default), or stop one and all it started.",
+          json!({ "action": { "type": "string", "enum": ["list", "output", "wait", "stop"] }, "id": { "type": "string", "description": "j1, j2…, for output, wait and stop" },
+                  "lines": { "type": "integer", "description": "How many last lines (50 by default)" }, "timeout": { "type": "integer" } }), &["action"]),
+        f("ask", "Ask the user questions and wait for their answers, shown as a card with your options and a field for their own answer. \
+               For a decision that's theirs, or one the task leaves open that changes what you'd do (which approach, what to keep, what they meant); not for what you can find out, or to ask leave for what they already asked for. \
+               One to four questions, two to six options each (the one you recommend first). The answer comes back as text.",
           json!({ "questions": { "type": "array", "minItems": 1, "maxItems": 4, "items": {
               "type": "object",
               "properties": {
-                  "question": { "type": "string", "description": "The whole question, ending with a question mark" },
-                  "header": { "type": "string", "description": "A label of a word or two" },
+                  "question": { "type": "string", "description": "The whole question, ending with ?" },
+                  "header": { "type": "string", "description": "A word or two" },
                   "options": { "type": "array", "minItems": 2, "maxItems": 6, "items": { "type": "object", "properties": {
                       "label": { "type": "string", "description": "A few words" },
-                      "description": { "type": "string", "description": "What it means, or what follows from it" },
+                      "description": { "type": "string", "description": "What it means or leads to" },
                   }, "required": ["label"], "additionalProperties": false } },
-                  "multiple": { "type": "boolean", "description": "Whether they may pick more than one (default false)" },
+                  "multiple": { "type": "boolean", "description": "May pick more than one (default false)" },
               },
               "required": ["question", "options"], "additionalProperties": false,
           } } }), &["questions"]),

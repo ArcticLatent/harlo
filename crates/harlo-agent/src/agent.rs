@@ -48,7 +48,7 @@ const STOPPED_NOTE: &str = "<turn_stopped>The user stopped this turn. A call mar
 const INTERRUPTED: &str = "Interrupted: the user stopped the turn while this call ran. It may have partly run.";
 const NOT_RUN: &str = "Not run: the user stopped the turn before this call started.";
 /// Told a helper (once a run) that would end its turn without reporting.
-const REPORT_REMINDER: &str = "[harlo] Before you end your turn: you're a helper, and the session that started you is waiting for your result. If you're done or can't go on, call report_done (outcome succeeded or failed, a three-sentence summary, the files you changed). If you're waiting on an answer, call ask_parent (your parent) or request_approval (the user) instead. Then end your turn.";
+const REPORT_REMINDER: &str = "[harlo] Before you end your turn: you're a helper, and the session that started you is waiting for your result. If you're done or can't go on, call report_done (outcome succeeded or failed, a three-sentence summary, the files you changed). If you're waiting on an answer, call ask_parent (your parent) or ask (the user) instead. Then end your turn.";
 /// harlo's tools a helper may end its turn with: it reported, or it waits
 /// for its parent or the user.
 const HAND_OVERS: [&str; 4] = ["report_done", "ask_parent", "request_approval", "propose_helpers"];
