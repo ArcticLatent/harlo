@@ -1483,7 +1483,10 @@ ApplicationWindow {
         PauseAnimation { duration: 800 }
         // An online server: no price yet, so it says what that means.
         ScriptAction { script: {
-            win.check(win.findName("serverPrice-fake") === null || !win.findName("serverPrice-fake").visible, "a server on this computer has no price field (nothing extra)")
+            // (Its file said nothing of free: harlo said it when it started.)
+            const fakeFree = win.findName("serverFree-fake")
+            win.check(fakeFree !== null && fakeFree.visible && fakeFree.checked, "a server on this computer that takes no key is marked free")
+            win.check(win.findName("serverFree-gw") === null || !win.findName("serverFree-gw").visible, "an online one isn't offered as free")
             const row = win.findName("serverPrice-gw")
             win.check(row !== null && row.visible, "an online server has one")
             win.check(win.findText("No price: what Harlo's sessions on it cost isn't known, so spending limits can't count it.") !== null, "and says what no price means")
@@ -1504,6 +1507,29 @@ ApplicationWindow {
             win.check(gw && JSON.stringify(gw.prices) === "[[3,15]]", "the price is kept for its models (" + (gw ? JSON.stringify(gw.prices) : "no gw") + ")")
             win.check(win.findText("Harlo counts what its sessions cost at this price.") !== null, "and it says it counts")
             win.shotPopup(settingsDialog, "clicks-harlo-spend-priced")
+            win.clickItem(win.findName("serverFree-fake"), "free") } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const fake = JSON.parse(Accounts.servers("harlo")).find(s => s.name === "fake")
+            win.check(fake && fake.free === false, "unticked, it isn't free any more (" + (fake ? fake.free : "no fake") + ")")
+            // Added again, under another name: on this computer, no key: free.
+            win.clickItem(win.findName("addModelServer"), "Connect…") } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            win.findName("modelServerAddress").text = JSON.parse(Accounts.servers("harlo")).find(s => s.name === "fake").baseUrl
+            win.clickItem(win.findName("modelServerFind"), "Find models") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloSpendSteps, () => Accounts.serverSearch.indexOf("\"ready\"") >= 0, 8000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const box = win.findName("modelServerFree")
+            win.check(box !== null && box.checked, "adding one here with no key: Free is ticked (" + (box ? box.checked : "no box") + ")")
+            win.findName("modelServerName").text = "again"
+            win.clickItem(win.findName("modelServerAdd"), "add") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const again = JSON.parse(Accounts.servers("harlo")).find(s => s.name === "again")
+            win.check(again && again.free === true, "and it's saved as free (" + (again ? again.free : "not added") + ")")
             win.summary(); Qt.quit() } }
     }
 

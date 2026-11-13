@@ -573,7 +573,7 @@ Popup {
                     SectionHeader {
                         title: "Spending limits"
                         subtitle: "Today so far, since midnight: $" + (spendLimits.spend.today || 0).toFixed(2) + " in harlo's sessions. Past a limit, harlo stops the run until you allow more."
-                        more: "Costs are what the agents report: Claude Code at the end of each turn, Harlo after each request. Harlo on a ChatGPT plan or on a model server on your network costs nothing extra. On a model with no price its cost isn't known, so the limits can't count it: give the server a price in Model servers. Empty: no limit."
+                        more: "Costs are what the agents report: Claude Code at the end of each turn, Harlo after each request. Harlo on a ChatGPT plan or on a model server marked free (it runs on your own hardware) costs nothing extra. On a model with no price its cost isn't known, so the limits can't count it: give the server a price in Model servers. Empty: no limit."
                     }
                     // (Sessions open now whose costs the limits can't count.)
                     Hint {
@@ -581,7 +581,7 @@ Popup {
                         visible: (spendLimits.spend.unpriced || 0) > 0
                         Layout.bottomMargin: 8
                         text: (spendLimits.spend.unpriced === 1 ? "One session open now runs" : spendLimits.spend.unpriced + " sessions open now run")
-                            + " on a model with no price, so the limits don't count what it costs. Give its server a price in Model servers."
+                            + " on a model with no price, so the limits don't count what it costs. Give its server a price in Model servers, or mark it free there if it runs on your own hardware."
                     }
                     Group {
                         SettingRow {
@@ -3198,7 +3198,7 @@ Popup {
                     for (const sv of JSON.parse(Accounts.servers(a.id))) {
                         const same = rows.find(r => r.name === sv.name && r.baseUrl === sv.baseUrl)
                         if (same) { same.agents.push(a.label); same.agentIds.push(a.id) }
-                        else rows.push({ name: sv.name, baseUrl: sv.baseUrl, models: sv.models, place: sv.place, managed: sv.managed, engine: sv.engine || "", contexts: sv.contexts || [], prices: sv.prices || [], agents: [a.label], agentIds: [a.id] })
+                        else rows.push({ name: sv.name, baseUrl: sv.baseUrl, models: sv.models, place: sv.place, managed: sv.managed, free: !!sv.free, engine: sv.engine || "", contexts: sv.contexts || [], prices: sv.prices || [], agents: [a.label], agentIds: [a.id] })
                     }
                 }
                 // Set up by harlo, in no agent yet.
@@ -3479,13 +3479,29 @@ Popup {
                                 font.pixelSize: Theme.px(12)
                                 wrapMode: Text.Wrap
                             }
-                            // An online server's price (Harlo's): what its
-                            // list says, or one you give; without one, what
-                            // its sessions cost isn't known.
+                            // One on this computer or its network (Harlo's):
+                            // free when it runs on your own hardware (a
+                            // proxy here may pass requests on to a paid
+                            // service).
+                            AppCheckBox {
+                                objectName: "serverFree-" + serverItem.modelData.name
+                                visible: serverItem.local && serverItem.modelData.agentIds.includes("harlo")
+                                Layout.topMargin: 4
+                                text: "Free: it runs on hardware you own"
+                                checked: !!serverItem.modelData.free
+                                onToggled: {
+                                    const err = Accounts.setServerFree("harlo", serverItem.modelData.name, checked)
+                                    if (err !== "") Workspace.showNotice(err, true)
+                                    Accounts.loadServers()
+                                }
+                            }
+                            // A server's price (Harlo's), when it isn't
+                            // free: what its list says, or one you give;
+                            // without one, what its sessions cost isn't known.
                             RowLayout {
                                 id: priceRow
                                 objectName: "serverPrice-" + serverItem.modelData.name
-                                visible: !serverItem.local && serverItem.modelData.agentIds.includes("harlo")
+                                visible: (!serverItem.modelData.free || (serverItem.modelData.prices || []).some(p => p)) && serverItem.modelData.agentIds.includes("harlo")
                                 Layout.topMargin: 6
                                 spacing: 6
                                 readonly property var prices: serverItem.modelData.prices || []

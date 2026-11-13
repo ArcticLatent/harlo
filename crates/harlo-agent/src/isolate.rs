@@ -112,6 +112,11 @@ fn cache_root() -> PathBuf {
 
 /// A tree of `dir`'s files as they are (what `git add -A` would stage),
 /// written with a temporary index.
+/// Caches tools write as they run (Python's): left out of what's taken and
+/// brought back, so two helpers that both ran the tests don't clash over
+/// them, and hold back each other's real changes.
+const CACHES: [&str; 5] = [":(exclude,glob)**/__pycache__/**", ":(exclude,glob)**/*.py[co]", ":(exclude,glob)**/.pytest_cache/**", ":(exclude,glob)**/.mypy_cache/**", ":(exclude,glob)**/.ruff_cache/**"];
+
 fn tree_of(dir: &Path, scratch: &Path) -> Result<String, String> {
     let index = scratch.join(format!("index-{}", rand()));
     let head = git(dir, &["rev-parse", "--verify", "-q", "HEAD"], None).ok();
@@ -120,7 +125,7 @@ fn tree_of(dir: &Path, scratch: &Path) -> Result<String, String> {
             Some(h) => git(dir, &["read-tree", h], Some(&index))?,
             None => git(dir, &["read-tree", "--empty"], Some(&index))?,
         };
-        git(dir, &["add", "-A", "."], Some(&index))?;
+        git(dir, &[&["add", "-A", "--", "."][..], &CACHES[..]].concat(), Some(&index))?;
         git(dir, &["write-tree"], Some(&index))
     })();
     let _ = std::fs::remove_file(&index);
@@ -334,6 +339,36 @@ mod tests {
         // The project's own index is untouched (nothing staged).
         let staged = git(&dir, &["diff", "--cached", "--name-only"], None).unwrap();
         assert!(staged.is_empty(), "{staged}");
+        drop(base);
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&unix);
+    }
+
+    /// Two helpers that both ran Python: their caches stay behind, and both
+    /// changes come back.
+    #[test]
+    fn caches_dont_hold_changes_back() {
+        let dir = repo();
+        let unix = std::env::temp_dir().join(format!("harlo-agent-iso-cache-py-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("__pycache__")).unwrap();
+        std::fs::write(dir.join("__pycache__/old.cpython-314.pyc"), b"\0old").unwrap();
+        let base = Baseline::take_in(&dir, &unix).unwrap();
+        let (a, b) = (base.worktree("a").unwrap(), base.worktree("b").unwrap());
+        assert!(!a.dir.join("__pycache__").exists(), "a cache isn't copied into a helper's copy");
+        std::fs::write(a.cwd.join("src/a.txt"), "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nadd()\n").unwrap();
+        std::fs::write(b.cwd.join("src/a.txt"), "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nsub()\n").unwrap();
+        for (w, made) in [(&a, b"\0aaa"), (&b, b"\0bbb")] {
+            for d in ["__pycache__", "src/__pycache__", ".pytest_cache/v", ".mypy_cache"] {
+                std::fs::create_dir_all(w.dir.join(d)).unwrap();
+                std::fs::write(w.dir.join(d).join("lib.cpython-314.pyc"), made).unwrap();
+            }
+            std::fs::write(w.dir.join("src/lib.pyc"), made).unwrap();
+        }
+        assert!(matches!(base.apply(&a), Applied::Done(f) if f == ["src/a.txt"]));
+        assert!(matches!(base.apply(&b), Applied::Done(f) if f == ["src/a.txt"]));
+        assert_eq!(std::fs::read_to_string(dir.join("src/a.txt")).unwrap(), "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nadd()\nsub()\n");
+        assert!(!dir.join("src/__pycache__").exists() && !dir.join("src/lib.pyc").exists());
+        assert_eq!(std::fs::read(dir.join("__pycache__/old.cpython-314.pyc")).unwrap(), b"\0old", "the project's own is left as it was");
         drop(base);
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&unix);

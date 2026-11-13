@@ -174,7 +174,17 @@ pub struct Tools {
     pub jobs: Arc<crate::jobs::Jobs>,
     /// Language servers started for `lsp`.
     pub lsp: Arc<crate::lsp::Servers>,
+    /// Folders below `cwd` whose own rules (AGENTS.md) the model has, as
+    /// paths relative to `cwd`.
+    rules_given: Mutex<HashSet<PathBuf>>,
 }
+
+/// Of a folder's own rules file, what goes with a tool result.
+const NESTED_RULES_KEPT: usize = 8_000;
+/// How a folder's rules start in a tool result (and are found again in the
+/// history): `[Rules from sub/AGENTS.md, for the files under sub/:]`.
+const RULES_FROM: &str = "[Rules from ";
+const RULES_FOR: &str = ", for the files under ";
 
 /// A file as the session last saw it.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -410,7 +420,7 @@ pub fn specs() -> Value {
 impl Tools {
     pub fn new(cwd: PathBuf, spill_dir: PathBuf) -> Self {
         let jobs = Arc::new(crate::jobs::Jobs::new(&spill_dir));
-        Tools { cwd, spill_dir, seen: Mutex::new(HashMap::new()), told_generated: Mutex::new(HashSet::new()), originals: Mutex::new(HashMap::new()), sandbox: None, jobs, lsp: Arc::default() }
+        Tools { cwd, spill_dir, seen: Mutex::new(HashMap::new()), told_generated: Mutex::new(HashSet::new()), originals: Mutex::new(HashMap::new()), sandbox: None, jobs, lsp: Arc::default(), rules_given: Mutex::default() }
     }
 
     /// Outputs set aside, kept for `recall` (`replace`: the session's
@@ -421,6 +431,70 @@ impl Tools {
             kept.clear();
         }
         kept.extend(originals);
+    }
+
+    /// The rules of folders below the working directory, on the way down to
+    /// `files`, that the model doesn't have yet: each folder's AGENTS.md (or
+    /// CLAUDE.md), as text to add to the tool result that touched them.
+    /// The working directory's own rules, and those above it, are in the
+    /// instructions already; dependencies' and hidden folders' aren't sent.
+    fn nested_rules(&self, files: &[PathBuf]) -> Option<String> {
+        use std::path::Component;
+        let mut out = String::new();
+        let mut given = self.rules_given.lock().unwrap();
+        for file in files {
+            let Some(folders) = file.strip_prefix(&self.cwd).ok().and_then(Path::parent) else { continue };
+            let mut rel = PathBuf::new();
+            for c in folders.components() {
+                let Component::Normal(name) = c else { break };
+                let name = name.to_string_lossy();
+                if name.starts_with('.') || name == "node_modules" || name == "vendor" {
+                    break;
+                }
+                rel.push(&*name);
+                if given.contains(&rel) {
+                    continue;
+                }
+                let dir = self.cwd.join(&rel);
+                let Some(rules) = ["AGENTS.md", "CLAUDE.md"].map(|n| dir.join(n)).into_iter().find(|p| p.is_file()) else { continue };
+                given.insert(rel.clone());
+                // (Read itself, or hidden: nothing to add.)
+                if rules == *file || self.hidden(&rules).is_some() {
+                    continue;
+                }
+                let Ok(text) = std::fs::read_to_string(&rules) else { continue };
+                let text = text.trim();
+                if text.is_empty() {
+                    continue;
+                }
+                let shown = rules.strip_prefix(&self.cwd).unwrap_or(&rules).display();
+                out.push_str(&format!("\n\n{RULES_FROM}{shown}{RULES_FOR}{}/:]\n", rel.display()));
+                if text.len() > NESTED_RULES_KEPT {
+                    let cut = text.floor_char_boundary(NESTED_RULES_KEPT);
+                    out.push_str(&format!("{}\n[… cut at {} KB: read {shown} for the rest.]", &text[..cut], NESTED_RULES_KEPT / 1000));
+                } else {
+                    out.push_str(text);
+                }
+            }
+        }
+        (!out.is_empty()).then_some(out)
+    }
+
+    /// Which folders' rules the model has: the ones whose text is in
+    /// `history` (its tool results not set aside), after it was loaded,
+    /// compacted or had outputs set aside.
+    pub fn rules_seen_in(&self, history: &[Value]) {
+        let mut given = self.rules_given.lock().unwrap();
+        given.clear();
+        for m in history.iter().filter(|m| m["role"] == "toolResult" && m["harloStub"] != true) {
+            for text in m["content"].as_array().into_iter().flatten().filter_map(|c| c["text"].as_str()) {
+                for line in text.lines().filter_map(|l| l.strip_prefix(RULES_FROM)) {
+                    if let Some(dir) = line.split_once(RULES_FOR).and_then(|(_, d)| d.strip_suffix("/:]")) {
+                        given.insert(PathBuf::from(dir));
+                    }
+                }
+            }
+        }
     }
 
     /// Whether any output is set aside (so `recall` is offered).
@@ -576,31 +650,45 @@ impl Tools {
     pub async fn call(&self, name: &str, args: &Value) -> Outcome {
         let s = |k: &str| args[k].as_str().unwrap_or_default();
         match name {
-            "read" => self.read(s("path"), args["offset"].as_u64(), args["limit"].as_u64()).await,
+            "read" => {
+                let mut out = self.read(s("path"), args["offset"].as_u64(), args["limit"].as_u64()).await;
+                if !out.failed
+                    && let Some(rules) = self.nested_rules(&[self.path(s("path"))])
+                {
+                    out.text.push_str(&rules);
+                }
+                out
+            }
             "write" | "edit" | "apply_patch" => {
                 let mut out = match name {
                     "write" => self.write(s("path"), s("content")),
                     "edit" => self.edit(s("path"), &args["edits"]),
                     _ => self.patch(s("input")),
                 };
-                if !out.failed && crate::lsp::diagnostics_on() {
-                    let changed: Vec<PathBuf> = match name {
-                        "apply_patch" => crate::patch::parse(s("input"))
-                            .unwrap_or_default()
-                            .iter()
-                            .filter_map(|op| match op {
-                                crate::patch::Op::Add { path, .. } => Some(path),
-                                crate::patch::Op::Update { move_to: Some(to), .. } => Some(to),
-                                crate::patch::Op::Update { path, .. } => Some(path),
-                                crate::patch::Op::Delete { .. } => None,
-                            })
-                            .map(|p| self.path(p))
-                            .collect(),
-                        _ => vec![self.path(s("path"))],
-                    };
-                    if let Some(errors) = self.lsp.errors_after(&changed, &self.cwd, self.sandbox.as_deref()).await {
-                        out.text = format!("{}\n\n{errors}", out.text);
-                    }
+                if out.failed {
+                    return out;
+                }
+                let changed: Vec<PathBuf> = match name {
+                    "apply_patch" => crate::patch::parse(s("input"))
+                        .unwrap_or_default()
+                        .iter()
+                        .filter_map(|op| match op {
+                            crate::patch::Op::Add { path, .. } => Some(path),
+                            crate::patch::Op::Update { move_to: Some(to), .. } => Some(to),
+                            crate::patch::Op::Update { path, .. } => Some(path),
+                            crate::patch::Op::Delete { .. } => None,
+                        })
+                        .map(|p| self.path(p))
+                        .collect(),
+                    _ => vec![self.path(s("path"))],
+                };
+                if crate::lsp::diagnostics_on()
+                    && let Some(errors) = self.lsp.errors_after(&changed, &self.cwd, self.sandbox.as_deref()).await
+                {
+                    out.text = format!("{}\n\n{errors}", out.text);
+                }
+                if let Some(rules) = self.nested_rules(&changed) {
+                    out.text.push_str(&rules);
                 }
                 out
             }
@@ -1159,6 +1247,59 @@ impl Tools {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A folder's own AGENTS.md comes once, with the first file read or
+    /// changed under it; the top folder's (in the instructions) doesn't.
+    #[tokio::test]
+    async fn a_folders_rules_come_once_with_its_first_file() {
+        let dir = std::env::temp_dir().join(format!("harlo-agent-rules-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for d in ["billing/ledger", "web", "node_modules/dep", ".hidden"] {
+            std::fs::create_dir_all(dir.join(d)).unwrap();
+        }
+        std::fs::write(dir.join("AGENTS.md"), "Top rule.").unwrap();
+        std::fs::write(dir.join("billing/AGENTS.md"), "Money is in cents.").unwrap();
+        std::fs::write(dir.join("billing/ledger/CLAUDE.md"), "Entries never change.").unwrap();
+        std::fs::write(dir.join("node_modules/dep/AGENTS.md"), "A dependency's rule.").unwrap();
+        std::fs::write(dir.join(".hidden/AGENTS.md"), "Hidden rule.").unwrap();
+        std::fs::write(dir.join("web/AGENTS.md"), "x".repeat(NESTED_RULES_KEPT + 500)).unwrap();
+        for f in ["main.rs", "billing/ledger/post.rs", "billing/tax.rs", "node_modules/dep/i.js", ".hidden/a"] {
+            std::fs::write(dir.join(f), "fn x() {}\n").unwrap();
+        }
+        let t = Tools::new(dir.clone(), dir.join(".out"));
+        async fn read(t: &Tools, p: &str) -> String {
+            t.call("read", &json!({ "path": p })).await.text
+        }
+        // None here: the top folder's are in the instructions already.
+        assert!(!read(&t, "main.rs").await.contains(RULES_FROM));
+        let first = read(&t, "billing/ledger/post.rs").await;
+        assert!(first.contains("[Rules from billing/AGENTS.md, for the files under billing/:]\nMoney is in cents."), "{first}");
+        assert!(first.contains("[Rules from billing/ledger/CLAUDE.md, for the files under billing/ledger/:]\nEntries never change."), "{first}");
+        assert!(!first.contains("Top rule."), "{first}");
+        // Once: not with the next file there, nor with an edit.
+        assert!(!read(&t, "billing/tax.rs").await.contains(RULES_FROM));
+        let edited = t.call("edit", &json!({ "path": "billing/tax.rs", "edits": [{ "old_text": "x", "new_text": "y" }] })).await;
+        assert!(!edited.failed && !edited.text.contains(RULES_FROM), "{}", edited.text);
+        // A dependency's and a hidden folder's aren't sent.
+        assert!(!read(&t, "node_modules/dep/i.js").await.contains(RULES_FROM));
+        assert!(!read(&t, ".hidden/a").await.contains(RULES_FROM));
+        // A new file, written: its folder's come, cut to size.
+        let written = t.call("write", &json!({ "path": "web/app.js", "content": "1" })).await.text;
+        assert!(written.contains("[Rules from web/AGENTS.md, for the files under web/:]"), "{written}");
+        assert!(written.contains("cut at 8 KB: read web/AGENTS.md for the rest") && written.len() < NESTED_RULES_KEPT + 400, "{}", written.len());
+        // Gone from the context (set aside, or compacted): sent again.
+        let history = vec![json!({ "role": "toolResult", "toolName": "read", "content": [{ "type": "text", "text": first }] })];
+        t.rules_seen_in(&history);
+        assert!(!read(&t, "billing/tax.rs").await.contains(RULES_FROM), "billing's are still in the history");
+        assert!(read(&t, "web/app.js").await.contains("[Rules from web/AGENTS.md"), "web's aren't any more");
+        t.rules_seen_in(&[json!({ "role": "toolResult", "harloStub": true, "content": [{ "type": "text", "text": first }] })]);
+        assert!(read(&t, "billing/tax.rs").await.contains("[Rules from billing/AGENTS.md"), "a stub doesn't keep them");
+        // Reading the rules file itself counts as having them.
+        let t = Tools::new(dir.clone(), dir.join(".out"));
+        assert!(!read(&t, "billing/AGENTS.md").await.contains(RULES_FROM));
+        assert!(!read(&t, "billing/tax.rs").await.contains("billing/AGENTS.md"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[tokio::test]
     async fn many_matches_show_the_first_and_where_the_rest_are() {

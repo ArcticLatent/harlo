@@ -41,8 +41,11 @@ use tokio::sync::oneshot;
 use crate::tools::{Outcome, bash};
 
 const PROTOCOL: &str = "2025-06-18";
-/// To start, unless an entry says otherwise.
-const START_TIMEOUT: Duration = Duration::from_secs(30);
+/// To start, unless an entry says otherwise. (The first request waits for
+/// every server, used or not.)
+const START_TIMEOUT: Duration = Duration::from_secs(10);
+/// A start that takes longer is said, naming the servers it waits for.
+pub const SAID_AFTER: Duration = Duration::from_secs(2);
 /// A tool call at most (Stop ends one sooner).
 const CALL_TIMEOUT: Duration = Duration::from_secs(600);
 /// The most of a result a program gets.
@@ -950,9 +953,17 @@ pub struct Mcp {
 
 impl Mcp {
     /// Starts `configs` (all at once); notes on those that didn't.
-    pub async fn start(configs: Vec<Config>, project: &Path) -> (Mcp, Vec<String>) {
+    /// `pending`: the ones not started yet, with their timeouts.
+    pub async fn start(configs: Vec<Config>, project: &Path, pending: &Mutex<Vec<(String, Duration)>>) -> (Mcp, Vec<String>) {
         let names: Vec<String> = configs.iter().map(|c| c.name.clone()).collect();
-        let started = join_all(configs.into_iter().map(|c| start(c, project.to_owned()))).await;
+        *pending.lock().unwrap() = configs.iter().map(|c| (c.name.clone(), c.timeout)).collect();
+        let started = join_all(configs.into_iter().map(|c| async move {
+            let name = c.name.clone();
+            let s = start(c, project.to_owned()).await;
+            pending.lock().unwrap().retain(|(n, _)| *n != name);
+            s
+        }))
+        .await;
         let mut mcp = Mcp::default();
         let mut notes = Vec::new();
         for (name, s) in names.into_iter().zip(started) {
@@ -963,6 +974,15 @@ impl Mcp {
         }
         mcp.index();
         (mcp, notes)
+    }
+
+    /// What the first request waits for, after `SAID_AFTER`: the servers
+    /// still starting (None: none).
+    pub fn waiting_for(pending: &[(String, Duration)]) -> Option<String> {
+        let most = pending.iter().map(|(_, t)| *t).max()?.saturating_sub(SAID_AFTER).as_secs_f64().ceil();
+        let names: Vec<&str> = pending.iter().map(|(n, _)| n.as_str()).collect();
+        let s = if names.len() == 1 { "" } else { "s" };
+        Some(format!("Waiting for MCP server{s} {} to start (up to {most} s more).", names.join(", ")))
     }
 
     fn index(&mut self) {
@@ -1188,6 +1208,15 @@ fn resource_row(x: &Value, key: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn says_what_the_start_waits_for() {
+        let s = |n: &str, t: u64| (n.to_owned(), Duration::from_secs(t));
+        assert_eq!(Mcp::waiting_for(&[]), None);
+        assert_eq!(Mcp::waiting_for(&[s("docs", 10)]).unwrap(), "Waiting for MCP server docs to start (up to 8 s more).");
+        assert_eq!(Mcp::waiting_for(&[s("a", 10), s("b", 60)]).unwrap(), "Waiting for MCP servers a, b to start (up to 58 s more).");
+        assert_eq!(START_TIMEOUT, Duration::from_secs(10));
+    }
 
     #[test]
     fn names_tools() {

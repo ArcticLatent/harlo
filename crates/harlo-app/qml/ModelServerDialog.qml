@@ -33,10 +33,17 @@ AppDialog {
             // Provider names it has already.
             const taken = [...new Set((a.modelIds || []).map(m => m.split(/[\/:]/)[0]).filter(p => p !== ""))]
             const err = Accounts.addServer(id, name.text, search.baseUrl, key.text, JSON.stringify(models), JSON.stringify(taken))
+                || Accounts.setServerFree(id, name.text.trim(), free.checked)
             if (err !== "") { error = (chosen.length > 1 ? a.label + ": " : "") + err; return }
         }
         close()
         added()
+    }
+    /// On this computer or its network (as harlo tells them apart).
+    function localAddress(url) {
+        const host = String(url).replace(/^[a-z]+:\/\//i, "").replace(/^[^@\/]*@/, "").replace(/[\/?#].*$/, "").replace(/:\d+$/, "").replace(/^\[|\]$/g, "").toLowerCase()
+        return host === "localhost" || /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.)/.test(host) || host === "::1" || (host.indexOf(":") >= 0 && /^(f[cd]|fe80)/.test(host))
+            || /\.(localhost|local|lan|internal|home\.arpa)$/.test(host) || (host !== "" && host.indexOf(".") < 0 && host.indexOf(":") < 0)
     }
     function contextText(n) { return n >= 1000 ? Math.round(n / 1000) + "k context" : n + " context" }
 
@@ -164,6 +171,19 @@ AppDialog {
                     }
                 }
             }
+            // Free: on your own hardware. A server here with a key may
+            // pass requests on to a paid service, so it isn't taken as free.
+            AppCheckBox {
+                id: free
+                objectName: "modelServerFree"
+                text: "Free: it runs on hardware you own"
+                checked: false
+                Connections {
+                    target: dlg
+                    function onFoundChanged() { if (dlg.found) free.checked = dlg.localAddress(dlg.search.baseUrl) && key.text.trim() === "" }
+                }
+            }
+            Note { text: free.checked ? "Its sessions cost nothing extra." : "Without a price its sessions' cost isn't known, so spending limits can't count it: give it one in Model servers." }
             Note { text: "Models show as " + (name.text.trim() || "name") + "/<model>, saved in each agent's own config." }
             Note { visible: dlg.error !== ""; color: Theme.error; text: dlg.error }
             RowLayout {

@@ -142,13 +142,20 @@ fn starts(program: &Path) -> Result<(), String> {
     if !check.is_file() {
         return Ok(());
     }
-    let mut child = std::process::Command::new(&check)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("it can't be run ({e})"))?;
+    let mut command = std::process::Command::new(&check);
+    command.args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+    // A program just written can be busy for a moment ("Text file busy")
+    // while a process started at the same time still holds it open for writing.
+    let mut tries = 0;
+    let mut child = loop {
+        match command.spawn() {
+            Err(e) if e.raw_os_error() == Some(libc::ETXTBSY) && tries < 20 => {
+                tries += 1;
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            spawned => break spawned.map_err(|e| format!("it can't be run ({e})"))?,
+        }
+    };
     let end = Instant::now() + Duration::from_secs(5);
     loop {
         match child.try_wait() {

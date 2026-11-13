@@ -20,6 +20,9 @@
 //! `cost`: dollars per million tokens (`cacheRead`: input the cache
 //! served; the input price when it's not given). Without one, a model's
 //! price is what its server's list says (OpenRouter's `pricing`, say).
+//! `"free": true` on a provider: it charges nothing (a server on your own
+//! hardware); unpriced and not free, what it costs is unknown, wherever it
+//! is (a local proxy may pass requests on to a paid service).
 //!
 //! `thinkingLevelMap`: the levels offered and the effort each sends (null:
 //! not offered); without it a model that reasons takes the usual levels.
@@ -77,6 +80,8 @@ pub struct Provider {
     key: Key,
     /// As configured (none: ask the server).
     models: Vec<ModelInfo>,
+    /// Said to charge nothing (`"free": true`).
+    free: bool,
 }
 
 /// A model one can pick.
@@ -121,9 +126,9 @@ impl Provider {
             && std::env::var("HARLO_AGENT_WEB_SEARCH").map_or(true, |v| v.trim() != "off")
     }
 
-    /// Whether its server is on this computer or its network (it charges
-    /// nothing): a loopback or private address, or a `.local`, `.lan` or
-    /// dotless name.
+    /// Whether its server is on this computer or its network: a loopback or
+    /// private address, or a `.local`, `.lan` or dotless name.
+    #[cfg(test)]
     pub fn is_local(&self) -> bool {
         let rest = self.base_url.split_once("://").map_or(self.base_url.as_str(), |(_, r)| r);
         let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
@@ -148,7 +153,7 @@ impl Provider {
         }
         match self.models.iter().find(|m| m.id == model).and_then(|m| m.price).or(listed) {
             Some(p) => Pricing::Priced(p),
-            None if self.is_local() => Pricing::Local,
+            None if self.free => Pricing::Local,
             None => Pricing::Unknown,
         }
     }
@@ -237,11 +242,11 @@ fn config_file() -> PathBuf {
 /// The providers: the plan, an OpenAI key, then the file's.
 pub fn all() -> Result<Vec<Provider>> {
     let mut out = vec![
-        Provider { id: CHATGPT.into(), name: "ChatGPT".into(), base_url: auth::RESOURCE.into(), api: Api::Responses, key: Key::Plan(Sign::Plan), models: Vec::new() },
-        Provider { id: CODEX.into(), name: "ChatGPT (Codex sign-in)".into(), base_url: format!("{}/codex", chatgpt_backend()), api: Api::Responses, key: Key::Plan(Sign::Codex), models: Vec::new() },
+        Provider { id: CHATGPT.into(), name: "ChatGPT".into(), base_url: auth::RESOURCE.into(), api: Api::Responses, key: Key::Plan(Sign::Plan), models: Vec::new(), free: false },
+        Provider { id: CODEX.into(), name: "ChatGPT (Codex sign-in)".into(), base_url: format!("{}/codex", chatgpt_backend()), api: Api::Responses, key: Key::Plan(Sign::Codex), models: Vec::new(), free: false },
     ];
     if std::env::var("OPENAI_API_KEY").is_ok_and(|k| !k.trim().is_empty()) {
-        out.push(Provider { id: "openai".into(), name: "OpenAI".into(), base_url: OPENAI_URL.into(), api: Api::Responses, key: Key::Env("OPENAI_API_KEY".into()), models: Vec::new() });
+        out.push(Provider { id: "openai".into(), name: "OpenAI".into(), base_url: OPENAI_URL.into(), api: Api::Responses, key: Key::Env("OPENAI_API_KEY".into()), models: Vec::new(), free: false });
     }
     let path = config_file();
     let text = match std::fs::read_to_string(&path) {
@@ -304,7 +309,7 @@ fn parse_provider(id: &str, p: &Value) -> Result<Provider> {
             Some(ModelInfo { provider: id.clone(), id: mid, name, context_window: m["contextWindow"].as_u64().unwrap_or(0), levels, efforts, images, price: file_price(&m["cost"]) })
         })
         .collect();
-    Ok(Provider { name: p["name"].as_str().filter(|s| !s.is_empty()).unwrap_or(&id).to_owned(), id, base_url, api, key, models })
+    Ok(Provider { name: p["name"].as_str().filter(|s| !s.is_empty()).unwrap_or(&id).to_owned(), id, base_url, api, key, models, free: p["free"] == true })
 }
 
 /// A model's `cost` in the file: dollars per million tokens.
@@ -486,14 +491,24 @@ mod tests {
         assert!((p.input - 3.0).abs() < 1e-9 && (p.output - 15.0).abs() < 1e-9 && (p.cached - 0.3).abs() < 1e-9, "{p:?}");
         assert_eq!(listed[1].price, None, "it varies: unknown");
         assert_eq!(file.pricing("plain", listed[0].price), Pricing::Priced(p));
-        // A server here or on the network: nothing extra; a plan's: in the plan.
+        // Said to be free: nothing extra; not said, unknown, even on this
+        // computer (a proxy may pass it on to a paid service); a plan's: in
+        // the plan.
         for url in ["http://127.0.0.1:8090/v1", "http://localhost:11434/v1", "http://192.168.1.20:8000/v1", "http://[::1]:8080/v1", "http://gpu:8000/v1", "http://box.local/v1", "http://10.0.0.5/v1"] {
-            assert_eq!(parse_provider("l", &json!({ "baseUrl": url })).unwrap().pricing("m", None), Pricing::Local, "{url}");
+            let p = parse_provider("l", &json!({ "baseUrl": url })).unwrap();
+            assert!(p.is_local(), "{url}");
+            assert_eq!(p.pricing("m", None), Pricing::Unknown, "{url}");
+            assert_eq!(parse_provider("l", &json!({ "baseUrl": url, "free": true })).unwrap().pricing("m", None), Pricing::Local, "{url}");
         }
         for url in ["https://openrouter.ai/api/v1", "https://8.8.8.8/v1", "https://user@api.example.com:443/v1"] {
-            assert_eq!(parse_provider("o", &json!({ "baseUrl": url })).unwrap().pricing("m", None), Pricing::Unknown, "{url}");
+            let p = parse_provider("o", &json!({ "baseUrl": url })).unwrap();
+            assert!(!p.is_local(), "{url}");
+            assert_eq!(p.pricing("m", None), Pricing::Unknown, "{url}");
         }
-        let plan = Provider { id: CHATGPT.into(), name: "ChatGPT".into(), base_url: auth::RESOURCE.into(), api: Api::Responses, key: Key::Plan(Sign::Plan), models: Vec::new() };
+        // A price still wins.
+        let priced = parse_provider("l", &json!({ "baseUrl": "http://127.0.0.1:4000/v1", "free": true, "models": [{ "id": "m", "cost": { "input": 1, "output": 2 } }] })).unwrap();
+        assert!(matches!(priced.pricing("m", None), Pricing::Priced(_)));
+        let plan = Provider { id: CHATGPT.into(), name: "ChatGPT".into(), base_url: auth::RESOURCE.into(), api: Api::Responses, key: Key::Plan(Sign::Plan), models: Vec::new(), free: false };
         assert_eq!(plan.pricing("gpt", None), Pricing::Plan);
     }
 

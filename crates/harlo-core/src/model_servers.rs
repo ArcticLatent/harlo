@@ -427,7 +427,61 @@ fn with_server(text: &str, shown: &str, name: &str, base_url: &str, key: &str, m
     } else {
         text.to_owned()
     };
-    entry_with(&text, name, base_url, placeholder(key), models).map_err(|e| format!("{e} ({shown})"))
+    entry_with(&text, name, base_url, placeholder(key), models, free_by_default(base_url, key)).map_err(|e| format!("{e} ({shown})"))
+}
+
+/// Whether a server added is taken to charge nothing, until said otherwise:
+/// on this computer or its network, and one harlo starts or that takes no
+/// key (one with a key may pass requests on to a paid service).
+fn free_by_default(base_url: &str, key: &str) -> bool {
+    let key = key.trim();
+    harlo_harness::is_local_url(base_url) && (key.is_empty() || key == "none" || crate::servers::commands_of(base_url)["start"].as_str().is_some_and(|c| !c.is_empty()))
+}
+
+/// Whether the agent's file says a server charges nothing (None: it
+/// doesn't say).
+pub fn free(kind: HarnessKind, name: &str) -> Option<bool> {
+    providers(kind)[name]["free"].as_bool()
+}
+
+/// Says in the agent's file whether a server charges nothing (unpriced and
+/// not free, its cost is unknown).
+pub fn set_free(kind: HarnessKind, name: &str, free: bool) -> Result<(), String> {
+    let f = file(kind).ok_or("harlo can't change this agent's model servers.")?;
+    let shown = f.display();
+    let text = std::fs::read_to_string(&f).map_err(|e| format!("Couldn't read {shown}: {e}"))?;
+    let mut v: Value = serde_json::from_str(&text).map_err(|e| format!("{shown} isn't valid JSON ({e})"))?;
+    let Some(p) = v["providers"].get_mut(name).and_then(Value::as_object_mut) else { return Err(format!("There's no server called {name}")) };
+    p.insert("free".into(), json!(free));
+    write(&f, &(serde_json::to_string_pretty(&v).unwrap_or_default() + "\n")).map_err(|e| format!("Couldn't write {shown}: {e}"))
+}
+
+/// Servers in the agent's file that don't say whether they charge: said,
+/// as they'd be taken when added ([`free_by_default`]). (Before, a server
+/// on this computer or its network was taken as free.) Whether it changed
+/// anything.
+pub fn mark_free(kind: HarnessKind) -> Result<bool, String> {
+    let Some(f) = file(kind) else { return Ok(false) };
+    let Ok(text) = std::fs::read_to_string(&f) else { return Ok(false) };
+    let Some(out) = marked_free(&text) else { return Ok(false) };
+    write(&f, &out).map_err(|e| format!("Couldn't write {}: {e}", f.display()))?;
+    Ok(true)
+}
+
+fn marked_free(text: &str) -> Option<String> {
+    let mut v: Value = serde_json::from_str(text).ok()?;
+    let mut changed = false;
+    for p in v["providers"].as_object_mut()?.values_mut() {
+        let Some(o) = p.as_object_mut() else { continue };
+        let Some(url) = o.get("baseUrl").and_then(Value::as_str).map(str::to_owned) else { continue };
+        if o.contains_key("free") {
+            continue;
+        }
+        let key = o.get("apiKey").and_then(Value::as_str).unwrap_or_default().to_owned();
+        o.insert("free".into(), json!(free_by_default(&url, &key)));
+        changed = true;
+    }
+    changed.then(|| serde_json::to_string_pretty(&v).unwrap_or_default() + "\n")
 }
 
 /// A provider's models are offered only with a key: one that servers
@@ -436,7 +490,7 @@ fn placeholder(key: &str) -> &str {
     if key.trim().is_empty() { "none" } else { key.trim() }
 }
 
-fn entry_with(text: &str, name: &str, base_url: &str, key: &str, models: &[Found]) -> Result<String, String> {
+fn entry_with(text: &str, name: &str, base_url: &str, key: &str, models: &[Found], free: bool) -> Result<String, String> {
     let mut v: Value = if text.trim().is_empty() { json!({}) } else { serde_json::from_str(text).map_err(|e| format!("The file isn't valid JSON ({e}); fix it first"))? };
     let root = v.as_object_mut().ok_or("The file isn't a JSON object")?;
     let providers = root.entry("providers").or_insert_with(|| json!({}));
@@ -465,7 +519,7 @@ fn entry_with(text: &str, name: &str, base_url: &str, key: &str, models: &[Found
             Value::Object(e)
         })
         .collect();
-    providers.insert(name.to_owned(), json!({ "baseUrl": base_url, "api": "openai-completions", "apiKey": key, "models": list }));
+    providers.insert(name.to_owned(), json!({ "baseUrl": base_url, "api": "openai-completions", "apiKey": key, "models": list, "free": free }));
     Ok(serde_json::to_string_pretty(&v).unwrap_or_default() + "\n")
 }
 
@@ -793,6 +847,22 @@ fn write(file: &Path, text: &str) -> std::io::Result<()> {
 mod tests {
     use super::*;
 
+    /// A file from before harlo said which servers are free: said once, as
+    /// they'd be added; one already saying isn't changed.
+    #[test]
+    fn servers_from_before_say_whether_they_are_free() {
+        let text = r#"{"providers":{
+            "llama":{"baseUrl":"http://127.0.0.1:8090/v1","apiKey":"none","models":["m"]},
+            "proxy":{"baseUrl":"http://localhost:4000/v1","apiKey":"$PROXY_KEY","models":["m"]},
+            "lan":{"baseUrl":"http://192.168.1.9:8000/v1","models":["m"]},
+            "online":{"baseUrl":"https://api.example.com/v1","apiKey":"none","models":["m"]},
+            "said":{"baseUrl":"http://127.0.0.1:9000/v1","apiKey":"none","free":false,"models":["m"]}}}"#;
+        let out: Value = serde_json::from_str(&marked_free(text).unwrap()).unwrap();
+        let free = |n: &str| out["providers"][n]["free"].clone();
+        assert_eq!([free("llama"), free("proxy"), free("lan"), free("online"), free("said")], [json!(true), json!(false), json!(true), json!(false), json!(false)]);
+        assert!(marked_free(&out.to_string()).is_none(), "once");
+    }
+
     #[test]
     fn harlos_servers_on_a_host() {
         assert!(ON_HOST.contains(&HarnessKind::Harlo));
@@ -966,7 +1036,13 @@ mod tests {
         let models = [found("qwen2.5-coder:7b", None), found("big", Some(65536))];
         add_to(HarnessKind::Harlo, &f, "ollama", "http://localhost:11434/v1", "", &models, &[]).unwrap();
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&f).unwrap()).unwrap();
-        assert_eq!(v["providers"]["ollama"], json!({ "baseUrl": "http://localhost:11434/v1", "api": "openai-completions", "apiKey": "none", "models": [{ "id": "qwen2.5-coder:7b" }, { "id": "big", "contextWindow": 65536 }] }));
+        assert_eq!(v["providers"]["ollama"], json!({ "baseUrl": "http://localhost:11434/v1", "api": "openai-completions", "apiKey": "none", "models": [{ "id": "qwen2.5-coder:7b" }, { "id": "big", "contextWindow": 65536 }], "free": true }));
+        // Free when it's here and takes no key; with one, it may pass
+        // requests on to a paid service; online, never.
+        add_to(HarnessKind::Harlo, &f, "proxy", "http://127.0.0.1:4000/v1", "sk-local", &models, &[]).unwrap();
+        add_to(HarnessKind::Harlo, &f, "gw", "https://gw.example.com/v1", "", &models, &[]).unwrap();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&f).unwrap()).unwrap();
+        assert_eq!((&v["providers"]["proxy"]["free"], &v["providers"]["gw"]["free"]), (&json!(false), &json!(false)));
         {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600);
@@ -1006,7 +1082,7 @@ mod tests {
         assert_eq!(
             v["providers"]["llamacpp"],
             json!({ "baseUrl": "http://127.0.0.1:8090/v1", "api": "openai-completions", "apiKey": "none", "models": [
-                { "id": "qwen3", "contextWindow": 32768, "reasoning": true, "thinkingLevelMap": thinking_levels(false) }, { "id": "plain" }] })
+                { "id": "qwen3", "contextWindow": 32768, "reasoning": true, "thinkingLevelMap": thinking_levels(false) }, { "id": "plain" }], "free": true })
         );
         assert_eq!(servers_in(HarnessKind::Harlo, &f)[0].models, ["qwen3", "plain"]);
         assert!(add_to(HarnessKind::Harlo, &f, "chatgpt", "http://b/v1", "", &[found("m", None)], &["chatgpt".into()]).unwrap_err().contains("already"));

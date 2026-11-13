@@ -494,6 +494,7 @@ impl Agent {
             tools: {
                 let mut t = Tools::new(cwd.clone(), spill);
                 t.set_aside(past.originals, true);
+                t.rules_seen_in(&past.messages);
                 t.sandbox = sandbox;
                 t
             },
@@ -557,6 +558,7 @@ impl Agent {
         self.ids.clear();
         self.files = Default::default();
         self.tools.set_aside([], true);
+        self.tools.rules_seen_in(&[]);
         self.logged = (None, None);
         self.spent_anew();
     }
@@ -570,6 +572,7 @@ impl Agent {
         self.ids = past.ids;
         self.files = past.files;
         self.tools.set_aside(past.originals, true);
+        self.tools.rules_seen_in(&self.history);
         self.logged = (past.model, past.effort);
         self.spent_anew();
     }
@@ -1117,7 +1120,19 @@ impl Agent {
             Some(m) => m.refresh().await,
             None => {
                 let (configs, mut notes) = crate::mcp::load(&self.cwd);
-                let (m, started) = crate::mcp::Mcp::start(configs, &self.cwd).await;
+                let pending = Mutex::new(Vec::new());
+                let mut starting = std::pin::pin!(crate::mcp::Mcp::start(configs, &self.cwd, &pending));
+                // (A slow one says so, naming it: the first request waits.)
+                let (m, started) = tokio::select! {
+                    done = &mut starting => done,
+                    _ = tokio::time::sleep(crate::mcp::SAID_AFTER) => {
+                        let waiting = crate::mcp::Mcp::waiting_for(&pending.lock().unwrap());
+                        if let Some(text) = waiting {
+                            show(Shown::Notice { level: "info", text: &text });
+                        }
+                        starting.await
+                    }
+                };
                 notes.extend(started);
                 self.mcp = Some(m);
                 notes
@@ -1327,6 +1342,7 @@ impl Agent {
             self.history[i] = stubs::as_stub(&self.history[i], t);
         }
         self.tools.set_aside(originals, false);
+        self.tools.rules_seen_in(&self.history);
         let after = context.saturating_sub(saved);
         if context > 0 {
             self.last_usage = json!({ "input_tokens": after, "output_tokens": 0 });
@@ -1598,6 +1614,7 @@ impl Agent {
             Err(e) => return failed(show, format!("{e:#}")),
         };
         self.history.splice(..cut, [crate::session::summary_message(&entry)]);
+        self.tools.rules_seen_in(&self.history);
         self.ids.splice(..cut, [id]);
         self.files = files;
         self.reread_instructions();

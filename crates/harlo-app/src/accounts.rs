@@ -141,6 +141,10 @@ pub mod qobject {
         /// not.
         #[qinvokable]
         fn set_server_price(self: &Accounts, agent: &QString, name: &QString, input: f64, output: f64) -> QString;
+        /// Says whether a server charges nothing (its own hardware's): ""
+        /// or why not. Unpriced and not free, its cost is unknown.
+        #[qinvokable]
+        fn set_server_free(self: &Accounts, agent: &QString, name: &QString, free: bool) -> QString;
         /// Reads which servers the agents on `host` have (`hostServers`
         /// follows).
         #[qinvokable]
@@ -591,6 +595,10 @@ impl Accounts {
     pub fn load_servers(self: Pin<&mut Self>) {
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
+            // (Servers from before harlo said which are free: said now.)
+            if let Err(e) = model_servers::mark_free(HarnessKind::Harlo) {
+                tracing::warn!("model servers: {e}");
+            }
             let mut all: Vec<(String, Value)> = model_servers::AGENTS.iter().map(|k| (k.as_str().to_owned(), servers_json(*k))).collect();
             // ("": those harlo set up that no agent has.)
             all.push((String::new(), unused_json()));
@@ -631,8 +639,10 @@ fn servers_json(k: HarnessKind) -> Value {
                 let prices: Vec<Value> = model_servers::prices(k, &s.name).into_iter().map(|p| p.map_or(Value::Null, |p| json!([p[0], p[1]]))).collect();
                 // Another machine's, reached here through SSH: that machine.
                 let via = model_servers::through(&s.base_url).map(|(h, _)| h).unwrap_or_default();
+                // Said to charge nothing.
+                let free = model_servers::free(k, &s.name) == Some(true);
                 json!({
-                    "name": s.name, "baseUrl": s.base_url, "models": s.models, "contexts": contexts, "prices": prices, "place": place, "managed": managed,
+                    "name": s.name, "baseUrl": s.base_url, "models": s.models, "contexts": contexts, "prices": prices, "place": place, "managed": managed, "free": free,
                     "engine": if via.is_empty() { engine_of(&s.base_url).to_owned() } else { String::new() }, "via": via,
                 })
             })
@@ -707,6 +717,14 @@ impl Accounts {
                 reread(to);
                 QString::default()
             }
+            Err(e) => QString::from(&e),
+        }
+    }
+
+    pub fn set_server_free(&self, agent: &QString, name: &QString, free: bool) -> QString {
+        let Some(k) = kind(&agent.to_string()) else { return QString::from("harlo can't change this agent's model servers.") };
+        match model_servers::set_free(k, &name.to_string(), free) {
+            Ok(()) => QString::default(),
             Err(e) => QString::from(&e),
         }
     }
