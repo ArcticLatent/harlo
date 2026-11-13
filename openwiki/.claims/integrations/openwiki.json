@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:61996be51bfd4ea39fa254100d5a12bcb532510eba8676d78d7c9d1328f54fbf",
+  "pageVersion": "sha256:a3e21985a456d3078c3976caf139f9a9416d2bf010d5ad10e2ca8432e2108c6b",
   "claims": [
     {
       "id": "claim_ea1bf621379e44639b09b0e1d96fa523",
@@ -91,7 +91,7 @@
       "statement": "Wiki session startup reads nonblank, noncomment ignore rules and includes instructions forbidding access or description of excluded resources and requiring updates to remove their existing wiki mentions.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-app/src/workspace.rs#L2400-L2412",
+          "resource": "repo://crates/harlo-app/src/workspace.rs#L2433-L2445",
           "version": "repo-lines-v1:sha256:937800acd053073b4e55cc1ab45c0fe1d69b697abe5f776b8ca3bb531b256914:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjYyZDI5MDRhNWJkMTg0MjYzNDczMjdjMGM2NDVlNTdlNWVlYzk5NWRiOGU1MzljMzA1YjI4NGJiMjM5NDQzMGMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJlYzM5MTJhMWRiNDg3ZDM5OTVkYmYxYmJiYWI0MjNkODdkMjFiOWRhZGUxZmVlZmY1ZjRmOTIxMzIwZDdlOGYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIyNWRiYTAxOWU1OGM0ZTE4NTY2NTAzMTIyNmRlYTExMWZhNzA2Y2U0YThhNzI4ZmZjOTdmOWIxMjAyZWViYzYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjZjMjIxOTBlNTBkMWE5YjM4Y2M4ZDFiNDQ1ZTNmYjQ3NDE3YjNkZWQzYzA2NGIxODdkMWYxNDRjYmZiYWJlMmUifQ"
         },
         {
@@ -125,7 +125,7 @@
       "statement": "Local default-branch update offers require unseen commits changing cited files, a checkout containing the tip and no active or interrupted wiki run; they are reminders rather than automatic generation.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-app/src/workspace.rs#L2428-L2502",
+          "resource": "repo://crates/harlo-app/src/workspace.rs#L2461-L2535",
           "version": "repo-lines-v1:sha256:37b8eb0329c6f4470bffa4544287391ac04b954bbef0ec3315bd76dfbe447287:eyJzZWxlY3RlZExpbmVDb3VudCI6NzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI5MzQ4M2QyN2NjMTAwYzM3ZDRiNTQ5Y2FiNWE5MGRkYjdkOTJlNDFiMTVlYmUwMGNmYzM5YWQ3MmQ5NjQwYmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjgzYmEzOWM3OWFlNGM1OGRiZjZiODAzY2ZlNGJmMzE4MjQzYzcwODQzYjE1OThkZGQwMTAxMzdlMmYwMDUwMDMifQ"
         },
         {
@@ -139,11 +139,11 @@
       "statement": "The desktop polls local wiki-enabled projects every minute after startup and persists accepted or declined offer tips in project-specific wiki_seen settings; acceptance starts the ordinary update path.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-app/src/workspace.rs#L1371-L1382",
+          "resource": "repo://crates/harlo-app/src/workspace.rs#L1388-L1399",
           "version": "repo-lines-v1:sha256:30ca6a2998b6cc3bac663f79aed2c86b15e0ea98dfd4e2cb1e0f5f35486d5aa3:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIyOGQ4NjM3YTZkZmM1ZGJkMzU3MTk0ZjIwMjFiODNmM2FiOTk4OTZmMmEzNGM5NTNhNGQzMWJkNGVjM2YzZTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImFjY2M2YzU1MTc0OTA4MmNiM2VkNDFhODY4MDk0MDAzMGVhMDM3YTRjY2MxOGQ1NjVjZWZmOTIyOTA5NDMwMjQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjY1ZWZkZWMwN2VlNjM0OGUyOTc4NmU5OWE4ODA0YjQxOTM1MDhlMWE0MTdhY2Y1NTY5ZmRlZDVkNTExOGYzOTgifQ"
         },
         {
-          "resource": "repo://crates/harlo-app/src/workspace.rs#L2428-L2502",
+          "resource": "repo://crates/harlo-app/src/workspace.rs#L2461-L2535",
           "version": "repo-lines-v1:sha256:37b8eb0329c6f4470bffa4544287391ac04b954bbef0ec3315bd76dfbe447287:eyJzZWxlY3RlZExpbmVDb3VudCI6NzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI5MzQ4M2QyN2NjMTAwYzM3ZDRiNTQ5Y2FiNWE5MGRkYjdkOTJlNDFiMTVlYmUwMGNmYzM5YWQ3MmQ5NjQwYmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjgzYmEzOWM3OWFlNGM1OGRiZjZiODAzY2ZlNGJmMzE4MjQzYzcwODQzYjE1OThkZGQwMTAxMzdlMmYwMDUwMDMifQ"
         }
       ]
@@ -165,10 +165,20 @@
           "version": "repo-lines-v1:sha256:b004a697d0230b6fcc213ba544259d65d3c3d8d789ad231490ee68f9403c11f7:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkMWVjOGI5ODc0MDdiZTQ3NjNmMjY2MjIwM2MxMjY4NTQ5YWQzY2I2ZWFhNzRjMjZlOTE1YWU0OGU4ZThlYzEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY3NzBjZjhmYzc0Zjc5ZjllNmU4NmI2YWVjYTk0OTM1NTVjYWJmNTJlMTgyN2Y2MDhlZWYyZWY5ODcyMDJkNjQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVjN2IxMjFjNjhjZGIyNWI5YmQzNTkzZTA2OTQ5NmI4N2RkNWZlZGJhOTEyODYyMzE2ZTdjN2M2MWE4Mzc5NGMifQ"
         }
       ]
+    },
+    {
+      "id": "claim_5aec7b0c6da14e99a35dbd956626858b",
+      "statement": "The Wiki panel freshness footer distinguishes active and interrupted runs from last-update freshness and wraps separate phrases to fit narrow panels.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-app/qml/WikiPanel.qml#L1127-L1159",
+          "version": "repo-lines-v1:sha256:bc1c64030f693ef9c95d4a2b0a5235fb3bf8693665c29a58c4da2a6fcc3623f4:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImViMGRlYTQ3NGE5MDYyZWZiYTE2MTI5MTQ1ZDNlZjZiNGIzYmE2MWVjMjYyNGM5MTdkZjBkZWIzODZlMTRhZTIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhmNzc0NTdkYzhlNjk4OWUyYThlODRjNjRlYTE3ZjFkOTU1ZjYyYjcwOTc1Y2ViNjkyMDQ5NDVkYzI5MTZmOWYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijg2YzE3MjVmNzQyZjg1MWVjNTQyYjdiYmUwZTlhOGUxNDZlMWJiMTUwZTNiMmU3NTA0YmViNzc4YTU4YTE1NDkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVmZWRlYWM4MGE0NDNjZWViYjFiY2M1MzNiNTZhMzc0MWRlYjA5MWQzZGEwYTJiZDYxYTE2YmIxNDRmY2QyNGEifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-12T20:55:29.850Z"
+    "at": "2026-11-13T07:57:21.074Z"
   }
 }

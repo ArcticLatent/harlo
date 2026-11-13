@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:d96edc3fd121b7b948bb3ea9542b67b32e7b2d419fb6914df7cb95ddd61663a2",
+  "pageVersion": "sha256:df1ad7cd0c75bfe79aba7f7f6e5766791cae886083ce9cbb5490c9f4cc21ba68",
   "claims": [
     {
       "id": "claim_6d0f3938d02847d89bfea69668b3d4ca",
@@ -109,10 +109,38 @@
           "version": "repo-lines-v1:sha256:f8a33881db4352d02dbd60018c205598c8e44bc8f44d94415579b0ff4c9d7548:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNiYTQxMjgyYjkyN2Y1MzU3ODhjMzBmOWVhNzYyYWNkZjQ0YzQwYmY5OGM5YzU5OWViOWI2NzJmODgzNjY1MWEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhhNjJhMjIzNDg3NTcwODlkOGQwMzEyZGRhY2FkZmExNjRkOTVhMmI5NzI2MDVhOWVkODFlYzEwMDI1NzFkNmQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNlMDdmM2QyMzMzODA0NDcxY2NmNTQ0MTMwNTUwZjE1NjYwMzkzZDVlZjE2NjQ1OTgzYTNkNjEwN2YwNDllYzkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjEwNTEyMmFiZGJjNjJlYTdjYmViNjgzOGUwZmJmYmU5NWJkYmExYTU3NmE3M2ZkNjU1OTU1OWIwOWRhZjk0NGMifQ"
         }
       ]
+    },
+    {
+      "id": "claim_74096992b32b4c5d97c2c0247b5f0ab4",
+      "statement": "Desktop persists Live Activity registrations and consumes them before best-effort encrypted end notifications on startup/shutdown, with shutdown bounded to three seconds.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-app/src/main.rs#L207-L207",
+          "version": "repo-lines-v1:sha256:c25034bd0c1de82959adc77c3b2caa4d3ade647afb0efa039d740c437a7ac103:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYzI1MDM0YmQwYzFkZTgyOTU5YWRjNzdjM2IyY2FhNGQzYWRlNjQ3YWZiMGVmYTAzOWQ3NDBjNDM3YTdhYzEwMyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYzI1MDM0YmQwYzFkZTgyOTU5YWRjNzdjM2IyY2FhNGQzYWRlNjQ3YWZiMGVmYTAzOWQ3NDBjNDM3YTdhYzEwMyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYTZjNzIyMGYzOGRiYTYxMjAzMTliN2U3NWE3ZjU5YzBlZWIwYzY0ZGU0OTE3MWNhYjhkMGE2ZjQ0MWQyMzI1MSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMTVhMzA4NDk5N2MxODYyNDYwYzdmZmY4ODE4NTU5YzZjYTYxYzIxNjViYTc1YzJiZGQwNmIwYTMxYmMzYTMxOSJ9"
+        },
+        {
+          "resource": "repo://crates/harlo-app/src/phone.rs#L285-L285",
+          "version": "repo-lines-v1:sha256:cfcea51f416957db32c034e2e92945a286ebec64740ecdcb7dac4dc3d156e8ef:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiY2ZjZWE1MWY0MTY5NTdkYjMyYzAzNGUyZTkyOTQ1YTI4NmViZWM2NDc0MGVjZGNiN2RhYzRkYzNkMTU2ZThlZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiY2ZjZWE1MWY0MTY5NTdkYjMyYzAzNGUyZTkyOTQ1YTI4NmViZWM2NDc0MGVjZGNiN2RhYzRkYzNkMTU2ZThlZiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYzZmZDZmMTc5OTgwNGNjMTllMGEyY2Y1NTQ0Y2Y1NDhkMmE4N2U4MTAwMDg5MmYxYzM1Y2E3ODA2NWRjMTdmNCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNDRhMmFlYjQ4MzVlMmIwN2EzZjFjYjM4M2JjNDQ1NmM2ZjdjMTIxMzBkY2E0ZmRjZmJkNDExMTdmMzQwZjlhNSJ9"
+        },
+        {
+          "resource": "repo://crates/harlo-app/src/phone_activity.rs#L339-L432",
+          "version": "repo-lines-v1:sha256:5431693217c90bfbe3dcbc6f86b8e376c42dea4cb17b2aa79f57423c37fa614a:eyJzZWxlY3RlZExpbmVDb3VudCI6OTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkMDgzNTU5MmMyMGIxYzBkYTFmNWVlZDkwMzg2OGJmYWQ5ODEzMjBiMTYwOTMzZWZiZDk0MTY3MTZlYjIzNWEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE5ZTc2MzU1Y2YxMTk5NDgwYzNmOTk4MzZiMTQ4NmM4NDFkODkxZmFhZDkwNGM2MDhlMDkzMDIyZDM3NTdhZWUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdiYzk4ZDZiMGRjNDkyYzUwMTZkZjEwODA1YTNhNTRlYjljMTg0YTVhNjEzN2U3ZjRiZWNmYTBjMjIwNTUwZDAifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_46b80f99268b407590f529dd8bf1599d",
+      "statement": "HarloKit option-card lines support styled inline Markdown and a plain-text projection, leaving unclosed marks as text.",
+      "evidence": [
+        {
+          "resource": "repo://ios/HarloKit/Sources/HarloKit/Visuals.swift#L29-L82",
+          "version": "repo-lines-v1:sha256:c50750a6d49b11e7cf0008e400ef1f48bb4ad8d887943736aa452cd7e919d5eb:eyJzZWxlY3RlZExpbmVDb3VudCI6NTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjczMTFjZmIxODc0MTc0ZWFiMTZlNWE4NmRmN2I5YTZkYzZlNGJiNTg1NDk1ZDZjZjJjMGNlOWY4ZDZkYTkxM2QiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIzNzg3YjBiMTY3NTI4OWRkZmJjYWRhOWJjNGY2N2NjNzc4Y2E5Yjg3MDUyOTZkNGQ0ZDU1YjM0MzkzZTA4YjUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjFmMzg5Zjg1MWQ2YjNkOGY0ZTVjMGRmMDVlYTQxODU4NzQ4MDZhZmIyNDAyNTc3ZDE1ZDQ3M2FmYzU0YmQ5ZDkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJjZWZjMjkyNjYzZDZiMzAxMGQxZTczM2RmZDA0OTdkNmUxMjY0MmI4ZGQwOGM4YTM4MGFmNmJjZTYwYWE5ZGEifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-12T20:55:29.850Z"
+    "at": "2026-11-13T07:57:21.074Z"
   }
 }

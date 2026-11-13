@@ -5,8 +5,10 @@ description: How Harlo hosts OpenWiki locally and over SSH, supplies repository-
 tags: [openwiki, documentation, mcp, remote]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-12T20:55:29.850Z
+    at: 2026-11-13T07:57:21.074Z
 sources:
+  - id: openwiki-source-4a2119659a0108ce888285c3
+    resource: repo://crates/harlo-app/qml/WikiPanel.qml
   - id: openwiki-source-22e4ea3417daf80d96080fd6
     resource: repo://crates/harlo-app/src/workspace.rs
   - id: openwiki-source-4af2dd3e4a0acae243d3b65c
@@ -15,7 +17,7 @@ sources:
     resource: repo://packaging/openwiki/fetch.sh
   - id: openwiki-source-f4e64e1831b7842380c11a41
     resource: repo://packaging/openwiki/patches/ignored-evidence-unresolved.patch
-generated: { by: "harlo", at: "2026-11-12T20:55:29.850Z" }
+generated: { by: "harlo", at: "2026-11-13T07:57:21.074Z" }
 ---
 
 # OpenWiki integration and wiki lifecycle
@@ -71,6 +73,8 @@ Accepting or declining records the tip in the project's `wiki_seen_<id>` setting
 The desktop can still read Markdown frontmatter, page links, `.run.json` progress, `.last-update.json` freshness, and plain-text section search without Node. Generated `index.md`, `log.md`, and `INSTRUCTIONS.md` are not treated as independent ordinary pages. Quickstart sorts first. This lightweight browser is distinct from the OpenWiki server's richer retrieval and generation operations.
 
 The same exclusion of generated page names applies inside subfolders, both in page listings and lightweight search. The safe page reader rejects parent traversal and hidden claim paths. Provenance and claims can be presented through dedicated parsing helpers instead of exposing arbitrary files as pages.
+
+The desktop freshness footer distinguishes planning, writing-page counts, interrupted runs, and last-update age/commit distance. It lays out freshness phrases separately so narrow panels wrap between phrases, then between words when a phrase exceeds the panel width; this presentation does not change the durable run state.
 
 ## Extension and verification
 

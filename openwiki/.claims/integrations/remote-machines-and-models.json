@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:fe954e5b9ef9612513a8aadd4aa9f61ed45501724d5f0c09f48a2d169c6424a6",
+  "pageVersion": "sha256:ad69d2a0f945edf60a38dd5d705e2b384d79ba3eccb9ec26f8e9e9cd65a817cb",
   "claims": [
     {
       "id": "claim_40719ccad61b4b4d8f75324bbf9767c6",
@@ -39,8 +39,8 @@
       "statement": "Model discovery writes selected OpenAI-compatible endpoint models to Harlo providers.json without replacing existing names or unrelated ordered JSON.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-core/src/model_servers.rs#L1-L10",
-          "version": "repo-lines-v1:sha256:cf1f5cd84c68b70c7c6d44c65d87eed21b0c3ad64bafef33684c98d8e44f3aec:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk3M2RkNTdiY2M2YTQyZDJmYzdiNDU3YzZhN2ZhMDVkZDJlZjE4MWUzMzMxNjVmMjNlYTNmOWI1OTUzNDVhOWEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ1ZTk0ZDk0YWExZDEyMWU5OTc5MGE2MjhjMDc5MWRmYWYwYWZmMmMzMDg5MzEyMzVlYjUwMzQ2YTVmODM4N2QiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdiODk5NDk5ODYyMGE4NmUxMTE1NjM0NThlZjBiMGM2ZTZjNDFjMjQ0MDA0M2UxZGMxMjVlMzNkYjgwYjdlYTQifQ"
+          "resource": "repo://crates/harlo-core/src/model_servers.rs#L1-L11",
+          "version": "repo-lines-v1:sha256:6845b3a5d40fa95549572fdc6e3ce1c6e697fbe7144bd336237a01d843ab7812:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk3M2RkNTdiY2M2YTQyZDJmYzdiNDU3YzZhN2ZhMDVkZDJlZjE4MWUzMzMxNjVmMjNlYTNmOWI1OTUzNDVhOWEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ1ZTk0ZDk0YWExZDEyMWU5OTc5MGE2MjhjMDc5MWRmYWYwYWZmMmMzMDg5MzEyMzVlYjUwMzQ2YTVmODM4N2QiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdiODk5NDk5ODYyMGE4NmUxMTE1NjM0NThlZjBiMGM2ZTZjNDFjMjQ0MDA0M2UxZGMxMjVlMzNkYjgwYjdlYTQifQ"
         }
       ]
     },
@@ -73,14 +73,32 @@
       "statement": "Reaching an unreachable forwarded remote model first restores the SSH forward, then asks the owning machine to start its server with a 20-minute call timeout.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-core/src/model_servers.rs#L675-L691",
+          "resource": "repo://crates/harlo-core/src/model_servers.rs#L743-L759",
           "version": "repo-lines-v1:sha256:20ef22df07266e51c2727faa37a56c5dc925f211241b48cef0e439acd8375d7e:eyJzZWxlY3RlZExpbmVDb3VudCI6MTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVjYWM1YTdhOTE2YmI0OTUxMWRlMGQxNjBiZGE5ZWFhY2FlNzAwYWRiNDIyZTYzZmRlZTRmNzVlZDc5NGY1MzciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ4OTc3MWZlMWI2NjI4ODc1YWEyM2U3ZGJlNGFhNzE0NjFkMDBjZGZiNjZkZGYxMWI5ZDgyMGFjNTg5N2ZkZjYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImYwZTQzMDQ3MzkzYWU0MGYxNmMyMjE2Njg3NWI3NGVlYjM0NThmNjViZTYxODMzYWEyYmNkNjFhZmJiN2MyZjQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdlOGJlMGE4MGE1MGFmMjg4NmZkMWMyZTJjY2QxMTAzODljNDAwMmI3OWJmN2Y2MDA5ZDY5MDk2NTBiYTI0ZmYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_c37dad52683d43eea0b6096ad0f635ca",
+      "statement": "Model-server discovery converts listed per-token prices to per-million cost entries; explicit server price edits update all models or remove their configured costs.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/model_servers.rs#L105-L127",
+          "version": "repo-lines-v1:sha256:e129c2a7cc264b8b4835e1f9bc7565413bf6dd833e63d094dd73844033f67697:eyJzZWxlY3RlZExpbmVDb3VudCI6MjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNmMmNlYWQwMGY4ODA0MWRlMTMxMWJkMGE4NjllZmIzZGNkZDMwYzgzODlkZTI4ZjJhNWRiMzY1YTkzNDc0ZWIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQ4MjUzNDEyYjdkZjAwNWJmMmFlOGY2ZTFhN2VmOTBhMDc5ZjZmMmRmMThhZDQ0NGY3NDllYmI1YTY4MTQ1ZDUifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-core/src/model_servers.rs#L268-L304",
+          "version": "repo-lines-v1:sha256:a88179707972e039a0b6d190c05aeb9ac87c2c16a078504fc4f1442374ef0963:eyJzZWxlY3RlZExpbmVDb3VudCI6MzcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM3ZWE5ODczYTJkOWQzNmMyYWFiMDA5YjhkM2M5NGIwYTFmOTk0NWJkMjYwMjk1Zjk2NDNjODYwMGZhOWIzN2MiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI5ZGU3NjNlOGYwODJkYTk4Y2Y2N2RkYTcxNjk0ZDFjZTQxODJjNmYxNmQzYmJkNjFhNTY3N2JhNDExZDI3ZmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJiYmRlMzg5MWY0NWQ4YzE4OTg2YzMzNjc1ODNlYjJhZGZiNzlmZTYzNjBlMGJjY2ZlNDM4NDJlNGY0ZmU1NjQifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-core/src/model_servers.rs#L837-L862",
+          "version": "repo-lines-v1:sha256:e2048dee3918f669791fcaff3b3274726e1ee0b7f8e51b3894fcd1364d3451a4:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkyYjVlZGY1OTQ5Y2ZlYTY3ODIyY2Y2OTExMzIzNjNkNjhkNmYxZTE2OWY1ZTBkNGY3YzE0ZTVmYTFlNmQ0ZTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZlZDBkMzhlYmRhN2Q2MzEzNjJkMmFkMTE5YmYxNTJiNTYwYzFiNDc0YzQyZjhlODg1YzYyZjM4NWJkMTNhMDUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE0ZmZkMTJlNDQyYjU3OTA1Y2NjY2ViZGFiNWY0MmI1ZTgxZjg2ZGE4M2U0NjExYjkxYWNmZmQxMzU5ZmEwOTgifQ"
         }
       ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-12T16:14:28.541Z"
+    "at": "2026-11-13T07:57:21.074Z"
   }
 }

@@ -5,16 +5,22 @@ description: Device authorization, replay-resistant NaCl channels, session subsc
 tags: [phone, ios, encryption, relay, apns]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-12T20:55:29.850Z
+    at: 2026-11-13T07:57:21.074Z
 sources:
   - id: openwiki-source-3e5d9e2412052022c04ac0ec
     resource: repo://crates/harlo-apns/src/lib.rs
+  - id: openwiki-source-1d40907d1133795813cede65
+    resource: repo://crates/harlo-app/src/main.rs
+  - id: openwiki-source-9f29fe751f9cc19b273be74f
+    resource: repo://crates/harlo-app/src/phone_activity.rs
   - id: openwiki-source-5a140dd0fb2fd61495f082c8
     resource: repo://crates/harlo-app/src/phone_bridge.rs
   - id: openwiki-source-df3006c1d4f506624c91dfd2
     resource: repo://crates/harlo-app/src/phone_push.rs
   - id: openwiki-source-71daf39798f4072df6e58b8d
     resource: repo://crates/harlo-app/src/phone_server.rs
+  - id: openwiki-source-fb73cab443b13627be975e74
+    resource: repo://crates/harlo-app/src/phone.rs
   - id: openwiki-source-33d58143535fd8586f3e5352
     resource: repo://crates/harlo-core/src/phone.rs
   - id: openwiki-source-f6c0ec21414aa65ae7ca1f61
@@ -25,7 +31,9 @@ sources:
     resource: repo://ios/Harlo/Harlo/WikiViews.swift
   - id: openwiki-source-8c23df65e9f6a257e8c67c14
     resource: repo://ios/HarloKit/Sources/HarloKit/Client.swift
-generated: { by: "harlo", at: "2026-11-12T20:55:29.850Z" }
+  - id: openwiki-source-8da0f5a3c9cfbd4d66280fb2
+    resource: repo://ios/HarloKit/Sources/HarloKit/Visuals.swift
+generated: { by: "harlo", at: "2026-11-13T07:57:21.074Z" }
 ---
 
 # Phone pairing, encrypted transport, and relay
@@ -85,6 +93,10 @@ A relay with the app team's APNs credentials accepts `/push`; `GET /push` report
 Desktop seals notification content for the phone before forwarding it, leaving the relay and Apple a placeholder. The notification extension decrypts the content. Currently connected phones do not receive these ordinary pushes because the app is already open. Live Activity updates use their own APNs tokens and sealed content as well. `harlo-apns` signs provider tokens with ES256 and renews them after 40 minutes.
 
 ## Verification
+
+Live Activity registrations are also recorded in the desktop phone data directory's `activities.json`. Startup and shutdown attempt to end leftover cards with encrypted “harlo was closed” content and immediate dismissal; shutdown waits at most three seconds. The persisted list is consumed before delivery, so this is best-effort cleanup, not a durable retry queue. `cards_left_over_are_ended` checks registration replacement/removal, encrypted end payloads, immediate dismissal, and one-time consumption. On returning to the iPhone app, ended cards are dismissed and active/stale cards are reconciled with session status.
+
+Option-card inline text is parsed into styled spans in HarloKit (code, bold, italic, strike, and HTTP(S) links). Unclosed marks remain text, and the plain-text projection supports reading the same content aloud.
 
 Core tests exercise identity persistence, two-way crypto, replay/wrong-connection/wrong-key rejection, device offers, and TweetNaCl interoperability.
 

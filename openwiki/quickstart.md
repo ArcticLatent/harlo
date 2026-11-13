@@ -5,7 +5,7 @@ description: Start building Harlo and find the right wiki guide for agent execut
 tags: [quickstart, navigation, build, architecture]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-12T16:14:28.541Z
+    at: 2026-11-13T07:57:21.074Z
 sources:
   - id: openwiki-source-651d1fb6c9e49916a916ab51
     resource: repo://Cargo.toml
@@ -19,7 +19,7 @@ sources:
     resource: repo://crates/harlo-harness/src/lib.rs
   - id: openwiki-source-07a69ae82a0e133d3de748f1
     resource: repo://crates/harlo-harness/src/store.rs
-generated: { by: "harlo", at: "2026-11-12T16:14:28.541Z" }
+generated: { by: "harlo", at: "2026-11-13T07:57:21.074Z" }
 ---
 
 # Quickstart and task routing
@@ -48,6 +48,7 @@ For the phone client library, `swift test --package-path ios/HarloKit` exercises
 | --- | --- | --- |
 | Chat state, lost rows, session switching, persistence, Qt threading | [Sessions and desktop](architecture/sessions-and-desktop.md) | Harness events → core session/reducer → app model |
 | Tool execution, approvals, sandbox access, resume, subagents | [Agent execution and safety](concepts/agent-execution-and-safety.md) | `harlo-agent` loop/RPC/tools/sandbox |
+| Token budgets, cached input, unknown or partly known costs | [Agent accounting](concepts/agent-execution-and-safety.md#usage-and-provider-capabilities) | Shared request usage and provider pricing |
 | Shared plan edits, helper worktrees, step commits, bring-over clashes | [Plans and project changes](workflows/plans-and-project-changes.md) | Core plan/git plus desktop orchestration |
 | Remote files/sessions, helper deployment, unavailable local models | [Remote machines and model servers](integrations/remote-machines-and-models.md) | SSH host routing, engine helper, provider configuration |
 | Pairing, encrypted events, reconnects, push or relay deployment | [Phone and relay](integrations/phone-and-relay.md) | Core crypto, desktop server, HarloKit, relay/APNs |

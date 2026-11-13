@@ -5,7 +5,7 @@ description: Contributor build prerequisites, focused and integration verificati
 tags: [testing, build, packaging, releases, security]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-12T17:20:25.384Z
+    at: 2026-11-13T07:57:21.074Z
 sources:
   - id: openwiki-source-4d1d392666be6dfdd7a91a2e
     resource: repo://.github/workflows/release.yml
@@ -19,7 +19,11 @@ sources:
     resource: repo://crates/harlo-update-signing/src/lib.rs
   - id: openwiki-source-578be1dc5f53b796e8783a2c
     resource: repo://docs/releasing.md
-generated: { by: "harlo", at: "2026-11-12T17:20:25.384Z" }
+  - id: openwiki-source-2e6fe030dac0fa4ae34a9b22
+    resource: repo://site/README.md
+  - id: openwiki-source-f1c29df965300759d3c1ff56
+    resource: repo://wrangler.jsonc
+generated: { by: "harlo", at: "2026-11-13T07:57:21.074Z" }
 ---
 
 # Testing, packaging, and signed updates
@@ -60,6 +64,8 @@ Keep external-service checks distinct from hermetic unit tests. See [agent safet
 The release workflow builds remote ARM helpers, then Linux packages/AppImage with bundled Qt (currently Qt 6.12.0). Package installation is exercised in Ubuntu 22.04/24.04, Debian 12, Fedora 42, openSUSE Tumbleweed and Arch containers. Publishing depends on both build and install jobs and is restricted to `v*` tags. It verifies that the tag version matches Cargo, extracts release notes, signs the update manifest, and creates the GitHub release. Manual runs and release-check branches can build/test without publishing.
 
 The iPhone app has a separate release/version lifecycle. The website in `site/` is the static download/support surface, not the desktop UI runtime.
+
+Cloudflare Workers static assets serves `site/` directly, with no site build step. `wrangler.jsonc` selects HTML path handling and the custom 404 page and disables workers.dev and preview addresses. The download page obtains current release files from GitHub's API; site deployment is distinct from producing or signing desktop packages.
 
 ## Signed self-update trust chain
 

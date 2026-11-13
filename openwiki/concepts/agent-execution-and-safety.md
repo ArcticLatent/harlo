@@ -5,7 +5,7 @@ description: Harlo agent model-loop ordering, resumable history, RPC approvals, 
 tags: [agent, safety, sandbox, rpc, tools]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-12T17:20:25.384Z
+    at: 2026-11-13T07:57:21.074Z
 sources:
   - id: openwiki-source-0b93973e66ce9fb1db2bd77c
     resource: repo://crates/harlo-agent/src/agent.rs
@@ -23,7 +23,9 @@ sources:
     resource: repo://crates/harlo-agent/src/task.rs
   - id: openwiki-source-9e8017dc1dcc559e5e7c38b9
     resource: repo://crates/harlo-agent/src/tools/mod.rs
-generated: { by: "harlo", at: "2026-11-12T17:20:25.384Z" }
+  - id: openwiki-source-cc3a6736ec7398d0638b6f38
+    resource: repo://crates/harlo-agent/src/used.rs
+generated: { by: "harlo", at: "2026-11-13T07:57:21.074Z" }
 ---
 
 # Agent execution and safety boundaries
@@ -36,7 +38,13 @@ The agent repeatedly sends history to a model, executes returned tool calls, rec
 
 The JSONL session log is the source of model history, not merely an activity export. Entries carry IDs, parent IDs and timestamps; resuming reconstructs the active history. A crash-truncated line is skipped when reopening. Compaction records a summary plus retained recent messages without removing the older log entries, and cuts are chosen not to split a tool call from its result.
 
-## Ordering and cancellation
+## Usage and provider capabilities
+
+`used::Used` is the shared accounting representation for requests, including compaction, side questions, searches, and subagents. Input includes cached tokens internally; persisted assistant usage separates uncached input from `cacheRead`. Token budgets count uncached input plus output. Cost is classified as plan, local, priced, unknown, or partly known when priced and unknown requests mix; unknown cost is not reported as a known zero.
+
+Configured model prices are dollars per million tokens, with cached input defaulting to the input price. Provider model metadata can map offered thinking levels to wire efforts through `thinkingLevelMap`; a null mapping suppresses that level. Built-in Responses web search is offered for plan/OpenAI providers unless `HARLO_AGENT_WEB_SEARCH=off`.
+
+## Tool-round ordering
 
 An entirely read-only, permitted tool batch runs concurrently with `join_all`. Other batches are processed in call order. This prevents a mixed edit/read batch from acquiring surprising parallel semantics. Invalid JSON arguments return a tool error; unavailable tools are rejected. Cancellation distinguishes interrupted work from later calls that did not run—an interrupted command may already have effects.
 

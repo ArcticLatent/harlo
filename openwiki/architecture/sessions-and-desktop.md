@@ -5,7 +5,7 @@ description: How agent protocols become shared live sessions, durable conversati
 tags: [architecture, sessions, persistence, desktop]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-12T20:55:29.850Z
+    at: 2026-11-13T07:57:21.074Z
 sources:
   - id: openwiki-source-eda83df6b22941ed75ede295
     resource: repo://crates/harlo-app/qml/ChatView.qml
@@ -29,7 +29,7 @@ sources:
     resource: repo://crates/harlo-harness/src/lib.rs
   - id: openwiki-source-07a69ae82a0e133d3de748f1
     resource: repo://crates/harlo-harness/src/store.rs
-generated: { by: "harlo", at: "2026-11-12T20:55:29.850Z" }
+generated: { by: "harlo", at: "2026-11-13T07:57:21.074Z" }
 ---
 
 # Sessions, persistence, and desktop presentation
@@ -61,6 +61,10 @@ The desktop's `registry.rs` retains shared `Arc<SessionHandle>` entries for the 
 A subscriber receives a snapshot before deltas. During streaming, the driver batches updates on a 100 ms interval rather than asking the UI to redraw for every token. The transcript reducer produces flat rows and a row diff, allowing a changed row to update without resetting the entire list. Session states distinguish loading, offline saved content, starting, idle, busy, and exited; an offline conversation is not a running agent.
 
 Prompts return false when a session or daily spending hold is active, so callers must not assume every send was accepted. Harness exits become session state and notices rather than leaving a view permanently busy.
+
+Before a new turn, the driver takes its undo snapshot asynchronously and holds the prompt while reporting `Preparing(true)`. Stop remains responsive: it drops held prompts, invalidates the snapshot completion token, and emits `Unsent` so the desktop restores the last sent text to the composer. A late snapshot completion cannot send the cancelled prompt. Steering during a busy turn and `/btw` do not start this new-turn snapshot path.
+
+Session metadata carries `cost_kind` separately from numeric cost, distinguishing plan/local usage, priced usage, partly known cost, and unknown cost. The context report forwards this classification rather than interpreting a numeric zero as evidence that usage was free.
 
 ## Crossing into Qt safely
 

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:01e9dd685008e26828701bff74e6c6c09aec7fb45d32035f87a4e9d5788c17d6",
+  "pageVersion": "sha256:35a1e579a08b28b414eaca7c95eeb0ee05825b83024c7f130324d73ff2daae1b",
   "claims": [
     {
       "id": "claim_7a207a8ae4594d9ba376628ea349a6b4",
@@ -63,10 +63,24 @@
           "version": "repo-lines-v1:sha256:4f9933e46e506f7e8a1e8328463fffea423744e0cea91481da23bfa1f0dd6ddb:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUzYTNkMmFlYzIxN2U1NzkzODg3YzlhNTYzNGRlNGRkYTU0ZTFiNTA4NDBhNjNiYjJiZTU4YzJkNjAwZDFlZGYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU3YzAxZDFjNDRjZjdhNmI5ODc3Y2VjOGY3NjgyZjRkOWY5MDMwMWQ5OWQ4ODFmNzY1OGViYjBkY2NjNmFiOGEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVhMTY3ZmM3ZDBhOGMwOTQxMTYxZjZiMmM1NDAwMTBiNjdiZDZkYzY0NjBkMGVkNzliZTljNDhhNjUzNGZmZTgifQ"
         }
       ]
+    },
+    {
+      "id": "claim_d1cc1257b98247afb4e0eb31613cfe28",
+      "statement": "The website is served directly as Cloudflare static assets with custom HTML/404 handling and no workers.dev or preview addresses; its download page asks GitHub for latest release files.",
+      "evidence": [
+        {
+          "resource": "repo://site/README.md#L31-L33",
+          "version": "repo-lines-v1:sha256:0d0b29416409e0342c1e273447c523020ed64c4e5dc7eb344962580608decee6:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZjIwMzBlZTZkZGU3NWNkZGZhZDI2OTE5OGQ4N2RjMzAxOTQyZmYxMDIwMGM2YjUyNmMwYzczODhiNTYyOTQ3OCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMmE1MjM1YjZjZjA5ZGE2MjE5YWNmZjc1MzBlNDljNTUyNDQwYjhjOWEyZGVlNjRkYmM2MTU2ZTk2Y2U0YTJjYyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYjVmZWQyNzJlZTBhMDE5YTc4YjM2MmVkNTJjM2U0Mzg1NWZlYmY3M2QwY2ZkZjNkOTQwZDM0Y2RiZmNmYzQxYiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjAsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSJ9"
+        },
+        {
+          "resource": "repo://wrangler.jsonc",
+          "version": "repo-file-v1:sha256:51904141c286bc8c9824749f0327e427a1527ad456f54d958e43722a39283e42"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-12T17:20:25.384Z"
+    "at": "2026-11-13T07:57:21.074Z"
   }
 }

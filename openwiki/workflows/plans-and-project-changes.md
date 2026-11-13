@@ -5,7 +5,7 @@ description: How session-scoped orchestration tools update shared plans and safe
 tags: [workflow, plans, orchestration, git, worktrees]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-12T20:55:29.850Z
+    at: 2026-11-13T07:57:21.074Z
 sources:
   - id: openwiki-source-c5e0556ff4a54e3a14503a14
     resource: repo://crates/harlo-app/qml/ChangesPanel.qml
@@ -19,7 +19,7 @@ sources:
     resource: repo://crates/harlo-core/src/orchestration.rs
   - id: openwiki-source-75bcb97e87a29c42db5d4dfd
     resource: repo://crates/harlo-core/src/plan.rs
-generated: { by: "harlo", at: "2026-11-12T20:55:29.850Z" }
+generated: { by: "harlo", at: "2026-11-13T07:57:21.074Z" }
 ---
 
 # Plans, helpers, and project changes
@@ -31,6 +31,8 @@ Harlo's orchestration bridge is `harlo --mcp-bridge`: a stdio MCP server forward
 Harlo's own agent can also send `harlo_call` frames on its RPC pipe when started with `--harlo-tools`; replies return as `harlo_result`. Both routes ultimately reach desktop orchestration. Calls needing workspace state cross the Qt thread; slower finishing work such as reading histories, manipulating plans, bringing over changes, or calling OpenWiki runs in the background.
 
 Helper-start policy is configurable: only when asked, offer a split for the user's decision (the default), or start independently. This is desktop orchestration, not the in-process `task` mechanism described in [agent execution](../concepts/agent-execution-and-safety.md).
+
+The helper briefing distinguishes unresolved task decisions from decisions reserved for the user. `ask_parent` returns a question to the starting session; Harlo helpers use their own blocking `ask` for user decisions, while other helpers use `request_approval` and end their turn. Completion calls `report_done` once with an explicit succeeded/failed outcome, summary, and changed files; inability to proceed must not be hidden as success.
 
 ## Shared plan state
 

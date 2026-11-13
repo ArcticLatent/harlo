@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:1ae2d5791b875710679cff7ed5b5d5397e1dc9d0c85b2e5bd95eb909af07e0ec",
+  "pageVersion": "sha256:7419a078006298c1a162189c6a6f917f9ef511f2f4b9575380e27139a2400614",
   "claims": [
     {
       "id": "claim_c7fdc8541d3d42b989d9897f9fe0c5ca",
@@ -109,10 +109,20 @@
           "version": "repo-lines-v1:sha256:b8e50b968be2882a93b733340f874e1a11dbfcc8c8175d6acc882a37f3578d5c:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVhZDI2OTMxNzhmMTA0MmZmOTcwNjhhOTE4N2MwYjEyNTU5N2U1Y2Y5ZGY0MzdkY2Y2NTIyMWIxYTkzNWMzNTAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU1MjJjNDJjZDE5YzZkMDNkODA4YzQ1MjcyMDU1MjgyNWI3ZWExYzViNDkxYjIxODUxMWNhYzc0MTVjZjlkOWIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNmODcxNDg1ZGMwMzBiZTk4YmQyNjlmYWY5ZDEwMmUwOWQzM2RhY2FmYTY4NWIzNTc2NTQxMWNlNjE0NDk5OWIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQxMGZkOGE3MTc4ZmIxZmNmNzI2OThjZjE4NDU3ZmI4MTBjYzI4NGJmYmFjMDNmMDdiMTBhYTIzYzFhZjE3MWMifQ"
         }
       ]
+    },
+    {
+      "id": "claim_5c5adb61e4744aad9492a267079f0297",
+      "statement": "Helper briefs route task questions to ask_parent, user decisions to Harlo's own ask or request_approval for other helpers, and completion through one explicit succeeded/failed report_done.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/orchestration.rs#L294-L309",
+          "version": "repo-lines-v1:sha256:c4ee5178aa9e67d04f4d007d87b729f3522e654dde8d7ba32d91f6e2ee6e9463:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMxNzg1MTBlYzYwOTI3MmE1NzA2NThiZjMxNTU5YmUyZjAzYzNlNDkxODQyZDViYjZhOWU1ZGJjMTNjZWQxM2UiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE5ZTc2MzU1Y2YxMTk5NDgwYzNmOTk4MzZiMTQ4NmM4NDFkODkxZmFhZDkwNGM2MDhlMDkzMDIyZDM3NTdhZWUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNhMDJhYWVkZjQ1NTNjZGI1N2VhNWMwNzdjODY0NDNjMDMwNzNkNGY5NWFmODRkZWFmNDU5NDI3YTk2YmNhYjUifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-12T20:55:29.850Z"
+    "at": "2026-11-13T07:57:21.074Z"
   }
 }

@@ -5,7 +5,7 @@ description: SSH-backed project paths, per-machine helper deployment and state, 
 tags: [ssh, remote, models, engines, configuration]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-12T16:14:28.541Z
+    at: 2026-11-13T07:57:21.074Z
 sources:
   - id: openwiki-source-be6e7bfc466a23d5de0a4a6d
     resource: repo://crates/harlo-core/src/agent_host.rs
@@ -21,7 +21,7 @@ sources:
     resource: repo://crates/harlo-core/src/remote.rs
   - id: openwiki-source-5d94b2fabb592e050ff61e0a
     resource: repo://crates/harlo-core/src/servers.rs
-generated: { by: "harlo", at: "2026-11-12T16:14:28.541Z" }
+generated: { by: "harlo", at: "2026-11-13T07:57:21.074Z" }
 ---
 
 # Remote machines and model servers
@@ -50,6 +50,8 @@ This is machine-local state: signing in on the desktop does not mean the remote 
 ## Model discovery is not server installation
 
 `model_servers.rs` handles an existing OpenAI-compatible endpoint: it asks `/models`, offers the results, and writes selected models into Harlo's `$XDG_CONFIG_HOME/harlo-agent/providers.json`. Entries include base URL, API type, key, model IDs, and context metadata. Existing unrelated JSON is preserved, including ordering; a conflicting provider name is not silently replaced.
+
+Discovery also imports listed prices: OpenRouter-style per-token `prompt`, `completion`, and optional `input_cache_read` become dollars per million tokens in model `cost` entries. Negative or invalid rates are not treated as known prices; missing cache rates default to input rates. Setting a server price updates every configured model (converting bare IDs into objects); clearing it removes explicit prices. `prices_as_listed_or_given` verifies discovery, round-trip persistence, overrides, removal, and unknown-server errors. Runtime cost classification remains the agent's responsibility.
 
 `engine_setup.rs` owns the managed setup flow: obtain/use an engine, download a model, start it, and test a message. Local desktop setup and remote `harlo-engines` use the same core implementation. Remote setup reports JSON job state and output lines back to the desktop; it does not require a remote Qt window.
 
