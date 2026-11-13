@@ -1132,6 +1132,8 @@ struct FollowsTheEnd: ViewModifier {
 
     struct Where: Equatable {
         var nearEnd: Bool
+        /// Scrolled all the way down (within the stack's bottom padding).
+        var atEnd: Bool
         /// Nothing of the content in sight: past its end.
         var pastEnd: Bool
         /// The content's height, and the top of what's in sight.
@@ -1143,13 +1145,17 @@ struct FollowsTheEnd: ViewModifier {
         if #available(iOS 18.0, *) {
             content.onScrollGeometryChange(for: Where.self) { g in
                 let end = g.contentSize.height
+                let lowest = end + g.contentInsets.bottom - g.containerSize.height
                 return Where(nearEnd: g.visibleRect.maxY >= end - 120,
+                             atEnd: g.contentOffset.y >= lowest - 20,
                              pastEnd: end > 0 && g.visibleRect.minY > end - 40,
                              height: end, top: g.visibleRect.minY)
             } action: { old, now in
                 // At the end and moved from it by anything but you (grown
-                // below, a panel taller, laid out late): to the new end.
-                if atBottom && !now.nearEnd && !yours {
+                // below, a panel taller, laid out late): to the new end,
+                // however little it moved (a panel a line taller hid the
+                // last reply's end).
+                if atBottom && !yours && (!now.nearEnd || (old.atEnd && !now.atEnd)) {
                     toEnd()
                     return
                 }
