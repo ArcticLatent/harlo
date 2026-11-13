@@ -3689,26 +3689,29 @@ ApplicationWindow {
     // the main window with a session and its changes, the diff tab, the
     // Midnight theme with the Activity panel, the new-session page, the Wiki
     // panel beside a lookup in it, and a plan under way with a diagram and
-    // options. Each dark, then light (name-light) in the same state, for the
-    // site's themes; then the first session in six more themes
-    // (site-theme-*). Run with QT_SCALE_FACTOR=2 for pictures the site can
-    // crop and still show sharp.
+    // options, and last two agents at work at once (site-hero). Each dark,
+    // then light (name-light) in the same state, for the site's themes. Run
+    // with QT_SCALE_FACTOR=2 for pictures the site can crop and still show
+    // sharp.
     property string siteKey: ""
-    function siteTheme(family, mode) {
-        Workspace.chooseTheme(family)
-        Workspace.chooseThemeMode(mode)
-        chat.transcript.scrollToEnd()
-    }
+    property real wikiScale: 1
     SequentialAnimation {
+        id: siteSteps
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "siteshots"
         PauseAnimation { duration: 1200 }
         ScriptAction { script: {
             Workspace.chooseThemeMode("dark")
+            // (Claude Code is the stand-in: never the claude installed here.)
+            Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
             // (A narrow window, --winwidth=524, for the phone-sized pictures.)
             win.width = Number(win.argValue("--winwidth=")) || 1440
             win.height = 900
-            // (Narrow, the diff inline: the phone-sized picture of it.)
-            if (win.width < 1000) Workspace.setSetting("diff_layout", "unified")
+            // (Narrow, for the phone-sized pictures: the diff inline, and the
+            // text larger, so it reads at a phone's width.)
+            if (win.width < 1000) {
+                Workspace.setSetting("diff_layout", "unified")
+                Workspace.chooseTextScale(1.25)
+            }
             const base = win.argValue("--cwd=").replace(/\/repo$/, "")
             Workspace.addProject(base + "/webapp")
             Workspace.addProject(base + "/api")
@@ -3731,11 +3734,12 @@ ApplicationWindow {
         PauseAnimation { duration: 800 }
         ScriptAction { script: win.clickText("guard.ts", changes) }
         PauseAnimation { duration: 800 }
-        ScriptAction { script: windowSettings.rightMode = "" }
+        // (Narrow, without the sidebar: the code's lines fit.)
+        ScriptAction { script: { windowSettings.rightMode = ""; if (win.width < 1000) windowSettings.sidebarOpen = false } }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: { win.shotWindow("site-diff"); Workspace.chooseThemeMode("light") } }
         PauseAnimation { duration: 1000 }
-        ScriptAction { script: { win.shotWindow("site-diff-light"); Workspace.chooseThemeMode("dark") } }
+        ScriptAction { script: { win.shotWindow("site-diff-light"); Workspace.chooseThemeMode("dark"); windowSettings.sidebarOpen = true } }
         PauseAnimation { duration: 800 }
         ScriptAction { script: {
             Workspace.chooseTheme("Midnight")
@@ -3763,6 +3767,18 @@ ApplicationWindow {
         PauseAnimation { duration: 1200 }
         ScriptAction { script: { chat.transcript.scrollToEnd(); win.shotWindow("site-wiki-light"); Workspace.chooseThemeMode("dark") } }
         PauseAnimation { duration: 800 }
+        // (Narrow, from the question: the phone crop shows what was asked,
+        // the wiki lookup and the page.)
+        ScriptAction { script: {
+            if (win.width >= 1000) return
+            const v = chat.transcript.listView
+            v.follow = false
+            v.positionViewAtBeginning() } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: { if (win.width < 1000) { win.shotWindow("site-wiki-top"); Workspace.chooseThemeMode("light") } } }
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: { if (win.width < 1000) { win.shotWindow("site-wiki-top-light"); Workspace.chooseThemeMode("dark") } } }
+        PauseAnimation { duration: 800 }
         ScriptAction { script: {
             windowSettings.rightMode = ""
             win.clickItem(win.findText("Carriers want manifests as CSV", sidebar), "the plan") } }
@@ -3771,33 +3787,66 @@ ApplicationWindow {
         PauseAnimation { duration: 1500 }
         ScriptAction { script: { chat.transcript.scrollToEnd(); win.shotWindow("site-plan-light"); Workspace.chooseThemeMode("dark") } }
         PauseAnimation { duration: 800 }
-        // (Narrow, the option cards stand one above another: the first one,
-        // the recommended, a screen up.)
+        // (Narrow, the option cards stand one above another: the plan folded
+        // to its header so both show whole, scrolled to the first, the
+        // recommended one, for the plan's phone picture.)
+        ScriptAction { script: {
+            if (win.width >= 1000) return
+            const fold = win.findName("planToggle", chat)
+            if (fold) win.clickItem(fold, "fold the plan") } }
+        PauseAnimation { duration: 700 }
         ScriptAction { script: {
             if (win.width >= 1000) return
             const v = chat.transcript.listView
+            const card = win.findName("optionCard", chat.transcript)
             v.follow = false
-            v.contentY = Math.max(v.originY, v.contentY - 330) } }
+            if (card) v.contentY = Math.max(v.originY, card.mapToItem(v.contentItem, 0, 0).y - 50)
+            // (The round Latest arrow would sit on the second card.)
+            const latest = win.findName("latestButton", chat)
+            if (latest) latest.opacity = 0 } }
         PauseAnimation { duration: 800 }
         ScriptAction { script: { if (win.width < 1000) { win.shotWindow("site-plan-cards"); Workspace.chooseThemeMode("light") } } }
         PauseAnimation { duration: 1200 }
-        ScriptAction { script: { if (win.width < 1000) { win.shotWindow("site-plan-cards-light"); Workspace.chooseThemeMode("dark") } } }
+        ScriptAction { script: {
+            if (win.width >= 1000) return
+            win.shotWindow("site-plan-cards-light"); Workspace.chooseThemeMode("dark")
+            const latest = win.findName("latestButton", chat)
+            if (latest) latest.opacity = 1 } }
         PauseAnimation { duration: 800 }
-        // The session and its changes in a few more themes, for the site's
-        // themes section (each in one mode: dark or light).
-        ScriptAction { script: { Workspace.open(win.siteKey); windowSettings.rightMode = "changes"; win.siteTheme("Catppuccin", "dark") } }
+        // Both agents at work (site-hero): the Harlo agent caching lookups
+        // in the api project while Claude Code reviews its login fix in
+        // webapp, whose changes wait in the Changes panel. (The stand-ins'
+        // "cache the user lookups" and "review the login fix".) On a wide run
+        // the window is the page column's size, 1102×720, so the site shows
+        // it at its own size, not shrunk.
+        ScriptAction { script: { if (win.width >= 1000) { win.width = 1102; win.height = 720; windowSettings.sidebarWidth = 250; windowSettings.changesWidth = 290 } } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            windowSettings.rightMode = ""
+            const api = JSON.parse(Workspace.projectsJson()).find(p => p.path.endsWith("/api"))
+            win.siteKey = Workspace.newSession(api.id, "harlo") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(siteSteps, () => chat.session.modelName !== "", 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: win.sendByKeys("Cache the user lookups") }
         PauseAnimation { duration: 1500 }
-        ScriptAction { script: { win.shotWindow("site-theme-catppuccin"); win.siteTheme("Rose Pine", "light") } }
-        PauseAnimation { duration: 1200 }
-        ScriptAction { script: { win.shotWindow("site-theme-rosepine"); win.siteTheme("Gruvbox", "dark") } }
-        PauseAnimation { duration: 1200 }
-        ScriptAction { script: { win.shotWindow("site-theme-gruvbox"); win.siteTheme("Solarized", "light") } }
-        PauseAnimation { duration: 1200 }
-        ScriptAction { script: { win.shotWindow("site-theme-solarized"); win.siteTheme("Nord", "dark") } }
-        PauseAnimation { duration: 1200 }
-        ScriptAction { script: { win.shotWindow("site-theme-nord"); win.siteTheme("Everforest", "light") } }
-        PauseAnimation { duration: 1200 }
-        ScriptAction { script: { win.shotWindow("site-theme-everforest"); win.siteTheme("harlo", "dark") } }
+        ScriptAction { script: {
+            const web = JSON.parse(Workspace.projectsJson()).find(p => p.path.endsWith("/webapp"))
+            win.siteKey = Workspace.newSession(web.id, "claude") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(siteSteps, () => chat.session.modelName !== "", 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: { win.sendByKeys("Review the login fix in src/auth/guard.ts"); windowSettings.rightMode = "changes"; git.refresh(true) } }
+        PauseAnimation { duration: 1500 }
+        // (Named as you would, so its header doesn't say New session.)
+        ScriptAction { script: Workspace.renameSession(win.siteKey, "Review the login fix") }
+        // (The review finished; the Harlo agent still at work.)
+        PauseAnimation { duration: 3000 }
+        ScriptAction { script: win.waitUntil(siteSteps, () => chat.session.status === "idle", 45000) }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: { chat.transcript.scrollToEnd(); win.shotWindow("site-hero"); Workspace.chooseThemeMode("light") } }
+        PauseAnimation { duration: 1000 }
+        ScriptAction { script: { chat.transcript.scrollToEnd(); win.shotWindow("site-hero-light"); Workspace.chooseThemeMode("dark") } }
         PauseAnimation { duration: 800 }
         ScriptAction { script: { win.summary(); Qt.quit() } }
     }
@@ -8547,6 +8596,17 @@ ApplicationWindow {
             TestInput.key(Qt.Key_K, Qt.ControlModifier | Qt.ShiftModifier) } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: win.waitUntil(wikiPanelSteps, () => win.wikiRows().length === 3, 10000) }
+        PauseAnimation { duration: 300 }
+        // (Larger text: the freshness line breaks between its phrases, or a
+        // phrase between its words, never inside a word.)
+        ScriptAction { script: { win.wikiScale = Workspace.textScale; Workspace.chooseTextScale(1.25) } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const f = win.findName("wikiFreshness", wikiPanel)
+            const labs = f ? f.children.filter(c => c.lineCount !== undefined) : []
+            win.check(labs.length === 2 && labs.every(l => l.lineCount === 1 || l.implicitWidth > f.width),
+                      "at 125% the freshness line keeps its words whole (" + labs.map(l => l.lineCount).join(",") + " lines, " + Math.round(f ? f.width : 0) + "px)")
+            Workspace.chooseTextScale(win.wikiScale) } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             win.check(windowSettings.rightMode === "wiki" && win.findName("wikiSearch", wikiPanel).activeFocus, "and opens it again, its search ready to type in")

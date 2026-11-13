@@ -1124,24 +1124,36 @@ Rectangle {
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 10
-                Label {
+                // How fresh the wiki is, in phrases that each stay whole on a
+                // line where they fit: a narrow panel breaks at the dot, and a
+                // phrase wider than the panel breaks between its words.
+                Flow {
+                    id: freshness
                     objectName: "wikiFreshness"
                     Layout.fillWidth: true
-                    wrapMode: Text.Wrap
-                    text: {
+                    readonly property var phrases: {
                         const r = footer.run, l = root.st.last
-                        if (r && root.st.running) return r.phase === "planning" || r.total === 0 ? "Planning the wiki…" : "Writing pages: " + r.done + " of " + r.total
-                        if (r) return "A run stopped part way" + (r.total > 0 ? " (" + r.done + " of " + r.total + " pages)" : "") + "."
-                        if (root.st.running) return "Starting a run…"
-                        if (!l) return "Not written by OpenWiki yet."
-                        // (Each phrase kept on one line: a narrow panel breaks at the dot.)
-                        const keep = t => t.replace(/ /g, "\u00a0")
-                        const when = keep("Updated " + root.ago(l.at))
+                        if (r && root.st.running) return [r.phase === "planning" || r.total === 0 ? "Planning the wiki…" : "Writing pages: " + r.done + " of " + r.total]
+                        if (r) return ["A run stopped part way" + (r.total > 0 ? " (" + r.done + " of " + r.total + " pages)" : "") + "."]
+                        if (root.st.running) return ["Starting a run…"]
+                        if (!l) return ["Not written by OpenWiki yet."]
+                        const when = "Updated " + root.ago(l.at)
                         const b = root.st.behind
-                        return b === null || b === undefined ? when : b === 0 ? when + " · " + keep("up to date") : when + " · " + keep(b + (b === 1 ? " commit" : " commits") + " since")
+                        return b === null || b === undefined ? [when] : [when, b === 0 ? "up to date" : b + (b === 1 ? " commit" : " commits") + " since"]
                     }
-                    color: Theme.textMuted
-                    font.pixelSize: Theme.px(12)
+                    readonly property string text: phrases.join(" · ")
+                    Repeater {
+                        model: freshness.phrases
+                        Label {
+                            required property int index
+                            required property string modelData
+                            text: modelData + (index < freshness.phrases.length - 1 ? " ·\u00a0" : "")
+                            width: Math.min(implicitWidth, freshness.width)
+                            wrapMode: Text.WordWrap
+                            color: Theme.textMuted
+                            font.pixelSize: Theme.px(12)
+                        }
+                    }
                 }
                 // The session writing it, unless it's this one.
                 FlatButton {
