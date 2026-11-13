@@ -3687,19 +3687,32 @@ ApplicationWindow {
 
     // The website's screenshots (not a test; see click-tests.sh's siteshots):
     // the main window with a session and its changes, the diff tab, the
-    // Midnight theme with the Activity panel, and the new-session page. Each
-    // dark, then light (name-light) in the same state, for the site's themes.
+    // Midnight theme with the Activity panel, the new-session page, the Wiki
+    // panel beside a lookup in it, and a plan under way with a diagram and
+    // options. Each dark, then light (name-light) in the same state, for the
+    // site's themes; then the first session in six more themes
+    // (site-theme-*). Run with QT_SCALE_FACTOR=2 for pictures the site can
+    // crop and still show sharp.
     property string siteKey: ""
+    function siteTheme(family, mode) {
+        Workspace.chooseTheme(family)
+        Workspace.chooseThemeMode(mode)
+        chat.transcript.scrollToEnd()
+    }
     SequentialAnimation {
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "siteshots"
         PauseAnimation { duration: 1200 }
         ScriptAction { script: {
             Workspace.chooseThemeMode("dark")
-            win.width = 1440
+            // (A narrow window, --winwidth=524, for the phone-sized pictures.)
+            win.width = Number(win.argValue("--winwidth=")) || 1440
             win.height = 900
+            // (Narrow, the diff inline: the phone-sized picture of it.)
+            if (win.width < 1000) Workspace.setSetting("diff_layout", "unified")
             const base = win.argValue("--cwd=").replace(/\/repo$/, "")
             Workspace.addProject(base + "/webapp")
             Workspace.addProject(base + "/api")
+            Workspace.addProject(base + "/shipyard")
             Workspace.saveTemplate(JSON.stringify({ name: "Review a pull request", harness: "claude", approval: "always-ask", text: "Review the open pull request: correctness first, then tests." }))
             Workspace.saveTemplate(JSON.stringify({ name: "Fix the failing tests", harness: "harlo", approval: "write", text: "Run the tests and fix what fails." })) } }
         PauseAnimation { duration: 1500 }
@@ -3738,6 +3751,53 @@ ApplicationWindow {
         ScriptAction { script: { win.shotWindow("site-new"); Workspace.chooseThemeMode("light") } }
         PauseAnimation { duration: 1000 }
         ScriptAction { script: { win.shotWindow("site-new-light"); Workspace.chooseThemeMode("dark") } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: {
+            win.clickItem(win.findText("Where is a pallet's weight worked out?", sidebar), "the wiki lookup") } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: { chat.transcript.scrollToEnd(); windowSettings.rightMode = "wiki" } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: wikiPanel.openWiki("workflows/manifests-and-weights.md", "weight-calculation-the-current-asymmetry-matters") }
+        PauseAnimation { duration: 2000 }
+        ScriptAction { script: { chat.transcript.scrollToEnd(); win.shotWindow("site-wiki"); Workspace.chooseThemeMode("light") } }
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: { chat.transcript.scrollToEnd(); win.shotWindow("site-wiki-light"); Workspace.chooseThemeMode("dark") } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: {
+            windowSettings.rightMode = ""
+            win.clickItem(win.findText("Carriers want manifests as CSV", sidebar), "the plan") } }
+        PauseAnimation { duration: 2500 }
+        ScriptAction { script: { chat.transcript.scrollToEnd(); win.shotWindow("site-plan"); Workspace.chooseThemeMode("light") } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: { chat.transcript.scrollToEnd(); win.shotWindow("site-plan-light"); Workspace.chooseThemeMode("dark") } }
+        PauseAnimation { duration: 800 }
+        // (Narrow, the option cards stand one above another: the first one,
+        // the recommended, a screen up.)
+        ScriptAction { script: {
+            if (win.width >= 1000) return
+            const v = chat.transcript.listView
+            v.follow = false
+            v.contentY = Math.max(v.originY, v.contentY - 330) } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: { if (win.width < 1000) { win.shotWindow("site-plan-cards"); Workspace.chooseThemeMode("light") } } }
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: { if (win.width < 1000) { win.shotWindow("site-plan-cards-light"); Workspace.chooseThemeMode("dark") } } }
+        PauseAnimation { duration: 800 }
+        // The session and its changes in a few more themes, for the site's
+        // themes section (each in one mode: dark or light).
+        ScriptAction { script: { Workspace.open(win.siteKey); windowSettings.rightMode = "changes"; win.siteTheme("Catppuccin", "dark") } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: { win.shotWindow("site-theme-catppuccin"); win.siteTheme("Rose Pine", "light") } }
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: { win.shotWindow("site-theme-rosepine"); win.siteTheme("Gruvbox", "dark") } }
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: { win.shotWindow("site-theme-gruvbox"); win.siteTheme("Solarized", "light") } }
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: { win.shotWindow("site-theme-solarized"); win.siteTheme("Nord", "dark") } }
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: { win.shotWindow("site-theme-nord"); win.siteTheme("Everforest", "light") } }
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: { win.shotWindow("site-theme-everforest"); win.siteTheme("harlo", "dark") } }
         PauseAnimation { duration: 800 }
         ScriptAction { script: { win.summary(); Qt.quit() } }
     }
