@@ -279,6 +279,10 @@ impl Phone {
             online: Default::default(),
         });
         crate::phone_push::attach(&shared);
+        // Lock-screen cards a harlo before this one left (it quit without
+        // ending them): ended now.
+        let left = shared.clone();
+        crate::runtime().spawn(async move { crate::phone_activity::end_left(&left.identity).await });
         // Devices paired or removed: the settings list follows.
         let mut changed = shared.devices_changed.subscribe();
         let thread = self.qt_thread();

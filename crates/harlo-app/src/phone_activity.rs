@@ -85,6 +85,7 @@ pub fn register(shared: &Arc<Shared>, device: &Device, key: &str, token: &str, s
     let live = crate::registry::get(key).ok_or("That session isn't running.")?;
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    note(key, std::slice::from_ref(&reg), now_ms());
     let (tx, rx) = mpsc::unbounded_channel();
     let _ = tx.send(Msg::Add(reg));
     w.insert(key.to_owned(), (id, tx));
@@ -268,9 +269,11 @@ async fn watch(shared: Arc<Shared>, key: String, id: u64, live: crate::registry:
                     regs.retain(|x| x.device != r.device);
                     sent.remove(&r.device);
                     regs.push(r);
+                    note(&key, &regs, t.busy_at);
                 }
                 Some(Msg::Remove(device)) => {
                     regs.retain(|x| x.device != device);
+                    note(&key, &regs, t.busy_at);
                     if regs.is_empty() {
                         break;
                     }
@@ -320,12 +323,112 @@ async fn watch(shared: Arc<Shared>, key: String, id: u64, live: crate::registry:
         if end || regs.is_empty() {
             break;
         }
+        if !lost.is_empty() {
+            note(&key, &regs, t.busy_at);
+        }
     }
+    // Ended (or none left to end): off the list.
+    note(&key, &[], 0);
     live.handle.unsubscribe(sub);
     let mut w = watchers().lock().unwrap();
     if w.get(&key).is_some_and(|(i, _)| *i == id) {
         w.remove(&key);
     }
+}
+
+/// The cards harlo is following, kept in a file: ended when harlo quits,
+/// and (if it quit without ending them, or the computer slept through it)
+/// when it starts again, so none is left on a lock screen for hours, where
+/// iOS may later fail to draw it.
+fn left_path() -> std::path::PathBuf {
+    phone::dir().join("activities.json")
+}
+
+fn left_lock() -> &'static Mutex<()> {
+    static L: OnceLock<Mutex<()>> = OnceLock::new();
+    L.get_or_init(Default::default)
+}
+
+fn read_left(path: &std::path::Path) -> Vec<Value> {
+    std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| v.as_array().cloned()).unwrap_or_default()
+}
+
+fn write_left(path: &std::path::Path, list: &[Value]) {
+    if list.is_empty() {
+        let _ = std::fs::remove_file(path);
+        return;
+    }
+    if let Some(d) = path.parent() {
+        let _ = std::fs::create_dir_all(d);
+    }
+    let tmp = path.with_extension("tmp");
+    if std::fs::write(&tmp, Value::Array(list.to_vec()).to_string()).is_ok() {
+        let _ = std::fs::rename(&tmp, path);
+    }
+}
+
+/// `key`'s cards are now `regs` (none: it's off the list); `since`: when
+/// its run began (unix ms).
+fn note(key: &str, regs: &[Reg], since: i64) {
+    note_in(&left_path(), key, regs, since);
+}
+
+fn note_in(path: &std::path::Path, key: &str, regs: &[Reg], since: i64) {
+    let _held = left_lock().lock().unwrap();
+    let mut list = read_left(path);
+    list.retain(|v| v["key"] != key);
+    list.extend(regs.iter().map(|r| json!({ "key": key, "device": r.device, "token": r.token, "sandbox": r.sandbox, "public": phone::b64(&r.public), "since": since })));
+    write_left(path, &list);
+}
+
+/// Ends every card on the list (taken off it first): harlo quitting, or
+/// starting after it quit without ending them. They go from the lock
+/// screen at once, saying harlo was closed.
+pub async fn end_left(identity: &phone::Identity) {
+    end_left_in(&left_path(), identity).await;
+}
+
+async fn end_left_in(path: &std::path::Path, identity: &phone::Identity) {
+    for (token, sandbox, body) in left_ends(path, identity) {
+        let push = apns::Push { device_token: &token, sandbox, topic: crate::phone_push::TOPIC, payload: &body, collapse_id: None, kind: apns::Kind::Activity { urgent: true } };
+        if let apns::Sent::Failed(e) = crate::phone_push::forward(&push).await {
+            tracing::info!("ending a live activity left over: {e}");
+        }
+    }
+}
+
+/// The ends of the cards on the list (taken off it): each one's push token,
+/// whether it's a development build's, and the push.
+fn left_ends(path: &std::path::Path, identity: &phone::Identity) -> Vec<(String, bool, Value)> {
+    let list = {
+        let _held = left_lock().lock().unwrap();
+        let list = read_left(path);
+        write_left(path, &[]);
+        list
+    };
+    let mut out = Vec::new();
+    for v in list {
+        let Some(public) = v["public"].as_str().and_then(|p| phone::unb64(p).ok()).and_then(|b| <[u8; 32]>::try_from(b).ok()) else { continue };
+        let token = v["token"].as_str().unwrap_or_default();
+        if token.is_empty() {
+            continue;
+        }
+        let state = State { phase: "failed", now: "harlo was closed".into(), title: String::new(), done: 0, total: 0, since: v["since"].as_i64().filter(|t| *t > 0).unwrap_or_else(now_ms) };
+        let mut body = payload(&state, true, &identity.channel(&public));
+        body["aps"]["dismissal-date"] = json!(now_ms() / 1000);
+        out.push((token.to_owned(), v["sandbox"].as_bool().unwrap_or(false), body));
+    }
+    out
+}
+
+/// harlo is quitting: the cards it follows end (waiting a few seconds at
+/// most for the relay).
+pub fn end_on_quit() {
+    if !left_path().exists() {
+        return;
+    }
+    let Ok(identity) = phone::Identity::load_or_create(&phone::dir().join("identity.json")) else { return };
+    let _ = crate::runtime().block_on(tokio::time::timeout(Duration::from_secs(3), end_left(&identity)));
 }
 
 #[cfg(test)]
@@ -355,6 +458,39 @@ mod tests {
         assert_eq!(t.state().phase, "done");
         t.idle_since = Some(Instant::now() - SETTLE);
         assert!(t.finished());
+    }
+
+    #[test]
+    fn cards_left_over_are_ended() {
+        use crypto_box::SecretKey;
+        use crypto_box::aead::OsRng;
+        let dir = std::env::temp_dir().join(format!("harlo-activities-{}", std::process::id()));
+        let path = dir.join("activities.json");
+        let _ = std::fs::remove_dir_all(&dir);
+        let harlo = phone::Identity::from_secret(SecretKey::generate(&mut OsRng).to_bytes());
+        let phone_secret = SecretKey::generate(&mut OsRng);
+        let reg = |device: &str, token: &str| Reg { device: device.into(), token: token.into(), sandbox: true, public: *phone_secret.public_key().as_bytes() };
+        // Two sessions followed; one ends, the other's phone leaves.
+        note_in(&path, "a", &[reg("p1", "aa"), reg("p2", "bb")], 1_700_000_000_000);
+        note_in(&path, "b", &[reg("p1", "cc")], 1_700_000_100_000);
+        note_in(&path, "a", &[reg("p1", "aa")], 1_700_000_000_000);
+        note_in(&path, "b", &[], 0);
+        assert_eq!(read_left(&path).len(), 1);
+        // harlo quit with "a" still going: its card ends, gone from the lock
+        // screen at once, and the list is empty.
+        let ends = left_ends(&path, &harlo);
+        assert_eq!(ends.len(), 1);
+        let (token, sandbox, body) = &ends[0];
+        assert_eq!((token.as_str(), *sandbox), ("aa", true));
+        assert_eq!(body["aps"]["event"], "end");
+        assert_eq!(body["aps"]["content-state"]["phase"], "failed");
+        assert_eq!(body["aps"]["content-state"]["since"].as_f64(), Some(1_700_000_000.0));
+        assert!(body["aps"]["dismissal-date"].as_i64().unwrap() <= body["aps"]["timestamp"].as_i64().unwrap() + 1);
+        let harlo_public: [u8; 32] = phone::unb64(&harlo.public_b64()).unwrap().try_into().unwrap();
+        let opened: Value = serde_json::from_slice(&phone::Identity::from_secret(phone_secret.to_bytes()).channel(&harlo_public).open(body["aps"]["content-state"]["sealed"].as_str().unwrap()).unwrap()).unwrap();
+        assert_eq!(opened["now"], "harlo was closed");
+        assert!(!path.exists() && left_ends(&path, &harlo).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

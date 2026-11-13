@@ -203,6 +203,8 @@ fn main() {
     // Quit normally, drawn or not (it started in the tray, say): the
     // graphics didn't stop it starting.
     graphics::inconclusive();
+    // The phones' lock-screen cards of runs still going end with harlo.
+    phone_activity::end_on_quit();
     // Remote sessions end with harlo: what they're running there stops, and
     // a session ending so isn't said as a failure.
     for h in harlo_core::remote::hosts() {
