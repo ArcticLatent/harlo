@@ -51,6 +51,10 @@ impl SearchReader {
 
     /// Best matches first.
     pub fn search(&self, input: &str, limit: usize) -> Result<Vec<Hit>> {
+        // (Tests: a slow disk or a big index.)
+        if let Some(ms) = std::env::var("HARLO_TEST_SLOW_SEARCH_MS").ok().and_then(|v| v.parse::<u64>().ok()) {
+            std::thread::sleep(std::time::Duration::from_millis(ms));
+        }
         search_in(&self.conn, input, limit)
     }
 }

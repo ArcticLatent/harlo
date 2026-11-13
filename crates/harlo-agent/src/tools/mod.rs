@@ -34,6 +34,118 @@ const GREP_MAX: usize = 300;
 const GREP_SHOWN: usize = 100;
 const GREP_BYTES: usize = 12 * 1024;
 
+/// The most of one line of a search's output kept (rg cuts its own at 300
+/// columns; grep doesn't).
+const LINE_CAP: usize = 4096;
+
+/// A search's matches as they come: the first ones (what's shown), how
+/// many and in which files, and, once there are more than are shown, all
+/// of them in a file (written as they come, not kept here).
+struct Matches {
+    base: String,
+    hidden: Vec<String>,
+    in_folder: bool,
+    spill_dir: PathBuf,
+    /// Lines the search gave (hidden ones too).
+    seen: usize,
+    total: usize,
+    bytes: usize,
+    first: Vec<String>,
+    counts: HashMap<String, usize>,
+    spill: Option<(std::io::BufWriter<std::fs::File>, String)>,
+    /// The file couldn't be made, or writing it failed part way.
+    unsaved: bool,
+    broke: bool,
+}
+
+impl Matches {
+    fn new(base: String, hidden: Vec<String>, in_folder: bool, spill_dir: PathBuf) -> Self {
+        Matches { base, hidden, in_folder, spill_dir, seen: 0, total: 0, bytes: 0, first: Vec::new(), counts: HashMap::new(), spill: None, unsaved: false, broke: false }
+    }
+
+    fn spilled(&self) -> bool {
+        grep_capped() && (self.total > GREP_SHOWN || self.bytes > GREP_BYTES)
+    }
+
+    fn take(&mut self, raw: &[u8]) {
+        use std::io::Write;
+        self.seen += 1;
+        let text = String::from_utf8_lossy(raw);
+        let l = text.strip_prefix(self.base.as_str()).unwrap_or(&text);
+        if names_hidden(&self.hidden, l) {
+            return;
+        }
+        self.total += 1;
+        self.bytes += l.len() + 1;
+        if self.in_folder
+            && let Some((file, _)) = l.split_once(':')
+        {
+            match self.counts.get_mut(file) {
+                Some(n) => *n += 1,
+                None => {
+                    self.counts.insert(file.to_owned(), 1);
+                }
+            }
+        }
+        if self.spilled() && self.spill.is_none() && !self.unsaved {
+            // (Every line so far is still among the first.)
+            match bash::open_spill(&self.spill_dir) {
+                Some((f, path)) => {
+                    let mut f = std::io::BufWriter::with_capacity(1 << 16, f);
+                    let so_far: String = self.first.iter().map(|l| format!("{l}\n")).collect();
+                    self.broke = f.write_all(so_far.as_bytes()).is_err();
+                    self.spill = Some((f, path));
+                }
+                None => self.unsaved = true,
+            }
+        }
+        if let Some((f, _)) = &mut self.spill
+            && !self.broke
+        {
+            self.broke = f.write_all(l.as_bytes()).and_then(|_| f.write_all(b"\n")).is_err();
+        }
+        if self.first.len() < GREP_MAX {
+            self.first.push(l.to_owned());
+        }
+    }
+
+    /// Many matches: a line saying how many and in which files (the most
+    /// first), where all of them are, then the first ones.
+    fn many(mut self) -> String {
+        use std::io::Write;
+        if let Some((f, _)) = &mut self.spill
+            && !self.broke
+        {
+            self.broke = f.flush().is_err();
+        }
+        let mut first = Vec::new();
+        let mut size = 0;
+        for l in &self.first {
+            if first.len() >= GREP_SHOWN || size + l.len() + 1 > GREP_BYTES {
+                break;
+            }
+            size += l.len() + 1;
+            first.push(l.as_str());
+        }
+        let mut files: Vec<(&String, &usize)> = self.counts.iter().collect();
+        files.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+        let where_ = match files.len() {
+            0 | 1 => String::new(),
+            n => {
+                let named: Vec<String> = files.iter().take(8).map(|(f, c)| format!("{f} {c}")).collect();
+                let more = if n > 8 { format!(", {} more files", n - 8) } else { String::new() };
+                format!(" in {n} files ({}{more})", named.join(", "))
+            }
+        };
+        let saved = match &self.spill {
+            Some((_, p)) if self.broke => format!("Only the first of them are in {p}: writing the rest failed (is the disk full?)."),
+            Some((_, p)) => format!("All of them are in {p}: grep that, or read it with offset."),
+            None => "The rest couldn't be saved.".into(),
+        };
+        format!("[{} matches{where_}; the first {} shown. {saved} Or narrow the pattern, path or glob.]\n{}", self.total, first.len(), first.join("\n"))
+    }
+}
+
 fn grep_capped() -> bool {
     std::env::var("HARLO_AGENT_GREP_CAP").map_or(true, |v| v.trim() != "off")
 }
@@ -79,6 +191,85 @@ struct Seen {
 /// the file is written again (some file systems' times are that coarse, and
 /// a write in the same tick keeps it): such a file's contents are compared.
 const RACY: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Whether a search's line `l` is of a hidden path (`under`: `hidden_names`).
+fn names_hidden(under: &[String], l: &str) -> bool {
+    under.iter().any(|h| l.strip_prefix(h.as_str()).is_some_and(|rest| rest.is_empty() || rest.starts_with('/') || rest.starts_with(':')))
+}
+
+/// Past this, `read` takes a file as it comes instead of whole.
+const BIG_READ: u64 = 8 << 20;
+
+/// A big file read as it comes ([`stream_lines`]).
+struct Streamed {
+    lines: usize,
+    bytes: u64,
+    /// The lines from the start asked for: at most the count, about the
+    /// bytes asked for, each cut a little past them.
+    kept: Vec<Vec<u8>>,
+    binary: bool,
+    /// As [`hash_of`] makes it.
+    hash: u64,
+}
+
+/// `path`'s lines counted (as `str::lines` would), the ones from `start`
+/// kept (see [`Streamed`]), and its hash: only a chunk of it in memory.
+fn stream_lines(path: &Path, start: usize, max: usize, max_bytes: usize) -> std::io::Result<Streamed> {
+    use std::hash::Hasher;
+    use std::io::Read;
+    let mut f = std::fs::File::open(path)?;
+    let size = f.metadata()?.len();
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    // (A slice hashes its length first.)
+    h.write_usize(size as usize);
+    let mut buf = vec![0u8; 1 << 16];
+    let (mut lines, mut bytes, mut binary) = (0usize, 0u64, false);
+    let (mut kept, mut kept_bytes, mut cur, mut open) = (Vec::new(), 0usize, Vec::new(), false);
+    let cap = max_bytes + 1;
+    loop {
+        let n = f.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        let part = &buf[..n];
+        h.write(part);
+        if bytes < 8192 && part[..n.min(8192 - bytes as usize)].contains(&0) {
+            binary = true;
+        }
+        bytes += n as u64;
+        let mut rest = part;
+        loop {
+            let end = rest.iter().position(|b| *b == b'\n');
+            let seg = &rest[..end.unwrap_or(rest.len())];
+            let keep = lines >= start && kept.len() < max && kept_bytes <= max_bytes;
+            if keep && cur.len() < cap {
+                cur.extend_from_slice(&seg[..seg.len().min(cap - cur.len())]);
+            }
+            open |= !seg.is_empty();
+            let Some(i) = end else { break };
+            if keep {
+                if cur.last() == Some(&b'\r') {
+                    cur.pop();
+                }
+                kept_bytes += cur.len() + 1;
+                kept.push(std::mem::take(&mut cur));
+            }
+            cur.clear();
+            lines += 1;
+            open = false;
+            rest = &rest[i + 1..];
+        }
+    }
+    if open {
+        if lines >= start && kept.len() < max && kept_bytes <= max_bytes {
+            kept.push(cur);
+        }
+        lines += 1;
+    }
+    // (Grown or shrunk while read: its hash can't match, as it shouldn't.)
+    let hash = if bytes == size { h.finish() } else { h.finish() ^ 1 };
+    Ok(Streamed { lines, bytes, kept, binary, hash })
+}
 
 fn hash_of(bytes: &[u8]) -> u64 {
     use std::hash::{Hash, Hasher};
@@ -290,18 +481,21 @@ impl Tools {
 
     /// grep's or find's lines, less those in hidden places under `root`.
     fn unhidden(&self, root: &Path, lines: Vec<String>) -> Vec<String> {
-        let Some(sb) = &self.sandbox else { return lines };
-        let base = format!("{}/", self.cwd.display());
-        let under: Vec<String> = sb.hidden_under(root).iter().map(|h| h.to_string_lossy().into_owned()).collect();
+        let under = self.hidden_names(root);
         if under.is_empty() {
             return lines;
         }
+        lines.into_iter().filter(|l| !names_hidden(&under, l)).collect()
+    }
+
+    /// The hidden paths under `root`, as a search names them (whole, and
+    /// from the working folder).
+    fn hidden_names(&self, root: &Path) -> Vec<String> {
+        let Some(sb) = &self.sandbox else { return Vec::new() };
+        let base = format!("{}/", self.cwd.display());
+        let under: Vec<String> = sb.hidden_under(root).iter().map(|h| h.to_string_lossy().into_owned()).collect();
         let shown = |h: &str| h.strip_prefix(&base).map(str::to_owned);
-        let under: Vec<String> = under.iter().flat_map(|h| [Some(h.clone()), shown(h)]).flatten().collect();
-        lines
-            .into_iter()
-            .filter(|l| !under.iter().any(|h| l.strip_prefix(h.as_str()).is_some_and(|rest| rest.is_empty() || rest.starts_with('/') || rest.starts_with(':'))))
-            .collect()
+        under.iter().flat_map(|h| [Some(h.clone()), shown(h)]).flatten().collect()
     }
 
     fn path(&self, p: &str) -> PathBuf {
@@ -363,6 +557,22 @@ impl Tools {
         }
     }
 
+    /// A command: `stop` (the turn's) ends it, with what it printed so far.
+    pub async fn bash(&self, args: &Value, stop: Option<&tokio_util::sync::CancellationToken>) -> Outcome {
+        let s = |k: &str| args[k].as_str().unwrap_or_default();
+        let sandbox = self.sandbox.as_deref();
+        if let Some(why) = sandbox.and_then(|sb| sb.broken.as_ref()) {
+            return fail(format!("Commands can't run: the sandbox can't start here ({why}). Install bubblewrap, or turn Harlo's sandbox off in Settings → Providers → Harlo."));
+        }
+        let inside = sandbox.filter(|_| args["outside_sandbox"] != true);
+        if args["background"] == true {
+            let (text, failed) = self.jobs.start(s("command"), &self.cwd, args["timeout"].as_u64(), inside);
+            return Outcome::new(text, failed);
+        }
+        let (text, failed) = bash::run(s("command"), &self.cwd, args["timeout"].as_u64(), &self.spill_dir, inside, stop).await;
+        Outcome::new(text, failed)
+    }
+
     pub async fn call(&self, name: &str, args: &Value) -> Outcome {
         let s = |k: &str| args[k].as_str().unwrap_or_default();
         match name {
@@ -394,19 +604,7 @@ impl Tools {
                 }
                 out
             }
-            "bash" => {
-                let sandbox = self.sandbox.as_deref();
-                if let Some(why) = sandbox.and_then(|sb| sb.broken.as_ref()) {
-                    return fail(format!("Commands can't run: the sandbox can't start here ({why}). Install bubblewrap, or turn Harlo's sandbox off in Settings → Providers → Harlo."));
-                }
-                let inside = sandbox.filter(|_| args["outside_sandbox"] != true);
-                if args["background"] == true {
-                    let (text, failed) = self.jobs.start(s("command"), &self.cwd, args["timeout"].as_u64(), inside);
-                    return Outcome::new(text, failed);
-                }
-                let (text, failed) = bash::run(s("command"), &self.cwd, args["timeout"].as_u64(), &self.spill_dir, inside).await;
-                Outcome::new(text, failed)
-            }
+            "bash" => self.bash(args, None).await,
             "grep" => self.grep(s("pattern"), s("path"), s("glob"), args["ignore_case"].as_bool() == Some(true)).await,
             "find" => self.find(s("pattern"), s("path")).await,
             "ls" => self.ls(s("path")),
@@ -436,6 +634,10 @@ impl Tools {
         let path = self.path(p);
         if let Some(no) = self.hidden(&path) {
             return no;
+        }
+        // A big one (not a picture): read as it comes, not whole.
+        if std::fs::metadata(&path).is_ok_and(|m| m.is_file() && m.len() > BIG_READ) && !self.picture(&path) {
+            return self.read_big(path, offset, limit).await;
         }
         // (Off the async threads: a large file, or a slow disk, doesn't
         // hold up a stop.)
@@ -514,6 +716,73 @@ impl Tools {
         }
         if end < lines.len() {
             out.push_str(&format!("\n[Lines {}-{} of {}. Read on with offset={}.]", start + 1, end, lines.len(), end + 1));
+        }
+        ok(out.trim_end_matches('\n').to_owned())
+    }
+
+    /// Whether `path` starts as a picture does.
+    fn picture(&self, path: &Path) -> bool {
+        use std::io::Read;
+        let mut head = [0u8; 64];
+        let n = std::fs::File::open(path).and_then(|mut f| f.read(&mut head)).unwrap_or(0);
+        crate::images::mime_of(&head[..n]).is_some()
+    }
+
+    /// `read` of a file past [`BIG_READ`]: its lines counted and the ones
+    /// asked for kept as it's read, the rest not held (no outline: it would
+    /// need the whole text).
+    async fn read_big(&self, path: PathBuf, offset: Option<u64>, limit: Option<u64>) -> Outcome {
+        let start = offset.unwrap_or(1).max(1) as usize - 1;
+        let preview = offset.is_none() && limit.is_none();
+        let (max, max_bytes) = if preview { (PREVIEW_LINES, PREVIEW_BYTES) } else { (limit.map_or(READ_LINES, |l| (l as usize).clamp(1, READ_LINES)), READ_BYTES) };
+        let reading = path.clone();
+        let read = tokio::task::spawn_blocking(move || stream_lines(&reading, start, max, max_bytes)).await.unwrap_or_else(|e| Err(std::io::Error::other(e.to_string())));
+        let got = match read {
+            Ok(g) => g,
+            Err(e) => return fail(format!("Can't read {}: {e}", path.display())),
+        };
+        if let (Ok(m), Ok(modified)) = (std::fs::metadata(&path), std::fs::metadata(&path).and_then(|m| m.modified())) {
+            self.seen.lock().unwrap().insert(path.clone(), Seen { modified, size: m.len(), hash: got.hash, at: SystemTime::now() });
+        }
+        if got.binary {
+            return ok(format!("{} is a binary file ({} bytes).", path.display(), got.bytes));
+        }
+        if start >= got.lines {
+            return fail(format!("The file has {} lines; offset {} is past its end.", got.lines, start + 1));
+        }
+        let kept: Vec<String> = got.kept.iter().map(|l| String::from_utf8_lossy(l).into_owned()).collect();
+        let mut out = String::new();
+        let mut n = 0;
+        let anchored = crate::hashline::on();
+        for l in &kept {
+            if n >= max || out.len() + l.len() + 1 > max_bytes {
+                break;
+            }
+            if anchored {
+                out.push_str(&crate::hashline::annotate(start + n + 1, l));
+            } else {
+                out.push_str(l);
+            }
+            out.push('\n');
+            n += 1;
+        }
+        if n == 0 {
+            // One line longer than the limit.
+            out = kept.first().map(|l| l.chars().take(READ_BYTES).collect()).unwrap_or_default();
+            n = 1;
+        }
+        let end = start + n;
+        if preview {
+            return ok(format!(
+                "[{} is {} lines ({} KB), more than one read shows. These are lines 1-{end}: grep it for what you need, or read a range with offset and limit (up to {READ_LINES} lines).]\n{}",
+                path.display(),
+                got.lines,
+                got.bytes.div_ceil(1024),
+                out.trim_end_matches('\n')
+            ));
+        }
+        if end < got.lines {
+            out.push_str(&format!("\n[Lines {}-{} of {}. Read on with offset={}.]", start + 1, end, got.lines, end + 1));
         }
         ok(out.trim_end_matches('\n').to_owned())
     }
@@ -749,6 +1018,54 @@ impl Tools {
         }
     }
 
+    /// A search whose output is taken a line at a time as it comes (`each`;
+    /// each line cut at [`LINE_CAP`]), not all of it kept: stopped with the
+    /// call, or after [`search_secs`]. Its exit and what it said on stderr
+    /// (the start).
+    async fn search_lines(&self, program: &str, args: &[String], each: &mut (dyn FnMut(&[u8]) + Send)) -> std::io::Result<(std::process::ExitStatus, String)> {
+        use tokio::io::AsyncReadExt;
+        let mut cmd = tokio::process::Command::new(program);
+        cmd.args(args).current_dir(&self.cwd).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).kill_on_drop(true);
+        let mut child = cmd.spawn()?;
+        let (mut out, mut err) = (child.stdout.take().expect("piped"), child.stderr.take().expect("piped"));
+        let work = async {
+            let (mut buf, mut ebuf) = (vec![0u8; 1 << 16], [0u8; 4096]);
+            let (mut line, mut said) = (Vec::new(), Vec::new());
+            let (mut o_open, mut e_open) = (true, true);
+            while o_open || e_open {
+                tokio::select! {
+                    n = out.read(&mut buf), if o_open => match n {
+                        Ok(0) | Err(_) => o_open = false,
+                        Ok(n) => {
+                            let mut rest = &buf[..n];
+                            while let Some(i) = rest.iter().position(|b| *b == b'\n') {
+                                line.extend_from_slice(&rest[..i.min(LINE_CAP.saturating_sub(line.len()))]);
+                                each(&line);
+                                line.clear();
+                                rest = &rest[i + 1..];
+                            }
+                            line.extend_from_slice(&rest[..rest.len().min(LINE_CAP.saturating_sub(line.len()))]);
+                        }
+                    },
+                    n = err.read(&mut ebuf), if e_open => match n {
+                        Ok(0) | Err(_) => e_open = false,
+                        Ok(n) => said.extend_from_slice(&ebuf[..n.min((64usize << 10).saturating_sub(said.len()))]),
+                    },
+                }
+            }
+            if !line.is_empty() {
+                each(&line);
+            }
+            let status = child.wait().await?;
+            Ok::<_, std::io::Error>((status, String::from_utf8_lossy(&said).into_owned()))
+        };
+        let secs = search_secs();
+        match tokio::time::timeout(std::time::Duration::from_secs(secs), work).await {
+            Ok(r) => r,
+            Err(_) => Err(std::io::Error::new(std::io::ErrorKind::TimedOut, format!("The search ran past {secs} s and was stopped: narrow the path, pattern or glob."))),
+        }
+    }
+
     async fn grep(&self, pattern: &str, p: &str, glob: &str, ignore_case: bool) -> Outcome {
         if pattern.is_empty() {
             return fail("Give a pattern.");
@@ -765,11 +1082,10 @@ impl Tools {
             args.extend(["-g".into(), glob.into()]);
         }
         args.extend(["-e".into(), pattern.into(), "--".into(), path.to_string_lossy().into_owned()]);
-        let out = match self.search("rg", &args).await {
-            Ok(o) => o,
-            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => return fail(e.to_string()),
-            // No ripgrep: grep.
-            Err(_) => {
+        let mut got = Matches::new(format!("{}/", self.cwd.display()), self.hidden_names(&path), path.is_dir(), self.spill_dir.clone());
+        let ran = match self.search_lines("rg", &args, &mut |l| got.take(l)).await {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                // No ripgrep: grep.
                 let mut g = vec!["-rnI".to_owned()];
                 if ignore_case {
                     g.push("-i".into());
@@ -778,78 +1094,30 @@ impl Tools {
                     g.push(format!("--include={glob}"));
                 }
                 g.extend(["-E".into(), "-e".into(), pattern.into(), "--".into(), path.to_string_lossy().into_owned()]);
-                match self.search("grep", &g).await {
-                    Ok(o) => o,
-                    Err(e) if e.kind() == std::io::ErrorKind::TimedOut => return fail(e.to_string()),
-                    Err(e) => return fail(format!("Can't search: {e}")),
-                }
+                self.search_lines("grep", &g, &mut |l| got.take(l)).await
             }
+            r => r,
         };
-        if !out.status.success() && out.stdout.is_empty() {
-            let err = String::from_utf8_lossy(&out.stderr);
-            return if err.trim().is_empty() { ok("No matches.") } else { fail(err.trim().to_owned()) };
+        let (status, said) = match ran {
+            Ok(r) => r,
+            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => return fail(e.to_string()),
+            Err(e) => return fail(format!("Can't search: {e}")),
+        };
+        if !status.success() && got.seen == 0 {
+            return if said.trim().is_empty() { ok("No matches.") } else { fail(said.trim().to_owned()) };
         }
-        let text = String::from_utf8_lossy(&out.stdout);
-        let base = format!("{}/", self.cwd.display());
-        let lines: Vec<String> = text.lines().map(|l| l.strip_prefix(&base).unwrap_or(l).to_owned()).collect();
-        let lines = self.unhidden(&path, lines);
-        if lines.is_empty() {
+        if got.total == 0 {
             return ok("No matches.");
         }
-        let total = lines.len();
-        let bytes: usize = lines.iter().map(|l| l.len() + 1).sum();
-        if grep_capped() && (total > GREP_SHOWN || bytes > GREP_BYTES) {
-            return ok(self.many_matches(&lines, path.is_dir()));
+        if got.spilled() {
+            return ok(got.many());
         }
-        let mut shown = lines.into_iter().take(GREP_MAX).collect::<Vec<_>>().join("\n");
+        let total = got.total;
+        let mut shown = got.first.into_iter().take(GREP_MAX).collect::<Vec<_>>().join("\n");
         if total > GREP_MAX {
             shown.push_str(&format!("\n[{} matches; first {GREP_MAX} shown. Narrow the pattern, path or glob.]", total));
         }
         ok(shown)
-    }
-
-    /// Many matches: a line saying how many and in which files (the most
-    /// first), where all of them are, then the first ones.
-    fn many_matches(&self, lines: &[String], in_folder: bool) -> String {
-        let mut first = Vec::new();
-        let mut size = 0;
-        for l in lines {
-            if first.len() >= GREP_SHOWN || size + l.len() + 1 > GREP_BYTES {
-                break;
-            }
-            size += l.len() + 1;
-            first.push(l.as_str());
-        }
-        let mut files: Vec<(String, usize)> = Vec::new();
-        if in_folder {
-            let mut counts: HashMap<&str, usize> = HashMap::new();
-            for l in lines {
-                if let Some((file, _)) = l.split_once(':') {
-                    *counts.entry(file).or_default() += 1;
-                }
-            }
-            files = counts.into_iter().map(|(f, n)| (f.to_owned(), n)).collect();
-            files.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-        }
-        let where_ = match files.len() {
-            0 | 1 => String::new(),
-            n => {
-                let named: Vec<String> = files.iter().take(8).map(|(f, c)| format!("{f} {c}")).collect();
-                let more = if n > 8 { format!(", {} more files", n - 8) } else { String::new() };
-                format!(" in {n} files ({}{more})", named.join(", "))
-            }
-        };
-        let all = lines.join("\n");
-        let saved = match bash::save(&all, &self.spill_dir) {
-            Some(p) => format!("All of them are in {p}: grep that, or read it with offset."),
-            None => "The rest couldn't be saved.".into(),
-        };
-        format!(
-            "[{} matches{where_}; the first {} shown. {saved} Or narrow the pattern, path or glob.]\n{}",
-            lines.len(),
-            first.len(),
-            first.join("\n")
-        )
     }
 
     async fn find(&self, pattern: &str, p: &str) -> Outcome {
@@ -909,6 +1177,32 @@ mod tests {
         assert!(one.starts_with("[150 matches; the first 100 shown."), "{}", &one[..120]);
         let few = t.call("grep", &json!({ "pattern": "late", "path": "logs" })).await.text;
         assert_eq!(few.lines().count(), 30);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn a_big_file_is_read_as_it_comes_the_same() {
+        let dir = std::env::temp_dir().join(format!("harlo-agent-bigread-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // 9 MB: CRLF lines, then one with no end.
+        let mut text: String = (1..=300_000).map(|i| format!("line {i:07} of the big one\r\n")).collect();
+        text.push_str("the last, unended");
+        std::fs::write(dir.join("big.txt"), &text).unwrap();
+        assert!(text.len() as u64 > BIG_READ);
+        let got = stream_lines(&dir.join("big.txt"), 0, 1, 100).unwrap();
+        assert_eq!((got.lines, got.bytes, got.hash), (text.lines().count(), text.len() as u64, hash_of(text.as_bytes())), "counted and hashed as when read whole");
+        let t = Tools::new(dir.clone(), dir.join(".out"));
+        let ranged = t.call("read", &json!({ "path": "big.txt", "offset": 299_999, "limit": 5 })).await.text;
+        assert_eq!(ranged, "line 0299999 of the big one\nline 0300000 of the big one\nthe last, unended");
+        let mid = t.call("read", &json!({ "path": "big.txt", "offset": 10, "limit": 2 })).await.text;
+        assert_eq!(mid, "line 0000010 of the big one\nline 0000011 of the big one\n\n[Lines 10-11 of 300001. Read on with offset=12.]");
+        let whole = t.call("read", &json!({ "path": "big.txt" })).await.text;
+        assert!(whole.starts_with(&format!("[{} is 300001 lines (", dir.join("big.txt").display())) && whole.contains("\nline 0000001 of the big one\n"), "{}", &whole[..200]);
+        let past = t.call("read", &json!({ "path": "big.txt", "offset": 400_000 })).await;
+        assert!(past.failed && past.text.contains("has 300001 lines"), "{}", past.text);
+        // Read so: an edit after it isn't taken as made on a changed file.
+        let edit = t.call("edit", &json!({ "path": "big.txt", "edits": [{ "old_text": "line 0000002 of", "new_text": "line two of" }] })).await;
+        assert!(!edit.failed, "{}", edit.text);
         let _ = std::fs::remove_dir_all(dir);
     }
 

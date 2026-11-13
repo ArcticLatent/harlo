@@ -76,6 +76,8 @@ struct Shared {
     /// What side questions are asked with while a run has the agent (as
     /// it started).
     aside: Mutex<crate::agent::AsideParts>,
+    /// Side questions out now.
+    asides: Mutex<Vec<tokio::task::JoinHandle<()>>>,
     /// What the session's requests used and cost (the agent's).
     spend: Arc<Mutex<crate::used::Used>>,
 }
@@ -357,6 +359,7 @@ pub async fn serve(keep: Keep, model: Option<String>, effort: Option<String>, ha
         subagents: agent.subagents.clone(),
         wake: Mutex::default(),
         aside: Mutex::default(),
+        asides: Mutex::default(),
         spend: agent.spend.clone(),
     });
     agent.gate = Some(Arc::new(Approvals(shared.clone())));
@@ -422,7 +425,10 @@ pub async fn serve(keep: Keep, model: Option<String>, effort: Option<String>, ha
     if let Some(stop) = shared.running.lock().unwrap().take() {
         stop.cancel();
     }
-    let _ = agent.lock().await;
+    // (Side questions still out: their requests logged, if they end soon.)
+    let asides: Vec<_> = std::mem::take(&mut *shared.asides.lock().unwrap());
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(10), futures_util::future::join_all(asides)).await;
+    let _ = agent.lock().await.settle_side();
     shared.emit(Value::Null);
     let _ = writer.await;
     Ok(())
@@ -657,7 +663,7 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
             let spend = *sh.spend.lock().unwrap();
             stats["cost"] = json!(spend.cost);
             stats["costKind"] = json!(spend.cost_kind());
-            stats["tokens"] = json!({ "input": spend.input, "cached": spend.cached, "output": spend.output, "requests": spend.requests });
+            stats["tokens"] = json!({ "input": spend.input, "cached": spend.cached, "output": spend.output, "requests": spend.requests, "unreported": spend.unreported });
             drop(v);
             reply(Ok(stats))
         }
@@ -848,8 +854,9 @@ async fn side_question(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>,
         Ok(mut a) => (a.aside_parts().await, a.history().to_vec()),
         Err(_) => (sh.aside.lock().unwrap().clone(), sh.view.lock().unwrap().messages.clone()),
     };
-    let (sh, agent) = (sh.clone(), agent.clone());
-    tokio::spawn(async move {
+    let (shared, agent) = (sh.clone(), agent.clone());
+    let task = tokio::spawn(async move {
+        let sh = shared;
         sh.emit(json!({ "type": "harlo_aside", "question": question, "text": "", "done": false }));
         let shown = sh.clone();
         let q = question.clone();
@@ -858,12 +865,13 @@ async fn side_question(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>,
             Ok(text) => sh.emit(json!({ "type": "harlo_aside", "question": question, "text": text, "done": true })),
             Err(e) => sh.emit(json!({ "type": "harlo_aside", "question": question, "text": "", "done": true, "error": format!("{e:#}") })),
         }
-        // Its request into the log now, when no run has the agent (a run
-        // does it at its next step).
-        if let Ok(mut a) = agent.try_lock() {
-            let _ = a.settle_side();
-        }
+        // Its request into the log: now, or once the run that has the
+        // agent lets it go (a run also does it at each step, and as it ends).
+        let _ = agent.lock().await.settle_side();
     });
+    let mut asides = sh.asides.lock().unwrap();
+    asides.retain(|t| !t.is_finished());
+    asides.push(task);
 }
 
 async fn start(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, what: Option<(String, Vec<Value>)>) -> Result<(), String> {
@@ -908,6 +916,7 @@ async fn start(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, what: O
             let _ = a.rename(&n);
         }
         let ended_since = a.has_notices();
+        let _ = a.settle_side();
         drop(a);
         sh.withdraw();
         *sh.running.lock().unwrap() = None;

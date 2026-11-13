@@ -238,8 +238,13 @@ impl Reply {
     }
 }
 
-/// The usage as the Responses API says it (what the rest reads).
+/// The usage as the Responses API says it (what the rest reads); none
+/// when the server didn't say it (some local servers don't), so it isn't
+/// taken for a measured nothing.
 fn usage(u: &Value) -> Value {
+    if !u["prompt_tokens"].is_u64() {
+        return json!({});
+    }
     json!({
         "input_tokens": u["prompt_tokens"].as_u64().unwrap_or(0),
         "output_tokens": u["completion_tokens"].as_u64().unwrap_or(0),
@@ -327,7 +332,7 @@ mod tests {
     /// "hang" (never answers), "stall" (headers and one event, then
     /// nothing), "endless" (an event that never ends), "split" (a reply
     /// whose blank lines come split across writes), "429" (busy, asking
-    /// for a 600 s wait).
+    /// for a 600 s wait), "huge" (a refusal whose body never ends).
     async fn stand_in(how: &'static str) -> String {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -358,6 +363,11 @@ mod tests {
                                 let _ = s.flush().await;
                                 tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                             }
+                        }
+                        "huge" => {
+                            let _ = s.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nThe request was refused: ").await;
+                            let part = vec![b'z'; 1 << 16];
+                            while s.write_all(&part).await.is_ok() {}
                         }
                         _ => {
                             let body = "{\"error\":{\"type\":\"rate_limit_exceeded\",\"message\":\"busy\"}}";
@@ -400,6 +410,14 @@ mod tests {
         assert!(e.to_string().contains("passed 16 MiB without ending"), "{e:#}");
         assert!(crate::retry::transient(&e).is_none(), "not sent again");
         assert!(took < std::time::Duration::from_secs(20), "{took:?}");
+    }
+
+    #[tokio::test]
+    async fn a_refusal_is_read_only_so_far() {
+        let (r, took) = ask("huge").await;
+        let e = format!("{:#}", r.unwrap_err());
+        assert!(e.contains("The request was refused: zzz") && e.len() < 80 << 10, "{} bytes: {}", e.len(), &e[..200.min(e.len())]);
+        assert!(took < std::time::Duration::from_secs(5), "{took:?}");
     }
 
     #[tokio::test]
@@ -456,6 +474,25 @@ mod tests {
         assert_eq!(r.finish.as_deref(), Some("tool_calls"));
         let u = usage(&r.usage);
         assert_eq!((u["input_tokens"].as_u64(), u["input_tokens_details"]["cached_tokens"].as_u64()), (Some(100), Some(64)));
+    }
+
+    #[test]
+    fn a_reply_without_usage_is_unknown_not_nothing() {
+        // (Some servers send no usage, even asked to: the reply ends.)
+        let (_, _, r) = feed(&[json!({ "choices": [{ "index": 0, "delta": { "content": "Done." }, "finish_reason": "stop" }] })]);
+        let u = usage(&r.usage);
+        assert_eq!(u, json!({}));
+        let price = crate::used::Pricing::Priced(crate::used::Price { input: 1.0, output: 1.0, cached: 1.0 });
+        let used = crate::used::Used::from_api(&u).priced(&price);
+        assert_eq!((used.requests, used.unreported, used.cost_kind()), (1, 1, "unknown"));
+        let logged = used.log(&u, &price);
+        assert!(logged.get("cost").is_none() && logged["costKind"] == "unknown" && logged["tokensUnknown"] == true, "{logged}");
+        assert_eq!(crate::used::Used::from_log(&logged).unreported, 1);
+        assert_eq!(crate::used::Used::from_details(&used.details()).unreported, 1);
+        // One reported beside it: the total is at least its cost, partly known.
+        let mut sum = crate::used::Used::from_api(&json!({ "input_tokens": 1_000_000, "output_tokens": 0 })).priced(&price);
+        sum.add(&used);
+        assert_eq!((sum.cost, sum.cost_kind(), sum.unreported), (1.0, "partly", 1));
     }
 
     #[test]

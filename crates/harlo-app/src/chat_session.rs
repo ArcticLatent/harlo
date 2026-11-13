@@ -266,6 +266,11 @@ pub mod qobject {
         #[qsignal]
         #[cxx_name = "editRequested"]
         fn edit_requested(self: Pin<&mut ChatSession>, text: &QString);
+        /// Words stopped before they were sent, back for the composer: put
+        /// above what's being typed there, not over it.
+        #[qsignal]
+        #[cxx_name = "unsentReturned"]
+        fn unsent_returned(self: Pin<&mut ChatSession>, text: &QString);
         /// A message wasn't sent: why (its text goes back in the composer).
         #[qsignal]
         #[cxx_name = "sendFailed"]
@@ -439,9 +444,52 @@ pub struct ChatSessionRust {
     host_files: std::cell::RefCell<std::collections::HashMap<String, (std::time::Instant, Option<Arc<str>>)>>,
     /// Where each row is (see `RowIndex`), once asked after the rows change.
     row_index: std::cell::RefCell<Option<RowIndex>>,
-    /// The words last sent: back in the composer if Stop comes before
-    /// they reach the agent (`SessionUpdate::Unsent`).
-    last_sent: String,
+    /// What was sent lately, as typed: back in the composer if Stop comes
+    /// before it reaches the agent (`SessionUpdate::Unsent`).
+    sent: Vec<Sent>,
+}
+
+/// A message as it was sent from here: `text` as given to the session
+/// (the plan note added), `original` as typed, with its attached files.
+#[derive(Default, Clone, Debug, PartialEq)]
+pub struct Sent {
+    text: String,
+    original: String,
+    files: Vec<String>,
+}
+
+/// The messages to put back for prompts stopped before they went (`held`,
+/// oldest first, as the session had them): each matched to what was sent
+/// from here, newest first (the held ones are the latest; one may carry
+/// read files or sessions in front); one sent from elsewhere (the phone)
+/// comes back as it was, less the plan note. Their words, oldest first, and
+/// their files. (What's left was sent, or stopped: forgotten.)
+fn unsent_back(sent: &mut Vec<Sent>, held: &[String]) -> (String, Vec<String>) {
+    let mut back: Vec<(String, Vec<String>)> = Vec::new();
+    let mut to = sent.len();
+    for h in held.iter().rev() {
+        let hit = sent[..to].iter().rposition(|s| *h == s.text || (!s.text.is_empty() && h.ends_with(&s.text)) || (s.text.is_empty() && !s.files.is_empty()));
+        back.push(match hit {
+            Some(i) => {
+                to = i;
+                (sent[i].original.clone(), sent[i].files.clone())
+            }
+            None => (h.strip_suffix(harlo_harness::file_blocks::PLAN_NOTE).unwrap_or(h).to_owned(), Vec::new()),
+        });
+    }
+    sent.clear();
+    let (mut words, mut files) = (Vec::<String>::new(), Vec::<String>::new());
+    for (original, more) in back.into_iter().rev() {
+        if !original.trim().is_empty() {
+            words.push(original);
+        }
+        for f in more {
+            if !files.contains(&f) {
+                files.push(f);
+            }
+        }
+    }
+    (words.join("\n\n"), files)
 }
 
 /// Where each row is, by its key and by the run (group) it's in. Rows'
@@ -859,13 +907,21 @@ impl ChatSession {
         };
         let Some(h) = self.handle().cloned() else { return };
         let original = text.clone();
-        self.as_mut().rust_mut().last_sent = original.clone();
         // Plan mode: a plan first, no changes. (Not for a side question.)
         let text = if self.plan_mode && mode == SendMode::Normal && !text.trim_start().starts_with("/btw") {
             format!("{text}{}", harlo_harness::file_blocks::PLAN_NOTE)
         } else {
             text
         };
+        {
+            let files = self.attachments.iter().map(|p| p.to_string()).collect();
+            let sent = &mut self.as_mut().rust_mut().sent;
+            sent.push(Sent { text: text.clone(), original: original.clone(), files });
+            // (Only the last few could still be waiting.)
+            if sent.len() > 16 {
+                sent.remove(0);
+            }
+        }
         let paths: Vec<PathBuf> = self.attachments.iter().map(|p| PathBuf::from(p.to_string())).collect();
         // Sessions it mentions (picked from the `@` list): read when it's sent.
         let named = harlo_core::session_ref::tokens(&text);
@@ -897,8 +953,11 @@ impl ChatSession {
                 starting(String::new());
                 if let Err(e) = started {
                     let message = format!("{name} didn't start: {e}");
+                    // (The words and files back, above anything typed since.)
+                    let files: Vec<String> = paths.iter().map(|p| p.to_string_lossy().into_owned()).collect();
                     let _ = thread.queue(move |mut this| {
-                        this.as_mut().edit_requested(&QString::from(&original));
+                        this.as_mut().give_back(files);
+                        this.as_mut().unsent_returned(&QString::from(&original));
                         this.as_mut().send_failed(&QString::from(&message));
                     });
                     return;
@@ -1071,6 +1130,22 @@ impl ChatSession {
             self.as_mut().set_attachments(list);
         }
         true
+    }
+
+    /// Files of a message that didn't go, attached again (beside any
+    /// attached since).
+    fn give_back(mut self: Pin<&mut Self>, files: Vec<String>) {
+        if files.is_empty() {
+            return;
+        }
+        let mut list = self.attachments.clone();
+        for f in files {
+            let f = QString::from(&f);
+            if !list.iter().any(|a| a == &f) {
+                list.append(f);
+            }
+        }
+        self.as_mut().set_attachments(list);
     }
 
     pub fn remove_attachment(mut self: Pin<&mut Self>, index: i32) {
@@ -1456,9 +1531,10 @@ impl ChatSession {
                 SessionUpdate::Aside(a) => self.as_mut().set_aside_json(QString::from(&a.to_string())),
                 SessionUpdate::Preparing(on) => self.as_mut().set_preparing(on),
                 // Stopped before it was sent: the words back to edit.
-                SessionUpdate::Unsent => {
-                    let text = QString::from(&self.last_sent);
-                    self.as_mut().edit_requested(&text);
+                SessionUpdate::Unsent(held) => {
+                    let (words, files) = unsent_back(&mut self.as_mut().rust_mut().sent, &held);
+                    self.as_mut().give_back(files);
+                    self.as_mut().unsent_returned(&QString::from(&words));
                 }
                 // (The workspace notifies.)
                 // (The workspace has these.)
@@ -1686,6 +1762,23 @@ fn compact_note(tokens: u64, compact_at: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_unsent_message_comes_back_with_its_files() {
+        let note = harlo_harness::file_blocks::PLAN_NOTE;
+        let sent = |text: &str, original: &str, files: &[&str]| Sent { text: text.into(), original: original.into(), files: files.iter().map(|f| f.to_string()).collect() };
+        // An old one sent long ago with the same words, then A (plan mode, a
+        // file read in front), B, and a picture alone.
+        let mut list = vec![sent("B", "B", &[]), sent(&format!("A{note}"), "A", &["/p/a.rs"]), sent("B", "B", &[]), sent("", "", &["/p/shot.png"])];
+        let held = vec![format!("<file a.rs>…</file>A{note}"), "B".into(), "[image]".into()];
+        let (words, files) = unsent_back(&mut list, &held);
+        assert_eq!(words, "A\n\nB");
+        assert_eq!(files, vec!["/p/a.rs".to_owned(), "/p/shot.png".into()]);
+        assert!(list.is_empty());
+        // One from the phone: as it came, less the plan note.
+        let (words, files) = unsent_back(&mut vec![sent("mine", "mine", &[])], &[format!("from the phone{note}")]);
+        assert_eq!((words.as_str(), files.len()), ("from the phone", 0));
+    }
 
     #[test]
     fn rows_are_found_by_key_and_run() {

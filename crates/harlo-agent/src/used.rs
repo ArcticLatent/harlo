@@ -93,6 +93,9 @@ pub struct Used {
     pub cost: f64,
     /// The kinds of cost among them (`PLAN | PRICED`, say; 0: not said).
     pub kinds: u8,
+    /// Of `requests`, those whose server didn't say what they used: their
+    /// tokens aren't in these, and a priced one's cost is unknown.
+    pub unreported: u64,
 }
 
 impl Used {
@@ -104,6 +107,7 @@ impl Used {
             input: usage["input_tokens"].as_u64().unwrap_or(0),
             cached: usage["input_tokens_details"]["cached_tokens"].as_u64().unwrap_or(0),
             output: usage["output_tokens"].as_u64().unwrap_or(0),
+            unreported: u64::from(usage["input_tokens"].as_u64().is_none()),
             ..Self::default()
         }
     }
@@ -121,6 +125,7 @@ impl Used {
             output: usage["output"].as_u64().unwrap_or(0),
             cost: if kinds == UNKNOWN { 0.0 } else { usage["cost"]["total"].as_f64().unwrap_or(0.0) },
             kinds,
+            unreported: u64::from(usage["tokensUnknown"] == true),
         }
     }
 
@@ -133,16 +138,31 @@ impl Used {
             output: usage["output"].as_u64().unwrap_or(0),
             cost: usage["cost"].as_f64().unwrap_or(0.0),
             kinds: usage["costKinds"].as_array().into_iter().flatten().filter_map(Value::as_str).fold(0, |k, n| k | kind_of(n)),
+            unreported: usage["unreported"].as_u64().unwrap_or(0),
         }
     }
 
     /// As a tool result's `details.usage`.
     pub fn details(&self) -> Value {
-        json!({ "requests": self.requests, "input": self.input, "cached": self.cached, "output": self.output, "cost": self.cost, "costKinds": self.kind_names() })
+        let mut v = json!({ "requests": self.requests, "input": self.input, "cached": self.cached, "output": self.output, "cost": self.cost, "costKinds": self.kind_names() });
+        if self.unreported > 0 {
+            v["unreported"] = json!(self.unreported);
+        }
+        v
+    }
+
+    /// The pricing that holds for it: a price can't be put on tokens the
+    /// server didn't say, so then it's unknown.
+    fn pricing<'a>(&self, pricing: &'a Pricing) -> &'a Pricing {
+        match pricing {
+            Pricing::Priced(_) if self.unreported > 0 => &Pricing::Unknown,
+            p => p,
+        }
     }
 
     /// With its cost, as `pricing` has it.
     pub fn priced(mut self, pricing: &Pricing) -> Self {
+        let pricing = self.pricing(pricing);
         self.cost = pricing.charge(&self).map_or(0.0, |(i, c, o)| i + c + o);
         self.kinds = pricing.kind();
         self
@@ -152,6 +172,7 @@ impl Used {
     /// here (`reasoning`, from the API's usage). Its cost only when it's
     /// known.
     pub fn log(&self, api: &Value, pricing: &Pricing) -> Value {
+        let pricing = self.pricing(pricing);
         let mut v = json!({
             "input": self.input.saturating_sub(self.cached), "output": self.output, "cacheRead": self.cached, "cacheWrite": 0,
             "reasoning": api["output_tokens_details"]["reasoning_tokens"].as_u64().unwrap_or(0),
@@ -160,6 +181,9 @@ impl Used {
         });
         if let Some((i, c, o)) = pricing.charge(self) {
             v["cost"] = json!({ "input": i, "output": o, "cacheRead": c, "cacheWrite": 0, "total": i + c + o });
+        }
+        if self.unreported > 0 {
+            v["tokensUnknown"] = json!(true);
         }
         v
     }
@@ -196,6 +220,7 @@ impl Used {
         self.output += other.output;
         self.cost += other.cost;
         self.kinds |= other.kinds;
+        self.unreported += other.unreported;
     }
 }
 

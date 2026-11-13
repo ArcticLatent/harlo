@@ -149,9 +149,10 @@ pub enum SessionUpdate {
     /// waits meanwhile, and Stop drops it. (The status stays as it was, so
     /// a turn's start and end are still the run's.)
     Preparing(bool),
-    /// A prompt stopped before it was sent (the turn's snapshot was still
-    /// being taken): its words go back in the composer.
-    Unsent,
+    /// Prompts stopped before they were sent (the turn's snapshot was still
+    /// being taken), oldest first, as they'd have gone: they go back in the
+    /// composer.
+    Unsent(Vec<String>),
 }
 
 /// The ids of harlo's own requests (approvals its tools asked for).
@@ -774,8 +775,13 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
             },
             ctl = control.recv() => match ctl {
                 Some(Control::Subscribe(id, sink)) => {
-                    // Bring the newcomer up to date with what others have seen.
-                    sink.deliver(st.snapshot());
+                    // Bring the newcomer up to date with what others have seen
+                    // (a turn still being prepared too).
+                    let mut now = st.snapshot();
+                    if !held.is_empty() {
+                        now.push(SessionUpdate::Preparing(true));
+                    }
+                    sink.deliver(now);
                     st.sinks.push((id, sink));
                 }
                 Some(Control::Unsubscribe(id)) => st.sinks.retain(|(s, _)| *s != id),
@@ -813,11 +819,12 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                 }
                 // Stopped while its snapshot was taken: never sent.
                 Some(Control::Abort) if !held.is_empty() => {
-                    held.clear();
+                    let unsent: Vec<String> = std::mem::take(&mut held).into_iter().map(|(text, _, _)| text).collect();
+                    let said = if unsent.len() == 1 { "Stopped before it was sent: your message is back in the box." } else { "Stopped before they were sent: your messages are back in the box." };
                     snap_turn += 1;
                     pending.push(SessionUpdate::Preparing(false));
-                    dirty |= st.transcript.apply(&HarnessEvent::Notice { level: harlo_harness::NoticeLevel::Info, text: "Stopped before it was sent: your message is back in the box.".into(), system: false });
-                    pending.push(SessionUpdate::Unsent);
+                    dirty |= st.transcript.apply(&HarnessEvent::Notice { level: harlo_harness::NoticeLevel::Info, text: said.into(), system: false });
+                    pending.push(SessionUpdate::Unsent(unsent));
                 }
                 Some(Control::Abort) => {
                     // A run you stopped isn't "ready".

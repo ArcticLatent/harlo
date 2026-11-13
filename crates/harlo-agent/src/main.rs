@@ -419,7 +419,11 @@ async fn ask(prompt: &str, images: &[serde_json::Value], model: Option<String>, 
             agent::Shown::Usage { model, usage } => {
                 end_thinking(&mut thinking);
                 line(&mut fresh);
-                eprintln!("\x1b[2m[{model} · {} in ({} cached), {} out]\x1b[0m", usage["input_tokens"], usage["input_tokens_details"]["cached_tokens"], usage["output_tokens"]);
+                if usage["estimated"] == true {
+                    eprintln!("\x1b[2m[{model} · about {} in, not reported by the server]\x1b[0m", usage["input_tokens"]);
+                } else {
+                    eprintln!("\x1b[2m[{model} · {} in ({} cached), {} out]\x1b[0m", usage["input_tokens"], usage["input_tokens_details"]["cached_tokens"], usage["output_tokens"]);
+                }
             }
             agent::Shown::CompactionStart { .. } => {
                 end_thinking(&mut thinking);

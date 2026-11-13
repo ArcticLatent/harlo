@@ -1609,10 +1609,13 @@ ApplicationWindow {
             win.summary(); Qt.quit() } }
     }
 
-    // Stop while a turn's snapshot is still being taken (slowed to 2.5 s):
-    // the message never reaches the model and comes back to the box; the
-    // next one goes as usual.
+    // Stop while a turn's snapshot is still being taken (slowed to 5 s):
+    // the messages sent meanwhile (one only a file) never reach the model
+    // and come back to the box with their files, above a draft typed
+    // meanwhile; switching away and back keeps it preparing; the next one
+    // goes as usual.
     function modelGot(text) { return win.modelRequests().some(b => JSON.stringify(b).indexOf(text) >= 0) }
+    property string stopKey: ""
     SequentialAnimation {
         id: harloStopSteps
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlostop"
@@ -1629,27 +1632,45 @@ ApplicationWindow {
         PauseAnimation { duration: 200 }
         ScriptAction { script: {
             win.check(chat.session.preparing && chat.session.status !== "busy", "preparing while the snapshot is taken, not yet busy (" + chat.session.status + ")")
+            win.sendByKeys("and this narwhal") } }
+        PauseAnimation { duration: 150 }
+        ScriptAction { script: {
+            chat.session.addAttachment(win.argValue("--cwd=") + "/README.md")
+            chat.session.send("", "")
+            chat.composerItem.text = "a draft typed meanwhile"
+            win.stopKey = chat.session.key
+            Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloStopSteps, () => chat.session.key !== win.stopKey && chat.session.key !== "", 3000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: Workspace.open(win.stopKey) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(chat.session.key === win.stopKey && chat.session.preparing, "back again: still preparing (" + chat.session.preparing + ")")
+            win.check(chat.composerItem.text === "a draft typed meanwhile", "and the draft is there (" + chat.composerItem.text + ")")
             const stop = win.findName("stopButton")
             win.check(stop !== null && stop.visible, "Stop is offered")
             win.clickItem(stop, "stop") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             win.check(!chat.session.preparing && chat.session.status !== "busy", "stopped at once (" + chat.session.status + ")")
-            win.check(chat.composerItem.text === "never send this walrus", "the words are back in the box (" + chat.composerItem.text + ")")
-            win.check(win.findText("Stopped before it was sent: your message is back in the box.") !== null, "the chat says so")
+            win.check(chat.composerItem.text === "never send this walrus\n\nand this narwhal\n\na draft typed meanwhile", "both messages are back above the draft (" + JSON.stringify(chat.composerItem.text) + ")")
+            win.check(chat.session.attachments.length === 1 && String(chat.session.attachments[0]).endsWith("/README.md"), "and the file sent alone is attached again (" + chat.session.attachments + ")")
+            win.check(win.findText("Stopped before they were sent: your messages are back in the box.") !== null, "the chat says so")
             win.shot("clicks-harlo-stop-unsent") } }
-        // (Past the snapshot's 2.5 s: it ends, and still nothing is sent.)
-        PauseAnimation { duration: 3200 }
+        // (Past the snapshot's 5 s: it ends, and still nothing is sent.)
+        PauseAnimation { duration: 5500 }
         ScriptAction { script: {
-            win.check(!win.modelGot("never send this walrus"), "the model never got it (" + win.modelRequests().length + " requests)")
+            win.check(!win.modelGot("never send this walrus") && !win.modelGot("and this narwhal"), "the model never got them (" + win.modelRequests().length + " requests)")
             chat.composerItem.text = ""
+            chat.session.removeAttachment(0)
             win.sendByKeys("send this one instead") } }
         PauseAnimation { duration: 300 }
-        ScriptAction { script: win.waitUntil(harloStopSteps, () => win.modelGot("send this one instead") && chat.session.status !== "busy", 10000) }
+        ScriptAction { script: win.waitUntil(harloStopSteps, () => win.modelGot("send this one instead") && chat.session.status !== "busy", 15000) }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             win.check(win.modelGot("send this one instead"), "the next message goes, after its snapshot")
-            win.check(!win.modelGot("never send this walrus"), "and the stopped one still never went")
+            win.check(!win.modelGot("never send this walrus") && !win.modelGot("and this narwhal"), "and the stopped ones still never went")
             win.summary(); Qt.quit() } }
     }
 
@@ -10337,6 +10358,8 @@ ApplicationWindow {
             win.check(win.chatText().indexOf("what did we pick?") >= 0 && win.chatText().indexOf("PICKED-BWRAP") < 0, "the transcript shows the message, not the excerpt")
             win.check(chat.session.title.indexOf("@session:") < 0 && chat.session.title.indexOf("what did we pick?") >= 0, "the title leaves the mention out (" + chat.session.title + ")")
             win.shotWindow("clicks-harlo-session-sent")
+            // (The search is slowed to 1.5 s: the window keeps drawing.)
+            longTick.reset(); longTick.start()
             win.sendByKeys("search past sessions for bubblewrap") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: win.waitUntil(harloSessionSteps, () => win.chatText().split("Done:").length > 1 && chat.session.status === "idle", 20000) }
@@ -10345,6 +10368,8 @@ ApplicationWindow {
             const reqs = win.modelRequests(), last = reqs[reqs.length - 1]
             const result = JSON.stringify((last.messages || []).filter(m => m.role === "tool").slice(-1))
             win.check(result.indexOf("@session:a1b2c3d4") >= 0 && result.indexOf("**bubblewrap**") >= 0, "list_sessions with a query finds it, with the passage (" + result.slice(0, 300) + ")")
+            longTick.stop()
+            win.check(longTick.worst < 400, "the window kept drawing while it searched (longest gap " + longTick.worst + " ms)")
             win.sendByKeys("read past session @session:a1b2c3d4") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: win.waitUntil(harloSessionSteps, () => win.chatText().split("Done:").length > 2 && chat.session.status === "idle", 20000) }

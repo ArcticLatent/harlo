@@ -1124,6 +1124,9 @@ pub struct WorkspaceRust {
     /// The index's second connection, for searches: they never wait for
     /// the indexer.
     search_reader: Option<Arc<std::sync::Mutex<harlo_core::search::SearchReader>>>,
+    /// The search dialog's newest query (its generation): older ones still
+    /// waiting for the reader aren't run.
+    find_latest: Arc<std::sync::atomic::AtomicI32>,
     /// Wakes the search indexer (new or changed session files).
     search_kick: Arc<tokio::sync::Notify>,
     /// Remote project folders per host, for the remote session scan.
@@ -5435,6 +5438,50 @@ impl Workspace {
         QString::from(&serde_json::Value::Array(list).to_string())
     }
 
+    /// The message search's reader, for a search off the UI thread.
+    pub(crate) fn session_search(&self) -> Option<Arc<std::sync::Mutex<harlo_core::search::SearchReader>>> {
+        self.search_reader.clone()
+    }
+
+    /// `list_sessions`' answer from its search's `hits` (done off this
+    /// thread): `cwd`'s sessions (or all, `everywhere`), not the caller's
+    /// own (`own`), each with a couple of its matches.
+    pub(crate) fn found_sessions(&self, hits: Vec<harlo_core::search::Hit>, everywhere: bool, cwd: Option<PathBuf>, own: Option<PathBuf>) -> serde_json::Value {
+        use serde_json::json;
+        let mut order: Vec<PathBuf> = Vec::new();
+        let mut passages: HashMap<PathBuf, Vec<String>> = HashMap::new();
+        for h in hits {
+            let Some(info) = self.sessions.get(&h.path) else { continue };
+            if !everywhere && cwd.as_ref().is_some_and(|c| *c != info.cwd) {
+                continue;
+            }
+            if own.as_ref() == Some(&h.path) {
+                continue;
+            }
+            let list = passages.entry(h.path.clone()).or_default();
+            if list.is_empty() {
+                order.push(h.path.clone());
+            }
+            if list.len() < 2 {
+                list.push(format!("{}: {}", h.role, harlo_core::session_ref::plain_snippet(&h.snippet)));
+            }
+        }
+        let found: Vec<serde_json::Value> = order
+            .iter()
+            .take(8)
+            .filter_map(|p| {
+                let i = self.sessions.get(p)?;
+                let when = chrono::DateTime::<chrono::Local>::from(i.modified).format("%Y-%m-%d %H:%M").to_string();
+                Some(json!({
+                    "session": harlo_core::session_ref::token(&i.id), "title": i.display_title().chars().take(100).collect::<String>(),
+                    "agent": i.harness.as_str(), "lastActive": when, "folder": everywhere.then(|| i.cwd.to_string_lossy().into_owned()),
+                    "matches": passages.remove(p).unwrap_or_default(),
+                }))
+            })
+            .collect();
+        json!({ "sessions": found, "note": if found.is_empty() { "No past session matches." } else { "read_session gives one's latest messages." } })
+    }
+
     pub fn search_messages(&self, query: &QString, limit: i32) -> QString {
         let Some(reader) = &self.search_reader else { return QString::from("[]") };
         let hits = reader.lock().unwrap().search(&query.to_string(), limit.clamp(1, 500) as usize).unwrap_or_default();
@@ -5447,9 +5494,20 @@ impl Workspace {
             return;
         };
         let (query, limit) = (query.to_string(), limit.clamp(1, 500) as usize);
+        let latest = Arc::clone(&self.find_latest);
+        latest.store(generation, std::sync::atomic::Ordering::SeqCst);
         let thread = self.qt_thread();
         crate::runtime().spawn(async move {
-            let hits = tokio::task::spawn_blocking(move || reader.lock().unwrap().search(&query, limit).unwrap_or_default()).await.unwrap_or_default();
+            // (Typed on since: a newer one answers instead.)
+            let current = move || latest.load(std::sync::atomic::Ordering::SeqCst) == generation;
+            let hits = tokio::task::spawn_blocking(move || {
+                let reader = reader.lock().unwrap();
+                current().then(|| reader.search(&query, limit).unwrap_or_default())
+            })
+            .await
+            .ok()
+            .flatten();
+            let Some(hits) = hits else { return };
             let _ = thread.queue(move |mut this| {
                 let json = this.hits_json(hits);
                 this.as_mut().messages_found(generation, &QString::from(&json));
@@ -6934,42 +6992,13 @@ impl Workspace {
                 Ok(json!({ "agents": list }))
             }
             // Past sessions whose messages match: this folder's (or all).
+            // (The search itself runs off this thread: `found_sessions`.)
             "list_sessions" if !text("query").is_empty() => {
-                let Some(reader) = &self.search_reader else { return Err("Searching sessions isn't available here.".into()) };
-                let hits = reader.lock().unwrap().search(&text("query"), 300).unwrap_or_default();
-                let everywhere = args["everywhere"] == true;
-                let mut order: Vec<PathBuf> = Vec::new();
-                let mut passages: HashMap<PathBuf, Vec<String>> = HashMap::new();
-                for h in hits {
-                    let Some(info) = self.sessions.get(&h.path) else { continue };
-                    if !everywhere && caller_cwd.as_ref().is_some_and(|c| *c != info.cwd) {
-                        continue;
-                    }
-                    if caller.as_ref().and_then(|c| self.live.get(c)).and_then(|e| e.info.session_file.as_ref()) == Some(&h.path) {
-                        continue;
-                    }
-                    let list = passages.entry(h.path.clone()).or_default();
-                    if list.is_empty() {
-                        order.push(h.path.clone());
-                    }
-                    if list.len() < 2 {
-                        list.push(format!("{}: {}", h.role, harlo_core::session_ref::plain_snippet(&h.snippet)));
-                    }
+                if self.search_reader.is_none() {
+                    return Err("Searching sessions isn't available here.".into());
                 }
-                let found: Vec<serde_json::Value> = order
-                    .iter()
-                    .take(8)
-                    .filter_map(|p| {
-                        let i = self.sessions.get(p)?;
-                        let when = chrono::DateTime::<chrono::Local>::from(i.modified).format("%Y-%m-%d %H:%M").to_string();
-                        Some(json!({
-                            "session": harlo_core::session_ref::token(&i.id), "title": i.display_title().chars().take(100).collect::<String>(),
-                            "agent": i.harness.as_str(), "lastActive": when, "folder": everywhere.then(|| i.cwd.to_string_lossy().into_owned()),
-                            "matches": passages.remove(p).unwrap_or_default(),
-                        }))
-                    })
-                    .collect();
-                Ok(json!({ "sessions": found, "note": if found.is_empty() { "No past session matches." } else { "read_session gives one's latest messages." } }))
+                let own = caller.as_ref().and_then(|c| self.live.get(c)).and_then(|e| e.info.session_file.clone());
+                Ok(json!({ "_defer": true, "query": text("query"), "everywhere": args["everywhere"] == true, "cwd": caller_cwd, "own": own }))
             }
             "list_sessions" => {
                 let list: Vec<serde_json::Value> = self

@@ -132,8 +132,11 @@ pub struct AsideParts {
     /// Its request comes out of the session's budget, and is logged by the
     /// agent when it next can (it may be in a run).
     budget: Option<Arc<Budget>>,
-    /// (Each with its usage as the log has it.)
-    side: Arc<Mutex<Vec<(Used, Value)>>>,
+    side: Arc<Mutex<Vec<SideUse>>>,
+    /// The session it's asked in (another may be open by the time it's
+    /// answered): its id and log.
+    session: String,
+    log_path: PathBuf,
     pricing: crate::used::Pricing,
 }
 
@@ -185,15 +188,28 @@ pub async fn aside(parts: &AsideParts, history: &[Value], question: &str, on_tex
             on_text(&text);
         }
     };
+    // (It comes out of the session's budget: not once that's used.)
+    let size = compact::estimate_text(&parts.system) + asked.iter().map(compact::estimate).sum::<u64>();
+    let hold = admit(parts.budget.as_ref(), size + REPLY_ROOM).map_err(|why| anyhow::anyhow!(why))?;
     let a = Asked { model: &parts.model, effort: parts.effort.as_deref(), instructions: &parts.system, history: &asked, session: &parts.key, specs: &parts.specs, tools: false, images: parts.images, trigger: false };
     let (reply, usage) = send(a, &mut show).await?;
+    drop(hold);
     let used = Used::from_api(&usage).priced(&parts.pricing);
     if let Some(b) = &parts.budget {
         b.spent.fetch_add(used.billed(), std::sync::atomic::Ordering::Relaxed);
     }
-    parts.side.lock().unwrap().push((used, used.log(&usage, &parts.pricing)));
+    parts.side.lock().unwrap().push(SideUse { used, logged: used.log(&usage, &parts.pricing), session: parts.session.clone(), path: parts.log_path.clone() });
     let said: String = reply["content"].as_array().into_iter().flatten().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect();
     Ok(if said.trim().is_empty() { text } else { said })
+}
+
+/// A side question's request, answered, waiting to be logged: its usage,
+/// as the log has it, and the session it was asked in.
+pub struct SideUse {
+    used: Used,
+    logged: Value,
+    session: String,
+    path: PathBuf,
 }
 
 /// What a launch may set for a session (the same for `-p` and RPC).
@@ -221,6 +237,7 @@ pub struct Budget {
 impl Budget {
     /// Why no more requests may go, once it's used (or the rest is held
     /// by requests already out).
+    #[cfg(test)]
     fn used(&self) -> Option<String> {
         self.over(self.held.load(std::sync::atomic::Ordering::Acquire))
     }
@@ -259,6 +276,32 @@ impl Budget {
             }
         }
     }
+}
+
+/// The model fell back (its plan used up): the request goes again, made
+/// for the fallback.
+#[derive(Debug)]
+struct FellBack;
+
+impl std::fmt::Display for FellBack {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Going on with the fallback model")
+    }
+}
+
+impl std::error::Error for FellBack {}
+
+/// How much of a reply a request holds room for in the budget (its
+/// output isn't known before it's sent).
+const REPLY_ROOM: u64 = 2_000;
+
+/// Lets a request go, when there's a budget and it isn't used (or taken
+/// by requests out now), holding `tokens` against it while it's out. Every
+/// request a session makes comes through here: its own, a side question's,
+/// a web search's, a summary's. (The limit is soft: a request let go may
+/// still cross it.)
+fn admit(budget: Option<&Arc<Budget>>, tokens: u64) -> Result<Option<Hold>, String> {
+    budget.map(|b| b.hold(tokens)).transpose()
 }
 
 /// A request's expected spend, held against its session's budget.
@@ -396,12 +439,15 @@ pub struct Agent {
     /// from its log when it's opened): what its stats say.
     pub spend: Arc<Mutex<Used>>,
     /// Side questions' requests, not yet in the totals and the log.
-    side: Arc<Mutex<Vec<(Used, Value)>>>,
+    side: Arc<Mutex<Vec<SideUse>>>,
     /// The last request's usage (the context's size).
     pub last_usage: Value,
     /// How many of the history's messages that usage covers (its reply
     /// counted as output): those after it are new since.
     measured: usize,
+    /// What that usage measured: the model, instructions and tools then
+    /// (`fingerprint`). Once they change it no longer says the size.
+    anchor: u64,
     pub gate: Option<Arc<dyn Gate>>,
     pub harlo: Option<Arc<dyn Harlo>>,
     /// A subagent's tools (None: all of them, and `task`).
@@ -467,6 +513,7 @@ impl Agent {
             side: Arc::default(),
             last_usage: Value::Null,
             measured: 0,
+            anchor: 0,
             gate: None,
             harlo: None,
             allowed: None,
@@ -501,8 +548,10 @@ impl Agent {
 
     /// Starts over in a new session (same folder, model and level).
     pub fn new_session(&mut self, log: Log) {
-        // (Its background commands end with it.)
+        // (Its background commands end with it; its side questions' usage
+        // goes into its own log.)
         self.tools.jobs.end_all();
+        let _ = self.settle_side();
         self.log = log;
         self.history.clear();
         self.ids.clear();
@@ -514,6 +563,7 @@ impl Agent {
 
     /// Goes on in another session (a fork): its log and history.
     pub fn switch(&mut self, loaded: crate::session::Loaded) {
+        let _ = self.settle_side();
         let (log, past, _) = loaded.into_parts();
         self.log = log;
         self.history = past.messages;
@@ -720,6 +770,8 @@ impl Agent {
                         Compacted::Nothing | Compacted::Failed(_) => return Err(e),
                     }
                 }
+                // (Gone on with the fallback: its request made from the start.)
+                Err(e) if e.is::<FellBack>() => continue,
                 Err(e) => return Err(e),
             };
             overflow = 0;
@@ -769,7 +821,7 @@ impl Agent {
                 allowed: self.allowed,
                 task: task.as_ref(),
                 mcp: self.mcp.as_ref(),
-                search: Some((&self.model, &key, pricing)),
+                search: Some((&self.model, &key, pricing, self.budget.as_ref())),
             };
             let outcomes = run_calls(&self.tools, &triples, &extra, stop).await;
             handed_over |= hands_over(&names, &outcomes);
@@ -896,10 +948,7 @@ impl Agent {
             self.told_sandbox = true;
         }
         // (Held until it's counted.)
-        let _hold = match self.budget.clone() {
-            Some(b) => Some(b.hold(self.fresh_tokens()).map_err(|why| anyhow::anyhow!(why))?),
-            None => None,
-        };
+        let _hold = admit(self.budget.as_ref(), self.fresh_tokens() + REPLY_ROOM).map_err(|why| anyhow::anyhow!(why))?;
         let (system, specs) = (self.system(), self.specs());
         let key = self.cache_key.clone().unwrap_or_else(|| self.log.id.clone());
         let asked = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &self.history, session: &key, specs: &specs, tools: true, images, trigger: false };
@@ -916,13 +965,22 @@ impl Agent {
                 self.log.append(json!({ "type": "model_change", "provider": provider, "modelId": id }))?;
                 self.logged.0 = Some(self.model.clone());
                 show(Shown::ModelChanged(&self.model));
-                // (A smaller window: made to fit first, as an overflow is.)
-                if self.full().await {
-                    bail!("The conversation is longer than {}'s context window allows: it's made shorter first.", self.model);
+                // (Its request made anew, as for any other model: the server's
+                // own compaction carried over, made to fit its window, its
+                // instructions and tools, out of the budget.)
+                return Err(FellBack.into());
+            }
+            Err(e) => {
+                // (A reply the server cut off still spent what it used.)
+                if let Some(cut) = e.downcast_ref::<crate::responses::CutOff>()
+                    && cut.usage.is_object()
+                {
+                    let pricing = self.pricing().await;
+                    let used = Used::from_api(&cut.usage).priced(&pricing);
+                    self.count(&used, true);
+                    self.log.append(json!({ "type": "harlo_usage", "source": "cut off", "usage": used.log(&cut.usage, &pricing) }))?;
                 }
-                let images = self.takes_images().await;
-                let asked = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &self.history, session: &key, specs: &specs, tools: true, images, trigger: false };
-                send(asked, show).await?
+                return Err(e);
             }
             r => r?,
         };
@@ -931,7 +989,9 @@ impl Agent {
         let used = Used::from_api(&usage).priced(&pricing);
         message["usage"] = used.log(&usage, &pricing);
         self.count(&used, true);
-        show(Shown::Usage { model: message["model"].as_str().unwrap_or_default(), usage: &usage });
+        // (A server that didn't say: the size shown is estimated.)
+        let shown = if usage["input_tokens"].is_u64() { usage.clone() } else { json!({ "input_tokens": self.estimate_whole(), "output_tokens": 0, "estimated": true }) };
+        show(Shown::Usage { model: message["model"].as_str().unwrap_or_default(), usage: &shown });
         // (Measuring: each request's parts beside what it measured.)
         if let Some(path) = std::env::var_os("HARLO_AGENT_PROMPT_PARTS") {
             let line = json!({ "session": self.log.id, "model": self.model, "subagent": self.allowed.is_some() || !self.added.is_empty(),
@@ -944,6 +1004,7 @@ impl Agent {
         self.last_usage = usage;
         // (The reply, pushed next, is its output.)
         self.measured = self.history.len() + 1;
+        self.anchor = self.fingerprint();
         Ok(message)
     }
 
@@ -990,18 +1051,27 @@ impl Agent {
             images,
             budget: self.budget.clone(),
             side: self.side.clone(),
+            session: self.log.id.clone(),
+            log_path: self.log.path.clone(),
             pricing: self.pricing().await,
         }
     }
 
     /// Side questions' requests since the last time: into the totals and
     /// the log (as `harlo_usage` entries; their words aren't kept).
+    /// (One asked in a session since left goes into that session's log.)
     pub fn settle_side(&mut self) -> Result<()> {
-        let done: Vec<(Used, Value)> = std::mem::take(&mut *self.side.lock().unwrap());
-        for (used, logged) in done {
-            self.totals.add(&used);
-            self.spend.lock().unwrap().add(&used);
-            self.log.append(json!({ "type": "harlo_usage", "source": "btw", "usage": logged }))?;
+        let done: Vec<SideUse> = std::mem::take(&mut *self.side.lock().unwrap());
+        for d in done {
+            let entry = json!({ "type": "harlo_usage", "source": "btw", "usage": d.logged });
+            if d.session == self.log.id {
+                self.totals.add(&d.used);
+                self.spend.lock().unwrap().add(&d.used);
+                self.log.append(entry)?;
+            } else if !d.path.as_os_str().is_empty() && d.path.exists() {
+                let (mut log, _, _) = crate::session::Log::open(&d.path)?.into_parts();
+                log.append(entry)?;
+            }
         }
         Ok(())
     }
@@ -1261,6 +1331,7 @@ impl Agent {
         if context > 0 {
             self.last_usage = json!({ "input_tokens": after, "output_tokens": 0 });
             self.measured = self.history.len();
+            self.anchor = self.fingerprint();
         }
         show(Shown::SetAside { count: picked.len(), saved, after });
         Ok(saved)
@@ -1271,8 +1342,8 @@ impl Agent {
     /// server that sends no usage), the whole request estimated.
     pub fn next_tokens(&self) -> u64 {
         match self.last_usage["input_tokens"].as_u64() {
-            Some(_) => self.context_tokens() + self.history.get(self.measured..).unwrap_or_default().iter().map(compact::estimate).sum::<u64>(),
-            None => self.estimate_whole(),
+            Some(_) if self.anchor == self.fingerprint() => self.context_tokens() + self.history.get(self.measured..).unwrap_or_default().iter().map(compact::estimate).sum::<u64>(),
+            _ => self.estimate_whole(),
         }
     }
 
@@ -1282,6 +1353,16 @@ impl Agent {
     /// when nothing's measured).
     fn fresh_tokens(&self) -> u64 {
         self.next_tokens().saturating_sub(self.last_usage["input_tokens"].as_u64().unwrap_or(0))
+    }
+
+    /// The model, instructions and tools a request goes with, as a number:
+    /// a measured size holds while it stays the same (a switch of model, an
+    /// MCP server's tools coming or going, change it).
+    fn fingerprint(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (&self.model, self.system(), self.specs().to_string()).hash(&mut h);
+        h.finish()
     }
 
     fn estimate_whole(&self) -> u64 {
@@ -1313,7 +1394,7 @@ impl Agent {
         }
         let (Some(upto), Some(first_kept)) = (self.ids.first().cloned(), self.ids.get(1).cloned()) else { return Compacted::Nothing };
         let before = crate::session::messages_before(&self.log.path, &upto, &first_kept);
-        if before.is_empty() || self.budget.as_ref().and_then(|b| b.used()).is_some() {
+        if before.is_empty() {
             return Compacted::Nothing;
         }
         let made_by = format!("{}/{}", first["native"]["provider"].as_str().unwrap_or_default(), first["native"]["model"].as_str().unwrap_or_default());
@@ -1334,6 +1415,8 @@ impl Agent {
         if from == before.len() {
             return Compacted::Nothing;
         }
+        // (Not once the budget's used: the note stands then.)
+        let Ok(_hold) = admit(self.budget.as_ref(), size + compact::estimate_text(&self.system()) + REPLY_ROOM) else { return Compacted::Nothing };
         show(Shown::CompactionStart { reason: "model change" });
         let mut asked: Vec<Value> = Vec::new();
         if from > 0 {
@@ -1389,6 +1472,7 @@ impl Agent {
         let after = self.estimate_whole();
         self.last_usage = json!({ "input_tokens": after, "output_tokens": 0 });
         self.measured = self.history.len();
+        self.anchor = self.fingerprint();
         let result = json!({ "summary": summary, "firstKeptEntryId": first_kept, "tokensBefore": tokens_before, "estimatedTokensAfter": after });
         show(Shown::CompactionEnd { reason: "model change", result: Some(&result), error: None, will_retry: false });
         Compacted::Done(result)
@@ -1403,10 +1487,12 @@ impl Agent {
         let keep = if reason == "manual" { compact::keep(at).min(compact::ASKED_KEEP) } else { compact::keep(at) };
         let cut = compact::cut(&self.history, keep).or_else(|| if reason == "overflow" { compact::cut(&self.history, 1) } else { None });
         let Some(cut) = cut else { return Compacted::Nothing };
-        if let Some(why) = self.budget.as_ref().and_then(|b| b.used()) {
-            return Compacted::Failed(why);
-        }
         let Some(first_kept) = self.ids.get(cut).cloned() else { return Compacted::Nothing };
+        let size = compact::estimate_text(&self.system()) + self.history[..cut].iter().map(compact::estimate).sum::<u64>();
+        let _hold = match admit(self.budget.as_ref(), size + REPLY_ROOM) {
+            Ok(h) => h,
+            Err(why) => return Compacted::Failed(why),
+        };
         show(Shown::CompactionStart { reason });
         let tokens_before = self.next_tokens();
         let pricing = self.pricing().await;
@@ -1518,6 +1604,7 @@ impl Agent {
         let after = self.estimate_whole();
         self.last_usage = json!({ "input_tokens": after, "output_tokens": 0 });
         self.measured = self.history.len();
+        self.anchor = self.fingerprint();
         let result = json!({ "summary": summary, "firstKeptEntryId": first_kept, "tokensBefore": tokens_before, "estimatedTokensAfter": after });
         show(Shown::CompactionEnd { reason, result: Some(&result), error: None, will_retry: reason == "overflow" });
         Compacted::Done(result)
@@ -1724,8 +1811,8 @@ struct Extra<'a> {
     allowed: Option<&'a [&'a str]>,
     task: Option<&'a crate::task::Ctx>,
     mcp: Option<&'a crate::mcp::Mcp>,
-    /// The session's model and cache key, for web searches.
-    search: Option<(&'a str, &'a str, crate::used::Pricing)>,
+    /// The session's model, cache key, pricing and budget, for web searches.
+    search: Option<(&'a str, &'a str, crate::used::Pricing, Option<&'a Arc<Budget>>)>,
 }
 
 impl Extra<'_> {
@@ -1737,7 +1824,7 @@ impl Extra<'_> {
 }
 
 /// A web search: a request of its own, with the server's search in it.
-async fn web_search(args: &Value, model: &str, key: &str, pricing: &crate::used::Pricing) -> tools::Outcome {
+async fn web_search(args: &Value, model: &str, key: &str, pricing: &crate::used::Pricing, budget: Option<&Arc<Budget>>) -> tools::Outcome {
     let Some(query) = args["query"].as_str().map(str::trim).filter(|q| !q.is_empty()) else {
         return tools::Outcome::new("Say what to search for in query.", true);
     };
@@ -1745,6 +1832,11 @@ async fn web_search(args: &Value, model: &str, key: &str, pricing: &crate::used:
     let specs = crate::search::request_specs();
     let key = format!("{key}-search");
     let asked = Asked { model, effort: Some("low"), instructions: crate::search::INSTRUCTIONS, history: &history, session: &key, specs: &specs, tools: true, images: false, trigger: false };
+    let size = compact::estimate_text(crate::search::INSTRUCTIONS) + history.iter().map(compact::estimate).sum::<u64>();
+    let _hold = match admit(budget, size + REPLY_ROOM) {
+        Ok(h) => h,
+        Err(why) => return tools::Outcome::new(why, true),
+    };
     let mut quiet = |_: Shown| {};
     match send(asked, &mut quiet).await {
         Ok((reply, usage)) => {
@@ -1757,11 +1849,11 @@ async fn web_search(args: &Value, model: &str, key: &str, pricing: &crate::used:
 }
 
 /// A call of ours or of an MCP server's.
-async fn call_tool(tools: &Tools, mcp: Option<&crate::mcp::Mcp>, search: Option<(&str, &str, crate::used::Pricing)>, name: &str, args: &Value) -> tools::Outcome {
+async fn call_tool(tools: &Tools, mcp: Option<&crate::mcp::Mcp>, search: Option<(&str, &str, crate::used::Pricing, Option<&Arc<Budget>>)>, name: &str, args: &Value) -> tools::Outcome {
     if name == crate::search::NAME
-        && let Some((model, key, pricing)) = search
+        && let Some((model, key, pricing, budget)) = search
     {
-        return web_search(args, model, key, &pricing).await;
+        return web_search(args, model, key, &pricing, budget).await;
     }
     if name == "run_code" {
         let mut specs: Vec<Value> = tools::specs().as_array().cloned().unwrap_or_default();
@@ -1909,6 +2001,11 @@ async fn run_calls(tools: &Tools, calls: &[(&str, &str, &Value)], extra: &Extra<
                 out.push(cut(&why));
                 continue;
             }
+        }
+        // A command: stopped, it says what it printed so far.
+        if *name == "bash" && !mcp.is_some_and(|m| m.has(name)) {
+            out.push(tools.bash(args, Some(stop)).await);
+            continue;
         }
         let ran = tokio::select! {
             biased;
@@ -2225,6 +2322,7 @@ mod tests {
         agent.history = vec![json!({ "role": "user", "content": "go" })];
         agent.last_usage = json!({ "input_tokens": 1_000, "output_tokens": 100 });
         agent.measured = agent.history.len();
+        agent.anchor = agent.fingerprint();
         assert_eq!(agent.next_tokens(), 1_100);
         assert!(!agent.full().await);
         for i in 0..3 {
@@ -2233,9 +2331,44 @@ mod tests {
         let next = agent.next_tokens();
         assert!(next > 30_000, "three large tool results counted: {next}");
         assert!(agent.full().await, "they make the next request too big, before it's sent");
+        // A switch of model (or of its instructions or tools): what was
+        // measured no longer says the size, so the whole is estimated.
+        agent.history.truncate(1);
+        agent.instructions = "x".repeat(40_000);
+        agent.anchor = agent.fingerprint();
+        assert_eq!(agent.next_tokens(), 1_100);
+        agent.model = "test/other".into();
+        assert!(agent.next_tokens() >= 10_000, "estimated after the switch: {}", agent.next_tokens());
+        agent.instructions.clear();
+        for i in 0..3 {
+            agent.history.push(json!({ "role": "toolResult", "toolCallId": format!("c{i}"), "content": "z".repeat(40_000) }));
+        }
         // A server that sent no usage: unknown, so the whole is estimated.
         agent.last_usage = json!({});
         assert!(agent.next_tokens() > 30_000);
+    }
+
+    #[test]
+    fn a_side_question_is_logged_in_the_session_it_was_asked_in() {
+        let dir = std::env::temp_dir().join(format!("harlo-agent-side-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut agent = Agent::new(dir.clone(), Log::new(&dir, &dir), Past::default(), "test/m".into(), None);
+        agent.log.append(json!({ "type": "message", "message": { "role": "user", "content": "hi" } })).unwrap();
+        let (first, first_id) = (agent.log.path.clone(), agent.log.id.clone());
+        let used = Used::from_api(&json!({ "input_tokens": 1_000, "output_tokens": 10 }));
+        let side = || SideUse { used, logged: used.log(&json!({}), &crate::used::Pricing::Unknown), session: first_id.clone(), path: first.clone() };
+        // One answered before a new session, one after (it was still out).
+        agent.side.lock().unwrap().push(side());
+        agent.new_session(Log::new(&dir, &dir));
+        agent.side.lock().unwrap().push(side());
+        agent.settle_side().unwrap();
+        let logged = |p: &Path| std::fs::read_to_string(p).unwrap_or_default().lines().filter(|l| l.contains("harlo_usage")).count();
+        assert_eq!(logged(&first), 2, "both in the session they were asked in");
+        assert_eq!(logged(&agent.log.path), 0);
+        assert_eq!(agent.spend.lock().unwrap().requests, 0, "not the new session's");
+        assert_eq!(crate::session::used(&first).requests, 2);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -2267,7 +2400,7 @@ mod tests {
         let btw = api(6_000, 5_000, 40);
         let asked = Used::from_api(&btw).priced(&price);
         parts.budget.as_ref().unwrap().spent.fetch_add(asked.billed(), std::sync::atomic::Ordering::Relaxed);
-        parts.side.lock().unwrap().push((asked, asked.log(&btw, &price)));
+        parts.side.lock().unwrap().push(SideUse { used: asked, logged: asked.log(&btw, &price), session: agent.log.id.clone(), path: agent.log.path.clone() });
         want.add(&asked);
         agent.settle_side().unwrap();
         assert!(agent.side.lock().unwrap().is_empty(), "logged once");
@@ -2298,6 +2431,19 @@ mod tests {
         assert!(b.used().is_none());
         b.spent.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         assert!(b.used().unwrap().starts_with("This session used its token budget of 1k (1k tokens"));
+    }
+
+    #[tokio::test]
+    async fn a_used_budget_stops_every_kind_of_request() {
+        // (Refused before anything's sent: no server here to reach.)
+        let b = Arc::new(Budget { limit: 1_000, spent: 1_010.into(), ..Budget::default() });
+        let parts = AsideParts { model: "nowhere/model".into(), budget: Some(b.clone()), ..AsideParts::default() };
+        let mut quiet = |_: &str| {};
+        let err = aside(&parts, &[], "Can you still answer?", &mut quiet).await.unwrap_err();
+        assert!(format!("{err:#}").contains("token budget"), "{err:#}");
+        let o = web_search(&json!({ "query": "rust" }), "nowhere/model", "k", &crate::used::Pricing::Unknown, Some(&b)).await;
+        assert!(o.failed && o.text.contains("token budget"), "{}", o.text);
+        assert_eq!(b.held.load(std::sync::atomic::Ordering::Relaxed), 0);
     }
 
     #[test]
@@ -2363,7 +2509,8 @@ mod tests {
         let out = run_calls(&tools, &[("1", "bash", &first), ("2", "bash", &slow), ("3", "bash", &after)], &Extra::default(), &stop).await;
         assert!(t.elapsed() < Duration::from_secs(5), "the stop didn't end the command");
         assert_eq!(out[0].text, "first");
-        assert_eq!(out[1].text, INTERRUPTED);
+        // (A command says so, and what it printed.)
+        assert!(out[1].text.starts_with("Interrupted: the user stopped the turn") && out[1].text.ends_with("It printed nothing."), "{}", out[1].text);
         assert_eq!(out[2].text, NOT_RUN);
         assert!(!marker.exists());
         let _ = std::fs::remove_dir_all(dir);

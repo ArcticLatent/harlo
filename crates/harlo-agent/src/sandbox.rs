@@ -329,6 +329,15 @@ impl Sandbox {
         let common = git_folders(&self.project).1.and_then(|c| c.canonicalize().ok());
         let mut s = self.clone();
         s.writable.retain(|w| !w.starts_with(&self.project) && Some(w) != common.as_ref());
+        // (Mounted read-only on their own, so a writable folder above them,
+        // /tmp or one of yours, doesn't make them writable again: the deeper
+        // mount wins.)
+        let project = self.project.canonicalize().unwrap_or_else(|_| self.project.clone());
+        for p in std::iter::once(project).chain(common) {
+            if !s.shown.contains(&p) {
+                s.shown.push(p);
+            }
+        }
         s.looking = true;
         s
     }
@@ -557,6 +566,45 @@ pub mod tests {
         assert!(!proj.join("made.txt").exists() && said.contains("touched=1"), "{said} {}", String::from_utf8_lossy(&out.stderr));
         assert!(said.contains("scratch=ok"), "/tmp still writable: {said}");
         let _ = std::fs::remove_file(scratch);
+    }
+
+    #[test]
+    fn a_writable_folder_above_the_project_doesnt_open_it_to_a_helper_that_looks() {
+        // A project under /tmp (writable for every command), and one under
+        // a folder made writable in sandbox.json, a linked worktree's too.
+        let s = home_outside_tmp("looking-above");
+        let home = s.0.join("home");
+        let tmp = std::env::temp_dir().join(format!("harlo-looking-above-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join("proj")).unwrap();
+        let tmp = tmp.canonicalize().unwrap();
+        let git = |dir: &Path, args: &[&str]| assert!(std::process::Command::new("git").arg("-C").arg(dir).args(args).status().unwrap().success());
+        git(&tmp.join("proj"), &["init", "-q"]);
+        git(&tmp.join("proj"), &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x"]);
+        git(&tmp.join("proj"), &["worktree", "add", "-q", tmp.join("wt").to_str().unwrap()]);
+        let mut mine = on();
+        mine.writable.push(s.0.clone());
+        let cases = [(on(), tmp.join("proj")), (on(), tmp.join("wt")), (mine, home.join("proj"))];
+        for (policy, proj) in cases {
+            let sb = Sandbox::new(&policy, &proj, &home, &home.join("none"), None).looking_only();
+            assert!(sb.may_write(&proj.join("a.rs")).unwrap_err().contains("only looks"), "{proj:?}");
+            if unavailable().is_some() {
+                continue;
+            }
+            let run = |command: &str| {
+                let out = std::process::Command::new("bwrap").args(sb.args(command, &proj)).output().unwrap();
+                String::from_utf8_lossy(&out.stdout).into_owned()
+            };
+            let common = git_folders(&proj).1.unwrap_or_else(|| proj.join(".git"));
+            let said = run(&format!("touch made.txt 2>/dev/null; echo touched=$?; echo x > by-redirect.txt 2>/dev/null; echo redirected=$?; touch {}/x 2>/dev/null; echo git=$?", common.display()));
+            assert!(!proj.join("made.txt").exists() && !proj.join("by-redirect.txt").exists() && !common.join("x").exists(), "{proj:?}: {said}");
+            assert!(said.contains("touched=1") && said.contains("redirected=1") && said.contains("git=1"), "{proj:?}: {said}");
+            // (Its scratch space stays.)
+            let scratch = format!("/tmp/harlo-looking-scratch-{}", std::process::id());
+            assert!(run(&format!("touch {scratch} && echo ok")).contains("ok"), "{proj:?}");
+            let _ = std::fs::remove_file(scratch);
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

@@ -228,15 +228,20 @@ async fn run_all(args: &Value, call_id: &str, ctx: &Ctx, stop: &CancellationToke
             }
         }
     }
+    report(&done)
+}
+
+/// What the helpers came back with, for the main agent: their answers,
+/// and their usage added up.
+fn report(done: &[Done]) -> Outcome {
     let mut text = String::new();
-    let mut total = (0, 0, 0, 0);
-    for d in &done {
+    // (All of each helper's usage, its cost and the kinds of cost too:
+    // the parent's totals count it as its own.)
+    let mut total = crate::used::Used::default();
+    for d in done {
         let answer = if d.text.trim().is_empty() { "(no answer)" } else { d.text.trim() };
         text.push_str(&format!("## {} ({})\n{answer}{}\n\n", d.description, d.status, d.note));
-        total.0 += d.usage["requests"].as_u64().unwrap_or(0);
-        total.1 += d.usage["input"].as_u64().unwrap_or(0);
-        total.2 += d.usage["cached"].as_u64().unwrap_or(0);
-        total.3 += d.usage["output"].as_u64().unwrap_or(0);
+        total.add(&crate::used::Used::from_details(&d.usage));
     }
     if done.iter().any(|d| d.unguarded) {
         text.push_str("(Harlo's sandbox is off, so the helpers that only looked could have changed files with their commands.)\n\n");
@@ -248,7 +253,7 @@ async fn run_all(args: &Value, call_id: &str, ctx: &Ctx, stop: &CancellationToke
     Outcome {
         text: text.trim_end().to_owned(),
         failed: done.iter().all(|d| d.status != "completed"),
-        details: json!({ "progress": progress, "usage": { "requests": total.0, "input": total.1, "cached": total.2, "output": total.3 } }),
+        details: json!({ "progress": progress, "usage": total.details() }),
         images: Vec::new(),
     }
 }
@@ -430,6 +435,23 @@ fn hex_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn helpers_costs_come_back_whole() {
+        let done = |usage: crate::used::Used| Done {
+            id: "1".into(), description: "look".into(), kind: "explore".into(), prompt: String::new(), status: "completed",
+            text: "Done.".into(), usage: usage.details(), worktree: None, note: String::new(), unguarded: false,
+        };
+        let price = crate::used::Pricing::Priced(crate::used::Price { input: 1.0, output: 1.0, cached: 1.0 });
+        let one = |input| crate::used::Used::from_api(&json!({ "input_tokens": input, "output_tokens": 10 }));
+        let (priced, unknown) = (one(1_000).priced(&price), one(2_000).priced(&crate::used::Pricing::Unknown));
+        let out = report(&[done(priced), done(unknown)]);
+        let total = crate::used::Used::from_details(&out.details["usage"]);
+        let mut want = priced;
+        want.add(&unknown);
+        assert_eq!(total, want);
+        assert!(total.cost > 0.0 && total.cost_kind() == "partly", "{}", out.details["usage"]);
+    }
 
     #[test]
     fn what_each_kind_may_use() {

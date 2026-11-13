@@ -34,11 +34,13 @@ struct Collected {
     tail: std::collections::VecDeque<u8>,
     /// The file couldn't be made: what's past `all` is lost.
     lost: bool,
+    /// Writing the file failed part way (a full disk): it has only the start.
+    broke: bool,
 }
 
 impl Collected {
     fn new() -> Self {
-        Collected { all: Vec::new(), total: 0, lines: 0, spill: None, tail: std::collections::VecDeque::new(), lost: false }
+        Collected { all: Vec::new(), total: 0, lines: 0, spill: None, tail: std::collections::VecDeque::new(), lost: false, broke: false }
     }
 
     fn take(&mut self, b: &[u8], dir: &Path) {
@@ -61,7 +63,9 @@ impl Collected {
         }
         match &mut self.spill {
             Some((f, _)) => {
-                let _ = f.write_all(b);
+                if !self.broke && f.write_all(b).is_err() {
+                    self.broke = true;
+                }
                 self.tail.extend(b);
                 let over = self.tail.len().saturating_sub(TAIL_BYTES);
                 self.tail.drain(..over);
@@ -82,13 +86,14 @@ impl Collected {
                 let tail_lines: Vec<&str> = tail.lines().skip(1).collect();
                 let head_lines: Vec<&str> = head.lines().collect();
                 let count = self.lines + usize::from(!head.is_empty() && !tail.ends_with('\n'));
-                cut_view(&head_lines, &tail_lines, false, count, Some(path.clone()), String::new())
+                let saved = if self.broke { Saved::Part(path.clone()) } else { Saved::Whole(path.clone()) };
+                cut_view(&head_lines, &tail_lines, false, count, saved, String::new())
             }
         }
     }
 }
 
-fn open_spill(dir: &Path) -> Option<(std::fs::File, String)> {
+pub(crate) fn open_spill(dir: &Path) -> Option<(std::fs::File, String)> {
     std::fs::create_dir_all(dir).ok()?;
     let mut b = [0u8; 6];
     getrandom::fill(&mut b).ok()?;
@@ -166,7 +171,9 @@ pub fn command(command: &str, cwd: &Path, sandbox: Option<&Sandbox>) -> Command 
 
 /// `sandbox`: run it in that (None: as it is, with all of Harlo's
 /// variables).
-pub async fn run(command: &str, cwd: &Path, timeout: Option<u64>, spill_dir: &Path, sandbox: Option<&Sandbox>) -> (String, bool) {
+/// `stop`: the user stopping the turn ends it too, and what it printed so
+/// far comes back.
+pub async fn run(command: &str, cwd: &Path, timeout: Option<u64>, spill_dir: &Path, sandbox: Option<&Sandbox>, stop: Option<&tokio_util::sync::CancellationToken>) -> (String, bool) {
     let secs = timeout.filter(|t| *t > 0).unwrap_or(DEFAULT_TIMEOUT);
     let mut cmd = self::command(command, cwd, sandbox);
     let mut child = match cmd.spawn() {
@@ -192,18 +199,37 @@ pub async fn run(command: &str, cwd: &Path, timeout: Option<u64>, spill_dir: &Pa
         collect.await;
         child.wait().await
     };
-    let (status, timed_out) = match tokio::time::timeout(Duration::from_secs(secs), work).await {
-        Ok(s) => (s.ok(), false),
-        Err(_) => {
-            group.kill(libc::SIGTERM);
-            tokio::time::sleep(Duration::from_millis(1500)).await;
-            group.kill(libc::SIGKILL);
-            (None, true)
+    let stopped = async {
+        match stop {
+            Some(s) => s.cancelled().await,
+            None => std::future::pending().await,
         }
+    };
+    let (status, timed_out, by_user) = tokio::select! {
+        biased;
+        _ = stopped => {
+            group.kill(libc::SIGTERM);
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            group.kill(libc::SIGKILL);
+            (None, false, true)
+        }
+        r = tokio::time::timeout(Duration::from_secs(secs), work) => match r {
+            Ok(s) => (s.ok(), false, false),
+            Err(_) => {
+                group.kill(libc::SIGTERM);
+                tokio::time::sleep(Duration::from_millis(1500)).await;
+                group.kill(libc::SIGKILL);
+                (None, true, false)
+            }
+        },
     };
     // Finished: anything it left in the background goes too.
     group.kill(libc::SIGKILL);
     group.0 = None;
+    if by_user {
+        let printed = if got.total == 0 { "It printed nothing.".to_owned() } else { format!("What it printed:\n{}", got.shown(spill_dir)) };
+        return (format!("Interrupted: the user stopped the turn while this command ran, and it was ended with everything it started. It may have partly run. {printed}"), true);
+    }
     if timed_out {
         let printed = if got.total == 0 { "It printed nothing.".to_owned() } else { format!("What it printed:\n{}", got.shown(spill_dir)) };
         return (format!("The command was stopped after {secs} seconds, with everything it started. If it needs longer and isn't waiting for input, run it again with a larger timeout. {printed}"), true);
@@ -229,14 +255,22 @@ pub fn shorten(text: &str, total: usize, spill_dir: &Path) -> String {
     if lines.len() <= MAX_LINES && text.len() <= MAX_BYTES && total == text.len() {
         return text.trim_end_matches('\n').to_owned();
     }
-    let file = save(text, spill_dir);
+    let saved = save(text, spill_dir).map_or(Saved::Not, Saved::Whole);
     let more = if total > text.len() { format!(" (and {} more bytes not kept)", total - text.len()) } else { String::new() };
-    cut_view(&lines, &lines, true, lines.len(), file, more)
+    cut_view(&lines, &lines, true, lines.len(), saved, more)
 }
 
 /// The start of `head` and the end of `tail` (one text: `same`, so they
 /// don't overlap), with notices at the top and at the cut.
-fn cut_view(head_src: &[&str], tail_src: &[&str], same: bool, count: usize, file: Option<String>, more: String) -> String {
+/// Where the whole output went.
+enum Saved {
+    Whole(String),
+    /// Writing it failed part way: the file has only its start.
+    Part(String),
+    Not,
+}
+
+fn cut_view(head_src: &[&str], tail_src: &[&str], same: bool, count: usize, saved: Saved, more: String) -> String {
     // A quarter for the start, the rest for the end (errors are usually last).
     let (head_lines, head_bytes) = (MAX_LINES / 4, MAX_BYTES / 4);
     let (tail_lines, tail_bytes) = (MAX_LINES - head_lines, MAX_BYTES - head_bytes);
@@ -260,9 +294,10 @@ fn cut_view(head_src: &[&str], tail_src: &[&str], same: bool, count: usize, file
     }
     tail.reverse();
     let cut = count.saturating_sub(head.len() + tail.len());
-    let saved = match &file {
-        Some(p) => format!("The whole output is in {p} (read it with offset and limit, or grep it)."),
-        None => "The whole output couldn't be saved.".into(),
+    let saved = match saved {
+        Saved::Whole(p) => format!("The whole output is in {p} (read it with offset and limit, or grep it)."),
+        Saved::Part(p) => format!("Only the start of the output is in {p}: writing the rest failed (is the disk full?)."),
+        Saved::Not => "The whole output couldn't be saved.".into(),
     };
     format!(
         "[Output shortened: {count} lines{more}; showing the first {} and the last {}. {saved}]\n{}\n[… {cut} lines cut here …]\n{}",
@@ -290,12 +325,12 @@ mod tests {
     #[tokio::test]
     async fn runs_without_waiting_for_input() {
         let dir = std::env::temp_dir();
-        let (out, failed) = run("echo hi; echo err >&2; echo \"$PAGER $GIT_EDITOR $GIT_TERMINAL_PROMPT\"", &dir, None, &dir, None).await;
+        let (out, failed) = run("echo hi; echo err >&2; echo \"$PAGER $GIT_EDITOR $GIT_TERMINAL_PROMPT\"", &dir, None, &dir, None, None).await;
         assert!(!failed && out.contains("hi") && out.contains("err") && out.contains("cat false 0"), "{out}");
         // Reading stdin gets end-of-input, not a hang.
-        let (out, _) = run("read x; echo \"got:$x\"", &dir, Some(5), &dir, None).await;
+        let (out, _) = run("read x; echo \"got:$x\"", &dir, Some(5), &dir, None, None).await;
         assert!(out.contains("got:"), "{out}");
-        let (out, failed) = run("exit 3", &dir, None, &dir, None).await;
+        let (out, failed) = run("exit 3", &dir, None, &dir, None, None).await;
         assert!(failed && out.contains("[exit code 3]"));
     }
 
@@ -304,7 +339,7 @@ mod tests {
         let dir = std::env::temp_dir();
         let marker = dir.join(format!("harlo-agent-bg-{}", std::process::id()));
         let cmd = format!("(sleep 3; touch {}) & sleep 30", marker.display());
-        let (out, failed) = run(&cmd, &dir, Some(1), &dir, None).await;
+        let (out, failed) = run(&cmd, &dir, Some(1), &dir, None, None).await;
         assert!(failed && out.contains("stopped after 1 seconds"), "{out}");
         tokio::time::sleep(Duration::from_secs(4)).await;
         assert!(!marker.exists(), "the background child was left running");
@@ -313,10 +348,41 @@ mod tests {
     #[tokio::test]
     async fn a_timeout_keeps_what_was_printed() {
         let dir = std::env::temp_dir();
-        let (out, failed) = run("echo 'error: E0308 mismatched types'; sleep 30", &dir, Some(1), &dir, None).await;
+        let (out, failed) = run("echo 'error: E0308 mismatched types'; sleep 30", &dir, Some(1), &dir, None, None).await;
         assert!(failed && out.contains("stopped after 1 seconds") && out.contains("What it printed:") && out.contains("error: E0308"), "{out}");
-        let (out, _) = run("sleep 30", &dir, Some(1), &dir, None).await;
+        let (out, _) = run("sleep 30", &dir, Some(1), &dir, None, None).await;
         assert!(out.contains("It printed nothing."), "{out}");
+    }
+
+    #[tokio::test]
+    async fn stopped_by_the_user_it_says_what_it_printed() {
+        let dir = std::env::temp_dir();
+        let marker = dir.join(format!("harlo-agent-stopped-cmd-{}", std::process::id()));
+        let stop = tokio_util::sync::CancellationToken::new();
+        let later = stop.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(700)).await;
+            later.cancel();
+        });
+        let started = std::time::Instant::now();
+        let cmd = format!("echo 'step 1 of 3 done'; (sleep 3; touch {}) & sleep 30", marker.display());
+        let (out, failed) = run(&cmd, &dir, None, &dir, None, Some(&stop)).await;
+        assert!(started.elapsed() < Duration::from_secs(3), "{:?}", started.elapsed());
+        assert!(failed && out.contains("the user stopped the turn") && out.contains("What it printed:") && out.contains("step 1 of 3 done"), "{out}");
+        tokio::time::sleep(Duration::from_secs(4)).await;
+        assert!(!marker.exists(), "the background child was left running");
+    }
+
+    #[test]
+    fn a_spill_that_fails_part_way_says_so() {
+        // (/dev/full takes the file's opening, then refuses each write.)
+        let Ok(full) = std::fs::OpenOptions::new().write(true).open("/dev/full") else { return };
+        let mut got = Collected::new();
+        got.spill = Some((full, "/tmp/output-x.log".into()));
+        got.take(&vec![b'a'; 100][..], Path::new("/tmp"));
+        got.take(b"\n", Path::new("/tmp"));
+        let shown = got.shown(Path::new("/tmp"));
+        assert!(shown.contains("Only the start of the output is in /tmp/output-x.log") && !shown.contains("The whole output is in"), "{shown}");
     }
 
     #[tokio::test]
@@ -324,7 +390,7 @@ mod tests {
         let spill = std::env::temp_dir().join(format!("harlo-agent-spill-{}", std::process::id()));
         // 20 MiB of lines, then the line that matters.
         let cmd = "yes 0123456789012345678901234567890123456789012345678901234567890123 | head -c 20971520; echo; echo 'FINAL: test x failed'";
-        let (out, failed) = run(cmd, &std::env::temp_dir(), Some(60), &spill, None).await;
+        let (out, failed) = run(cmd, &std::env::temp_dir(), Some(60), &spill, None, None).await;
         assert!(!failed && out.contains("FINAL: test x failed") && !out.contains("not kept"), "the real end shown: {}", &out[out.len().saturating_sub(300)..]);
         let file = out.split("The whole output is in ").nth(1).and_then(|r| r.split(' ').next()).expect("a file");
         let saved = std::fs::read(file).unwrap();
@@ -349,18 +415,18 @@ mod tests {
         std::fs::write(home.join(".ssh/id"), "secret-key").unwrap();
         let p = crate::sandbox::Policy { on: true, network: false, writable: Vec::new(), hidden: Vec::new(), env: Vec::new() };
         let sb = Sandbox::new(&p, &proj, &home, &home.join("none"), None);
-        let (out, failed) = run("echo a > made && cat made && echo t > /tmp/harlo-agent-sb-t && rm /tmp/harlo-agent-sb-t", &proj, None, &root, Some(&sb)).await;
+        let (out, failed) = run("echo a > made && cat made && echo t > /tmp/harlo-agent-sb-t && rm /tmp/harlo-agent-sb-t", &proj, None, &root, Some(&sb), None).await;
         assert!(!failed && out.contains('a'), "{out}");
-        let (out, failed) = run("echo x > ../other/f", &proj, None, &root, Some(&sb)).await;
+        let (out, failed) = run("echo x > ../other/f", &proj, None, &root, Some(&sb), None).await;
         assert!(failed && out.contains("Read-only"), "{out}");
-        let (out, _) = run("cat ../.ssh/id; ls -A ../.ssh | wc -l", &proj, None, &root, Some(&sb)).await;
+        let (out, _) = run("cat ../.ssh/id; ls -A ../.ssh | wc -l", &proj, None, &root, Some(&sb), None).await;
         assert!(!out.contains("secret-key") && out.ends_with('0'), "{out}");
         // SAFETY: a variable for this test only (tests in this binary don't read it).
         unsafe { std::env::set_var("HARLO_TEST_API_KEY", "k") };
-        let (out, _) = run("echo \"[$HARLO_TEST_API_KEY][$PAGER]\"", &proj, None, &root, Some(&sb)).await;
+        let (out, _) = run("echo \"[$HARLO_TEST_API_KEY][$PAGER]\"", &proj, None, &root, Some(&sb), None).await;
         assert!(out.contains("[][cat]"), "{out}");
         let marker = std::env::temp_dir().join(format!("harlo-agent-sb-bg-{}", std::process::id()));
-        let (out, failed) = run(&format!("(sleep 3; touch {}) & sleep 30", marker.display()), &proj, Some(1), &root, Some(&sb)).await;
+        let (out, failed) = run(&format!("(sleep 3; touch {}) & sleep 30", marker.display()), &proj, Some(1), &root, Some(&sb), None).await;
         assert!(failed && out.contains("stopped after 1 seconds"), "{out}");
         tokio::time::sleep(Duration::from_secs(4)).await;
         assert!(!marker.exists(), "the background child was left running");

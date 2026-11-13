@@ -72,6 +72,17 @@ fn handle(thread: &CxxQtThread<Workspace>, call: &Value) -> Result<Value, String
     finish(thread, &tool, &args, result)
 }
 
+/// `f` done on the UI thread, waited for here (not on the UI thread).
+fn on_ui<T: Send + 'static>(thread: &CxxQtThread<Workspace>, f: impl FnOnce(std::pin::Pin<&mut Workspace>) -> T + Send + 'static) -> Result<T, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    thread
+        .queue(move |this| {
+            let _ = tx.send(f(this));
+        })
+        .map_err(|_| "harlo is closing".to_owned())?;
+    rx.recv_timeout(Duration::from_secs(60)).map_err(|_| "harlo didn't answer in time".to_owned())
+}
+
 /// A harlo-agent session's call on its pipe, done on the UI thread
 /// (`result`): finished here in the background, then the answer to the
 /// session.
@@ -99,6 +110,16 @@ fn finish(thread: &CxxQtThread<Workspace>, tool: &str, args: &Value, result: Val
             let brought = harlo_core::git::bring_over(&helper, &path("here"), &text("start"), &text("base")).map_err(|e| format!("Not brought over: {e:#}."))?;
             let shown = harlo_core::remote::display(&helper);
             return Ok(json!({ "applied": brought.applied, "clashed": brought.clashed, "text": harlo_core::orchestration::brought_text(&brought.applied, &brought.clashed, &shown) }));
+        }
+        // Past sessions' messages: searched here, then shown with what the
+        // UI thread knows of them.
+        if tool == "list_sessions" {
+            let reader = on_ui(thread, |this| this.session_search())?.ok_or("Searching sessions isn't available here.")?;
+            let query = result["query"].as_str().unwrap_or_default().to_owned();
+            let hits = reader.lock().map_err(|_| "The session search broke.".to_owned())?.search(&query, 300).unwrap_or_default();
+            let path = |k: &str| result[k].as_str().map(std::path::PathBuf::from);
+            let (everywhere, cwd, own) = (result["everywhere"] == true, path("cwd"), path("own"));
+            return on_ui(thread, move |this| this.found_sessions(hits, everywhere, cwd, own));
         }
         if tool.starts_with("openwiki_") {
             let root = harlo_core::openwiki::root_of(std::path::Path::new(result["cwd"].as_str().unwrap_or_default()));

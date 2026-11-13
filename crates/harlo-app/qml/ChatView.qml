@@ -195,6 +195,13 @@ Rectangle {
             composer.text = text
             composer.focusInput()
         }
+        // Stopped before they went: above what's typed meanwhile, not over it.
+        function onUnsentReturned(text) {
+            const draft = composer.text
+            if (text !== "")
+                composer.text = draft.trim() === "" ? text : text + "\n\n" + draft
+            composer.focusInput()
+        }
         // (Not while it's writing: going idle reads it again.)
         function onStatusChanged() { if (root.session.status !== "busy") root.refreshBranches() }
         function onSendFailed(message) { Workspace.showNotice(message, true) }

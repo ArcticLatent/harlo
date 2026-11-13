@@ -95,9 +95,23 @@ pub(crate) async fn send(req: reqwest::RequestBuilder, base: &str) -> Result<req
 }
 
 /// A refused request's body, as text (waited for no longer than a reply).
-pub(crate) async fn refusal_text(resp: reqwest::Response) -> String {
-    tokio::time::timeout(idle(), resp.text()).await.ok().and_then(Result::ok).unwrap_or_default()
+pub(crate) async fn refusal_text(mut resp: reqwest::Response) -> String {
+    let mut body = Vec::new();
+    let read = async {
+        while let Ok(Some(part)) = resp.chunk().await {
+            body.extend_from_slice(&part);
+            if body.len() >= MAX_REFUSAL {
+                body.truncate(MAX_REFUSAL);
+                break;
+            }
+        }
+    };
+    let _ = tokio::time::timeout(idle(), read).await;
+    String::from_utf8_lossy(&body).into_owned()
 }
+
+/// The most of a refusal's body read (it only names what went wrong).
+const MAX_REFUSAL: usize = 64 << 10;
 
 /// A reply's server-sent events, read as they come.
 pub(crate) struct Events {
@@ -120,6 +134,9 @@ impl Events {
     pub async fn next(&mut self) -> Result<Option<String>> {
         loop {
             if let Some((text, end)) = find_event_end(&self.buf[self.searched..]) {
+                if self.searched + end > MAX_EVENT {
+                    bail!("The reply was stopped: one of its events passed {} MiB", MAX_EVENT >> 20);
+                }
                 let raw: Vec<u8> = self.buf.drain(..self.searched + end).collect();
                 let text = String::from_utf8_lossy(&raw[..self.searched + text]);
                 self.searched = 0;
@@ -409,7 +426,8 @@ pub async fn stream(base: &str, token: Option<&str>, affinity: Option<&str>, hea
                 return Err(Failed { code: code.to_owned(), message: explain(code, err["message"].as_str().unwrap_or("the request failed")) }.into());
             }
             "response.incomplete" => {
-                bail!("The reply was cut off ({})", ev["response"]["incomplete_details"]["reason"].as_str().unwrap_or("no reason given"));
+                let reason = ev["response"]["incomplete_details"]["reason"].as_str().unwrap_or("no reason given").to_owned();
+                return Err(CutOff { reason, usage: ev["response"]["usage"].clone() }.into());
             }
             "error" => {
                 let code = ev["code"].as_str().or_else(|| ev["error"]["code"].as_str()).unwrap_or_default();
@@ -464,6 +482,21 @@ impl std::fmt::Display for Dropped {
 }
 
 impl std::error::Error for Dropped {}
+
+/// A reply the server cut off: what it used is still spent.
+#[derive(Debug)]
+pub struct CutOff {
+    pub reason: String,
+    pub usage: Value,
+}
+
+impl std::fmt::Display for CutOff {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "The reply was cut off ({})", self.reason)
+    }
+}
+
+impl std::error::Error for CutOff {}
 
 /// The reply's stream ended with an error (`response.failed`, `error`).
 #[derive(Debug)]
