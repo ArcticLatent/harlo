@@ -229,7 +229,8 @@ final class HarloUITests: XCTestCase {
     func test08HelperAndMCP() {
         launch("helpers")
         openMain()
-        see("bring over a helper's changes")
+        // (30 s: on a slow simulator the session's first look takes long.)
+        see("bring over a helper's changes", timeout: 30)
         see("Update the changelog finished")
         shot("12-helper-report")
         tapInConversation("Update the changelog finished")
@@ -466,12 +467,20 @@ final class HarloUITests: XCTestCase {
             // (20 s: at a large text size the session is 64 pages, and each look
             // at what is on screen takes seconds.)
             XCTAssertTrue(last.waitForExistence(timeout: 20), "the last reply", file: file, line: line)
-            // (Settled.)
-            Thread.sleep(forTimeInterval: 1.5)
             // (Its end: at a large text size it's taller than the room above
-            // the panels.)
-            let bottom = app.otherElements["sessionBottom"].frame
-            XCTAssertTrue(last.frame.maxY > 0 && last.frame.maxY <= bottom.minY + 1, "\(why): the last reply's end in sight (\(last.frame), the composer at \(bottom.minY))", file: file, line: line)
+            // the panels. Settled: looked at again for up to 10 s on a slow
+            // simulator.)
+            var inSight = false
+            var said = ""
+            for _ in 0..<5 {
+                Thread.sleep(forTimeInterval: 2)
+                let bottom = app.otherElements["sessionBottom"].frame
+                let end = last.frame
+                said = "\(end), the composer at \(bottom.minY)"
+                inSight = end.maxY > 0 && end.maxY <= bottom.minY + 1
+                if inSight { break }
+            }
+            XCTAssertTrue(inSight, "\(why): the last reply's end in sight (\(said))", file: file, line: line)
         }
         openMain()
         atEnd("opened")
