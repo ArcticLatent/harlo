@@ -50,9 +50,15 @@ enum LiveActivities {
     }
 
     /// Back in the app: activities of sessions no longer at work end (if
-    /// harlo's end didn't come).
+    /// harlo's end didn't come), and finished ones leave the lock screen
+    /// (you're in the app now; one left there for hours may later show
+    /// empty).
     static func tidy(_ sessions: [SessionSummary]) {
-        for a in Activity<SessionActivityAttributes>.activities where a.activityState == .active {
+        for a in Activity<SessionActivityAttributes>.activities where a.activityState == .ended {
+            Task { await a.end(nil, dismissalPolicy: .immediate) }
+            tokens[a.attributes.key] = nil
+        }
+        for a in Activity<SessionActivityAttributes>.activities where a.activityState == .active || a.activityState == .stale {
             guard let s = sessions.first(where: { $0.key == a.attributes.key }),
                   Date().timeIntervalSince(started[s.key] ?? .distantPast) > 20 else { continue }
             if !["busy", "starting", "input"].contains(s.status) {

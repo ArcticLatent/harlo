@@ -95,11 +95,21 @@ struct LockScreenView: View {
                     .font(.system(size: 15, weight: .semibold))
                     .lineLimit(1)
                 Spacer(minLength: 6)
-                Live.clock(state, took: true)
-                    .font(.system(size: 14, weight: .medium).monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .fixedSize()
+                // (A running clock is a live timer, which has no width of its
+                // own: held to its room, or the card can't be laid out and
+                // shows empty. "Took 4m 11s" keeps its whole width.)
+                Group {
+                    if Live.running(state) {
+                        Live.clock(state)
+                            .frame(maxWidth: 80, alignment: .trailing)
+                    } else {
+                        Live.clock(state, took: true)
+                            .fixedSize()
+                    }
+                }
+                .font(.system(size: 14, weight: .medium).monospacedDigit())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
             }
             Text(Live.words(state, stale: stale))
                 .font(.system(size: 13, design: .monospaced))
@@ -165,13 +175,18 @@ enum Live {
     /// 18s" where there's room (a bare "18s" by the title, on the lock
     /// screen, read as "18 seconds ago").
     @ViewBuilder static func clock(_ s: SessionActivityAttributes.ContentState, took: Bool = false) -> some View {
-        if s.until > 0 || s.phase == "done" || s.phase == "failed" {
+        if !running(s) {
             let d = duration(max(0, (s.until > 0 ? s.until : Date().timeIntervalSince1970) - s.since))
             Text(took ? "Took \(d)" : d)
         } else {
             Text(Date(timeIntervalSince1970: s.since), style: .timer)
                 .multilineTextAlignment(.trailing)
         }
+    }
+
+    /// Still at it: its clock counts up (a live timer).
+    static func running(_ s: SessionActivityAttributes.ContentState) -> Bool {
+        !(s.until > 0 || s.phase == "done" || s.phase == "failed")
     }
 
     static func duration(_ seconds: Double) -> String {
