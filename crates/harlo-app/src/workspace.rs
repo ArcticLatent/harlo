@@ -481,6 +481,11 @@ pub mod qobject {
         /// `{ path, index, role, snippet, title, harness, cwd, modified }`.
         #[qinvokable]
         fn search_messages(self: &Workspace, query: &QString, limit: i32) -> QString;
+        /// `search_messages` off the UI thread: the hits come with
+        /// `messagesFound(generation, json)` (the caller drops a generation
+        /// that isn't its latest).
+        #[qinvokable]
+        fn find_messages(self: Pin<&mut Workspace>, query: &QString, limit: i32, generation: i32);
         /// The sessions used last, newest first, for the search's empty
         /// state: JSON array of `{ path, title, harness, cwd, modified }`.
         #[qinvokable]
@@ -727,6 +732,15 @@ pub mod qobject {
         #[qsignal]
         #[cxx_name = "raiseRequested"]
         fn raise_requested(self: Pin<&mut Workspace>);
+        /// findMessages' hits.
+        #[qsignal]
+        #[cxx_name = "messagesFound"]
+        fn messages_found(self: Pin<&mut Workspace>, generation: i32, json: &QString);
+        /// The message search index took in more sessions (a search open
+        /// may have more hits now).
+        #[qsignal]
+        #[cxx_name = "searchIndexGrew"]
+        fn search_index_grew(self: Pin<&mut Workspace>);
         /// Another machine's worktree, asked there (`worktree_info` gave its
         /// record first).
         #[qsignal]
@@ -1107,6 +1121,9 @@ pub struct WorkspaceRust {
     ignored_repos: HashSet<PathBuf>,
     /// Message search index, shared with its background updater.
     search: Option<Arc<std::sync::Mutex<harlo_core::search::SearchIndex>>>,
+    /// The index's second connection, for searches: they never wait for
+    /// the indexer.
+    search_reader: Option<Arc<std::sync::Mutex<harlo_core::search::SearchReader>>>,
     /// Wakes the search indexer (new or changed session files).
     search_kick: Arc<tokio::sync::Notify>,
     /// Remote project folders per host, for the remote session scan.
@@ -1440,6 +1457,10 @@ impl cxx_qt::Initialize for Workspace {
             Ok(index) => {
                 let index = Arc::new(std::sync::Mutex::new(index));
                 self.as_mut().rust_mut().search = Some(Arc::clone(&index));
+                match harlo_core::search::SearchReader::open(&harlo_core::search::default_path()) {
+                    Ok(r) => self.as_mut().rust_mut().search_reader = Some(Arc::new(std::sync::Mutex::new(r))),
+                    Err(e) => tracing::warn!("search reader unavailable: {e:#}"),
+                }
                 let s_thread = self.qt_thread();
                 let kick = self.search_kick.clone();
                 crate::runtime().spawn(async move {
@@ -1467,10 +1488,22 @@ impl cxx_qt::Initialize for Workspace {
                         }
                         let Ok(list) = rx.await else { break };
                         let index = Arc::clone(&index);
+                        let grew = s_thread.clone();
                         let _ = tokio::task::spawn_blocking(move || {
                             let kinds: HashMap<PathBuf, HarnessKind> = list.iter().map(|(p, _, _, k)| (p.clone(), *k)).collect();
                             let files: Vec<(PathBuf, i64, i64)> = list.into_iter().map(|(p, m, s, _)| (p, m, s)).collect();
-                            if let Err(e) = index.lock().unwrap().update_parts(&files, |p, resume| session_part(p, kinds.get(p).copied().unwrap_or(HarnessKind::Harlo), resume)) {
+                            // (Tests: a slow disk or host, each file taking this long.)
+                            let slow = std::env::var("HARLO_TEST_SLOW_INDEX_MS").ok().and_then(|v| v.parse::<u64>().ok()).map(Duration::from_millis);
+                            let read = |p: &Path, resume: Option<&harlo_harness::claude::Resume>| {
+                                if let Some(d) = slow {
+                                    std::thread::sleep(d);
+                                }
+                                session_part(p, kinds.get(p).copied().unwrap_or(HarnessKind::Harlo), resume)
+                            };
+                            let told = || {
+                                let _ = grew.queue(|this| this.search_index_grew());
+                            };
+                            if let Err(e) = index.lock().unwrap().update_batched(&files, read, told) {
                                 tracing::warn!("search index: {e:#}");
                             }
                         })
@@ -5403,8 +5436,29 @@ impl Workspace {
     }
 
     pub fn search_messages(&self, query: &QString, limit: i32) -> QString {
-        let Some(index) = &self.search else { return QString::from("[]") };
-        let hits = index.lock().unwrap().search(&query.to_string(), limit.clamp(1, 500) as usize).unwrap_or_default();
+        let Some(reader) = &self.search_reader else { return QString::from("[]") };
+        let hits = reader.lock().unwrap().search(&query.to_string(), limit.clamp(1, 500) as usize).unwrap_or_default();
+        QString::from(&self.hits_json(hits))
+    }
+
+    pub fn find_messages(self: Pin<&mut Self>, query: &QString, limit: i32, generation: i32) {
+        let Some(reader) = self.search_reader.clone() else {
+            self.messages_found(generation, &QString::from("[]"));
+            return;
+        };
+        let (query, limit) = (query.to_string(), limit.clamp(1, 500) as usize);
+        let thread = self.qt_thread();
+        crate::runtime().spawn(async move {
+            let hits = tokio::task::spawn_blocking(move || reader.lock().unwrap().search(&query, limit).unwrap_or_default()).await.unwrap_or_default();
+            let _ = thread.queue(move |mut this| {
+                let json = this.hits_json(hits);
+                this.as_mut().messages_found(generation, &QString::from(&json));
+            });
+        });
+    }
+
+    /// Hits as the search shows them, with their sessions' titles.
+    fn hits_json(&self, hits: Vec<harlo_core::search::Hit>) -> String {
         let list: Vec<serde_json::Value> = hits
             .into_iter()
             .map(|h| {
@@ -5421,7 +5475,7 @@ impl Workspace {
                 })
             })
             .collect();
-        QString::from(&serde_json::Value::Array(list).to_string())
+        serde_json::Value::Array(list).to_string()
     }
 
     pub fn recent_sessions(&self, limit: i32) -> QString {
@@ -6876,8 +6930,8 @@ impl Workspace {
             }
             // Past sessions whose messages match: this folder's (or all).
             "list_sessions" if !text("query").is_empty() => {
-                let Some(index) = &self.search else { return Err("Searching sessions isn't available here.".into()) };
-                let hits = index.lock().unwrap().search(&text("query"), 300).unwrap_or_default();
+                let Some(reader) = &self.search_reader else { return Err("Searching sessions isn't available here.".into()) };
+                let hits = reader.lock().unwrap().search(&text("query"), 300).unwrap_or_default();
                 let everywhere = args["everywhere"] == true;
                 let mut order: Vec<PathBuf> = Vec::new();
                 let mut passages: HashMap<PathBuf, Vec<String>> = HashMap::new();

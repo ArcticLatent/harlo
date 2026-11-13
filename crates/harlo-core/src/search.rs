@@ -33,6 +33,33 @@ pub struct SearchIndex {
     big_reads: HashMap<String, Instant>,
 }
 
+/// A second connection to the index, for searching while it's being
+/// updated (the index is in WAL mode: a search sees what's committed and
+/// never waits for the update).
+pub struct SearchReader {
+    conn: Connection,
+}
+
+impl SearchReader {
+    /// The index at `path` (open it with [`SearchIndex::open`] first).
+    pub fn open(path: &Path) -> Result<SearchReader> {
+        let conn = Connection::open(path)?;
+        conn.execute_batch("PRAGMA query_only = 1;")?;
+        conn.busy_timeout(Duration::from_millis(200))?;
+        Ok(SearchReader { conn })
+    }
+
+    /// Best matches first.
+    pub fn search(&self, input: &str, limit: usize) -> Result<Vec<Hit>> {
+        search_in(&self.conn, input, limit)
+    }
+}
+
+/// How many files the indexer reads before it commits them, so searches
+/// see them as it goes; and the longest it holds them.
+const BATCH_FILES: usize = 20;
+const BATCH_TIME: Duration = Duration::from_millis(500);
+
 pub fn default_path() -> PathBuf {
     crate::db::default_path().with_file_name("search.db")
 }
@@ -164,23 +191,41 @@ impl SearchIndex {
     /// (it's given that place; what it returns replaces the messages from
     /// its `first_index` on).
     pub fn update_parts(&mut self, files: &[(PathBuf, i64, i64)], read: impl Fn(&Path, Option<&Resume>) -> Part) -> Result<usize> {
+        self.update_batched(files, read, || {})
+    }
+
+    /// `update_parts`, committing as it goes ([`BATCH_FILES`] files, or
+    /// [`BATCH_TIME`]): `committed` is called after each commit that
+    /// changed something.
+    pub fn update_batched(&mut self, files: &[(PathBuf, i64, i64)], read: impl Fn(&Path, Option<&Resume>) -> Part, mut committed: impl FnMut()) -> Result<usize> {
         let wanted: HashSet<&Path> = files.iter().map(|p| p.0.as_path()).collect();
-        let known: Vec<(String, i64, i64)> = {
+        let known: HashMap<String, (i64, i64)> = {
             let mut stmt = self.conn.prepare("SELECT path, modified, size FROM files")?;
-            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<_>>()?
+            stmt.query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))?.collect::<rusqlite::Result<_>>()?
         };
-        let tx = self.conn.transaction()?;
-        for (path, _, _) in known.iter().filter(|(p, _, _)| !wanted.contains(Path::new(p))) {
+        let mut tx = self.conn.transaction()?;
+        let mut pending = 0;
+        for path in known.keys().filter(|p| !wanted.contains(Path::new(p))) {
             tx.execute("DELETE FROM messages WHERE path = ?1", params![path])?;
             tx.execute("DELETE FROM files WHERE path = ?1", params![path])?;
+            pending += 1;
         }
         let mut indexed = 0;
         let mut biggest = 0;
+        let mut since = Instant::now();
         for (file, modified, size) in files {
             let (modified, size) = (*modified, *size);
             let key = file.to_string_lossy();
-            if known.iter().any(|(p, m, s)| *p == key && *m == modified && *s == size) {
+            if known.get(key.as_ref()) == Some(&(modified, size)) {
                 continue;
+            }
+            // (What's read so far, committed: searches see it.)
+            if pending > 0 && (pending >= BATCH_FILES || since.elapsed() >= BATCH_TIME) {
+                tx.commit()?;
+                committed();
+                tx = self.conn.transaction()?;
+                pending = 0;
+                since = Instant::now();
             }
             // (A big one that's being written to: it's caught up on later.)
             if size as u64 >= BIG_FILE {
@@ -209,31 +254,40 @@ impl SearchIndex {
                 params![key, modified, size, part.resume.offset as i64, part.resume.index, part.resume.check],
             )?;
             indexed += 1;
+            pending += 1;
         }
         tx.commit()?;
+        if pending > 0 {
+            committed();
+        }
         after_reading(biggest);
         Ok(indexed)
     }
 
     /// Best matches first.
     pub fn search(&self, input: &str, limit: usize) -> Result<Vec<Hit>> {
-        let Some(query) = fts_query(input) else { return Ok(Vec::new()) };
-        let mut stmt = self.conn.prepare(
-            "SELECT path, idx, role, snippet(messages, 0, char(2), char(3), '…', 16)
-             FROM messages WHERE messages MATCH ?1 ORDER BY bm25(messages) LIMIT ?2",
-        )?;
-        let hits = stmt
-            .query_map(params![query, limit as i64], |r| {
-                Ok(Hit {
-                    path: PathBuf::from(r.get::<_, String>(0)?),
-                    index: r.get(1)?,
-                    role: r.get(2)?,
-                    snippet: snippet_html(&r.get::<_, String>(3)?),
-                })
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(hits)
+        search_in(&self.conn, input, limit)
     }
+}
+
+/// Best matches first, on either connection.
+fn search_in(conn: &Connection, input: &str, limit: usize) -> Result<Vec<Hit>> {
+    let Some(query) = fts_query(input) else { return Ok(Vec::new()) };
+    let mut stmt = conn.prepare(
+        "SELECT path, idx, role, snippet(messages, 0, char(2), char(3), '…', 16)
+         FROM messages WHERE messages MATCH ?1 ORDER BY bm25(messages) LIMIT ?2",
+    )?;
+    let hits = stmt
+        .query_map(params![query, limit as i64], |r| {
+            Ok(Hit {
+                path: PathBuf::from(r.get::<_, String>(0)?),
+                index: r.get(1)?,
+                role: r.get(2)?,
+                snippet: snippet_html(&r.get::<_, String>(3)?),
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(hits)
 }
 
 #[cfg(test)]
@@ -281,6 +335,38 @@ mod tests {
         index.update(&[a]).unwrap();
         assert!(index.search("parser", 10).unwrap().is_empty(), "deleted sessions drop out");
         assert!(index.search("  \"\" ", 10).unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_search_never_waits_for_the_indexer() {
+        let dir = std::env::temp_dir().join(format!("harlo-search-batches-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let files: Vec<PathBuf> = (0..45).map(|i| session(&dir, &format!("s{i}.jsonl"), &[("user", &format!("zebra number {i}"))])).collect();
+        let db = dir.join("search.db");
+        let mut index = SearchIndex::open(&db).unwrap();
+        let reader = SearchReader::open(&db).unwrap();
+        let stamped: Vec<(PathBuf, i64, i64)> = files.iter().map(|f| stamp(f).map(|(m, s)| (f.clone(), m, s)).unwrap()).collect();
+        let seen = std::cell::RefCell::new(Vec::new());
+        let mut commits = 0;
+        index
+            .update_batched(
+                &stamped,
+                |p, _| {
+                    // (Mid-update: the reader answers at once, with what's committed.)
+                    let started = Instant::now();
+                    seen.borrow_mut().push(reader.search("zebra", 100).unwrap().len());
+                    assert!(started.elapsed() < Duration::from_millis(150), "a search waited {:?}", started.elapsed());
+                    Part { messages: harlo_harness::store::read_messages(p).unwrap_or_default(), ..Default::default() }
+                },
+                || commits += 1,
+            )
+            .unwrap();
+        let seen = seen.into_inner();
+        assert_eq!((seen[0], seen[20], seen[40]), (0, 20, 40), "batches of 20 seen as they're committed");
+        assert_eq!(commits, 3);
+        assert_eq!(reader.search("zebra", 100).unwrap().len(), 45);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

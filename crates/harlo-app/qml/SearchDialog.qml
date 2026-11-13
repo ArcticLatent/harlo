@@ -44,9 +44,38 @@ Popup {
         field.forceActiveFocus()
         run()
     }
+    // Searches run off the window's thread: the latest one asked for is
+    // shown when it answers (an older answer is dropped), and the index
+    // taking in more sessions asks again.
+    property int generation: 0
+    property string asked: ""
+    property string shown: ""
+    // Whether the hits shown answer what's typed now.
+    readonly property bool settled: empty || shown === field.text
     function run() {
-        hits = empty ? [] : JSON.parse(Workspace.searchMessages(field.text, 80))
-        current = 0
+        generation++
+        asked = field.text
+        if (empty) {
+            hits = []
+            shown = asked
+            current = 0
+            return
+        }
+        Workspace.findMessages(asked, 80, generation)
+    }
+    Connections {
+        target: Workspace
+        function onMessagesFound(gen, json) {
+            if (gen !== root.generation) return
+            const same = root.shown === root.asked
+            root.hits = JSON.parse(json)
+            root.shown = root.asked
+            // (More hits for the same words: the chosen one stays chosen.)
+            if (!same || root.current >= root.hits.length) root.current = 0
+        }
+        function onSearchIndexGrew() {
+            if (root.visible && !root.empty) root.run()
+        }
     }
     function pick(i) {
         if (empty) {
@@ -112,7 +141,7 @@ Popup {
         }
         ColumnLayout {
             objectName: "searchNone"
-            visible: !root.empty && root.hits.length === 0
+            visible: !root.empty && root.settled && root.hits.length === 0
             Layout.fillWidth: true
             Layout.leftMargin: 8
             Layout.topMargin: 4

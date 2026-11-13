@@ -38,7 +38,7 @@ Rectangle {
     // Helpers it started are at work (Stop stops them too, as it waits).
     readonly property bool helpersWorking: Workspace.orchestrationRevision >= 0 && session.key !== "" && Workspace.helpersWorking(session.key)
     function stop() {
-        if (session.status === "busy") session.abort()
+        if (session.status === "busy" || session.preparing) session.abort()
         Workspace.stopHelpersOf(session.key)
     }
     readonly property var approvalModes: ["always-ask", "write", "yolo"]
@@ -549,7 +549,7 @@ Rectangle {
                     if (files.length > 0) event.accepted = true
                     return
                 }
-                if (event.key === Qt.Key_Escape && root.session.status === "busy") {
+                if (event.key === Qt.Key_Escape && (root.session.status === "busy" || root.session.preparing)) {
                     root.stop()
                     event.accepted = true
                     return
@@ -815,8 +815,8 @@ Rectangle {
         // Stop while the agent runs; Send (or queue, while it runs).
         ComposerIconButton {
             objectName: "stopButton"
-            visible: root.session.status === "busy" || root.helpersWorking
-            tip: root.session.status === "busy" ? "Stop the run, and its helpers (Esc)" : "Stop its helpers"
+            visible: root.session.status === "busy" || root.session.preparing || root.helpersWorking
+            tip: root.session.preparing ? "Stop: it isn't sent yet (Esc)" : root.session.status === "busy" ? "Stop the run, and its helpers (Esc)" : "Stop its helpers"
             onClicked: root.stop()
             contentItem: Item {
                 Rectangle { anchors.centerIn: parent; width: 14; height: 14; radius: 3; color: Qt.rgba(Theme.error.r, Theme.error.g, Theme.error.b, 0.22); border.color: Theme.error; border.width: 1.5 }

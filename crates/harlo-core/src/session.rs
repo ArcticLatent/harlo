@@ -145,6 +145,13 @@ pub enum SessionUpdate {
     Limits(Value),
     /// A side question and its answer so far (see `HarnessEvent::Aside`).
     Aside(Value),
+    /// A new turn's snapshot is being taken (true) or done: its prompt
+    /// waits meanwhile, and Stop drops it. (The status stays as it was, so
+    /// a turn's start and end are still the run's.)
+    Preparing(bool),
+    /// A prompt stopped before it was sent (the turn's snapshot was still
+    /// being taken): its words go back in the composer.
+    Unsent,
 }
 
 /// The ids of harlo's own requests (approvals its tools asked for).
@@ -578,6 +585,10 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
     let mut pending: Vec<SessionUpdate> = Vec::new();
     let mut dirty = false;
     let mut last_flush = Instant::now() - STREAM_FLUSH;
+    // A turn waiting for its snapshot: its prompt (and any sent meanwhile),
+    // and the snapshot's number.
+    let mut held: Vec<(String, Vec<Value>, SendMode)> = Vec::new();
+    let mut snap_turn: u64 = 0;
 
     if spawn_now {
         driver.ensure_harness(&mut st, &mut pending);
@@ -750,6 +761,16 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                     st.commands = parse_commands(&list);
                     pending.push(SessionUpdate::Commands(st.commands.clone()));
                 }
+                // The snapshot's done: the turn's prompt goes now (unless
+                // it was stopped meanwhile).
+                Aux::Snapshotted(n) if n == snap_turn && !held.is_empty() => {
+                    pending.push(SessionUpdate::Preparing(false));
+                    for (i, (text, images, mode)) in std::mem::take(&mut held).into_iter().enumerate() {
+                        let Some(h) = driver.ensure_harness(&mut st, &mut pending) else { break };
+                        h.prompt(&text, images, if i == 0 { SendMode::Normal } else { mode });
+                    }
+                }
+                Aux::Snapshotted(_) => {}
             },
             ctl = control.recv() => match ctl {
                 Some(Control::Subscribe(id, sink)) => {
@@ -758,22 +779,45 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                     st.sinks.push((id, sink));
                 }
                 Some(Control::Unsubscribe(id)) => st.sinks.retain(|(s, _)| *s != id),
+                // (One sent while a turn waits for its snapshot: after it.)
+                Some(Control::Prompt(text, images, mode)) if !held.is_empty() => held.push((text, images, mode)),
                 Some(Control::Prompt(text, images, mode)) => {
                     // A new turn (not steering or a queued one): the folder's
                     // files first, so the turn can be undone (git::snapshot_turn).
+                    // That can take seconds (a big or remote repository), so
+                    // it's taken beside the loop: a Stop meanwhile still gets
+                    // here, and the prompt is never sent.
                     // (A side question, `/btw`, isn't a turn.)
                     if st.status != SessionStatus::Busy && turn_snapshots_on() && !text.trim_start().starts_with("/btw") {
                         let dir = match &driver.cfg.remote {
                             Some(r) => crate::remote::join(&r.host, &driver.cfg.cwd.to_string_lossy()),
                             None => driver.cfg.cwd.clone(),
                         };
-                        let _ = tokio::task::spawn_blocking(move || crate::git::snapshot_turn(&dir)).await;
-                    }
-                    if let Some(h) = driver.ensure_harness(&mut st, &mut pending) {
+                        held.push((text, images, mode));
+                        snap_turn += 1;
+                        pending.push(SessionUpdate::Preparing(true));
+                        let (tx, n) = (driver.aux_tx.clone(), snap_turn);
+                        tokio::spawn(async move {
+                            // (Tests: a slow disk or host.)
+                            if let Some(ms) = std::env::var("HARLO_TEST_SLOW_SNAPSHOT_MS").ok().and_then(|v| v.parse::<u64>().ok()) {
+                                tokio::time::sleep(Duration::from_millis(ms)).await;
+                            }
+                            let _ = tokio::task::spawn_blocking(move || crate::git::snapshot_turn(&dir)).await;
+                            let _ = tx.send(Aux::Snapshotted(n));
+                        });
+                    } else if let Some(h) = driver.ensure_harness(&mut st, &mut pending) {
                         // A prompt sent while idle must not carry a queue mode.
                         let mode = if st.status == SessionStatus::Busy { mode } else { SendMode::Normal };
                         h.prompt(&text, images, mode);
                     }
+                }
+                // Stopped while its snapshot was taken: never sent.
+                Some(Control::Abort) if !held.is_empty() => {
+                    held.clear();
+                    snap_turn += 1;
+                    pending.push(SessionUpdate::Preparing(false));
+                    dirty |= st.transcript.apply(&HarnessEvent::Notice { level: harlo_harness::NoticeLevel::Info, text: "Stopped before it was sent: your message is back in the box.".into(), system: false });
+                    pending.push(SessionUpdate::Unsent);
                 }
                 Some(Control::Abort) => {
                     // A run you stopped isn't "ready".
@@ -1067,6 +1111,8 @@ enum Aux {
     State(Value),
     Stats(Value),
     Commands(Value),
+    /// The snapshot taken before turn `n` (see `Control::Prompt`) is done.
+    Snapshotted(u64),
 }
 
 async fn fetch_initial(harness: Arc<Harness>, tx: mpsc::UnboundedSender<Aux>, resume: bool) {

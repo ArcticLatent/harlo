@@ -29,6 +29,9 @@ pub mod qobject {
         /// Plan mode (set from the workspace's per-session state): messages
         /// ask for a plan, not changes.
         #[qproperty(bool, plan_mode, cxx_name = "planMode")]
+        /// A new turn's snapshot is being taken: its message isn't sent
+        /// yet, and Stop drops it.
+        #[qproperty(bool, preparing)]
         #[qproperty(QString, model_name, cxx_name = "modelName")]
         /// The model as `provider/id` (for its provider logo).
         #[qproperty(QString, model_id, cxx_name = "modelId")]
@@ -373,6 +376,7 @@ pub struct ChatSessionRust {
     status: QString,
     harness: QString,
     plan_mode: bool,
+    preparing: bool,
     model_name: QString,
     model_id: QString,
     thinking: QString,
@@ -433,6 +437,9 @@ pub struct ChatSessionRust {
     /// Files on a host that edits were numbered from: when each was asked
     /// for, and its text once it came.
     host_files: std::cell::RefCell<std::collections::HashMap<String, (std::time::Instant, Option<Arc<str>>)>>,
+    /// The words last sent: back in the composer if Stop comes before
+    /// they reach the agent (`SessionUpdate::Unsent`).
+    last_sent: String,
 }
 
 struct QtSink {
@@ -469,6 +476,7 @@ impl ChatSession {
         }
         self.as_mut().rust_mut().generation += 1;
         self.host_files.borrow_mut().clear();
+        self.as_mut().set_preparing(false);
         unsafe {
             self.as_mut().begin_reset_model();
             self.as_mut().rust_mut().rows.clear();
@@ -792,6 +800,7 @@ impl ChatSession {
         };
         let Some(h) = self.handle().cloned() else { return };
         let original = text.clone();
+        self.as_mut().rust_mut().last_sent = original.clone();
         // Plan mode: a plan first, no changes. (Not for a side question.)
         let text = if self.plan_mode && mode == SendMode::Normal && !text.trim_start().starts_with("/btw") {
             format!("{text}{}", harlo_harness::file_blocks::PLAN_NOTE)
@@ -1390,6 +1399,12 @@ impl ChatSession {
                 }
                 SessionUpdate::Todos(todos) => self.as_mut().set_todos_json(QString::from(&todos.to_string())),
                 SessionUpdate::Aside(a) => self.as_mut().set_aside_json(QString::from(&a.to_string())),
+                SessionUpdate::Preparing(on) => self.as_mut().set_preparing(on),
+                // Stopped before it was sent: the words back to edit.
+                SessionUpdate::Unsent => {
+                    let text = QString::from(&self.last_sent);
+                    self.as_mut().edit_requested(&text);
+                }
                 // (The workspace notifies.)
                 // (The workspace has these.)
                 SessionUpdate::Notable(_) | SessionUpdate::Limits(_) | SessionUpdate::GateAnswered { .. } | SessionUpdate::Stopped | SessionUpdate::HarloCall { .. } => {}

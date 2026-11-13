@@ -1507,6 +1507,50 @@ ApplicationWindow {
             win.summary(); Qt.quit() } }
     }
 
+    // Stop while a turn's snapshot is still being taken (slowed to 2.5 s):
+    // the message never reaches the model and comes back to the box; the
+    // next one goes as usual.
+    function modelGot(text) { return win.modelRequests().some(b => JSON.stringify(b).indexOf(text) >= 0) }
+    SequentialAnimation {
+        id: harloStopSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlostop"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo") }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloStopSteps, () => chat.session.modelName !== "", 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: win.sendByKeys("never send this walrus") }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            win.check(chat.session.preparing && chat.session.status !== "busy", "preparing while the snapshot is taken, not yet busy (" + chat.session.status + ")")
+            const stop = win.findName("stopButton")
+            win.check(stop !== null && stop.visible, "Stop is offered")
+            win.clickItem(stop, "stop") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(!chat.session.preparing && chat.session.status !== "busy", "stopped at once (" + chat.session.status + ")")
+            win.check(chat.composerItem.text === "never send this walrus", "the words are back in the box (" + chat.composerItem.text + ")")
+            win.check(win.findText("Stopped before it was sent: your message is back in the box.") !== null, "the chat says so")
+            win.shot("clicks-harlo-stop-unsent") } }
+        // (Past the snapshot's 2.5 s: it ends, and still nothing is sent.)
+        PauseAnimation { duration: 3200 }
+        ScriptAction { script: {
+            win.check(!win.modelGot("never send this walrus"), "the model never got it (" + win.modelRequests().length + " requests)")
+            chat.composerItem.text = ""
+            win.sendByKeys("send this one instead") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloStopSteps, () => win.modelGot("send this one instead") && chat.session.status !== "busy", 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(win.modelGot("send this one instead"), "the next message goes, after its snapshot")
+            win.check(!win.modelGot("never send this walrus"), "and the stopped one still never went")
+            win.summary(); Qt.quit() } }
+    }
+
     // Spending limits (the demo agent costs $0.25 a prompt): a session past
     // its limit is stopped and held, Allow more lets it go on; the day's
     // limit holds every session, new ones too.
@@ -7231,6 +7275,42 @@ ApplicationWindow {
         ScriptAction { script: Qt.quit() }
     }
 
+    // Search while the indexer is slow (each file 400 ms): typing never
+    // waits for it, and the hits grow as it commits, without typing again.
+    Timer {
+        id: slowSearchTick
+        interval: 16
+        repeat: true
+        property real last: 0
+        property real worst: 0
+        onTriggered: { const n = Date.now(); if (last > 0) worst = Math.max(worst, n - last); last = n }
+    }
+    property int slowSearchFirst: -1
+    SequentialAnimation {
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clickssearchslow"
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            slowSearchTick.start()
+            searchDialog.openSearch()
+            TestInput.typeText("walrus") } }
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            win.slowSearchFirst = searchDialog.hits.length
+            win.check(searchDialog.settled && win.slowSearchFirst < 16, "typing answered at once, before the indexer finished (" + win.slowSearchFirst + " of 16)")
+            win.check(slowSearchTick.worst < 300, "the window kept drawing while it searched (longest gap " + slowSearchTick.worst + " ms)")
+            TestInput.typeText(" tusk") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            win.check(searchDialog.settled && searchDialog.query === "walrus tusk", "more typing answered too (" + searchDialog.hits.length + ")")
+            TestInput.key(Qt.Key_Backspace, 0); TestInput.key(Qt.Key_Backspace, 0); TestInput.key(Qt.Key_Backspace, 0); TestInput.key(Qt.Key_Backspace, 0); TestInput.key(Qt.Key_Backspace, 0) } }
+        PauseAnimation { duration: 8000 }
+        ScriptAction { script: {
+            win.check(searchDialog.hits.length === 16 && win.slowSearchFirst < 16, "the rest arrived late, as the indexer committed them (" + searchDialog.hits.length + ")")
+            win.check(slowSearchTick.worst < 300, "and the window never stalled (longest gap " + slowSearchTick.worst + " ms)")
+            win.shotWindow("search-slow-index")
+            win.summary(); Qt.quit() } }
+    }
+
     // Full-text search over sessions: index, query, open at the message.
     SequentialAnimation {
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "search"
@@ -7240,10 +7320,10 @@ ApplicationWindow {
                 searchDialog.openSearch()
                 searchDialog.query = win.argValue("--query=")
                 searchDialog.run()
-                win.log("hits:", searchDialog.hits.length, "first:", searchDialog.hits.length ? searchDialog.hits[0].title + " #" + searchDialog.hits[0].index + " " + searchDialog.hits[0].snippet.slice(0, 80) : "-")
             }
         }
         PauseAnimation { duration: 500 }
+        ScriptAction { script: win.log("hits:", searchDialog.hits.length, "first:", searchDialog.hits.length ? searchDialog.hits[0].title + " #" + searchDialog.hits[0].index + " " + searchDialog.hits[0].snippet.slice(0, 80) : "-") }
         ScriptAction { script: win.shotPopup(searchDialog, "search") }
         PauseAnimation { duration: 400 }
         ScriptAction { script: searchDialog.pick(0) }
