@@ -5,14 +5,18 @@ description: How Harlo's Rust wiki engine retrieves sections, selects linked wor
 tags: [openwiki, architecture, retrieval, claims, persistence]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-14T13:04:09.841Z
+    at: 2026-11-14T17:36:19.145Z
 sources:
+  - id: openwiki-source-4af2dd3e4a0acae243d3b65c
+    resource: repo://crates/harlo-core/src/openwiki.rs
   - id: openwiki-source-7206122c56875c37e0a62050
     resource: repo://crates/harlo-wiki/src/claims.rs
   - id: openwiki-source-b8f6d0324ba35da484134e1b
     resource: repo://crates/harlo-wiki/src/finish.rs
   - id: openwiki-source-470aa439ad0b0cba98be72e8
     resource: repo://crates/harlo-wiki/src/fsb.rs
+  - id: openwiki-source-056ac262dd327c0a8e1ed162
+    resource: repo://crates/harlo-wiki/src/marked.rs
   - id: openwiki-source-fccbfc8dec18dfaf10104a6c
     resource: repo://crates/harlo-wiki/src/mcp.rs
   - id: openwiki-source-c3f26d7f96c5e44628c83808
@@ -21,9 +25,11 @@ sources:
     resource: repo://crates/harlo-wiki/src/run.rs
   - id: openwiki-source-73bde8fc6e5321d17aacc85f
     resource: repo://crates/harlo-wiki/src/store.rs
+  - id: openwiki-source-284dc687e6c6caf96d9a4904
+    resource: repo://crates/harlo-wiki/src/tools.rs
   - id: openwiki-source-7df8fd612dbd67f186cd1d6e
     resource: repo://crates/harlo-wiki/src/workspaces.rs
-generated: { by: "harlo", at: "2026-11-14T13:04:09.841Z" }
+generated: { by: "harlo", at: "2026-11-14T17:36:19.145Z" }
 ---
 
 # Native wiki engine and evidence lifecycle
@@ -42,7 +48,15 @@ Search first resolves workspace scope, discovers eligible Markdown pages, and tu
 
 The cache is bounded to four wiki-root sets and 32 MiB of indexed page text across them. Each search still reads the current pages and compares their text hashes and lengths. An unchanged collection reuses its index; a changed collection rebuilds it while reusing unchanged pages' parsed units. Large collections can be searched without being retained. This makes edits, additions, and deletions visible without a separate reindex command.
 
+Concurrent searches of the same retained scope share a mutex-protected index slot. Building and ranking use that scope's single SQLite connection serially: the first search builds a cold or changed index, and waiting searches with the same page snapshot reuse it. The global cache lock is only for slot selection and eviction, not the whole search. Parsing changed pages can use up to eight workers, bounded further by available parallelism and changed-text size. A failed rebuild returns an error without replacing the previous index; it does not silently serve the previous results for changed content.
+
 Search results are compact references such as `openwiki/architecture/wiki-engine.md#retrieval-is-a-rebuildable-view`. Read resolves the requested wiki, validates the page and anchors, reparses headings, and returns the complete requested sections. An unknown anchor fails the read instead of returning an unrelated passage. Hidden path components are rejected. Optional provenance exposes recorded source resources and claim evidence versions; it does not establish that the claims are fresh or semantically correct.
+
+### Markdown limits isolate failure
+
+Retrieval's Markdown lexer grows its stack as needed and limits nested parsing to 3,000 levels and 16 MiB of cumulative parsing work. The work limit counts text again at each nested level, so it is not a 16 MiB file-size allowance. Exceeding either limit produces `TooDeep` rather than exhausting the worker thread's stack. Stack-aware inline traversal and token cleanup also protect deeply nested intermediate structures.
+
+Search propagates a parse failure from any page it must index; section read propagates a failure from its requested page. The tool boundary reports `OpenWiki MCP operation failed.` for this error. It is a failed call, not an empty match set or a process-wide shutdown: a subsequent read of another valid page can still succeed. Desktop page presentation uses core's separate Markdown renderer, so successful display is not proof that retrieval accepts the same nesting.
 
 ### Linked workspace scope
 
@@ -63,6 +77,8 @@ flowchart LR
 ```
 
 Begin captures source state, language, previous update information, and generated-provenance snapshots. `.run.json` keeps the durable run and queue. A writer object holds at most one active run and rejects later lifecycle calls for a different run ID. Restarted hosts must call begin to rehydrate the durable run before submitting more work.
+
+Begin also checks that the wiki folder and code-mode setup destinations resolve inside the canonical repository. Setup covers the managed instruction files and, on initialization, the workflow destination. A destination or parent symlink leading outside is refused, including a dangling link to an outside file; links resolving inside remain supported. This setup containment check is separate from the stricter evidence-file symlink policy below. Correct an outward-pointing link before retrying rather than treating it as a missing writable file.
 
 On resume, a mode or language conflict is refused. If the source fingerprint changed, the persisted run returns to planning and its old plan is removed. Otherwise persisted completion records are reconciled and the run continues. Updates can return `noop` only when the update preflight, claim health, coverage, and stable source checks permit it.
 
@@ -95,6 +111,8 @@ When changing this system, preserve the separation between disposable retrieval 
 ## Focused verification
 
 Representative engine tests cover cache invalidation (`kept_index_follows_the_pages`), evidence canonicalization and moved ranges (`resources`, `ranges_follow_moved_lines`), safe storage, schema validation, and link/diagram processing. Core integration tests additionally exercise local reading without a server and native writer run-ID rejection.
+
+`concurrent_searches_share_the_index` verifies four simultaneous cold searches build one index and warm searches reuse it. `deep_nesting_fails_the_text_not_the_process` exercises the lexer on a 256 KiB thread stack, including accepted nesting and rejected depth/work cases. `setup_stays_inside_the_repository` checks outward file, parent-directory, wiki-directory, and dangling links as well as supported inward links. Core's `deep_page_fails_its_calls_only` verifies that search and read fail without preventing a subsequent valid read; `deep_pages_view_on_a_small_stack` covers the separate desktop rendering path.
 
 ```sh
 cargo test -p harlo-wiki
