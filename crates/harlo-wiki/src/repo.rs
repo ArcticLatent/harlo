@@ -7,6 +7,7 @@ use crate::ignore::{self, Ignore};
 use crate::util;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -112,6 +113,104 @@ pub fn added_paths(root: &Path, ignore: &Ignore, base: &str) -> Vec<String> {
             out.push(p);
         }
     }
+    out.sort_by(|a, b| util::cmp16(a, b));
+    out
+}
+
+/// harlo: source files changed since `base` (committed or in the work
+/// tree) by enough that the wiki may need to say more: a new top-level
+/// definition (outside tests), or `GROWN_LINES` lines or more added and
+/// removed. A small edit to code no fact cites needs no update; these may.
+pub const GROWN_LINES: usize = 50;
+
+const SOURCE_EXTENSIONS: [&str; 32] = [
+    "rs", "py", "js", "mjs", "cjs", "ts", "tsx", "jsx", "go", "java", "kt", "kts", "swift", "c", "h", "cc", "cpp", "hpp", "cs", "rb", "php", "qml", "sh", "lua",
+    "scala", "ex", "exs", "zig", "dart", "vue", "svelte", "sql",
+];
+
+/// The keywords that open a top-level definition, after any `export`,
+/// `default`, `pub(…)`, `async`, `unsafe` or `static`.
+const DEFINITIONS: [&str; 16] = ["fn", "struct", "enum", "trait", "impl", "mod", "class", "def", "function", "interface", "type", "func", "object", "protocol", "extension", "module"];
+
+fn is_test_path(p: &str) -> bool {
+    let name = p.rsplit('/').next().unwrap_or(p);
+    let dirs = format!("/{p}");
+    ["/tests/", "/test/", "/Tests/", "/__tests__/", "/spec/"].iter().any(|d| dirs.contains(d))
+        || name.starts_with("test_")
+        || ["_test.", ".test.", ".spec.", "Tests."].iter().any(|t| name.contains(t))
+}
+
+/// The name a top-level definition line defines ("pub fn run(" → "run"),
+/// if it is one.
+fn defined_name(line: &str) -> Option<String> {
+    if line.starts_with(char::is_whitespace) {
+        return None;
+    }
+    // (`pub(crate) …`: its scope in brackets.)
+    let line = match line.strip_prefix("pub(").and_then(|r| r.split_once(')')) {
+        Some((_, rest)) => rest.trim_start(),
+        None => line,
+    };
+    // (A Go method: its name is after the receiver.)
+    if let Some(rest) = line.strip_prefix("func (") {
+        let name: String = rest.split_once(')')?.1.trim_start().chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+        return (!name.is_empty()).then_some(name);
+    }
+    let mut words = line.split(|c: char| c.is_whitespace() || c == '(' || c == '<' || c == ':' || c == '{' || c == '=' || c == ';').filter(|w| !w.is_empty()).peekable();
+    while let Some(w) = words.peek() {
+        if ["export", "default", "async", "unsafe", "static", "abstract", "final", "public", "private", "open", "extern", "const"].contains(w) || w.starts_with("pub") {
+            words.next();
+        } else {
+            break;
+        }
+    }
+    let keyword = words.next()?;
+    if !DEFINITIONS.contains(&keyword) {
+        return None;
+    }
+    words.next().map(|n| n.trim_matches(|c: char| !(c.is_alphanumeric() || c == '_')).to_owned()).filter(|n| !n.is_empty())
+}
+
+pub fn grown_paths(root: &Path, ignore: &Ignore, base: &str) -> Vec<String> {
+    let Ok(out) = git_strict(root, &["-c", "core.quotePath=false", "diff", "-U0", "--no-color", "--no-ext-diff", "--no-renames", base]) else { return Vec::new() };
+    let text = String::from_utf8_lossy(&out);
+    // Per file: lines added and removed, names defined in each.
+    let mut files: Vec<(String, usize, HashSet<String>, HashSet<String>)> = Vec::new();
+    let mut current: Option<usize> = None;
+    for line in text.split('\n') {
+        if let Some(path) = line.strip_prefix("+++ ") {
+            current = path.strip_prefix("b/").map(|p| {
+                files.push((normalize_git_path(p), 0, HashSet::new(), HashSet::new()));
+                files.len() - 1
+            });
+            continue;
+        }
+        if line.starts_with("--- ") || line.starts_with("diff --git ") {
+            if line.starts_with("diff --git ") {
+                current = None;
+            }
+            continue;
+        }
+        let Some(i) = current else { continue };
+        let (added, body) = match line.as_bytes().first() {
+            Some(b'+') => (true, &line[1..]),
+            Some(b'-') => (false, &line[1..]),
+            _ => continue,
+        };
+        let f = &mut files[i];
+        f.1 += 1;
+        if let Some(name) = defined_name(body) {
+            if added { f.2.insert(name); } else { f.3.insert(name); }
+        }
+    }
+    let mut out: Vec<String> = files
+        .into_iter()
+        .filter(|(p, ..)| !is_wiki_path(p) && !SETUP_FILES.contains(&p.as_str()) && !ignore.ignores(p, false))
+        .filter(|(p, ..)| p.rsplit_once('.').is_some_and(|(_, ext)| SOURCE_EXTENSIONS.contains(&ext)))
+        .filter(|(p, lines, new, gone)| *lines >= GROWN_LINES || (!is_test_path(p) && new.iter().any(|n| !gone.contains(n))))
+        .map(|(p, ..)| p)
+        .collect();
+    out.dedup();
     out.sort_by(|a, b| util::cmp16(a, b));
     out
 }
@@ -580,6 +679,19 @@ pub fn update_noop(root: &Path, ignore: &Ignore, requested_language: Option<&str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn definitions_are_found() {
+        assert_eq!(defined_name("pub fn run(x: u32) {").as_deref(), Some("run"));
+        assert_eq!(defined_name("pub(crate) async fn go<T>() {}").as_deref(), Some("go"));
+        assert_eq!(defined_name("export default function App() {").as_deref(), Some("App"));
+        assert_eq!(defined_name("class Queue:").as_deref(), Some("Queue"));
+        assert_eq!(defined_name("async def fetch(url):").as_deref(), Some("fetch"));
+        assert_eq!(defined_name("func (s *Server) Start() error {").as_deref(), Some("Start"), "a Go method: past its receiver");
+        assert_eq!(defined_name("    def inner(self):"), None, "not top level");
+        assert_eq!(defined_name("let x = 1;"), None);
+        assert!(is_test_path("tests/test_orders.py") && is_test_path("src/a_test.go") && is_test_path("web/app.spec.ts") && !is_test_path("src/testing.rs"));
+    }
 
     #[test]
     fn blank_lines_collapse() {

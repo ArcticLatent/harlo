@@ -194,12 +194,16 @@ fn change_note(found: &Value) -> String {
         })
         .collect();
     let added: Vec<String> = found["added"].as_array().into_iter().flatten().filter_map(|f| f.as_str()).map(|f| format!("`{f}`")).collect();
+    let grown: Vec<String> = found["grown"].as_array().into_iter().flatten().filter_map(|f| f.as_str()).map(|f| format!("`{f}`")).collect();
     let mut parts = Vec::new();
     if !stale.is_empty() {
         parts.push(format!("pages with facts whose cited code changed: {}", list(stale, PAGES)));
     }
     if !added.is_empty() {
         parts.push(format!("files added since the last update: {}", list(added, FILES)));
+    }
+    if !grown.is_empty() {
+        parts.push(format!("files with new definitions or larger changes: {}", list(grown, FILES)));
     }
     if parts.is_empty() {
         return String::new();
@@ -1546,9 +1550,9 @@ esac; done"#
         assert!(run_prompt("continue", "update", &[]).contains("mode \"update\""));
         assert!(run_prompt("update", "", &[]).contains("openwiki_submit_plan"));
         // What the check found leads an update, not the others.
-        let found = json!({"recorded": false, "stale": [{"page": "/openwiki/a.md", "files": ["src/a.rs", "src/b.rs"]}], "added": ["src/c.rs"]});
+        let found = json!({"recorded": false, "stale": [{"page": "/openwiki/a.md", "files": ["src/a.rs", "src/b.rs"]}], "added": ["src/c.rs"], "grown": ["src/d.rs"]});
         let p = run_prompt_with("update", "", &[], Some(&found));
-        assert!(p.contains("pages with facts whose cited code changed: `/openwiki/a.md` (`src/a.rs`, `src/b.rs`); files added since the last update: `src/c.rs`."), "{p}");
+        assert!(p.contains("pages with facts whose cited code changed: `/openwiki/a.md` (`src/a.rs`, `src/b.rs`); files added since the last update: `src/c.rs`; files with new definitions or larger changes: `src/d.rs`."), "{p}");
         assert!(!run_prompt_with("create", "", &[], Some(&found)).contains("check before"));
         assert!(!run_prompt_with("update", "", &[], Some(&json!({"recorded": false, "reason": "x"}))).contains("check before"));
         let many = json!({"added": (0..40).map(|i| format!("f{i}")).collect::<Vec<_>>()});

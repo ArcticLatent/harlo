@@ -1157,18 +1157,20 @@ pub enum Quiet {
     /// last one looked at.
     Recorded { commits: u32 },
     /// A model is needed, and why: `stale` pages with the cited files that
-    /// changed under them, `added` files no page may cover yet.
-    Needed { reason: String, stale: Vec<(String, Vec<String>)>, added: Vec<String> },
+    /// changed under them, `added` files no page may cover yet, `grown`
+    /// files with a new definition or a larger change.
+    Needed { reason: String, stale: Vec<(String, Vec<String>)>, added: Vec<String>, grown: Vec<String> },
 }
 
 impl Quiet {
     pub fn to_json(&self) -> Value {
         match self {
             Quiet::Recorded { commits } => json!({ "recorded": true, "commits": commits }),
-            Quiet::Needed { reason, stale, added } => json!({
+            Quiet::Needed { reason, stale, added, grown } => json!({
                 "recorded": false, "reason": reason,
                 "stale": stale.iter().map(|(p, f)| json!({ "page": p, "files": f })).collect::<Vec<_>>(),
                 "added": added,
+                "grown": grown,
             }),
         }
     }
@@ -1176,13 +1178,15 @@ impl Quiet {
 
 /// harlo: an update done without a model when there's nothing for one to
 /// do: a complete last update at a commit, no run under way, every page
-/// in the manifest, no claim whose cited code changed or went, and no
-/// file added since (it may need a page). Then it's recorded as begin's
-/// no-op records one (claims re-anchored, manifest, last update at HEAD,
-/// the same model), else nothing is written. Code the wiki doesn't cite
-/// may change: no page says anything about it.
+/// in the manifest, no claim whose cited code changed or went, no file
+/// added since and no source file with a new top-level definition or
+/// `repo::GROWN_LINES` changed lines (either may need saying). Then it's
+/// recorded as begin's no-op records one (claims re-anchored, manifest,
+/// last update at HEAD, the same model), else nothing is written but the
+/// manifest entries begin would seed. Small edits to code the wiki
+/// doesn't cite need no update: no page says anything about them.
 pub fn quiet_update(root: &Path) -> Result<Quiet> {
-    let needed = |r: &str| Ok(Quiet::Needed { reason: r.to_owned(), stale: Vec::new(), added: Vec::new() });
+    let needed = |r: &str| Ok(Quiet::Needed { reason: r.to_owned(), stale: Vec::new(), added: Vec::new(), grown: Vec::new() });
     inside(root, "openwiki")?;
     if read_state(root)?.is_some() {
         return needed("a run is under way");
@@ -1193,28 +1197,50 @@ pub fn quiet_update(root: &Path) -> Result<Quiet> {
         return needed("the last update's commit is gone");
     }
     let ignore = Ignore::load(root).map_err(|e| other(e.to_string()))?;
-    let added = repo::added_paths(root, &ignore, &base);
-    if !added.is_empty() {
-        return Ok(Quiet::Needed { reason: format!("{} new file{}", added.len(), if added.len() == 1 { "" } else { "s" }), stale: Vec::new(), added });
-    }
     let initial = Store::new(root).discover_pages()?;
     seed_manifest(root, &initial, &base)?;
     let m = read_manifest(root)?;
-    if !initial.iter().all(|p| m.contains_key(p)) {
-        return needed("some pages were never finished");
-    }
-    let mut rt = prepare_claims(root, &ignore, "update", false)?;
-    if !rt.issues.is_empty() {
-        let mut stale: Vec<(String, Vec<String>)> = Vec::new();
-        for i in &rt.issues {
-            let files: Vec<String> = i.resources.iter().filter_map(|r| claims::parse_resource(r).ok().map(|r| r.path)).collect();
-            match stale.iter_mut().find(|(p, _)| *p == i.page) {
-                Some((_, f)) => f.extend(files.into_iter().filter(|x| !f.contains(x)).collect::<Vec<_>>()),
-                None => stale.push((i.page.clone(), files.into_iter().fold(Vec::new(), |mut v, x| { if !v.contains(&x) { v.push(x) } v }))),
+    let unfinished = !initial.iter().all(|p| m.contains_key(p));
+    let added = repo::added_paths(root, &ignore, &base);
+    let grown: Vec<String> = repo::grown_paths(root, &ignore, &base).into_iter().filter(|p| !added.contains(p)).collect();
+    // (Claims it can't read: a model's run says what's wrong with them.)
+    let rt = prepare_claims(root, &ignore, "update", false);
+    let unreadable = rt.is_err();
+    let mut stale: Vec<(String, Vec<String>)> = Vec::new();
+    for i in rt.as_ref().map(|r| r.issues.as_slice()).unwrap_or_default() {
+        let mut files: Vec<String> = Vec::new();
+        for f in i.resources.iter().filter_map(|r| claims::parse_resource(r).ok().map(|r| r.path)) {
+            if !files.contains(&f) {
+                files.push(f);
             }
         }
-        return Ok(Quiet::Needed { reason: format!("{} page{} cite changed code", stale.len(), if stale.len() == 1 { "" } else { "s" }), stale, added: Vec::new() });
+        match stale.iter_mut().find(|(p, _)| *p == i.page) {
+            Some((_, have)) => {
+                for f in files {
+                    if !have.contains(&f) {
+                        have.push(f);
+                    }
+                }
+            }
+            None => stale.push((i.page.clone(), files)),
+        }
     }
+    if unreadable || unfinished || !stale.is_empty() || !added.is_empty() || !grown.is_empty() {
+        let n = |k: usize, one: &str, many: &str| format!("{k} {}", if k == 1 { one } else { many });
+        let reason = [
+            unreadable.then(|| "its claims couldn't be read".to_owned()),
+            unfinished.then(|| "some pages were never finished".to_owned()),
+            (!stale.is_empty()).then(|| n(stale.len(), "page cites", "pages cite") + " changed code"),
+            (!added.is_empty()).then(|| n(added.len(), "new file", "new files")),
+            (!grown.is_empty()).then(|| n(grown.len(), "file", "files") + " with new definitions or larger changes"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(", ");
+        return Ok(Quiet::Needed { reason, stale, added, grown });
+    }
+    let Ok(mut rt) = rt else { return needed("its claims couldn't be read") };
     let commits = repo::git_lines(root, &["rev-list", "--count", &format!("{base}..HEAD"), "--", ".", ":(exclude)openwiki"]).first().and_then(|n| n.trim().parse().ok()).unwrap_or(0);
     // (As begin's no-op: the code must hold still while it's recorded.)
     let first = repo::source_snapshot(root, &ignore).map_err(other)?;
@@ -1836,6 +1862,8 @@ mod tests {
         git(&["init", "-q"]);
         std::fs::write(r.join("src/a.rs"), "// a\npub const LIMIT: u32 = 100;\n").unwrap();
         std::fs::write(r.join("src/b.rs"), "fn b() {}\n").unwrap();
+        std::fs::create_dir_all(r.join("tests")).unwrap();
+        std::fs::write(r.join("tests/t.rs"), "fn t() {}\n").unwrap();
         commit("code");
         // A wiki of one page with one claim, written as a model would.
         let mut w = Writer::new("harlo");
@@ -1858,6 +1886,19 @@ mod tests {
         commit("b");
         assert_eq!(quiet_update(&r).unwrap(), Quiet::Recorded { commits: 1 });
         assert_eq!(last_head(), head());
+        // A new function in code no page cites, or a bigger change: a
+        // model, then nothing recorded; a test's new function, no.
+        let at = last_head();
+        std::fs::write(r.join("src/b.rs"), "fn b() { let _ = 1; }\n\npub fn ship() {}\n").unwrap();
+        assert_eq!(quiet_update(&r).unwrap(), Quiet::Needed { reason: "1 file with new definitions or larger changes".into(), stale: Vec::new(), added: Vec::new(), grown: vec!["src/b.rs".into()] });
+        let lines: String = (0..60).map(|i| format!("    let _x{i} = {i};\n")).collect();
+        std::fs::write(r.join("src/b.rs"), format!("fn b() {{\n{lines}}}\n")).unwrap();
+        assert!(matches!(quiet_update(&r).unwrap(), Quiet::Needed { grown, .. } if grown == vec!["src/b.rs".to_owned()]), "60 lines");
+        assert_eq!(last_head(), at);
+        git(&["checkout", "-q", "--", "src/b.rs"]);
+        std::fs::write(r.join("tests/t.rs"), "fn t() {}\nfn u() {}\n").unwrap();
+        commit("another test");
+        assert_eq!(quiet_update(&r).unwrap(), Quiet::Recorded { commits: 1 });
         // The cited line moved down.
         std::fs::write(r.join("src/a.rs"), "// a\n// more\n\npub const LIMIT: u32 = 100;\n").unwrap();
         commit("moved");
@@ -1878,16 +1919,24 @@ mod tests {
         let before = last_head();
         // A new file, committed or not.
         std::fs::write(r.join("src/c.rs"), "fn c() {}\n").unwrap();
-        assert_eq!(quiet_update(&r).unwrap(), Quiet::Needed { reason: "1 new file".into(), stale: Vec::new(), added: vec!["src/c.rs".into()] });
+        assert_eq!(quiet_update(&r).unwrap(), Quiet::Needed { reason: "1 new file".into(), stale: Vec::new(), added: vec!["src/c.rs".into()], grown: Vec::new() });
         commit("c");
         assert!(matches!(quiet_update(&r).unwrap(), Quiet::Needed { added, .. } if added == vec!["src/c.rs".to_owned()]));
         assert_eq!(last_head(), before);
+        // Claims it can't read: a model, what else it found kept.
+        let sidecar = r.join("openwiki/.claims/quickstart.json");
+        let kept = std::fs::read(&sidecar).unwrap();
+        std::fs::write(&sidecar, "{}").unwrap();
+        std::fs::write(r.join("src/d.rs"), "fn d() {}\n").unwrap();
+        assert_eq!(quiet_update(&r).unwrap(), Quiet::Needed { reason: "its claims couldn't be read, 2 new files".into(), stale: Vec::new(), added: vec!["src/c.rs".into(), "src/d.rs".into()], grown: Vec::new() });
+        std::fs::write(&sidecar, kept).unwrap();
+        std::fs::remove_file(r.join("src/d.rs")).unwrap();
         // A run under way (an update begun, not finished): not now.
         std::fs::remove_file(r.join("src/c.rs")).unwrap();
         commit("no c");
         let mut w = Writer::new("harlo");
         w.call("openwiki_begin", &json!({"root": r.to_string_lossy(), "mode": "update", "force": true})).unwrap();
-        assert_eq!(quiet_update(&r).unwrap(), Quiet::Needed { reason: "a run is under way".into(), stale: Vec::new(), added: Vec::new() });
+        assert_eq!(quiet_update(&r).unwrap(), Quiet::Needed { reason: "a run is under way".into(), stale: Vec::new(), added: Vec::new(), grown: Vec::new() });
         let _ = std::fs::remove_dir_all(&r);
     }
 
