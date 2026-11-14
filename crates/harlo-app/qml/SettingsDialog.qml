@@ -37,6 +37,7 @@ Popup {
         { id: "shortcuts", title: "Shortcuts", icon: "command", group: "harlo", keywords: "keyboard keys hotkeys" },
         { id: "usage", title: "Usage", icon: "bar-chart-2", group: "harlo", keywords: "stats statistics tokens cost models tools" },
         { id: "projects", title: "Projects", icon: "folder-3", group: "workspace", keywords: "project icon colour color name harness setup remove wiki openwiki docs plan steps commit review" },
+        { id: "wiki", title: "Wiki", icon: "book-open", group: "workspace", keywords: "wiki openwiki writer model agent thinking create update continue cheaper cheap cost tokens spend" },
         { id: "worktrees", title: "Worktrees", icon: "git-branch", group: "workspace", keywords: "worktree folder location branch settled shelf finished merged closed pull request quiet archive" },
         { id: "git", title: "Git", icon: "git-repository", group: "workspace", keywords: "undo snapshot turn revert rollback github gitlab forgejo codeberg gitea hosting sign in login token credentials changes count repository hidden sidebar uncommitted commit message model ai" },
         { id: "schedules", title: "Schedules", icon: "history", group: "workspace", keywords: "schedule scheduled prompt cron timer daily weekday every hour morning automatic run" },
@@ -198,6 +199,103 @@ Popup {
         color: Theme.raised
         border.color: Theme.hairline
         ColumnLayout { id: groupCol; width: parent.width; spacing: 0 }
+    }
+    // Who writes the wiki for one kind of run (Settings → Wiki): agent,
+    // model and thinking, kept in `wiki_writer` under `op`.
+    component WikiWriter: Group {
+        id: writer
+        property string op
+        property string objectPrefix
+        property int rev: 0
+        readonly property var all: {
+            if (rev < 0) return ({})
+            try { return JSON.parse(Workspace.setting("wiki_writer") || "{}") } catch (e) { return ({}) }
+        }
+        // { agent, model, thinking } ({}: the project's own).
+        readonly property var value: all[op] || ({})
+        readonly property var providers: Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()).filter(p => p.canChat && p.enabled && p.state !== "missing") : []
+        readonly property var provider: providers.find(p => p.id === value.agent) || null
+        readonly property var levels: ["", "low", "medium", "high"]
+        // Model servers: the agent's, and which are up.
+        readonly property var servers: Accounts.revision >= 0 && provider ? JSON.parse(Accounts.servers(provider.id)) : []
+        readonly property var states: Accounts.serverStates !== "" ? JSON.parse(Accounts.serverStates) : ({})
+        function serverOf(id) { return servers.find(sv => id.split("/")[0] === sv.name) || null }
+        function up(id) { const sv = serverOf(id); const st = sv ? states[sv.baseUrl] : null; return !st || st.state === "running" || st.state === "starting" }
+        // Local models whose server is up first, then online ones, then
+        // local ones whose server is stopped.
+        readonly property var models: {
+            if (!provider) return []
+            const all = (provider.modelIds || []).map((id, i) => ({ id: id, name: Theme.modelLabel((provider.models || [])[i] || id), local: (provider.localIds || []).indexOf(id) >= 0 }))
+            const rank = m => !m.local ? 1 : up(m.id) ? 0 : 2
+            return all.sort((a, b) => rank(a) - rank(b)).map(m => Object.assign(m, { label: m.name + (!m.local ? "" : up(m.id) ? " · local" : " · local, server stopped") }))
+        }
+        function save(v) {
+            const next = Object.assign({}, all)
+            if (v.agent) next[op] = v; else delete next[op]
+            Workspace.setSetting("wiki_writer", Object.keys(next).length ? JSON.stringify(next) : "")
+            rev++
+            Workspace.wikiWriterChanged()
+        }
+        function change(k, x) { const v = Object.assign({}, value); v[k] = x; save(v) }
+        Component.onCompleted: { Workspace.ensureProviders(); Accounts.loadServers() }
+        onServersChanged: { const urls = [...new Set(servers.filter(sv => sv.place !== "online").map(sv => sv.baseUrl))]; if (urls.length) Accounts.checkServers(JSON.stringify(urls)) }
+        SettingRow {
+            title: "Agent"
+            detail: writer.provider ? "A " + writer.provider.label + " session writes it, with the model and thinking below." : "Each project's own agent and model write it."
+            icon: "robot-2"
+            ComboField {
+                objectName: writer.objectPrefix + "Agent"
+                width: 230
+                model: ["Same as the project"].concat(writer.providers.map(p => p.label))
+                function at() { return writer.provider ? writer.providers.indexOf(writer.provider) + 1 : 0 }
+                currentIndex: at()
+                onModelChanged: currentIndex = Qt.binding(() => at())
+                onActivated: i => {
+                    writer.save(i === 0 ? {} : { agent: writer.providers[i - 1].id, model: "", thinking: "" })
+                    currentIndex = Qt.binding(() => at())
+                }
+            }
+        }
+        SettingRow {
+            visible: writer.provider !== null
+            divider: true
+            title: "Model"
+            detail: writer.provider && writer.provider.state === "checking" ? "Finding " + writer.provider.label + "'s models…"
+                  : writer.models.some(m => m.local) ? "Local models, from Model servers, come first: they spend no API money."
+                  : "Add a server in Model servers to write it with a local model, spending no API money."
+            icon: "sparkling"
+            ComboField {
+                objectName: writer.objectPrefix + "Model"
+                width: 230
+                readonly property var ids: writer.models.map(m => m.id)
+                model: ["Default model"].concat(writer.models.map(m => m.label))
+                function at() { return !writer.value.model ? 0 : ids.indexOf(writer.value.model) + 1 }
+                currentIndex: at()
+                onModelChanged: currentIndex = Qt.binding(() => at())
+                onActivated: i => {
+                    writer.change("model", i > 0 ? ids[i - 1] || "" : "")
+                    currentIndex = Qt.binding(() => at())
+                }
+            }
+        }
+        SettingRow {
+            visible: writer.provider !== null
+            divider: true
+            title: "Thinking"
+            detail: "How hard it thinks: more is slower and costs more."
+            icon: "speed"
+            ComboField {
+                objectName: writer.objectPrefix + "Thinking"
+                width: 230
+                model: ["Default", "Low", "Medium", "High"]
+                function at() { return Math.max(0, writer.levels.indexOf(writer.value.thinking || "")) }
+                currentIndex: at()
+                onActivated: i => {
+                    writer.change("thinking", writer.levels[i])
+                    currentIndex = Qt.binding(() => at())
+                }
+            }
+        }
     }
     // Title and description on the left, a control on the right.
     component SettingRow: Item {
@@ -685,7 +783,7 @@ Popup {
                     Layout.fillWidth: true
                     sourceComponent: ({
                         general: generalPage, appearance: appearancePage, notifications: notificationsPage, voice: voicePage, devices: devicesPage,
-                        shortcuts: shortcutsPage, projects: projectsPage, worktrees: worktreesPage, git: gitPage, schedules: schedulesPage, providers: providersPage, servers: serversPage, remote: remotePage, mcp: mcpPage, orchestration: orchestrationPage,
+                        shortcuts: shortcutsPage, projects: projectsPage, wiki: wikiPage, worktrees: worktreesPage, git: gitPage, schedules: schedulesPage, providers: providersPage, servers: serversPage, remote: remotePage, mcp: mcpPage, orchestration: orchestrationPage,
                         about: aboutPage
                     })[root.page] || null
                 }
@@ -2060,6 +2158,26 @@ Popup {
     }
 
     Component {
+        id: wikiPage
+        ColumnLayout {
+            spacing: 0
+            SectionHeader {
+                title: "Creating a wiki"
+                subtitle: "Reads the whole repository and plans every page: the biggest job, where a stronger model pays off."
+                more: "Create, and Continue on a first run that stopped, is a session of this agent spending its model's tokens. Unset, a project's own agent and model write it. On another machine, the project's model writes it (the one chosen here may not be there). Turning a project's wiki on or off is in Projects."
+            }
+            WikiWriter { op: "create"; objectPrefix: "wikiCreate" }
+            SectionHeader {
+                Layout.topMargin: 28
+                title: "Updating it"
+                subtitle: "Rewrites only the pages whose cited code changed: focused work a cheaper or local model does well."
+                more: "Update first checks, with no model, whether any fact's code changed or files were added; when none did, harlo records the update itself and no session starts. Otherwise a session of this agent updates the pages that need it."
+            }
+            WikiWriter { op: "update"; objectPrefix: "wikiWriter" }
+        }
+    }
+
+    Component {
         id: worktreesPage
         ColumnLayout {
             spacing: 0
@@ -2638,7 +2756,7 @@ Popup {
                     SettingRow {
                         title: "Wiki"
                         detail: "A wiki of this project in openwiki/, written by your agent from the code. Agents search it and read the sections they need. On unless you switch it off."
-                        more: "Create and update it from the Wiki panel (right edge); each run spends your model's tokens. Its pages and tools follow OpenWiki's (MIT), built into harlo."
+                        more: "Create and update it from the Wiki panel (right edge); each run spends the tokens of the model that writes it (Settings → Wiki). Its pages and tools follow OpenWiki's (MIT), built into harlo."
                         icon: "book-open"
                         AppSwitch {
                             objectName: "projectWiki"

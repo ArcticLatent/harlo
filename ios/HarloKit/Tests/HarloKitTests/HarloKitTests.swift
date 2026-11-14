@@ -1167,6 +1167,12 @@ final class PlanTests: XCTestCase {
         up.behind = 0
         XCTAssertEqual(up.freshness(now: now), "Updated 3 days ago · up to date")
         XCTAssertFalse(up.wantsUpdate)
+        // An Update checking first, and one harlo recorded without a model.
+        XCTAssertEqual(Wiki(["project": 3, "exists": true, "checking": true, "last": ["at": "2026-11-08T12:00:00Z"], "behind": 1]).freshness(now: now), "Checking what changed…")
+        let quiet = Wiki(["project": 3, "exists": true, "last": ["at": "2026-11-11T11:59:30Z"], "behind": 0, "quiet": ["at": "2026-11-11T11:59:30Z", "commits": 2]])
+        XCTAssertEqual(quiet.quietCommits, 2)
+        XCTAssertEqual(quiet.freshness(now: now), "Updated just now · up to date · 2 commits checked, none change what it says, so no model ran")
+        XCTAssertNil(wiki.quietCommits)
         // Its graph, as the desktop draws it; code links' files in the
         // repository.
         XCTAssertEqual(wiki.mermaid, "flowchart LR\n  p0[\"Quickstart\"]\n  p1[\"Jobs\"]\n  p0 --> p1\n")

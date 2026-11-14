@@ -46,7 +46,7 @@ struct WikiSection: View {
                 .padding(.vertical, 2)
                 if wiki.running {
                     running
-                } else if wiki.canWrite {
+                } else if wiki.canWrite && !wiki.checking {
                     runButton(wiki.run != nil ? "continue" : "update", wiki.run != nil ? "Continue the run" : "Update the wiki",
                               wiki.run != nil ? "play.circle" : "arrow.clockwise")
                 }
@@ -57,8 +57,8 @@ struct WikiSection: View {
                  : wiki.enabled ? "Agents search it in sessions started from now on." : "Agents don't use it: switched off in harlo's Wiki panel on the computer.")
         }
         // While a run writes it: how far along, now and then.
-        .task(id: wiki.running) {
-            while wiki.running && !Task.isCancelled {
+        .task(id: wiki.running || wiki.checking) {
+            while (wiki.running || wiki.checking) && !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
                 await model.loadWiki()
             }
@@ -81,7 +81,8 @@ struct WikiSection: View {
             UISelectionFeedbackGenerator().selectionChanged()
             Task {
                 if await model.runWiki(mode) {
-                    notice = "A session on your computer is writing the wiki."
+                    notice = mode == "update" ? "harlo is checking what changed: a session on your computer updates the wiki only if a fact's code changed or files were added."
+                                              : "A session on your computer is writing the wiki."
                 }
             }
         } label: {

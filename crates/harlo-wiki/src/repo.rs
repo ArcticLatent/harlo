@@ -96,6 +96,26 @@ pub fn changed_paths(root: &Path, ignore: &Ignore, base: Option<&str>) -> Vec<St
     out
 }
 
+/// The files a wiki's run sets up beside it (not code it describes).
+const SETUP_FILES: [&str; 4] = ["AGENTS.md", "CLAUDE.md", ".openwikiignore", ".github/workflows/openwiki-update.yml"];
+
+/// harlo: files added since `base` (committed), staged or new in the work
+/// tree, past the wiki's and ignored ones, in code-unit order.
+pub fn added_paths(root: &Path, ignore: &Ignore, base: &str) -> Vec<String> {
+    let mut paths: Vec<String> = git_lines(root, &["diff", "--name-only", "--diff-filter=A", &format!("{base}..HEAD")]);
+    paths.extend(git_lines(root, &["diff", "--name-only", "--diff-filter=A", "HEAD"]));
+    paths.extend(git_lines(root, &["ls-files", "--others", "--exclude-standard"]));
+    let mut out: Vec<String> = Vec::new();
+    for p in paths.iter().map(|p| normalize_git_path(p)) {
+        // (Added, then deleted again: not there.)
+        if !p.is_empty() && !is_wiki_path(&p) && !SETUP_FILES.contains(&p.as_str()) && !ignore.ignores(&p, false) && !out.contains(&p) && root.join(&p).exists() {
+            out.push(p);
+        }
+    }
+    out.sort_by(|a, b| util::cmp16(a, b));
+    out
+}
+
 const COMMITS: usize = 20;
 const SUBJECT_CHARS: usize = 200;
 const BODY_CHARS: usize = 400;

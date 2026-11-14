@@ -143,9 +143,18 @@ pub fn ignored(root: &Path) -> Vec<String> {
 /// blocks reading them, but the session reads with its agent's tools, so
 /// it's told), then OpenWiki's own steps (from its skill).
 pub fn run_prompt(mode: &str, run_mode: &str, ignored: &[String]) -> String {
+    run_prompt_with(mode, run_mode, ignored, None)
+}
+
+/// The same, with what harlo's check before an update found
+/// (`quiet_update`'s answer when a model is needed): the pages whose
+/// cited code changed and the files added, so the session starts there.
+pub fn run_prompt_with(mode: &str, run_mode: &str, ignored: &[String], found: Option<&Value>) -> String {
     let ask = match mode {
         "create" => "Create this repository's wiki with OpenWiki: call openwiki_begin with mode \"init\".".to_owned(),
         "update" => "Update this repository's wiki with OpenWiki, so it matches the code again: call openwiki_begin with mode \"update\".".to_owned(),
+        // (harlo found nothing stale and recorded it: asked for anyway.)
+        "update-anyway" => "Update this repository's wiki with OpenWiki, so it matches the code again: call openwiki_begin with mode \"update\" and force true. harlo found no fact whose code changed, so look over the pages for anything the code now does that they miss or get wrong.".to_owned(),
         _ => format!("Continue the OpenWiki run that stopped part way in this repository: call openwiki_begin with mode \"{}\", then go on from where its queue is.", if run_mode == "init" { "init" } else { "update" }),
     };
     let steps = harlo_wiki::AUTHORING;
@@ -158,7 +167,47 @@ pub fn run_prompt(mode: &str, run_mode: &str, ignored: &[String]) -> String {
             ignored.iter().map(|r| format!("`{r}`")).collect::<Vec<_>>().join(", ")
         )
     };
-    format!("{}{ask}{keep_out}\n\nharlo fills in `root` for every openwiki tool, so leave it out (and skip resolving the top-level). Write only the wiki: never change the code. OpenWiki's steps:\n\n{steps}", crate::transcript::HARLO_PREFIX)
+    let focus = found.filter(|_| mode == "update").map(change_note).unwrap_or_default();
+    format!("{}{ask}{focus}{keep_out}\n\nharlo fills in `root` for every openwiki tool, so leave it out (and skip resolving the top-level). Write only the wiki: never change the code. OpenWiki's steps:\n\n{steps}", crate::transcript::HARLO_PREFIX)
+}
+
+/// "\n\nharlo's check before this session found …": the stale pages
+/// (with the cited files that changed) and the files added, a few of each.
+fn change_note(found: &Value) -> String {
+    const PAGES: usize = 20;
+    const FILES: usize = 30;
+    let list = |v: Vec<String>, max: usize| {
+        let more = v.len().saturating_sub(max);
+        let mut out = v.into_iter().take(max).collect::<Vec<_>>().join(", ");
+        if more > 0 {
+            out.push_str(&format!(" and {more} more"));
+        }
+        out
+    };
+    let stale: Vec<String> = found["stale"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|p| {
+            let files: Vec<String> = p["files"].as_array().into_iter().flatten().filter_map(|f| f.as_str()).map(|f| format!("`{f}`")).collect();
+            format!("`{}` ({})", p["page"].as_str().unwrap_or_default(), list(files, 5))
+        })
+        .collect();
+    let added: Vec<String> = found["added"].as_array().into_iter().flatten().filter_map(|f| f.as_str()).map(|f| format!("`{f}`")).collect();
+    let mut parts = Vec::new();
+    if !stale.is_empty() {
+        parts.push(format!("pages with facts whose cited code changed: {}", list(stale, PAGES)));
+    }
+    if !added.is_empty() {
+        parts.push(format!("files added since the last update: {}", list(added, FILES)));
+    }
+    if parts.is_empty() {
+        return String::new();
+    }
+    format!(
+        "\n\nharlo's check before this session found {}. Start your research there and leave pages these don't touch as they are, unless openwiki_begin's queue asks for them.",
+        parts.join("; ")
+    )
 }
 
 // ---- The tool server ----
@@ -366,6 +415,28 @@ pub fn prepare_writer(root: &Path) -> Result<()> {
     match remote::split(root) {
         Some((h, d)) => agent_server(&h, Some(&d)).map(|_| ()),
         None => Ok(()),
+    }
+}
+
+/// An Update with nothing for a model to redo, recorded without one, on
+/// the repository's machine (`harlo_wiki::run::quiet_update`): `{
+/// recorded: true, commits }`, else `{ recorded: false, reason, stale:
+/// [{ page, files }], added }` and nothing written.
+pub fn quiet_update(root: &Path) -> Result<Value> {
+    match remote::split(root) {
+        None => {
+            let dir = root.to_string_lossy().into_owned();
+            // (Not while this machine's writer for it is in a call.)
+            let w = local_writer(&dir);
+            let _held = w.lock().unwrap();
+            harlo_wiki::run::quiet_update(root).map(|q| q.to_json()).map_err(|e| anyhow::anyhow!(harlo_wiki::run::error_text(e)))
+        }
+        Some((h, d)) => {
+            let host = remote::host(&h).ok_or_else(|| anyhow::anyhow!("No remote instance named {h}"))?;
+            let agent = crate::agent_host::program_on(&h)?;
+            let out = remote::run_ok(&host, &format!("exec {} wiki --quiet-update {} </dev/null", remote::quote_path(&agent), remote::quote_path(&d)), Duration::from_secs(120))?;
+            serde_json::from_str(out.trim()).map_err(|_| anyhow::anyhow!("{h}'s harlo-agent didn't check the wiki"))
+        }
     }
 }
 
@@ -1474,6 +1545,14 @@ esac; done"#
         assert!(run_prompt("continue", "init", &[]).contains("mode \"init\""));
         assert!(run_prompt("continue", "update", &[]).contains("mode \"update\""));
         assert!(run_prompt("update", "", &[]).contains("openwiki_submit_plan"));
+        // What the check found leads an update, not the others.
+        let found = json!({"recorded": false, "stale": [{"page": "/openwiki/a.md", "files": ["src/a.rs", "src/b.rs"]}], "added": ["src/c.rs"]});
+        let p = run_prompt_with("update", "", &[], Some(&found));
+        assert!(p.contains("pages with facts whose cited code changed: `/openwiki/a.md` (`src/a.rs`, `src/b.rs`); files added since the last update: `src/c.rs`."), "{p}");
+        assert!(!run_prompt_with("create", "", &[], Some(&found)).contains("check before"));
+        assert!(!run_prompt_with("update", "", &[], Some(&json!({"recorded": false, "reason": "x"}))).contains("check before"));
+        let many = json!({"added": (0..40).map(|i| format!("f{i}")).collect::<Vec<_>>()});
+        assert!(run_prompt_with("update", "", &[], Some(&many)).contains("`f29` and 10 more"));
     }
 
     #[test]

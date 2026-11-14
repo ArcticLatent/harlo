@@ -8910,6 +8910,24 @@ ApplicationWindow {
             win.check(win.findName("wikiRun", wikiPanel).variant === "outline", "Update is quiet then")
             win.check(win.findText("Agents search it, in sessions started from now on.", wikiPanel) !== null, "and agents use it")
             win.shotWindow("clicks-wiki-created")
+            // A commit to a line no fact cites (click-tests.sh makes it).
+            win.log("wiki-quiet-now") } }
+        ScriptAction { script: win.waitUntil(wikiPanelSteps, () => { wikiPanel.load(); return wikiPanel.st.behind === 1 }, 15000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(win.wikiFresh() === "Updated just now · 1 commit since", "a commit behind (" + win.wikiFresh() + ")")
+            win.wikiKeyBefore = Workspace.activeKey
+            win.wikiSessionsBefore = Workspace.sessionCount
+            win.clickItem(win.findName("wikiRun", wikiPanel), "Update") } }
+        ScriptAction { script: win.waitUntil(wikiPanelSteps, () => !!wikiPanel.st.quiet, 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(win.wikiFresh() === "Updated just now · up to date · 1 commit checked, none change what it says, so no model ran",
+                      "nothing it says changed: harlo records the update, no model (" + win.wikiFresh() + ")")
+            win.check(Workspace.activeKey === win.wikiKeyBefore && Workspace.sessionCount === win.wikiSessionsBefore, "and no session starts")
+            const run = win.findName("wikiRun", wikiPanel)
+            win.check(run && run.text === "Update anyway" && run.variant === "outline", "Update anyway, if wanted (" + (run ? run.text : "") + ")")
+            win.shotWindow("clicks-wiki-quiet")
             win.clickItem(win.findName("wikiSwitch", wikiPanel), "the panel's Wiki switch") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
@@ -9156,6 +9174,13 @@ ApplicationWindow {
     // Merged work changing code the wiki cites: an offer in the corner to
     // update it; Not now holds until main moves again; Update starts the
     // update's session.
+    property int wikiBehindBefore: 0
+    property int wikiSessionsBefore: 0
+    property string wikiPanelWriter: ""
+    function wikiFresh() {
+        const f = win.findName("wikiFreshness", wikiPanel)
+        return f ? f.text.replace(/\u00a0/g, " ") : ""
+    }
     SequentialAnimation {
         id: wikiOfferSteps
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlowikioffer"
@@ -9184,21 +9209,73 @@ ApplicationWindow {
             win.check(win.findName("wikiOffer-" + win.wikiProject) === null, "Not now: it goes")
             Workspace.checkWikiOffers() } }
         PauseAnimation { duration: 1500 }
+        // A commit made outside harlo while the Wiki panel is open: the
+        // panel counts it once the regular look at the branches sees them move.
         ScriptAction { script: {
             win.check(win.findName("wikiOffer-" + win.wikiProject) === null, "and doesn't come back while main stays where it is")
+            win.openDraft(win.wikiProject)
+            windowSettings.rightMode = "wiki" } }
+        ScriptAction { script: win.waitUntil(wikiOfferSteps, () => /commits? since/.test(win.wikiFresh()), 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.wikiBehindBefore = parseInt(win.wikiFresh().split("· ")[1])
+            win.log("wiki-commit-now") } }
+        ScriptAction { script: win.waitUntil(wikiOfferSteps, () => { Workspace.checkWikiOffers(); return parseInt(win.wikiFresh().split("· ")[1]) === win.wikiBehindBefore + 1 }, 15000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.check(parseInt(win.wikiFresh().split("· ")[1]) === win.wikiBehindBefore + 1, "a commit made elsewhere shows in the open panel (" + win.wikiBehindBefore + " → " + win.wikiFresh() + ")")
+            windowSettings.rightMode = ""
             // (As if main had moved since.)
             Workspace.setSetting("wiki_seen_" + win.wikiProject, "")
             Workspace.checkWikiOffers() } }
         ScriptAction { script: win.waitUntil(wikiOfferSteps, () => win.findName("wikiOffer-" + win.wikiProject) !== null, 10000) }
         PauseAnimation { duration: 400 }
+        // Settings → Wiki: Harlo with Fake Coder, thinking low, writes
+        // every wiki (the project's own model is Fake Helper).
+        ScriptAction { script: settingsDialog.openPage("wiki") }
+        ScriptAction { script: win.waitUntil(wikiOfferSteps, () => { const c = win.findName("wikiWriterAgent", settingsDialog.contentItem); return c && c.model.indexOf("Harlo") > 0 }, 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const agent = win.findName("wikiWriterAgent", settingsDialog.contentItem)
+            win.check(agent.currentText === "Same as the project", "unset, each project's own agent writes its wiki (" + agent.currentText + ")")
+            agent.activated(agent.model.indexOf("Harlo")) } }
+        ScriptAction { script: win.waitUntil(wikiOfferSteps, () => { const c = win.findName("wikiWriterModel", settingsDialog.contentItem); return c && c.visible && c.model.length > 1 }, 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const model = win.findName("wikiWriterModel", settingsDialog.contentItem)
+            model.activated(model.ids.indexOf("fake/fake-coder") + 1)
+            const thinking = win.findName("wikiWriterThinking", settingsDialog.contentItem)
+            thinking.activated(1)
+            const v = JSON.parse(Workspace.setting("wiki_writer") || "{}")
+            win.check(JSON.stringify(v) === JSON.stringify({ update: { agent: "harlo", model: "fake/fake-coder", thinking: "low" } }), "Settings → Wiki keeps Update's agent, model and thinking, Create's unset (" + JSON.stringify(v) + ")")
+            const create = win.findName("wikiCreateAgent", settingsDialog.contentItem)
+            win.check(create && create.currentText === "Same as the project", "Create has its own (" + (create ? create.currentText : "") + ")")
+            // (The stand-in models are served on this computer: local.)
+            win.check(model.model.slice(1).every(m => / · local$/.test(m)), "models from a server here say local (" + JSON.stringify(model.model) + ")")
+            win.shotWindow("clicks-harlo-wiki-writer")
+            settingsDialog.close()
+            // (As it reads when shown.)
+            wikiPanel.load()
+            win.wikiPanelWriter = wikiPanel.updaterText } }
+        PauseAnimation { duration: 300 }
         ScriptAction { script: {
             win.wikiKeyBefore = Workspace.activeKey
             win.clickItem(win.findName("wikiOfferUpdate", win.findName("wikiOffer-" + win.wikiProject)), "Update the wiki") } }
         ScriptAction { script: win.waitUntil(wikiOfferSteps, () => Workspace.activeKey !== win.wikiKeyBefore && chat.session.key === Workspace.activeKey && chat.session.title === "Wiki: update", 20000) }
+        ScriptAction { script: win.waitUntil(wikiOfferSteps, () => JSON.stringify(win.modelRequests().map(r => r.messages || [])).indexOf("Update this repository's wiki") >= 0, 20000) }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             win.check(chat.session.title === "Wiki: update", "Update starts the update's session (" + chat.session.title + ")")
             win.check(win.findName("wikiOffer-" + win.wikiProject) === null, "and the offer goes")
+            // (Its thinking is asked for too; the stand-in model has none.)
+            win.check(chat.session.modelId.endsWith("fake-coder"), "written with the wiki's model, not the project's (" + chat.session.modelId + ")")
+            const w = JSON.parse(Workspace.wikiWriterJson("project:" + win.wikiProject))
+            win.check(w.update.model === "fake/fake-coder" && w.create.model === "fake/fake-helper", "Update's writer, Create's the project's (" + JSON.stringify(w) + ")")
+            // (Its prompt: where the check found change.)
+            const asked = JSON.stringify(win.modelRequests().map(r => r.messages || []))
+            const at = asked.indexOf("check before this session found")
+            win.check(at >= 0 && asked.indexOf("src/c.rs", at) >= 0, "the update starts where the check found change (" + (at >= 0 ? asked.slice(at, at + 260) : "not said") + ")")
+            win.check(win.wikiPanelWriter === "Written by Harlo with " + Theme.modelLabel("fake/fake-coder") + " (Settings → Wiki)", "and the panel says who updates it (" + win.wikiPanelWriter + ")")
             win.summary(); Qt.quit() } }
     }
 
@@ -9237,17 +9314,25 @@ ApplicationWindow {
             } } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: win.waitUntil(wikiRealSteps, () => win.harloKey !== "" ? chat.session.modelName !== "" || chat.session.harness === "claude"
-                                                                         : Workspace.activeKey !== win.wikiKeyBefore && Workspace.activeKey !== "", 120000) }
+                                                                         : Workspace.activeKey !== win.wikiKeyBefore && Workspace.activeKey !== "" || !!JSON.parse(Workspace.wikiJson("project:" + win.wikiProject)).quiet, 120000) }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
-            win.log("session", chat.session.key, chat.session.harness, chat.session.modelName, chat.session.title)
-            if (win.harloKey === "") {
-                win.harloKey = Workspace.activeKey
-                Workspace.setApprovalMode(win.harloKey, "yolo")
+            // (An update with nothing stale: recorded by harlo, no session.)
+            const quiet = JSON.parse(Workspace.wikiJson("project:" + win.wikiProject))
+            if (win.harloKey === "" && quiet.quiet) {
+                TestInput.writeFile(win.selftestDir + "/wiki-real.json", JSON.stringify({ mode: win.argValue("--wiki-mode="), quiet: quiet.quiet, wiki: quiet }, null, 1))
+                win.log("done quiet", quiet.quiet.commits, "commits")
+                Qt.quit()
             } else {
-                chat.session.send(TestInput.readFile(win.argValue("--prompt-file=")).trim(), "normal")
-            }
-            win.realStarted = false; win.realQuiet = 0; win.realText = win.chatText().length; win.realBegin = Date.now() } }
+                win.log("session", chat.session.key, chat.session.harness, chat.session.modelName, chat.session.title)
+                if (win.harloKey === "") {
+                    win.harloKey = Workspace.activeKey
+                    Workspace.setApprovalMode(win.harloKey, "yolo")
+                } else {
+                    chat.session.send(TestInput.readFile(win.argValue("--prompt-file=")).trim(), "normal")
+                }
+                win.realStarted = false; win.realQuiet = 0; win.realText = win.chatText().length; win.realBegin = Date.now()
+            } } }
         PauseAnimation { duration: 3000 }
         ScriptAction { script: win.waitUntil(wikiRealSteps, () => {
             if (chat.session.key !== win.harloKey) Workspace.open(win.harloKey)
@@ -9403,6 +9488,24 @@ ApplicationWindow {
             win.check(TestInput.readFile(cwd + "/openwiki/.run.json") === "", "its run state gone")
             win.check(win.hostOpenWiki().length === 0, "with no OpenWiki put on box")
             win.shotWindow("wiki-remote-create")
+            // A commit there to a README line no fact cites (click-tests.sh
+            // makes it): Update checks on box, and needs no model.
+            win.log("wiki-quiet-now") } }
+        ScriptAction { script: win.waitUntil(wikiRemoteSteps, () => (TestInput.readFile(win.argValue("--cwd=") + "2/.git/logs/HEAD") || "").indexOf("commit: more") >= 0, 30000) }
+        // (git writes its log a moment before HEAD moves.)
+        PauseAnimation { duration: 700 }
+        ScriptAction { script: {
+            win.wikiKeyBefore = Workspace.activeKey
+            win.wikiSessionsBefore = Workspace.sessionCount
+            win.check(Workspace.startWikiRun("project:" + win.wikiProject, "update") === "", "Update starts on box") } }
+        ScriptAction { script: win.waitUntil(wikiRemoteSteps, () => !!JSON.parse(Workspace.wikiJson("project:" + win.wikiProject)).quiet, 60000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const st = JSON.parse(Workspace.wikiJson("project:" + win.wikiProject)), cwd = win.argValue("--cwd=") + "2"
+            win.check(st.quiet.commits === 1 && st.behind === 0, "nothing it says changed: recorded on box with no model (" + JSON.stringify(st.quiet) + ", " + st.behind + " behind)")
+            win.check(Workspace.activeKey === win.wikiKeyBefore && Workspace.sessionCount === win.wikiSessionsBefore, "and no session starts")
+            const last = TestInput.readFile(cwd + "/openwiki/.last-update.json") || ""
+            win.check(last.indexOf("\"command\": \"update\"") >= 0 && last.indexOf("\"status\": \"complete\"") >= 0, "the update recorded there (" + last.replace(/\s+/g, " ").slice(0, 160) + ")")
             win.summary(); Qt.quit() } }
     }
 

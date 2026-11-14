@@ -236,6 +236,11 @@ public struct Wiki: Equatable, Sendable {
     public var canWrite: Bool
     /// Still being read on another machine.
     public var loading: Bool
+    /// An Update checking, with no model, whether there's anything to redo.
+    public var checking: Bool
+    /// The last update was harlo's, with no model (nothing was stale): the
+    /// commits it looked at; nil otherwise.
+    public var quietCommits: Int?
     /// The repository's folder (on its machine): code links' files are in it.
     public var root: String
 
@@ -265,12 +270,17 @@ public struct Wiki: Equatable, Sendable {
         canWrite = v["runtime"].bool ?? false
         loading = v["loading"].bool ?? false
         root = v["root"].text
+        checking = v["checking"].bool ?? false
+        quietCommits = v["quiet"].object == nil ? nil : Int(v["quiet"]["commits"].int ?? 0)
     }
 
     public init(pages: [WikiPage] = [], inProject: Bool = true, enabled: Bool = true, exists: Bool = true, run: Run? = nil, updatedAt: String = "",
-                behind: Int? = nil, running: Bool = false, session: String = "", canWrite: Bool = true, loading: Bool = false, root: String = "")
+                behind: Int? = nil, running: Bool = false, session: String = "", canWrite: Bool = true, loading: Bool = false, root: String = "",
+                checking: Bool = false, quietCommits: Int? = nil)
     {
         self.root = root
+        self.checking = checking
+        self.quietCommits = quietCommits
         self.pages = pages
         self.inProject = inProject
         self.enabled = enabled
@@ -285,16 +295,22 @@ public struct Wiki: Equatable, Sendable {
     }
 
     /// Its freshness in words: "Writing pages: 2 of 5", "Updated 3 days ago
-    /// · 4 commits since", "A run stopped part way (1 of 3 pages).".
+    /// · 4 commits since", "A run stopped part way (1 of 3 pages).", "Checking
+    /// what changed…".
     public func freshness(now: Date = Date()) -> String {
         if let r = run, running {
             return r.phase == "planning" || r.total == 0 ? "Planning the wiki…" : "Writing pages: \(r.done) of \(r.total)"
         }
         if let r = run { return "A run stopped part way" + (r.total > 0 ? " (\(r.done) of \(r.total) pages)." : ".") }
         if running { return "Starting a run…" }
+        if checking { return "Checking what changed…" }
         guard !updatedAt.isEmpty else { return "Not written by OpenWiki yet." }
         let when = "Updated " + Wiki.ago(updatedAt, now: now)
         guard let b = behind else { return when }
+        // (harlo recorded it, no model needed.)
+        if let n = quietCommits, b == 0 {
+            return when + " · up to date · " + (n == 0 ? "nothing changed" : "\(n) " + (n == 1 ? "commit" : "commits") + " checked, none change what it says, so no model ran")
+        }
         return b == 0 ? when + " · up to date" : when + " · \(b) " + (b == 1 ? "commit" : "commits") + " since"
     }
 

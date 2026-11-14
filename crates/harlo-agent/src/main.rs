@@ -87,6 +87,14 @@ async fn run(args: Vec<String>) -> Result<()> {
         Some("mcp") => mcp_sign(&args[1..]).await,
         // The wiki's tools over stdio (how harlo reads a wiki on this machine).
         Some("wiki") => {
+            // (`--quiet-update DIR`: harlo's Update with nothing for a model
+            // to redo, recorded here; prints what it found as JSON.)
+            if let Some(dir) = std::env::args().skip_while(|a| a != "--quiet-update").nth(1) {
+                let found = harlo_wiki::tools::repository_root(&dir).and_then(|root| harlo_wiki::run::quiet_update(&root));
+                let v = found.map(|q| q.to_json()).unwrap_or_else(|e| serde_json::json!({ "recorded": false, "reason": harlo_wiki::run::error_text(e) }));
+                println!("{v}");
+                return Ok(());
+            }
             // (`--write HOST`: the writing tools too, run as that host.)
             let host = std::env::args().skip_while(|a| a != "--write").nth(1);
             harlo_wiki::mcp::serve_as(host.as_deref());

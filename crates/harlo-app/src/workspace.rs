@@ -206,6 +206,13 @@ pub mod qobject {
         /// session of harlo's is open there).
         #[qinvokable]
         fn wiki_json(self: &Workspace, key: &QString) -> QString;
+        /// Who writes it: `{ agent, model, thinking }` (Settings → Wiki,
+        /// else the project's), or {}.
+        #[qinvokable]
+        fn wiki_writer_json(self: &Workspace, key: &QString) -> QString;
+        /// Settings → Wiki changed who writes it: open Wiki panels look again.
+        #[qinvokable]
+        fn wiki_writer_changed(self: Pin<&mut Workspace>);
         /// A page of it for reading (`wikiPageReady` brings it).
         #[qinvokable]
         fn request_wiki_page(self: &Workspace, key: &QString, page: &QString);
@@ -1003,6 +1010,16 @@ pub struct WorkspaceRust {
     wiki_offers: Vec<(i64, harlo_core::openwiki::MergeOffer)>,
     /// Looking for them now.
     wiki_offer_checking: bool,
+    /// Each wiki project's branches and HEAD as last looked at: when they
+    /// move (a commit, here or elsewhere), an open Wiki panel reads how far
+    /// behind it is again.
+    wiki_heads: HashMap<i64, String>,
+    /// Updates harlo recorded without a model (nothing stale), by wiki
+    /// folder: the last update's time it wrote and the commits it looked
+    /// at, so the panel can say so while that's the last update.
+    wiki_quiet: HashMap<PathBuf, (String, u64)>,
+    /// Wiki folders whose Update is checking what changed (no model yet).
+    wiki_checking: HashSet<PathBuf>,
     spend_limits: harlo_core::spending::Limits,
     spend_ledger: harlo_core::spending::Ledger,
     /// Live sessions' spending, by key.
@@ -2359,6 +2376,11 @@ impl Workspace {
             v["runtime"] = json!(true);
             v["loading"] = json!(loading);
             v["host"] = json!(harlo_core::remote::host_of(&cwd).unwrap_or_default());
+            v["checking"] = json!(self.wiki_checking.contains(&cwd));
+            // (Still the last update: what harlo recorded without a model.)
+            if let Some((at, commits)) = self.wiki_quiet.get(&cwd).filter(|(at, _)| !at.is_empty() && v["last"]["at"].as_str() == Some(at.as_str())) {
+                v["quiet"] = json!({ "at": at, "commits": commits });
+            }
             QString::from(&v.to_string())
         };
         if !harlo_core::remote::is_remote(&cwd) {
@@ -2416,20 +2438,86 @@ impl Workspace {
         self.setting_str(&format!("default_model_{}", kind.as_str()))
     }
 
-    pub fn start_wiki_run(self: Pin<&mut Self>, key: &QString, mode: &QString) -> QString {
+    /// Who writes a project's wiki: Settings → Wiki's agent, model and
+    /// thinking for every project, else the project's own (its agent, and
+    /// the model a new session of it gets). On another machine its model
+    /// stays the project's: the one chosen here may not be there.
+    /// Who writes a project's wiki for `op` ("create": the first, whole
+    /// repository; "update": the pages whose code changed), from Settings →
+    /// Wiki (`wiki_writer`: `{ create: { agent, model, thinking }, update:
+    /// … }`), else the project's agent and model.
+    fn wiki_writer(&self, project: i64, cwd: &Path, op: &str) -> Option<(HarnessKind, String, String)> {
+        let set: serde_json::Value = serde_json::from_str(&self.setting_str("wiki_writer")).unwrap_or_default();
+        let field = |k: &str| set[op][k].as_str().unwrap_or_default().to_owned();
+        let chosen = HarnessKind::parse(&field("agent")).filter(|k| self.usable_harness(*k));
+        let kind = match chosen {
+            Some(k) => k,
+            None => HarnessKind::parse(&self.projects.iter().find(|p| p.id == project).map(|p| p.harness.clone()).filter(|h| !h.is_empty()).unwrap_or_else(|| self.default_harness()))?,
+        };
+        // (Another machine's project: its own model; this one's may not be there.)
+        let model = match field("model") {
+            m if chosen.is_some() && !m.is_empty() && harlo_core::remote::host_of(cwd).is_none() => m,
+            _ => self.model_for(Some(project), kind, cwd),
+        };
+        Some((kind, model, if chosen.is_some() { field("thinking") } else { String::new() }))
+    }
+
+    /// Who writes the wiki of a session's repository (as wiki_json's key):
+    /// `{ create: { agent, model, thinking }, update: … }`, each {} when no
+    /// agent can.
+    pub fn wiki_writer_json(&self, key: &QString) -> QString {
+        let folder = self.wiki_folder(&key.to_string());
+        let one = |op: &str| {
+            folder.as_ref().and_then(|(cwd, project)| self.wiki_writer(*project, cwd, op)).map_or_else(|| json!({}), |(kind, model, thinking)| json!({ "agent": kind.as_str(), "model": model, "thinking": thinking }))
+        };
+        QString::from(&json!({ "create": one("create"), "update": one("update") }).to_string())
+    }
+
+    pub fn wiki_writer_changed(self: Pin<&mut Self>) {
+        self.wiki_ready();
+    }
+
+    pub fn start_wiki_run(mut self: Pin<&mut Self>, key: &QString, mode: &QString) -> QString {
         let mode = mode.to_string();
         let Some((cwd, project)) = self.wiki_folder(&key.to_string()) else {
             return QString::from("The wiki is for a harlo project's sessions.");
         };
-        let kind = self.projects.iter().find(|p| p.id == project).map(|p| p.harness.clone()).filter(|h| !h.is_empty()).unwrap_or_else(|| self.default_harness());
-        let Some(kind) = HarnessKind::parse(&kind) else {
+        let (Some(create), Some(update)) = (self.wiki_writer(project, &cwd, "create"), self.wiki_writer(project, &cwd, "update")) else {
             return QString::from("Pick a default agent first (Settings → General).");
         };
-        // (The project's model, as a new session from the phone gets.)
-        let model = self.model_for(Some(project), kind, &cwd);
         let thread = self.qt_thread();
+        if mode == "update" {
+            if !self.as_mut().rust_mut().wiki_checking.insert(cwd.clone()) {
+                return QString::default();
+            }
+            self.as_mut().wiki_ready();
+        }
         crate::runtime().spawn_blocking(move || {
             let root = harlo_core::openwiki::root_of(&cwd);
+            // An update first checks, with no model, whether there's
+            // anything for one to redo: when not, harlo records it itself.
+            let mut found = None;
+            if mode == "update" {
+                let quiet = harlo_core::openwiki::quiet_update(&root);
+                if let Err(e) = &quiet {
+                    tracing::warn!("wiki: checking for an update without a model: {e:#}");
+                }
+                let recorded = quiet.as_ref().ok().filter(|v| v["recorded"] == true).map(|v| v["commits"].as_u64().unwrap_or(0));
+                if let Some(commits) = recorded {
+                    let at = harlo_core::openwiki::state(&root).last.map(|l| l.at).unwrap_or_default();
+                    let _ = thread.queue(move |mut this| {
+                        this.as_mut().rust_mut().wiki_checking.remove(&cwd);
+                        this.as_mut().rust_mut().wiki_quiet.insert(cwd, (at, commits));
+                        this.as_mut().wiki_ready();
+                    });
+                    return;
+                }
+                let done = cwd.clone();
+                let _ = thread.queue(move |mut this| {
+                    this.as_mut().rust_mut().wiki_checking.remove(&done);
+                });
+                found = quiet.ok();
+            }
             let ready = harlo_core::openwiki::prepare_writer(&root);
             let run_mode = harlo_core::openwiki::state(&root).run.map(|r| r.mode).unwrap_or_default();
             let ignored = harlo_core::openwiki::ignored(&root);
@@ -2438,11 +2526,14 @@ impl Workspace {
                     this.as_mut().set_notice_text(&format!("The wiki's tools didn't start: {e:#}"), true);
                     return;
                 }
-                let prompt = harlo_core::openwiki::run_prompt(&mode, &run_mode, &ignored);
-                let title = match mode.as_str() { "create" => "Wiki: create", "update" => "Wiki: update", _ => "Wiki: continue" };
+                let prompt = harlo_core::openwiki::run_prompt_with(&mode, &run_mode, &ignored, found.as_ref());
+                // (Continuing a first run: Create's writer.)
+                let (kind, model, thinking) = if mode == "create" || (mode == "continue" && run_mode == "init") { create } else { update };
+                let title = match mode.as_str() { "create" => "Wiki: create", "update" | "update-anyway" => "Wiki: update", _ => "Wiki: continue" };
                 let cwd_of_run = root.clone();
-                let key = this.as_mut().start_session_budget(kind, root, &model, "", true, None);
+                let key = this.as_mut().start_session_budget(kind, root, &model, &thinking, true, None);
                 this.as_mut().rust_mut().wiki_sessions.insert(key.clone());
+                this.as_mut().apply_thinking(&key, &thinking);
                 if let Some(live) = registry::get(&key) {
                     live.handle.send_raw(json!({ "type": "set_session_name", "name": title }));
                 }
@@ -2476,17 +2567,30 @@ impl Workspace {
         self.as_mut().rust_mut().wiki_offer_checking = true;
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
-            let found: Vec<(i64, String, Option<harlo_core::openwiki::MergeOffer>)> = projects
+            let found: Vec<(i64, String, Option<harlo_core::openwiki::MergeOffer>, String)> = projects
                 .into_iter()
                 .map(|(id, path, seen)| {
-                    let (tip, offer) = harlo_core::openwiki::merge_offer(&harlo_core::openwiki::root_of(&path), &seen);
-                    (id, tip, offer)
+                    let root = harlo_core::openwiki::root_of(&path);
+                    let (tip, offer) = harlo_core::openwiki::merge_offer(&root, &seen);
+                    // (Branch tips: a worktree's commits move its branch here too.)
+                    let heads = harlo_core::git::output_in(&root, &["for-each-ref", "--format=%(objectname)", "refs/heads"])
+                        + &harlo_core::git::output_in(&root, &["rev-parse", "HEAD"]);
+                    (id, tip, offer, heads)
                 })
                 .collect();
             let _ = thread.queue(move |mut this| {
                 this.as_mut().rust_mut().wiki_offer_checking = false;
+                let mut moved = false;
+                for (id, _, _, heads) in &found {
+                    if let Some(before) = this.as_mut().rust_mut().wiki_heads.insert(*id, heads.clone()) {
+                        moved |= before != *heads;
+                    }
+                }
+                if moved {
+                    this.as_mut().wiki_ready();
+                }
                 let mut offers: Vec<(i64, harlo_core::openwiki::MergeOffer)> = Vec::new();
-                for (id, tip, offer) in found {
+                for (id, tip, offer, _) in found {
                     match offer {
                         Some(o) => offers.push((id, o)),
                         // (Nothing to offer at this tip: seen.)

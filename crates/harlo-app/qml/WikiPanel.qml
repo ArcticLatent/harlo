@@ -44,8 +44,24 @@ Rectangle {
     /// The repository whose wiki is shown: another one starts afresh (a
     /// file tab or another session of the same one keeps the page open).
     property string shownRoot: ""
+    /// Who writes it (Settings → Wiki, else the project's agent and model).
+    property var writer: ({})
+    /// The last update was harlo's, with no model: nothing was stale.
+    readonly property bool quiet: !!st.quiet
+    /// Who writes a kind of run ("create", "update"): "Written by Harlo
+    /// with GPT-5 mini (Settings → Wiki)", or "".
+    function writerOf(op) {
+        const w = (writer || {})[op] || {}
+        if (!w.agent) return ""
+        const agent = w.agent === "claude" ? "Claude Code" : w.agent === "harlo" ? "Harlo" : w.agent
+        return "Written by " + agent + (w.model ? " with " + Theme.modelLabel(w.model) : "") + " (Settings → Wiki)"
+    }
+    // (Create's writer; Update's, or Create's again for a first run that stopped.)
+    readonly property string writerText: writerOf("create")
+    readonly property string updaterText: writerOf(st.run && st.run.mode === "init" ? "create" : "update")
     function load() {
         st = JSON.parse(Workspace.wikiJson(sessionKey))
+        writer = JSON.parse(Workspace.wikiWriterJson(sessionKey))
         if (st.root !== "" && st.root !== shownRoot) {
             shownRoot = st.root
             closePage(); results = null; query = ""; searchField.text = ""; mode = "pages"
@@ -364,6 +380,15 @@ Rectangle {
                 color: Theme.textFaint
                 font.pixelSize: Theme.px(12)
                 lineHeight: 1.15
+            }
+            Label {
+                objectName: "wikiWriter"
+                Layout.fillWidth: true
+                visible: root.writerText !== ""
+                wrapMode: Text.Wrap
+                text: root.writerText + "."
+                color: Theme.textFaint
+                font.pixelSize: Theme.px(12)
             }
             FlatButton {
                 objectName: "wikiCreate"
@@ -1128,9 +1153,15 @@ Rectangle {
                         if (r && root.st.running) return [r.phase === "planning" || r.total === 0 ? "Planning the wiki…" : "Writing pages: " + r.done + " of " + r.total]
                         if (r) return ["A run stopped part way" + (r.total > 0 ? " (" + r.done + " of " + r.total + " pages)" : "") + "."]
                         if (root.st.running) return ["Starting a run…"]
+                        if (root.st.checking) return ["Checking what changed…"]
                         if (!l) return ["Not written by OpenWiki yet."]
                         const when = "Updated " + root.ago(l.at)
                         const b = root.st.behind
+                        // (harlo recorded it, no model needed.)
+                        if (root.quiet && b === 0) {
+                            const n = root.st.quiet.commits
+                            return [when, "up to date", n === 0 ? "nothing changed" : n + (n === 1 ? " commit" : " commits") + " checked, none change what it says, so no model ran"]
+                        }
                         return b === null || b === undefined ? [when] : [when, b === 0 ? "up to date" : b + (b === 1 ? " commit" : " commits") + " since"]
                     }
                     readonly property string text: phrases.join(" · ")
@@ -1157,14 +1188,17 @@ Rectangle {
                 }
                 FlatButton {
                     objectName: "wikiRun"
-                    visible: !root.st.running
+                    visible: !root.st.running && !root.st.checking
                     // (Behind the code: the one thing to do here.)
                     variant: footer.run || (root.st.behind || 0) > 0 ? "primary" : "outline"
-                    text: footer.run ? "Continue" : "Update"
+                    readonly property bool anyway: !footer.run && root.quiet && root.st.behind === 0
+                    text: footer.run ? "Continue" : anyway ? "Update anyway" : "Update"
                     font.pixelSize: Theme.px(12)
-                    onClicked: root.start(footer.run ? "continue" : "update")
+                    onClicked: root.start(footer.run ? "continue" : anyway ? "update-anyway" : "update")
                     ToolTip.visible: hovered
-                    ToolTip.text: footer.run ? "Start a session that finishes this run" : "Start a session that brings the wiki in line with the code"
+                    ToolTip.text: (footer.run ? "Start a session that finishes this run"
+                                   : anyway ? "Start a session that looks over every page anyway"
+                                   : "Bring the wiki in line with the code: harlo checks first, and starts a session only when cited code changed or files were added") + (root.updaterText ? ". " + root.updaterText + "." : "")
                     ToolTip.delay: 600
                 }
             }

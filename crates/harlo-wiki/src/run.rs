@@ -1149,6 +1149,87 @@ fn prepare_claims(root: &Path, ignore: &Ignore, mode: &str, resume_init: bool) -
     claims::prepare(root, ignore, mode == "init" && !resume_init)
 }
 
+/// harlo: what an update's check before any model found.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Quiet {
+    /// Nothing for a model to redo: the update is recorded at HEAD (claims
+    /// whose lines only moved follow them), `commits` of code since the
+    /// last one looked at.
+    Recorded { commits: u32 },
+    /// A model is needed, and why: `stale` pages with the cited files that
+    /// changed under them, `added` files no page may cover yet.
+    Needed { reason: String, stale: Vec<(String, Vec<String>)>, added: Vec<String> },
+}
+
+impl Quiet {
+    pub fn to_json(&self) -> Value {
+        match self {
+            Quiet::Recorded { commits } => json!({ "recorded": true, "commits": commits }),
+            Quiet::Needed { reason, stale, added } => json!({
+                "recorded": false, "reason": reason,
+                "stale": stale.iter().map(|(p, f)| json!({ "page": p, "files": f })).collect::<Vec<_>>(),
+                "added": added,
+            }),
+        }
+    }
+}
+
+/// harlo: an update done without a model when there's nothing for one to
+/// do: a complete last update at a commit, no run under way, every page
+/// in the manifest, no claim whose cited code changed or went, and no
+/// file added since (it may need a page). Then it's recorded as begin's
+/// no-op records one (claims re-anchored, manifest, last update at HEAD,
+/// the same model), else nothing is written. Code the wiki doesn't cite
+/// may change: no page says anything about it.
+pub fn quiet_update(root: &Path) -> Result<Quiet> {
+    let needed = |r: &str| Ok(Quiet::Needed { reason: r.to_owned(), stale: Vec::new(), added: Vec::new() });
+    inside(root, "openwiki")?;
+    if read_state(root)?.is_some() {
+        return needed("a run is under way");
+    }
+    let Some(last) = repo::read_last_update(root).map_err(other)? else { return needed("no update yet") };
+    let Some(base) = last.git_head.clone().filter(|_| last.status == "complete") else { return needed("the last update didn't finish") };
+    if !repo::is_readable_commit(root, &base) {
+        return needed("the last update's commit is gone");
+    }
+    let ignore = Ignore::load(root).map_err(|e| other(e.to_string()))?;
+    let added = repo::added_paths(root, &ignore, &base);
+    if !added.is_empty() {
+        return Ok(Quiet::Needed { reason: format!("{} new file{}", added.len(), if added.len() == 1 { "" } else { "s" }), stale: Vec::new(), added });
+    }
+    let initial = Store::new(root).discover_pages()?;
+    seed_manifest(root, &initial, &base)?;
+    let m = read_manifest(root)?;
+    if !initial.iter().all(|p| m.contains_key(p)) {
+        return needed("some pages were never finished");
+    }
+    let mut rt = prepare_claims(root, &ignore, "update", false)?;
+    if !rt.issues.is_empty() {
+        let mut stale: Vec<(String, Vec<String>)> = Vec::new();
+        for i in &rt.issues {
+            let files: Vec<String> = i.resources.iter().filter_map(|r| claims::parse_resource(r).ok().map(|r| r.path)).collect();
+            match stale.iter_mut().find(|(p, _)| *p == i.page) {
+                Some((_, f)) => f.extend(files.into_iter().filter(|x| !f.contains(x)).collect::<Vec<_>>()),
+                None => stale.push((i.page.clone(), files.into_iter().fold(Vec::new(), |mut v, x| { if !v.contains(&x) { v.push(x) } v }))),
+            }
+        }
+        return Ok(Quiet::Needed { reason: format!("{} page{} cite changed code", stale.len(), if stale.len() == 1 { "" } else { "s" }), stale, added: Vec::new() });
+    }
+    let commits = repo::git_lines(root, &["rev-list", "--count", &format!("{base}..HEAD"), "--", ".", ":(exclude)openwiki"]).first().and_then(|n| n.trim().parse().ok()).unwrap_or(0);
+    // (As begin's no-op: the code must hold still while it's recorded.)
+    let first = repo::source_snapshot(root, &ignore).map_err(other)?;
+    rt.session.finalize(&rt.store, &util::now_iso(), &HashSet::new())?;
+    if repo::source_snapshot(root, &ignore).map_err(other)?.fingerprint != first.fingerprint {
+        return needed("the code changed while it was checked");
+    }
+    replace_manifest(root, &initial, &Checkpoint::of(&first), &HashSet::new(), &HashSet::new())?;
+    if repo::source_snapshot(root, &ignore).map_err(other)?.fingerprint != first.fingerprint {
+        return needed("the code changed while it was checked");
+    }
+    repo::write_last_update(root, "update", &last.model, "complete", last.language.as_deref(), None).map_err(other)?;
+    Ok(Quiet::Recorded { commits })
+}
+
 /// `beginRepositoryRun`.
 pub fn begin(input: &Begin) -> Result<Begun> {
     let requested = match lang::resolve(input.language.as_deref()) {
@@ -1737,6 +1818,77 @@ mod tests {
         assert!(std::fs::symlink_metadata(r.join("CLAUDE.md")).unwrap().file_type().is_symlink());
         assert!(r.join("ci/workflows/openwiki-update.yml").is_file());
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// An update with nothing for a model to redo is recorded without one:
+    /// commits to code no page cites, and cited lines that only moved; a
+    /// changed cited line or a new file needs a model, and then nothing
+    /// is written.
+    #[test]
+    fn quiet_updates() {
+        let r = std::env::temp_dir().join(format!("harlo-run-quiet-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&r);
+        std::fs::create_dir_all(r.join("src")).unwrap();
+        let git = |args: &[&str]| assert!(std::process::Command::new("git").arg("-C").arg(&r).args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]).args(args).status().unwrap().success());
+        let commit = |m: &str| { git(&["add", "-A"]); git(&["commit", "-q", "-m", m]); };
+        let head = || repo::git_head(&r).unwrap();
+        let last_head = || repo::read_last_update(&r).unwrap().unwrap().git_head.unwrap();
+        git(&["init", "-q"]);
+        std::fs::write(r.join("src/a.rs"), "// a\npub const LIMIT: u32 = 100;\n").unwrap();
+        std::fs::write(r.join("src/b.rs"), "fn b() {}\n").unwrap();
+        commit("code");
+        // A wiki of one page with one claim, written as a model would.
+        let mut w = Writer::new("harlo");
+        let begun = w.call("openwiki_begin", &json!({"root": r.to_string_lossy(), "mode": "init"})).unwrap();
+        let run = begun["runId"].as_str().unwrap().to_owned();
+        w.call("openwiki_submit_plan", &json!({"runId": run, "pages": [{"path": "/openwiki/quickstart.md", "title": "Quickstart", "purpose": "Where to start."}]})).unwrap();
+        let next = w.call("openwiki_next_page", &json!({"runId": run})).unwrap();
+        let job = next["job"]["jobId"].as_str().or(next["job"]["id"].as_str()).unwrap().to_owned();
+        std::fs::write(r.join("openwiki/quickstart.md"), "---\ntype: overview\ntitle: Quickstart\ndescription: Where to start.\ntags: [a]\n---\n\n# Quickstart\n\nThe limit is 100.\n").unwrap();
+        w.call("openwiki_submit_page", &json!({"runId": run, "jobId": job, "claims": [{"statement": "The limit is 100.", "evidence": [{"resource": "repo://src/a.rs#L2-L2"}]}]})).unwrap();
+        w.call("openwiki_next_page", &json!({"runId": run})).unwrap();
+        w.call("openwiki_finish", &json!({"runId": run})).unwrap();
+        let _ = std::fs::remove_file(r.join(".github/workflows/openwiki-update.yml"));
+        commit("wiki");
+        // Its own commit (AGENTS.md is new, but the wiki's).
+        assert_eq!(quiet_update(&r).unwrap(), Quiet::Recorded { commits: 1 });
+        assert_eq!(last_head(), head());
+        // Code no page cites.
+        std::fs::write(r.join("src/b.rs"), "fn b() { let _ = 1; }\n").unwrap();
+        commit("b");
+        assert_eq!(quiet_update(&r).unwrap(), Quiet::Recorded { commits: 1 });
+        assert_eq!(last_head(), head());
+        // The cited line moved down.
+        std::fs::write(r.join("src/a.rs"), "// a\n// more\n\npub const LIMIT: u32 = 100;\n").unwrap();
+        commit("moved");
+        assert_eq!(quiet_update(&r).unwrap(), Quiet::Recorded { commits: 1 });
+        assert_eq!(quiet_update(&r).unwrap(), Quiet::Recorded { commits: 0 }, "again: still nothing to do");
+        // The cited line changed: a model, and nothing recorded.
+        let before = last_head();
+        std::fs::write(r.join("src/a.rs"), "// a\n// more\n\npub const LIMIT: u32 = 200;\n").unwrap();
+        commit("limit");
+        let q = quiet_update(&r).unwrap();
+        assert!(matches!(&q, Quiet::Needed { stale, .. } if stale == &vec![("/openwiki/quickstart.md".to_owned(), vec!["src/a.rs".to_owned()])]), "{q:?}");
+        assert_eq!(last_head(), before);
+        // Uncommitted, the same.
+        git(&["reset", "-q", "--hard", "HEAD~1"]);
+        std::fs::write(r.join("src/a.rs"), "// a\n// more\n\npub const LIMIT: u32 = 300;\n").unwrap();
+        assert!(matches!(quiet_update(&r).unwrap(), Quiet::Needed { .. }));
+        git(&["checkout", "-q", "--", "src/a.rs"]);
+        let before = last_head();
+        // A new file, committed or not.
+        std::fs::write(r.join("src/c.rs"), "fn c() {}\n").unwrap();
+        assert_eq!(quiet_update(&r).unwrap(), Quiet::Needed { reason: "1 new file".into(), stale: Vec::new(), added: vec!["src/c.rs".into()] });
+        commit("c");
+        assert!(matches!(quiet_update(&r).unwrap(), Quiet::Needed { added, .. } if added == vec!["src/c.rs".to_owned()]));
+        assert_eq!(last_head(), before);
+        // A run under way (an update begun, not finished): not now.
+        std::fs::remove_file(r.join("src/c.rs")).unwrap();
+        commit("no c");
+        let mut w = Writer::new("harlo");
+        w.call("openwiki_begin", &json!({"root": r.to_string_lossy(), "mode": "update", "force": true})).unwrap();
+        assert_eq!(quiet_update(&r).unwrap(), Quiet::Needed { reason: "a run is under way".into(), stale: Vec::new(), added: Vec::new() });
+        let _ = std::fs::remove_dir_all(&r);
     }
 
     #[test]
