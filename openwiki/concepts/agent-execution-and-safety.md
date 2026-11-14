@@ -5,7 +5,7 @@ description: Harlo agent model-loop ordering, resumable history, RPC approvals, 
 tags: [agent, safety, sandbox, rpc, tools]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-14T06:18:31.902Z
+    at: 2026-11-14T06:51:12.859Z
 sources:
   - id: openwiki-source-0b93973e66ce9fb1db2bd77c
     resource: repo://crates/harlo-agent/src/agent.rs
@@ -37,7 +37,7 @@ sources:
     resource: repo://crates/harlo-agent/src/tools/mod.rs
   - id: openwiki-source-cc3a6736ec7398d0638b6f38
     resource: repo://crates/harlo-agent/src/used.rs
-generated: { by: "harlo", at: "2026-11-14T06:18:31.902Z" }
+generated: { by: "harlo", at: "2026-11-14T06:51:12.859Z" }
 ---
 
 # Agent execution and safety boundaries
@@ -60,13 +60,13 @@ An unpriced provider is free only when explicitly configured with `"free": true`
 
 Missing usage is not measured zero: `Used.unreported` tracks requests missing either input or output token reporting, persisted as `tokensUnknown` in assistant usage and `unreported` in aggregate tool details. A priced request with incomplete token reporting becomes unknown-cost; plan and explicitly free requests retain their no-extra-cost classification. Missing input and output can be estimated from request size and reply length for budget enforcement only: `tokensEstimated` in logs and `estimated` in tool details never become measured tokens or a price. Subagent aggregation preserves costs, cost kinds, unreported counts, and estimates.
 
-Responses attempts cut off by the server retain their usage even if retried; a cutoff without reported usage is counted as unknown and estimated for the budget. Failed responses carrying a usage object also count, while failures without usage do not add a request to this failed-attempt accounting. Each ended attempt is charged immediately and put in a session-owned ledger, separately from the eventual successful reply. Main requests settle the ledger into totals and logs before fallback or error propagation, after tool batches, and when stopped. Dropping a request during retry backoff does not discard attempts already recorded. Side questions use their originating session's side-usage queue; compaction and web searches use the session ledger.
+Responses attempts cut off by the server retain their usage even if retried; a cutoff without reported usage is counted as unknown and estimated for the budget. Failed responses carrying a usage object also count. If an error carries no accounting usage, the agent falls back to the stream's retained usage snapshot—for example, when an oversized event interrupts a chat stream after it has reported tokens. A failure with neither error usage nor a retained snapshot adds no failed-attempt charge. Each ended attempt is charged immediately and put in a session-owned ledger, separately from the eventual successful reply. Main requests settle the ledger into totals and logs before fallback or error propagation, after tool batches, and when stopped. Dropping a request during retry backoff does not discard attempts already recorded. Side questions use their originating session's side-usage queue; compaction and web searches use the session ledger.
 
 Chat-completions usage reports merge field by field, including nested details: later non-null values replace earlier totals rather than being added, while omitted or null fields preserve earlier values. An error-local report overlays the accumulated report using the same rule. Counts are normalized to the shared Responses-style accounting shape. Reported zero remains measured zero; an error without any usage remains absent rather than becoming an unknown-sized request.
 
 Premature stream closure, connection failure, and idle timeout also carry any usage already reported by a chat-completions stream. The agent charges that dropped attempt through the same ledger before deciding whether to retry; a dropped stream without a usage object adds no failed-attempt charge. Retrying does not erase spend from the broken reply.
 
-Stopping a chat request while its stream is still running also preserves reported spend. The stream keeps the latest normalized usage in the request's `Tries` guard; dropping that guard charges the reported usage once and sends it to the accounting sink. A normally ended attempt clears this snapshot before success/error accounting, preventing a second charge on drop. A stop before any recognized token count has arrived adds no charge through this guard. Settlement prices and logs the retained usage separately from a completed reply.
+Stopping a chat request while its stream is still running also preserves reported spend. The stream keeps the latest normalized usage in the request's `Tries` guard. `Tries::stopped` takes and clears that snapshot, charges it once, and sends it to the accounting sink; dropping the guard invokes the same operation as a safety net. Model-change summaries, native compaction, and ordinary compaction summaries explicitly call it immediately after their cancellation-aware send and before settling the ledger, so cancellation does not leave the current attempt waiting for a later settlement. A normally ended attempt takes the snapshot before success/error accounting, preventing a second charge on drop. A stop before any recognized token count has arrived adds no charge through this guard. Settlement prices and logs the retained usage separately from a completed reply.
 
 Input and output counts normalize independently. An output-only report keeps its measured output and leaves input unknown; the request-size estimate covers missing input for budget enforcement, not pricing. An input-only report likewise does not invent measured zero output. `each_count_said_is_kept_on_its_own` verifies these partial-report cases and an entirely empty report.
 
