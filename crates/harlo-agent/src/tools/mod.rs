@@ -177,6 +177,10 @@ pub struct Tools {
     /// Folders below `cwd` whose own rules (AGENTS.md) the model has, as
     /// paths relative to `cwd`.
     rules_given: Mutex<HashSet<PathBuf>>,
+    /// Of those, the folders whose rules went out with this batch's results:
+    /// the model hasn't read them yet, so a change there waits for its next
+    /// reply.
+    rules_new: Mutex<HashSet<PathBuf>>,
 }
 
 /// Of a folder's own rules file, what goes with a tool result.
@@ -445,7 +449,7 @@ pub fn specs() -> Value {
 impl Tools {
     pub fn new(cwd: PathBuf, spill_dir: PathBuf) -> Self {
         let jobs = Arc::new(crate::jobs::Jobs::new(&spill_dir));
-        Tools { cwd, spill_dir, seen: Mutex::new(HashMap::new()), told_generated: Mutex::new(HashSet::new()), originals: Mutex::new(HashMap::new()), sandbox: None, jobs, lsp: Arc::default(), rules_given: Mutex::default() }
+        Tools { cwd, spill_dir, seen: Mutex::new(HashMap::new()), told_generated: Mutex::new(HashSet::new()), originals: Mutex::new(HashMap::new()), sandbox: None, jobs, lsp: Arc::default(), rules_given: Mutex::default(), rules_new: Mutex::default() }
     }
 
     /// Outputs set aside, kept for `recall` (`replace`: the session's
@@ -464,27 +468,24 @@ impl Tools {
     /// The working directory's own rules, and those above it, are in the
     /// instructions already; dependencies' and hidden folders' aren't sent.
     fn nested_rules(&self, files: &[PathBuf]) -> Option<String> {
-        use std::path::Component;
         let mut out = String::new();
         let mut given = self.rules_given.lock().unwrap();
+        let mut new = self.rules_new.lock().unwrap();
         for file in files {
-            let Some(folders) = file.strip_prefix(&self.cwd).ok().and_then(Path::parent) else { continue };
-            let mut rel = PathBuf::new();
-            for c in folders.components() {
-                let Component::Normal(name) = c else { break };
-                let name = name.to_string_lossy();
-                if name.starts_with('.') || name == "node_modules" || name == "vendor" {
-                    break;
-                }
-                rel.push(&*name);
+            for rel in self.rule_folders(file) {
                 if given.contains(&rel) {
                     continue;
                 }
                 let dir = self.cwd.join(&rel);
                 let Some(rules) = ["AGENTS.md", "CLAUDE.md"].map(|n| dir.join(n)).into_iter().find(|p| p.is_file()) else { continue };
                 given.insert(rel.clone());
-                // (Read itself, or hidden: nothing to add.)
-                if rules == *file || self.hidden(&rules).is_some() {
+                // (Hidden: nothing to add. Read itself: its text is the
+                // result, which the model reads with the rest.)
+                if self.hidden(&rules).is_some() {
+                    continue;
+                }
+                if rules == *file {
+                    new.insert(rel);
                     continue;
                 }
                 // (Read up to what's sent, however big the file.)
@@ -501,6 +502,7 @@ impl Tools {
                 }
                 let shown = rules.strip_prefix(&self.cwd).unwrap_or(&rules).display();
                 out.push_str(&format!("\n\n{RULES_FROM}{shown}{RULES_FOR}{}/:]\n", rel.display()));
+                new.insert(rel.clone());
                 if whole > NESTED_RULES_KEPT {
                     let cut = text.floor_char_boundary(NESTED_RULES_KEPT);
                     out.push_str(&format!("{}\n[… cut at {} KB: read {shown} for the rest.]", &text[..cut], NESTED_RULES_KEPT / 1000));
@@ -510,6 +512,39 @@ impl Tools {
             }
         }
         (!out.is_empty()).then_some(out)
+    }
+
+    /// The folders below the working directory on the way down to `file`
+    /// whose rules count (relative; not hidden ones, dependencies' or
+    /// vendored ones, or what's below them).
+    fn rule_folders(&self, file: &Path) -> Vec<PathBuf> {
+        use std::path::Component;
+        let mut out = Vec::new();
+        let Some(folders) = file.strip_prefix(&self.cwd).ok().and_then(Path::parent) else { return out };
+        let mut rel = PathBuf::new();
+        for c in folders.components() {
+            let Component::Normal(name) = c else { break };
+            let name = name.to_string_lossy();
+            if name.starts_with('.') || name == "node_modules" || name == "vendor" {
+                break;
+            }
+            rel.push(&*name);
+            out.push(rel.clone());
+        }
+        out
+    }
+
+    /// A folder on the way to `files` whose rules went out earlier in this
+    /// batch: the model asked for the change before it read them.
+    fn rules_unread(&self, files: &[PathBuf]) -> Option<PathBuf> {
+        let new = self.rules_new.lock().unwrap();
+        files.iter().flat_map(|f| self.rule_folders(f)).find(|rel| new.contains(rel))
+    }
+
+    /// A new batch of calls: the model has read the rules sent with the
+    /// last one's results.
+    pub fn batch_starts(&self) {
+        self.rules_new.lock().unwrap().clear();
     }
 
     /// Which folders' rules the model has: the ones whose text is in
@@ -700,6 +735,11 @@ impl Tools {
                 };
                 if let Some(rules) = self.nested_rules(&touched) {
                     return fail(format!("Nothing was changed yet: this touches a folder with rules of its own, which you hadn't seen (below). Check the change follows them, then make it again.{rules}"));
+                }
+                // (Its rules came with another call's result in this reply:
+                // asked for before they were read.)
+                if let Some(folder) = self.rules_unread(&touched) {
+                    return fail(format!("Nothing was changed yet: {}/ has rules of its own, which came with another result of this reply, after you asked for this. Check the change follows them, then make it again.", folder.display()));
                 }
                 let mut out = match name {
                     "write" => self.write(s("path"), s("content")),
@@ -1317,7 +1357,9 @@ mod tests {
         assert!(first.contains("[Rules from billing/AGENTS.md, for the files under billing/:]\nMoney is in cents."), "{first}");
         assert!(first.contains("[Rules from billing/ledger/CLAUDE.md, for the files under billing/ledger/:]\nEntries never change."), "{first}");
         assert!(!first.contains("Top rule."), "{first}");
-        // Once: not with the next file there, nor with an edit.
+        // Once: not with the next file there, nor with an edit (in the
+        // model's next reply, once it read them).
+        t.batch_starts();
         assert!(!read(&t, "billing/tax.rs").await.contains(RULES_FROM));
         let edited = t.call("edit", &json!({ "path": "billing/tax.rs", "edits": [{ "old_text": "x", "new_text": "y" }] })).await;
         assert!(!edited.failed && !edited.text.contains(RULES_FROM), "{}", edited.text);
@@ -1330,6 +1372,7 @@ mod tests {
         assert!(held.failed && held.text.starts_with("Nothing was changed yet") && !dir.join("web/app.js").exists(), "{}", held.text);
         assert!(held.text.contains("[Rules from web/AGENTS.md, for the files under web/:]"), "{}", held.text);
         assert!(held.text.contains("cut at 8 KB: read web/AGENTS.md for the rest") && held.text.len() < NESTED_RULES_KEPT + 500, "{}", held.text.len());
+        t.batch_starts();
         let written = t.call("write", &json!({ "path": "web/app.js", "content": "1" })).await;
         assert!(!written.failed && !written.text.contains(RULES_FROM) && dir.join("web/app.js").exists(), "{}", written.text);
         // A patch: a deletion counts its folder, a move both ends.
@@ -1342,6 +1385,7 @@ mod tests {
         assert!(gone.failed && gone.text.contains("[Rules from ops/AGENTS.md") && dir.join("ops/run.sh").exists(), "{}", gone.text);
         let moved = t.call("apply_patch", &json!({ "input": "*** Begin Patch\n*** Update File: main.rs\n*** Move to: lib/main.rs\n@@\n-fn x() {}\n+fn y() {}\n*** End Patch" })).await;
         assert!(moved.failed && moved.text.contains("[Rules from lib/AGENTS.md") && !moved.text.contains("ops/AGENTS.md") && dir.join("main.rs").exists(), "{}", moved.text);
+        t.batch_starts();
         let moved = t.call("apply_patch", &json!({ "input": "*** Begin Patch\n*** Update File: main.rs\n*** Move to: lib/main.rs\n@@\n-fn x() {}\n+fn y() {}\n*** End Patch" })).await;
         assert!(!moved.failed && dir.join("lib/main.rs").exists(), "{}", moved.text);
         // Gone from the context (set aside, or compacted): sent again.
@@ -1355,6 +1399,61 @@ mod tests {
         let t = Tools::new(dir.clone(), dir.join(".out"));
         assert!(!read(&t, "billing/AGENTS.md").await.contains(RULES_FROM));
         assert!(!read(&t, "billing/tax.rs").await.contains("billing/AGENTS.md"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Rules that came with one call's result hold back every change in
+    /// their folder later in the same batch: the model asked for those
+    /// before it read them.
+    #[tokio::test]
+    async fn rules_from_a_batch_hold_its_later_changes() {
+        let dir = std::env::temp_dir().join(format!("harlo-agent-batch-rules-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for d in ["billing/ledger", "web", "lib"] {
+            std::fs::create_dir_all(dir.join(d)).unwrap();
+        }
+        std::fs::write(dir.join("billing/AGENTS.md"), "New files start with a header.").unwrap();
+        std::fs::write(dir.join("web/AGENTS.md"), "Tabs.").unwrap();
+        std::fs::write(dir.join("lib/AGENTS.md"), "Library rules.").unwrap();
+        std::fs::write(dir.join("web/a.js"), "1\n").unwrap();
+        std::fs::write(dir.join("main.rs"), "fn x() {}\n").unwrap();
+        let t = Tools::new(dir.clone(), dir.join(".out"));
+        async fn write_to(t: &Tools, p: &str) -> Outcome {
+            t.call("write", &json!({ "path": p, "content": "no header" })).await
+        }
+        let write = |p: &'static str| write_to(&t, p);
+        // Two writes in one reply: the first brings the rules, the second
+        // (deeper, the same folder's rules) waits too, and says why.
+        t.batch_starts();
+        let first = write("billing/first.txt").await;
+        let second = write("billing/ledger/second.txt").await;
+        assert!(first.failed && first.text.contains("[Rules from billing/AGENTS.md"), "{}", first.text);
+        assert!(second.failed && second.text.starts_with("Nothing was changed yet: billing/ has rules") && !second.text.contains(RULES_FROM), "{}", second.text);
+        assert!(!dir.join("billing/first.txt").exists() && !dir.join("billing/ledger/second.txt").exists());
+        // The same call twice: both wait.
+        let again = write("billing/first.txt").await;
+        assert!(again.failed && !dir.join("billing/first.txt").exists(), "{}", again.text);
+        // A file elsewhere isn't held.
+        let elsewhere = write("notes.txt").await;
+        assert!(!elsewhere.failed && dir.join("notes.txt").exists(), "{}", elsewhere.text);
+        // The next reply: made.
+        t.batch_starts();
+        assert!(!write("billing/first.txt").await.failed && dir.join("billing/first.txt").exists());
+        assert!(!write("billing/ledger/second.txt").await.failed);
+        // A read, then a change, in one reply: the read brings the rules, the
+        // change waits; so does one after reading the rules file itself.
+        t.batch_starts();
+        assert!(t.call("read", &json!({ "path": "web/a.js" })).await.text.contains("[Rules from web/AGENTS.md"));
+        let edited = t.call("edit", &json!({ "path": "web/a.js", "edits": [{ "old_text": "1", "new_text": "2" }] })).await;
+        assert!(edited.failed && edited.text.starts_with("Nothing was changed yet: web/ has rules"), "{}", edited.text);
+        assert_eq!(std::fs::read_to_string(dir.join("web/a.js")).unwrap(), "1\n");
+        let t = Tools::new(dir.clone(), dir.join(".out"));
+        t.batch_starts();
+        assert!(t.call("read", &json!({ "path": "lib/AGENTS.md" })).await.text.contains("Library rules."));
+        let moved = t.call("apply_patch", &json!({ "input": "*** Begin Patch\n*** Update File: main.rs\n*** Move to: lib/main.rs\n@@\n-fn x() {}\n+fn y() {}\n*** End Patch" })).await;
+        assert!(moved.failed && moved.text.starts_with("Nothing was changed yet: lib/ has rules") && dir.join("main.rs").exists(), "{}", moved.text);
+        t.batch_starts();
+        assert!(!t.call("apply_patch", &json!({ "input": "*** Begin Patch\n*** Update File: main.rs\n*** Move to: lib/main.rs\n@@\n-fn x() {}\n+fn y() {}\n*** End Patch" })).await.failed);
         let _ = std::fs::remove_dir_all(dir);
     }
 

@@ -571,7 +571,10 @@ final class HarloUITests: XCTestCase {
         cells.element(boundBy: 1).tap()
         XCTAssertTrue(gone(cells.firstMatch), "a tap opens it")
         see("2 of 2")
+        // (Just after the grid closes, a swipe can land while the pages are
+        // still settling on a big phone: swiped again if it didn't turn.)
         viewer.swipeRight()
+        if !element("1 of 2").waitForExistence(timeout: 3) { viewer.swipeRight() }
         see("1 of 2")
         see("You sent")
         XCTAssertTrue(app.buttons["pictureShare"].waitForExistence(timeout: 5), "Share")

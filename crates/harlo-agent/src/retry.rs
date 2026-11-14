@@ -120,8 +120,8 @@ mod tests {
         assert!(transient(&api(503, "", None)).is_some());
         assert!(transient(&api(500, "", None)).is_some());
         assert!(transient(&Dropped("closed".into()).into()).is_some());
-        assert!(transient(&Failed { code: "server_error".into(), message: "x".into() }.into()).is_some());
-        assert!(transient(&Failed { code: String::new(), message: "Model is overloaded".into() }.into()).is_some());
+        assert!(transient(&Failed { code: "server_error".into(), message: "x".into(), usage: serde_json::Value::Null }.into()).is_some());
+        assert!(transient(&Failed { code: String::new(), message: "Model is overloaded".into(), usage: serde_json::Value::Null }.into()).is_some());
     }
 
     #[test]
@@ -133,7 +133,7 @@ mod tests {
         assert!(transient(&api(403, "", None)).is_none());
         let long: anyhow::Error = ApiError { status: 400, message: "context_length_exceeded".into(), code: "context_length_exceeded".into(), retry_after: None, resets_at: None }.into();
         assert!(transient(&long).is_none());
-        assert!(transient(&Failed { code: "invalid_prompt".into(), message: "no".into() }.into()).is_none());
+        assert!(transient(&Failed { code: "invalid_prompt".into(), message: "no".into(), usage: serde_json::Value::Null }.into()).is_none());
         assert!(transient(&anyhow::anyhow!("something else")).is_none());
     }
 

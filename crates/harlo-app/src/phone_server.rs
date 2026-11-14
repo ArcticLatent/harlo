@@ -158,6 +158,10 @@ impl SessionSink for Forward {
     fn deliver(&self, updates: Vec<SessionUpdate>) {
         let _ = self.0.send(updates);
     }
+    /// (A phone with the session open: its box takes messages back.)
+    fn composes(&self) -> bool {
+        true
+    }
 }
 
 /// Rows of a session a phone gets: the latest, at most (a long session's
@@ -208,6 +212,42 @@ fn row_json(r: &harlo_core::Row, folder: &std::path::Path) -> Value {
     json!({ "key": r.key, "kind": if more { "codePart" } else { r.kind.as_str() }, "html": clip(&r.html), "text": text, "title": r.title, "subtitle": r.subtitle, "state": r.state,
         "group": r.group, "summary": r.summary, "groupOpen": r.group_open, "time": r.time, "ended": r.ended, "result": r.result, "diff": clip(&r.diff),
         "runMs": r.run_ms, "label": r.label, "command": clip(&r.command), "model": r.model, "images": harlo_core::pictures::shown(r, folder) })
+}
+
+/// A long code block's pieces are one block on a phone: the first piece
+/// (at `i` in `full`) carries the html of all of them, the rest show
+/// nothing. None: `i` isn't a first piece.
+fn whole_code(full: &[Arc<harlo_core::Row>], i: usize) -> Option<String> {
+    let first = full.get(i).filter(|r| r.kind == harlo_core::RowKind::Code && r.label == "part-first")?;
+    // (Each piece is a <pre> of its own lines.)
+    let inner = |h: &str| -> String {
+        let body = h.strip_prefix("<pre").and_then(|h| h.find('>').map(|at| &h[at + 1..])).unwrap_or(h);
+        body.strip_suffix("</pre>").unwrap_or(body).trim_end_matches('\n').to_owned()
+    };
+    let mut html = String::from("<pre style=\"margin:0;\">");
+    html.push_str(&inner(&first.html));
+    for r in full[i + 1..].iter().take_while(|r| r.kind == harlo_core::RowKind::Code && matches!(r.label.as_str(), "part-middle" | "part-last") && r.summary == first.key) {
+        html.push('\n');
+        html.push_str(&inner(&r.html));
+    }
+    html.push_str("</pre>");
+    Some(html)
+}
+
+/// The first piece of the long code block whose piece is at `i` in `full`.
+fn first_piece(full: &[Arc<harlo_core::Row>], i: usize) -> Option<usize> {
+    let piece = full.get(i).filter(|r| r.kind == harlo_core::RowKind::Code && matches!(r.label.as_str(), "part-middle" | "part-last"))?;
+    (0..i).rev().find(|&k| full[k].key == piece.summary && full[k].label == "part-first")
+}
+
+/// A row for a phone, at `i` in `full`: a long code block's first piece
+/// whole.
+fn phone_row(full: &[Arc<harlo_core::Row>], i: usize, folder: &std::path::Path) -> Value {
+    let mut v = row_json(&full[i], folder);
+    if let Some(html) = whole_code(full, i) {
+        v["html"] = json!(clip(&html));
+    }
+    v
 }
 
 /// The part of a session's rows a phone has: everything after `skipped`.
@@ -275,10 +315,11 @@ fn row_frames(key: &str, window: &mut Window, u: &SessionUpdate) -> Vec<Value> {
     match u {
         SessionUpdate::Reset(rows) => {
             window.full = rows.clone();
-            let shown = window.reset(rows);
+            let shown = window.reset(rows).len();
+            let from = window.skipped;
             let mut frames = Vec::new();
             let mut at = 0;
-            for (i, piece) in pieces(shown.iter().map(|r| row_json(r, &window.cwd)).collect()).into_iter().enumerate() {
+            for (i, piece) in pieces((from..from + shown).map(|i| phone_row(&window.full, i, &window.cwd)).collect()).into_iter().enumerate() {
                 let n = piece.len();
                 frames.push(if i == 0 {
                     json!({ "ev": "reset", "key": key, "rows": piece, "earlier": window.skipped })
@@ -294,19 +335,48 @@ fn row_frames(key: &str, window: &mut Window, u: &SessionUpdate) -> Vec<Value> {
             let mut values = Vec::new();
             let cwd = window.cwd.clone();
             let changes: Vec<_> = changes.iter().filter_map(|c| window.change(c)).collect();
+            // (A long code block's piece changed: its first, which shows
+            // them all, is sent again after the rest, whole.)
+            let mut changed = std::collections::HashSet::new();
+            let skipped = window.skipped;
+            let full = &window.full;
             for c in changes {
                 match c {
-                    ListChange::Update { at, row } => values.push(json!({ "op": "update", "at": at, "row": row_json(&row, &cwd) })),
+                    ListChange::Update { at, row } => {
+                        changed.insert(row.key.clone());
+                        let mut v = row_json(&row, &cwd);
+                        if let Some(html) = full.get(skipped + at).filter(|r| r.key == row.key).and_then(|_| whole_code(full, skipped + at)) {
+                            v["html"] = json!(clip(&html));
+                        }
+                        values.push(json!({ "op": "update", "at": at, "row": v }));
+                    }
                     ListChange::Remove { at, count } => values.push(json!({ "op": "remove", "at": at, "count": count })),
                     ListChange::Insert { at, rows } => {
-                        let mut at = at;
-                        for piece in pieces(rows.iter().map(|r| row_json(r, &cwd)).collect()) {
+                        let mut place = at;
+                        let n = rows.len();
+                        changed.extend(rows.iter().map(|r| r.key.clone()));
+                        let made: Vec<Value> = (0..n)
+                            .map(|k| match full.get(skipped + at + k).filter(|r| r.key == rows[k].key) {
+                                Some(_) => phone_row(full, skipped + at + k, &cwd),
+                                None => row_json(&rows[k], &cwd),
+                            })
+                            .collect();
+                        for piece in pieces(made) {
                             let n = piece.len();
-                            values.push(json!({ "op": "insert", "at": at, "rows": piece }));
-                            at += n;
+                            values.push(json!({ "op": "insert", "at": place, "rows": piece }));
+                            place += n;
                         }
                     }
                 }
+            }
+            // (Found by key: the changes' places were before the ones after them.)
+            let firsts: std::collections::BTreeSet<usize> = (skipped..full.len())
+                .filter(|&i| changed.contains(&full[i].key))
+                .filter_map(|i| if full[i].label == "part-first" { Some(i) } else { first_piece(full, i) })
+                .filter(|&f| f >= skipped)
+                .collect();
+            for f in firsts {
+                values.push(json!({ "op": "update", "at": f - skipped, "row": phone_row(full, f, &cwd) }));
             }
             pieces(values).into_iter().filter(|p| !p.is_empty()).map(|p| json!({ "ev": "rows", "key": key, "changes": p })).collect()
         }
@@ -1367,6 +1437,97 @@ pub(crate) mod tests {
         let ev = event("live:1", &SessionUpdate::Unsent(held)).unwrap();
         assert_eq!(ev, json!({ "ev": "unsent", "key": "live:1", "text": "fix it\n\nsaid elsewhere",
             "photos": [{ "data": "AAAA", "mimeType": "image/jpeg" }, { "data": "BBBB", "mimeType": "image/jpeg" }] }));
+    }
+
+    /// The rows a phone has after `frames`, applied as it does.
+    fn phone_applies(rows: &mut Vec<Value>, frames: &[Value]) {
+        for f in frames {
+            if f["ev"] == "reset" {
+                *rows = f["rows"].as_array().cloned().unwrap_or_default();
+                continue;
+            }
+            for c in f["changes"].as_array().into_iter().flatten() {
+                let at = c["at"].as_u64().unwrap() as usize;
+                match c["op"].as_str() {
+                    Some("update") => rows[at] = c["row"].clone(),
+                    Some("remove") => drop(rows.drain(at..at + c["count"].as_u64().unwrap() as usize)),
+                    _ => {
+                        for (k, r) in c["rows"].as_array().unwrap().iter().enumerate() {
+                            rows.insert(at + k, r.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// The lines of a code row's html, its tags taken out.
+    fn code_lines(html: &str) -> Vec<String> {
+        let mut text = String::new();
+        let mut tag = false;
+        for c in html.chars() {
+            match c {
+                '<' => tag = true,
+                '>' => tag = false,
+                _ if !tag => text.push(c),
+                _ => {}
+            }
+        }
+        text.lines().map(str::to_owned).collect()
+    }
+
+    /// A long code block, in pieces on the desktop, is one whole block on a
+    /// phone: its first row shows every line (what it copies), the others
+    /// nothing; at the piece boundaries and as it streams in.
+    #[test]
+    fn a_long_code_block_reaches_phones_whole() {
+        use harlo_harness::HarnessEvent;
+        let message = |n: usize| -> (String, String) {
+            let code: String = (1..=n).map(|i| format!("line {i}\n")).collect();
+            (format!("```sh\n{code}```\n\nDone."), code.trim_end().to_owned())
+        };
+        for n in [149, 150, 151, 320] {
+            let mut t = harlo_core::transcript::Transcript::new();
+            let (text, code) = message(n);
+            t.apply(&HarnessEvent::MessageStart { id: "m".into(), message: json!({"role":"assistant","content":[]}) });
+            t.apply(&HarnessEvent::MessageEnd { id: "m".into(), message: json!({"role":"assistant","content":[{"type":"text","text":text}]}) });
+            let mut rows = Vec::new();
+            phone_applies(&mut rows, &row_frames("live:1", &mut Window::default(), &SessionUpdate::Reset(t.rows())));
+            let first = rows.iter().find(|r| r["kind"] == "code").unwrap();
+            let lines = code_lines(first["html"].as_str().unwrap());
+            assert_eq!((lines.len(), lines.last().map(String::as_str)), (n, Some(format!("line {n}").as_str())), "{n} lines");
+            assert_eq!(first["text"].as_str().unwrap(), code, "{n}: copies what it shows");
+            let parts = rows.iter().filter(|r| r["kind"] == "codePart").count();
+            assert_eq!(parts, n.div_ceil(150) - 1, "{n}: the rest show nothing");
+        }
+        // Streaming: 100 lines, then 320, then done; each change applied.
+        let mut t = harlo_core::transcript::Transcript::new();
+        t.apply(&HarnessEvent::MessageStart { id: "m".into(), message: json!({"role":"assistant","content":[]}) });
+        let mut window = Window::default();
+        let mut rows = Vec::new();
+        let mut before = t.rows();
+        phone_applies(&mut rows, &row_frames("live:1", &mut window, &SessionUpdate::Reset(before.clone())));
+        let mut sent = String::new();
+        for n in [100, 200, 320] {
+            let (text, _) = message(n);
+            let upto = text.find("```\n\nDone").unwrap();
+            let more = &text[sent.len()..upto];
+            t.apply(&HarnessEvent::BlockDelta { id: "m".into(), index: 0, kind: harlo_harness::BlockKind::Text, delta: more.into() });
+            sent.push_str(more);
+            let now = t.rows();
+            phone_applies(&mut rows, &row_frames("live:1", &mut window, &SessionUpdate::Rows(harlo_core::transcript::diff_rows(&before, &now))));
+            before = now;
+            let first = rows.iter().find(|r| r["kind"] == "code").unwrap();
+            let lines = code_lines(first["html"].as_str().unwrap());
+            assert_eq!(lines.last().map(String::as_str), Some(format!("line {n}").as_str()), "streaming, {n} lines");
+        }
+        let (text, _) = message(320);
+        t.apply(&HarnessEvent::MessageEnd { id: "m".into(), message: json!({"role":"assistant","content":[{"type":"text","text":text}]}) });
+        let now = t.rows();
+        phone_applies(&mut rows, &row_frames("live:1", &mut window, &SessionUpdate::Rows(harlo_core::transcript::diff_rows(&before, &now))));
+        let first = rows.iter().find(|r| r["kind"] == "code").unwrap();
+        assert_eq!(code_lines(first["html"].as_str().unwrap()).len(), 320, "done");
+        assert_eq!(rows.len(), now.len(), "the phone's rows match");
     }
 
     /// The phone's part follows the whole list through every kind of change

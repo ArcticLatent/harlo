@@ -168,6 +168,17 @@ final class RichTextTests: XCTestCase {
         XCTAssertEqual(RichText.plain(md), "a  b")
     }
 
+    /// A long code block comes whole in its first row (the server joins its
+    /// pieces): all of its lines parse, the last one included.
+    func testALongCodeBlockParsesWhole() {
+        let lines = (1...320).map { "<span class=\"s2\">echo</span> line \($0)" }
+        let b = RichText.parse("<pre style=\"margin:0;\">" + lines.joined(separator: "\n") + "</pre>")
+        guard case .code(let spans)? = b.first else { return XCTFail("\(b)") }
+        let text = RichText.plain(spans).split(separator: "\n")
+        XCTAssertEqual(text.count, 320)
+        XCTAssertEqual(text.last, "echo line 320")
+    }
+
     func testTables() {
         let html = "<table border=\"1\" cellspacing=\"0\" cellpadding=\"6\" style=\"border-collapse: collapse;\"><thead><tr><th>A</th><th>B</th></tr></thead><tbody>\n<tr><td>1</td><td><code>2</code></td></tr>\n</tbody></table>"
         guard case .table(let head, let rows)? = RichText.parse(html).first else { return XCTFail() }

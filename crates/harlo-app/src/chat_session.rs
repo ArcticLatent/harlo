@@ -564,6 +564,10 @@ impl SessionSink for QtSink {
             }
         });
     }
+    /// (The session open in the window: its box takes messages back.)
+    fn composes(&self) -> bool {
+        true
+    }
 }
 
 impl Drop for ChatSessionRust {

@@ -26,11 +26,16 @@ pub struct Hit {
 
 /// How often one big file that's being written to is read again.
 const BIG_FILE_INTERVAL: Duration = Duration::from_secs(60);
+/// How long a file that couldn't be read waits before it's tried again.
+const UNREAD_INTERVAL: Duration = Duration::from_secs(60);
 
 pub struct SearchIndex {
     conn: Connection,
     /// When each big file was last read.
     big_reads: HashMap<String, Instant>,
+    /// Files that couldn't be read, and when: tried again a while later
+    /// (one on a host that's gone mustn't hold up every scan).
+    unread: HashMap<String, Instant>,
 }
 
 /// A second connection to the index, for searching while it's being
@@ -196,33 +201,29 @@ impl SearchIndex {
             }
             tx.commit()?;
         }
-        Ok(SearchIndex { conn, big_reads: HashMap::new() })
+        Ok(SearchIndex { conn, big_reads: HashMap::new(), unread: HashMap::new() })
     }
 
     /// Re-indexes session files that changed since last time and forgets
     /// ones that are gone. Returns how many files were (re)indexed.
     pub fn update(&mut self, files: &[PathBuf]) -> Result<usize> {
         let stamped: Vec<(PathBuf, i64, i64)> = files.iter().filter_map(|f| stamp(f).map(|(m, s)| (f.clone(), m, s))).collect();
-        self.update_with(&stamped, |f| harlo_harness::store::read_messages(f).unwrap_or_default())
+        self.update_batched(&stamped, |f, _| harlo_harness::store::read_messages(f).ok().map(|messages| Part { messages, ..Default::default() }), || {})
     }
 
-    /// `update` for sessions anywhere: each with the stamp it has (a remote
-    /// host's), read by `read` when it changed.
-    pub fn update_with(&mut self, files: &[(PathBuf, i64, i64)], read: impl Fn(&Path) -> Vec<Value>) -> Result<usize> {
-        self.update_parts(files, |p, _| Part { messages: read(p), ..Default::default() })
-    }
-
-    /// `update_with` where `read` may read on from where a file was left
-    /// (it's given that place; what it returns replaces the messages from
-    /// its `first_index` on).
+    /// `update` for sessions anywhere, each with the stamp it has (a remote
+    /// host's), read by `read` when it changed: it may read on from where a
+    /// file was left (it's given that place; what it returns replaces the
+    /// messages from its `first_index` on).
     pub fn update_parts(&mut self, files: &[(PathBuf, i64, i64)], read: impl Fn(&Path, Option<&Resume>) -> Part) -> Result<usize> {
-        self.update_batched(files, read, || {})
+        self.update_batched(files, |p, r| Some(read(p, r)), || {})
     }
 
     /// `update_parts`, committing as it goes ([`BATCH_FILES`] files, or
     /// [`BATCH_TIME`]): `committed` is called after each commit that
-    /// changed something.
-    pub fn update_batched(&mut self, files: &[(PathBuf, i64, i64)], read: impl Fn(&Path, Option<&Resume>) -> Part, mut committed: impl FnMut()) -> Result<usize> {
+    /// changed something. A file `read` couldn't read (None) keeps what it
+    /// had and is tried again after [`UNREAD_INTERVAL`].
+    pub fn update_batched(&mut self, files: &[(PathBuf, i64, i64)], read: impl Fn(&Path, Option<&Resume>) -> Option<Part>, mut committed: impl FnMut()) -> Result<usize> {
         let wanted: HashSet<&Path> = files.iter().map(|p| p.0.as_path()).collect();
         let known: HashMap<String, (i64, i64)> = {
             let mut stmt = self.conn.prepare("SELECT path, modified, size FROM files")?;
@@ -260,6 +261,9 @@ impl SearchIndex {
                 self.big_reads.insert(key.to_string(), Instant::now());
                 biggest = biggest.max(size as u64);
             }
+            if self.unread.get(key.as_ref()).is_some_and(|at| at.elapsed() < UNREAD_INTERVAL) {
+                continue;
+            }
             let was_known = known.contains_key(key.as_ref());
             let resume = if !was_known {
                 None
@@ -269,7 +273,13 @@ impl SearchIndex {
                 })
                 .optional()?
             };
-            let part = read(file, resume.as_ref());
+            // (Not readable now: what it had stays, and its stamp isn't
+            // taken, so it's read again.)
+            let Some(part) = read(file, resume.as_ref()) else {
+                self.unread.insert(key.to_string(), Instant::now());
+                continue;
+            };
+            self.unread.remove(key.as_ref());
             if was_known {
                 forget(&tx, &key, part.first_index)?;
             }
@@ -391,7 +401,7 @@ mod tests {
                     let started = Instant::now();
                     seen.borrow_mut().push(reader.search("zebra", 100).unwrap().len());
                     assert!(started.elapsed() < Duration::from_millis(150), "a search waited {:?}", started.elapsed());
-                    Part { messages: harlo_harness::store::read_messages(p).unwrap_or_default(), ..Default::default() }
+                    Some(Part { messages: harlo_harness::store::read_messages(p).unwrap_or_default(), ..Default::default() })
                 },
                 || commits += 1,
             )
@@ -500,6 +510,36 @@ mod tests {
         assert!(index.search("lemming", 10).unwrap().is_empty());
         let rows: i64 = index.conn.query_row("SELECT count(*) FROM message_rows", [], |r| r.get(0)).unwrap();
         assert_eq!(rows, 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A file that can't be read for now isn't indexed as empty: it keeps
+    /// what it had, and is read once it can be (after a while: one that
+    /// keeps failing isn't tried on every scan).
+    #[test]
+    fn a_file_not_readable_now_keeps_its_hits() {
+        let dir = std::env::temp_dir().join(format!("harlo-search-unread-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut index = SearchIndex::open(&dir.join("search.db")).unwrap();
+        let said = |word: &'static str| Some(Part { messages: vec![serde_json::json!({"role": "user", "content": word})], ..Default::default() });
+        let a = PathBuf::from("/a");
+        index.update_batched(&[(a.clone(), 1, 1)], |_, _| said("walrus"), || {}).unwrap();
+        // Changed, but not readable: what it had stays, its stamp isn't taken.
+        let tried = std::cell::Cell::new(0);
+        let fails = |_: &Path, _: Option<&Resume>| {
+            tried.set(tried.get() + 1);
+            None
+        };
+        assert_eq!(index.update_batched(&[(a.clone(), 2, 2)], fails, || {}).unwrap(), 0);
+        assert_eq!(index.search("walrus", 10).unwrap().len(), 1, "its hits stay");
+        // Not tried again on the next scan, but after a while.
+        index.update_batched(&[(a.clone(), 2, 2)], fails, || {}).unwrap();
+        assert_eq!(tried.get(), 1, "not on every scan");
+        index.unread.clear();
+        assert_eq!(index.update_batched(&[(a.clone(), 2, 2)], |_, _| said("puffin"), || {}).unwrap(), 1, "read once it can be");
+        assert!(index.search("walrus", 10).unwrap().is_empty());
+        assert_eq!(index.search("puffin", 10).unwrap().len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

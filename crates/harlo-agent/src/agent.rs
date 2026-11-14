@@ -192,9 +192,10 @@ pub async fn aside(parts: &AsideParts, history: &[Value], question: &str, on_tex
     let size = compact::estimate_text(&parts.system) + asked.iter().map(compact::estimate).sum::<u64>();
     let hold = admit(parts.budget.as_ref(), size + REPLY_ROOM).map_err(|why| anyhow::anyhow!(why))?;
     let a = Asked { model: &parts.model, effort: parts.effort.as_deref(), instructions: &parts.system, history: &asked, session: &parts.key, specs: &parts.specs, tools: false, images: parts.images, trigger: false };
-    let sent = send(a, &mut show).await;
+    let mut spent = Vec::new();
+    let sent = send(a, &mut show, &mut spent).await;
     // (Out of the budget and into the session's totals before its hold
-    // goes: a reply cut off spent what it says too.)
+    // goes: a try that failed or was cut off spent what it says too.)
     let settle = |usage: &Value, reply: u64| {
         let used = Used::from_api(usage).estimating(usage, size, reply).priced(&parts.pricing);
         if let Some(b) = &parts.budget {
@@ -202,15 +203,10 @@ pub async fn aside(parts: &AsideParts, history: &[Value], question: &str, on_tex
         }
         parts.side.lock().unwrap().push(SideUse { used, logged: used.log(usage, &parts.pricing), session: parts.session.clone(), path: parts.log_path.clone() });
     };
-    let (reply, usage) = match sent {
-        Ok(r) => r,
-        Err(e) => {
-            if let Some(usage) = cut_off_usage(&e) {
-                settle(usage, 0);
-            }
-            return Err(e);
-        }
-    };
+    for usage in &spent {
+        settle(usage, 0);
+    }
+    let (reply, usage) = sent?;
     settle(&usage, compact::estimate(&reply));
     drop(hold);
     let said: String = reply["content"].as_array().into_iter().flatten().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect();
@@ -305,10 +301,15 @@ impl std::fmt::Display for FellBack {
 
 impl std::error::Error for FellBack {}
 
-/// What a request the server cut off said it used (None: it said nothing,
-/// or it wasn't cut off). It spent that even though its reply is lost.
-fn cut_off_usage(e: &anyhow::Error) -> Option<&Value> {
-    e.downcast_ref::<crate::responses::CutOff>().map(|c| &c.usage).filter(|u| u.is_object())
+/// What a try the server answered but didn't finish spent, though its
+/// reply is lost: a reply cut off spent what it says, or (saying nothing,
+/// null) an unknown amount, estimated; a failed one what it says, if it
+/// says. None: nothing to count (refused, or failed saying nothing).
+fn spent_by(e: &anyhow::Error) -> Option<Value> {
+    if let Some(c) = e.downcast_ref::<crate::responses::CutOff>() {
+        return Some(if c.usage.is_object() { c.usage.clone() } else { Value::Null });
+    }
+    e.downcast_ref::<crate::responses::Failed>().map(|f| &f.usage).filter(|u| u.is_object()).cloned()
 }
 
 /// How much of a reply a request holds room for in the budget (its
@@ -852,6 +853,8 @@ impl Agent {
                 mcp: self.mcp.as_ref(),
                 search: Some((&self.model, &key, pricing, self.budget.as_ref())),
             };
+            // (The rules sent with the last batch's results are read now.)
+            self.tools.batch_starts();
             let outcomes = run_calls(&self.tools, &triples, &extra, stop).await;
             handed_over |= hands_over(&names, &outcomes);
             let changed = names.iter().zip(&outcomes).any(|(n, o)| matches!(*n, "edit" | "write" | "apply_patch") && !o.failed);
@@ -986,7 +989,14 @@ impl Agent {
         let (system, specs) = (self.system(), self.specs());
         let key = self.cache_key.clone().unwrap_or_else(|| self.log.id.clone());
         let asked = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &self.history, session: &key, specs: &specs, tools: true, images, trigger: false };
-        let (mut message, usage) = match send(asked, show).await {
+        let mut spent = Vec::new();
+        let sent = send(asked, show, &mut spent).await;
+        // (Tries cut off or failed spent what they say, retried or not.)
+        if !spent.is_empty() {
+            let pricing = self.pricing().await;
+            self.count_spent(&spent, self.estimate_whole(), &pricing, "cut off");
+        }
+        let (mut message, usage) = match sent {
             Err(e) if let Some(back) = self.falls_back(&e) => {
                 // Goes on with the fallback: said, and in the log.
                 let (plan, fb) = (self.model.clone(), self.fallback.clone().unwrap_or_default());
@@ -1003,16 +1013,6 @@ impl Agent {
                 // own compaction carried over, made to fit its window, its
                 // instructions and tools, out of the budget.)
                 return Err(FellBack.into());
-            }
-            Err(e) => {
-                // (A reply the server cut off still spent what it used.)
-                if let Some(usage) = cut_off_usage(&e) {
-                    let pricing = self.pricing().await;
-                    let used = Used::from_api(usage).estimating(usage, self.estimate_whole(), 0).priced(&pricing);
-                    self.count(&used, true);
-                    self.log.append(json!({ "type": "harlo_usage", "source": "cut off", "usage": used.log(usage, &pricing) }))?;
-                }
-                return Err(e);
             }
             r => r?,
         };
@@ -1295,13 +1295,14 @@ impl Agent {
         };
     }
 
-    /// A compaction's request the server cut off: what it said it spent,
-    /// counted and logged on its own.
-    fn cut_off_spent(&mut self, e: &anyhow::Error, size: u64, pricing: &crate::used::Pricing) {
-        if let Some(usage) = cut_off_usage(e) {
+    /// Tries the server answered but didn't finish ([`spent_by`]), each
+    /// counted and logged as a request of its own (estimated at `size`
+    /// where it didn't say).
+    fn count_spent(&mut self, spent: &[Value], size: u64, pricing: &crate::used::Pricing, source: &str) {
+        for usage in spent {
             let used = Used::from_api(usage).estimating(usage, size, 0).priced(pricing);
             self.count(&used, true);
-            let _ = self.log.append(json!({ "type": "harlo_usage", "source": "compaction", "usage": used.log(usage, pricing) }));
+            let _ = self.log.append(json!({ "type": "harlo_usage", "source": source, "usage": used.log(usage, pricing) }));
         }
     }
 
@@ -1502,11 +1503,13 @@ impl Agent {
         let images = self.takes_images().await;
         let request = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &asked, session: &key, specs: &specs, tools: false, images, trigger: false };
         let mut quiet = |_: Shown| {};
+        let mut spent = Vec::new();
         let sent = tokio::select! {
             biased;
             _ = stop.cancelled() => None,
-            r = send(request, &mut quiet) => Some(r),
+            r = send(request, &mut quiet, &mut spent) => Some(r),
         };
+        self.count_spent(&spent, size, &pricing, "compaction");
         let failed = |show: &mut (dyn FnMut(Shown) + Send), why: String| {
             let said = format!("{why}; it goes on with {made_by}'s note of the user's requests");
             show(Shown::CompactionEnd { reason: "model change", result: None, error: Some(&said), will_retry: false });
@@ -1517,10 +1520,7 @@ impl Agent {
                 show(Shown::CompactionEnd { reason: "model change", result: None, error: None, will_retry: false });
                 return Compacted::Stopped;
             }
-            Some(Err(e)) => {
-                self.cut_off_spent(&e, size, &pricing);
-                return failed(show, format!("{e:#}"));
-            }
+            Some(Err(e)) => return failed(show, format!("{e:#}")),
             Some(Ok(r)) => r,
         };
         let used = Used::from_api(&usage).estimating(&usage, size, compact::estimate(&reply)).priced(&pricing);
@@ -1581,11 +1581,13 @@ impl Agent {
         if let Some((pid, bare)) = providers::resolve(&self.model).ok().filter(|(p, _)| p.api == Api::Responses && compact::native(&p.id)).map(|(p, m)| (p.id, m)) {
             let request = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &self.history[..cut], session: &key, specs: &specs, tools: true, images, trigger: true };
             let mut quiet = |_: Shown| {};
+            let mut spent = Vec::new();
             let sent = tokio::select! {
                 biased;
                 _ = stop.cancelled() => None,
-                r = send(request, &mut quiet) => Some(r),
+                r = send(request, &mut quiet, &mut spent) => Some(r),
             };
+            self.count_spent(&spent, size, &pricing, "compaction");
             match sent {
                 None => {
                     show(Shown::CompactionEnd { reason, result: None, error: None, will_retry: false });
@@ -1614,7 +1616,6 @@ impl Agent {
                     }
                 }
                 Some(Err(e)) => {
-                    self.cut_off_spent(&e, size, &pricing);
                     show(Shown::Notice { level: "info", text: &format!("The server's compaction failed ({e:#}): summarizing instead.") })
                 }
             }
@@ -1639,20 +1640,19 @@ impl Agent {
                 let request = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &asked, session: &key, specs: &specs, tools: false, images, trigger: false };
                 // (The summary isn't shown as it's written.)
                 let mut quiet = |_: Shown| {};
+                let mut spent = Vec::new();
                 let sent = tokio::select! {
                     biased;
                     _ = stop.cancelled() => None,
-                    r = send(request, &mut quiet) => Some(r),
+                    r = send(request, &mut quiet, &mut spent) => Some(r),
                 };
+                self.count_spent(&spent, size, &pricing, "compaction");
                 let (mut reply, usage) = match sent {
                     None => {
                         show(Shown::CompactionEnd { reason, result: None, error: None, will_retry: false });
                         return Compacted::Stopped;
                     }
-                    Some(Err(e)) => {
-                        self.cut_off_spent(&e, size, &pricing);
-                        return failed(show, format!("{e:#}"));
-                    }
+                    Some(Err(e)) => return failed(show, format!("{e:#}")),
                     Some(Ok(r)) => r,
                 };
                 let used = Used::from_api(&usage).estimating(&usage, size, compact::estimate(&reply)).priced(&pricing);
@@ -1723,14 +1723,17 @@ struct Asked<'a> {
 
 /// Sends a request: the reply, as pi's assistant message, and its usage.
 /// One that failed for a passing reason (see `retry`) is sent again, the
-/// reply it had started dropped, with a notice.
-async fn send(a: Asked<'_>, show: &mut (dyn FnMut(Shown) + Send)) -> Result<(Value, Value)> {
+/// reply it had started dropped, with a notice. What tries the server
+/// answered but didn't finish spent goes in `spent` ([`spent_by`]), as
+/// it happens: it's there if the request is stopped too.
+async fn send(a: Asked<'_>, show: &mut (dyn FnMut(Shown) + Send), spent: &mut Vec<Value>) -> Result<(Value, Value)> {
     let mut tried = 0;
     loop {
         let e = match send_once(a, show).await {
             Ok(r) => return Ok(r),
             Err(e) => e,
         };
+        spent.extend(spent_by(&e));
         let Some((why, asked)) = crate::retry::transient(&e).filter(|_| tried < crate::retry::TRIES) else { return Err(e) };
         if let Some(secs) = asked.filter(|s| *s > crate::retry::MAX_WAIT) {
             let said = crate::retry::not_waiting(secs, crate::clock::now().unix);
@@ -1927,30 +1930,29 @@ async fn web_search(args: &Value, model: &str, key: &str, pricing: &crate::used:
         Err(why) => return tools::Outcome::new(why, true),
     };
     let mut quiet = |_: Shown| {};
-    match send(asked, &mut quiet).await {
-        Ok((reply, usage)) => {
-            let used = Used::from_api(&usage).estimating(&usage, size, compact::estimate(&reply)).priced(pricing);
-            // (Out of the budget now, before its hold goes: the next request,
-            // a search later in the same batch too, sees it.)
-            if let Some(b) = budget {
-                b.spent.fetch_add(used.billed(), std::sync::atomic::Ordering::Relaxed);
-            }
-            let mut o = tools::Outcome::new(crate::search::findings(&reply), false);
-            o.details = json!({ "usage": used.details() });
-            o
-        }
-        Err(e) => {
-            let mut o = tools::Outcome::new(format!("The search failed: {e:#}"), true);
-            if let Some(usage) = cut_off_usage(&e) {
-                let used = Used::from_api(usage).estimating(usage, size, 0).priced(pricing);
-                if let Some(b) = budget {
-                    b.spent.fetch_add(used.billed(), std::sync::atomic::Ordering::Relaxed);
-                }
-                o.details = json!({ "usage": used.details() });
-            }
-            o
-        }
+    let mut spent = Vec::new();
+    let sent = send(asked, &mut quiet, &mut spent).await;
+    // (Its tries, each a request: out of the budget now, before its hold
+    // goes, so the next request, a search later in the same batch too,
+    // sees them.)
+    let mut used = Used::default();
+    for usage in &spent {
+        used.add(&Used::from_api(usage).estimating(usage, size, 0).priced(pricing));
     }
+    let mut o = match sent {
+        Ok((reply, usage)) => {
+            used.add(&Used::from_api(&usage).estimating(&usage, size, compact::estimate(&reply)).priced(pricing));
+            tools::Outcome::new(crate::search::findings(&reply), false)
+        }
+        Err(e) => tools::Outcome::new(format!("The search failed: {e:#}"), true),
+    };
+    if used.requests > 0 {
+        if let Some(b) = budget {
+            b.spent.fetch_add(used.billed(), std::sync::atomic::Ordering::Relaxed);
+        }
+        o.details = json!({ "usage": used.details() });
+    }
+    o
 }
 
 /// A call of ours or of an MCP server's.
@@ -1996,12 +1998,19 @@ async fn run_calls(tools: &Tools, calls: &[(&str, &str, &Value)], extra: &Extra<
     };
     let mcp = extra.mcp;
     if calls.iter().all(|(_, n, _)| extra.read_only(n) && !not_here(n)) {
-        let all = join_all(calls.iter().map(|(_, name, args)| async move { if args.is_null() { bad_args() } else { call_tool(tools, mcp, extra.search, name, args).await } }));
-        return tokio::select! {
+        // (Stopped: the calls that finished keep what they found, and what
+        // they spent; only the rest are interrupted.)
+        let done: Vec<std::sync::Mutex<Option<tools::Outcome>>> = calls.iter().map(|_| std::sync::Mutex::new(None)).collect();
+        let all = join_all(calls.iter().zip(&done).map(|((_, name, args), slot)| async move {
+            let o = if args.is_null() { bad_args() } else { call_tool(tools, mcp, extra.search, name, args).await };
+            *slot.lock().unwrap() = Some(o);
+        }));
+        tokio::select! {
             biased;
-            _ = stop.cancelled() => calls.iter().map(|_| cut(INTERRUPTED)).collect(),
-            o = all => o,
-        };
+            _ = stop.cancelled() => {}
+            _ = all => {}
+        }
+        return done.into_iter().map(|slot| slot.into_inner().unwrap().unwrap_or_else(|| cut(INTERRUPTED))).collect();
     }
     let mut out = Vec::new();
     for (id, name, args) in calls {

@@ -212,6 +212,12 @@ pub enum Notable {
 /// them to the UI thread.
 pub trait SessionSink: Send + 'static {
     fn deliver(&self, updates: Vec<SessionUpdate>);
+    /// Whether it has a box to type in, which takes messages back
+    /// (`SessionUpdate::Unsent`): with none of those there, the session
+    /// keeps them for the next one.
+    fn composes(&self) -> bool {
+        false
+    }
 }
 
 enum Control {
@@ -403,6 +409,9 @@ struct DriverState {
     /// one only once its first message is under way).
     file_asked: bool,
     sinks: Vec<(u64, Box<dyn SessionSink>)>,
+    /// Messages given back while nothing with a box to type in was there:
+    /// for the next one that is.
+    unsent: Vec<Unsent>,
     messages: KeptMessages,
     /// Why the current run failed, if it did (reported when it settles).
     run_error: Option<String>,
@@ -578,6 +587,22 @@ pub fn turn_snapshots_on() -> bool {
     crate::db::Db::open(&crate::db::default_path()).ok().and_then(|d| d.get("settings.undo_snapshots").ok().flatten()).as_deref() != Some("0")
 }
 
+/// Messages that weren't sent, back to the box they were typed in, with
+/// a word in the transcript: now if one is there, else kept for the next
+/// (a Stop from elsewhere, a spending limit, while it's open nowhere).
+fn give_back(st: &mut DriverState, pending: &mut Vec<SessionUpdate>, unsent: Vec<Unsent>, why: &str) {
+    if unsent.is_empty() {
+        return;
+    }
+    let said = if unsent.len() == 1 { format!("{why}: your message is back in the box.") } else { format!("{why}: your messages are back in the box.") };
+    st.transcript.apply(&HarnessEvent::Notice { level: harlo_harness::NoticeLevel::Info, text: said, system: false });
+    if st.sinks.iter().any(|(_, s)| s.composes()) {
+        pending.push(SessionUpdate::Unsent(unsent));
+    } else {
+        st.unsent.extend(unsent);
+    }
+}
+
 fn set_status(st: &mut DriverState, s: SessionStatus, pending: &mut Vec<SessionUpdate>) {
     if st.status != s {
         st.status = s;
@@ -609,6 +634,7 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
         background: 0,
         file_asked: false,
         sinks: Vec::new(),
+        unsent: Vec::new(),
         messages: KeptMessages::default(),
         run_error: None,
         subagents_done: Default::default(),
@@ -807,8 +833,15 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                 // it was stopped meanwhile).
                 Aux::Snapshotted(n) if n == snap_turn && !held.is_empty() => {
                     pending.push(SessionUpdate::Preparing(false));
-                    for (i, u) in std::mem::take(&mut held).into_iter().enumerate() {
-                        let Some(h) = driver.ensure_harness(&mut st, &mut pending) else { break };
+                    let mut rest = std::mem::take(&mut held).into_iter().enumerate();
+                    while let Some((i, u)) = rest.next() {
+                        let Some(h) = driver.ensure_harness(&mut st, &mut pending) else {
+                            // (It didn't start: this one and the rest back.)
+                            let back = std::iter::once(u).chain(rest.map(|(_, u)| u)).collect();
+                            give_back(&mut st, &mut pending, back, "Not sent");
+                            dirty = true;
+                            break;
+                        };
                         h.prompt(&u.text, u.images, if i == 0 { SendMode::Normal } else { u.mode });
                     }
                 }
@@ -821,6 +854,10 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                     let mut now = st.snapshot();
                     if !held.is_empty() {
                         now.push(SessionUpdate::Preparing(true));
+                    }
+                    // (Messages given back while no box was there: this one's.)
+                    if sink.composes() && !st.unsent.is_empty() {
+                        now.push(SessionUpdate::Unsent(std::mem::take(&mut st.unsent)));
                     }
                     sink.deliver(now);
                     st.sinks.push((id, sink));
@@ -856,16 +893,20 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                         // A prompt sent while idle must not carry a queue mode.
                         let mode = if st.status == SessionStatus::Busy { mode } else { SendMode::Normal };
                         h.prompt(&text, images, mode);
+                    } else {
+                        // (It didn't start: the message back.)
+                        give_back(&mut st, &mut pending, vec![Unsent { text, images, mode, typed }], "Not sent");
+                        dirty = true;
                     }
                 }
                 // Stopped while its snapshot was taken: never sent.
                 Some(Control::Abort) if !held.is_empty() => {
                     let unsent = std::mem::take(&mut held);
-                    let said = if unsent.len() == 1 { "Stopped before it was sent: your message is back in the box." } else { "Stopped before they were sent: your messages are back in the box." };
+                    let why = if unsent.len() == 1 { "Stopped before it was sent" } else { "Stopped before they were sent" };
                     snap_turn += 1;
                     pending.push(SessionUpdate::Preparing(false));
-                    dirty |= st.transcript.apply(&HarnessEvent::Notice { level: harlo_harness::NoticeLevel::Info, text: said.into(), system: false });
-                    pending.push(SessionUpdate::Unsent(unsent));
+                    give_back(&mut st, &mut pending, unsent, why);
+                    dirty = true;
                 }
                 Some(Control::Abort) => {
                     // A run you stopped isn't "ready".
@@ -1997,6 +2038,59 @@ mod tests {
         assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::UiCleared(c) if *c == id)).await);
         let started = tokio::time::timeout(Duration::from_secs(1), collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::Status(SessionStatus::Starting)))).await;
         assert!(!matches!(started, Ok(true)));
+    }
+
+    /// A sink with a box to type in (the window's, a phone's).
+    struct ComposingSink(mpsc::UnboundedSender<SessionUpdate>);
+    impl SessionSink for ComposingSink {
+        fn deliver(&self, updates: Vec<SessionUpdate>) {
+            for u in updates {
+                let _ = self.0.send(u);
+            }
+        }
+        fn composes(&self) -> bool {
+            true
+        }
+    }
+
+    /// Messages given back from what `rx` has now.
+    async fn given_back(rx: &mut mpsc::UnboundedReceiver<SessionUpdate>) -> Vec<String> {
+        let mut out = Vec::new();
+        while let Ok(Some(u)) = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await {
+            if let SessionUpdate::Unsent(held) = u {
+                out.extend(held.into_iter().map(|u| u.text));
+            }
+        }
+        out
+    }
+
+    /// A message its agent couldn't start for comes back to the box; with
+    /// no box open, the session keeps it for the first one that opens, and
+    /// only that one.
+    #[tokio::test]
+    async fn a_message_that_couldnt_be_sent_comes_back() {
+        let gone = std::env::temp_dir().join(format!("harlo-gone-{}", std::process::id()));
+        let handle = SessionHandle::spawn(HarnessConfig { kind: HarnessKind::Harlo, program: Some("/nonexistent/harlo-agent".into()), cwd: gone, session: SessionTarget::New, extra_args: vec![], env: vec![], remote: None });
+        // Only a watcher (as the workspace's is): nothing to give it back to.
+        let (tx, mut watcher) = mpsc::unbounded_channel();
+        handle.subscribe(ChannelSink(tx));
+        handle.prompt("first words", Vec::new(), harlo_harness::SendMode::Normal);
+        assert!(given_back(&mut watcher).await.is_empty(), "a watcher has no box");
+        // The first box opened gets it, with the snapshot; the next doesn't.
+        let (tx, mut window) = mpsc::unbounded_channel();
+        handle.subscribe(ComposingSink(tx));
+        assert_eq!(given_back(&mut window).await, ["first words"]);
+        // With a box open, it comes back at once.
+        handle.prompt("second words", Vec::new(), harlo_harness::SendMode::Normal);
+        assert_eq!(given_back(&mut window).await, ["second words"]);
+        let (tx, mut phone) = mpsc::unbounded_channel();
+        handle.subscribe(ComposingSink(tx));
+        assert!(given_back(&mut phone).await.is_empty(), "taken already");
+        let mut rows = Vec::new();
+        let (tx, mut late) = mpsc::unbounded_channel();
+        handle.subscribe(ChannelSink(tx));
+        collect_until(&mut late, &mut rows, |u| matches!(u, SessionUpdate::Reset(_))).await;
+        assert!(rows.iter().any(|r| r.text.contains("Not sent: your message is back in the box.")), "said in the transcript");
     }
 
     /// A run you stop says so (its helpers stop with it); one that finishes doesn't.

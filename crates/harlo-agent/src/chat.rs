@@ -290,7 +290,7 @@ pub async fn stream(base: &str, token: Option<&str>, body: &Value, provider: &st
         if chunk["error"].is_object() || chunk["error"].is_string() {
             let e = &chunk["error"];
             let code = e["type"].as_str().or_else(|| e["code"].as_str()).unwrap_or_default().to_owned();
-            return Err(Failed { code, message: format!("{provider}: {}", e["message"].as_str().or_else(|| e.as_str()).unwrap_or("the request failed")) }.into());
+            return Err(Failed { code, message: format!("{provider}: {}", e["message"].as_str().or_else(|| e.as_str()).unwrap_or("the request failed")), usage: chunk["usage"].clone() }.into());
         }
         reply.take(&chunk, &mut events);
         for e in events.drain(..) {

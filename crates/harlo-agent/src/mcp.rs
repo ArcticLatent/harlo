@@ -60,6 +60,24 @@ pub const RESOURCES: &str = "mcp_resources";
 /// one: the model finds them with this, then calls them with [`CALL`].
 pub const FIND: &str = "mcp_tools";
 pub const CALL: &str = "mcp_call";
+
+/// A [`CALL`]'s `arguments`: an object, or one as a JSON string (some
+/// models send them so); none, `null` or an empty string are none. Any
+/// other value isn't sent: Err says what it was.
+fn call_arguments(v: &Value) -> Result<Value, String> {
+    match v {
+        Value::Null => Ok(json!({})),
+        Value::Object(_) => Ok(v.clone()),
+        Value::String(t) if t.trim().is_empty() => Ok(json!({})),
+        Value::String(t) => match serde_json::from_str::<Value>(t) {
+            Ok(o) if o.is_object() => Ok(o),
+            Ok(_) => Err("were a string holding JSON that isn't an object".into()),
+            Err(e) => Err(format!("were a string that isn't valid JSON ({e})")),
+        },
+        Value::Array(_) => Err("were a list".into()),
+        _ => Err(format!("were {v}, not an object")),
+    }
+}
 /// Past this many bytes of tool schemas (about 3k tokens: 20 tools of a
 /// usual size), they're listed by name and looked up, not sent whole with
 /// every request (100 tools cost 11k tokens a request, 500 cost 54k).
@@ -1094,13 +1112,7 @@ impl Mcp {
         }
         let asked = args["name"].as_str()?.trim();
         let found = self.find_name(asked)?;
-        let arguments = match &args["arguments"] {
-            Value::Object(_) => args["arguments"].clone(),
-            // (Some models send the arguments as a JSON string.)
-            Value::String(t) => serde_json::from_str::<Value>(t).ok().filter(Value::is_object).unwrap_or_else(|| json!({})),
-            _ => json!({}),
-        };
-        Some((found, arguments))
+        Some((found, call_arguments(&args["arguments"]).ok()?))
     }
 
     /// A tool by its full name, its own name (if only one server has it),
@@ -1204,23 +1216,44 @@ impl Mcp {
         self.read_only.contains(name) || (name == RESOURCES && self.has(RESOURCES)) || (self.listed && (name == FIND || name == CALL))
     }
 
-    /// Lists again the tools of servers that said they changed.
+    /// Lists again the tools of servers that said they changed. Stopped
+    /// part way (Stop drops it) or failed, they're listed again with the
+    /// next prompt; what's listed goes in only once all of them are.
     pub async fn refresh(&mut self) -> Vec<String> {
-        let mut notes = Vec::new();
-        let mut any = false;
-        for s in &mut self.servers {
-            if !s.changed.swap(false, Ordering::Relaxed) {
-                continue;
-            }
-            match list_tools(&s.conn, s.timeout).await {
-                Ok(t) => {
-                    s.tools = t;
-                    any = true;
+        /// Servers still to list: said again when it's dropped.
+        struct Due(Vec<Arc<AtomicBool>>);
+        impl Drop for Due {
+            fn drop(&mut self) {
+                for c in &self.0 {
+                    c.store(true, Ordering::Relaxed);
                 }
-                Err(e) => notes.push(format!("MCP server {}: couldn't list its tools again: {e}", s.name)),
             }
         }
-        if any {
+        let mut notes = Vec::new();
+        // (Cleared first: one that says it changed again meanwhile is
+        // listed again next time.)
+        let due: Vec<usize> = (0..self.servers.len()).filter(|&i| self.servers[i].changed.swap(false, Ordering::Relaxed)).collect();
+        if due.is_empty() {
+            return notes;
+        }
+        let mut still = Due(due.iter().map(|&i| self.servers[i].changed.clone()).collect());
+        let mut listed = Vec::new();
+        let mut failed = Vec::new();
+        for &i in &due {
+            let s = &self.servers[i];
+            match list_tools(&s.conn, s.timeout).await {
+                Ok(t) => listed.push((i, t)),
+                Err(e) => {
+                    notes.push(format!("MCP server {}: couldn't list its tools again: {e}", s.name));
+                    failed.push(s.changed.clone());
+                }
+            }
+        }
+        still.0 = failed;
+        if !listed.is_empty() {
+            for (i, t) in listed {
+                self.servers[i].tools = t;
+            }
             self.index();
         }
         notes
@@ -1247,6 +1280,9 @@ impl Mcp {
         // got here: `resolve`.)
         if name == CALL && self.listed {
             let asked = args["name"].as_str().unwrap_or_default();
+            if let (Some(tool), Err(why)) = (self.find_name(asked.trim()), call_arguments(&args["arguments"])) {
+                return Outcome::new(format!("Not called: {tool}'s arguments {why}; call it again with them as a JSON object."), true);
+            }
             return Outcome::new(format!("No MCP tool {asked}: find it with {FIND} and use the name it gives."), true);
         }
         let Some((i, tool)) = self.by_name.get(name) else {
@@ -1367,6 +1403,20 @@ fn resource_row(x: &Value, key: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A listed call's arguments: an object, or one in a string; none is
+    /// none; anything else isn't sent.
+    #[test]
+    fn call_arguments_are_an_object_or_not_sent() {
+        assert_eq!(call_arguments(&json!({"a": 1})), Ok(json!({"a": 1})));
+        assert_eq!(call_arguments(&json!("{\"a\": 1}")), Ok(json!({"a": 1})));
+        for none in [Value::Null, json!(""), json!("  ")] {
+            assert_eq!(call_arguments(&none), Ok(json!({})), "{none}");
+        }
+        for bad in [json!("{\"text\":"), json!("[1]"), json!([1]), json!(3), json!(true)] {
+            assert!(call_arguments(&bad).is_err(), "{bad}");
+        }
+    }
 
     #[test]
     fn says_what_the_start_waits_for() {

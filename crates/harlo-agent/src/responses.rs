@@ -423,7 +423,7 @@ pub async fn stream(base: &str, token: Option<&str>, affinity: Option<&str>, hea
             "response.failed" => {
                 let err = &ev["response"]["error"];
                 let code = err["code"].as_str().unwrap_or_default();
-                return Err(Failed { code: code.to_owned(), message: explain(code, err["message"].as_str().unwrap_or("the request failed")) }.into());
+                return Err(Failed { code: code.to_owned(), message: explain(code, err["message"].as_str().unwrap_or("the request failed")), usage: ev["response"]["usage"].clone() }.into());
             }
             "response.incomplete" => {
                 let reason = ev["response"]["incomplete_details"]["reason"].as_str().unwrap_or("no reason given").to_owned();
@@ -432,7 +432,7 @@ pub async fn stream(base: &str, token: Option<&str>, affinity: Option<&str>, hea
             "error" => {
                 let code = ev["code"].as_str().or_else(|| ev["error"]["code"].as_str()).unwrap_or_default();
                 let message = ev["message"].as_str().or_else(|| ev["error"]["message"].as_str()).unwrap_or("the request failed");
-                return Err(Failed { code: code.to_owned(), message: explain(code, message) }.into());
+                return Err(Failed { code: code.to_owned(), message: explain(code, message), usage: Value::Null }.into());
             }
             _ => {}
         }
@@ -503,6 +503,8 @@ impl std::error::Error for CutOff {}
 pub struct Failed {
     pub code: String,
     pub message: String,
+    /// What the server said the request used (null when it didn't say).
+    pub usage: Value,
 }
 
 impl std::fmt::Display for Failed {

@@ -6821,27 +6821,28 @@ fn branches_json(list: Vec<harlo_harness::branches::BranchInfo>) -> String {
 }
 
 /// A saved session's messages for the search index: read as its agent
-/// writes them, here or (over SSH) on its host.
-fn session_messages(path: &Path, kind: HarnessKind) -> Vec<serde_json::Value> {
+/// writes them, here or (over SSH) on its host. None: not readable now.
+fn session_messages(path: &Path, kind: HarnessKind) -> Option<Vec<serde_json::Value>> {
     let remote = harlo_core::remote::host_of(path).and_then(|h| harlo_core::remote::host(&h));
     match remote {
-        Some(_) => harlo_core::remote::local_copy(path).ok().and_then(|copy| harlo_harness::store::read_saved_for(kind, &copy).ok()).map(|s| s.messages).unwrap_or_default(),
-        None => harlo_harness::store::read_saved_for(kind, path).map(|s| s.messages).unwrap_or_default(),
+        Some(_) => harlo_core::remote::local_copy(path).ok().and_then(|copy| harlo_harness::store::read_saved_for(kind, &copy).ok()).map(|s| s.messages),
+        None => harlo_harness::store::read_saved_for(kind, path).ok().map(|s| s.messages),
     }
 }
 
 /// What the search index needs of a session: a local one is read on from
 /// `resume` (a Claude transcript only grows; a Harlo session is read whole
-/// again when what was added doesn't go on from its last entry).
-fn session_part(path: &Path, kind: HarnessKind, resume: Option<&harlo_harness::claude::Resume>) -> harlo_harness::claude::Part {
+/// again when what was added doesn't go on from its last entry). None:
+/// not readable now (the index keeps what it had, and tries again).
+fn session_part(path: &Path, kind: HarnessKind, resume: Option<&harlo_harness::claude::Resume>) -> Option<harlo_harness::claude::Part> {
     if !harlo_core::remote::is_remote(path) {
         return match kind {
             HarnessKind::Claude => harlo_harness::claude::read_part(path, resume),
             _ => harlo_harness::store::read_part(path, resume),
         }
-        .unwrap_or_default();
+        .ok();
     }
-    harlo_harness::claude::Part { messages: session_messages(path, kind), ..Default::default() }
+    session_messages(path, kind).map(|messages| harlo_harness::claude::Part { messages, ..Default::default() })
 }
 
 impl Workspace {
