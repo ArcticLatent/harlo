@@ -106,6 +106,26 @@ pub fn translate(src: &str, flags: &str) -> String {
     out
 }
 
+/// Whether the pattern has top-level alternatives, each starting with `^`.
+fn anchored_alternatives(src: &str) -> bool {
+    let b = src.as_bytes();
+    let (mut depth, mut class, mut i, mut parts) = (0usize, false, 0, vec![0usize]);
+    while i < b.len() {
+        match b[i] {
+            b'\\' => i += 1,
+            b']' if class => class = false,
+            _ if class => {}
+            b'[' => class = true,
+            b'(' => depth += 1,
+            b')' => depth = depth.saturating_sub(1),
+            b'|' if depth == 0 => parts.push(i + 1),
+            _ => {}
+        }
+        i += 1;
+    }
+    parts.len() > 1 && parts.iter().all(|&p| b.get(p) == Some(&b'^'))
+}
+
 /// A compiled JavaScript pattern.
 #[derive(Clone)]
 pub struct Re {
@@ -144,7 +164,12 @@ impl<'t> Match<'t> {
 
 impl Re {
     pub fn new(src: &str, flags: &str) -> Re {
-        let t = translate(src, flags);
+        // `^a|^b` matches only at the start, as `^(?:a|b)` does, but only
+        // the second is run that way here: the first is tried again at
+        // every later position of the text, so a failed match took time
+        // in proportion to all that follows.
+        let src = if !flags.contains('m') && anchored_alternatives(src) { format!("^(?:{src})") } else { src.to_owned() };
+        let t = translate(&src, flags);
         let re = RegexBuilder::new(&t)
             .backtrack_limit(50_000_000)
             .build()

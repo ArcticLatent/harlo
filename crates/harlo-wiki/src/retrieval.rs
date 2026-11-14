@@ -432,7 +432,7 @@ fn units_of(pages: &[PageKey], texts: &[String], old: &HashMap<&PageKey, &Arc<Ve
 /// A page nesting deeper than the lexer goes: the call fails, as
 /// OpenWiki's does (its parser's stack runs out), with its generic error.
 fn too_deep(_: marked::TooDeep) -> Error {
-    Error::Other(format!("Markdown nests more than {} levels deep", marked::MAX_NESTING))
+    Error::Other(format!("Markdown nests more than {} levels deep, or takes too long to read", marked::MAX_NESTING))
 }
 
 pub fn search(root: &Path, req: &SearchRequest) -> Result<Value> {

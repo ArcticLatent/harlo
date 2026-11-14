@@ -215,6 +215,8 @@ struct Lexer {
     /// level goes through what it holds again, so a deep page costs its
     /// size times its depth.
     work: usize,
+    /// Closing delimiters looked at for emphasis and strikethrough so far.
+    scans: usize,
 }
 
 /// More nested blocks or inline tokens than this and the text isn't lexed:
@@ -222,15 +224,23 @@ struct Lexer {
 /// and fails the call. The stack grows as needed up to it, so any thread
 /// gets there (a page past it fails its call, never the process).
 pub const MAX_NESTING: usize = 3000;
-/// Nor more work than this (bytes gone through, counted at each level): a
+/// Nor more work than this (bytes gone through, counted at each level, and
+/// for a heading's inline text, what follows each place a rule is tried): a
 /// real page takes a few times its size; a 100 KB page of `>` would take
 /// seconds before it reached the depth limit (OpenWiki's parser fails it
-/// in a fraction of one).
+/// in a fraction of one), and a heading of thousands of `_a` 16 s.
 pub const MAX_WORK: usize = 16 << 20;
+/// Nor more closing delimiters looked at than this: each `*`, `_` or `~`
+/// that could open looks along the rest of its text for its closer, so a
+/// heading of thousands of them costs their number squared (a 60 KB one
+/// took 14 s here and 2 s in OpenWiki's parser). Real pages look at a few;
+/// this many takes about a quarter of a second.
+pub const MAX_SCANS: usize = 1 << 20;
 const RED_ZONE: usize = 128 * 1024;
 const GROW_BY: usize = 4 << 20;
 
-/// Text that nests deeper than `MAX_NESTING`, or costs more than `MAX_WORK`.
+/// Text that nests deeper than `MAX_NESTING`, or costs more than `MAX_WORK`
+/// or `MAX_SCANS`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TooDeep;
 
@@ -238,7 +248,7 @@ pub struct TooDeep;
 /// tokens.
 pub fn lex(src: &str) -> Result<Vec<Block>, TooDeep> {
     let src = src.replace("\r\n", "\n").replace('\r', "\n");
-    let mut lx = Lexer { links: HashMap::new(), in_link: false, in_raw_block: false, link_emitted: false, link_paren_possible: true, depth: 0, too_deep: false, work: 0 };
+    let mut lx = Lexer { links: HashMap::new(), in_link: false, in_raw_block: false, link_emitted: false, link_paren_possible: true, depth: 0, too_deep: false, work: 0, scans: 0 };
     let mut tokens = Vec::new();
     lx.block_tokens(&src, &mut tokens, false);
     for t in tokens.iter_mut() {
@@ -413,6 +423,15 @@ impl Lexer {
         let out = stacker::maybe_grow(RED_ZONE, GROW_BY, || f(self));
         self.depth -= 1;
         out
+    }
+
+    /// Counts a closing delimiter looked at: false past `MAX_SCANS`.
+    fn scanned(&mut self) -> bool {
+        self.scans += 1;
+        if self.scans > MAX_SCANS {
+            self.too_deep = true;
+        }
+        !self.too_deep
     }
 
     fn block_tokens(&mut self, src: &str, tokens: &mut Vec<Block>, last_paragraph_clipped: bool) {
@@ -776,7 +795,14 @@ impl Lexer {
         let mut keep_prev = false;
         let mut prev_char = String::new();
         let closers = last_closers(masked);
-        while !src.is_empty() {
+        while !src.is_empty() && !self.too_deep {
+            // Each rule can look along all the text left (a failed one
+            // sometimes does), so each position costs what follows it.
+            self.work += src.len();
+            if self.work > MAX_WORK {
+                self.too_deep = true;
+                break;
+            }
             if !keep_prev {
                 prev_char.clear();
             }
@@ -977,6 +1003,9 @@ impl Lexer {
     }
 
     fn em_strong(&mut self, src: &str, masked_full: &str, prev_char: &str, closers: &Closers) -> Option<(usize, Inline)> {
+        if self.too_deep {
+            return None;
+        }
         let m = EM_STRONG_LDELIM.exec(src)?;
         if !m.has(1) && !m.has(2) && !m.has(3) && !m.has(4) {
             return None;
@@ -1018,6 +1047,9 @@ impl Lexer {
         let last_in_window = last_possible - window_start as isize;
         let mut pos = 0;
         while let Some(mm) = end_re.exec_at(masked, pos) {
+            if !self.scanned() {
+                return None;
+            }
             pos = mm.end().max(mm.start() + 1);
             if mm.start() as isize > last_in_window {
                 break;
@@ -1059,6 +1091,9 @@ impl Lexer {
     }
 
     fn del(&mut self, src: &str, masked_full: &str, prev_char: &str, closers: &Closers) -> Option<(usize, Inline)> {
+        if self.too_deep {
+            return None;
+        }
         let m = DEL_LDELIM.exec(src)?;
         let next_char = m.str(1);
         if !(next_char.is_empty() || prev_char.is_empty() || PUNCTUATION.test(prev_char)) {
@@ -1074,6 +1109,9 @@ impl Lexer {
         let last_in_window = closers.del - window_start as isize;
         let mut pos = 0;
         while let Some(mm) = DEL_RDELIM.exec_at(masked, pos) {
+            if !self.scanned() {
+                return None;
+            }
             pos = mm.end().max(mm.start() + 1);
             if mm.start() as isize > last_in_window {
                 break;
@@ -1300,12 +1338,34 @@ mod tests {
         assert_eq!(on_small_stack(format!("# a\n\n{} x\n", ">".repeat(100_000))), Err(TooDeep));
         let list: String = (0..1500).map(|i| format!("{}- a\n", "  ".repeat(i))).collect();
         assert!(on_small_stack(list).is_ok());
-        let inline = format!("# {}x{}\n", "[".repeat(20_000), "]".repeat(20_000));
-        assert!(on_small_stack(inline).is_ok());
+        let inline = |n: usize| format!("# {}x{}\n", "[".repeat(n), "]".repeat(n));
+        assert!(on_small_stack(inline(2000)).is_ok());
+        assert_eq!(on_small_stack(inline(20_000)), Err(TooDeep));
         // (Emphasis nests a level per two marks: OpenWiki's fails past
         // about 3,000 marks, so the deep one fails here too.)
         let emph = |n: usize| format!("# {}x{}\n", "*".repeat(n), "*".repeat(n));
         assert!(on_small_stack(emph(1000)).is_ok());
         assert_eq!(on_small_stack(emph(20_000)), Err(TooDeep));
+    }
+
+    /// Thousands of `*_~` that could each open look along the rest of the
+    /// heading for a closer: a few hundred lex as before; more stop at
+    /// `MAX_SCANS`, at once, not after their number squared.
+    #[test]
+    fn delimiter_runs_stop_at_their_budget() {
+        let runs = |n: usize| format!("# {}x{}\n", "*_~".repeat(n), "~_*".repeat(n));
+        assert!(lex(&runs(300)).is_ok());
+        let started = std::time::Instant::now();
+        assert_eq!(lex(&runs(10_000)).err(), Some(TooDeep));
+        assert!(started.elapsed() < std::time::Duration::from_secs(20), "{:?}", started.elapsed());
+        // A failed rule that looks along all the text left, at each of
+        // thousands of positions, stops at `MAX_WORK` the same way.
+        let started = std::time::Instant::now();
+        assert_eq!(lex(&format!("# {}\n", "_a".repeat(30_000))).err(), Some(TooDeep));
+        assert!(started.elapsed() < std::time::Duration::from_secs(20), "{:?}", started.elapsed());
+        assert!(lex(&format!("# {}\n", "_a".repeat(500))).is_ok());
+        let lone = |c: &str, n: usize| format!("# {}\n", format!("a{c} ").repeat(n));
+        assert!(lex(&lone("*", 2000)).is_ok());
+        assert!(lex(&lone("~", 2000)).is_ok());
     }
 }
