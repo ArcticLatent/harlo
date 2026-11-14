@@ -98,6 +98,9 @@ fn search_dirs() -> Vec<PathBuf> {
     if let Some(c) = std::env::var_os("CARGO_HOME") {
         dirs.push(PathBuf::from(c).join("bin"));
     }
+    if let Some(g) = std::env::var_os("GOBIN") {
+        dirs.push(PathBuf::from(g));
+    }
     if let Some(g) = std::env::var_os("GOPATH") {
         dirs.extend(std::env::split_paths(&g).map(|g| g.join("bin")));
     }
@@ -209,22 +212,133 @@ fn installed(li: usize) -> Option<&'static Vec<String>> {
     }
 }
 
-/// How to install a language's server (`manager`: the system's package
-/// manager, for the one that comes with it).
-fn install_hint(li: usize, manager: Option<&str>) -> String {
+/// What this system can install a server with: its language tools, its
+/// package manager, whether that needs `sudo`, and whether npm installs
+/// for the user alone.
+#[derive(Default)]
+struct System {
+    tools: HashSet<&'static str>,
+    manager: Option<&'static str>,
+    root: bool,
+    /// npm's global prefix is the user's (npm under the home, or a prefix
+    /// set to one), so `npm install -g` needs no `sudo`.
+    npm_own: bool,
+    /// apt has a rust-analyzer package (Debian 13 and later; not 12 or
+    /// Ubuntu's).
+    apt_rust_analyzer: bool,
+}
+
+/// Language tools a hint can use, looked for where servers are (and Go's
+/// own folder).
+const TOOLS: [&str; 6] = ["uv", "pipx", "rustup", "go", "bun", "npm"];
+/// Package managers, the system's own first.
+const MANAGERS: [&str; 6] = ["pacman", "apt", "dnf", "zypper", "apk", "brew"];
+
+const RUST_ANALYZER_DOWNLOAD: &str = "mkdir -p ~/.local/bin && curl -sSfL https://github.com/rust-lang/rust-analyzer/releases/latest/download/rust-analyzer-$(uname -m)-unknown-linux-gnu.gz | gunzip -c > ~/.local/bin/rust-analyzer && chmod +x ~/.local/bin/rust-analyzer";
+
+fn system(dirs: &[PathBuf], home: &Path) -> System {
+    let mut dirs = dirs.to_vec();
+    dirs.push(PathBuf::from("/usr/local/go/bin"));
+    let find = |name: &str| dirs.iter().map(|d| d.join(name)).find(|p| p.is_file());
+    let tools = TOOLS.into_iter().filter(|t| find(t).is_some()).collect();
+    let manager = MANAGERS.into_iter().find(|m| find(m).is_some());
+    let mine = |p: &Path| !home.as_os_str().is_empty() && p.starts_with(&home);
+    // A prefix set in the environment or ~/.npmrc, in the home.
+    let prefix = std::env::var("NPM_CONFIG_PREFIX").or_else(|_| std::env::var("npm_config_prefix")).ok().or_else(|| {
+        let rc = std::fs::read_to_string(home.join(".npmrc")).ok()?;
+        rc.lines().find_map(|l| l.trim().strip_prefix("prefix").map(|v| v.trim_start().trim_start_matches('=').trim().to_owned()))
+    });
+    let prefix_mine = prefix.is_some_and(|p| p.starts_with('~') || p.starts_with("$HOME") || p.starts_with("${HOME}") || mine(Path::new(&p)));
+    let npm_own = find("npm").is_some_and(|n| mine(&n)) || prefix_mine;
+    let apt_rust_analyzer = manager == Some("apt")
+        && std::process::Command::new("apt-cache")
+            .args(["policy", "rust-analyzer"])
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).lines().any(|l| l.trim().strip_prefix("Candidate:").is_some_and(|c| c.trim() != "(none)")));
+    System { tools, manager, root: unsafe { libc::geteuid() } == 0, npm_own, apt_rust_analyzer }
+}
+
+/// How to install a language's server here: with the user's own language
+/// tool when it installs a good server for them alone, else the system's
+/// package where it has one, else the usual way.
+fn install_hint(li: usize, sys: &System) -> String {
+    let has = |t: &str| sys.tools.contains(t);
+    let su = if sys.root { "" } else { "sudo " };
+    let package = |pkg: &str| match sys.manager {
+        Some("pacman") => Some(format!("{su}pacman -S {pkg}")),
+        Some("apt") => Some(format!("{su}apt install {pkg}")),
+        Some("dnf") => Some(format!("{su}dnf install {pkg}")),
+        Some("zypper") => Some(format!("{su}zypper install {pkg}")),
+        Some("apk") => Some(format!("{su}apk add {pkg}")),
+        Some("brew") => Some(format!("brew install {pkg}")),
+        _ => None,
+    };
+    let m = sys.manager.unwrap_or_default();
     match LANGS[li].name {
-        "Rust" => "rustup component add rust-analyzer".into(),
-        "Python" => "pipx install basedpyright".into(),
-        "Go" => "go install golang.org/x/tools/gopls@latest".into(),
-        "TypeScript/JavaScript" => "npm install -g typescript-language-server typescript".into(),
-        _ => match manager {
-            Some("pacman") => "sudo pacman -S clang".into(),
-            Some("apt") => "sudo apt install clangd".into(),
-            Some("dnf") => "sudo dnf install clang-tools-extra".into(),
-            Some("zypper") => "sudo zypper install clang".into(),
-            Some("brew") => "brew install llvm".into(),
-            _ => "Install clangd with your package manager".into(),
-        },
+        "Rust" => {
+            if has("rustup") {
+                return "rustup component add rust-analyzer".into();
+            }
+            match m {
+                "pacman" | "dnf" | "apk" | "brew" => package("rust-analyzer"),
+                "apt" if sys.apt_rust_analyzer => package("rust-analyzer"),
+                _ => None,
+            }
+            // Else its own build (rust-analyzer's manual), beside the
+            // system's Rust rather than in place of it.
+            .unwrap_or_else(|| RUST_ANALYZER_DOWNLOAD.into())
+        }
+        "Python" => {
+            if has("uv") {
+                return "uv tool install basedpyright".into();
+            }
+            if has("pipx") {
+                return "pipx install basedpyright".into();
+            }
+            // basedpyright is in no distribution: pipx from it, but Arch
+            // has Pyright itself.
+            let pipx = match m {
+                "pacman" => return package("pyright").unwrap_or_default(),
+                "brew" => return package("basedpyright").unwrap_or_default(),
+                "zypper" => package("python3-pipx"),
+                _ => package("pipx"),
+            };
+            pipx.map_or_else(|| "pipx install basedpyright".into(), |p| format!("{p} && pipx install basedpyright"))
+        }
+        "Go" => {
+            let go_install = "go install golang.org/x/tools/gopls@latest";
+            match m {
+                // (apt's is years old on Debian 12 and Ubuntu 22.04.)
+                "apt" if has("go") => go_install.into(),
+                "pacman" | "apt" | "dnf" | "zypper" | "apk" | "brew" => package("gopls").unwrap_or_default(),
+                _ => go_install.into(),
+            }
+        }
+        "TypeScript/JavaScript" => {
+            let packages = "typescript-language-server typescript";
+            if let ("pacman" | "brew", Some(p)) = (m, package("typescript-language-server")) {
+                return p;
+            }
+            if has("bun") {
+                return format!("bun add -g {packages}");
+            }
+            let npm = format!("{}npm install -g {packages}", if sys.npm_own || sys.root { "" } else { "sudo " });
+            if has("npm") {
+                return npm;
+            }
+            package("npm").map_or(npm.clone(), |p| format!("{p} && {npm}"))
+        }
+        _ => match m {
+            "pacman" | "zypper" => package("clang"),
+            "apt" => package("clangd"),
+            "dnf" => package("clang-tools-extra"),
+            "apk" => package("clang-extra-tools"),
+            "brew" => package("llvm"),
+            _ => None,
+        }
+        .unwrap_or_else(|| "Install clangd with your package manager".into()),
     }
 }
 
@@ -233,7 +347,7 @@ fn install_hint(li: usize, manager: Option<&str>) -> String {
 /// "missing" | "broken", path, why, install }]`.
 pub fn status() -> Value {
     let dirs = search_dirs();
-    let manager = ["pacman", "apt", "dnf", "zypper", "brew"].into_iter().find(|m| dirs.iter().any(|d| d.join(m).is_file()));
+    let sys = system(&dirs, &std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default());
     let list: Vec<Value> = (0..LANGS.len())
         .map(|li| {
             let (state, path, why) = match look_for(li, &dirs) {
@@ -242,7 +356,7 @@ pub fn status() -> Value {
                 Found::Broken(p, why) => ("broken", p.to_string_lossy().into_owned(), why),
             };
             let servers: Vec<&str> = LANGS[li].servers.iter().map(|s| s[0]).collect();
-            json!({ "language": LANGS[li].name, "servers": servers, "state": state, "path": path, "why": why, "install": install_hint(li, manager) })
+            json!({ "language": LANGS[li].name, "servers": servers, "state": state, "path": path, "why": why, "install": install_hint(li, &sys) })
         })
         .collect();
     Value::Array(list)
@@ -1202,6 +1316,92 @@ impl Answer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Each language's hint on a system with these tools and this manager.
+    fn hints(tools: &[&'static str], manager: Option<&'static str>, set: impl FnOnce(&mut System)) -> Vec<String> {
+        let mut sys = System { tools: tools.iter().copied().collect(), manager, ..System::default() };
+        set(&mut sys);
+        (0..LANGS.len()).map(|li| install_hint(li, &sys)).collect()
+    }
+
+    #[test]
+    fn the_system_is_what_is_installed() {
+        let root = std::env::temp_dir().join(format!("harlo-lsp-system-{}", std::process::id()));
+        let (bin, home) = (root.join("bin"), root.join("home"));
+        std::fs::create_dir_all(home.join(".local/bin")).unwrap();
+        std::fs::create_dir_all(&bin).unwrap();
+        for p in [bin.join("pacman"), bin.join("npm"), home.join(".local/bin/uv")] {
+            std::fs::write(&p, "").unwrap();
+        }
+        let dirs = [bin.clone(), home.join(".local/bin")];
+        let sys = system(&dirs, &home);
+        assert_eq!((sys.manager, sys.tools.contains("uv"), sys.tools.contains("npm"), sys.tools.contains("pipx")), (Some("pacman"), true, true, false));
+        assert!(!sys.npm_own, "npm outside the home");
+        std::fs::write(home.join(".npmrc"), "fund=false\nprefix = ~/.npm-global\n").unwrap();
+        assert!(system(&dirs, &home).npm_own, "a prefix in the home");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn install_hints_follow_the_system() {
+        // The one that asked: Arch with uv and rustup, npm from pacman.
+        assert_eq!(
+            hints(&["uv", "rustup", "npm"], Some("pacman"), |_| {}),
+            [
+                "rustup component add rust-analyzer",
+                "uv tool install basedpyright",
+                "sudo pacman -S gopls",
+                "sudo pacman -S typescript-language-server",
+                "sudo pacman -S clang"
+            ]
+        );
+        // Arch with nothing else: Pyright and rust-analyzer from pacman.
+        let arch = hints(&[], Some("pacman"), |_| {});
+        assert_eq!((arch[0].as_str(), arch[1].as_str()), ("sudo pacman -S rust-analyzer", "sudo pacman -S pyright"));
+        // Debian 12 / Ubuntu: no rust-analyzer package, gopls from Go when
+        // it's there, pipx and npm installed first, global npm as root.
+        assert_eq!(
+            hints(&["go"], Some("apt"), |_| {}),
+            [
+                RUST_ANALYZER_DOWNLOAD,
+                "sudo apt install pipx && pipx install basedpyright",
+                "go install golang.org/x/tools/gopls@latest",
+                "sudo apt install npm && sudo npm install -g typescript-language-server typescript",
+                "sudo apt install clangd"
+            ]
+        );
+        let trixie = hints(&[], Some("apt"), |s| s.apt_rust_analyzer = true);
+        assert_eq!((trixie[0].as_str(), trixie[2].as_str()), ("sudo apt install rust-analyzer", "sudo apt install gopls"));
+        // npm the user's own (nvm, a prefix in the home); bun before it.
+        assert_eq!(hints(&["npm"], Some("dnf"), |s| s.npm_own = true)[3], "npm install -g typescript-language-server typescript");
+        assert_eq!(hints(&["npm", "bun"], Some("dnf"), |_| {})[3], "bun add -g typescript-language-server typescript");
+        // pipx before the system's packages; root needs no sudo.
+        assert_eq!(hints(&["pipx"], Some("zypper"), |_| {})[1], "pipx install basedpyright");
+        assert_eq!(
+            hints(&[], Some("zypper"), |s| s.root = true),
+            [
+                RUST_ANALYZER_DOWNLOAD,
+                "zypper install python3-pipx && pipx install basedpyright",
+                "zypper install gopls",
+                "zypper install npm && npm install -g typescript-language-server typescript",
+                "zypper install clang"
+            ]
+        );
+        let alpine = hints(&[], Some("apk"), |_| {});
+        assert_eq!((alpine[0].as_str(), alpine[4].as_str()), ("sudo apk add rust-analyzer", "sudo apk add clang-extra-tools"));
+        assert_eq!(hints(&[], Some("brew"), |_| {})[1], "brew install basedpyright");
+        // No package manager known: the usual ways.
+        assert_eq!(
+            hints(&[], None, |_| {}),
+            [
+                RUST_ANALYZER_DOWNLOAD,
+                "pipx install basedpyright",
+                "go install golang.org/x/tools/gopls@latest",
+                "sudo npm install -g typescript-language-server typescript",
+                "Install clangd with your package manager"
+            ]
+        );
+    }
 
     #[test]
     fn finds_the_symbol_on_its_line() {
