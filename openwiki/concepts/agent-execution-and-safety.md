@@ -5,10 +5,12 @@ description: Harlo agent model-loop ordering, resumable history, RPC approvals, 
 tags: [agent, safety, sandbox, rpc, tools]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-14T03:17:14.108Z
+    at: 2026-11-14T04:44:05.718Z
 sources:
   - id: openwiki-source-0b93973e66ce9fb1db2bd77c
     resource: repo://crates/harlo-agent/src/agent.rs
+  - id: openwiki-source-f9cde46e266df585b9f891eb
+    resource: repo://crates/harlo-agent/src/chat.rs
   - id: openwiki-source-7afaa5ecb5f0234d809b2ace
     resource: repo://crates/harlo-agent/src/compact.rs
   - id: openwiki-source-b51f99006fb5c853445948b7
@@ -35,7 +37,7 @@ sources:
     resource: repo://crates/harlo-agent/src/tools/mod.rs
   - id: openwiki-source-cc3a6736ec7398d0638b6f38
     resource: repo://crates/harlo-agent/src/used.rs
-generated: { by: "harlo", at: "2026-11-14T03:17:14.108Z" }
+generated: { by: "harlo", at: "2026-11-14T04:44:05.718Z" }
 ---
 
 # Agent execution and safety boundaries
@@ -58,11 +60,15 @@ An unpriced provider is free only when explicitly configured with `"free": true`
 
 Missing usage is not measured zero: `Used.unreported` tracks requests missing either input or output token reporting, persisted as `tokensUnknown` in assistant usage and `unreported` in aggregate tool details. A priced request with incomplete token reporting becomes unknown-cost; plan and explicitly free requests retain their no-extra-cost classification. Missing input and output can be estimated from request size and reply length for budget enforcement only: `tokensEstimated` in logs and `estimated` in tool details never become measured tokens or a price. Subagent aggregation preserves costs, cost kinds, unreported counts, and estimates.
 
-Responses attempts cut off by the server retain their usage even if retried; a cutoff without reported usage is counted as unknown and estimated for the budget. Failed responses carrying a usage object also count, while failures without usage do not add a request to this failed-attempt accounting. `send` collects these attempts separately from the eventual successful reply. Main requests log and charge them before fallback or error propagation; side questions, compaction, and web searches also settle collected attempts rather than losing them when a retry succeeds.
+Responses attempts cut off by the server retain their usage even if retried; a cutoff without reported usage is counted as unknown and estimated for the budget. Failed responses carrying a usage object also count, while failures without usage do not add a request to this failed-attempt accounting. Each ended attempt is charged immediately and put in a session-owned ledger, separately from the eventual successful reply. Main requests settle the ledger into totals and logs before fallback or error propagation, after tool batches, and when stopped. Dropping a request during retry backoff does not discard attempts already recorded. Side questions use their originating session's side-usage queue; compaction and web searches use the session ledger.
+
+Chat-completions stream errors also preserve usage: an error's report with a prompt-token count takes precedence, otherwise a previously received usage object is retained when available. Counts are normalized to the shared Responses-style accounting shape. Reported zero remains measured zero; an error without any usage remains absent rather than becoming an unknown-sized request.
 
 ## Request admission and auxiliary work
 
 Main requests, side questions, summaries/compaction, and built-in web searches pass through shared budget admission. In-flight requests hold estimated input plus 2,000 tokens of reply room; concurrent reservations use atomic updates. Once spent plus held tokens reaches the limit, another request is refused. This is a soft limit, not a hard output cap: an admitted request can cross it. Unreported usage consumes the budget through estimates, without being presented as measured spend. Web searches settle their own spend before releasing the reservation, so a later search in the same batch sees it and parent aggregation does not charge it twice.
+
+Every retry releases its previous reservation and obtains admission again before waiting to resend. Thus a failed attempt can exhaust the budget and prevent the next retry. A summary following native compaction likewise gets fresh admission rather than inheriting the native request's hold.
 
 Fallback does not reuse the failed model's prepared request. After recording and announcing the model change, the agent returns to its run loop so context preparation, capabilities, tools, and budget admission are evaluated for the fallback model. Exhausted-plan limits and transient server failures can trigger this route; request/sign-in refusals do not.
 
@@ -132,6 +138,8 @@ Additional focused checks include `a_used_budget_stops_every_kind_of_request`, `
 `unsaid_usage_is_estimated` verifies separate estimated spend and log/detail round trips. `a_cut_long_line_says_so` and `find_shows_the_first_names_and_the_count` cover bounded I/O guidance and ordering; nested-rule tests also verify that first edits, deletes and moves are held until their rules have been returned.
 
 `rules_from_a_batch_hold_its_later_changes` covers the same-batch rules barrier, including a direct rules-file read and a move. `call_arguments_are_an_object_or_not_sent` covers MCP argument normalization and rejection.
+
+`each_try_is_counted_as_it_ends_and_the_next_admitted` verifies immediate charging, refusal after exhaustion, and ledger retention when the request is dropped. Chat's `a_failed_reply_keeps_what_it_said_it_used` checks error-local and earlier usage reports, measured zero, and absent usage.
 
 Suggested checks:
 

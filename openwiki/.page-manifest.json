@@ -2,18 +2,18 @@
   "schemaVersion": 1,
   "pages": {
     "/openwiki/architecture/sessions-and-desktop.md": {
-      "pageVersion": "sha256:521d3dc91fb157e58fd3bf74c850e235399316cddad90b7cdda53ba7f33473c2",
+      "pageVersion": "sha256:9423af87ed8febb3cea9b473349baa08f80ea4fd9ba308b4fd0dab9fdaeaf711",
       "completedBy": "harlo",
-      "completedRunId": "6e86026e-574e-4e0c-ad1d-f4a6874948b8",
-      "gitHead": "797ca51869d0499e21c7f32cacc9cf5b2c75eb7a",
-      "sourceFingerprint": "sha256:a976202207c21cfde83b9a079bcaf34196973f4c50a82041e206886fac0c6d1e"
+      "completedRunId": "6cd86641-7db0-470c-ad61-d1d8207fc1ae",
+      "gitHead": "02f73fdac83a8f6b92dff714385d28f7bba1a25f",
+      "sourceFingerprint": "sha256:f32ef1627b219171871f7768502a49c1d089fa66e4de4dfae47a560f021cdc4e"
     },
     "/openwiki/concepts/agent-execution-and-safety.md": {
-      "pageVersion": "sha256:0aa7b605271740f94047b8abb34b30ed761e90fdc1bea4d1145e68c0954ef56e",
+      "pageVersion": "sha256:25525705beeed8dedd1ce2c5a5f516c6b18a3b0e5b313e2bca1181041665eec2",
       "completedBy": "harlo",
-      "completedRunId": "6e86026e-574e-4e0c-ad1d-f4a6874948b8",
-      "gitHead": "797ca51869d0499e21c7f32cacc9cf5b2c75eb7a",
-      "sourceFingerprint": "sha256:a976202207c21cfde83b9a079bcaf34196973f4c50a82041e206886fac0c6d1e"
+      "completedRunId": "6cd86641-7db0-470c-ad61-d1d8207fc1ae",
+      "gitHead": "02f73fdac83a8f6b92dff714385d28f7bba1a25f",
+      "sourceFingerprint": "sha256:f32ef1627b219171871f7768502a49c1d089fa66e4de4dfae47a560f021cdc4e"
     },
     "/openwiki/integrations/openwiki.md": {
       "gitHead": "ec99b5fe5adc5cb2ef22889fbd5adae5b9b6069a",
@@ -23,11 +23,11 @@
       "completedRunId": "9eb905ed-7750-4e63-a652-2147d87ccde5"
     },
     "/openwiki/integrations/phone-and-relay.md": {
-      "pageVersion": "sha256:d4bf21d5e32275d09a29a5b0381af86a2f649117c83d2d0a7615d66ddfc6abc3",
+      "pageVersion": "sha256:63163f71c2c322e84370447741e4bb851ad94c42a001250db8fcb38133b9dbb4",
       "completedBy": "harlo",
-      "completedRunId": "6e86026e-574e-4e0c-ad1d-f4a6874948b8",
-      "gitHead": "797ca51869d0499e21c7f32cacc9cf5b2c75eb7a",
-      "sourceFingerprint": "sha256:a976202207c21cfde83b9a079bcaf34196973f4c50a82041e206886fac0c6d1e"
+      "completedRunId": "6cd86641-7db0-470c-ad61-d1d8207fc1ae",
+      "gitHead": "02f73fdac83a8f6b92dff714385d28f7bba1a25f",
+      "sourceFingerprint": "sha256:f32ef1627b219171871f7768502a49c1d089fa66e4de4dfae47a560f021cdc4e"
     },
     "/openwiki/integrations/remote-machines-and-models.md": {
       "gitHead": "563992a39e12a546d13170faa8d118719becd2ad",

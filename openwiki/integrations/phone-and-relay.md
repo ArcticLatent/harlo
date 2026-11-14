@@ -5,7 +5,7 @@ description: Device authorization, replay-resistant NaCl channels, session subsc
 tags: [phone, ios, encryption, relay, apns]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-14T03:17:14.108Z
+    at: 2026-11-14T04:44:05.718Z
 sources:
   - id: openwiki-source-3e5d9e2412052022c04ac0ec
     resource: repo://crates/harlo-apns/src/lib.rs
@@ -45,7 +45,7 @@ sources:
     resource: repo://ios/HarloKit/Sources/HarloKit/Visuals.swift
   - id: openwiki-source-e36aee686debea4d83dc020e
     resource: repo://ios/HarloKit/Tests/HarloKitTests/HarloKitTests.swift
-generated: { by: "harlo", at: "2026-11-14T03:17:14.108Z" }
+generated: { by: "harlo", at: "2026-11-14T04:44:05.718Z" }
 ---
 
 # Phone pairing, encrypted transport, and relay
@@ -83,7 +83,9 @@ A phone subscription advertises that it has a composer. It can therefore receive
 
 Long desktop code blocks are split into continuation rows by the shared transcript. Phone serialization marks later code pieces as `codePart`, which the iOS view hides; the first code row carries both combined copyable code and combined highlighted HTML. The server joins matching consecutive pieces into one `<pre>` block, rather than displaying only the first desktop piece. Reset frames use this joined representation, and insert/update deltas resend an affected first row after the other changes when it is within the phone's window. Hidden continuation rows remain in the protocol list to preserve row positions.
 
-This does not remove transport bounds: reset starts with the latest 300 rows, frames are grouped at about 512 KiB, and each row's text and HTML are clipped at 64 KiB with a continuation notice. The first row of a code block outside that window is not pulled into it merely because a later piece is visible.
+The HTML join preserves each piece's own trailing blank lines and restores only the separator newline between pieces. It therefore preserves blank lines at piece boundaries and at the end, rather than trimming them away.
+
+This does not remove transport bounds: reset starts with the latest 300 rows and frames are grouped at about 512 KiB. Ordinary row text and HTML use a 64 KiB clipping threshold with a continuation notice. Joined long-code HTML instead has a separate 256 KiB threshold: it cuts at the last newline before that threshold when available, adds an omitted-line notice, and closes the `<pre>` wrapper. The notice and closing markup can extend the result slightly past the threshold. Copyable text still uses the ordinary text limit, independently of highlighted HTML. The first row of a code block outside that window is not pulled into it merely because a later piece is visible.
 
 ## Wiki access from a phone session
 
@@ -123,6 +125,8 @@ Core tests exercise identity persistence, two-way crypto, replay/wrong-connectio
 `stopped_messages_reach_phones` checks ordered original words and pictures in the desktop event. HarloKit's `testStoppedMessagesComeBack` checks decoding, rejection of invalid base64 photos, preservation of newer draft text, and photo-only recovery.
 
 `a_long_code_block_reaches_phones_whole` checks reset delivery at 149/150/151/320 lines and streamed growth through piece boundaries, applying the frames as a phone does and comparing shown lines, copy text, and retained row counts.
+
+`a_long_code_blocks_blank_lines_reach_phones` checks blank lines at piece boundaries and the end, including escaped characters in plain and highlighted code. `a_huge_code_block_is_cut_after_a_line` checks the larger HTML threshold, balanced highlighting spans, retained initial lines, and omitted-line count.
 
 ```sh
 cargo test -p harlo-core --no-default-features phone

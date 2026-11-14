@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:521d3dc91fb157e58fd3bf74c850e235399316cddad90b7cdda53ba7f33473c2",
+  "pageVersion": "sha256:9423af87ed8febb3cea9b473349baa08f80ea4fd9ba308b4fd0dab9fdaeaf711",
   "claims": [
     {
       "id": "claim_372c141472fb4274ac9fa038c2951ee3",
@@ -189,8 +189,8 @@
       "statement": "Transcript Markdown splits long code into 150-line pieces and tables into 100-row pieces, leaves the live final piece uncached, and retains complete code on the first continuation row for copying while ordinary rendering keeps whole blocks.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-core/src/markdown.rs#L68-L180",
-          "version": "repo-lines-v1:sha256:e585ca64e38c34191d1c9d235b56712feaa6717c9fddbde88699863ccfadc672:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEzLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJkYTFjODZjYmZmMTQxYTIyYzRmYTc1MDdjYmIzN2JiNDY1ZDIzNmIzZjJhNGExNGJjNjkxNjFmNTE4NTdlY2YxIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI0ODkzZjQwZTM3ODFlYjg5NmM4MmQwNDZhMDgwNjdhMTFlMzVjZGYyZjFkZmFmMjZmZWE5MGI4ZGI2Njc2NDEzIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJmOGRmMjRmY2FiMzdmODE4YzE3NzYyYTgzN2U4ZmFmYTFmZGI1MmRlOTJmMTMxNmRkNDViYzc2YmE5YzYwNzMzIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJhYjkzOTNhNDUzZjk1MzQ3NDEwZGFiODNjNDQ5YmU0Mjc1ZjYyZDllNTc3ZTEzOGQ0ZmYzZGQ1MTU1MzQyYWViIn0"
+          "resource": "repo://crates/harlo-core/src/markdown.rs#L68-L182",
+          "version": "repo-lines-v1:sha256:5f64b2c66855f78a7f62e726b26887396e0de115f28df19fcb99cbd9aa51bc2c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTE1LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJkYTFjODZjYmZmMTQxYTIyYzRmYTc1MDdjYmIzN2JiNDY1ZDIzNmIzZjJhNGExNGJjNjkxNjFmNTE4NTdlY2YxIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI0ODkzZjQwZTM3ODFlYjg5NmM4MmQwNDZhMDgwNjdhMTFlMzVjZGYyZjFkZmFmMjZmZWE5MGI4ZGI2Njc2NDEzIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJmOGRmMjRmY2FiMzdmODE4YzE3NzYyYTgzN2U4ZmFmYTFmZGI1MmRlOTJmMTMxNmRkNDViYzc2YmE5YzYwNzMzIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJhYjkzOTNhNDUzZjk1MzQ3NDEwZGFiODNjNDQ5YmU0Mjc1ZjYyZDllNTc3ZTEzOGQ0ZmYzZGQ1MTU1MzQyYWViIn0"
         },
         {
           "resource": "repo://crates/harlo-core/src/transcript.rs#L945-L981",
@@ -251,10 +251,24 @@
           "version": "repo-lines-v1:sha256:ae3b04aa69e1a252e3bbe09e96932edbb234965d67f6949d7c94da80abeeaa2a:eyJzZWxlY3RlZExpbmVDb3VudCI6MzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU3Y2NhZmRiOWVjYzRkODFlM2UxODE5MDVkZWNjOTliNzVlNWJjNDMyNzlmNDZlNzNjZDc4NDNiZmZiOWZkZGIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEifQ"
         }
       ]
+    },
+    {
+      "id": "claim_9ccc507a209740e9933bb06889a76145",
+      "statement": "Code pieces remove only the separator newline from nonfinal pieces and retain final blank lines, so joining pieces with a newline preserves the original code for first-row copying.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/markdown.rs#L165-L181",
+          "version": "repo-lines-v1:sha256:20e0c508169765b82e9bed326cac8e0c76d484e97a404c6040fa59b1610d5b27:eyJzZWxlY3RlZExpbmVDb3VudCI6MTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMzZDFmMGQ2NTFhODNkMWFmZTVhMjlhNmVmNTdmMTNhMjlmNTNhN2E0MWY5MmViZjY5MGFjNTRhNmQ2ZmQ4OTIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcyOWE0NThhMjNlNTUyMWE1NDMxOWQ1NGY3M2FiNDEzNWVkOWQ4NmEyOWFkNTIzMjZmODdiM2FlYjVlMGUzODEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImFhODZkYjkxZjc1N2FlNTA1Y2JlNzQ2YjVmMDdlZjc5Y2JmNTdhMTIyZDlkZjViZGQ4ZDg0NWE1NzlkNTBmNmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjE5ZTc2MzU1Y2YxMTk5NDgwYzNmOTk4MzZiMTQ4NmM4NDFkODkxZmFhZDkwNGM2MDhlMDkzMDIyZDM3NTdhZWUifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-core/src/transcript.rs#L945-L973",
+          "version": "repo-lines-v1:sha256:39c0fb9728de320e9946f296f00953107b076815b76126c812fa6c33f48ab2f7:eyJzZWxlY3RlZExpbmVDb3VudCI6MjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRhMWJiYmE3YjU2YTM2N2Y1YzQ1M2RkODRiZWEzOGVmYWU2YmYzZDUzMzNkZTRiZWZhMmVmNTRjMzM3ODJiYTAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEyOTRlZTAxOGRiODk2N2EwNmY0MWY0OWY1NTMxMjEyYjc3NjQ2MjBiZWE0ZTlkNGNkZTQ3N2VlNjhiYzUzOTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE3MDFiMTAyNDIyNjNmMWMzOGQxN2NhYTkzOWUyMjcxZmFkMTM3ODEyMGI3NDQwMWJjNDA3Y2U2YWRlOTk5MGEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImZjMGI1OTVlYjM3N2QyNGQxNTU2MTdkMTMyNzBmNDIyMjcxZWZkMzdiZDUzODAyMjE2OTQ5ZmMxMzRlNDQ0OTcifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-14T03:17:14.108Z"
+    "at": "2026-11-14T04:44:05.718Z"
   }
 }
