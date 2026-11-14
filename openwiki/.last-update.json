@@ -1,7 +1,7 @@
 {
-  "updatedAt": "2026-11-14T06:52:59.800Z",
+  "updatedAt": "2026-11-14T13:09:55.479Z",
   "command": "update",
-  "gitHead": "49e1c73cd96a97c140b16609f6f2478914f24596",
+  "gitHead": "f469a2a7388fb9d80794d4d8c7b886e4a148813e",
   "model": "host-agent/harlo",
   "status": "complete",
   "language": "en"

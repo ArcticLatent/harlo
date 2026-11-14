@@ -8,19 +8,26 @@
       "completedBy": "harlo",
       "completedRunId": "9b116427-ea1c-457a-969e-28b1368f1b02"
     },
+    "/openwiki/architecture/wiki-engine.md": {
+      "pageVersion": "sha256:0dee8cbcd3c6ca7c13bef3715b219f85c61b2ae53b7731788ad6fbc36695a3a1",
+      "completedBy": "harlo",
+      "completedRunId": "5ec5a276-fcff-45d4-b5e1-6f294ce173ee",
+      "gitHead": "f469a2a7388fb9d80794d4d8c7b886e4a148813e",
+      "sourceFingerprint": "sha256:5b737691922526dae868ed58e883820afbe6d614de4ed4893d47938852231494"
+    },
     "/openwiki/concepts/agent-execution-and-safety.md": {
+      "gitHead": "49e1c73cd96a97c140b16609f6f2478914f24596",
+      "sourceFingerprint": "sha256:643d6587bc85545bccd320042c16525f37ca5290247da75ac69019504f52d568",
       "pageVersion": "sha256:b80b291d5c9e68c2cc01794d82c805821e29aadbce93e6bb3790278cadc79587",
       "completedBy": "harlo",
-      "completedRunId": "d18377cb-7202-4789-b5f6-244035a2949d",
-      "gitHead": "49e1c73cd96a97c140b16609f6f2478914f24596",
-      "sourceFingerprint": "sha256:643d6587bc85545bccd320042c16525f37ca5290247da75ac69019504f52d568"
+      "completedRunId": "d18377cb-7202-4789-b5f6-244035a2949d"
     },
     "/openwiki/integrations/openwiki.md": {
-      "gitHead": "ccaa1466d93b1493f9ec1e3f58a4242afefd9638",
-      "sourceFingerprint": "sha256:6c9931086c3af562642ddd6a343b9dd6dca8ca2ef5ce0699bc6dd490d212554f",
-      "pageVersion": "sha256:4b76e8325413f19c37e9764d61a88b042846a736703725deb62f2071dcbeeb30",
+      "pageVersion": "sha256:521731f2a9141f1467952da65e597f9b8bb0250b1d41514bbf35b43d3a40c6a1",
       "completedBy": "harlo",
-      "completedRunId": "9b116427-ea1c-457a-969e-28b1368f1b02"
+      "completedRunId": "5ec5a276-fcff-45d4-b5e1-6f294ce173ee",
+      "gitHead": "f469a2a7388fb9d80794d4d8c7b886e4a148813e",
+      "sourceFingerprint": "sha256:5b737691922526dae868ed58e883820afbe6d614de4ed4893d47938852231494"
     },
     "/openwiki/integrations/phone-and-relay.md": {
       "gitHead": "ba356d4079f5b8c7dec7e27a881b30d7645263d5",
@@ -44,11 +51,11 @@
       "completedRunId": "67a4c80c-fe9e-4fa0-91e7-4ed8201db90d"
     },
     "/openwiki/quickstart.md": {
-      "gitHead": "ccaa1466d93b1493f9ec1e3f58a4242afefd9638",
-      "sourceFingerprint": "sha256:6c9931086c3af562642ddd6a343b9dd6dca8ca2ef5ce0699bc6dd490d212554f",
-      "pageVersion": "sha256:4736f416d8a3b95c6becc8d9e8508e9a24118b8083ed26c92ad91cb878689baa",
+      "pageVersion": "sha256:3da5e373ebc6af19c1371da9a91cd487d953c73ba68949bfaaf20cfda85f35e2",
       "completedBy": "harlo",
-      "completedRunId": "9b116427-ea1c-457a-969e-28b1368f1b02"
+      "completedRunId": "5ec5a276-fcff-45d4-b5e1-6f294ce173ee",
+      "gitHead": "f469a2a7388fb9d80794d4d8c7b886e4a148813e",
+      "sourceFingerprint": "sha256:5b737691922526dae868ed58e883820afbe6d614de4ed4893d47938852231494"
     },
     "/openwiki/workflows/plans-and-project-changes.md": {
       "gitHead": "ccaa1466d93b1493f9ec1e3f58a4242afefd9638",

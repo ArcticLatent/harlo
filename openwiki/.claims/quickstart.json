@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:4736f416d8a3b95c6becc8d9e8508e9a24118b8083ed26c92ad91cb878689baa",
+  "pageVersion": "sha256:3da5e373ebc6af19c1371da9a91cd487d953c73ba68949bfaaf20cfda85f35e2",
   "claims": [
     {
       "id": "claim_292a16b40b5241b4ac361dda40dea2cd",
@@ -53,10 +53,28 @@
           "version": "repo-lines-v1:sha256:8e3b42f555d2c5f2e1cb99ee99462637ab1e4fbc6dcef36d82ab8759f357dc6a:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMGQyMWFiYjU4ZGQzMWFjNTk4MDA0MDYyZGIwODQyYzdiN2E4N2VhOGU2ZjcxMDRiMGU4YzY2M2UzY2MyZWNkYSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZjA2NTczN2UwNzFmOWZiY2RmNTRiOGFkMzhlNjZlNGI2ZjFmOWZhMWMwMWVkNmFmOWQ5NjY0ZDIyMmE5NjQwMyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYzE4YjhlMTQyOWY2ODc2MzEyYzQ0MGMwZDdkMDkyYThkZTliMGM5N2JmNDJjZWExYjgyODJjYjFiODBiZmEzOSJ9"
         }
       ]
+    },
+    {
+      "id": "claim_e528ab8fa12f41b29c9c1621142f91fa",
+      "statement": "The native harlo-wiki crate implements OpenWiki-format reading and writing; core invokes it directly locally and through harlo-agent wiki on SSH hosts without a separate Node runtime.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/openwiki.rs#L301-L338",
+          "version": "repo-lines-v1:sha256:526df0bce0f7d2592aca8e045d7edb87c489c74c75ffaf5e43c2a703b2da46ea:eyJzZWxlY3RlZExpbmVDb3VudCI6MzgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRjMjI4ZDdmZDZhNzExN2E3ZjFiODMwZjQyNDg3NDBiNzQ4OTI1NjUwZmYyMTA5MDc4ZjZlODM4NmQ5NTQ3OGEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFkOWUxMjU0NjQyNTU3NmQzZGVhZThjOWI5ZGJmMTI4ZDVkNmRkYWY1ZDdmZTg1NzkzNDkyN2RlZmZhM2I5ZGQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRhNWNiNDI3ZGY1MjBjMTFlNGZmMjcxYjBjZGIxMmViNzg5YWYzMjg1NWY5YjkxMGExMjA5ZGQwYjAzNjNkNjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjM0ZTQ1ZjU1ZjgyZGZjZGI1ZDQ5NjFlZTg2YWNkNGY0MjY5M2NmNGRkYmM3NmU3MDBiNzViMDk4NmRjNzQzYmYifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-core/src/openwiki.rs#L381-L414",
+          "version": "repo-lines-v1:sha256:35fe755ab76a6cb09b8132a58c9c9c823bba5eaa94f3f9efea895eb8776190bd:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMxYTkwNjhjNTc2YzdlNmYwMGVkZTc0YzgxYjAwZWYzNTY1ZWU0ODExN2E0Y2UyMmYwMWI2Zjc1ZWRhNzk5ZWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY1N2RhZDhjNTY0NDgxYjhiNWRiZTZiYWU2OTQxYmUzMzExMzJjNzJjN2ZiYmE3MDk5ZmRmMDhjNzIyOTU3NWUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjRkMjk0NTk1NDY1ZGQ3OTY4NDFlZDc0YWFjZmY3ZTcyMjlmNzU3YzY1NDMyZjMxN2I0N2RmYjRkYTY1ODVjOTAifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-wiki/src/lib.rs#L1-L11",
+          "version": "repo-lines-v1:sha256:441e7c456dcc15ae99e5e51136c948b62f8ede53fb8321f7230dfc771581ad19:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJlYjQ5MTA2NzQ5M2VmNDJmZGQ2NTQ5ZWFiYzcyMWY2MDk1MDNmNWEyYmM1Y2E0Y2I2Zjc2NzZiODk5ZmFhZjkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE5ZDc3OTRmZGE2NmQzMjdkMjM5ZjVjYWQxOTM3NTkzY2RiNmYwNzA1NGU0MTM5MmZmZDJkOTUzYjY5NzYxZmEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImMwM2M3YzZjMTU3Zjg2ZDEyNDNlNjJhZjhlYWVjMTMzNzY2ZmI2MDUzNjc2YjA4NjMzNTFkOTgyNDA1ZGRjNDgifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-14T05:16:59.652Z"
+    "at": "2026-11-14T13:04:09.841Z"
   }
 }

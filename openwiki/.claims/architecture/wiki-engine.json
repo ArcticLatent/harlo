@@ -1,0 +1,172 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:0dee8cbcd3c6ca7c13bef3715b219f85c61b2ae53b7731788ad6fbc36695a3a1",
+  "claims": [
+    {
+      "id": "claim_cd31b18fb1af473882d2c2d91575eaea",
+      "statement": "The native MCP adapter exposes four reading tools by default and adds lifecycle tools only when constructed with a writer; successful results include JSON text and structured content.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-wiki/src/mcp.rs#L65-L133",
+          "version": "repo-lines-v1:sha256:82c7eca439ed2e5dc6a6dda4db880d7537997f16e48007a7c7bcd2cc3edc014c:eyJzZWxlY3RlZExpbmVDb3VudCI6NjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNhOGM2OTNjZWM1MDYxZDMwZDg0NGQzNDE1ZDZlNDdjYjY2NjdhMWNhNDVmN2Q1ODViOGMxODIxMWVlNDRkYTQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRmY2ZkZmJkMzlhZTI0Y2IyYzA1ZDk5Mjk4ZWQ2N2QzZjBmNTk1MmJhZjZiYjE3OTRjMGVjZWIwYmViMGMxZTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_7db2d60a4e69477e8c82bbae42a903ad",
+      "statement": "Native wiki search uses an in-memory FTS5 index and ranks lexical matches by source-path boosts, term coverage, then weighted BM25 rather than filtering to hinted source paths.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-wiki/src/retrieval.rs#L289-L360",
+          "version": "repo-lines-v1:sha256:61e05295a8cd3b11801460ca4c5ee97c7c0046c8852b06e273344b272f3d2e05:eyJzZWxlY3RlZExpbmVDb3VudCI6NzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZhMmU0ZTE5MmE5OGJlMjMwMmUwNGY1NGM5MjY1NDExOTk4YWYzNzFmM2JkY2M5YTM0NjZjYzQzOGE4Yzg4MzkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjIyODgwOTE3YjljZjJlODQwNTEyZWZkZjEzMmI0ZWYzMzc1MzU5YTc5MmM5ODcxZjg2YzdmYjdmY2RlYTRmNjUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFmNDAwODM3YTI0MWE5MzVjNzc3M2E1ZjVhZTJkMTFlZjJlMTIzOTYzZTVmMzI1MDExMzRlNWRjYTI4NGJlM2MifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_7160a0b15191459fb7358d9dcf6fd162",
+      "statement": "Search retains at most four index sets and 32 MiB of page text, compares current page content on each search, and reuses unchanged page units when rebuilding after edits.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-wiki/src/retrieval.rs#L269-L281",
+          "version": "repo-lines-v1:sha256:386856a4dba129f2ae70401a56293160ade147ed00ed1a0676c0e35bf4d0f479:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk1NGRjYWRkNjE3ODU1MzYwYzJmZTE1OGIwM2Q3N2NkYWQ3NjIyZjUwMWZkMDY0YzIzNmRhYjZhMzVkMzY5OWMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE5ODRiYzhjZTAzZDI1YzIwZjc3NTRkNjAzOTFjOGYzMjcwMzQ1ZTAxMjA3NzhjMDBmZDdjZTk1OGY3MmNkMGMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZhNmJlNzQyODNlMWI5MTg3MTAwODQ2MzdjYTM4OTY1Y2Q2NjBhNWFlNzIzMmY5MGQzNTJlNTEyNTYyMDg2NmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImEwMDc2OGU2Njk0ZjgxZjM5ZThhMjkzNmRjNDA2YWI2YzMyNTQ2YTY1YjU5ZmVjNGI4MDM3OTFmYjJmZDVkNzAifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-wiki/src/retrieval.rs#L423-L499",
+          "version": "repo-lines-v1:sha256:cc2eac6a6a0773284b904b06ca412a3dfa81745ca645f68684f5bc749ee8f105:eyJzZWxlY3RlZExpbmVDb3VudCI6NzcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRhYjUwN2E2OWM0NWUxOTAxNTFiNzdmYzQxNDEzOThiZWEzZWQ5NTc3MmFiODRkYzIxNTcxYzdmOTE2YzlmZjUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJlMjgyNDkxNjI5MTcwNzE1Yzg0YzRjYWEyMWExZjkyYmE1MWUyYWNhODFkMmVhNGM3ZTQ2ZDIxN2I2OTU1NjgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFhMzQzZWY1MmM4MGMzNDdmMzEzYzdmMjI5MGJmODJmYThkMWY5ZDc1MzJiNmIyNzE0Nzg2ZWUxMzI3NGQzMTQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_ef99ba338ccc42539a48379947a784da",
+      "statement": "Section reads validate page paths and requested anchors, fail for missing anchors, and optionally return recorded provenance without rechecking claim freshness.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-wiki/src/retrieval.rs#L501-L601",
+          "version": "repo-lines-v1:sha256:009728d4d15c7610b4599bee6d7c710c5170db68dec6b6b8c727e3e1f9ebfa6f:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAxLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI4MWYzMmY4ZTI0NjJmMjkxNzhlNmY0MzY2NjRhNjg1YWIwOWUyNTk1MGFhN2RmZmMxZjVlODA5NDAxNGRhOWJjIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI0MTJjYTM0NWNjZjc1YmY5YzA4MDZiY2U2OTViZThkZTgwOGI3OTk4NDI1MWE3YTU0ZDIwMmNmNjEwMWRkNDUxIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiIwYmNmZjJhNDI3YWUzYmQzZTM2NjA3ZWU0NGQzYTM1NzdiZjVjZDQ0Nzc5M2I1N2ZkMWZkNWY1OGUxMTJmMmM2IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJkNzAzYTdjN2U1ZTU1ZTUwN2E5MzY2YTkzZmQ4NjE3OTk5NTYwZGViNTNmY2ZiY2Q3MDUzODRhYzBkMTY2N2I0In0"
+        }
+      ]
+    },
+    {
+      "id": "claim_22da3e4f2b6e48d08901bd9113ce66b3",
+      "statement": "Workspace search is local for an unregistered repository, automatically selects a sole membership or active workspace, and otherwise returns workspace_required; linked reads require shared membership and valid materialized locations.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-wiki/src/workspaces.rs#L231-L280",
+          "version": "repo-lines-v1:sha256:e17491dcfdb80376b1226a99489f1f32325e4e46194d8b03a66fff5de9dc9d5e:eyJzZWxlY3RlZExpbmVDb3VudCI6NTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc3MzExNDQxYmY3M2JjNzU1MGNkYzFiY2M0NmE0YTU4NDAxNGIyOGU4NDAwOGJlZmQ1NzFiMTE1NDYwNzM2YmMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjZjNTVjYmJjZTFmMDkwZTg3Mzg3ZTMzNzU2MTJmNGQzNjg2ODc0NmI4ZGVmNTgyNDg5NDNlMjYzZTFlYmZjOTYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdjNGNkNTI3NzkyMmEzMWUyMGM4NmM0MmQ1NWY1MGI5NWQwMTk5MjYyMDNmMGJmNTRhODcyYzA2MjI5NmM0NWYifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-wiki/src/workspaces.rs#L317-L362",
+          "version": "repo-lines-v1:sha256:3f99f5660b2e7ae0e6f2f4ce055d98c84add089e808e97a21cef6f3e59eeffd5:eyJzZWxlY3RlZExpbmVDb3VudCI6NDYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUyOWJmMjE0MTkyMDdkM2ZlOWE1YzBjYTk1ZWY3YWMxOWRhZGQ2MDEyYTg2M2M1YTU3ZDEzYmJkNzg5ODg5MWMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI3OTI1NjY4OTY0YTkzNDRkYTFjMmY4ZmJlZGRiNDgzMzRlY2NhNTZhN2JmYzVhNjdlZjk3NTg3ZTk1NTU4MzkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdiYzk4ZDZiMGRjNDkyYzUwMTZkZjEwODA1YTNhNTRlYjljMTg0YTVhNjEzN2U3ZjRiZWNmYTBjMjIwNTUwZDAifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_68b5eca981b0426bb9bc856c5c755b44",
+      "statement": "A writer accepts later lifecycle calls only for its active run ID, and begin resumes persisted state while discarding the old plan when source fingerprints have changed.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-wiki/src/run.rs#L1214-L1271",
+          "version": "repo-lines-v1:sha256:d3c85b9a59933af4cf4f534c689de11c249287d0550f5ada0b5dbc752bc873c4:eyJzZWxlY3RlZExpbmVDb3VudCI6NTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzNTM1NTE3N2M4NzUyZWQ3ZmI0ZDU5YWY1OTVjNjk2MmE5ZTQ3ZWNmOTYwN2M5MzJiMDY1OGIzYWYxYmNlNGEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEyYWRlYmI2NWZjYzFiOTBkZGE1YjgwZmE3YzM2MjY4ZjY1ZDI3NmYzYTI1OTQ3YmNkMDI4ODUzYzE0ZjQ1OTciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjAzYTEwMzdmMDcxOTYxZmIzYjEzYTdkYWZmNjlhY2MyYmFiODEwZmU4YmRhMTZhMmIyMjcxNTU0MzcxNGNjNzUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQxZTBkNmRlNjhlZjcwYWFmMmFmMDVkNzI1ODFlZjY1Y2QxNGJjZjY3ODJlYmRmZjI3ZDAwNTg3ZjE5MmZhMTIifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-wiki/src/run.rs#L1550-L1605",
+          "version": "repo-lines-v1:sha256:6932687e44bd3adb462bcb1ae2bc2781d8564ea08fc74c0d15b2924381bede2a:eyJzZWxlY3RlZExpbmVDb3VudCI6NTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYxMmYwMWYyMjU3YTU5YWFiYTExZDA0OWVkNmRlYzI2NzU0ZjU5NDVkYjIyZGMxMTYxZDM5YWQzZGQ2MzEzNmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQ0Yzc2ZmMxZGExMGE3NjE0MTc5ZjYwZTViNGE1OGFiMTVkN2M0NjNhOTA5NTMyOTMxNDVmNDg3YWIyOGZjMWQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjliNDA5NDc1NDI3MjM4OWM1NGM3ZmFlZjA5MTJhNWI3NDk1NGRjZDJmOGY1NDA0ZmQ0MTBlZWI5NDNkNzYxNTAifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_f8a848b6233c4ffd872a2db02680e377",
+      "statement": "Plans reject duplicate and reserved pages, prohibit deleting quickstart, require quickstart for init, automatically add issue pages unless deferred, and sort quickstart last.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-wiki/src/run.rs#L649-L771",
+          "version": "repo-lines-v1:sha256:aa858c4ce5c8f5de5e0f1322a20d199edca405f742a5f02e1efd640cda8e23cc:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIzLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI4MDY0ZDZlZjE0YTA0ZWZjYzJmZjRlYTA1N2ViYTgwNTczZjViNDBkODc1M2RmNDUzMTZlOWNmODZkZGE1Mjc4IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI0MTJjYTM0NWNjZjc1YmY5YzA4MDZiY2U2OTViZThkZTgwOGI3OTk4NDI1MWE3YTU0ZDIwMmNmNjEwMWRkNDUxIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI0OTY3NzY0ZGM3ZmM1YjNjMGQ0ZWFiZDFhMWViY2M0ZGYyNGNkODljM2I4NzY0ZDVhMTIwMTI5MjJkZjMxMWYzIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJmZDliMmI1NDk2MWQwYTVkZTg5NzhiNWNlMjZhODc1MDkxNzU2OTU1YzAxYTE3NmMwY2ExYjQxMDIzNDVhZTE4In0"
+        }
+      ]
+    },
+    {
+      "id": "claim_e56ad05eae7d482e8a2560a16716c18d",
+      "statement": "Page claim reconciliation retains omitted issue-free claims, requires explicit decisions for stale or unresolved claims, rejects duplicate decisions, and requires at least one claim per completed factual page.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-wiki/src/run.rs#L790-L872",
+          "version": "repo-lines-v1:sha256:2303514099ab86a37a7dcb35ceaf1945180ebeb2365e61b7e82eddc16beec4a6:eyJzZWxlY3RlZExpbmVDb3VudCI6ODMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVlM2E0ZDc3OTg2NGYxYjE2OWNmNzRhYzZlN2U2MmYwZDc0ODA4OTJlMzkwNmU3NjAwZGMyMTczY2Y3YzVmMjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBmNWIzNjM3NTZkMzU2YTQ3ODY1NTY1OGVlNzA1YjVjMDllNzA1YjY4OTI5NTRmZmY3ODU0OTdkYWZhNDk0YjYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjUxNGFkODkxZWMwNDJkYzhmODc3NDc4MWQ3YWYzMTBjYmRhNDg5YmYzNDQ0YjUyZWYzZmZmZDY5YTI4M2RkYzAifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_b53e829a9fb34b7b96e2a3d8e4b80d22",
+      "statement": "Page completion follows persisted Markdown/frontmatter validation and claim reconciliation, with durability checks comparing the page hash, claim set, and verification projection before recording completion.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-wiki/src/run.rs#L1324-L1441",
+          "version": "repo-lines-v1:sha256:62d9ba2bef8f1615e4649044ead1b79b5b90978dca75ab67c788b00e025e9f52:eyJzZWxlY3RlZExpbmVDb3VudCI6MTE4LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI5ZmMyN2U4MTliNGJmMTVhYjhkYTk1MjViNmVmOTYxOGM1YzJhZjcyMGMzOWU4ZjU0ZTJmODQyYzQxMTZmYjJlIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIyZjhkYWM1YWYyOWM1ZTdmOTIzOTYyN2JkYzFlM2ZiOGExNjViNTBkZmE4Nzk5MTAwMDZkN2Y2YjA0NGZmYzczIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJkZmI5ZDlkNzdlN2MzMjkzNDk5YjI1MGMzMzMxOWM0ZjFjNmFlMmI1OWVmZGI4YjNkNzk5NThjOGY4ZjE5ZDc3IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJiOGI0OWIyOTk5NzYzYjM0OTQzZjBkZWZlODNkNzJkYWIyYmEwOWMyODNjOTYwZmM1OTRlYjhkYTllMWE5NGFiIn0"
+        }
+      ]
+    },
+    {
+      "id": "claim_21dfc4f2b0054098aa962f74f28a835a",
+      "statement": "Evidence excludes Git metadata and generated wiki output, applies ignore rules before reads, rejects symlinks and aliases, and hashes whole files or relocatable line spans with context metadata.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-wiki/src/claims.rs#L181-L219",
+          "version": "repo-lines-v1:sha256:5c7d21939a4f1fbcc71ee278579662b21c5eee8454ac12cc4a62478acb5586e4:eyJzZWxlY3RlZExpbmVDb3VudCI6MzksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg1ZDY0ZmU2YjgyNjBkMGUwOTAzYTBiMDlhNzhkNGI3M2I5YzkzOWJmNTdmNDYyYTI5OWYzNzEyOTU3MWNhYTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJmMDU4MGFlMzAxNDYzMzQ5OTA4YWRiZmNmNmMxYzM4OTM2NWIxYTY0ZmM3YWFhOWY1YWM0NmQwN2QyODc5MzUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjcyYTY4OTI0NTgxMmZkM2UzODBjNzFlYzA3OGE4ZGM2YmRlZDI1MTY2NGY2NDczOTUzYTk0ZjViOTkyOTFhOTgifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-wiki/src/claims.rs#L287-L333",
+          "version": "repo-lines-v1:sha256:e04785ecc6dad149b45285b0a9dbd2ff527157bcd1b2100680fa397fc47015b6:eyJzZWxlY3RlZExpbmVDb3VudCI6NDcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZlNGQ4ODcyYmU3OWE4NjcyNTBmZGQ0YWY2NTE3ODEyNGUwOWVhMmMzYTQ4YjRmODBiZjZjYTljMDMzZTEyYzYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImM2YjhmN2JkMGVmN2VlNTYyZDMyYTdlOWNkOTI4ZjAxYzlmNWViMGJjYTIzOTAwNjdjMGRhYjVkMWJmMDkwMDEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImM4MTY0M2NmNjQxZDFkM2IyZDFlNjkwMmIxZDliMGZlZDQ0MTAyYjU5ZGM4ZTJmZDQ4YzM3ZjY0YTdjODFjYzcifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-wiki/src/claims.rs#L366-L448",
+          "version": "repo-lines-v1:sha256:040534fab5a9c2573a830c781b4f4204cb3f901239071689883f3ac2766a18e9:eyJzZWxlY3RlZExpbmVDb3VudCI6ODMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjliMjI5ODAxMTU5M2Q5YTE0ZGIzNWUyNWFhZmQ3Zjg3OWQ1Y2I4MDM4YjU3NTE5Y2QwZGRiNTE4ZDg4MWVkYjkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIyODYyMjE2Yjg3NDM3ZjZkMzQ4NTQ0MjM5NzE1MGI4ZWZlM2Q4NWU4YTU1YTMxYzE5ODM3MTZmZjAxMjk1NDkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImYxMmY3ZjA5ZmY0NGJhNGRjNjQzOGJmMzljZTIzZDQ0ZTdmMTQ2ODUyMGU5ZGFiMjc5NjMzZTM1YzY5NjU5ZDEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_c92015901ee0471497676c612588841c",
+      "statement": "Claim preflight records newly ignored or security-refused evidence as unresolved while propagating other resolver errors; changed resolved evidence is stale.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-wiki/src/claims.rs#L1065-L1119",
+          "version": "repo-lines-v1:sha256:7a565dd68ce809388d6b04f98f371a40a4a7fe9d1ed19d9c820cb1281505b4d8:eyJzZWxlY3RlZExpbmVDb3VudCI6NTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMxZWQ1NjUwMWY1ZjEwYWNkYjdiZTBhY2JmOTMyNDZjNTljZmEwOTY3YjdiYWI1MTg5MTE4NTU2MTQ3YTI5ZTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhlY2I1M2RlNjI1Y2QzZDUxNmZjODRiZjFkMDNjZjQzOTZhOTZjOTYxNjlhZjA5NjllMjc4NmIzNDZjMDNkMjUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQxMzYwZTc4OTM3Mjc0OTA3NjlhYzM4ZTYxMjRhNzZhMGIyOGZkZGJiZjFlYTM1ZDJiOTk4MDYzMjNiMWZjODUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_6933edd4e6a843bcadc3493d8c461ddf",
+      "statement": "The authoring backend limits ordinary writes to wiki output and refuses claim paths and excluded paths, while claim sidecars use a dedicated contained store with atomic replacement.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-wiki/src/fsb.rs#L117-L137",
+          "version": "repo-lines-v1:sha256:7c23d5956f39fac30df05ce09b051b2a2f94e04d7d7462fead0a77b468d9e668:eyJzZWxlY3RlZExpbmVDb3VudCI6MjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE0NTQ0ZDNiNThhMWJmM2NlOTYzZGZiNTJkY2E5MWVmYzQ3OWI0ZTQ1OGYyYWEyZDAwZjYyMzQxYmE5ZmY2ZjQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIwZjA5MGQ0NGIxMGI0OGYxMTQ4YTIyNDg3NjM2Y2JiODZhOTlkYjJiZjdlOTA0ZWQ2MDBmMmViMjY4MjA5MWQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJjMWRlZmY4OTRkMDFlM2VhMjUzNTFmZDFjMzI1MDViM2YyMzA3MjgyZWUyZGEwMWIwYTg2MTViNzg2NWM1YjUifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-wiki/src/fsb.rs#L151-L215",
+          "version": "repo-lines-v1:sha256:941c198906f2558cd47e4b0c2c37d59b089367eaf7acd3fec22cd40063518afd:eyJzZWxlY3RlZExpbmVDb3VudCI6NjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRlYWE4NjA2OTBkNjk5OGQ5YzQwMDZhNjdmZTg2ZTk1ZmI5MWJlZTA3MTFiYjkwYzAxZGUyNmE1MjQyN2NjZTAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2YjA0NDkxNDY5NzIyZTgzNjNhOTRlNDA0NDUzOGUwMTNhMmEyMTdlMzZiMWU1NjhiYTYwYWNiN2I0YzhmMmUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjZiYjMwNzE1ZjZlZWM5Y2FhNjRhMTFmMjJhNWY1Njk0MzAwMGM3MTQxZTkxMjY2Njc2MTQ2ZTk0MzJmZTY1NGEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjIwNmFhNGIzNWEzNjhlYzQwY2M0N2I0ODE1YzVkYjY1NTU5YmU0MThkZTAyYTA2MmM1OTgzY2E0ODE2OGJmMGQifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-wiki/src/store.rs#L316-L328",
+          "version": "repo-lines-v1:sha256:aeade295a0843a3b4dc23734333065e06db513df8b3fa434ee77bc2e9abe810d:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJkMWExNDU0MDU2MTk1YWE0NmMyZTFhMDdkYmEyM2NiMTIyZTg1NzE1MDY2ZDAzZWVjNjhkYmZiMTM2OWIzMmQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ4MDIxZWFhZmMxMGRmNjBkYmJjNGI0YjNhN2VjZmYxODAzZWUxNTFkMzc1OTFhZjVhODFiNmQzN2UyZTE0OGMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImFlZjNlYWIxNjE2YTgyZGNlMzNmODQ5YmM3YzJmNWNkNTU5ODRkMDQ0YTBlNWU0MTIzNzhlNWE1N2E5NTcwODYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjkyZTJmZTJjNTZmYWM1YjVlZTBlNDAyYTkwYzUzOGI5YTYzMWFhYmM2N2ZlYmQ3MzA1MDEyZWIwOGZhZGY5MjQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_4d6ab06f86584a4192151c8edd30dddc",
+      "statement": "Finish refuses pending jobs, reconciles deletions and orphaned sidecars, finalizes indexes, links, source and provenance fields, and leaves freshness interrupted for deferred claims or detected source drift.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-wiki/src/finish.rs#L746-L760",
+          "version": "repo-lines-v1:sha256:26c8fbd1ffce84d3fd3fc622541064c15cfee6098f0a67c56f38fe929b336141:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE3NDY4Nzc1ZDIzYjc3OTA2Y2M3OTBjZjMyYTRhYjQ4YzU1YzQyMmUzYTEwMDhiYmExMzVhMDI2YzYxMTNiODMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQxMzYwZTc4OTM3Mjc0OTA3NjlhYzM4ZTYxMjRhNzZhMGIyOGZkZGJiZjFlYTM1ZDJiOTk4MDYzMjNiMWZjODUifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-wiki/src/run.rs#L1463-L1523",
+          "version": "repo-lines-v1:sha256:a3c39e43cc3c2d13cb2bb4a4eb4949e8bd1ffeb021b0b5d9ba59ce31dc91e76c:eyJzZWxlY3RlZExpbmVDb3VudCI6NjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNiMmNiZTZjZjNkMDBiZTM5MmI0YzllYzcyZWViYzUzYjQwMWVmNmRhNGRmMGYwZWFiZTM0YjZjM2Q4OWM3ODkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFlYTM1MGRkNmRlMjc3YzVkZjZmNjQxNGUwNTUwOTI0ODE2MzY5MmUwZjE3NzI1YzYxZjAwZWVlMDgwMDFhMjQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhlZDRkYjMyMjViNThmMWM2YjQ5YjUxN2YzMDk0YjU3NDMyM2Y5ZWI5ZTVmNDVkMDQ5NzBkYjA4ODdkNzI3MmUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjZlNzk0Y2RjYmE0ZjUyNGVhYTI1ZDQxMGI0ODk0MGRkNGMzNDUyNTNhMGExNzA5MzdhZWNhZjMwMjM2OWFlYzcifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-14T13:04:09.841Z"
+  }
+}
