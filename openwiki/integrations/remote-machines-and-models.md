@@ -5,8 +5,10 @@ description: SSH-backed project paths, per-machine helper deployment and state, 
 tags: [ssh, remote, models, engines, configuration]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-14T05:16:59.652Z
+    at: 2026-11-14T20:46:59.159Z
 sources:
+  - id: openwiki-source-72ec9ac0129b24bc305a0df1
+    resource: repo://crates/harlo-agent/src/main.rs
   - id: openwiki-source-f1322101a0183d196da191a3
     resource: repo://crates/harlo-agent/src/providers.rs
   - id: openwiki-source-f3b7ddced6bd0e383fa959d1
@@ -23,13 +25,15 @@ sources:
     resource: repo://crates/harlo-core/src/engine_setup.rs
   - id: openwiki-source-2e13cea144aac4277e57e2b1
     resource: repo://crates/harlo-core/src/model_servers.rs
+  - id: openwiki-source-4af2dd3e4a0acae243d3b65c
+    resource: repo://crates/harlo-core/src/openwiki.rs
   - id: openwiki-source-3967b37bf3499aaa56517a6d
     resource: repo://crates/harlo-core/src/remote_helper.rs
   - id: openwiki-source-91f70adb7dede434bd1dac37
     resource: repo://crates/harlo-core/src/remote.rs
   - id: openwiki-source-5d94b2fabb592e050ff61e0a
     resource: repo://crates/harlo-core/src/servers.rs
-generated: { by: "harlo", at: "2026-11-14T05:16:59.652Z" }
+generated: { by: "harlo", at: "2026-11-14T20:46:59.159Z" }
 ---
 
 # Remote machines and model servers
@@ -90,7 +94,7 @@ Keep the three states separate when debugging: **configured model**, **working S
 
 ## Extension seams and tests
 
-New model engines belong in engine/setup/server machinery, while provider-file compatibility belongs in `model_servers` and the [agent provider layer](../concepts/agent-execution-and-safety.md). Keep machine-specific side effects behind the helper API. The [OpenWiki integration](openwiki.md) uses the same remote-routing principle but deploys a Node runtime instead of these Rust executables.
+New model engines belong in engine/setup/server machinery, while provider-file compatibility belongs in `model_servers` and the [agent provider layer](../concepts/agent-execution-and-safety.md). Keep machine-specific side effects behind the helper API. The [OpenWiki integration](openwiki.md) uses the same machine-routing principle but deploys Harlo's `harlo-agent` executable and invokes its native Rust wiki MCP endpoint; it does not deploy a separate Node runtime. Core caches remote wiki readers per host and writers per host and repository, and discards dead server processes before reuse. This is a separate routing path from `remote_helper::Helper`'s build-keyed engine/agent binary uploads.
 
 Focused tests cover provider discovery, preserving existing provider configuration, and supported remote agent platforms. SSH forwarding tests (`forwards_a_port_there`, `reaches_a_server_there`) are ignored by default and require `HARLO_TEST_SSH`; do not count ordinary unit tests as exercising a real tunnel.
 

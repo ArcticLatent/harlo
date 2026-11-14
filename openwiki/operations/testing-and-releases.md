@@ -5,7 +5,7 @@ description: Contributor build prerequisites, focused and integration verificati
 tags: [testing, build, packaging, releases, security]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-14T06:18:31.902Z
+    at: 2026-11-14T20:46:59.159Z
 sources:
   - id: openwiki-source-4d1d392666be6dfdd7a91a2e
     resource: repo://.github/workflows/release.yml
@@ -19,17 +19,27 @@ sources:
     resource: repo://crates/harlo-agent/src/chat.rs
   - id: openwiki-source-1ab0216479222bff9a772d8b
     resource: repo://crates/harlo-app/src/updates.rs
+  - id: openwiki-source-4af2dd3e4a0acae243d3b65c
+    resource: repo://crates/harlo-core/src/openwiki.rs
   - id: openwiki-source-7f90659c3ba3e62659b4a786
     resource: repo://crates/harlo-core/src/updates.rs
   - id: openwiki-source-4dadc7b205a2f63287cbe0a8
     resource: repo://crates/harlo-update-signing/src/lib.rs
+  - id: openwiki-source-056ac262dd327c0a8e1ed162
+    resource: repo://crates/harlo-wiki/src/marked.rs
+  - id: openwiki-source-c3f26d7f96c5e44628c83808
+    resource: repo://crates/harlo-wiki/src/retrieval.rs
+  - id: openwiki-source-eb7f694aac7969d92da614ab
+    resource: repo://crates/harlo-wiki/src/run.rs
   - id: openwiki-source-578be1dc5f53b796e8783a2c
     resource: repo://docs/releasing.md
+  - id: openwiki-source-f9c77b8035af27d8ca2a61f1
+    resource: repo://packaging/linux/bundle.sh
   - id: openwiki-source-2e6fe030dac0fa4ae34a9b22
     resource: repo://site/README.md
   - id: openwiki-source-f1c29df965300759d3c1ff56
     resource: repo://wrangler.jsonc
-generated: { by: "harlo", at: "2026-11-14T06:18:31.902Z" }
+generated: { by: "harlo", at: "2026-11-14T20:46:59.159Z" }
 ---
 
 # Testing, packaging, and signed updates
@@ -58,7 +68,7 @@ Use a scratch HOME or XDG data/config directories for interactive testing. Demo 
 | Session reduction or metadata | Focused core tests | Demo subscriber lifecycle and UI behavior |
 | Sandbox or agent tools | `cargo test -p harlo-agent` | Actual OS sandbox behavior |
 | Phone protocol | Core phone tests, `swift test --package-path ios/HarloKit` | Direct and relay transport behavior |
-| OpenWiki integration | Core `openwiki` test filter | Bundled runtime and remote tool-server behavior |
+| OpenWiki integration | `cargo test -p harlo-wiki` and the core `openwiki` test filter | Native local engine behavior and remote `harlo-agent wiki` tool-server behavior |
 | Packaging/update | Signing/core update tests | Installed package smoke tests and self-update scenario |
 
 Keep external-service checks distinct from hermetic unit tests. See [agent safety](../concepts/agent-execution-and-safety.md) and [phone integration](../integrations/phone-and-relay.md) for focused invariants.
@@ -76,6 +86,13 @@ The partial-count check distinguishes output-only and input-only reports from me
 
 For phone code display/copy regressions, use the focused checks listed in [phone verification](../integrations/phone-and-relay.md#verification); core crypto tests alone are not a substitute for checking desktop serialization and the Swift renderer.
 
+The wiki engine has its own crate-level test boundary as well as the core adapter tests. `harlo-wiki` exercises native retrieval, Markdown parsing limits, evidence handling, storage, and lifecycle behavior; core tests check that the desktop uses the engine locally and routes remote operations through the agent. A parser failure is expected to return a tool error without terminating Harlo; a focused engine test alone does not prove the UI or SSH path.
+
+```sh
+cargo test -p harlo-wiki
+cargo test -p harlo-core --no-default-features openwiki
+```
+
 ## Headless Rust CI
 
 `.github/workflows/tests.yml` runs the agent and core tests on pushes to `main`, pull requests, and manual dispatch. Push/PR changes confined to iOS, the website, wiki, or Markdown are ignored. Runs for the same ref cancel an older in-progress run.
@@ -92,7 +109,7 @@ This is not a whole-workspace or Qt UI job. The workflow disables Ubuntu's AppAr
 
 `docs/releasing.md` describes the maintainer workflow: add the next version's CHANGELOG section, then invoke `packaging/release.sh` from an up-to-date main branch. The script checks repository state, updates Cargo versions, commits, tags and pushes, then follows the release workflow. These are publishing operations, not prerequisites for ordinary development; do not run them merely to test a change. `--dry-run` is the documented preview.
 
-The release workflow builds remote ARM helpers, then Linux packages/AppImage with bundled Qt (currently Qt 6.12.0). Package installation is exercised in Ubuntu 22.04/24.04, Debian 12, Fedora 42, openSUSE Tumbleweed and Arch containers. Publishing depends on both build and install jobs and is restricted to `v*` tags. It verifies that the tag version matches Cargo, extracts release notes, signs the update manifest, and creates the GitHub release. Manual runs and release-check branches can build/test without publishing.
+The release workflow builds remote ARM helpers, then Linux packages/AppImage with bundled Qt (currently Qt 6.12.0). The native wiki engine is part of the Rust workspace; the Linux bundle also includes its OpenWiki license notice. Package installation is exercised in Ubuntu 22.04/24.04, Debian 12, Fedora 42, openSUSE Tumbleweed and Arch containers. Publishing depends on both build and install jobs and is restricted to `v*` tags. It verifies that the tag version matches Cargo, extracts release notes, signs the update manifest, and creates the GitHub release. Manual runs and release-check branches can build/test without publishing.
 
 The iPhone app has a separate release/version lifecycle. The website in `site/` is the static download/support surface, not the desktop UI runtime.
 

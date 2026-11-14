@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:739211a3f14e87958f4ff3734c065fa535c36dc3d5dac46ac22286513e7a0863",
+  "pageVersion": "sha256:8bbb0454c4deb242eb8bf61bfb49008cdd6176c6b02f4d22600c7caaaa383af0",
   "claims": [
     {
       "id": "claim_7a207a8ae4594d9ba376628ea349a6b4",
@@ -103,7 +103,7 @@
       "statement": "Focused agent tests cover independent input/output usage normalization with missing-input budget estimates and attempt accounting that preserves reported spend on stop, releases held budget, and avoids an extra charge from an empty snapshot.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-agent/src/agent.rs#L2653-L2691",
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L2666-L2704",
           "version": "repo-lines-v1:sha256:116200b92e9429b6c1619bc1d886c29587af35beb47956b557ca2f9af30fd348:eyJzZWxlY3RlZExpbmVDb3VudCI6MzksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkyYjVlZGY1OTQ5Y2ZlYTY3ODIyY2Y2OTExMzIzNjNkNjhkNmYxZTE2OWY1ZTBkNGY3YzE0ZTVmYTFlNmQ0ZTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNkOTA4YzhkYjhiNTZjYjFmNTM0MmFjMGI3ZjQ2ODlmODZjMWI4Y2ZkMWM0MTk1NDU4YTdkZTgyN2Q5MDU3MTIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjViMWEwMmM1MWZmZTkyNzM5MWNjMWE3NTQ2ZjIzOGRkYjBkMTExYzIxYTI0ZTdjYTYwN2EwNDQ0NzRkNzBjYTYifQ"
         },
         {
@@ -111,10 +111,42 @@
           "version": "repo-lines-v1:sha256:81154013a095dcb59d74499f232a8e957334c2be1c7100a1060944a2f474047a:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkyYjVlZGY1OTQ5Y2ZlYTY3ODIyY2Y2OTExMzIzNjNkNjhkNmYxZTE2OWY1ZTBkNGY3YzE0ZTVmYTFlNmQ0ZTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRkMzkyMTQ3NDg3ZTVjODJmYmU1YzNlYzQ2NmYwOTlhNjRhZjg2NDMwYmI4ZDExMGM5YmZlZWZhZDFkN2RlNmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk3Yjg3MTgwMmIxZjA3NTQzZmEzMTY2ZWQ1ZGEyZGZjOTI3NmRhNzA4ZjQwNTAzMDMyMWZhYjY2NDRiYWRmZjIifQ"
         }
       ]
+    },
+    {
+      "id": "claim_3b5c3fcbf5804397aa5898f82422dcf1",
+      "statement": "The native wiki engine has focused crate-level tests for parser failure isolation, concurrent retrieval caching, and repository-contained setup writes, while core's OpenWiki tests exercise the desktop adapter boundary.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/openwiki.rs#L1110-L1140",
+          "version": "repo-lines-v1:sha256:2af8e20328c1499f5a8026b77ac258dba2bbe451fab63a55fc97a8706cab8bec:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5YzEzNTkwNjY1NjMyM2QxYzVlYTQxNjU0ZWU2NmFmYjU4NWFjZGNmYWVhY2ExMjFkNWUzMGJmMTkzZWVkZDciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJmYzEzOGJkYTE0YjA2MjU3NGYzZjlhOTRhZjlkMDFhMTBiMmUwNzJkNDQ5Njg3N2ZiMDE1ZDQ5ODZhMTIxMTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImYzNmIzN2ZlYWMzNGFlOTRhM2E1MDRkNjZkNTc5NzdhMjFmZmI1ZDk3Y2VkOWIxY2UwMWU2ZjkyMWM3YTRkZDcifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-wiki/src/marked.rs#L1330-L1338",
+          "version": "repo-lines-v1:sha256:c0fb83d5d4d6c91d3c708cd24f7a5246d98a6441876d21497f3118bc4a726a63:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZWIwMGFjZTQ0NzU5YTI3MzZhNGM0NzI0YjQwM2VhNDdlOWUzMWU4MGUwODg2MGQyMWEyY2M2NzBkMmRiNmFiMCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZjZhYzVlMDU3MzIwNWE5MzI3MDQyMWJkYjdjMGYyNDdlZjRmZWY1MGNiZDgyMDhkNGY2MTRkOTMxZGZhNTU5OSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNzlkMGI3MGNkNGRjZDdkNmZhNGRlZTlhNTViZjI5Y2NlYWQ4ZjgxZDljZTk4OWEzODdlODY2ZDZjYmUzYzJhYyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiY2QzYWI3NTZmNGJjMTgyZDRhZWFmMGUwN2M1NTMxNTEwZGQ0MTA2YzNjMDcxNGIxMmNkY2UwZTQ3ZTBiMDQ0ZSJ9"
+        },
+        {
+          "resource": "repo://crates/harlo-wiki/src/retrieval.rs#L686-L710",
+          "version": "repo-lines-v1:sha256:66d9ad95a39e0fa653518d54d436025eede80bbece8f059d19f72c0378972e44:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY2YzQ5M2IyNzVjNDUxYWQ5YjQyZWY2ZmJhZDgyODNjMzJhZGMyOGMyMzRjMGY0NGRlOThkYTNmZjZmYWIwZjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE0ZjMzMTBjOGVjNWZiNDE2YjYwNWJjYmMxNTBjNmFmOTQ3NGMxYzE2MzEwMWU5MmMwZGUzMjkzYmQzOGUyM2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImExN2M4YWJiMjUyMDRkMmUwNzc0NTc2NDIyMWI1MmIxNDU4ZDRkMWUwNmFiZGNiZWM1ZjJkM2YzMDljZThhZTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjgzNGRiYzk4Y2VmMzBiOGI2MGYxNjQwMjRhMGQ3ZTliNDQ3NDQxYmRmNTc2Njc4NGQ4ZGM1MGJiZjg5NmVmMDgifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-wiki/src/run.rs#L1767-L1797",
+          "version": "repo-lines-v1:sha256:6c30386bbea151729a3946156837e38a713d2ab6c687033550f421fec2ccc110:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUzYTk1MjU0Zjk1MjdiODBmNGY2MzI5YWMyZjhmM2RmNmI5ZDhmN2EyOWFkZmZjYWViN2UyZDdlMGI0ODAyODkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc2NzA2NWQ2NDVkMmE0ODhkNWMzODFiNThkZDQyYjRmOTY4Y2I5NTcyNTZhZWU4OGVhMzE1YzUwZWVhNzRhZjQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJlYWY4Mzk3MjgwODhlZWYwYjZiZjI3Y2YxZmUwYjY4ZTEzNDFhMDJjZjgwMThkZWU3MWYyNWE3NDQwNzI4YmQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjAwZmZmZGRlYWE4YTEyMTRhMjFiZTdlMjBjMDcxMDI2ZWFmZTQ5NmZjZTE4NjQ4YmU2NjkxNTViODg5Njg5YjQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_066b2f6b1f19445f93f4278799901c82",
+      "statement": "Linux release bundling installs the native wiki crate's OpenWiki license notice in the package's license directory.",
+      "evidence": [
+        {
+          "resource": "repo://packaging/linux/bundle.sh#L61-L64",
+          "version": "repo-lines-v1:sha256:d83769abbde0a834dcb7aee3dba259217e0ccace3539a9c50c129650e2fb71f2:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYzdlMzBmZDE2YzJkZmE5MzAyOTQ4MGMwM2Y3ZTM3NWMxZTMzNjIxMWRhOTcwZTFhYjAwYWE5N2I0YTE3YzNmYSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiM2I3NjZhYjU0ODJmMjdjNmYwN2Y3Y2VhNjllN2M5MjdiN2EzODM2NWE3OWJjNTIxZDc2NTUzZDc4M2U2NjFmYSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNWRlZTM0MTcxNmE1OGRhODcwZWRkYmM2MzEwNjFhY2VhMGExNzBmYzBhMTdkNzcxOTlmM2M2MTVmZDJkNWE1NiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZjNmN2YxYmM5MDA0OGQ2OTQ2NDVmMjJjZDM0YzFlMTdmMzI1NGE1NmFkZGRmNjlkZGMzYzg3YjNjNDRlN2VkYiJ9"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-14T06:18:31.902Z"
+    "at": "2026-11-14T20:46:59.159Z"
   }
 }

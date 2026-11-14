@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:b7a93a4295d48bbdf3c0daae2bded6fb31533585e1d56af7911efe4f87c6f2bc",
+  "pageVersion": "sha256:3825eb089e33898d7c3d7fa836ab9ab1d2f1313740508c5249001d5bbc4f79be",
   "claims": [
     {
       "id": "claim_372c141472fb4274ac9fa038c2951ee3",
@@ -87,7 +87,7 @@
       "statement": "Finished wiki sessions have a separately expandable Wiki shelf after Settled; workspace settlement defers active or unsaved sessions and respects disabling, pinning and archiving.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-app/src/workspace.rs#L8003-L8021",
+          "resource": "repo://crates/harlo-app/src/workspace.rs#L8096-L8114",
           "version": "repo-lines-v1:sha256:892eecf63f30e036d3dd7b0ef731f17b35e57d752d28f05c7535a82784a2c53e:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNmYjkxMjRjZDJlYzJlNTFhYmUzYzE5MTM0Y2JjYzE0NjU3ZTkzYWQzYThhMjA3NGU3MDJlNGJlZmM3NzY1ZTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5YzEzNTkwNjY1NjMyM2QxYzVlYTQxNjU0ZWU2NmFmYjU4NWFjZGNmYWVhY2ExMjFkNWUzMGJmMTkzZWVkZDciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk5OWJkZWZlZWFjYTYzNDBlMDI5MGRjODZlODg5Yzg5ZDVlMTg5YWE1YmE0NGI1ODViM2I3MDczNGY0YTYyZDgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjkyM2VhMWVmZTRhYzFhZTU2YTRmMzAxOTZiNGRkNDkyZmM1YThhNDAzYTE0YzM2MmMxZDllNWZhNzU5YmFhNDIifQ"
         },
         {
@@ -105,7 +105,7 @@
           "version": "repo-lines-v1:sha256:e1e04961992ad1bc1ea10aa59327b30b79bfa923551dea065afc06bdeab9629a:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIxLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiIzOTZhNDEyODU0NGFiMTg5YmVlYjEyM2YyM2JmMzE4MDU2MTYxMDkzOWQ4MDk0ZTVjNzk1Y2Q0ZGE3ODgwOWZiIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiJiMWU1NDRjNWI1ZWFjNGUyMjM5MDEyMjVhODY1ZjI4YjFhY2Y3MWE4MWE5NTQ4ODJiY2Q0OWRkYzMxNDBkYzVlIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiIyYTU2OGNhMTMxZGRkNDI1OWNhMzg4NGNlNDJlNGE2OGZhNmZlYjYzOGIzZDJlODQ3Mzk3ZGJkMDk2ODcwMDAwIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiIzYWQ4MzI5ODkwM2U3ODJjNTNhNzg5NzVjOWQzYjczZWQxMWM0YjIzODFkYjMwODVmM2NjODUyNmE2OWI1ZTIwIn0"
         },
         {
-          "resource": "repo://crates/harlo-app/src/workspace.rs#L4081-L4089",
+          "resource": "repo://crates/harlo-app/src/workspace.rs#L4179-L4187",
           "version": "repo-lines-v1:sha256:e634696c7e02781364fce1f89b518d9215f6df48cfb0b4e4ae3c830c97fe271a:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOWZjOWJlMmNlOWE3NTdkNGVhYmIxZWY2MWFiYmQxYzBmMGVhMTc2ZjVhMzhhNjYzM2M2ODM3Njk4MGI2NTM4NyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYTJjYzBkNDRkZGUzOTEwMThhNDU5YzA2YjA5MGVlZWM4ZGY1MDQxODgyOTczMjAyZDBhNzY1ZmM5MzU2NGNhNiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNjIyNjNmNzYyZTY2MzlmNmU3OGEyMzQxOTM4NzQzMDE5ZDJlZTY3NmM3YjExMDhmNmU1ZDdlOGM4ZTFiNGQ1NiJ9"
         }
       ]
@@ -169,7 +169,7 @@
           "version": "repo-lines-v1:sha256:00a116ebfbec842b1fc3ca86198e8d01a3476cb392e0cc895d853627c9d7c4e1:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5NDZmOTY3ZDBiMzhiNGUzZDU1ZjRkYjg3MzRlOThjMmUwNDc3NzYxYjVjNzJhYTNmOTJhMGExZGE1NWY4ODQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2YjA0NDkxNDY5NzIyZTgzNjNhOTRlNDA0NDUzOGUwMTNhMmEyMTdlMzZiMWU1NjhiYTYwYWNiN2I0YzhmMmUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBmZDU3YmY3ZTdkYTM0MzI0YjcxMzZmOTM3NDgxMWUyYWMxOGQ5ODgxYjJiNDA1ZWNjM2I4MzIyYTViZjY1ZjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjA0Yzg0OGM2YTc2ZWUwMmY3NzEyNjlmMjE1M2I4NWJmMDE3N2MyNTA4NzI2MzhlZmJjYTEzN2Y4OTNkMTZhNjcifQ"
         },
         {
-          "resource": "repo://crates/harlo-app/src/workspace.rs#L5443-L5481",
+          "resource": "repo://crates/harlo-app/src/workspace.rs#L5541-L5579",
           "version": "repo-lines-v1:sha256:01b05559fc775811cb99349de293b5204de4e150440be7ff77b3ce6b558ccf2c:eyJzZWxlY3RlZExpbmVDb3VudCI6MzksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVkZWNiYzA0ODgwNDNmMWZkM2NlYzgyZGYwY2ZjYWMwODQwNGM3Mjg4NTJlZmMyYTE3MGJmNGQ4ZGM1YThkMzkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE0ODE3YjM4YzMxYTVkNWIzMzk2ZDRmYmQ5ODJmZDAyZWZkZjgxNzRjMDQwMjNkM2M4MWNhYzdlNWFjZDYyYzkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE4NGViMjEyMmYxOWYyNThmNmVmZTZkOTVjYTJjYWNjYTY4ZGExOTVlYjEwNzkyZjYxNzAyYTFkMTkxMGNmMGEifQ"
         }
       ]
@@ -179,7 +179,7 @@
       "statement": "Asynchronous desktop message searches check the latest generation after acquiring the search-reader lock, skipping obsolete queries still waiting to execute.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-app/src/workspace.rs#L5482-L5506",
+          "resource": "repo://crates/harlo-app/src/workspace.rs#L5580-L5604",
           "version": "repo-lines-v1:sha256:b16db15c258035dadfcdae66ba016725f038edc50df235aaf79d38cb6b2a41f5:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkyYmZkMDI3YTU3MzMzOTkzMmFjNDRkNzNmN2NlNzU3Njc5MmQ5NjM5ZmZmYmFmMWRkZWU1NWE2NTA0ZTQxM2QiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5YzEzNTkwNjY1NjMyM2QxYzVlYTQxNjU0ZWU2NmFmYjU4NWFjZGNmYWVhY2ExMjFkNWUzMGJmMTkzZWVkZDciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ0MTRjMzQ0NzZmYTE4MmRkZTU5MjgyYWQxOWQ3NTY4MTVmMjliNWQwN2ViNDA3MmRhMGE5NWI5ODEwZjAzZGQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUyZmI3Zjk4NTI2NWRlZjkyMzZhMzQ2M2YwMWI4NGY0YzlkMjQ3OTE3NDczZTA0ZmIxMTA2MjI2MWRhYjdkZTcifQ"
         }
       ]
@@ -203,7 +203,7 @@
       "statement": "Local Harlo search reads continue from complete lines only when the saved tail and parent chain match; branch or rewrite changes trigger a full active-branch read, and the search index migrates a row-ID map to delete replaced or removed messages efficiently.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-app/src/workspace.rs#L6833-L6846",
+          "resource": "repo://crates/harlo-app/src/workspace.rs#L6931-L6944",
           "version": "repo-lines-v1:sha256:30733d021780a2fa1109d48b6424b1b7c47b8ac22f9ad20d03e4d8325b0e1ffd:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk5N2MyMjExYjY1MGFiOWJiMGFiYjlhYWY2Y2VkYzcwNzFhMzI4M2ZkZmY2NDNiZDcyMDM0ZGYwOWQxYmUzZDYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE5ZTc2MzU1Y2YxMTk5NDgwYzNmOTk4MzZiMTQ4NmM4NDFkODkxZmFhZDkwNGM2MDhlMDkzMDIyZDM3NTdhZWUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImZkZTlkNjBjZGQyNDg2YThiMDViZmFmMDk1ZDJkYWM1MjdjYmZmY2I3MWQ4ZGNmM2U4OTViN2ExNmUyZDBhMzAifQ"
         },
         {
@@ -239,7 +239,7 @@
       "statement": "Search indexing preserves existing hits and stamps for listed files whose read fails, throttles retries, and replaces them after a successful read; files missing from the supplied list are deleted normally.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-app/src/workspace.rs#L6823-L6846",
+          "resource": "repo://crates/harlo-app/src/workspace.rs#L6921-L6944",
           "version": "repo-lines-v1:sha256:7bc6da5222278e0dbb1b4173ccd492658e3c35578c9243fe50742e5e50f85df5:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhmZjBkMzIwOWZmYzIzN2M0YzlkYzQ1MmQ4MTM4YWE5MDk1NjViNTE0M2Q1NzAyYjVhNWQwYTNlMzk3OGZhYWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijg3ZDYzYjc3NDE4MDFmMDQ5YzUyMjVlMTgyZWJlYjRjNWYxYzgyZGY5NmNjY2IwMDIzZDBkMGI0YzI3ODRjZGIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImZkZTlkNjBjZGQyNDg2YThiMDViZmFmMDk1ZDJkYWM1MjdjYmZmY2I3MWQ4ZGNmM2U4OTViN2ExNmUyZDBhMzAifQ"
         },
         {
@@ -269,6 +269,6 @@
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-14T05:16:59.652Z"
+    "at": "2026-11-14T20:46:59.159Z"
   }
 }

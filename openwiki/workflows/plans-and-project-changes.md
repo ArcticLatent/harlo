@@ -5,7 +5,7 @@ description: How session-scoped orchestration tools update shared plans and safe
 tags: [workflow, plans, orchestration, git, worktrees]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-14T05:16:59.652Z
+    at: 2026-11-14T20:46:59.159Z
 sources:
   - id: openwiki-source-c5e0556ff4a54e3a14503a14
     resource: repo://crates/harlo-app/qml/ChangesPanel.qml

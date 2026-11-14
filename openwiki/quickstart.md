@@ -5,7 +5,7 @@ description: Start building Harlo and find the right wiki guide for agent execut
 tags: [quickstart, navigation, build, architecture]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-14T13:04:09.841Z
+    at: 2026-11-14T20:46:59.159Z
 sources:
   - id: openwiki-source-651d1fb6c9e49916a916ab51
     resource: repo://Cargo.toml

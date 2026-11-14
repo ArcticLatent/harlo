@@ -5,7 +5,7 @@ description: How Harlo's Rust wiki engine retrieves sections, selects linked wor
 tags: [openwiki, architecture, retrieval, claims, persistence]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-14T18:22:19.698Z
+    at: 2026-11-14T20:46:59.159Z
 sources:
   - id: openwiki-source-4af2dd3e4a0acae243d3b65c
     resource: repo://crates/harlo-core/src/openwiki.rs

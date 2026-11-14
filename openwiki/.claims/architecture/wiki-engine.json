@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:fd5a7a5bf53977ee89ede62bf3ed737a9032e761ab5086ae0dc8bdf501d82ece",
+  "pageVersion": "sha256:4b8fdc47dad667c45f82f6e0b5e7461e21f31a152a90125465479089fddf4ac8",
   "claims": [
     {
       "id": "claim_cd31b18fb1af473882d2c2d91575eaea",
@@ -69,11 +69,11 @@
       "statement": "A writer accepts later lifecycle calls only for its active run ID, and begin resumes persisted state while discarding the old plan when source fingerprints have changed.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-wiki/src/run.rs#L1261-L1318",
+          "resource": "repo://crates/harlo-wiki/src/run.rs#L1342-L1399",
           "version": "repo-lines-v1:sha256:d3c85b9a59933af4cf4f534c689de11c249287d0550f5ada0b5dbc752bc873c4:eyJzZWxlY3RlZExpbmVDb3VudCI6NTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzNTM1NTE3N2M4NzUyZWQ3ZmI0ZDU5YWY1OTVjNjk2MmE5ZTQ3ZWNmOTYwN2M5MzJiMDY1OGIzYWYxYmNlNGEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEyYWRlYmI2NWZjYzFiOTBkZGE1YjgwZmE3YzM2MjY4ZjY1ZDI3NmYzYTI1OTQ3YmNkMDI4ODUzYzE0ZjQ1OTciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjAzYTEwMzdmMDcxOTYxZmIzYjEzYTdkYWZmNjlhY2MyYmFiODEwZmU4YmRhMTZhMmIyMjcxNTU0MzcxNGNjNzUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQxZTBkNmRlNjhlZjcwYWFmMmFmMDVkNzI1ODFlZjY1Y2QxNGJjZjY3ODJlYmRmZjI3ZDAwNTg3ZjE5MmZhMTIifQ"
         },
         {
-          "resource": "repo://crates/harlo-wiki/src/run.rs#L1597-L1652",
+          "resource": "repo://crates/harlo-wiki/src/run.rs#L1678-L1733",
           "version": "repo-lines-v1:sha256:6932687e44bd3adb462bcb1ae2bc2781d8564ea08fc74c0d15b2924381bede2a:eyJzZWxlY3RlZExpbmVDb3VudCI6NTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYxMmYwMWYyMjU3YTU5YWFiYTExZDA0OWVkNmRlYzI2NzU0ZjU5NDVkYjIyZGMxMTYxZDM5YWQzZGQ2MzEzNmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQ0Yzc2ZmMxZGExMGE3NjE0MTc5ZjYwZTViNGE1OGFiMTVkN2M0NjNhOTA5NTMyOTMxNDVmNDg3YWIyOGZjMWQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjliNDA5NDc1NDI3MjM4OWM1NGM3ZmFlZjA5MTJhNWI3NDk1NGRjZDJmOGY1NDA0ZmQ0MTBlZWI5NDNkNzYxNTAifQ"
         }
       ]
@@ -103,7 +103,7 @@
       "statement": "Page completion follows persisted Markdown/frontmatter validation and claim reconciliation, with durability checks comparing the page hash, claim set, and verification projection before recording completion.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-wiki/src/run.rs#L1371-L1488",
+          "resource": "repo://crates/harlo-wiki/src/run.rs#L1452-L1569",
           "version": "repo-lines-v1:sha256:62d9ba2bef8f1615e4649044ead1b79b5b90978dca75ab67c788b00e025e9f52:eyJzZWxlY3RlZExpbmVDb3VudCI6MTE4LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI5ZmMyN2U4MTliNGJmMTVhYjhkYTk1MjViNmVmOTYxOGM1YzJhZjcyMGMzOWU4ZjU0ZTJmODQyYzQxMTZmYjJlIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIyZjhkYWM1YWYyOWM1ZTdmOTIzOTYyN2JkYzFlM2ZiOGExNjViNTBkZmE4Nzk5MTAwMDZkN2Y2YjA0NGZmYzczIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJkZmI5ZDlkNzdlN2MzMjkzNDk5YjI1MGMzMzMxOWM0ZjFjNmFlMmI1OWVmZGI4YjNkNzk5NThjOGY4ZjE5ZDc3IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJiOGI0OWIyOTk5NzYzYjM0OTQzZjBkZWZlODNkNzJkYWIyYmEwOWMyODNjOTYwZmM1OTRlYjhkYTllMWE5NGFiIn0"
         }
       ]
@@ -163,7 +163,7 @@
           "version": "repo-lines-v1:sha256:26c8fbd1ffce84d3fd3fc622541064c15cfee6098f0a67c56f38fe929b336141:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE3NDY4Nzc1ZDIzYjc3OTA2Y2M3OTBjZjMyYTRhYjQ4YzU1YzQyMmUzYTEwMDhiYmExMzVhMDI2YzYxMTNiODMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQxMzYwZTc4OTM3Mjc0OTA3NjlhYzM4ZTYxMjRhNzZhMGIyOGZkZGJiZjFlYTM1ZDJiOTk4MDYzMjNiMWZjODUifQ"
         },
         {
-          "resource": "repo://crates/harlo-wiki/src/run.rs#L1510-L1570",
+          "resource": "repo://crates/harlo-wiki/src/run.rs#L1591-L1651",
           "version": "repo-lines-v1:sha256:a3c39e43cc3c2d13cb2bb4a4eb4949e8bd1ffeb021b0b5d9ba59ce31dc91e76c:eyJzZWxlY3RlZExpbmVDb3VudCI6NjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNiMmNiZTZjZjNkMDBiZTM5MmI0YzllYzcyZWViYzUzYjQwMWVmNmRhNGRmMGYwZWFiZTM0YjZjM2Q4OWM3ODkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFlYTM1MGRkNmRlMjc3YzVkZjZmNjQxNGUwNTUwOTI0ODE2MzY5MmUwZjE3NzI1YzYxZjAwZWVlMDgwMDFhMjQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhlZDRkYjMyMjViNThmMWM2YjQ5YjUxN2YzMDk0YjU3NDMyM2Y5ZWI5ZTVmNDVkMDQ5NzBkYjA4ODdkNzI3MmUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjZlNzk0Y2RjYmE0ZjUyNGVhYTI1ZDQxMGI0ODk0MGRkNGMzNDUyNTNhMGExNzA5MzdhZWNhZjMwMjM2OWFlYzcifQ"
         }
       ]
@@ -241,7 +241,7 @@
       "statement": "A retrieval parser-limit failure fails the affected search or section-read call with the generic OpenWiki MCP operation error while leaving a subsequent read of another valid page usable.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-core/src/openwiki.rs#L1434-L1454",
+          "resource": "repo://crates/harlo-core/src/openwiki.rs#L1505-L1525",
           "version": "repo-lines-v1:sha256:fcd05df5fa321e47207864ec878ae883830d604cabedd80a60437d874685e114:eyJzZWxlY3RlZExpbmVDb3VudCI6MjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVmMDYyYTZhMWE5ZDNlMDQ1ZmNhYWYwYmYwZDhkMDkwYzA2NDMyOTE2ODdiYzI5ZjI2ZWE5MjkwZTRhMGIwZDAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk5OWJkZWZlZWFjYTYzNDBlMDI5MGRjODZlODg5Yzg5ZDVlMTg5YWE1YmE0NGI1ODViM2I3MDczNGY0YTYyZDgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjEyYzQxN2FiMjhmY2I2ZWVjYjEzYzI3ZWEzNDZhMTZiZWYwYzM0MGQwZGI3MWRjOGVhZGYwOTA2MmVkNzUzNGIifQ"
         },
         {
@@ -263,11 +263,11 @@
       "statement": "Desktop wiki page presentation uses core's MarkdownRenderer rather than retrieval's lexer, and has its own small-stack deep-page regression coverage.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-core/src/openwiki.rs#L1420-L1431",
+          "resource": "repo://crates/harlo-core/src/openwiki.rs#L1491-L1502",
           "version": "repo-lines-v1:sha256:a82d47e3cd741dcf55a942079eeefd56f598c81eaf5887a81dcc6ac495b332ed:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlhODM2YWY1MTBiZmUwZTE4NGU4ZjA0MzIyZGFmYWFmZTQ0NzM4ZDA0OGI2M2VjMzE1OWZmMzNlZmI2Nzg4MmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2YjA0NDkxNDY5NzIyZTgzNjNhOTRlNDA0NDUzOGUwMTNhMmEyMTdlMzZiMWU1NjhiYTYwYWNiN2I0YzhmMmUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjlhNDc1NzAxYjFkZjU0MWUxOWY1NjM2MDUyZDdlMGEwOTBlZGRkZDA4OGU5YjZhMTVmZjE3ZTRhMTdlOGY1MWYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdlNmRjNTRhNzI1NzBlMDI2OWE3Y2U1ZDY0NDdhZTEwMmExYTkzNmQ1NWZiOWQxYzQ4OWU4MWQ0ZDU4NjJlZDEifQ"
         },
         {
-          "resource": "repo://crates/harlo-core/src/openwiki.rs#L923-L942",
+          "resource": "repo://crates/harlo-core/src/openwiki.rs#L994-L1013",
           "version": "repo-lines-v1:sha256:02b2d190e92aac65395210ede1d8ac1c50fc84a775e45064a115cdff8372ebd5:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYwOGVkZTEyNzlhZDRmOWI3YjQ4Y2RhZjU2NWI5NjhkOTY0MThhOTc2MWM3NTRmMWIxNWZkZGM0NzYzMDM0MzYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ4ODU5MjEwZWJjYjEyY2Y2OGM2MTYyMjJmYzU2MGMxZjY4ZTJmYTMxZjYzMDQ5M2RmODA5NTg4ODdkNTdhZjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdjMmUzNWRmZDdmMzIwY2RmYjFjYWZjMWUzYWU2YWVjYmUzOWQ0OWZlMDQzZTgzOGU2NjJjNWZkNDhmYmFiMDcifQ"
         }
       ]
@@ -277,11 +277,11 @@
       "statement": "Begin checks canonical repository containment for the wiki folder and setup destinations, refusing outward file, parent, and dangling symlinks while supporting links resolving inside the repository.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-wiki/src/run.rs#L1152-L1165",
+          "resource": "repo://crates/harlo-wiki/src/run.rs#L1233-L1246",
           "version": "repo-lines-v1:sha256:31b8d6cbda001e7763bd3cebc17a98dd64e87876e433a4d64e2e3e39210dc5b0:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImViZmJiNmQxMjk5Mjg0YTM2MDU1ZTU0NzI3ZDc0NmNjMzBmNGI4ZGYyNzFkOTgzODQyNTA3ZjNjMTI4M2UwNzAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNmZDc4MDBhZjFjMzZkZDBhNGY4ODBkOGM1ZjVjNzA4MmY0ZjViZDNhNzJjYTBkNTQ3YjU0ZTRjMmYwYWM5YjgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImEyNThlZWVmMDI0Yjc5NDk2N2JhNTMwZjg1YTQ5ZWE2MzQzZDBjZGE3MGVlZWFhNDU3NjViN2VjZjEwYTZiYTAifQ"
         },
         {
-          "resource": "repo://crates/harlo-wiki/src/run.rs#L1682-L1739",
+          "resource": "repo://crates/harlo-wiki/src/run.rs#L1763-L1820",
           "version": "repo-lines-v1:sha256:d69aa785c96aecb3c8682758abbd0aa09134af7c0943e74b86dc65cb89f8bae1:eyJzZWxlY3RlZExpbmVDb3VudCI6NTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRkNjRlODFkOWIxNDZjZDIyYmJhZDlmNWM5MGM5OTM0MzQ4NWNhNWY2OTMxNmMxM2MwYjhkOTI2NmM1Yzg1ZjkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFhMDgxNjBmYzc4YWJkOWQxODY4NWY1ODc5MmIwYzYwNGNlYTY0ODE3YmFlMWJkMDMxNzgyYzJiMTRmZWM0MjUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNjNjQ0OTY4NDY0MmEyYmIzZGRjYWExYTAxMmM4OTRhMTQxOWY5NDNhODhhNDNhZGZjMDhmMDRiNjU0MjNiMmQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImEwMGRiMDQwZjI5MDliZjk3OGZmMGE5NTZhNTVlODNjNjUzNDE4ZGU2YmI2OGY4MDQxZGE5NzZmOGQzZDIyNzAifQ"
         },
         {
@@ -293,6 +293,6 @@
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-14T18:22:19.698Z"
+    "at": "2026-11-14T20:46:59.159Z"
   }
 }
