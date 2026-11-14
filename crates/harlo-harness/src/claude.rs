@@ -487,7 +487,7 @@ pub fn saved_file(path: &Path) -> std::io::Result<crate::store::SavedSession> {
 }
 
 /// The bytes just before `offset`, to recognise that place later.
-fn check_at(path: &Path, offset: u64) -> std::io::Result<Vec<u8>> {
+pub(crate) fn check_at(path: &Path, offset: u64) -> std::io::Result<Vec<u8>> {
     use std::io::{Read, Seek, SeekFrom};
     let mut file = std::fs::File::open(path)?;
     let start = offset.saturating_sub(RESUME_CHECK_BYTES);

@@ -375,6 +375,9 @@ struct RowView: View {
             UserBubble(row: row)
         case "markdown":
             RichTextView(blocks: RichCache.blocks(row.html))
+        // A long code block's later pieces: its first shows it.
+        case "codePart":
+            EmptyView()
         case "code":
             if row.title.lowercased() == "mermaid" && model.drawsDiagrams {
                 DiagramBlock(source: row.text, code: CodeBlock(spans: codeSpans, language: row.title, raw: row.text))

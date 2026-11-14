@@ -63,5 +63,5 @@ pub mod tool_facts;
 pub mod transcript;
 pub mod updates;
 
-pub use session::{Notable, SessionHandle, SessionMetaInfo, SessionSink, SessionStatus, SessionUpdate, SlashCommand, UiRequest};
+pub use session::{Notable, SessionHandle, SessionMetaInfo, SessionSink, SessionStatus, SessionUpdate, SlashCommand, Typed, UiRequest, Unsent};
 pub use transcript::{Row, RowChange, RowKind, Transcript, diff_rows};

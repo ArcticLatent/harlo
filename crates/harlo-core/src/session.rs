@@ -149,10 +149,45 @@ pub enum SessionUpdate {
     /// waits meanwhile, and Stop drops it. (The status stays as it was, so
     /// a turn's start and end are still the run's.)
     Preparing(bool),
-    /// Prompts stopped before they were sent (the turn's snapshot was still
-    /// being taken), oldest first, as they'd have gone: they go back in the
-    /// composer.
-    Unsent(Vec<String>),
+    /// Messages stopped before they were sent (the turn's snapshot was still
+    /// being taken), oldest first, whole: they go back in the composer.
+    Unsent(Vec<Unsent>),
+}
+
+/// A message as its sender typed it: the words (no plan note, no files or
+/// sessions read in front) and the files attached. Held with the message,
+/// so Stop before it's sent gives it back as it was.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Typed {
+    pub words: String,
+    pub files: Vec<String>,
+}
+
+/// A message stopped before it was sent (`SessionUpdate::Unsent`): as it
+/// would have gone (`text`, `images` as `ImageContent` values, `mode`), and
+/// as it was typed, when its sender said (`Typed`).
+#[derive(Clone, Debug)]
+pub struct Unsent {
+    pub text: String,
+    pub images: Vec<Value>,
+    pub mode: SendMode,
+    pub typed: Option<Typed>,
+}
+
+impl Unsent {
+    /// Its words to give back: as typed, else as it would have gone, less
+    /// the plan note and the photos' `<file>` lines in front.
+    pub fn words(&self) -> String {
+        if let Some(t) = &self.typed {
+            return t.words.clone();
+        }
+        let text = self.text.strip_suffix(harlo_harness::file_blocks::PLAN_NOTE).unwrap_or(&self.text);
+        let mut rest = text;
+        while let Some(after) = rest.strip_prefix("<file name=\"Photo ").and_then(|r| r.split_once("\"></file>\n")).map(|(_, r)| r) {
+            rest = after;
+        }
+        rest.to_owned()
+    }
 }
 
 /// The ids of harlo's own requests (approvals its tools asked for).
@@ -182,7 +217,7 @@ pub trait SessionSink: Send + 'static {
 enum Control {
     Subscribe(u64, Box<dyn SessionSink>),
     Unsubscribe(u64),
-    Prompt(String, Vec<Value>, SendMode),
+    Prompt(String, Vec<Value>, SendMode, Option<Typed>),
     Abort,
     Answer(String, Value),
     /// A request of harlo's (an approval its tools asked for): shown and
@@ -262,10 +297,16 @@ impl SessionHandle {
     /// Sends a prompt; `images` are `ImageContent` values. False when it's
     /// held (a spending limit: `held` says why), and nothing was sent.
     pub fn prompt(&self, text: &str, images: Vec<Value>, mode: SendMode) -> bool {
+        self.prompt_typed(text, images, mode, None)
+    }
+
+    /// `prompt`, with how it was typed: what Stop gives back if it comes
+    /// before the message is sent (`SessionUpdate::Unsent`).
+    pub fn prompt_typed(&self, text: &str, images: Vec<Value>, mode: SendMode, typed: Option<Typed>) -> bool {
         if self.held().is_some() {
             return false;
         }
-        let _ = self.control.send(Control::Prompt(text.to_owned(), images, mode));
+        let _ = self.control.send(Control::Prompt(text.to_owned(), images, mode, typed));
         true
     }
 
@@ -588,7 +629,7 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
     let mut last_flush = Instant::now() - STREAM_FLUSH;
     // A turn waiting for its snapshot: its prompt (and any sent meanwhile),
     // and the snapshot's number.
-    let mut held: Vec<(String, Vec<Value>, SendMode)> = Vec::new();
+    let mut held: Vec<Unsent> = Vec::new();
     let mut snap_turn: u64 = 0;
 
     if spawn_now {
@@ -766,9 +807,9 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                 // it was stopped meanwhile).
                 Aux::Snapshotted(n) if n == snap_turn && !held.is_empty() => {
                     pending.push(SessionUpdate::Preparing(false));
-                    for (i, (text, images, mode)) in std::mem::take(&mut held).into_iter().enumerate() {
+                    for (i, u) in std::mem::take(&mut held).into_iter().enumerate() {
                         let Some(h) = driver.ensure_harness(&mut st, &mut pending) else { break };
-                        h.prompt(&text, images, if i == 0 { SendMode::Normal } else { mode });
+                        h.prompt(&u.text, u.images, if i == 0 { SendMode::Normal } else { u.mode });
                     }
                 }
                 Aux::Snapshotted(_) => {}
@@ -786,8 +827,8 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                 }
                 Some(Control::Unsubscribe(id)) => st.sinks.retain(|(s, _)| *s != id),
                 // (One sent while a turn waits for its snapshot: after it.)
-                Some(Control::Prompt(text, images, mode)) if !held.is_empty() => held.push((text, images, mode)),
-                Some(Control::Prompt(text, images, mode)) => {
+                Some(Control::Prompt(text, images, mode, typed)) if !held.is_empty() => held.push(Unsent { text, images, mode, typed }),
+                Some(Control::Prompt(text, images, mode, typed)) => {
                     // A new turn (not steering or a queued one): the folder's
                     // files first, so the turn can be undone (git::snapshot_turn).
                     // That can take seconds (a big or remote repository), so
@@ -799,7 +840,7 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                             Some(r) => crate::remote::join(&r.host, &driver.cfg.cwd.to_string_lossy()),
                             None => driver.cfg.cwd.clone(),
                         };
-                        held.push((text, images, mode));
+                        held.push(Unsent { text, images, mode, typed });
                         snap_turn += 1;
                         pending.push(SessionUpdate::Preparing(true));
                         let (tx, n) = (driver.aux_tx.clone(), snap_turn);
@@ -819,7 +860,7 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                 }
                 // Stopped while its snapshot was taken: never sent.
                 Some(Control::Abort) if !held.is_empty() => {
-                    let unsent: Vec<String> = std::mem::take(&mut held).into_iter().map(|(text, _, _)| text).collect();
+                    let unsent = std::mem::take(&mut held);
                     let said = if unsent.len() == 1 { "Stopped before it was sent: your message is back in the box." } else { "Stopped before they were sent: your messages are back in the box." };
                     snap_turn += 1;
                     pending.push(SessionUpdate::Preparing(false));

@@ -1635,6 +1635,84 @@ ApplicationWindow {
             win.summary(); Qt.quit() } }
     }
 
+    // Memory and frame times with four long sessions open (3000 turns,
+    // about 18,000 rows each, opened one after another and left open), then
+    // one reply that is a single huge code block (2000 lines) and one that
+    // is a huge table (1500 rows), each streamed into the last. Numbers
+    // logged ("big session"); loose bounds.
+    function rssMb() { const m = /VmRSS:\s+(\d+)/.exec(TestInput.readFile("/proc/self/status")); return m ? Math.round(Number(m[1]) / 1024) : -1 }
+    property var bigTimes: ({})
+    property int bigOpen: 0
+    function bigPath(k) {
+        const cwd = win.argValue("--cwd=")
+        return win.selftestDir + "/data/harlo-agent/sessions/--" + cwd.replace(/^\//, "").replace(/\//g, "-") + "--/long000" + k + "-0000-0000-0000-000000000000.jsonl"
+    }
+    Connections {
+        target: win.argValue("--scenario=") === "clicksharlobig" ? chat.session : null
+        function onStatusChanged() {
+            if (chat.session.status === "busy") win.longBusy = true
+            else if (win.longBusy && chat.session.status === "idle") win.longDone = true
+        }
+    }
+    SequentialAnimation {
+        id: harloBigSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlobig"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            Workspace.addProject(win.argValue("--cwd="))
+            win.bigTimes.turns = Number(TestInput.readFile(win.selftestDir + "/long-turns"))
+            win.bigTimes.rss = [["start", win.rssMb()]]
+            win.bigTimes.open = [] } }
+        // Each opened, read whole and its agent ready, then the next.
+        SequentialAnimation {
+            loops: 4
+            ScriptAction { script: { longTick.reset(); longTick.start(); win.longAt = Date.now(); const k = win.bigOpen; Qt.callLater(() => Workspace.open(win.bigPath(k))) } }
+            PauseAnimation { duration: 1500 }
+            ScriptAction { script: win.waitUntil(harloBigSteps, () => chat.session.key !== "" && chat.transcript.listView.count >= win.bigTimes.turns * 6 && chat.session.status === "idle", 120000) }
+            PauseAnimation { duration: 300 }
+            ScriptAction { script: {
+                win.bigTimes.open.push([Date.now() - win.longAt, longTick.worst, longTick.gaps])
+                win.bigTimes.rss.push(["open " + (win.bigOpen + 1), win.rssMb()])
+                win.bigOpen++ } }
+        }
+        ScriptAction { script: { longTick.reset(); win.longAt = Date.now(); win.longBusy = false; win.longDone = false; win.sendByKeys("write a huge code block") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloBigSteps, () => win.longDone, 120000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.bigTimes.code = [Date.now() - win.longAt, longTick.worst, longTick.slow, longTick.gaps]
+            win.bigTimes.rss.push(["code block", win.rssMb()])
+            win.check(win.findText("That's all of it.") !== null || chat.transcript.listView.count > 0, "the code block came")
+            longTick.reset(); win.longAt = Date.now(); win.longBusy = false; win.longDone = false
+            win.sendByKeys("write a huge table") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloBigSteps, () => win.longDone, 120000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.bigTimes.table = [Date.now() - win.longAt, longTick.worst, longTick.slow, longTick.gaps]
+            win.bigTimes.rss.push(["table", win.rssMb()])
+            win.longBusy = false; win.longDone = false
+            win.sendByKeys("write a huge table") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloBigSteps, () => win.longDone, 120000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            win.bigTimes.rss.push(["table again", win.rssMb()])
+            longTick.stop()
+            win.log("big session", JSON.stringify(win.bigTimes))
+            win.check(win.bigOpen === 4, "four long sessions open (" + win.bigOpen + ")")
+            // (Before they came in pieces: over a second each, and the code
+            // block took 167 MB more, the table 68.)
+            win.check(win.bigTimes.code[1] < 150 && win.bigTimes.table[1] < 150, "frames keep coming while the huge blocks stream (longest " + win.bigTimes.code[1] + " and " + win.bigTimes.table[1] + " ms)")
+            const grew = (at, before) => win.bigTimes.rss.find(r => r[0] === at)[1] - win.bigTimes.rss.find(r => r[0] === before)[1]
+            // (The first table takes about 60 MB once, which the next keeps
+            // using: what grows is per block, not per version of it.)
+            win.check(grew("code block", "open 4") < 60 && grew("table again", "table") < 20, "and memory grows little (code block " + grew("code block", "open 4") + " MB, a second table " + grew("table again", "table") + " MB)")
+            win.check(win.bigTimes.open[3][1] < 300, "the session ending with them opens without a stall (longest " + win.bigTimes.open[3][1] + " ms)")
+            win.summary(); Qt.quit() } }
+    }
+
     // Stop while a turn's snapshot is still being taken (slowed to 5 s):
     // the messages sent meanwhile (one only a file) never reach the model
     // and come back to the box with their files, above a draft typed
@@ -1663,6 +1741,14 @@ ApplicationWindow {
         ScriptAction { script: {
             chat.session.addAttachment(win.argValue("--cwd=") + "/README.md")
             chat.session.send("", "")
+            // More than the desktop once kept, then the same words twice,
+            // each with its own file.
+            for (let i = 1; i <= 16; i++)
+                chat.session.send("note " + i, "")
+            chat.session.addAttachment(win.argValue("--cwd=") + "/notes.md")
+            chat.session.send("same", "")
+            chat.session.addAttachment(win.argValue("--cwd=") + "/../wt/README.md")
+            chat.session.send("same", "")
             chat.composerItem.text = "a draft typed meanwhile"
             win.stopKey = chat.session.key
             Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo") } }
@@ -1680,8 +1766,10 @@ ApplicationWindow {
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             win.check(!chat.session.preparing && chat.session.status !== "busy", "stopped at once (" + chat.session.status + ")")
-            win.check(chat.composerItem.text === "never send this walrus\n\nand this narwhal\n\na draft typed meanwhile", "both messages are back above the draft (" + JSON.stringify(chat.composerItem.text) + ")")
-            win.check(chat.session.attachments.length === 1 && String(chat.session.attachments[0]).endsWith("/README.md"), "and the file sent alone is attached again (" + chat.session.attachments + ")")
+            const notes = Array.from({ length: 16 }, (_, i) => "note " + (i + 1)).join("\n\n")
+            win.check(chat.composerItem.text === "never send this walrus\n\nand this narwhal\n\n" + notes + "\n\nsame\n\nsame\n\na draft typed meanwhile", "every message is back above the draft (" + JSON.stringify(chat.composerItem.text) + ")")
+            const back = Array.from(chat.session.attachments, String).map(f => f.split("/").slice(-2).join("/")).sort()
+            win.check(back.join() === "repo/README.md,repo/notes.md,wt/README.md", "and their files are attached again, the first one's too (" + back + ")")
             win.check(win.findText("Stopped before they were sent: your messages are back in the box.") !== null, "the chat says so")
             win.shot("clicks-harlo-stop-unsent") } }
         // (Past the snapshot's 5 s: it ends, and still nothing is sent.)
@@ -1689,7 +1777,8 @@ ApplicationWindow {
         ScriptAction { script: {
             win.check(!win.modelGot("never send this walrus") && !win.modelGot("and this narwhal"), "the model never got them (" + win.modelRequests().length + " requests)")
             chat.composerItem.text = ""
-            chat.session.removeAttachment(0)
+            while (chat.session.attachments.length > 0)
+                chat.session.removeAttachment(0)
             win.sendByKeys("send this one instead") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: win.waitUntil(harloStopSteps, () => win.modelGot("send this one instead") && chat.session.status !== "busy", 15000) }
@@ -2556,8 +2645,10 @@ ApplicationWindow {
             win.check(TestInput.readFile(k.replace("ssh://box", "")).indexOf("Branchy second") >= 0, "whose file is there") } }
         // The host's sessions are in the message search too.
         PauseAnimation { duration: 3000 }
+        ScriptAction { script: win.findForTest("Branchy edited") }
+        PauseAnimation { duration: 800 }
         ScriptAction { script: {
-            const hits = JSON.parse(Workspace.searchMessages("Branchy edited", 20))
+            const hits = win.foundHits || []
             win.check(hits.some(h => String(h.path).indexOf("ssh://box") === 0 && String(h.path).indexOf("remote-branches.jsonl") > 0), "message search finds the host's sessions (" + hits.length + " hits)") } }
         PauseAnimation { duration: 2500 }
         ScriptAction { script: {
@@ -2927,6 +3018,15 @@ ApplicationWindow {
     // permission switches (the stand-in's replies report them), stopping,
     // and the session in the sidebar, reopened with its history and resumed.
     property string claudeKey: ""
+    // A test's message search (off the UI thread, as the dialog's): its hits
+    // land here.
+    property var foundHits: null
+    function findForTest(words) { win.foundHits = null; Workspace.findMessages(words, 20, 900001) }
+    Connections {
+        target: Workspace
+        enabled: win.selftestDir !== ""
+        function onMessagesFound(gen, json) { if (gen === 900001) win.foundHits = JSON.parse(json) }
+    }
     function chatText() { return chat.session.transcriptText() }
     SequentialAnimation {
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksclaude"
@@ -3049,7 +3149,10 @@ ApplicationWindow {
         PauseAnimation { duration: 2000 }
         ScriptAction { script: {
             win.check(win.chatText().indexOf("Hello from fake claude") >= 0 && chat.session.status === "idle" && win.chatText().split("Hello from fake claude").length > 1, "and it carries on (resumed)")
-            const hits = JSON.parse(Workspace.searchMessages("picked Postgres", 20))
+            win.findForTest("picked Postgres") } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: {
+            const hits = win.foundHits || []
             win.check(hits.some(h => String(h.path).indexOf("/claude-config/projects/") >= 0), "message search finds Claude's sessions (" + hits.length + " hits)")
             win.shot("clicks-claude")
             // Archived from the phone while open (and done): it leaves the lists.

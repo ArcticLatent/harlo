@@ -154,6 +154,13 @@ fn snippet_html(raw: &str) -> String {
     out
 }
 
+/// Deletes `path`'s messages from `from` on, by their rows.
+fn forget(conn: &Connection, path: &str, from: i64) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM messages WHERE rowid IN (SELECT row FROM message_rows WHERE path = ?1 AND idx >= ?2)", params![path, from])?;
+    conn.execute("DELETE FROM message_rows WHERE path = ?1 AND idx >= ?2", params![path, from])?;
+    Ok(())
+}
+
 impl SearchIndex {
     pub fn open(path: &Path) -> Result<SearchIndex> {
         if let Some(dir) = path.parent() {
@@ -174,6 +181,20 @@ impl SearchIndex {
                  ALTER TABLE files ADD COLUMN resume_index INTEGER NOT NULL DEFAULT 0;
                  ALTER TABLE files ADD COLUMN resume_check BLOB;",
             )?;
+        }
+        // (Which rows of `messages` each file has: deleting a file's rows
+        // by `path` would scan the whole full-text table, once per file.)
+        let has_rows = |c: &Connection| c.prepare("SELECT 1 FROM sqlite_master WHERE name = 'message_rows'")?.exists([]);
+        if !has_rows(&conn)? {
+            let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate)?;
+            if !has_rows(&tx)? {
+                tx.execute_batch(
+                    "CREATE TABLE message_rows (row INTEGER PRIMARY KEY, path TEXT NOT NULL, idx INTEGER NOT NULL);
+                     CREATE INDEX message_rows_path ON message_rows (path, idx);
+                     INSERT INTO message_rows (row, path, idx) SELECT rowid, path, idx FROM messages;",
+                )?;
+            }
+            tx.commit()?;
         }
         Ok(SearchIndex { conn, big_reads: HashMap::new() })
     }
@@ -210,7 +231,7 @@ impl SearchIndex {
         let mut tx = self.conn.transaction()?;
         let mut pending = 0;
         for path in known.keys().filter(|p| !wanted.contains(Path::new(p))) {
-            tx.execute("DELETE FROM messages WHERE path = ?1", params![path])?;
+            forget(&tx, path, 0)?;
             tx.execute("DELETE FROM files WHERE path = ?1", params![path])?;
             pending += 1;
         }
@@ -239,16 +260,24 @@ impl SearchIndex {
                 self.big_reads.insert(key.to_string(), Instant::now());
                 biggest = biggest.max(size as u64);
             }
-            let resume = tx
-                .query_row("SELECT resume_offset, resume_index, resume_check FROM files WHERE path = ?1 AND resume_offset > 0", params![key], |r| {
+            let was_known = known.contains_key(key.as_ref());
+            let resume = if !was_known {
+                None
+            } else {
+                tx.query_row("SELECT resume_offset, resume_index, resume_check FROM files WHERE path = ?1 AND resume_offset > 0", params![key], |r| {
                     Ok(Resume { offset: r.get::<_, i64>(0)? as u64, index: r.get(1)?, check: r.get::<_, Option<Vec<u8>>>(2)?.unwrap_or_default() })
                 })
-                .optional()?;
+                .optional()?
+            };
             let part = read(file, resume.as_ref());
-            tx.execute("DELETE FROM messages WHERE path = ?1 AND idx >= ?2", params![key, part.first_index])?;
+            if was_known {
+                forget(&tx, &key, part.first_index)?;
+            }
             for (i, m) in part.messages.iter().enumerate() {
                 if let Some((role, text)) = message_text(m) {
-                    tx.execute("INSERT INTO messages (text, path, idx, role) VALUES (?1, ?2, ?3, ?4)", params![text, key, part.first_index + i as i64, role])?;
+                    let idx = part.first_index + i as i64;
+                    tx.execute("INSERT INTO messages (text, path, idx, role) VALUES (?1, ?2, ?3, ?4)", params![text, key, idx, role])?;
+                    tx.execute("INSERT INTO message_rows (row, path, idx) VALUES (?1, ?2, ?3)", params![tx.last_insert_rowid(), key, idx])?;
                 }
             }
             tx.execute(
@@ -439,6 +468,38 @@ mod tests {
         let mut index = SearchIndex::open(&db).unwrap();
         let unchanged = index.update_parts(&[(PathBuf::from("/x"), 1, 2)], |_, _| panic!("unchanged")).unwrap();
         assert_eq!(unchanged, 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_index_from_before_its_row_table_still_forgets() {
+        let dir = std::env::temp_dir().join(format!("harlo-search-rows-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("search.db");
+        Connection::open(&db)
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE files (path TEXT PRIMARY KEY, modified INTEGER NOT NULL, size INTEGER NOT NULL);
+                 CREATE VIRTUAL TABLE messages USING fts5(text, path UNINDEXED, idx UNINDEXED, role UNINDEXED, tokenize = 'unicode61 remove_diacritics 2');
+                 INSERT INTO files VALUES ('/a', 1, 1), ('/b', 1, 1);
+                 INSERT INTO messages VALUES ('walrus', '/a', 0, 'user'), ('narwhal', '/b', 0, 'user');",
+            )
+            .unwrap();
+        let mut index = SearchIndex::open(&db).unwrap();
+        let said = |word: &'static str| move |_: &Path, _: Option<&Resume>| Part { messages: vec![serde_json::json!({"role": "user", "content": word})], ..Default::default() };
+        // /a changed, /b gone: their old rows go.
+        index.update_parts(&[(PathBuf::from("/a"), 2, 2)], said("puffin")).unwrap();
+        assert!(index.search("walrus", 10).unwrap().is_empty());
+        assert!(index.search("narwhal", 10).unwrap().is_empty());
+        assert_eq!(index.search("puffin", 10).unwrap().len(), 1);
+        // And rows written since go too.
+        index.update_parts(&[(PathBuf::from("/a"), 3, 3)], said("lemming")).unwrap();
+        assert!(index.search("puffin", 10).unwrap().is_empty());
+        index.update_parts(&[], said("x")).unwrap();
+        assert!(index.search("lemming", 10).unwrap().is_empty());
+        let rows: i64 = index.conn.query_row("SELECT count(*) FROM message_rows", [], |r| r.get(0)).unwrap();
+        assert_eq!(rows, 0);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

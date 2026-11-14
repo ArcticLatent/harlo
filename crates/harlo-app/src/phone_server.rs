@@ -202,7 +202,10 @@ fn clip_end(s: &str) -> String {
 /// `picture`).
 fn row_json(r: &harlo_core::Row, folder: &std::path::Path) -> Value {
     let text = if r.command.is_empty() { clip(&r.text) } else { clip_end(&r.text) };
-    json!({ "key": r.key, "kind": r.kind.as_str(), "html": clip(&r.html), "text": text, "title": r.title, "subtitle": r.subtitle, "state": r.state,
+    // (A long code block's pieces after its first: the phone shows the first,
+    // which copies all of it.)
+    let more = r.kind == harlo_core::RowKind::Code && matches!(r.label.as_str(), "part-middle" | "part-last");
+    json!({ "key": r.key, "kind": if more { "codePart" } else { r.kind.as_str() }, "html": clip(&r.html), "text": text, "title": r.title, "subtitle": r.subtitle, "state": r.state,
         "group": r.group, "summary": r.summary, "groupOpen": r.group_open, "time": r.time, "ended": r.ended, "result": r.result, "diff": clip(&r.diff),
         "runMs": r.run_ms, "label": r.label, "command": clip(&r.command), "model": r.model, "images": harlo_core::pictures::shown(r, folder) })
 }
@@ -328,6 +331,13 @@ fn event(key: &str, u: &SessionUpdate) -> Option<Value> {
         SessionUpdate::UiCleared(id) => json!({ "ev": "cleared", "key": key, "id": id }),
         // A side question (/btw) and its answer so far: shown, not kept.
         SessionUpdate::Aside(a) => json!({ "ev": "aside", "key": key, "aside": a }),
+        // Stopped before they were sent: their words and pictures back in
+        // the composer (files the phone can't attach stay on the desktop).
+        SessionUpdate::Unsent(held) => {
+            let words: Vec<String> = held.iter().map(|u| u.words()).filter(|w| !w.trim().is_empty()).collect();
+            let photos: Vec<Value> = held.iter().flat_map(|u| &u.images).map(|i| json!({ "data": i["data"], "mimeType": i["mimeType"] })).collect();
+            json!({ "ev": "unsent", "key": key, "text": words.join("\n\n"), "photos": photos })
+        }
         _ => return None,
     })
 }
@@ -1341,6 +1351,22 @@ pub(crate) mod tests {
         let a = json!({ "question": "why?", "text": "Because.", "done": true, "error": null });
         let ev = event("live:1", &SessionUpdate::Aside(a.clone())).unwrap();
         assert_eq!(ev, json!({ "ev": "aside", "key": "live:1", "aside": a }));
+    }
+
+    /// Messages stopped before they were sent go back to phones whole: the
+    /// words as typed, and every picture (the desktop's and the phone's).
+    #[test]
+    fn stopped_messages_reach_phones() {
+        use harlo_core::{Typed, Unsent};
+        let pic = |d: &str| json!({ "type": "image", "data": d, "mimeType": "image/jpeg" });
+        let held = vec![
+            Unsent { text: format!("<file a.rs>…</file>fix it{}", harlo_harness::file_blocks::PLAN_NOTE), images: vec![pic("AAAA")], mode: harlo_harness::SendMode::Normal, typed: Some(Typed { words: "fix it".into(), files: vec!["/p/a.rs".into(), "/p/s.jpg".into()] }) },
+            Unsent { text: "<file name=\"Photo 1\"></file>\n".into(), images: vec![pic("BBBB")], mode: harlo_harness::SendMode::FollowUp, typed: Some(Typed::default()) },
+            Unsent { text: "said elsewhere".into(), images: Vec::new(), mode: harlo_harness::SendMode::Normal, typed: None },
+        ];
+        let ev = event("live:1", &SessionUpdate::Unsent(held)).unwrap();
+        assert_eq!(ev, json!({ "ev": "unsent", "key": "live:1", "text": "fix it\n\nsaid elsewhere",
+            "photos": [{ "data": "AAAA", "mimeType": "image/jpeg" }, { "data": "BBBB", "mimeType": "image/jpeg" }] }));
     }
 
     /// The phone's part follows the whole list through every kind of change

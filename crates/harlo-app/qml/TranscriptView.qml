@@ -568,6 +568,10 @@ Item {
         // its numbers when it has them.
         property bool numbers: true
         property bool signs: false
+        // A piece of a long block: its first line's number, and the digits
+        // its numbers take at least (the pieces' columns line up).
+        property int firstNumber: 1
+        property int minDigits: 1
         // A line with a path (`p`) opens its file at that line: its number
         // is a link, and so is a file's name.
         signal openAt(string path, int line)
@@ -584,7 +588,7 @@ Item {
         readonly property string selectedText: edit.selectedText
         implicitHeight: edit.implicitHeight + topPad + bottomPad
         function number(i) {
-            if (!lines) return String(i + 1)
+            if (!lines) return String(ct.firstNumber + i)
             const l = lines[i]
             if (!l) return ""
             if (!signs) return l.n
@@ -613,7 +617,7 @@ Item {
         Label {
             id: probe
             visible: false
-            text: ct.lines ? ct.lines.reduce((w, l) => String(l.n).length > w.length ? String(l.n) : w, "0") + (ct.signs ? "\u00a0+" : "") : String(ct.count)
+            text: ct.lines ? ct.lines.reduce((w, l) => String(l.n).length > w.length ? String(l.n) : w, "0") + (ct.signs ? "\u00a0+" : "") : String(ct.firstNumber + ct.count - 1).padStart(ct.minDigits, "0")
             font.family: Theme.mono
             font.pixelSize: ct.fontSize
         }
@@ -1988,11 +1992,14 @@ Item {
                     required property string html
                     required property string rowKey
                     required property int index
-                    readonly property real gap: root.gapAbove("markdown", ListView.previousSection)
+                    required property string label
+                    // A piece of a long table after its first: right under it.
+                    readonly property bool more: label === "part-middle" || label === "part-last"
+                    readonly property real gap: more ? 0 : root.gapAbove("markdown", ListView.previousSection)
                     // The code block (in a list) just copied: its link says "Copied" a moment.
                     property int copiedBlock: -1
                     Timer { id: blockCopiedTimer; interval: 1200; onTriggered: mdRow.copiedBlock = -1 }
-                    AgentHead { replyModel: mdRow.rowModel; visible: root.opensTurn(mdRow.ListView.previousSection); y: mdRow.gap - height - 10 }
+                    AgentHead { replyModel: mdRow.rowModel; visible: !mdRow.more && root.opensTurn(mdRow.ListView.previousSection); y: mdRow.gap - height - 10 }
                     width: view.width
                     implicitHeight: md.implicitHeight + gap
                     TextEdit {
@@ -2063,7 +2070,16 @@ Item {
                     required property string html
                     required property string text
                     required property string title
-                    readonly property real gap: root.gapAbove("code", ListView.previousSection)
+                    required property string label
+                    required property string subtitle
+                    required property string summary
+                    // A piece of a long block after its first: under the one
+                    // before, one card with it (no header, gap or corners
+                    // between), its numbers going on; wrapped as the first is.
+                    readonly property bool more: label === "part-middle" || label === "part-last"
+                    readonly property bool goesOn: label === "part-first" || label === "part-middle"
+                    readonly property string wrapKey: summary !== "" ? summary : rowKey
+                    readonly property real gap: more ? 0 : root.gapAbove("code", ListView.previousSection)
                     // A Mermaid diagram: drawn (Diagrams), its code a click away.
                     readonly property bool mermaid: title.toLowerCase() === "mermaid"
                     property bool showCode: false
@@ -2083,7 +2099,7 @@ Item {
                     readonly property bool visual: canShow && !showCode
                     property bool showBefore: false
                     Timer { interval: 2500; repeat: true; running: codeRow.mock !== null && codeRow.visual; onTriggered: codeRow.mockTick++ }
-                    AgentHead { replyModel: codeRow.rowModel; visible: root.opensTurn(codeRow.ListView.previousSection); y: codeRow.gap - height - 10 }
+                    AgentHead { replyModel: codeRow.rowModel; visible: !codeRow.more && root.opensTurn(codeRow.ListView.previousSection); y: codeRow.gap - height - 10 }
                     width: view.width
                     implicitHeight: codeBox.height + gap
                     Rectangle {
@@ -2096,7 +2112,10 @@ Item {
                         height: codeRule.y + 1 + (codeRow.drawn ? diagramBox.height : codeRow.visual ? visualBox.height : blockCode.height) + (diagramNote.visible ? diagramNote.height : 0)
                         // (The same well as a tool's code: its header, a rule, the
                         // numbers on their own column.)
-                        radius: 6
+                        topLeftRadius: codeRow.more ? 0 : 6
+                        topRightRadius: codeRow.more ? 0 : 6
+                        bottomLeftRadius: codeRow.goesOn ? 0 : 6
+                        bottomRightRadius: codeRow.goesOn ? 0 : 6
                         // (Cards or a picture aren't code: on the page, in a
                         // hairline frame; their code goes back in the well.)
                         color: codeRow.visual || codeRow.drawn ? "transparent" : Theme.codeBg
@@ -2105,7 +2124,8 @@ Item {
                         RowLayout {
                             id: codeHeader
                             width: parent.width
-                            height: 28
+                            height: codeRow.more ? 0 : 28
+                            visible: !codeRow.more
                             Label { Layout.leftMargin: 10; text: codeRow.kind === "options" ? "Options" : codeRow.kind === "mockup" ? "Mockup" : codeRow.mermaid ? "Diagram" : root.session.languageName(codeRow.title); color: Theme.muted; font.pixelSize: Theme.px(12) }
                             Item { Layout.fillWidth: true }
                             FlatButton {
@@ -2131,9 +2151,9 @@ Item {
                                 copyText: codeRow.text
                             }
                             // (At the edge, so it never stands beside Copy's empty place.)
-                            WrapButton { id: wrapBlock; Layout.rightMargin: 6; Layout.preferredHeight: 22; key: codeRow.rowKey; code: blockCode }
+                            WrapButton { id: wrapBlock; Layout.rightMargin: 6; Layout.preferredHeight: 22; key: codeRow.wrapKey; code: blockCode }
                         }
-                        Rectangle { id: codeRule; y: codeHeader.height; width: parent.width; height: 1; color: codeRow.visual || codeRow.drawn ? Theme.hairline : Theme.codeRule }
+                        Rectangle { id: codeRule; y: codeHeader.height; width: parent.width; height: 1; visible: !codeRow.more; color: codeRow.visual || codeRow.drawn ? Theme.hairline : Theme.codeRule }
                         // Drawing it, or why it isn't drawn.
                         Label {
                             id: diagramNote
@@ -2230,7 +2250,7 @@ Item {
                             width: blockCode.gutterWidth - 6
                             height: blockCode.height
                             color: Theme.codeGutter
-                            bottomLeftRadius: 6
+                            bottomLeftRadius: codeRow.goesOn ? 0 : 6
                         }
                         CodeText {
                             id: blockCode
@@ -2239,10 +2259,12 @@ Item {
                             visible: !codeRow.drawn && !codeRow.visual
                             width: parent.width
                             html: codeRow.html
-                            wrap: Theme.wrapCode || view.wraps[codeRow.rowKey] === true
+                            wrap: Theme.wrapCode || view.wraps[codeRow.wrapKey] === true
                             fontSize: Theme.mpx(13)
-                            topPad: 8
-                            bottomPad: 8
+                            firstNumber: codeRow.more && codeRow.subtitle !== "" ? Number(codeRow.subtitle) : 1
+                            minDigits: codeRow.label !== "" ? 4 : 1
+                            topPad: codeRow.more ? 0 : 8
+                            bottomPad: codeRow.goesOn ? 0 : 8
                         }
                     }
                 }

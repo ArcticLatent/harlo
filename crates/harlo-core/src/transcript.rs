@@ -698,10 +698,18 @@ impl Transcript {
                     match block {
                         Block::Text(text) => {
                             // Only the block still being written is held back.
-                            let shown = if streaming && Some(bi) == last_text { committed_prefix(text) } else { text };
-                            for (mi, kind, html, code, lang) in md_rows(&self.md.render(shown)) {
-                                let mut r = row(format!("{id}:{bi}:{mi}"), kind);
-                                (r.html, r.text, r.title) = (html, code, lang);
+                            let writing = streaming && Some(bi) == last_text;
+                            let shown = if writing { committed_prefix(text) } else { text };
+                            for m in md_rows(&self.md.render_rows(shown, writing)) {
+                                let mut r = row(format!("{id}:{bi}:{}", m.mi), m.kind);
+                                (r.html, r.text, r.title) = (m.html, m.code, m.lang);
+                                // (A piece of a long block: where it stands, its
+                                // first line's number, the first piece's row.)
+                                if !m.part.is_empty() {
+                                    r.label = m.part.into();
+                                    r.subtitle = m.first_line.to_string();
+                                    r.summary = format!("{id}:{bi}:{}", m.head);
+                                }
                                 rows.push(Arc::new(r));
                             }
                             // Its pictures, once it's written: Markdown images
@@ -794,9 +802,9 @@ impl Transcript {
                             if name == "yield"
                                 && let Some(result) = yield_markdown(args)
                             {
-                                for (mi, kind, html, code, lang) in md_rows(&self.md.render(&result)) {
-                                    let mut r = row(format!("{id}:{bi}:y{mi}"), kind);
-                                    (r.html, r.text, r.title) = (html, code, lang);
+                                for m in md_rows(&self.md.render(&result)) {
+                                    let mut r = row(format!("{id}:{bi}:y{}", m.mi), m.kind);
+                                    (r.html, r.text, r.title) = (m.html, m.code, m.lang);
                                     rows.push(Arc::new(r));
                                 }
                             }
@@ -934,19 +942,57 @@ const MD_ROW_BYTES: usize = 40_000;
 /// selected across paragraphs, lists and headings), each code block in its
 /// own. Each with the index of its first block (its key, steady while the
 /// text streams), its kind, HTML, and code and language (code).
-fn md_rows(blocks: &[Arc<crate::markdown::MdBlock>]) -> Vec<(usize, RowKind, String, String, String)> {
-    let mut out: Vec<(usize, RowKind, String, String, String)> = Vec::new();
+fn md_rows(blocks: &[Arc<crate::markdown::MdBlock>]) -> Vec<MdRow> {
+    use crate::markdown::Part;
+    let mut out: Vec<MdRow> = Vec::new();
+    let mut head = 0;
     for (mi, md) in blocks.iter().enumerate() {
+        if md.part == Part::First {
+            head = mi;
+        }
+        let part = md.part.as_str();
         if md.kind == MdBlockKind::Code {
-            out.push((mi, RowKind::Code, md.html.clone(), md.code.clone(), md.lang.clone()));
-        } else if let Some(last) = out.last_mut().filter(|l| l.1 == RowKind::Markdown && l.2.len() < MD_ROW_BYTES) {
-            last.2.push('\n');
-            last.2.push_str(&md.html);
+            // (A long block's first piece copies the whole of it.)
+            let code = if md.part == Part::First {
+                let mut all = vec![md.code.as_str()];
+                for b in &blocks[mi + 1..] {
+                    if b.kind != MdBlockKind::Code || !matches!(b.part, Part::Middle | Part::Last) {
+                        break;
+                    }
+                    all.push(&b.code);
+                    if b.part == Part::Last {
+                        break;
+                    }
+                }
+                all.join("\n")
+            } else if md.part != Part::Whole {
+                String::new()
+            } else {
+                md.code.clone()
+            };
+            out.push(MdRow { mi, kind: RowKind::Code, html: md.html.clone(), code, lang: md.lang.clone(), part, first_line: md.first_line, head });
+        } else if let Some(last) = out.last_mut().filter(|l| l.kind == RowKind::Markdown && l.part.is_empty() && md.part == Part::Whole && l.html.len() < MD_ROW_BYTES) {
+            last.html.push('\n');
+            last.html.push_str(&md.html);
         } else {
-            out.push((mi, RowKind::Markdown, md.html.clone(), String::new(), String::new()));
+            out.push(MdRow { mi, kind: RowKind::Markdown, html: md.html.clone(), code: String::new(), lang: String::new(), part, first_line: md.first_line, head });
         }
     }
     out
+}
+
+/// A row of a reply's Markdown: its block's index, kind and contents, and
+/// for a piece of a long block, where it stands (`Part::as_str`), its first
+/// line's number and its first piece's block index.
+struct MdRow {
+    mi: usize,
+    kind: RowKind,
+    html: String,
+    code: String,
+    lang: String,
+    part: &'static str,
+    first_line: usize,
+    head: usize,
 }
 
 /// An OpenWiki writing step in words: what it did, never the run's or a
@@ -1493,6 +1539,26 @@ mod tests {
         assert!(rows[0].html.contains("Done:") && rows[0].html.contains("<li>two</li>") && rows[0].html.contains("More."), "{}", rows[0].html);
         assert_eq!(rows[1].text, "ls");
         assert!(rows[2].html.contains("After the code.") && rows[2].html.contains("The end."));
+    }
+
+    #[test]
+    fn a_long_code_block_is_rows_of_one_card() {
+        let mut t = Transcript::new();
+        let code: String = (0..320).map(|i| format!("line {i}\n")).collect();
+        let text = format!("```sh\n{code}```\n\nDone.");
+        t.apply(&HarnessEvent::MessageStart { id: "m".into(), message: json!({"role":"assistant","content":[]}) });
+        t.apply(&HarnessEvent::MessageEnd { id: "m".into(), message: json!({"role":"assistant","content":[{"type":"text","text":text}]}) });
+        let rows = t.rows();
+        let got: Vec<(RowKind, &str, &str, &str)> = rows.iter().map(|r| (r.kind, r.label.as_str(), r.subtitle.as_str(), r.summary.as_str())).collect();
+        assert_eq!(got, [
+            (RowKind::Code, "part-first", "1", "m:0:0"),
+            (RowKind::Code, "part-middle", "151", "m:0:0"),
+            (RowKind::Code, "part-last", "301", "m:0:0"),
+            (RowKind::Markdown, "", "", ""),
+        ]);
+        // The first copies all of it; the others none.
+        assert_eq!(rows[0].text, code.trim_end());
+        assert!(rows[1].text.is_empty() && rows[2].text.is_empty());
     }
 
     #[test]

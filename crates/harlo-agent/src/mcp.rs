@@ -56,6 +56,23 @@ pub const PREFIX: &str = "mcp__";
 /// The tool that lists and reads servers' resources (offered when one has
 /// them).
 pub const RESOURCES: &str = "mcp_resources";
+/// Many tools (their schemas past [`LISTED_PAST`]) aren't offered one by
+/// one: the model finds them with this, then calls them with [`CALL`].
+pub const FIND: &str = "mcp_tools";
+pub const CALL: &str = "mcp_call";
+/// Past this many bytes of tool schemas (about 3k tokens: 20 tools of a
+/// usual size), they're listed by name and looked up, not sent whole with
+/// every request (100 tools cost 11k tokens a request, 500 cost 54k).
+/// `HARLO_AGENT_MCP_LISTED_PAST` changes it (0: always whole).
+const LISTED_PAST: usize = 12_000;
+/// How many tools a search gives back.
+const FOUND_MAX: usize = 8;
+/// How many tool names the instructions list (the rest: found by search).
+const NAMES_MAX: usize = 400;
+
+fn listed_past() -> usize {
+    std::env::var("HARLO_AGENT_MCP_LISTED_PAST").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(LISTED_PAST)
+}
 /// Resources listed per server, at most.
 const RESOURCES_LISTED: usize = 200;
 /// A server's instructions to the model, at most (bytes).
@@ -949,6 +966,12 @@ pub struct Mcp {
     by_name: HashMap<String, (usize, String)>,
     read_only: HashSet<String>,
     specs: Vec<Value>,
+    /// Every tool's spec, as it'd be offered (the same as `specs` unless
+    /// they're listed).
+    all: Vec<Value>,
+    /// Too many to offer whole: listed by name, found with [`FIND`] and
+    /// called with [`CALL`].
+    listed: bool,
 }
 
 impl Mcp {
@@ -989,6 +1012,7 @@ impl Mcp {
         self.by_name.clear();
         self.read_only.clear();
         self.specs.clear();
+        self.all.clear();
         let mut taken = HashSet::new();
         for (i, s) in self.servers.iter().enumerate() {
             for t in &s.tools {
@@ -1006,12 +1030,34 @@ impl Mcp {
                     parameters["type"] = json!("object");
                 }
                 let description = t["description"].as_str().or(t["title"].as_str()).unwrap_or_default().trim();
-                self.specs.push(json!({ "type": "function", "name": name, "description": format!("(MCP server {}) {description}", s.name).trim_end(), "parameters": parameters, "strict": false }));
+                self.all.push(json!({ "type": "function", "name": name, "description": format!("(MCP server {}) {description}", s.name).trim_end(), "parameters": parameters, "strict": false }));
                 if t["annotations"]["readOnlyHint"] == true || s.read_only.covers(tool) {
                     self.read_only.insert(name.clone());
                 }
                 self.by_name.insert(name, (i, tool.to_owned()));
             }
+        }
+        let past = listed_past();
+        self.listed = past > 0 && serde_json::to_string(&self.all).map_or(0, |t| t.len()) > past;
+        if self.listed {
+            self.specs.push(json!({
+                "type": "function", "name": FIND, "strict": false,
+                "description": "Find MCP tools (the servers' tools named in the instructions): what each does and its parameters, to call it with mcp_call. Search by what it should do or by its name.",
+                "parameters": { "type": "object", "properties": {
+                    "query": { "type": "string", "description": "Words of what it does, or its name." },
+                    "server": { "type": "string", "description": "Only this server's (with no query: its tools)." },
+                }, "additionalProperties": false },
+            }));
+            self.specs.push(json!({
+                "type": "function", "name": CALL, "strict": false,
+                "description": "Call an MCP tool found with mcp_tools: its name, and its arguments as its parameters say.",
+                "parameters": { "type": "object", "properties": {
+                    "name": { "type": "string" },
+                    "arguments": { "type": "object" },
+                }, "required": ["name"], "additionalProperties": false },
+            }));
+        } else {
+            self.specs.extend(self.all.iter().cloned());
         }
         let with: Vec<&str> = self.servers.iter().filter(|s| s.resources).map(|s| s.name.as_str()).collect();
         if !with.is_empty() {
@@ -1030,6 +1076,86 @@ impl Mcp {
         &self.specs
     }
 
+    /// Every tool's spec, listed or not (what a program may call).
+    pub fn all_specs(&self) -> &[Value] {
+        &self.all
+    }
+
+    /// Whether the tools are listed by name rather than offered whole.
+    pub fn listed(&self) -> bool {
+        self.listed
+    }
+
+    /// A [`CALL`] as the call of the tool it names: (its name, its
+    /// arguments). None for any other call, or a name no tool has.
+    pub fn resolve(&self, name: &str, args: &Value) -> Option<(String, Value)> {
+        if name != CALL || !self.listed {
+            return None;
+        }
+        let asked = args["name"].as_str()?.trim();
+        let found = self.find_name(asked)?;
+        let arguments = match &args["arguments"] {
+            Value::Object(_) => args["arguments"].clone(),
+            // (Some models send the arguments as a JSON string.)
+            Value::String(t) => serde_json::from_str::<Value>(t).ok().filter(Value::is_object).unwrap_or_else(|| json!({})),
+            _ => json!({}),
+        };
+        Some((found, arguments))
+    }
+
+    /// A tool by its full name, its own name (if only one server has it),
+    /// or server/tool.
+    fn find_name(&self, asked: &str) -> Option<String> {
+        if self.by_name.contains_key(asked) {
+            return Some(asked.to_owned());
+        }
+        let split = asked.split_once('/').or_else(|| asked.split_once("__").filter(|(s, _)| self.servers.iter().any(|v| v.name == *s)));
+        let mut hits = self.by_name.iter().filter(|(_, (i, tool))| match split {
+            Some((server, t)) => self.servers[*i].name == server && tool == t,
+            None => tool == asked,
+        });
+        let first = hits.next()?.0.clone();
+        hits.next().is_none().then_some(first)
+    }
+
+    /// [`FIND`]: the tools whose name or description has the query's
+    /// words (most first), whole, as a model calls them.
+    fn find(&self, args: &Value) -> Outcome {
+        let query = args["query"].as_str().unwrap_or_default().to_lowercase();
+        let server = args["server"].as_str().map(str::trim).filter(|s| !s.is_empty());
+        if query.trim().is_empty() && server.is_none() {
+            return Outcome::new("Say what the tool should do in query (or name a server).", true);
+        }
+        let words: Vec<&str> = query.split(|c: char| !c.is_alphanumeric()).filter(|w| w.len() > 1).collect();
+        let mut scored: Vec<(usize, &Value)> = self
+            .all
+            .iter()
+            .filter(|t| server.is_none_or(|s| self.by_name.get(t["name"].as_str().unwrap_or_default()).is_some_and(|(i, _)| self.servers[*i].name == s)))
+            .filter_map(|t| {
+                let name = t["name"].as_str().unwrap_or_default().to_lowercase();
+                let about = t["description"].as_str().unwrap_or_default().to_lowercase();
+                if words.is_empty() {
+                    return Some((0, t));
+                }
+                let score: usize = words.iter().map(|w| if name.contains(w) { 3 } else if about.contains(w) { 1 } else { 0 }).sum();
+                let exact = name == query.trim() || name.ends_with(&format!("__{}", query.trim()));
+                (score > 0 || exact).then_some((score + if exact { 100 } else { 0 }, t))
+            })
+            .collect();
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1["name"].as_str().cmp(&b.1["name"].as_str())));
+        if scored.is_empty() {
+            return Outcome::new("No MCP tool matches. Try other words, or a server's name with no query to see its tools.", false);
+        }
+        let total = scored.len();
+        let shown: Vec<String> = scored
+            .iter()
+            .take(FOUND_MAX)
+            .map(|(_, t)| json!({ "name": t["name"], "description": t["description"], "parameters": t["parameters"] }).to_string())
+            .collect();
+        let more = if total > FOUND_MAX { format!("\n[{total} match; the first {FOUND_MAX} shown. Narrow the query for the rest.]") } else { String::new() };
+        Outcome::new(format!("{}{more}", shown.join("\n")), false)
+    }
+
     /// What the servers say about using them, for the instructions ("" when
     /// none says anything).
     pub fn notes(&self) -> String {
@@ -1037,11 +1163,33 @@ impl Mcp {
         for s in self.servers.iter().filter(|s| !s.note.is_empty()) {
             out.push_str(&format!("\n<mcp_server name=\"{}\">\n{}\n</mcp_server>\n", s.name, s.note));
         }
+        if self.listed {
+            // (Their names only, by server: what each does comes with a search.)
+            let mut by_server: Vec<(&str, Vec<&str>)> = Vec::new();
+            let mut names: Vec<(&usize, &str)> = self.by_name.values().map(|(i, t)| (i, t.as_str())).collect();
+            names.sort();
+            for (i, tool) in names {
+                let server = self.servers[*i].name.as_str();
+                match by_server.iter_mut().find(|(s, _)| *s == server) {
+                    Some((_, list)) => list.push(tool),
+                    None => by_server.push((server, vec![tool])),
+                }
+            }
+            out.push_str("\n<mcp_tools>\nThe MCP servers' tools aren't in your tool list: find one with mcp_tools (what it does and its parameters), then call it with mcp_call. They are:");
+            let mut left = NAMES_MAX;
+            for (server, list) in &by_server {
+                let shown = list.len().min(left);
+                left -= shown;
+                let more = if shown < list.len() { format!(" (and {} more)", list.len() - shown) } else { String::new() };
+                out.push_str(&format!("\n- {server}: {}{more}", list[..shown].join(", ")));
+            }
+            out.push_str("\n</mcp_tools>\n");
+        }
         out
     }
 
     pub fn has(&self, name: &str) -> bool {
-        self.by_name.contains_key(name) || (name == RESOURCES && self.servers.iter().any(|s| s.resources))
+        self.by_name.contains_key(name) || (name == RESOURCES && self.servers.iter().any(|s| s.resources)) || (self.listed && (name == FIND || name == CALL))
     }
 
     /// Whether any server's tools only look.
@@ -1051,7 +1199,9 @@ impl Mcp {
 
     /// Whether the tool only looks: its server says so, or its entry does.
     pub fn read_only(&self, name: &str) -> bool {
-        self.read_only.contains(name) || (name == RESOURCES && self.has(RESOURCES))
+        // (A CALL that names a tool was made that tool's call already: one
+        // left names none, and only fails.)
+        self.read_only.contains(name) || (name == RESOURCES && self.has(RESOURCES)) || (self.listed && (name == FIND || name == CALL))
     }
 
     /// Lists again the tools of servers that said they changed.
@@ -1089,6 +1239,15 @@ impl Mcp {
     async fn call_as(&self, name: &str, args: &Value, spill_dir: Option<&Path>) -> Outcome {
         if name == RESOURCES && self.has(RESOURCES) {
             return self.resources(args, spill_dir).await;
+        }
+        if name == FIND && self.listed {
+            return self.find(args);
+        }
+        // (A call of a tool that's there was made that tool's call before it
+        // got here: `resolve`.)
+        if name == CALL && self.listed {
+            let asked = args["name"].as_str().unwrap_or_default();
+            return Outcome::new(format!("No MCP tool {asked}: find it with {FIND} and use the name it gives."), true);
         }
         let Some((i, tool)) = self.by_name.get(name) else {
             return Outcome::new(format!("No MCP tool {name}."), true);

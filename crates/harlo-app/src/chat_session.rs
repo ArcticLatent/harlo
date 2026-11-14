@@ -444,45 +444,21 @@ pub struct ChatSessionRust {
     host_files: std::cell::RefCell<std::collections::HashMap<String, (std::time::Instant, Option<Arc<str>>)>>,
     /// Where each row is (see `RowIndex`), once asked after the rows change.
     row_index: std::cell::RefCell<Option<RowIndex>>,
-    /// What was sent lately, as typed: back in the composer if Stop comes
-    /// before it reaches the agent (`SessionUpdate::Unsent`).
-    sent: Vec<Sent>,
 }
 
-/// A message as it was sent from here: `text` as given to the session
-/// (the plan note added), `original` as typed, with its attached files.
-#[derive(Default, Clone, Debug, PartialEq)]
-pub struct Sent {
-    text: String,
-    original: String,
-    files: Vec<String>,
-}
-
-/// The messages to put back for prompts stopped before they went (`held`,
-/// oldest first, as the session had them): each matched to what was sent
-/// from here, newest first (the held ones are the latest; one may carry
-/// read files or sessions in front); one sent from elsewhere (the phone)
-/// comes back as it was, less the plan note. Their words, oldest first, and
-/// their files. (What's left was sent, or stopped: forgotten.)
-fn unsent_back(sent: &mut Vec<Sent>, held: &[String]) -> (String, Vec<String>) {
-    let mut back: Vec<(String, Vec<String>)> = Vec::new();
-    let mut to = sent.len();
-    for h in held.iter().rev() {
-        let hit = sent[..to].iter().rposition(|s| *h == s.text || (!s.text.is_empty() && h.ends_with(&s.text)) || (s.text.is_empty() && !s.files.is_empty()));
-        back.push(match hit {
-            Some(i) => {
-                to = i;
-                (sent[i].original.clone(), sent[i].files.clone())
-            }
-            None => (h.strip_suffix(harlo_harness::file_blocks::PLAN_NOTE).unwrap_or(h).to_owned(), Vec::new()),
-        });
-    }
-    sent.clear();
+/// What to put back for messages stopped before they went (`held`, oldest
+/// first, as the session holds them): their words as typed, oldest first,
+/// and their files; pictures sent without files (from the phone) are saved
+/// by `save` and come back as files.
+fn unsent_back(held: &[harlo_core::Unsent], save: impl Fn(&Value) -> Option<String>) -> (String, Vec<String>) {
     let (mut words, mut files) = (Vec::<String>::new(), Vec::<String>::new());
-    for (original, more) in back.into_iter().rev() {
-        if !original.trim().is_empty() {
-            words.push(original);
+    for u in held {
+        let said = u.words();
+        if !said.trim().is_empty() {
+            words.push(said);
         }
+        let typed = u.typed.as_ref().map(|t| t.files.clone()).unwrap_or_default();
+        let more = if typed.is_empty() { u.images.iter().filter_map(&save).collect() } else { typed };
         for f in more {
             if !files.contains(&f) {
                 files.push(f);
@@ -490,6 +466,32 @@ fn unsent_back(sent: &mut Vec<Sent>, held: &[String]) -> (String, Vec<String>) {
         }
     }
     (words.join("\n\n"), files)
+}
+
+/// A picture sent as data (an `ImageContent` value) saved with the pasted
+/// ones, to attach again: its path.
+fn save_picture(dir: &std::path::Path, image: &Value) -> Option<String> {
+    use base64::Engine;
+    let ext = match image["mimeType"].as_str()? {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        _ => return None,
+    };
+    let bytes = base64::engine::general_purpose::STANDARD.decode(image["data"].as_str()?).ok()?;
+    // (Named by its bytes: the same picture saved once.)
+    let hash = {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        bytes.hash(&mut h);
+        h.finish()
+    };
+    let name = format!("unsent-{hash:016x}.{ext}");
+    std::fs::create_dir_all(dir).ok()?;
+    let path = dir.join(name);
+    std::fs::write(&path, &bytes).ok()?;
+    Some(path.to_string_lossy().into_owned())
 }
 
 /// Where each row is, by its key and by the run (group) it's in. Rows'
@@ -913,15 +915,8 @@ impl ChatSession {
         } else {
             text
         };
-        {
-            let files = self.attachments.iter().map(|p| p.to_string()).collect();
-            let sent = &mut self.as_mut().rust_mut().sent;
-            sent.push(Sent { text: text.clone(), original: original.clone(), files });
-            // (Only the last few could still be waiting.)
-            if sent.len() > 16 {
-                sent.remove(0);
-            }
-        }
+        // (As typed: what Stop gives back if it comes before it's sent.)
+        let typed = Some(harlo_core::Typed { words: original.clone(), files: self.attachments.iter().map(|p| p.to_string()).collect() });
         let paths: Vec<PathBuf> = self.attachments.iter().map(|p| PathBuf::from(p.to_string())).collect();
         // Sessions it mentions (picked from the `@` list): read when it's sent.
         let named = harlo_core::session_ref::tokens(&text);
@@ -934,7 +929,7 @@ impl ChatSession {
         let (agent, model) = (self.harness.to_string(), self.model_id.to_string());
         let server = if host.is_none() { crate::accounts::managed_server(&agent, &model) } else { None };
         if paths.is_empty() && mentioned.is_empty() && server.is_none() && host.is_none() {
-            h.prompt(&text, Vec::new(), mode);
+            h.prompt_typed(&text, Vec::new(), mode, typed);
             return;
         }
         self.as_mut().set_attachments(QStringList::default());
@@ -969,7 +964,7 @@ impl ChatSession {
                 .filter_map(|(kind, path)| harlo_harness::store::read_session(*kind, path))
                 .map(|info| harlo_core::session_ref::block(&info, &harlo_core::session_ref::messages_of(info.harness, &info.path)))
                 .collect();
-            h.prompt(&format!("{sessions}{}{text}", prepared.prefix), prepared.images, mode);
+            h.prompt_typed(&format!("{sessions}{}{text}", prepared.prefix), prepared.images, mode, typed);
         });
     }
 
@@ -1532,7 +1527,8 @@ impl ChatSession {
                 SessionUpdate::Preparing(on) => self.as_mut().set_preparing(on),
                 // Stopped before it was sent: the words back to edit.
                 SessionUpdate::Unsent(held) => {
-                    let (words, files) = unsent_back(&mut self.as_mut().rust_mut().sent, &held);
+                    let pasted = harlo_core::db::default_path().with_file_name("pasted");
+                    let (words, files) = unsent_back(&held, |i| save_picture(&pasted, i));
                     self.as_mut().give_back(files);
                     self.as_mut().unsent_returned(&QString::from(&words));
                 }
@@ -1765,19 +1761,39 @@ mod tests {
 
     #[test]
     fn every_unsent_message_comes_back_with_its_files() {
+        use base64::Engine;
+        use harlo_core::{Typed, Unsent};
         let note = harlo_harness::file_blocks::PLAN_NOTE;
-        let sent = |text: &str, original: &str, files: &[&str]| Sent { text: text.into(), original: original.into(), files: files.iter().map(|f| f.to_string()).collect() };
-        // An old one sent long ago with the same words, then A (plan mode, a
-        // file read in front), B, and a picture alone.
-        let mut list = vec![sent("B", "B", &[]), sent(&format!("A{note}"), "A", &["/p/a.rs"]), sent("B", "B", &[]), sent("", "", &["/p/shot.png"])];
-        let held = vec![format!("<file a.rs>…</file>A{note}"), "B".into(), "[image]".into()];
-        let (words, files) = unsent_back(&mut list, &held);
-        assert_eq!(words, "A\n\nB");
-        assert_eq!(files, vec!["/p/a.rs".to_owned(), "/p/shot.png".into()]);
-        assert!(list.is_empty());
-        // One from the phone: as it came, less the plan note.
-        let (words, files) = unsent_back(&mut vec![sent("mine", "mine", &[])], &[format!("from the phone{note}")]);
-        assert_eq!((words.as_str(), files.len()), ("from the phone", 0));
+        let typed = |text: &str, words: &str, files: &[&str]| Unsent {
+            text: text.into(),
+            images: Vec::new(),
+            mode: SendMode::Normal,
+            typed: Some(Typed { words: words.into(), files: files.iter().map(|f| f.to_string()).collect() }),
+        };
+        let png = json!({ "type": "image", "mimeType": "image/png", "data": base64::engine::general_purpose::STANDARD.encode(b"\x89PNG picture") });
+        // A (plan mode, a file read in front), then 20 more, two with the
+        // same words and different files, then a photo alone from the phone
+        // (its words were none, its picture data).
+        let mut held = vec![typed(&format!("<file a.rs>…</file>A{note}"), "A", &["/p/a.rs"])];
+        for i in 0..20 {
+            held.push(typed(&format!("m{i}"), &format!("m{i}"), &[]));
+        }
+        held.push(typed("<file b.rs>…</file>same", "same", &["/p/b.rs"]));
+        held.push(typed("<file c.rs>…</file>same", "same", &["/p/c.rs"]));
+        held.push(Unsent { text: "<file name=\"Photo 1\"></file>\n".into(), images: vec![png.clone()], mode: SendMode::Normal, typed: Some(Typed::default()) });
+        let dir = std::env::temp_dir().join(format!("harlo-unsent-{}", std::process::id()));
+        let (words, files) = unsent_back(&held, |i| save_picture(&dir, i));
+        let want: Vec<String> = std::iter::once("A".to_owned()).chain((0..20).map(|i| format!("m{i}"))).chain(["same".into(), "same".into()]).collect();
+        assert_eq!(words, want.join("\n\n"));
+        assert_eq!(files[..3], ["/p/a.rs".to_owned(), "/p/b.rs".into(), "/p/c.rs".into()]);
+        assert_eq!(files.len(), 4);
+        assert_eq!(std::fs::read(&files[3]).unwrap(), b"\x89PNG picture", "the phone's picture, saved to attach");
+        // One with no record of how it was typed: as it would have gone,
+        // less the plan note and the photos' lines.
+        let bare = Unsent { text: format!("<file name=\"Photo 1\"></file>\nfrom elsewhere{note}"), images: vec![png], mode: SendMode::Normal, typed: None };
+        let (words, files) = unsent_back(&[bare], |i| save_picture(&dir, i));
+        assert_eq!((words.as_str(), files.len()), ("from elsewhere", 1));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

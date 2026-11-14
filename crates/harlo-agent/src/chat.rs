@@ -245,12 +245,16 @@ fn usage(u: &Value) -> Value {
     if !u["prompt_tokens"].is_u64() {
         return json!({});
     }
-    json!({
+    let mut out = json!({
         "input_tokens": u["prompt_tokens"].as_u64().unwrap_or(0),
-        "output_tokens": u["completion_tokens"].as_u64().unwrap_or(0),
         "input_tokens_details": { "cached_tokens": u["prompt_tokens_details"]["cached_tokens"].as_u64().or_else(|| u["cached_tokens"].as_u64()).unwrap_or(0) },
         "output_tokens_details": { "reasoning_tokens": u["completion_tokens_details"]["reasoning_tokens"].as_u64().unwrap_or(0) },
-    })
+    });
+    // (Not said: left out, not taken for none.)
+    if let Some(n) = u["completion_tokens"].as_u64() {
+        out["output_tokens"] = json!(n);
+    }
+    out
 }
 
 /// Sends one request: `on` gets pi's stream events as they come; the

@@ -860,6 +860,8 @@ struct Composer: View {
             }
             levels = await model.thinkingLevels()
         }
+        // Stopped before it was sent: its photos back in the strip.
+        .onChange(of: session.returnedPhotos, initial: true) { takeBack() }
     }
 
     /// While it works: a message steers the run, or waits for it to end.
@@ -972,6 +974,14 @@ struct Composer: View {
             }
             .accessibilityLabel("Options: thinking \(session.info.thinking), approvals \(Modes.label(m?.approval ?? "")), Plan \(plan ? "on" : "off")")
         }
+    }
+
+    /// Photos of messages stopped before they were sent: back with the
+    /// ones picked since.
+    func takeBack() {
+        guard !session.returnedPhotos.isEmpty else { return }
+        photos = session.returnedPhotos + photos
+        session.returnedPhotos = []
     }
 
     func send() {

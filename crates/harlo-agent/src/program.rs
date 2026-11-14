@@ -63,7 +63,7 @@ pub fn callable<'a>(specs: &'a [Value], mcp: Option<&crate::mcp::Mcp>) -> Vec<&'
         .iter()
         .filter(|s| {
             let n = s["name"].as_str().unwrap_or_default();
-            OURS.contains(&n) || mcp.is_some_and(|m| m.has(n) && m.read_only(n))
+            OURS.contains(&n) || (n != crate::mcp::CALL && mcp.is_some_and(|m| m.has(n) && m.read_only(n)))
         })
         .collect()
 }

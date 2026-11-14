@@ -217,9 +217,25 @@ struct Streamed {
     /// The lines from the start asked for: at most the count, about the
     /// bytes asked for, each cut a little past them.
     kept: Vec<Vec<u8>>,
+    /// The first kept line's whole length (it may be kept cut).
+    first_len: usize,
     binary: bool,
     /// As [`hash_of`] makes it.
     hash: u64,
+}
+
+/// A line too long to show whole: its start (up to [`READ_BYTES`]), and a
+/// note that says so, with how to read on (no anchor: it isn't the line).
+fn long_line(path: &Path, number: usize, line: &str, whole: usize) -> String {
+    let shown = &line[..line.floor_char_boundary(READ_BYTES)];
+    let from = shown.len() + 1;
+    format!(
+        "{shown}\n[Line {number} is {} KB; only its first {} bytes are shown. Read on with bash: sed -n '{number}p' '{}' | cut -b {from}-{}, or grep -o what you need.]",
+        whole.div_ceil(1024),
+        shown.len(),
+        path.display(),
+        from + READ_BYTES - 1
+    )
 }
 
 /// `path`'s lines counted (as `str::lines` would), the ones from `start`
@@ -235,6 +251,7 @@ fn stream_lines(path: &Path, start: usize, max: usize, max_bytes: usize) -> std:
     let mut buf = vec![0u8; 1 << 16];
     let (mut lines, mut bytes, mut binary) = (0usize, 0u64, false);
     let (mut kept, mut kept_bytes, mut cur, mut open) = (Vec::new(), 0usize, Vec::new(), false);
+    let (mut cur_len, mut first_len) = (0usize, 0usize);
     let cap = max_bytes + 1;
     loop {
         let n = f.read(&mut buf)?;
@@ -255,16 +272,21 @@ fn stream_lines(path: &Path, start: usize, max: usize, max_bytes: usize) -> std:
             if keep && cur.len() < cap {
                 cur.extend_from_slice(&seg[..seg.len().min(cap - cur.len())]);
             }
+            cur_len += seg.len();
             open |= !seg.is_empty();
             let Some(i) = end else { break };
             if keep {
                 if cur.last() == Some(&b'\r') {
                     cur.pop();
                 }
+                if kept.is_empty() {
+                    first_len = cur_len;
+                }
                 kept_bytes += cur.len() + 1;
                 kept.push(std::mem::take(&mut cur));
             }
             cur.clear();
+            cur_len = 0;
             lines += 1;
             open = false;
             rest = &rest[i + 1..];
@@ -272,13 +294,16 @@ fn stream_lines(path: &Path, start: usize, max: usize, max_bytes: usize) -> std:
     }
     if open {
         if lines >= start && kept.len() < max && kept_bytes <= max_bytes {
+            if kept.is_empty() {
+                first_len = cur_len;
+            }
             kept.push(cur);
         }
         lines += 1;
     }
     // (Grown or shrunk while read: its hash can't match, as it shouldn't.)
     let hash = if bytes == size { h.finish() } else { h.finish() ^ 1 };
-    Ok(Streamed { lines, bytes, kept, binary, hash })
+    Ok(Streamed { lines, bytes, kept, first_len, binary, hash })
 }
 
 fn hash_of(bytes: &[u8]) -> u64 {
@@ -462,14 +487,21 @@ impl Tools {
                 if rules == *file || self.hidden(&rules).is_some() {
                     continue;
                 }
-                let Ok(text) = std::fs::read_to_string(&rules) else { continue };
+                // (Read up to what's sent, however big the file.)
+                let mut raw = Vec::new();
+                let Ok(f) = std::fs::File::open(&rules) else { continue };
+                if std::io::Read::read_to_end(&mut std::io::Read::take(f, NESTED_RULES_KEPT as u64 + 4), &mut raw).is_err() {
+                    continue;
+                }
+                let whole = std::fs::metadata(&rules).map_or(0, |m| m.len()) as usize;
+                let text = String::from_utf8_lossy(&raw);
                 let text = text.trim();
                 if text.is_empty() {
                     continue;
                 }
                 let shown = rules.strip_prefix(&self.cwd).unwrap_or(&rules).display();
                 out.push_str(&format!("\n\n{RULES_FROM}{shown}{RULES_FOR}{}/:]\n", rel.display()));
-                if text.len() > NESTED_RULES_KEPT {
+                if whole > NESTED_RULES_KEPT {
                     let cut = text.floor_char_boundary(NESTED_RULES_KEPT);
                     out.push_str(&format!("{}\n[… cut at {} KB: read {shown} for the rest.]", &text[..cut], NESTED_RULES_KEPT / 1000));
                 } else {
@@ -551,15 +583,6 @@ impl Tools {
     /// Why the sandbox keeps the file tools from changing `path`.
     fn fenced(&self, path: &Path) -> Option<Outcome> {
         self.sandbox.as_ref().and_then(|sb| sb.may_write(path).err()).map(fail)
-    }
-
-    /// grep's or find's lines, less those in hidden places under `root`.
-    fn unhidden(&self, root: &Path, lines: Vec<String>) -> Vec<String> {
-        let under = self.hidden_names(root);
-        if under.is_empty() {
-            return lines;
-        }
-        lines.into_iter().filter(|l| !names_hidden(&under, l)).collect()
     }
 
     /// The hidden paths under `root`, as a search names them (whole, and
@@ -660,6 +683,24 @@ impl Tools {
                 out
             }
             "write" | "edit" | "apply_patch" => {
+                // A folder's own rules come before a change in it, not after:
+                // the first change there is held back with them, to be made
+                // again if it still fits.
+                let touched: Vec<PathBuf> = match name {
+                    "apply_patch" => crate::patch::parse(s("input"))
+                        .unwrap_or_default()
+                        .iter()
+                        .flat_map(|op| match op {
+                            crate::patch::Op::Add { path, .. } | crate::patch::Op::Delete { path } => vec![path],
+                            crate::patch::Op::Update { path, move_to, .. } => std::iter::once(path).chain(move_to.as_ref()).collect(),
+                        })
+                        .map(|p| self.path(p))
+                        .collect(),
+                    _ => vec![self.path(s("path"))],
+                };
+                if let Some(rules) = self.nested_rules(&touched) {
+                    return fail(format!("Nothing was changed yet: this touches a folder with rules of its own, which you hadn't seen (below). Check the change follows them, then make it again.{rules}"));
+                }
                 let mut out = match name {
                     "write" => self.write(s("path"), s("content")),
                     "edit" => self.edit(s("path"), &args["edits"]),
@@ -686,9 +727,6 @@ impl Tools {
                     && let Some(errors) = self.lsp.errors_after(&changed, &self.cwd, self.sandbox.as_deref()).await
                 {
                     out.text = format!("{}\n\n{errors}", out.text);
-                }
-                if let Some(rules) = self.nested_rules(&changed) {
-                    out.text.push_str(&rules);
                 }
                 out
             }
@@ -788,8 +826,8 @@ impl Tools {
             n += 1;
         }
         if n == 0 {
-            // One line longer than the limit.
-            out = lines[start].chars().take(READ_BYTES).collect();
+            // One line longer than the limit: its start, said so.
+            out = long_line(&path, start + 1, lines[start], lines[start].len());
             n = 1;
         }
         let end = start + n;
@@ -855,8 +893,8 @@ impl Tools {
             n += 1;
         }
         if n == 0 {
-            // One line longer than the limit.
-            out = kept.first().map(|l| l.chars().take(READ_BYTES).collect()).unwrap_or_default();
+            // One line longer than the limit: its start, said so.
+            out = kept.first().map(|l| long_line(&path, start + 1, l, got.first_len)).unwrap_or_default();
             n = 1;
         }
         let end = start + n;
@@ -1094,18 +1132,6 @@ impl Tools {
         ok(if out.is_empty() { "(empty folder)".into() } else { out })
     }
 
-    /// Runs a search (rg, grep, find) in the working folder: stopped with
-    /// the call, or after [`search_secs`].
-    async fn search(&self, program: &str, args: &[String]) -> std::io::Result<std::process::Output> {
-        let mut cmd = tokio::process::Command::new(program);
-        cmd.args(args).current_dir(&self.cwd).stdin(std::process::Stdio::null()).kill_on_drop(true);
-        let secs = search_secs();
-        match tokio::time::timeout(std::time::Duration::from_secs(secs), cmd.output()).await {
-            Ok(r) => r,
-            Err(_) => Err(std::io::Error::new(std::io::ErrorKind::TimedOut, format!("The search ran past {secs} s and was stopped: narrow the path, pattern or glob."))),
-        }
-    }
-
     /// A search whose output is taken a line at a time as it comes (`each`;
     /// each line cut at [`LINE_CAP`]), not all of it kept: stopped with the
     /// call, or after [`search_secs`]. Its exit and what it said on stderr
@@ -1218,25 +1244,40 @@ impl Tools {
         }
         let at = path.to_string_lossy().into_owned();
         let rg: Vec<String> = ["--files", "--color", "never", "-g", pattern, "-g", "!.git/", "--", &at].map(str::to_owned).into();
-        let text = match self.search("rg", &rg).await {
-            Ok(o) => String::from_utf8_lossy(&o.stdout).into_owned(),
-            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => return fail(e.to_string()),
-            Err(_) => {
-                let name = pattern.rsplit('/').next().unwrap_or(pattern);
-                let find: Vec<String> = [&at, "-name", name, "-not", "-path", "*/.git/*"].map(str::to_owned).into();
-                match self.search("find", &find).await {
-                    Ok(o) => String::from_utf8_lossy(&o.stdout).into_owned(),
-                    Err(e) if e.kind() == std::io::ErrorKind::TimedOut => return fail(e.to_string()),
-                    Err(e) => return fail(format!("Can't search: {e}")),
-                }
+        // (Taken as they come: the first LIST_MAX by name kept, a max-heap of
+        // them, and how many there are; not every path held and sorted.)
+        let base = format!("{}/", self.cwd.display());
+        let under = self.hidden_names(&path);
+        let mut first = std::collections::BinaryHeap::<String>::new();
+        let mut total = 0usize;
+        let mut take = |raw: &[u8]| {
+            let l = String::from_utf8_lossy(raw);
+            let l = l.strip_prefix(base.as_str()).unwrap_or(&l);
+            if l.is_empty() || names_hidden(&under, l) {
+                return;
+            }
+            total += 1;
+            if first.len() < LIST_MAX {
+                first.push(l.to_owned());
+            } else if first.peek().is_some_and(|last| l < last.as_str()) {
+                first.pop();
+                first.push(l.to_owned());
             }
         };
-        let base = format!("{}/", self.cwd.display());
-        let mut files: Vec<String> = self.unhidden(&path, text.lines().map(|l| l.strip_prefix(&base).unwrap_or(l).to_owned()).collect());
-        files.sort();
-        let total = files.len();
-        files.truncate(LIST_MAX);
-        let mut shown = files.join("\n");
+        let ran = match self.search_lines("rg", &rg, &mut take).await {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let name = pattern.rsplit('/').next().unwrap_or(pattern);
+                let find: Vec<String> = [&at, "-name", name, "-not", "-path", "*/.git/*"].map(str::to_owned).into();
+                self.search_lines("find", &find, &mut take).await
+            }
+            r => r,
+        };
+        match ran {
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => return fail(e.to_string()),
+            Err(e) => return fail(format!("Can't search: {e}")),
+        }
+        let mut shown = first.into_sorted_vec().join("\n");
         if total > LIST_MAX {
             shown.push_str(&format!("\n[{total} files; first {LIST_MAX} shown]"));
         }
@@ -1252,7 +1293,7 @@ mod tests {
     /// changed under it; the top folder's (in the instructions) doesn't.
     #[tokio::test]
     async fn a_folders_rules_come_once_with_its_first_file() {
-        let dir = std::env::temp_dir().join(format!("harlo-agent-rules-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("harlo-agent-nested-rules-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         for d in ["billing/ledger", "web", "node_modules/dep", ".hidden"] {
             std::fs::create_dir_all(dir.join(d)).unwrap();
@@ -1283,10 +1324,26 @@ mod tests {
         // A dependency's and a hidden folder's aren't sent.
         assert!(!read(&t, "node_modules/dep/i.js").await.contains(RULES_FROM));
         assert!(!read(&t, ".hidden/a").await.contains(RULES_FROM));
-        // A new file, written: its folder's come, cut to size.
-        let written = t.call("write", &json!({ "path": "web/app.js", "content": "1" })).await.text;
-        assert!(written.contains("[Rules from web/AGENTS.md, for the files under web/:]"), "{written}");
-        assert!(written.contains("cut at 8 KB: read web/AGENTS.md for the rest") && written.len() < NESTED_RULES_KEPT + 400, "{}", written.len());
+        // A new file, written first thing in a folder with rules: held back,
+        // with them (cut to size), then made when asked again.
+        let held = t.call("write", &json!({ "path": "web/app.js", "content": "1" })).await;
+        assert!(held.failed && held.text.starts_with("Nothing was changed yet") && !dir.join("web/app.js").exists(), "{}", held.text);
+        assert!(held.text.contains("[Rules from web/AGENTS.md, for the files under web/:]"), "{}", held.text);
+        assert!(held.text.contains("cut at 8 KB: read web/AGENTS.md for the rest") && held.text.len() < NESTED_RULES_KEPT + 500, "{}", held.text.len());
+        let written = t.call("write", &json!({ "path": "web/app.js", "content": "1" })).await;
+        assert!(!written.failed && !written.text.contains(RULES_FROM) && dir.join("web/app.js").exists(), "{}", written.text);
+        // A patch: a deletion counts its folder, a move both ends.
+        std::fs::create_dir_all(dir.join("ops")).unwrap();
+        std::fs::create_dir_all(dir.join("lib")).unwrap();
+        std::fs::write(dir.join("ops/AGENTS.md"), "Keep the scripts.").unwrap();
+        std::fs::write(dir.join("lib/AGENTS.md"), "Library rules.").unwrap();
+        std::fs::write(dir.join("ops/run.sh"), "echo\n").unwrap();
+        let gone = t.call("apply_patch", &json!({ "input": "*** Begin Patch\n*** Delete File: ops/run.sh\n*** End Patch" })).await;
+        assert!(gone.failed && gone.text.contains("[Rules from ops/AGENTS.md") && dir.join("ops/run.sh").exists(), "{}", gone.text);
+        let moved = t.call("apply_patch", &json!({ "input": "*** Begin Patch\n*** Update File: main.rs\n*** Move to: lib/main.rs\n@@\n-fn x() {}\n+fn y() {}\n*** End Patch" })).await;
+        assert!(moved.failed && moved.text.contains("[Rules from lib/AGENTS.md") && !moved.text.contains("ops/AGENTS.md") && dir.join("main.rs").exists(), "{}", moved.text);
+        let moved = t.call("apply_patch", &json!({ "input": "*** Begin Patch\n*** Update File: main.rs\n*** Move to: lib/main.rs\n@@\n-fn x() {}\n+fn y() {}\n*** End Patch" })).await;
+        assert!(!moved.failed && dir.join("lib/main.rs").exists(), "{}", moved.text);
         // Gone from the context (set aside, or compacted): sent again.
         let history = vec![json!({ "role": "toolResult", "toolName": "read", "content": [{ "type": "text", "text": first }] })];
         t.rules_seen_in(&history);
@@ -1344,6 +1401,54 @@ mod tests {
         // Read so: an edit after it isn't taken as made on a changed file.
         let edit = t.call("edit", &json!({ "path": "big.txt", "edits": [{ "old_text": "line 0000002 of", "new_text": "line two of" }] })).await;
         assert!(!edit.failed, "{}", edit.text);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A line longer than one read shows says it's cut, how long it is
+    /// and how to read on, whether the file is read whole or streamed.
+    #[tokio::test]
+    async fn a_cut_long_line_says_so() {
+        let dir = std::env::temp_dir().join(format!("harlo-agent-longline-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let long = "x".repeat(200 * 1024);
+        std::fs::write(dir.join("small.txt"), format!("first\n{long}\nlast\n")).unwrap();
+        let mut big: String = (1..=400_000).map(|i| format!("line {i:07} of the big one\n")).collect();
+        big.insert_str(big.find('\n').unwrap() + 1, &format!("{long}\n"));
+        std::fs::write(dir.join("big.txt"), &big).unwrap();
+        assert!(big.len() as u64 > BIG_READ);
+        let t = Tools::new(dir.clone(), dir.join(".out"));
+        for name in ["small.txt", "big.txt"] {
+            let out = t.call("read", &json!({ "path": name, "offset": 2, "limit": 3 })).await.text;
+            let (shown, note) = out.split_once('\n').unwrap();
+            assert_eq!(shown.len(), READ_BYTES, "{name}: the line's start");
+            let want = format!("[Line 2 is 200 KB; only its first {READ_BYTES} bytes are shown. Read on with bash: sed -n '2p' '{}' | cut -b {}-{}, or grep -o what you need.]", dir.join(name).display(), READ_BYTES + 1, 2 * READ_BYTES);
+            assert!(note.starts_with(&want), "{name}: {note}");
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// find lists the first LIST_MAX names in order, and how many there are,
+    /// however many match.
+    #[tokio::test]
+    async fn find_shows_the_first_names_and_the_count() {
+        let dir = std::env::temp_dir().join(format!("harlo-agent-find-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        // Made out of order, so the first ones found aren't the first by name.
+        for i in (0..1200).rev() {
+            std::fs::write(dir.join(format!("src/f{i:04}.rs")), "").unwrap();
+        }
+        std::fs::write(dir.join("src/notes.md"), "").unwrap();
+        let t = Tools::new(dir.clone(), dir.join(".out"));
+        let out = t.call("find", &json!({ "pattern": "*.rs" })).await.text;
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines.len(), LIST_MAX + 1, "the names, then the note");
+        let want: Vec<String> = (0..LIST_MAX).map(|i| format!("src/f{i:04}.rs")).collect();
+        assert_eq!(lines[..LIST_MAX], want.iter().map(String::as_str).collect::<Vec<_>>()[..]);
+        assert_eq!(lines[LIST_MAX], format!("[1200 files; first {LIST_MAX} shown]"));
+        let few = t.call("find", &json!({ "pattern": "*.md" })).await.text;
+        assert_eq!(few, "src/notes.md");
         let _ = std::fs::remove_dir_all(dir);
     }
 

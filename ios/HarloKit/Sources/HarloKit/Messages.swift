@@ -286,6 +286,9 @@ public enum Event: Equatable, Sendable {
     case subagents(key: String, subagents: [Subagent])
     /// A side question (/btw) and its answer so far.
     case aside(key: String, aside: Aside)
+    /// Messages stopped before they were sent: their words and photos, to
+    /// put back in the composer.
+    case unsent(key: String, text: String, photos: [Photo])
     /// Plan limits changed (this computer's or a machine's).
     case limits(PlanLimits)
     /// The open session's shared plan changed: ask for it again.
@@ -311,6 +314,10 @@ public enum Event: Equatable, Sendable {
         case "todos": self = .todos(key: key, phases: TodoPhase.list(v["phases"]))
         case "subagents": self = .subagents(key: key, subagents: (v["subagents"].array ?? []).map(Subagent.init))
         case "aside": self = .aside(key: key, aside: Aside(v["aside"]))
+        case "unsent":
+            self = .unsent(key: key, text: v["text"].text, photos: (v["photos"].array ?? []).compactMap { p in
+                Data(base64Encoded: p["data"].text).map { Photo(data: $0, mimeType: p["mimeType"].text) }
+            })
         case "limits": self = .limits(PlanLimits(v))
         case "plan": self = .plan(key: key)
         case "revoked": self = .revoked

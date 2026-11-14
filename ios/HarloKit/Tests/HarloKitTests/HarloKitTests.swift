@@ -1243,6 +1243,27 @@ final class PlanTests: XCTestCase {
         XCTAssertEqual(s.aside?.text, "Because **so**.")
     }
 
+    @MainActor func testStoppedMessagesComeBack() {
+        let jpeg = Data([0xFF, 0xD8, 0xFF, 1, 2, 3])
+        let ev = Event(["ev": "unsent", "key": "live:1", "text": "fix the tests\n\nthen this",
+                        "photos": [["data": .string(jpeg.base64EncodedString()), "mimeType": "image/jpeg"], ["data": "not base64!", "mimeType": "image/png"]]])
+        guard case .unsent(let k, let text, let photos)? = ev else { return XCTFail("\(String(describing: ev))") }
+        XCTAssertEqual(k, "live:1")
+        XCTAssertEqual(text, "fix the tests\n\nthen this")
+        XCTAssertEqual(photos.map(\.data), [jpeg])
+        let s = OpenSession(key: "live:1")
+        s.opened(liveKey: "live:1", harness: "harlo")
+        s.draft = "typed since"
+        s.take(ev!)
+        // Above what's typed meanwhile, its photos for the composer.
+        XCTAssertEqual(s.draft, "fix the tests\n\nthen this\n\ntyped since")
+        XCTAssertEqual(s.returnedPhotos.map(\.data), [jpeg])
+        // A photo alone: the words stay as they are.
+        s.take(Event(["ev": "unsent", "key": "live:1", "text": "", "photos": [["data": .string(jpeg.base64EncodedString()), "mimeType": "image/jpeg"]]])!)
+        XCTAssertEqual(s.draft, "fix the tests\n\nthen this\n\ntyped since")
+        XCTAssertEqual(s.returnedPhotos.count, 2)
+    }
+
     func testColoursAsHex() {
         XCTAssertEqual(RGBA(hex: "#5b9bf0")?.hex, "#5b9bf0")
     }

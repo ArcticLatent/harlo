@@ -168,6 +168,9 @@ public final class OpenSession {
     public var steer = false
     /// What's typed and not sent yet (edit & resend puts a message back here).
     public var draft = ""
+    /// Photos of messages stopped before they were sent, for the composer
+    /// to take back (it empties this).
+    public var returnedPhotos: [Photo] = []
     /// When each waiting question or approval came (unix ms).
     @ObservationIgnored var asked: [String: Int64] = [:]
     /// Events that came before harlo said which live key is this one's.
@@ -270,6 +273,12 @@ public final class OpenSession {
             subagents = list
         case .aside(_, let a):
             aside = a
+        case .unsent(_, let text, let photos):
+            // Above what's typed meanwhile, not over it.
+            if !text.isEmpty {
+                draft = draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? text : text + "\n\n" + draft
+            }
+            returnedPhotos += photos
         default:
             break
         }
@@ -1394,7 +1403,7 @@ extension Event {
     public var sessionKey: String? {
         switch self {
         case .reset(let k, _, _), .rows(let k, _), .status(let k, _), .meta(let k, _), .request(let k, _), .cleared(let k, _),
-             .commands(let k, _), .queue(let k, _, _), .todos(let k, _), .subagents(let k, _), .aside(let k, _), .plan(let k): return k
+             .commands(let k, _), .queue(let k, _, _), .todos(let k, _), .subagents(let k, _), .aside(let k, _), .unsent(let k, _, _), .plan(let k): return k
         case .sessions, .limits, .revoked: return nil
         }
     }

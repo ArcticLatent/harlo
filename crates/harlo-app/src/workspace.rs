@@ -477,13 +477,10 @@ pub mod qobject {
         /// it (read-only until you send). Returns its key.
         #[qinvokable]
         fn continue_branch(self: Pin<&mut Workspace>, path: &QString, leaf: &QString) -> QString;
-        /// Full-text search over every session's messages: JSON array of
-        /// `{ path, index, role, snippet, title, harness, cwd, modified }`.
-        #[qinvokable]
-        fn search_messages(self: &Workspace, query: &QString, limit: i32) -> QString;
-        /// `search_messages` off the UI thread: the hits come with
-        /// `messagesFound(generation, json)` (the caller drops a generation
-        /// that isn't its latest).
+        /// Full-text search over every session's messages, off the UI
+        /// thread: the hits come with `messagesFound(generation, json)`, a
+        /// JSON array of `{ path, index, role, snippet, title, harness, cwd,
+        /// modified }` (the caller drops a generation that isn't its latest).
         #[qinvokable]
         fn find_messages(self: Pin<&mut Workspace>, query: &QString, limit: i32, generation: i32);
         /// The sessions used last, newest first, for the search's empty
@@ -5482,12 +5479,6 @@ impl Workspace {
         json!({ "sessions": found, "note": if found.is_empty() { "No past session matches." } else { "read_session gives one's latest messages." } })
     }
 
-    pub fn search_messages(&self, query: &QString, limit: i32) -> QString {
-        let Some(reader) = &self.search_reader else { return QString::from("[]") };
-        let hits = reader.lock().unwrap().search(&query.to_string(), limit.clamp(1, 500) as usize).unwrap_or_default();
-        QString::from(&self.hits_json(hits))
-    }
-
     pub fn find_messages(self: Pin<&mut Self>, query: &QString, limit: i32, generation: i32) {
         let Some(reader) = self.search_reader.clone() else {
             self.messages_found(generation, &QString::from("[]"));
@@ -6147,7 +6138,7 @@ impl Workspace {
                 self.as_mut().rebuild();
                 if (!first.trim().is_empty() || !images.is_empty())
                     && let Some(live) = registry::get(&key)
-                    && !live.handle.prompt(&format!("{}{first}", image_blocks(images.len())), images, harlo_harness::SendMode::Normal)
+                    && !live.handle.prompt_typed(&format!("{}{first}", image_blocks(images.len())), images, harlo_harness::SendMode::Normal, Some(harlo_core::Typed { words: first.clone(), files: Vec::new() }))
                 {
                     return json!({ "key": key, "harness": kind.as_str(), "model": model, "error": live.handle.held().unwrap_or_default() });
                 }
@@ -6209,6 +6200,8 @@ impl Workspace {
                     _ => harlo_harness::SendMode::Normal,
                 };
                 let images = phone_images(&msg["images"]);
+                // (As typed: its pictures are its images.)
+                let typed = Some(harlo_core::Typed { words: text("text"), files: Vec::new() });
                 let mut text = format!("{}{}", image_blocks(images.len()), text("text"));
                 // Plan mode: a plan first, no changes (as the desktop sends).
                 if self.modes.get(&key).is_some_and(|m| m.plan) && mode == harlo_harness::SendMode::Normal {
@@ -6226,11 +6219,11 @@ impl Workspace {
                     }
                     crate::runtime().spawn_blocking(move || {
                         let text = harlo_core::session_ref::expand(&text, |m| harlo_core::session_ref::find(&mentioned, m).cloned());
-                        live.handle.prompt(&text, images, mode);
+                        live.handle.prompt_typed(&text, images, mode, typed);
                     });
                     return json!({ "ok": true });
                 }
-                if !live.handle.prompt(&text, images, mode) {
+                if !live.handle.prompt_typed(&text, images, mode, typed) {
                     return fail(&live.handle.held().unwrap_or_else(|| "harlo holds this session's messages.".into()));
                 }
                 json!({ "ok": true })
@@ -6746,7 +6739,8 @@ fn send_first_prompt(key: &str, first: FirstPrompt, notify: Option<CxxQtThread<W
         }
         let prepared = harlo_core::attach::prepare_for(&first.attachments, host.as_deref());
         let text = format!("{}{}", prepared.prefix, first.text);
-        live.handle.prompt(&text, prepared.images, harlo_harness::SendMode::Normal);
+        let typed = harlo_core::Typed { words: first.text.clone(), files: first.attachments.iter().map(|p| p.to_string_lossy().into_owned()).collect() };
+        live.handle.prompt_typed(&text, prepared.images, harlo_harness::SendMode::Normal, Some(typed));
     });
 }
 
@@ -6836,12 +6830,16 @@ fn session_messages(path: &Path, kind: HarnessKind) -> Vec<serde_json::Value> {
     }
 }
 
-/// What the search index needs of a session: a local Claude transcript only
-/// grows, so it's read on from `resume`. (Harlo's are trees: what was added
-/// can change which messages came before.)
+/// What the search index needs of a session: a local one is read on from
+/// `resume` (a Claude transcript only grows; a Harlo session is read whole
+/// again when what was added doesn't go on from its last entry).
 fn session_part(path: &Path, kind: HarnessKind, resume: Option<&harlo_harness::claude::Resume>) -> harlo_harness::claude::Part {
-    if kind == HarnessKind::Claude && !harlo_core::remote::is_remote(path) {
-        return harlo_harness::claude::read_part(path, resume).unwrap_or_default();
+    if !harlo_core::remote::is_remote(path) {
+        return match kind {
+            HarnessKind::Claude => harlo_harness::claude::read_part(path, resume),
+            _ => harlo_harness::store::read_part(path, resume),
+        }
+        .unwrap_or_default();
     }
     harlo_harness::claude::Part { messages: session_messages(path, kind), ..Default::default() }
 }

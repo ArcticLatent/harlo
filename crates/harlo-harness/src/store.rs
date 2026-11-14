@@ -318,6 +318,12 @@ struct EntryHead {
 /// The current branch from `lines` (which calls back with each line and where
 /// it starts): the tree first, then only the messages on that branch.
 fn saved_from(lines: &dyn Fn(&mut dyn FnMut(u64, &str))) -> SavedSession {
+    saved_and_leaf(lines).0
+}
+
+/// [`saved_from`], and the id of the branch's last entry.
+fn saved_and_leaf(lines: &dyn Fn(&mut dyn FnMut(u64, &str))) -> (SavedSession, Option<String>) {
+    let mut leaf = None;
     let mut entries: Vec<(u64, Option<String>)> = Vec::new();
     let mut index: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let (mut model, mut thinking, mut name) = (String::new(), String::new(), String::new());
@@ -341,6 +347,7 @@ fn saved_from(lines: &dyn Fn(&mut dyn FnMut(u64, &str))) -> SavedSession {
             _ => {}
         }
         if let Some(id) = entry.id.as_str().filter(|_| entry.kind != "session") {
+            leaf = Some(id.to_owned());
             index.insert(id.to_owned(), entries.len());
             entries.push((offset, entry.parent.as_str().map(str::to_owned)));
         }
@@ -361,17 +368,8 @@ fn saved_from(lines: &dyn Fn(&mut dyn FnMut(u64, &str))) -> SavedSession {
     let mut found: Vec<Option<Value>> = vec![None; branch.len()];
     lines(&mut |offset, line| {
         let Some(&place) = places.get(&offset) else { return };
-        let Ok(mut e) = serde_json::from_str::<Value>(line) else { return };
-        found[place] = match e["type"].as_str() {
-            Some("message") => Some(e["message"].take()),
-            // Custom messages (e.g. background job results).
-            Some("custom_message") => Some(serde_json::json!({
-                "role": "custom", "customType": e["customType"], "content": e["content"], "display": e["display"].as_bool().unwrap_or(true),
-            })),
-            Some("compaction") => Some(serde_json::json!({"role": "compactionSummary", "summary": e["summary"]})),
-            Some("branch_summary") => Some(serde_json::json!({"role": "branchSummary", "summary": e["summary"]})),
-            _ => None,
-        };
+        let Ok(e) = serde_json::from_str::<Value>(line) else { return };
+        found[place] = branch_message(e);
     });
     let messages: Vec<Value> = found.into_iter().flatten().collect();
     // No model change in it: the model of its last reply.
@@ -381,7 +379,91 @@ fn saved_from(lines: &dyn Fn(&mut dyn FnMut(u64, &str))) -> SavedSession {
             model_id = format!("{}/{}", m["provider"].as_str().unwrap_or_default(), m["model"].as_str().unwrap_or_default());
         }
     }
-    SavedSession { messages, model, model_id, thinking, name }
+    (SavedSession { messages, model, model_id, thinking, name }, leaf)
+}
+
+/// The message an entry on the branch is, if it's one.
+fn branch_message(mut e: Value) -> Option<Value> {
+    match e["type"].as_str() {
+        Some("message") => Some(e["message"].take()),
+        // Custom messages (e.g. background job results).
+        Some("custom_message") => Some(serde_json::json!({
+            "role": "custom", "customType": e["customType"], "content": e["content"], "display": e["display"].as_bool().unwrap_or(true),
+        })),
+        Some("compaction") => Some(serde_json::json!({"role": "compactionSummary", "summary": e["summary"]})),
+        Some("branch_summary") => Some(serde_json::json!({"role": "branchSummary", "summary": e["summary"]})),
+        _ => None,
+    }
+}
+
+/// Where a file's complete lines end (after its last newline).
+fn complete_end(path: &Path) -> std::io::Result<u64> {
+    let mut file = File::open(path)?;
+    let mut end = file.metadata()?.len();
+    let mut chunk = vec![0u8; 64 * 1024];
+    while end > 0 {
+        let start = end.saturating_sub(chunk.len() as u64);
+        file.seek(SeekFrom::Start(start))?;
+        let part = &mut chunk[..(end - start) as usize];
+        file.read_exact(part)?;
+        if let Some(at) = part.iter().rposition(|&b| b == b'\n') {
+            return Ok(start + at as u64 + 1);
+        }
+        end = start;
+    }
+    Ok(0)
+}
+
+/// The current branch's messages from where `resume` left off. A Harlo
+/// session is a tree, but what's added to it usually goes on from its last
+/// entry: then only that is read. Anything else (going back to an earlier
+/// point, a file rewritten) and it's read whole.
+pub fn read_part(path: &Path, resume: Option<&crate::claude::Resume>) -> std::io::Result<crate::claude::Part> {
+    use crate::claude::{Part, Resume};
+    let end = complete_end(path)?;
+    let lines = |from: u64, each: &mut dyn FnMut(u64, &str)| {
+        let _ = for_each_line(path, from, &mut |offset, line| {
+            if offset < end {
+                each(offset, line)
+            }
+        });
+    };
+    let resume_at = |offset: u64, index: i64, leaf: Option<String>| -> std::io::Result<Resume> {
+        let mut check = leaf.unwrap_or_default().into_bytes();
+        check.push(b'\n');
+        check.extend(crate::claude::check_at(path, offset)?);
+        Ok(Resume { offset, index, check })
+    };
+    if let Some(r) = resume.filter(|r| r.offset <= end) {
+        if let Some((leaf, tail)) = r.check.iter().position(|&b| b == b'\n').map(|at| (&r.check[..at], &r.check[at + 1..])) {
+            if !leaf.is_empty() && crate::claude::check_at(path, r.offset).is_ok_and(|now| now == tail) {
+                let mut leaf = String::from_utf8_lossy(leaf).into_owned();
+                let (mut messages, mut on) = (Vec::new(), true);
+                lines(r.offset, &mut |_, line| {
+                    let Ok(e) = serde_json::from_str::<Value>(line) else { return };
+                    if !on || e["type"] == "session" {
+                        on = false;
+                        return;
+                    }
+                    if let Some(id) = e["id"].as_str() {
+                        if e["parentId"].as_str() != Some(leaf.as_str()) {
+                            on = false;
+                            return;
+                        }
+                        leaf = id.to_owned();
+                        messages.extend(branch_message(e));
+                    }
+                });
+                if on {
+                    let index = r.index + messages.len() as i64;
+                    return Ok(Part { messages, first_index: r.index, resume: resume_at(end, index, Some(leaf))? });
+                }
+            }
+        }
+    }
+    let (saved, leaf) = saved_and_leaf(&|each| lines(0, each));
+    let index = saved.messages.len() as i64;
+    Ok(Part { messages: saved.messages, first_index: 0, resume: resume_at(end, index, leaf)? })
 }
 
 /// Converts bytes to text, dropping a partial first line (tail reads) or
@@ -421,6 +503,51 @@ fn first_line(s: &str, max: usize) -> String {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn a_harlo_session_is_read_on_while_it_goes_on_and_whole_when_it_branches() {
+        let dir = std::env::temp_dir().join(format!("harlo-read-part-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("s.jsonl");
+        let entry = |id: &str, parent: Option<&str>, text: &str| {
+            format!("{}\n", serde_json::json!({"type": "message", "id": id, "parentId": parent, "message": {"role": "user", "content": text}}))
+        };
+        let add = |text: &str| std::fs::OpenOptions::new().append(true).open(&path).unwrap().write_all(text.as_bytes()).unwrap();
+        let texts = |m: &[Value]| m.iter().map(|m| m["content"].as_str().unwrap_or_default().to_owned()).collect::<Vec<_>>();
+        let whole = || texts(&read_saved(&path).unwrap().messages);
+        std::fs::write(&path, format!("{{\"type\":\"session\",\"id\":\"s\"}}\n{}{}", entry("a", None, "one"), entry("b", Some("a"), "two"))).unwrap();
+        let first = read_part(&path, None).unwrap();
+        assert_eq!((texts(&first.messages), first.first_index), (whole(), 0));
+
+        // Going on: only what's new.
+        add(&format!("{}{}", entry("c", Some("b"), "three"), r#"{"type":"session_info","name":"x"}"#));
+        add("\n");
+        let on = read_part(&path, Some(&first.resume)).unwrap();
+        assert_eq!((texts(&on.messages), on.first_index), (vec!["three".to_owned()], 2));
+
+        // Half a line: not yet, then read when it's whole.
+        let line = entry("d", Some("c"), "four");
+        add(&line[..10]);
+        let half = read_part(&path, Some(&on.resume)).unwrap();
+        assert!(half.messages.is_empty());
+        assert_eq!(half.resume.offset, on.resume.offset);
+        add(&line[10..]);
+        let rest = read_part(&path, Some(&half.resume)).unwrap();
+        assert_eq!((texts(&rest.messages), rest.first_index), (vec!["four".to_owned()], 3));
+
+        // Back to an earlier point: read whole.
+        add(&entry("e", Some("a"), "two again"));
+        let back = read_part(&path, Some(&rest.resume)).unwrap();
+        assert_eq!((texts(&back.messages), back.first_index), (vec!["one".to_owned(), "two again".to_owned()], 0));
+        assert_eq!(texts(&back.messages), whole());
+
+        // Rewritten: read whole.
+        std::fs::write(&path, format!("{}{}", entry("x", None, "other"), entry("y", Some("x"), "words"))).unwrap();
+        let other = read_part(&path, Some(&back.resume)).unwrap();
+        assert_eq!((texts(&other.messages), other.first_index), (vec!["other".to_owned(), "words".to_owned()], 0));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn a_saved_session_knows_its_models_provider() {

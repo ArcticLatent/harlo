@@ -93,9 +93,14 @@ pub struct Used {
     pub cost: f64,
     /// The kinds of cost among them (`PLAN | PRICED`, say; 0: not said).
     pub kinds: u8,
-    /// Of `requests`, those whose server didn't say what they used: their
-    /// tokens aren't in these, and a priced one's cost is unknown.
+    /// Of `requests`, those whose server didn't say (all of) what they
+    /// used: their missing tokens aren't in these, and a priced one's cost
+    /// is unknown.
     pub unreported: u64,
+    /// What those left unsaid, estimated (a request's size, its reply's
+    /// length): counted against a token budget only, so one it can't measure
+    /// still uses it up, never shown as tokens or priced.
+    pub estimated: u64,
 }
 
 impl Used {
@@ -107,9 +112,21 @@ impl Used {
             input: usage["input_tokens"].as_u64().unwrap_or(0),
             cached: usage["input_tokens_details"]["cached_tokens"].as_u64().unwrap_or(0),
             output: usage["output_tokens"].as_u64().unwrap_or(0),
-            unreported: u64::from(usage["input_tokens"].as_u64().is_none()),
+            unreported: u64::from(usage["input_tokens"].as_u64().is_none() || usage["output_tokens"].as_u64().is_none()),
             ..Self::default()
         }
+    }
+
+    /// With what `usage` left unsaid estimated: `input`, the request's
+    /// size; `output`, its reply's.
+    pub fn estimating(mut self, usage: &Value, input: u64, output: u64) -> Self {
+        if usage["input_tokens"].as_u64().is_none() {
+            self.estimated += input;
+        }
+        if usage["output_tokens"].as_u64().is_none() {
+            self.estimated += output;
+        }
+        self
     }
 
     /// A usage as the session log has it (`input` without the cache's,
@@ -126,6 +143,7 @@ impl Used {
             cost: if kinds == UNKNOWN { 0.0 } else { usage["cost"]["total"].as_f64().unwrap_or(0.0) },
             kinds,
             unreported: u64::from(usage["tokensUnknown"] == true),
+            estimated: usage["tokensEstimated"].as_u64().unwrap_or(0),
         }
     }
 
@@ -139,6 +157,7 @@ impl Used {
             cost: usage["cost"].as_f64().unwrap_or(0.0),
             kinds: usage["costKinds"].as_array().into_iter().flatten().filter_map(Value::as_str).fold(0, |k, n| k | kind_of(n)),
             unreported: usage["unreported"].as_u64().unwrap_or(0),
+            estimated: usage["estimated"].as_u64().unwrap_or(0),
         }
     }
 
@@ -147,6 +166,9 @@ impl Used {
         let mut v = json!({ "requests": self.requests, "input": self.input, "cached": self.cached, "output": self.output, "cost": self.cost, "costKinds": self.kind_names() });
         if self.unreported > 0 {
             v["unreported"] = json!(self.unreported);
+        }
+        if self.estimated > 0 {
+            v["estimated"] = json!(self.estimated);
         }
         v
     }
@@ -185,6 +207,9 @@ impl Used {
         if self.unreported > 0 {
             v["tokensUnknown"] = json!(true);
         }
+        if self.estimated > 0 {
+            v["tokensEstimated"] = json!(self.estimated);
+        }
         v
     }
 
@@ -208,9 +233,9 @@ impl Used {
     }
 
     /// What a token budget counts: tokens sent and received, not those the
-    /// cache served.
+    /// cache served, and what servers didn't say, estimated.
     pub fn billed(&self) -> u64 {
-        self.input.saturating_sub(self.cached) + self.output
+        self.input.saturating_sub(self.cached) + self.output + self.estimated
     }
 
     pub fn add(&mut self, other: &Used) {
@@ -221,12 +246,33 @@ impl Used {
         self.cost += other.cost;
         self.kinds |= other.kinds;
         self.unreported += other.unreported;
+        self.estimated += other.estimated;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What a server leaves unsaid is estimated for the budget, apart from
+    /// what it said, and kept when logged.
+    #[test]
+    fn unsaid_usage_is_estimated() {
+        let none = json!({});
+        let u = Used::from_api(&none).estimating(&none, 5_000, 300);
+        assert_eq!((u.input, u.output, u.unreported, u.estimated, u.billed()), (0, 0, 1, 5_300, 5_300));
+        let half = json!({ "input_tokens": 4_000 });
+        let h = Used::from_api(&half).estimating(&half, 5_000, 300);
+        assert_eq!((h.input, h.output, h.unreported, h.estimated, h.billed()), (4_000, 0, 1, 300, 4_300));
+        let price = Pricing::Priced(Price { input: 2.0, output: 10.0, cached: 0.5 });
+        let logged = h.priced(&price).log(&half, &price);
+        assert_eq!((logged["costKind"].as_str(), logged["tokensEstimated"].as_u64()), (Some("unknown"), Some(300)));
+        assert_eq!(Used::from_log(&logged).billed(), 4_300);
+        assert_eq!(Used::from_details(&h.details()).billed(), 4_300);
+        // Said in full: nothing estimated.
+        let all = json!({ "input_tokens": 10, "output_tokens": 2 });
+        assert_eq!(Used::from_api(&all).estimating(&all, 5_000, 300).estimated, 0);
+    }
 
     #[test]
     fn the_shapes_agree() {
