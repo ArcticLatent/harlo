@@ -5,7 +5,7 @@ description: How agent protocols become shared live sessions, durable conversati
 tags: [architecture, sessions, persistence, desktop]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-14T04:44:05.718Z
+    at: 2026-11-14T05:16:59.652Z
 sources:
   - id: openwiki-source-eda83df6b22941ed75ede295
     resource: repo://crates/harlo-app/qml/ChatView.qml
@@ -37,7 +37,7 @@ sources:
     resource: repo://crates/harlo-harness/src/lib.rs
   - id: openwiki-source-07a69ae82a0e133d3de748f1
     resource: repo://crates/harlo-harness/src/store.rs
-generated: { by: "harlo", at: "2026-11-14T04:44:05.718Z" }
+generated: { by: "harlo", at: "2026-11-14T05:16:59.652Z" }
 ---
 
 # Sessions, persistence, and desktop presentation
@@ -87,6 +87,8 @@ This is the extension seam for desktop presentation: change row roles and QML co
 Transcript Markdown uses `render_rows` to divide long code blocks into 150-line pieces and tables into 100-row pieces, rather than creating one enormous delegate. Continuation rows carry their part, first line, and first-row identity; the first code row retains the complete code for copying. Table pieces share column widths and show the header once. The still-streaming final piece is not cached; finished pieces can be reused. Ordinary `render`, used outside this transcript path, still returns whole blocks.
 
 Code splitting removes only the separator newline from nonfinal pieces. The final piece retains its trailing blank lines; joining pieces with one newline therefore preserves the complete code, including blank lines at piece boundaries and at the end. This matters both for first-row copying and for the phone's reconstruction of highlighted HTML.
+
+For the phone-specific display and copy limits, follow [phone transcript windows](../integrations/phone-and-relay.md); desktop row splitting and transport truncation are separate concerns.
 
 ## Persistence is deliberately split
 

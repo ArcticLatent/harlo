@@ -5,7 +5,7 @@ description: Contributor build prerequisites, focused and integration verificati
 tags: [testing, build, packaging, releases, security]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-13T19:56:31.605Z
+    at: 2026-11-14T05:16:59.652Z
 sources:
   - id: openwiki-source-4d1d392666be6dfdd7a91a2e
     resource: repo://.github/workflows/release.yml
@@ -25,7 +25,7 @@ sources:
     resource: repo://site/README.md
   - id: openwiki-source-f1c29df965300759d3c1ff56
     resource: repo://wrangler.jsonc
-generated: { by: "harlo", at: "2026-11-13T19:56:31.605Z" }
+generated: { by: "harlo", at: "2026-11-14T05:16:59.652Z" }
 ---
 
 # Testing, packaging, and signed updates
@@ -58,6 +58,15 @@ Use a scratch HOME or XDG data/config directories for interactive testing. Demo 
 | Packaging/update | Signing/core update tests | Installed package smoke tests and self-update scenario |
 
 Keep external-service checks distinct from hermetic unit tests. See [agent safety](../concepts/agent-execution-and-safety.md) and [phone integration](../integrations/phone-and-relay.md) for focused invariants.
+
+For stream-accounting regressions, start narrowly before running the broader agent suite:
+
+```sh
+cargo test --locked -p harlo-agent a_stream_that_breaks_keeps_what_it_said_it_used
+cargo test --locked -p harlo-agent a_later_report_of_part_keeps_the_rest
+```
+
+For phone code display/copy regressions, use the focused checks listed in [phone verification](../integrations/phone-and-relay.md#verification); core crypto tests alone are not a substitute for checking desktop serialization and the Swift renderer.
 
 ## Headless Rust CI
 

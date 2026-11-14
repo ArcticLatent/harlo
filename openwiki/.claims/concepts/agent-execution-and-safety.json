@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:25525705beeed8dedd1ce2c5a5f516c6b18a3b0e5b313e2bca1181041665eec2",
+  "pageVersion": "sha256:4bd0ffbe6934493789ec1f08d4100da50d9a07aa36a9c5e7399738851db0a26d",
   "claims": [
     {
       "id": "claim_f2e5edb5ea144848b99636cceee494eb",
@@ -21,7 +21,7 @@
       "statement": "Entirely read-only permitted tool batches run concurrently and preserve completed outcomes and usage when cancelled, marking only unfinished calls interrupted; other batches execute in order and distinguish interrupted calls from calls not run.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-agent/src/agent.rs#L2041-L2101",
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L2044-L2104",
           "version": "repo-lines-v1:sha256:1aae33759de864095e49f8b369e5f47ac512ef35a14920b594951175029e47fc:eyJzZWxlY3RlZExpbmVDb3VudCI6NjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFkNmQwYzQ0NDhhODBiOWQ2NTljYzlhY2Y5ZjlmZTY0ZjcwNzJlNjhjNzc5ZmQ2ZGJlODdlZWFjOTk2OWY3ZjkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJjMmU5ZDUwZTM0MmIzYTYzMTU2MmU3NDkyMmJhZjg1OTdmMDFlZGNhNzE1ODRiMGYwZWNkZjI0NDdlNzE2MDAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE5ZTc2MzU1Y2YxMTk5NDgwYzNmOTk4MzZiMTQ4NmM4NDFkODkxZmFhZDkwNGM2MDhlMDkzMDIyZDM3NTdhZWUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImM1NDljZWE5NWEyNGE2OTRhNGZhMDkxOTc3YjRmMDM4NzU3ZDYyMmJhNzRjODE2OGMwNWRmYzFlZTBmMWNkZWUifQ"
         }
       ]
@@ -155,19 +155,19 @@
       "statement": "Cutoff attempts, including missing-usage estimates, and failed attempts with usage are charged immediately into a session-owned ledger; settlement logs them separately from successful replies before fallback, after tool batches and on stop, so dropping retry work does not discard recorded spend.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-agent/src/agent.rs#L1360-L1382",
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L1363-L1385",
           "version": "repo-lines-v1:sha256:9f13a49647ecd640cbd12dca052beabc9bfd19ffd91c463967c908e0edcbe572:eyJzZWxlY3RlZExpbmVDb3VudCI6MjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFhNzZiMTkxYTgwZGY3MTVjNGVmN2M4OTE4MTQzMTY0OGYwZGM5YTRjODY2MjliZmUxNGRjZTYxMTBlNTJlNzIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImM4MDg4M2RjYzQ1NWNiNGUwODk3NDkxNzMwZmVhYmQzOWM3MTRhYTRmYTUzZTc4MzA1YThkN2ViMWQyZjYxZmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVkZmY3NmIxMDAwZGFjOGJiZWRjNjdlYjU5MWFkNzg5YWRmZTUxZjQ0M2Q0NWEzMTU0NDI5ZmU4NTY2NjllNWMifQ"
         },
         {
-          "resource": "repo://crates/harlo-agent/src/agent.rs#L1791-L1817",
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L1794-L1820",
           "version": "repo-lines-v1:sha256:e4daf18799ebe45ac7592bee15604a23fdf68229341f9cadc91cb62968927a89:eyJzZWxlY3RlZExpbmVDb3VudCI6MjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAyNWY0MWQ0N2QyZjZlYmYwOWRjNGRkYzY0NDExYTYwYjEzNmIzNTE2Mzg4NTJmZjQwYjQwOTAxNWZiNTMwZmMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI2ODg1MTUxZDMyOGUxYzc3NTMxNWE1ZTg5NDQ1NTFlNWQ0Yjk4NTZiYjBjMGQ0M2Q2MjEwODE3NTIyYmJlYzMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjlkZWJjNTQ3ZWQ4MGVmYWJiZGUyMzYwMjYyMDk1MjY5YmQ0N2U4ZTJkZWU4YmI2ZmNhMGVlNjZhMDk2YzllY2QifQ"
         },
         {
-          "resource": "repo://crates/harlo-agent/src/agent.rs#L303-L313",
-          "version": "repo-lines-v1:sha256:71785d0a3408c7c67c616650a9d4beca0d4a02aef2f82bdc111789030de28902:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk2YmUzNWIxODlkYjhkNGJmMmRmMDA1NjJjYzVmMGVhNjFiZmYwMTkxNTc4ZTI0Y2ZiOWFmMmJiZjZlMWRiNWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImEwYzRmZDA3ODBkZmEwYjcwMDg1YTZhZTk4MTZkZTJiMTM2ZDU0NDQwZjY4ZjA0YWNlN2ZkY2Q4YmI0ZWQ5MDYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImZiZTAwOTk4ZGE1NTdkYzA2OWUzYzk1M2JhY2ZhY2YwNzJkMWYzZGMwNWFjMTBmZjY0NGUyOTRjMWMzOGFlMzkifQ"
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L303-L316",
+          "version": "repo-lines-v1:sha256:22c9d236e7e351d950ae90efe866997591a51711166f565e0fbf2ba163bfa9a4:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk2YmUzNWIxODlkYjhkNGJmMmRmMDA1NjJjYzVmMGVhNjFiZmYwMTkxNTc4ZTI0Y2ZiOWFmMmJiZjZlMWRiNWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImEwYzRmZDA3ODBkZmEwYjcwMDg1YTZhZTk4MTZkZTJiMTM2ZDU0NDQwZjY4ZjA0YWNlN2ZkY2Q4YmI0ZWQ5MDYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImZiZTAwOTk4ZGE1NTdkYzA2OWUzYzk1M2JhY2ZhY2YwNzJkMWYzZGMwNWFjMTBmZjY0NGUyOTRjMWMzOGFlMzkifQ"
         },
         {
-          "resource": "repo://crates/harlo-agent/src/agent.rs#L338-L394",
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L341-L397",
           "version": "repo-lines-v1:sha256:c6425bc2eecd7f75e52b092dd5b095b7157c420c25f1df1574aa3ead85027248:eyJzZWxlY3RlZExpbmVDb3VudCI6NTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI3MjA2ZjVkY2RhZTc1ODMyMmIwZmY4ZGJhZWU1ZjA3MzNmZmZlNjIyMzI3ZTMyOWQ1OThkZGJhYWFmYWI1ZWEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY1ZWZiYmI3M2E3YzRlMGNiNWFmYTNmOTk4MGY0Zjk0NmM1ZDYxY2ZmYzg3ZmVhZTI4ZWY2YzNkNmU0NjFiNDQifQ"
         }
       ]
@@ -177,19 +177,19 @@
       "statement": "Shared budget admission atomically reserves estimated request tokens plus 2000 tokens of reply room across main, side, compaction and web-search requests; every retry and post-native-compaction summary obtains fresh admission, with spent-plus-held limits that admitted requests can overshoot.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-agent/src/agent.rs#L1690-L1700",
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L1693-L1703",
           "version": "repo-lines-v1:sha256:9d28367f2384b3313481eba7ddcbba46836deac9ad1733daf3b0e8dbe630fd97:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNjMTQyY2RkODJiMTA3ZDY4MDk5NmZkMTQyNDgxNTkzYjhmYzNmZTU0OWUxOWU1ZjI0NzkwMDgzNmY4ZmZjZWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVmZGY2MmFmNzQxZjAzZDc5ZWQxZGUyMmFmMjQ0MDNjNDg5YzFiY2U0NzYyZWExODFkYzZkNTljMGY5Y2U3OTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNjMTUzZTcyN2IzM2IxODNmMjgxOGY3ZjRhZGRjOGFlNmQxNGViZjlmNmY4MWMwM2UwZDIyNTQ0MGM5MTgwNTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImExODQ3ZmYzMWMzMGZmMjQ4NDA0M2U4NGZjNzlhYjU5NjE4YzFmMWFlOWEzODY4ODY3YWY1MmI3MDg0ZTNiNTIifQ"
         },
         {
-          "resource": "repo://crates/harlo-agent/src/agent.rs#L1791-L1817",
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L1794-L1820",
           "version": "repo-lines-v1:sha256:e4daf18799ebe45ac7592bee15604a23fdf68229341f9cadc91cb62968927a89:eyJzZWxlY3RlZExpbmVDb3VudCI6MjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAyNWY0MWQ0N2QyZjZlYmYwOWRjNGRkYzY0NDExYTYwYjEzNmIzNTE2Mzg4NTJmZjQwYjQwOTAxNWZiNTMwZmMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI2ODg1MTUxZDMyOGUxYzc3NTMxNWE1ZTg5NDQ1NTFlNWQ0Yjk4NTZiYjBjMGQ0M2Q2MjEwODE3NTIyYmJlYzMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjlkZWJjNTQ3ZWQ4MGVmYWJiZGUyMzYwMjYyMDk1MjY5YmQ0N2U4ZTJkZWU4YmI2ZmNhMGVlNjZhMDk2YzllY2QifQ"
         },
         {
-          "resource": "repo://crates/harlo-agent/src/agent.rs#L255-L336",
-          "version": "repo-lines-v1:sha256:dcf6c671ba26e7389da41e1621613a54f4840f69f0e9b9a51742ef22a55d70ff:eyJzZWxlY3RlZExpbmVDb3VudCI6ODIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlhZDIyMDJiYmEwMjUyNTY3ZDNiODM0YzUyOWIxNTlmMDU1NWEzMGEwNDQ0MGVhMTJlZTk1MjI4Y2QxYjNmNWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdiNmM0YjdkNmU5Y2FjYzYxZGZkOTA5NjZhYjVmNjFjMWM4NGEyYTcyNzk4ZTZiY2IzM2RhMjhhYjQ5NGQyYmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFjMzlmYjY4YTRhZDkxZGI3NjlhODY0YzJhMWZmMmU1YzM3YTA3NjA0OWQ3OTNhZWJjYmMxYmY4Mzg5ZDYxYjkifQ"
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L255-L339",
+          "version": "repo-lines-v1:sha256:0c999822479ee634e3c684241a39d8a361f6a66e6ab84d165350a2883f4797a5:eyJzZWxlY3RlZExpbmVDb3VudCI6ODUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlhZDIyMDJiYmEwMjUyNTY3ZDNiODM0YzUyOWIxNTlmMDU1NWEzMGEwNDQ0MGVhMTJlZTk1MjI4Y2QxYjNmNWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdiNmM0YjdkNmU5Y2FjYzYxZGZkOTA5NjZhYjVmNjFjMWM4NGEyYTcyNzk4ZTZiY2IzM2RhMjhhYjQ5NGQyYmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFjMzlmYjY4YTRhZDkxZGI3NjlhODY0YzJhMWZmMmU1YzM3YTA3NjA0OWQ3OTNhZWJjYmMxYmY4Mzg5ZDYxYjkifQ"
         },
         {
-          "resource": "repo://crates/harlo-agent/src/agent.rs#L367-L394",
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L370-L397",
           "version": "repo-lines-v1:sha256:aa64c5dce2b724a2b23b2c44e969d8c0af4b8cf3abdd658068667b880ed3644d:eyJzZWxlY3RlZExpbmVDb3VudCI6MjgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY0MDdlZDc0MThlODE5MzY2ZjUzNTRiMTExNzJkNWZmMjllZDIxYTE1MWY5ZGJlNGY5NzkzNTI3Y2VjMTdkYzAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRkZjE4NDc2ZjBlMWUwNzdhNGY3OWY1NTU1MWNkOTE2OGY1MmZhMTM3NTIyMjYxMTM0ZmJkMzI4ZDU1NGI3MGIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY1ZWZiYmI3M2E3YzRlMGNiNWFmYTNmOTk4MGY0Zjk0NmM1ZDYxY2ZmYzg3ZmVhZTI4ZWY2YzNkNmU0NjFiNDQifQ"
         }
       ]
@@ -199,11 +199,11 @@
       "statement": "Fallback records and announces the model change then restarts the run-loop request path rather than resending an already prepared request for the old model.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-agent/src/agent.rs#L864-L866",
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L867-L869",
           "version": "repo-lines-v1:sha256:f3a5da997fd1d8425ab102ce9ff74b47b12461be362110fc1fdd9933a0211aaa:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZjJlY2U0NDBiYTdiYTAyMTcxY2I0YmNmYjI2Y2UwMWY3NTM1YmZiNWRlMDZmYmY3MjJmZmE4NWM2OTZjMGY5OCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNjIzOTMzZjQ4YmE1NzVkNTU2ZTE4N2EyOWIzYmZlNzE5NjgzZGU5MDAxMGMxNjM5NTg3NmFjZDNiZmMwM2UzMyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiODBkZjA3MGZhZTJlNzc2MmZkNDgxNmM2MmE4NDc2YzFmMTk3M2E5ODY5OGM3YTViNWI1NGQ2ZjgwYjFkOWFiNiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYzdmZmU5OGI1NDFlOGJkODY5NzllZTg4YjNmMWQ3OGJhNGQwMzVmNDc4NmIwZDZkM2NkOTZmYmE3OTdjM2Y4ZiJ9"
         },
         {
-          "resource": "repo://crates/harlo-agent/src/agent.rs#L1061-L1079",
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L1064-L1082",
           "version": "repo-lines-v1:sha256:707ef823889e27cbaebd3422feb3336a164c79ca8d836ef9855841021a8eab00:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM0M2EwNWY5ZGZkZDJhNjQwYWM0YjgyNWVmMjdhMmMyZTY1YjNjZTQ0OTRkNTliNGY0ZWEyNTZkNmZiYTAxNjEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk5ZjJkODRkODgzZmJmNWNjZDdjYWFiMjgzOTlmNTk3YzQ5OTVhZjY0MDc3MTZkZTJkY2VjYzE1NzZmYjAxNzMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA4MWRhMmVhMjgxNDVhNWI0NmFlYjg2NDUwZTVhMTk0MmM4ODVkZmI2NjY1N2QzY2IyNmY5YjEyY2U5Yjc4N2IiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk4MDJmYWY5YjIwMzk3NWRhZmUyZWMxNTFhNjFjOGU5YTcxZDczZDNiMmFjYTdhZjFlZTRiZmM4NjkyN2E4ODcifQ"
         }
       ]
@@ -213,7 +213,7 @@
       "statement": "Completed side-question usage is attributed to its originating session log even after switching sessions, and RPC shutdown waits at most ten seconds for outstanding side tasks before settling usage.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-agent/src/agent.rs#L1155-L1171",
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L1158-L1174",
           "version": "repo-lines-v1:sha256:3a625e18c1eb8f17fc0d00748999b29a5c88f91df7353b6bfb4da76c7300d5d7:eyJzZWxlY3RlZExpbmVDb3VudCI6MTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVmOTM5MGUwY2VlOWRmM2MzYTJjOTRlNTY0NTQ2YjYyM2NiNTQ2Mzg5MGViNmRhYTNlM2RiNzBlZjZhYTdhMzciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUwNzFjNmU5MjJkNjRlM2MyZDEyZDFiNDAwODRjMzFjYzRlNzgwN2ZiNDJlN2Y3MjI5Y2M4ODYwNWU3ZmM4YjUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk5OWJkZWZlZWFjYTYzNDBlMDI5MGRjODZlODg5Yzg5ZDVlMTg5YWE1YmE0NGI1ODViM2I3MDczNGY0YTYyZDgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQxNDI1ZWE1YWM3NWIwMDMxZmYzYTc3NGFiMDljZjE4M2U4MTFlOGZjMDcyOWE2ZjY1OTY2MjRiMDAyMWI2N2YifQ"
         },
         {
@@ -227,7 +227,7 @@
       "statement": "MCP servers start concurrently with a default ten-second startup timeout; after two seconds the agent reports still-pending servers and their timeout allowance.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-agent/src/agent.rs#L1205-L1247",
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L1208-L1250",
           "version": "repo-lines-v1:sha256:1efed49f4a7bfaf36c786432ce2277f49205cfdbab473003cf30a9a31973fe75:eyJzZWxlY3RlZExpbmVDb3VudCI6NDMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY0NzY3NTc4NmMxMmU5NmQ0NjQzYjU3NDFhMzI2YzkyZTNkNTJiZWNkNTdiZjg0ZTM4NjExNzY5NmMzN2UzY2YiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2YjA0NDkxNDY5NzIyZTgzNjNhOTRlNDA0NDUzOGUwMTNhMmEyMTdlMzZiMWU1NjhiYTYwYWNiN2I0YzhmMmUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjlmY2U3ODRjYTk2NDk5YTI4OWQyNTZhOTk0ZDliMTBjOWRhMmFlZDNkODM1NjU0NTA2YzhlNjJlMTkxNzk2NDgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjA2MzdhYWExNGYxYmM4YzNiMDUwOTdmMmYwMmRjMDEwMDBiYWNkN2Y5MDQzNTc3M2U0ZDM1NjYzY2YxYzBkY2MifQ"
         },
         {
@@ -293,7 +293,7 @@
       "statement": "Explore-only sandbox views explicitly mount the project and shared Git directory read-only even under writable ancestors; this shell-level guarantee requires sandboxing.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-agent/src/agent.rs#L1185-L1192",
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L1188-L1195",
           "version": "repo-lines-v1:sha256:dee58ecc18fb0a71017df091ab5adf944daf0af765f613a1b7c1ab082a069808:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMWFmMmQ2MmEwYTczNjVlMWU4MGIxNDkxZTFlMzZkMjBiNTdmMTk5M2FlMjcxNzcyMzFhZWYyYjM3ZjY5NzYyYyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNDg5M2Y0MGUzNzgxZWI4OTZjODJkMDQ2YTA4MDY3YTExZTM1Y2RmMmYxZGZhZjI2ZmVhOTBiOGRiNjY3NjQxMyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYmI0OTQ0NmY2MDNhMmY0ZjUzMGIzNzMwZTE2ODE5NTVjYzgzNmU2ZDdlY2ZlZTc1NWI3ODNmNjVmMGQyMDA3YyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiODgwMTM2YzQ5MmE5NmQ5NzcxMDlmNzUzYWQ0ODY2ZGRjMjljMTAxYjY4ZGExNDQ1MTY0YzRhMjNjYWM5ODg3ZiJ9"
         },
         {
@@ -321,11 +321,11 @@
       "statement": "Web searches settle token spend before releasing their budget holds, and parent tool-result aggregation adds usage without charging that spend twice.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-agent/src/agent.rs#L1986-L2017",
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L1989-L2020",
           "version": "repo-lines-v1:sha256:18a708f914184ad8717c79f7debb55af446c3e0250e8cfb7f33d5d196a2d8216:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjEwM2E3YjgxZTVhZmExMDA3NWM3MGQwM2FhOWNiMTg5YTM4OTgzZTFlZjRlNTA2YWJjZGMxNGVkYTcwMTIwMWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijc0NTU1NTY3NWJjNDQ1NjE3ODBkYTA0ZDQxNmQ3NTNlMGY4ZjgyYWY4ZmY2MzYzNTg1OGEyNjkyMjAyNmY4NmUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjNiMTg4YjJlMTA1NGE3YzQ5ZjE1MzNkMmYyMWYzMjFlMTBlNzcxOWE1N2I2YjBkMDYwZTc4OWU1YWI4MDdmZGMifQ"
         },
         {
-          "resource": "repo://crates/harlo-agent/src/agent.rs#L943-L952",
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L946-L955",
           "version": "repo-lines-v1:sha256:4db9b56311038ac5c31dd126c409f5c9bd79ed24bfaed99f1b55df3889532310:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImExZWQwMTk0ZGY1Y2M1MTBhNzMzZjI3NTZjOTU3YjNhMTA3ZjYxNGM2NDllNWQ4M2ViZWQyNjAyNWJlYTk3MzciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgwYjVjY2YwODRjNWYwYTNlYjA1NzljOGIwOWZjMTc5MGYwZTk1Nzk3NTFhZGJkODBkYTcyMWI0ZDZiOGY5MmQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdmNjhhNDY1MTMyNjM1NjMxZTA4OGRiNjY4ZTY4MzgxZDhhYTkzN2Q1Y2NjN2NhMzU5NGQ2ZGEyNjUzYWEzYjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjBlZjg1Y2JjNTBmMGE1NGU5MDc5ZDA5ZTRiODYyN2FkNjFlNjVmNzJkMmY4YTgyZWNjYTFiODQ4YWNmYjc5ZTYifQ"
         }
       ]
@@ -335,11 +335,11 @@
       "statement": "Stop interrupts desktop-tool discovery and MCP startup; an incomplete MCP start is retried on a subsequent prompt.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-agent/src/agent.rs#L1205-L1247",
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L1208-L1250",
           "version": "repo-lines-v1:sha256:1efed49f4a7bfaf36c786432ce2277f49205cfdbab473003cf30a9a31973fe75:eyJzZWxlY3RlZExpbmVDb3VudCI6NDMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY0NzY3NTc4NmMxMmU5NmQ0NjQzYjU3NDFhMzI2YzkyZTNkNTJiZWNkNTdiZjg0ZTM4NjExNzY5NmMzN2UzY2YiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2YjA0NDkxNDY5NzIyZTgzNjNhOTRlNDA0NDUzOGUwMTNhMmEyMTdlMzZiMWU1NjhiYTYwYWNiN2I0YzhmMmUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjlmY2U3ODRjYTk2NDk5YTI4OWQyNTZhOTk0ZDliMTBjOWRhMmFlZDNkODM1NjU0NTA2YzhlNjJlMTkxNzk2NDgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjA2MzdhYWExNGYxYmM4YzNiMDUwOTdmMmYwMmRjMDEwMDBiYWNkN2Y5MDQzNTc3M2U0ZDM1NjYzY2YxYzBkY2MifQ"
         },
         {
-          "resource": "repo://crates/harlo-agent/src/agent.rs#L744-L756",
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L747-L759",
           "version": "repo-lines-v1:sha256:3d645bdce94af1fa95607fcdf16a68c295f39c79b70f6230dddde5e736029dc1:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZlNjk2YzkyMDYxZTVmNDUxNzBjODhmZTBmNTBhZjg2YTVjNjA3ZGFjNDRjNDc4ZDFiMGRlYTk5NzJjMGY0YjUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU3MjMxODEzOWM5ZjU4YjEzZjRjYjlmZWJiMzExMTUzZGQ1NTI5ZWVmOWEzNzNkNjdlMzA1ZmRjYmVmYjE0MGEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNjNjdlZTA0OGU0MzVhYjkyYzA0MTg4MDRlNmE5ZTA4Mjc0MzZlNjQyNGZlZTBkYzZmY2UxZTQ0YTViMzdkNjciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjYzMzBjODI2ODRlZmI2MDAwOTRlYmY0NGU4NjZlZjhmNjk1ZGQxOGViMjI0NjljYTIyZjc2YmVhNDg4MzMyMDgifQ"
         }
       ]
@@ -349,7 +349,7 @@
       "statement": "MCP schemas exceeding a configurable 12000-byte threshold are replaced by tool search and indirect calls, with up to eight search matches; indirect calls resolve before read-only, approval and plan checks.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-agent/src/agent.rs#L2041-L2061",
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L2044-L2064",
           "version": "repo-lines-v1:sha256:47887fd03c29ae9937bfaef365b39cf6fce3e99fa0aff57eea0f9a2315ad130d:eyJzZWxlY3RlZExpbmVDb3VudCI6MjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFkNmQwYzQ0NDhhODBiOWQ2NTljYzlhY2Y5ZjlmZTY0ZjcwNzJlNjhjNzc5ZmQ2ZGJlODdlZWFjOTk2OWY3ZjkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUyZDRkNTk1NGJiMDg5NmFlMGQyZjU3ZWZjODRhZDEzNTFkZjU2Mzk5ZmZjMTQxNGMzYTM0MDc0NDM4ODNjMzEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE5ZTc2MzU1Y2YxMTk5NDgwYzNmOTk4MzZiMTQ4NmM4NDFkODkxZmFhZDkwNGM2MDhlMDkzMDIyZDM3NTdhZWUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhjODY2MmUwNTE3YzVlNTI3ZDRiZDc3MDc5NTI5OWQyOGM5MzE5Y2JlOGNkMTE3MzgxZWUyNmMxMmIxYjNlN2EifQ"
         },
         {
@@ -385,15 +385,15 @@
       "statement": "Side questions, native compaction and summary requests, and web searches settle failed or cut-off attempts separately from a successful reply; side usage queues and the session ledger retain those attempts independently of the request future.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-agent/src/agent.rs#L1554-L1575",
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L1557-L1578",
           "version": "repo-lines-v1:sha256:ccadd16448f0d430bdf5e06dbcfa813403255fa410db73ab2b66c20067c25b74:eyJzZWxlY3RlZExpbmVDb3VudCI6MjIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2YjA0NDkxNDY5NzIyZTgzNjNhOTRlNDA0NDUzOGUwMTNhMmEyMTdlMzZiMWU1NjhiYTYwYWNiN2I0YzhmMmUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA2YjE4NWFmM2E2YjIzNGM3Y2I3NTZjZTEyNWRhNzMwNTYzNzljZDNmNWM3NGExZTk5NzI5ZDA4Mjk5NGYzODkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNjNzY4NTZlYzI5YTU1YjYyNDM0YWYxNWJhMTgyMjE5MDYyOGU1YWRlOGUwYjhkZjc0ZGMwYmFhOGJjOWI0NDYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE1N2Q0NWViNTIzMGQyZWEyYTEwOWVhMzYyMTA4NTI3ZmNiN2E2NzI0MjQzYzI5OGE5NGY5ZGFkNzQ1ODZiZDgifQ"
         },
         {
-          "resource": "repo://crates/harlo-agent/src/agent.rs#L1630-L1662",
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L1633-L1665",
           "version": "repo-lines-v1:sha256:4da38c6c85f85f68214fad03b59681e3824ee8d384e7d0991f503baa8f1929d7:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE4MGU5Yjc3NjgwODJiMmQwYTk0ZTIzZDZiZWQ2YzNiNWQ3NGFiYmQ1YjFlMDBiMjlkNWZmYWE2Y2M1ZTZjMzYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNkYmQ4YTc1ZTk1YWIxN2RlMDZmMmFhODdiMGFjOTUxNGY4OGM2MGNiNjAwNWRlNWNhYmRjMDNjMDBkMjdjM2QiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNhOTkyNDA4YTE3YTViNjE3ZjVhYmNkMWQ1Y2FmNjBiMTk3NGJiN2Y1NGU4OWMzMDNjYjM3NjU0NTE1MDU5OTIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhlZGYyNDFmZjM3YjY0MGI1ZWY4YzEyNWQ2ZWMyNTczZTIwNDI4ZjBmMjQyMTAxZjMwNzljMGQwMDRmN2QyZjQifQ"
         },
         {
-          "resource": "repo://crates/harlo-agent/src/agent.rs#L1690-L1722",
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L1693-L1725",
           "version": "repo-lines-v1:sha256:39235a4dcf6d52645bfac0eb7500e903bfd8c9575885519ce90a2ffc57aebc02:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNjMTQyY2RkODJiMTA3ZDY4MDk5NmZkMTQyNDgxNTkzYjhmYzNmZTU0OWUxOWU1ZjI0NzkwMDgzNmY4ZmZjZWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM3ZDg3MDNkODRiNWUzNDk0Njk0ZDExYWVmNWM5OTQ2OGQzYjc5M2RhYjQ1MWI3NzdhOTYyYTgwMTQ3ODA0YjgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNjMTUzZTcyN2IzM2IxODNmMjgxOGY3ZjRhZGRjOGFlNmQxNGViZjlmNmY4MWMwM2UwZDIyNTQ0MGM5MTgwNTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVlMjE5NmUxNmZjMjhiMDEzMmRhYmQ1OGYwMzU5NGVmZjk4YTc0ZDc0M2Q4NDUxMzM2YmI1ODdiMWEzZTIxOWQifQ"
         },
         {
@@ -401,7 +401,7 @@
           "version": "repo-lines-v1:sha256:a0323122b0e9722c5ca92ac19cd552f02498de11f9e11d2b1da7eb92983c69f0:eyJzZWxlY3RlZExpbmVDb3VudCI6MjIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFkOWUxMjU0NjQyNTU3NmQzZGVhZThjOWI5ZGJmMTI4ZDVkNmRkYWY1ZDdmZTg1NzkzNDkyN2RlZmZhM2I5ZGQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVkMDc0OWFiMmZmZTNmNGE0ODU2NTI1MTcyMTVmYzc2OTZkNjczYjIyZDJjYmJiZTAxNjIzOTA1YzkzZmRkMzgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBlNzRhYTRkZTE5NDAyNzMxNjg1ZmQwNmNjNTc5YTA3NzRkMGExYjNhODM3MTRlMjMyZDI0MDFjODkzY2Q2ODciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjRkZjA4ZjBkMGJkMDA5NThkNmQ2NDQyMDg0MDczM2E5YjBhOWYzZjhlMTZiYmEyMTM4M2IyYzU2NDA5OTRmNGYifQ"
         },
         {
-          "resource": "repo://crates/harlo-agent/src/agent.rs#L1986-L2017",
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L1989-L2020",
           "version": "repo-lines-v1:sha256:18a708f914184ad8717c79f7debb55af446c3e0250e8cfb7f33d5d196a2d8216:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjEwM2E3YjgxZTVhZmExMDA3NWM3MGQwM2FhOWNiMTg5YTM4OTgzZTFlZjRlNTA2YWJjZGMxNGVkYTcwMTIwMWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijc0NTU1NTY3NWJjNDQ1NjE3ODBkYTA0ZDQxNmQ3NTNlMGY4ZjgyYWY4ZmY2MzYzNTg1OGEyNjkyMjAyNmY4NmUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjNiMTg4YjJlMTA1NGE3YzQ5ZjE1MzNkMmYyMWYzMjFlMTBlNzcxOWE1N2I2YjBkMDYwZTc4OWU1YWI4MDdmZGMifQ"
         }
       ]
@@ -411,7 +411,7 @@
       "statement": "Nested rules delivered within a tool batch block subsequent changes under the same folder until the next batch, including after direct rules-file reads and for move destinations; unrelated folders remain writable.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-agent/src/agent.rs#L917-L919",
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L920-L922",
           "version": "repo-lines-v1:sha256:fdda6b7d49907d9777dd51733d4cae3dfce0b7ad74bcbc7899d55b8d06d6a7f1:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMzQ1NTVmZmJhZGJlYWIzYWQyYmUwZDg0YTdiMjE2YjBkMjE4ZGM4OGQ3ZGYzMWFhZjU0NGFmNjYzNmE3MDU1OSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiOGVlMTZlZGZhOTUwYmU0ZjQ3ZGZlZGQ5ZGFkNTc3N2I2NzBlN2E4MDYzMzBmN2UzOWQzMjViZmMyYzQzYWU4OCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMTgzN2FkYWExOWViNjBlYzM3MWZkMGU1YTU4MDgwYWY4NjAzODU5NjA5ZTQwOTkxMTUwM2EyODQ2OGU3Zjg2YSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYTViZGFjM2MxMzRlZjAyNGRiMDlhMTc0N2U1Zjc5N2JhNThjNGY2MWYzYzNjYmI4MDY5ODA1NDlmM2FmNWM2MSJ9"
         },
         {
@@ -455,7 +455,7 @@
       "statement": "run_code exposes concrete permitted read-only MCP tools but excludes the generic mcp_call dispatcher from its callable set.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-agent/src/agent.rs#L2026-L2035",
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L2029-L2038",
           "version": "repo-lines-v1:sha256:49ce8cc67d8df3cfc7f50a2d5f8a07500a1b88501ab4745665a753e4565277fb:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY3MTk2OGI3ZDA0OTg3YWVkMWViODA5MDIwODM1MjQ0ZjVkZjAyOGEyNWU2YWZjYjBjYmFlMzA1MTA4MjU4M2UiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIyNDQ3YjdkZGVhZTYwNzM5OWYxZTJiZWRiZTQyZmY2ZDM0YjMwODk1MGI3MWMyZWFmOWIxYzllODVkOTIxYWYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJhYTY3ZjA1ZTZiN2ZmM2YzYmEwNjkwY2Q2MTUzN2ZjODQ4OWJmZWM5Y2I0YmVkYTQwOWU2OWViNDUyOWI5MGMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQ0ZjNlZmY3YTNmYTA0N2FlZmZkN2U0Y2E5YTI4ZjM1MjBhNDdlZjM3NmEwMjBiMzNlZjI0YjI3MWJlNTkzMjYifQ"
         },
         {
@@ -466,25 +466,47 @@
     },
     {
       "id": "claim_079ea2b7dfdc4b1d951836a8888ac62d",
-      "statement": "Chat-completions stream errors normalize error-local or earlier usage into shared accounting, preserving measured zero and leaving usage absent when neither report exists.",
+      "statement": "Chat-completions usage reports merge recursively: later non-null fields replace earlier totals, omitted fields remain, and error-local usage overlays accumulated usage before normalization; measured zero remains zero and wholly absent failed-reply usage remains absent.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-agent/src/chat.rs#L262-L268",
-          "version": "repo-lines-v1:sha256:66f3d02409a31c98cf6186261ff9d58faf3674beed8ff5d7b58613310e50bee8:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOGYyNmM3MDNkYzQ2ZTgwYjMzZGI5MjE5ZmJmMTFiYWQ1ZDIzZjY2ZGY5NTE2ZTg5NzFmN2NlZGMwZTA1Yjk1YSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNDEyY2EzNDVjY2Y3NWJmOWMwODA2YmNlNjk1YmU4ZGU4MDhiNzk5ODQyNTFhN2E1NGQyMDJjZjYxMDFkZDQ1MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMmY4YjJhMDIwZDk5NjcxMmE0MDkwNGIwMzcxOTU4OTE1YTU1OTk3MTIyNGJjOTQzYzAzN2Q1MzNjMjhhZTgzZiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMmJkOTMzYjgxYjI4ZTg4N2Y3MDZmMzFjYTg3ODllNzVjNmYwMGUwZjVhNWVkZjhmMzk0NDg1MDExMGUxYjA1MSJ9"
+          "resource": "repo://crates/harlo-agent/src/chat.rs#L141-L148",
+          "version": "repo-lines-v1:sha256:5bc4ce91217c04a04722cb3f3a77f7517e2d94fb1859133c63bcc7a524ec799f:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZDk4NzUxMjdjZmY0YTEwYjYxYTdiOGQxODIzZTU3NTc1NGVmYjg1ZjA2MjIzY2E5MzMxOWYyYWYyZDdlZjJjMyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZTZiMDQ0OTE0Njk3MjJlODM2M2E5NGU0MDQ0NTM4ZTAxM2EyYTIxN2UzNmIxZTU2OGJhNjBhY2I3YjRjOGYyZSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiODYwZGNkZDE4NjI1ZDgwNGI4MjkzMTE0M2I2MjI2NDJjODNjZDllYmU2MTU0ODE4MmIwMTEyNDYyYTM3ZjM1YSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNTcxMDc2NDFmYzgwNjkxMTVjZWU2NzU0ZTA0MzYyMjRhNjQyN2E1YTY3YjUyNzdiZjM5MzVjZDU3NGU1ODRhMiJ9"
         },
         {
-          "resource": "repo://crates/harlo-agent/src/chat.rs#L297-L304",
-          "version": "repo-lines-v1:sha256:c0075f5bacab23f4d340ca475698f93284e863a881b8d3707514cab0e274cf7f:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiODYxMDYwNTY5NmEyMTJjYmMyM2NlODBkMWU1ZDVlODMxZDI5ZmM1OGFlZTkzODdjNGYwZjczN2VkMDc2ZmNkYSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZTZiMDQ0OTE0Njk3MjJlODM2M2E5NGU0MDQ0NTM4ZTAxM2EyYTIxN2UzNmIxZTU2OGJhNjBhY2I3YjRjOGYyZSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYmQ5YzkzNWIwZWZjNzQwYzE2YjhjNzI0MDc3MGIzZDVhMWY2OTA5NDQyNjlhMzJhMmFmZjJlZmFjMWY5Mjk3NCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZjkxMTlkMmQ0NzIwZDlhOTkyYzk5MWVjYTY2ZjVlZGIzYmI4M2QyYzBlZDJjYjI1MGQ2OTllZjkzOWNhMjlkYyJ9"
+          "resource": "repo://crates/harlo-agent/src/chat.rs#L262-L285",
+          "version": "repo-lines-v1:sha256:0cbe65ec7fc83d1556e5849259f091dcb8ce60fa48a802f95ff1a5cfa7ba8428:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBjNjQzYzU3YmU0ODFiNGM2NTZmZWEwMTUwODdiNDc5Y2VkNWQ4NTM1NWNjOTNhODIxMWU1NjNiYWRmODI3NDYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ2N2ZhMzk5NmVkMWFiYzQ0MmRjZmVjMjc3OWFmZTkwMjI4ZjBjM2RkNDQ3NDNlN2RkMTVlMDk2OWY4N2Y5NjAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJmOGIyYTAyMGQ5OTY3MTJhNDA5MDRiMDM3MTk1ODkxNWE1NTk5NzEyMjRiYzk0M2MwMzdkNTMzYzI4YWU4M2YiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY3NDJkYzljMmI5Zjg2MzM1YTYyZWM4YTFmMmU4NzE3NWJkYmExYmFjZDc3NjEwYTBmY2M4ZDkzNzg3OGFjYzMifQ"
         },
         {
-          "resource": "repo://crates/harlo-agent/src/chat.rs#L525-L543",
-          "version": "repo-lines-v1:sha256:11277807d32ba56a3c436c5d883682468684e43981aa84e58f995af692dde0e0:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkxY2M0MDY4N2QyNDRlOWRhZjkxY2VkNDY1MjMyNjU2OWE0ZmI2ZGZjODFkMDNmYmU3MjNhNWVhM2NjYmU5ZGYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkyYjVlZGY1OTQ5Y2ZlYTY3ODIyY2Y2OTExMzIzNjNkNjhkNmYxZTE2OWY1ZTBkNGY3YzE0ZTVmYTFlNmQ0ZTUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIwODgxYzhkZWNmMzMyMzIwMDI0NjM5NTc2NGY2ZDU1ODM2MGRkMjFkMWRkOGZkNjllZDE3OGVmZTFmODNkYjQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjNkMWEzYjhmYzU1NTg2MjZmNzgzMTI0YjdlNmNjNjYxYTQ5N2IyNTZjMmMwMzM4Y2JiZjAxMjdlZDViNTcwNWQifQ"
+          "resource": "repo://crates/harlo-agent/src/chat.rs#L560-L604",
+          "version": "repo-lines-v1:sha256:80aec46f6b914f4bc08635207953f3be84db957416125fb6b365ec93d8d07bae:eyJzZWxlY3RlZExpbmVDb3VudCI6NDUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkxY2M0MDY4N2QyNDRlOWRhZjkxY2VkNDY1MjMyNjU2OWE0ZmI2ZGZjODFkMDNmYmU3MjNhNWVhM2NjYmU5ZGYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIwODgxYzhkZWNmMzMyMzIwMDI0NjM5NTc2NGY2ZDU1ODM2MGRkMjFkMWRkOGZkNjllZDE3OGVmZTFmODNkYjQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk3Yjg3MTgwMmIxZjA3NTQzZmEzMTY2ZWQ1ZGEyZGZjOTI3NmRhNzA4ZjQwNTAzMDMyMWZhYjY2NDRiYWRmZjIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_75e8f39536ea4bb0a08f690a623df626",
+      "statement": "Broken chat-completions streams preserve previously reported usage in Dropped errors, which the agent charges before retry admission; a dropped stream without reported usage does not add a failed-attempt charge.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L1794-L1818",
+          "version": "repo-lines-v1:sha256:8c7a1137df2ae79f64c53a8b68c7121109700f4cf680ddf41084f2088c7a641a:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAyNWY0MWQ0N2QyZjZlYmYwOWRjNGRkYzY0NDExYTYwYjEzNmIzNTE2Mzg4NTJmZjQwYjQwOTAxNWZiNTMwZmMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdiODk2MjhjMzJkMzc0N2M5YTczZTQwODc2NTk5OGRmNjFiMjA3MmJiNWU3N2FhNGJkYzc1YThjNGMyYmEzZjQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI2ODg1MTUxZDMyOGUxYzc3NTMxNWE1ZTg5NDQ1NTFlNWQ0Yjk4NTZiYjBjMGQ0M2Q2MjEwODE3NTIyYmJlYzMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjE5ZTc2MzU1Y2YxMTk5NDgwYzNmOTk4MzZiMTQ4NmM4NDFkODkxZmFhZDkwNGM2MDhlMDkzMDIyZDM3NTdhZWUifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L303-L315",
+          "version": "repo-lines-v1:sha256:280460a9ccb355accab38ffde21ad650bd7b7294c1cbb1a5802e0e7c90897d25:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk2YmUzNWIxODlkYjhkNGJmMmRmMDA1NjJjYzVmMGVhNjFiZmYwMTkxNTc4ZTI0Y2ZiOWFmMmJiZjZlMWRiNWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImEwYzRmZDA3ODBkZmEwYjcwMDg1YTZhZTk4MTZkZTJiMTM2ZDU0NDQwZjY4ZjA0YWNlN2ZkY2Q4YmI0ZWQ5MDYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI2YjczMThmMDAyODkwMmYwYzU5N2NiOTU4Yjc4NmM1NjAxZDU1ZTM4ZGRlZTZlNjI1MmIwZDEwOThmNDUwZmUifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-agent/src/chat.rs#L308-L339",
+          "version": "repo-lines-v1:sha256:3380833350a0c344c38ed6a8e61a3ef361fadd145b3d23a5aca38b9779aa5963:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM2YzEyOGJjYTM0ZjQ3NTdiYmFjNTY2YjIzODliMWRlNjgyYmJkYWRhYTBiOWZkODY2NTQ0Y2UzNTRjOGIzY2QiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjYwZDRhNDJlYjFlNGZiODk4Y2FlYjRmYTdiOTQ3N2JhZGE3MjhkZTcyNmU2N2FlMWQzY2JkNzg1OGNlZjk2NjYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjgyMDcxMzg4Mjk2MjVhNjk3ODVhYTIzZGNiMDQ2NDg5NjRhZDU5YmRlMTU4YWQ4MjliYmJjNjZkNWQ1ZmZjNDkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjcxNjE1NjE1YWQ1YWM2ZmYxMzE2YzkyMzQ4NWIwNjQ0YzMyYzJiYzEzZWY5NTEzMzNjY2UwYzU2MzE4ZjU1ZWMifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-agent/src/chat.rs#L578-L587",
+          "version": "repo-lines-v1:sha256:914958a1a16739b35392281b34d209558f7ac94e7aebc4add4d235874f3cb50c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkxY2M0MDY4N2QyNDRlOWRhZjkxY2VkNDY1MjMyNjU2OWE0ZmI2ZGZjODFkMDNmYmU3MjNhNWVhM2NjYmU5ZGYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdkOTM1YjQzZDlhYTc0ODg4NDFmODEzNTYzNzUyMDE4ZGYwZjVlZDEwNmIwYTg4ZDU4ZDg1ZWYzM2RjYTcwOWMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjViMGY0ZDQ1MDJiNDg3YjYzMTRiYzI3ZGVhNjA3ZGMxZmI2MjY1NWVhYWVhNmM1MGNjMzBkZWE1ZmYyMGMyYjYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImEwMGRiMDQwZjI5MDliZjk3OGZmMGE5NTZhNTVlODNjNjUzNDE4ZGU2YmI2OGY4MDQxZGE5NzZmOGQzZDIyNzAifQ"
         }
       ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-14T04:44:05.718Z"
+    "at": "2026-11-14T05:16:59.652Z"
   }
 }

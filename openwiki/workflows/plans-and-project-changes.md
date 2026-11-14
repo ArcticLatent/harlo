@@ -5,21 +5,25 @@ description: How session-scoped orchestration tools update shared plans and safe
 tags: [workflow, plans, orchestration, git, worktrees]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-13T07:57:21.074Z
+    at: 2026-11-14T05:16:59.652Z
 sources:
   - id: openwiki-source-c5e0556ff4a54e3a14503a14
     resource: repo://crates/harlo-app/qml/ChangesPanel.qml
   - id: openwiki-source-0120ee12ce1363bc8be995c8
     resource: repo://crates/harlo-app/qml/PlanDock.qml
+  - id: openwiki-source-94aedfb131ba76701f9659c4
+    resource: repo://crates/harlo-app/src/orchestration.rs
   - id: openwiki-source-707e4f109038162ab1383c58
     resource: repo://crates/harlo-app/src/plans.rs
+  - id: openwiki-source-22e4ea3417daf80d96080fd6
+    resource: repo://crates/harlo-app/src/workspace.rs
   - id: openwiki-source-3da8c8a8e687e436a4a8c49a
     resource: repo://crates/harlo-core/src/git.rs
   - id: openwiki-source-0605559ba1474db590a7724b
     resource: repo://crates/harlo-core/src/orchestration.rs
   - id: openwiki-source-75bcb97e87a29c42db5d4dfd
     resource: repo://crates/harlo-core/src/plan.rs
-generated: { by: "harlo", at: "2026-11-13T07:57:21.074Z" }
+generated: { by: "harlo", at: "2026-11-14T05:16:59.652Z" }
 ---
 
 # Plans, helpers, and project changes
@@ -33,6 +37,12 @@ Harlo's own agent can also send `harlo_call` frames on its RPC pipe when started
 Helper-start policy is configurable: only when asked, offer a split for the user's decision (the default), or start independently. This is desktop orchestration, not the in-process `task` mechanism described in [agent execution](../concepts/agent-execution-and-safety.md).
 
 The helper briefing distinguishes unresolved task decisions from decisions reserved for the user. `ask_parent` returns a question to the starting session; Harlo helpers use their own blocking `ask` for user decisions, while other helpers use `request_approval` and end their turn. Completion calls `report_done` once with an explicit succeeded/failed outcome, summary, and changed files; inability to proceed must not be hidden as success.
+
+## Finding prior work before starting a helper
+
+Without a query, `list_sessions` lists live sessions and their status, folder, and starting parent. A nonempty query instead searches past messages: the workspace captures caller scope, orchestration queries the shared search reader off the Qt thread, and the UI thread joins the hits to session metadata. Results exclude the caller's own saved session and default to its folder unless `everywhere` is true. The reply includes at most eight sessions with up to two passages each; use `read_session` for the selected session's latest messages.
+
+This is a discovery workflow, not a new helper launch. See [history search and indexing](../architecture/sessions-and-desktop.md#searching-without-blocking-presentation) when expected prior work is missing from the results.
 
 ## Shared plan state
 

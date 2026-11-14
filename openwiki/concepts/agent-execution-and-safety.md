@@ -5,7 +5,7 @@ description: Harlo agent model-loop ordering, resumable history, RPC approvals, 
 tags: [agent, safety, sandbox, rpc, tools]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-14T04:44:05.718Z
+    at: 2026-11-14T05:16:59.652Z
 sources:
   - id: openwiki-source-0b93973e66ce9fb1db2bd77c
     resource: repo://crates/harlo-agent/src/agent.rs
@@ -37,7 +37,7 @@ sources:
     resource: repo://crates/harlo-agent/src/tools/mod.rs
   - id: openwiki-source-cc3a6736ec7398d0638b6f38
     resource: repo://crates/harlo-agent/src/used.rs
-generated: { by: "harlo", at: "2026-11-14T04:44:05.718Z" }
+generated: { by: "harlo", at: "2026-11-14T05:16:59.652Z" }
 ---
 
 # Agent execution and safety boundaries
@@ -62,7 +62,9 @@ Missing usage is not measured zero: `Used.unreported` tracks requests missing ei
 
 Responses attempts cut off by the server retain their usage even if retried; a cutoff without reported usage is counted as unknown and estimated for the budget. Failed responses carrying a usage object also count, while failures without usage do not add a request to this failed-attempt accounting. Each ended attempt is charged immediately and put in a session-owned ledger, separately from the eventual successful reply. Main requests settle the ledger into totals and logs before fallback or error propagation, after tool batches, and when stopped. Dropping a request during retry backoff does not discard attempts already recorded. Side questions use their originating session's side-usage queue; compaction and web searches use the session ledger.
 
-Chat-completions stream errors also preserve usage: an error's report with a prompt-token count takes precedence, otherwise a previously received usage object is retained when available. Counts are normalized to the shared Responses-style accounting shape. Reported zero remains measured zero; an error without any usage remains absent rather than becoming an unknown-sized request.
+Chat-completions usage reports merge field by field, including nested details: later non-null values replace earlier totals rather than being added, while omitted or null fields preserve earlier values. An error-local report overlays the accumulated report using the same rule. Counts are normalized to the shared Responses-style accounting shape. Reported zero remains measured zero; an error without any usage remains absent rather than becoming an unknown-sized request.
+
+Premature stream closure, connection failure, and idle timeout also carry any usage already reported by a chat-completions stream. The agent charges that dropped attempt through the same ledger before deciding whether to retry; a dropped stream without a usage object adds no failed-attempt charge. Retrying does not erase spend from the broken reply.
 
 ## Request admission and auxiliary work
 
@@ -140,6 +142,8 @@ Additional focused checks include `a_used_budget_stops_every_kind_of_request`, `
 `rules_from_a_batch_hold_its_later_changes` covers the same-batch rules barrier, including a direct rules-file read and a move. `call_arguments_are_an_object_or_not_sent` covers MCP argument normalization and rejection.
 
 `each_try_is_counted_as_it_ends_and_the_next_admitted` verifies immediate charging, refusal after exhaustion, and ledger retention when the request is dropped. Chat's `a_failed_reply_keeps_what_it_said_it_used` checks error-local and earlier usage reports, measured zero, and absent usage.
+
+`a_stream_that_breaks_keeps_what_it_said_it_used` covers usage followed by closure or an idle timeout, including continued retry eligibility. `a_later_report_of_part_keeps_the_rest` verifies partial-report merging and replacement of totals rather than double counting.
 
 Suggested checks:
 

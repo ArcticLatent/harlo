@@ -5,7 +5,7 @@ description: SSH-backed project paths, per-machine helper deployment and state, 
 tags: [ssh, remote, models, engines, configuration]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-13T19:56:31.605Z
+    at: 2026-11-14T05:16:59.652Z
 sources:
   - id: openwiki-source-f1322101a0183d196da191a3
     resource: repo://crates/harlo-agent/src/providers.rs
@@ -29,7 +29,7 @@ sources:
     resource: repo://crates/harlo-core/src/remote.rs
   - id: openwiki-source-5d94b2fabb592e050ff61e0a
     resource: repo://crates/harlo-core/src/servers.rs
-generated: { by: "harlo", at: "2026-11-13T19:56:31.605Z" }
+generated: { by: "harlo", at: "2026-11-14T05:16:59.652Z" }
 ---
 
 # Remote machines and model servers
@@ -97,6 +97,7 @@ Focused tests cover provider discovery, preserving existing provider configurati
 ```sh
 cargo test -p harlo-core --no-default-features model_servers
 cargo test -p harlo-core --no-default-features agent_host
+cargo test -p harlo-agent what_a_model_costs
 ```
 
 For a broader view of where the remote session feeds into the UI, see [sessions and desktop](../architecture/sessions-and-desktop.md).
