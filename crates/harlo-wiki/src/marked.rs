@@ -168,9 +168,27 @@ pub enum Inline {
     Br,
 }
 
+impl Drop for Inline {
+    /// Children dropped from a list, not by recursion: a heading's tokens
+    /// can nest thousands deep (`****…x…****`).
+    fn drop(&mut self) {
+        let (Inline::Link(c) | Inline::Em(c) | Inline::Strong(c) | Inline::Del(c)) = self else { return };
+        let mut pending = std::mem::take(c);
+        while let Some(mut t) = pending.pop() {
+            if let Inline::Link(c) | Inline::Em(c) | Inline::Strong(c) | Inline::Del(c) = &mut t {
+                pending.append(c);
+            }
+        }
+    }
+}
+
 /// Text of inline tokens the way OpenWiki forms an anchor from it: html
 /// left out, nested tokens followed, a line break a space.
 pub fn inline_text(tokens: &[Inline]) -> String {
+    stacker::maybe_grow(RED_ZONE, GROW_BY, || inline_text_at(tokens))
+}
+
+fn inline_text_at(tokens: &[Inline]) -> String {
     let mut out = String::new();
     for t in tokens {
         match t {
@@ -189,22 +207,55 @@ struct Lexer {
     in_raw_block: bool,
     link_emitted: bool,
     link_paren_possible: bool,
+    /// Blocks (and inline tokens) nested so far, and whether they went
+    /// past `MAX_NESTING`.
+    depth: usize,
+    too_deep: bool,
+    /// Text gone through nested blocks and inline tokens so far: each
+    /// level goes through what it holds again, so a deep page costs its
+    /// size times its depth.
+    work: usize,
 }
+
+/// More nested blocks or inline tokens than this and the text isn't lexed:
+/// OpenWiki's parser runs out of stack at about 3,000 nested blockquotes
+/// and fails the call. The stack grows as needed up to it, so any thread
+/// gets there (a page past it fails its call, never the process).
+pub const MAX_NESTING: usize = 3000;
+/// Nor more work than this (bytes gone through, counted at each level): a
+/// real page takes a few times its size; a 100 KB page of `>` would take
+/// seconds before it reached the depth limit (OpenWiki's parser fails it
+/// in a fraction of one).
+pub const MAX_WORK: usize = 16 << 20;
+const RED_ZONE: usize = 128 * 1024;
+const GROW_BY: usize = 4 << 20;
+
+/// Text that nests deeper than `MAX_NESTING`, or costs more than `MAX_WORK`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TooDeep;
 
 /// `marked.lexer(src)`: the top-level blocks, headings with their inline
 /// tokens.
-pub fn lex(src: &str) -> Vec<Block> {
+pub fn lex(src: &str) -> Result<Vec<Block>, TooDeep> {
     let src = src.replace("\r\n", "\n").replace('\r', "\n");
-    let mut lx = Lexer { links: HashMap::new(), in_link: false, in_raw_block: false, link_emitted: false, link_paren_possible: true };
+    let mut lx = Lexer { links: HashMap::new(), in_link: false, in_raw_block: false, link_emitted: false, link_paren_possible: true, depth: 0, too_deep: false, work: 0 };
     let mut tokens = Vec::new();
     lx.block_tokens(&src, &mut tokens, false);
     for t in tokens.iter_mut() {
+        if lx.too_deep {
+            break;
+        }
         if t.kind == Kind::Heading {
             lx.in_raw_block = false;
             t.inline = lx.inline_tokens(&t.text.clone());
         }
     }
-    tokens
+    if lx.too_deep {
+        // (Dropped here, a frame at a time, on a stack that can take it.)
+        stacker::maybe_grow(RED_ZONE, GROW_BY, move || drop(tokens));
+        return Err(TooDeep);
+    }
+    Ok(tokens)
 }
 
 fn rtrim<'a>(s: &'a str, c: char) -> &'a str {
@@ -245,7 +296,7 @@ pub fn warm() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         let _ = std::thread::Builder::new().name("wiki-warm".into()).spawn(|| {
-            lex("# A\n\nText with `code`, [a](b) and *em*.\n\n## B\n\n- one\n- two\n\n1. x\n\n> q\n\n```rs\nx\n```\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\n<div>\nh\n</div>\n\n[r]: http://x\n\n---\n");
+            let _ = lex("# A\n\nText with `code`, [a](b) and *em*.\n\n## B\n\n- one\n- two\n\n1. x\n\n> q\n\n```rs\nx\n```\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\n<div>\nh\n</div>\n\n[r]: http://x\n\n---\n");
         });
     });
 }
@@ -350,9 +401,27 @@ fn first_char(s: &str) -> Option<char> {
 }
 
 impl Lexer {
-    fn block_tokens(&mut self, src: &str, tokens: &mut Vec<Block>, mut last_paragraph_clipped: bool) {
+    /// Counts a level of nesting while `f` runs (none past the limit), on a
+    /// stack grown as needed.
+    fn nested<T: Default>(&mut self, len: usize, f: impl FnOnce(&mut Self) -> T) -> T {
+        self.work += len;
+        if self.too_deep || self.depth >= MAX_NESTING + 1 || self.work > MAX_WORK {
+            self.too_deep = true;
+            return T::default();
+        }
+        self.depth += 1;
+        let out = stacker::maybe_grow(RED_ZONE, GROW_BY, || f(self));
+        self.depth -= 1;
+        out
+    }
+
+    fn block_tokens(&mut self, src: &str, tokens: &mut Vec<Block>, last_paragraph_clipped: bool) {
+        self.nested(src.len(), |lx| lx.block_tokens_at(src, tokens, last_paragraph_clipped))
+    }
+
+    fn block_tokens_at(&mut self, src: &str, tokens: &mut Vec<Block>, mut last_paragraph_clipped: bool) {
         let mut src = src;
-        while !src.is_empty() {
+        while !src.is_empty() && !self.too_deep {
             let last_kind = tokens.last().map(|t| t.kind);
             // space
             if let Some(m) = NEWLINE.exec(src).filter(|m| !m.whole().is_empty()) {
@@ -546,7 +615,7 @@ impl Lexer {
                     let old = tokens.last().unwrap().clone();
                     let continuation = lines.join("\n");
                     let new_text = format!("{}\n{}", old.raw, BLOCKQUOTE_SETEXT_REPLACE2.replace(&continuation, true, |_| String::new()));
-                    let new = self.blockquote(&new_text)?;
+                    let new = stacker::maybe_grow(RED_ZONE, GROW_BY, || self.blockquote(&new_text))?;
                     let leftover = new_text[new.raw.len()..].strip_prefix('\n').unwrap_or(&new_text[new.raw.len()..]).to_owned();
                     let leftover_count = if leftover.is_empty() { 0 } else { leftover.split('\n').count() };
                     let consumed: Vec<String> = if leftover_count > 0 { lines[..lines.len().saturating_sub(leftover_count)].to_vec() } else { lines.clone() };
@@ -689,6 +758,10 @@ impl Lexer {
     // ---- Inline ----
 
     fn inline_tokens(&mut self, src: &str) -> Vec<Inline> {
+        self.nested(src.len(), |lx| lx.inline_tokens_at(src))
+    }
+
+    fn inline_tokens_at(&mut self, src: &str) -> Vec<Inline> {
         let prev = self.link_paren_possible;
         self.link_paren_possible = prev && src.contains(')');
         let masked = if src.contains(['*', '_', '~']) { self.mask_src(src) } else { src.to_owned() };
@@ -1195,13 +1268,13 @@ mod tests {
     use super::*;
 
     fn kinds(src: &str) -> Vec<(Kind, String)> {
-        lex(src).into_iter().map(|b| (b.kind, b.raw)).collect()
+        lex(src).unwrap().into_iter().map(|b| (b.kind, b.raw)).collect()
     }
 
     #[test]
     fn blocks_keep_their_source() {
         let src = "# Title\n\nIntro.\n\n## A\n\n- one\n- two\n\n> quote\n\n```\n# code\n```\n\nSetext\n---\n\n| a | b |\n|---|---|\n| 1 | 2 |\n";
-        let joined: String = lex(src).iter().map(|b| b.raw.as_str()).collect();
+        let joined: String = lex(src).unwrap().iter().map(|b| b.raw.as_str()).collect();
         assert_eq!(joined, src);
         let k: Vec<Kind> = kinds(src).into_iter().map(|(k, _)| k).filter(|k| *k != Kind::Space).collect();
         assert_eq!(k, [Kind::Heading, Kind::Paragraph, Kind::Heading, Kind::List, Kind::Blockquote, Kind::Code, Kind::Heading, Kind::Table]);
@@ -1209,10 +1282,30 @@ mod tests {
 
     #[test]
     fn heading_text_and_inline() {
-        let t = lex("## Queue `enqueue()` and <em>dequeue</em> ##\n");
+        let t = lex("## Queue `enqueue()` and <em>dequeue</em> ##\n").unwrap();
         assert_eq!(t[0].text, "Queue `enqueue()` and <em>dequeue</em>");
         assert_eq!(inline_text(&t[0].inline), "Queue enqueue() and dequeue");
-        let t = lex("## _private_ my_var *x* [link](a.md) \\_ &#65;\n");
+        let t = lex("## _private_ my_var *x* [link](a.md) \\_ &#65;\n").unwrap();
         assert_eq!(inline_text(&t[0].inline), "private my_var x link _ A");
+    }
+
+    /// Deep nesting never takes the process down, even on a small thread's
+    /// stack: up to the limit it's lexed, past it the text fails.
+    #[test]
+    fn deep_nesting_fails_the_text_not_the_process() {
+        let on_small_stack = |src: String| std::thread::Builder::new().stack_size(256 << 10).spawn(move || lex(&src).map(|t| t.len())).unwrap().join().unwrap();
+        assert_eq!(on_small_stack(format!("{} x\n", ">".repeat(1000))), Ok(1));
+        assert_eq!(on_small_stack(format!("{} x\n", ">".repeat(MAX_NESTING))), Ok(1));
+        assert_eq!(on_small_stack(format!("{} x\n", ">".repeat(MAX_NESTING + 1))), Err(TooDeep));
+        assert_eq!(on_small_stack(format!("# a\n\n{} x\n", ">".repeat(100_000))), Err(TooDeep));
+        let list: String = (0..1500).map(|i| format!("{}- a\n", "  ".repeat(i))).collect();
+        assert!(on_small_stack(list).is_ok());
+        let inline = format!("# {}x{}\n", "[".repeat(20_000), "]".repeat(20_000));
+        assert!(on_small_stack(inline).is_ok());
+        // (Emphasis nests a level per two marks: OpenWiki's fails past
+        // about 3,000 marks, so the deep one fails here too.)
+        let emph = |n: usize| format!("# {}x{}\n", "*".repeat(n), "*".repeat(n));
+        assert!(on_small_stack(emph(1000)).is_ok());
+        assert_eq!(on_small_stack(emph(20_000)), Err(TooDeep));
     }
 }

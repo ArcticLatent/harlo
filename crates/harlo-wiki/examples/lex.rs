@@ -7,7 +7,7 @@ fn main() {
     for line in std::io::stdin().lock().lines() {
         let path = line.unwrap();
         let text = std::fs::read_to_string(&path).unwrap_or_default();
-        let blocks: Vec<serde_json::Value> = marked::lex(&text)
+        let blocks: Vec<serde_json::Value> = marked::lex(&text).unwrap_or_default()
             .iter()
             .map(|b| {
                 let kind = match b.kind {

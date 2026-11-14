@@ -594,11 +594,22 @@ mod tests {
         std::fs::write(&program, "#!/bin/sh\nwhile read -r _; do :; done\n").unwrap();
         std::fs::set_permissions(&program, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
         let cfg = HarnessConfig { kind: HarnessKind::Harlo, program: Some(program), cwd: dir.clone(), session: SessionTarget::Ephemeral, extra_args: vec![], env: vec![], remote: None };
-        let spawned = {
-            let _dir = crate::protocol_log::TEST_DIR.lock().unwrap_or_else(|e| e.into_inner());
-            Harness::spawn(cfg)
+        // Another test thread forking while the script was still open for
+        // writing keeps it busy for a moment ("Text file busy"): try again.
+        let mut tries = 0;
+        let (harness, _events) = loop {
+            let spawned = {
+                let _dir = crate::protocol_log::TEST_DIR.lock().unwrap_or_else(|e| e.into_inner());
+                Harness::spawn(cfg.clone())
+            };
+            match spawned {
+                Err(e) if tries < 20 && format!("{e:#}").contains("Text file busy") => {
+                    tries += 1;
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+                other => break other.unwrap(),
+            }
         };
-        let (harness, _events) = spawned.unwrap();
         let wait = Duration::from_secs(5);
         let asked = harness.request(json!({ "type": "get_available_models" }));
         tokio::pin!(asked);

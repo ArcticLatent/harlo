@@ -540,11 +540,56 @@ fn same_file(a: &Path, b: &Path) -> bool {
 
 const WORKFLOW: &str = include_str!("openwiki-update.yml");
 
+/// Where `rel` (a path under the repository at `root`) really is, links
+/// followed (a link to a file not made yet too), when that's inside the
+/// repository: a setup file or the wiki's folder leading out of it (a link
+/// to another folder, or a parent folder that's one) is refused, so a run
+/// never writes outside the repository. (OpenWiki writes through them.)
+pub fn inside(root: &Path, rel: &str) -> Result<PathBuf> {
+    let refused = || Error::Host("invalid_input", format!("Cannot update {rel} because it leads outside the repository (a symbolic link); nothing was changed. Point it inside the repository or remove it, then retry."));
+    let real_root = std::fs::canonicalize(root).map_err(|e| other(e.to_string()))?;
+    let mut path = root.join(rel);
+    for _ in 0..40 {
+        // The deepest part that exists, resolved; the rest is made later.
+        let mut existing = path.clone();
+        let mut rest: Vec<std::ffi::OsString> = Vec::new();
+        loop {
+            match std::fs::symlink_metadata(&existing) {
+                Ok(_) => break,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    let Some(name) = existing.file_name().map(|n| n.to_owned()) else { return Err(refused()) };
+                    if !existing.pop() {
+                        return Err(refused());
+                    }
+                    rest.push(name);
+                }
+                Err(e) => return Err(other(e.to_string())),
+            }
+        }
+        let real = match std::fs::canonicalize(&existing) {
+            Ok(r) => r,
+            // A link to something not there yet: where it points.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && rest.is_empty() => {
+                let target = std::fs::read_link(&existing).map_err(|e| other(e.to_string()))?;
+                path = existing.parent().map(|p| p.join(&target)).unwrap_or(target);
+                continue;
+            }
+            Err(e) => return Err(other(e.to_string())),
+        };
+        if rest.iter().any(|n| n == ".." || n == ".") || !real.starts_with(&real_root) {
+            return Err(refused());
+        }
+        return Ok(rest.iter().rev().fold(real, |p, n| p.join(n)));
+    }
+    Err(refused())
+}
+
 /// `ensureCodeModeRepoSetup`: the workflow on init (when there's none), and
-/// the managed block in AGENTS.md and CLAUDE.md.
+/// the managed block in AGENTS.md and CLAUDE.md, each written where it
+/// really is, inside the repository.
 fn code_mode_setup(root: &Path, workflow: bool) -> Result<()> {
     if workflow {
-        let p = root.join(".github/workflows/openwiki-update.yml");
+        let p = inside(root, ".github/workflows/openwiki-update.yml")?;
         match std::fs::read(&p) {
             Ok(_) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -555,8 +600,8 @@ fn code_mode_setup(root: &Path, workflow: bool) -> Result<()> {
         }
     }
     let agents = agents_snippet();
-    let (a, c) = (root.join("AGENTS.md"), root.join("CLAUDE.md"));
-    let claude = if same_file(&a, &c) { agents.clone() } else { claude_snippet() };
+    let (a, c) = (inside(root, "AGENTS.md")?, inside(root, "CLAUDE.md")?);
+    let claude = if a == c || same_file(&a, &c) { agents.clone() } else { claude_snippet() };
     let updates = [(a.clone(), next_agents_content(&a, &agents, false)?), (c.clone(), next_agents_content(&c, &claude, true)?)];
     for (p, next) in updates {
         if let Some(n) = next {
@@ -1112,6 +1157,8 @@ pub fn begin(input: &Begin) -> Result<Begun> {
         lang::Resolved::Absent => None,
     };
     let root = &input.root;
+    // (The wiki's folder too: its run files are written in it.)
+    inside(root, "openwiki")?;
     code_mode_setup(root, input.mode == "init")?;
     if let Some(persisted) = read_state(root)? {
         return resume(input, requested, persisted);
@@ -1630,6 +1677,66 @@ mod tests {
         assert_eq!(plan_page_path("architecture/x.md").unwrap(), "/openwiki/architecture/x.md");
         assert!(plan_page_path("/openwiki/_draft.md").is_err());
         assert!(plan_page_path("/openwiki/index.md").is_err());
+    }
+
+    /// Setup files and the wiki's folder that lead outside the repository
+    /// (links, a linked parent folder, a link to nothing yet) are refused
+    /// and nothing outside changes; links inside it still work.
+    #[test]
+    fn setup_stays_inside_the_repository() {
+        use std::os::unix::fs::symlink;
+        let base = std::env::temp_dir().join(format!("harlo-run-links-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let outside = base.join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        let repo = |name: &str| {
+            let r = base.join(name);
+            std::fs::create_dir_all(&r).unwrap();
+            assert!(std::process::Command::new("git").arg("-C").arg(&r).args(["init", "-q"]).status().unwrap().success());
+            std::fs::write(r.join("main.rs"), "fn main() {}\n").unwrap();
+            r
+        };
+        let begin_in = |r: &Path| {
+            let b = Begin { root: r.to_path_buf(), mode: "init".into(), language: None, force: false, producer: "harlo".into(), model: "m".into() };
+            begin(&b).map(|_| ()).map_err(error_text)
+        };
+        let refused = |r: std::result::Result<(), String>, what: &str| assert!(r.as_ref().is_err_and(|e| e.starts_with("invalid_input: Cannot update") && e.contains("outside the repository")), "{what}: {r:?}");
+        std::fs::write(outside.join("theirs.md"), "theirs\n").unwrap();
+        // A setup file linked out of the repository.
+        for name in ["AGENTS.md", "CLAUDE.md"] {
+            let r = repo(&format!("file-{name}"));
+            symlink(outside.join("theirs.md"), r.join(name)).unwrap();
+            refused(begin_in(&r), name);
+            assert_eq!(std::fs::read_to_string(outside.join("theirs.md")).unwrap(), "theirs\n");
+        }
+        // A link to a file not there yet, outside.
+        let r = repo("dangling");
+        symlink(outside.join("new.md"), r.join("AGENTS.md")).unwrap();
+        refused(begin_in(&r), "dangling");
+        assert!(!outside.join("new.md").exists());
+        // A parent folder linked out: the workflow would go there.
+        let r = repo("github");
+        std::fs::create_dir_all(outside.join("gh")).unwrap();
+        symlink(outside.join("gh"), r.join(".github")).unwrap();
+        refused(begin_in(&r), ".github");
+        assert!(!outside.join("gh/workflows").exists());
+        // The wiki's folder linked out.
+        let r = repo("wiki");
+        std::fs::create_dir_all(outside.join("wiki")).unwrap();
+        symlink(outside.join("wiki"), r.join("openwiki")).unwrap();
+        refused(begin_in(&r), "openwiki");
+        assert_eq!(std::fs::read_dir(outside.join("wiki")).unwrap().count(), 0);
+        // Inside: CLAUDE.md a link to AGENTS.md (not there yet), and
+        // .github a link to a folder in the repository.
+        let r = repo("inside");
+        symlink("AGENTS.md", r.join("CLAUDE.md")).unwrap();
+        std::fs::create_dir_all(r.join("ci")).unwrap();
+        symlink("ci", r.join(".github")).unwrap();
+        assert_eq!(begin_in(&r), Ok(()));
+        assert!(std::fs::read_to_string(r.join("AGENTS.md")).unwrap().contains("OPENWIKI:START"));
+        assert!(std::fs::symlink_metadata(r.join("CLAUDE.md")).unwrap().file_type().is_symlink());
+        assert!(r.join("ci/workflows/openwiki-update.yml").is_file());
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

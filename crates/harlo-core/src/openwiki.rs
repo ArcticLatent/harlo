@@ -1417,6 +1417,41 @@ esac; done"#
         assert!(r.to_string().contains("invalid_state"), "planning: no pages yet: {r}");
     }
 
+    /// A page nesting thousands deep shows (or fails) without taking harlo
+    /// down, on a worker thread's stack.
+    #[test]
+    fn deep_pages_view_on_a_small_stack() {
+        let view = |body: String| std::thread::Builder::new().stack_size(2 << 20).spawn(move || page_view("deep.md", &body)["blocks"].as_array().map(Vec::len)).unwrap().join().unwrap();
+        for n in [1000, 5000, 100_000] {
+            assert!(view(format!("# Deep\n\n{} x\n", ">".repeat(n))).is_some(), "{n} blockquotes");
+            let list: String = (0..n.min(3000)).map(|i| format!("{}- a\n", "  ".repeat(i))).collect();
+            assert!(view(format!("# Deep\n\n{list}")).is_some(), "{n} lists");
+            assert!(view(format!("# {}x{}\n", "*".repeat(n), "*".repeat(n))).is_some(), "{n} emphasis");
+            assert!(view(format!("# Deep\n\n{}x{}\n", "[".repeat(n), "]".repeat(n))).is_some(), "{n} brackets");
+        }
+    }
+
+    /// A page past the parser's depth fails the calls that read it, as
+    /// OpenWiki's do, with its error; the process and the other pages are
+    /// fine.
+    #[test]
+    fn deep_page_fails_its_calls_only() {
+        let (root, _gone) = fixture();
+        assert!(Command::new("git").arg("-C").arg(&root).args(["init", "-q"]).status().unwrap().success());
+        std::fs::write(root.join("openwiki/deep.md"), format!("---\ntype: overview\ntitle: Deep\n---\n# Deep\n\n## Part\n\n{} retried\n", ">".repeat(5000))).unwrap();
+        let on_worker = |tool: &'static str, args: Value| {
+            let root = root.clone();
+            std::thread::Builder::new().stack_size(2 << 20).spawn(move || call(&root, tool, args).unwrap()).unwrap().join().unwrap()
+        };
+        let failed = |r: &Value| r["isError"] == json!(true) && r["content"][0]["text"] == "OpenWiki MCP operation failed.";
+        let r = on_worker("openwiki_search", json!({"query": "retried"}));
+        assert!(failed(&r), "{r}");
+        let r = on_worker("openwiki_read", json!({"page": "openwiki/deep.md", "sections": ["part"]}));
+        assert!(failed(&r), "{r}");
+        let r = on_worker("openwiki_read", json!({"page": "openwiki/architecture/jobs.md", "sections": ["retry-control"]}));
+        assert!(r.to_string().contains("three times"), "{r}");
+    }
+
     #[test]
     fn writing_session_tools_and_prompt() {
         let tools = writing_tools();

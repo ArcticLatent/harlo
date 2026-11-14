@@ -173,21 +173,21 @@ fn repository_path(resource: &str) -> String {
     js_lower(p.strip_prefix("./").unwrap_or(&p))
 }
 
-fn search_units(markdown: &str, page: &str, wiki: &str) -> Vec<Unit> {
+fn search_units(markdown: &str, page: &str, wiki: &str) -> std::result::Result<Vec<Unit>, marked::TooDeep> {
     let fields = front::fields(markdown).unwrap_or_default();
     if fields.get("status").and_then(Value::as_str) == Some("deprecated") {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let body = front::body(markdown);
     if body.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let relative = &page[1..];
     let title = front::string_field(fields.get("title")).unwrap_or_else(|| relative.to_owned());
     let description = front::string_field(fields.get("description")).unwrap_or_default();
     let tags = front::string_array(fields.get("tags"));
     let source_paths: Vec<String> = source_resources(&fields).iter().map(|r| repository_path(r)).collect();
-    let tokens = marked::lex(body);
+    let tokens = marked::lex(body)?;
     let headings = heading_sections(&tokens);
     let identifiers = std::iter::once(relative.to_owned()).chain(tags).chain(source_paths.iter().cloned()).collect::<Vec<_>>().join(" ");
     let unit = |s: &Section, raw: &str| Unit {
@@ -206,7 +206,7 @@ fn search_units(markdown: &str, page: &str, wiki: &str) -> Vec<Unit> {
     if !sections.is_empty() {
         let mut units: Vec<Unit> = sections.iter().map(|s| unit(s, &s.raw)).collect();
         if let Some(h1) = first_h1 {
-            let page_tokens = marked::lex(&h1.raw);
+            let page_tokens = marked::lex(&h1.raw)?;
             let first_h2 = page_tokens.iter().position(|t| t.kind == Kind::Heading && t.depth == 2).unwrap_or(page_tokens.len());
             let intro: String = page_tokens[..first_h2].iter().filter(|t| t.kind != Kind::Heading).map(|t| t.raw.as_str()).collect();
             if !jsre::trim(&intro).is_empty() {
@@ -215,12 +215,12 @@ fn search_units(markdown: &str, page: &str, wiki: &str) -> Vec<Unit> {
                 units.insert(0, u);
             }
         }
-        return units;
+        return Ok(units);
     }
     if let Some(h1) = first_h1 {
-        return vec![unit(h1, body)];
+        return Ok(vec![unit(h1, body)]);
     }
-    Vec::new()
+    Ok(Vec::new())
 }
 
 static IMAGE: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"!\[([^\]]*)\]\([^)]*\)").unwrap());
@@ -231,7 +231,7 @@ static SPACES: LazyLock<Re> = LazyLock::new(|| Re::new(r"\s+", "gu"));
 /// The block of a section matching the most terms, as plain text of at most
 /// 600 characters.
 fn relevant_excerpt(raw: &str, terms: &[String]) -> String {
-    let blocks: Vec<Block> = marked::lex(raw).into_iter().filter(|t| t.kind != Kind::Heading && !jsre::trim(&t.raw).is_empty()).collect();
+    let blocks: Vec<Block> = marked::lex(raw).unwrap_or_default().into_iter().filter(|t| t.kind != Kind::Heading && !jsre::trim(&t.raw).is_empty()).collect();
     let mut best: Option<(usize, usize)> = None;
     for (i, b) in blocks.iter().enumerate() {
         let text = js_lower(&normalize_text(&b.raw));
@@ -272,9 +272,18 @@ struct Index {
     db: rusqlite::Connection,
 }
 
-/// The last few indexes built, the latest first, by the wikis' roots (with
-/// their pages' text size).
-static INDEXES: Mutex<Vec<(Vec<std::path::PathBuf>, usize, Index)>> = Mutex::new(Vec::new());
+/// A search scope's index: searches of the same wikis share it, one at a
+/// time (its database is one connection); the first after a change builds
+/// it again, in place, and those waiting use that one.
+type Slot = Arc<Mutex<Option<Index>>>;
+
+/// The last few scopes searched, the latest first, by the wikis' roots
+/// (with their pages' text size): one slot each.
+static INDEXES: Mutex<Vec<(Vec<std::path::PathBuf>, usize, Slot)>> = Mutex::new(Vec::new());
+
+/// The scopes each index was built for, in order (for tests).
+#[cfg(test)]
+static BUILT: Mutex<Vec<Vec<std::path::PathBuf>>> = Mutex::new(Vec::new());
 const KEPT_INDEXES: usize = 4;
 /// At most this much page text indexed is kept, all wikis together (the
 /// oldest go first; a wiki bigger than it is indexed per search).
@@ -386,18 +395,18 @@ type PageKey = (String, String, u64, usize);
 
 /// Each page's sections: an unchanged page's kept ones, the others made on
 /// as many threads as help (a first search of a big wiki is mostly this).
-fn units_of(pages: &[PageKey], texts: &[String], old: &HashMap<&PageKey, &Arc<Vec<Unit>>>) -> Vec<Arc<Vec<Unit>>> {
+fn units_of(pages: &[PageKey], texts: &[String], old: &HashMap<&PageKey, &Arc<Vec<Unit>>>) -> Result<Vec<Arc<Vec<Unit>>>> {
     let mut out: Vec<Option<Arc<Vec<Unit>>>> = pages.iter().map(|k| old.get(k).map(|u| Arc::clone(u))).collect();
     let todo: Vec<usize> = (0..pages.len()).filter(|&i| out[i].is_none()).collect();
     let bytes: usize = todo.iter().map(|&i| texts[i].len()).sum();
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(8).min(bytes / (64 << 10) + 1);
     if threads <= 1 {
         for i in todo {
-            out[i] = Some(Arc::new(search_units(&texts[i], &pages[i].1, &pages[i].0)));
+            out[i] = Some(Arc::new(search_units(&texts[i], &pages[i].1, &pages[i].0).map_err(too_deep)?));
         }
     } else {
         let next = std::sync::atomic::AtomicUsize::new(0);
-        let made: Vec<Vec<(usize, Vec<Unit>)>> = std::thread::scope(|s| {
+        let made: Vec<Vec<(usize, std::result::Result<Vec<Unit>, marked::TooDeep>)>> = std::thread::scope(|s| {
             let workers: Vec<_> = (0..threads)
                 .map(|_| {
                     s.spawn(|| {
@@ -414,10 +423,16 @@ fn units_of(pages: &[PageKey], texts: &[String], old: &HashMap<&PageKey, &Arc<Ve
             workers.into_iter().map(|w| w.join().unwrap_or_else(|e| std::panic::resume_unwind(e))).collect()
         });
         for (i, units) in made.into_iter().flatten() {
-            out[i] = Some(Arc::new(units));
+            out[i] = Some(Arc::new(units.map_err(too_deep)?));
         }
     }
-    out.into_iter().map(Option::unwrap_or_default).collect()
+    Ok(out.into_iter().map(Option::unwrap_or_default).collect())
+}
+
+/// A page nesting deeper than the lexer goes: the call fails, as
+/// OpenWiki's does (its parser's stack runs out), with its generic error.
+fn too_deep(_: marked::TooDeep) -> Error {
+    Error::Other(format!("Markdown nests more than {} levels deep", marked::MAX_NESTING))
 }
 
 pub fn search(root: &Path, req: &SearchRequest) -> Result<Value> {
@@ -456,9 +471,15 @@ pub fn search(root: &Path, req: &SearchRequest) -> Result<Value> {
     // The pages' texts, then the index kept for these wikis when none
     // changed, else one built again (reusing unchanged pages' sections).
     let roots: Vec<std::path::PathBuf> = wikis.iter().map(|w| w.root.clone()).collect();
-    let kept = {
-        let mut all = INDEXES.lock().unwrap();
-        all.iter().position(|(r, _, _)| *r == roots).map(|i| all.remove(i).2)
+    let slot: Slot = {
+        let mut all = INDEXES.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = match all.iter().position(|(r, _, _)| *r == roots) {
+            Some(i) => all.remove(i),
+            None => (roots.clone(), 0, Slot::default()),
+        };
+        let slot = Arc::clone(&entry.2);
+        all.insert(0, entry);
+        slot
     };
     let mut pages = Vec::new();
     let mut texts = Vec::new();
@@ -473,28 +494,43 @@ pub fn search(root: &Path, req: &SearchRequest) -> Result<Value> {
             texts.push(markdown);
         }
     }
-    let index = match kept {
-        Some(index) if index.pages == pages => index,
-        kept => {
-            let old: HashMap<&(String, String, u64, usize), &Arc<Vec<Unit>>> = kept.as_ref().map(|k| k.pages.iter().zip(&k.page_units).collect()).unwrap_or_default();
-            let page_units = units_of(&pages, &texts, &old);
-            drop(old);
-            build_index(pages, page_units)?
-        }
-    };
-    let results = if index.page_units.iter().all(|p| p.is_empty()) { Vec::new() } else { rank(&index, &terms, &paths, limit as usize, workspace.is_some())? };
     let bytes: usize = texts.iter().map(String::len).sum();
-    if bytes <= KEPT_BYTES {
-        let mut all = INDEXES.lock().unwrap();
-        all.insert(0, (roots, bytes, index));
-        let mut total = 0;
-        let keep = all.iter().take(KEPT_INDEXES).take_while(|(_, b, _)| {
+    let results = {
+        let mut held = slot.lock().unwrap_or_else(|e| e.into_inner());
+        if held.as_ref().is_none_or(|index| index.pages != pages) {
+            let made = {
+                let old: HashMap<&(String, String, u64, usize), &Arc<Vec<Unit>>> = held.as_ref().map(|k| k.pages.iter().zip(&k.page_units).collect()).unwrap_or_default();
+                units_of(&pages, &texts, &old).and_then(|page_units| build_index(pages, page_units))
+            };
+            // (One that fails leaves the last one there.)
+            *held = Some(made?);
+            #[cfg(test)]
+            BUILT.lock().unwrap().push(roots.clone());
+        }
+        let index = held.as_ref().expect("built");
+        let results = if index.page_units.iter().all(|p| p.is_empty()) { Vec::new() } else { rank(index, &terms, &paths, limit as usize, workspace.is_some())? };
+        if bytes > KEPT_BYTES {
+            *held = None;
+        }
+        results
+    };
+    // Its size noted; the oldest scopes go past the limits (a wiki bigger
+    // than them isn't kept at all).
+    let mut all = INDEXES.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(e) = all.iter_mut().find(|(r, _, s)| *r == roots && Arc::ptr_eq(s, &slot)) {
+        e.1 = bytes;
+    }
+    all.retain(|(r, b, _)| !(*r == roots && *b > KEPT_BYTES));
+    let mut total = 0;
+    let keep = all
+        .iter()
+        .take(KEPT_INDEXES)
+        .take_while(|(_, b, _)| {
             total += b;
             total <= KEPT_BYTES
-        });
-        let keep = keep.count();
-        all.truncate(keep);
-    }
+        })
+        .count();
+    all.truncate(keep);
     Ok(wrap(results))
 }
 
@@ -540,7 +576,7 @@ pub fn read(root: &Path, req: &ReadRequest) -> Result<Value> {
     let requested = req.sections.iter().map(|s| normalize_anchor(s)).collect::<Result<Vec<_>>>()?;
     let store = Store::new(&wiki.root);
     let markdown = store.read_markdown(&page)?;
-    let tokens = marked::lex(front::body(&markdown));
+    let tokens = marked::lex(front::body(&markdown)).map_err(too_deep)?;
     let mut available: HashMap<String, String> = HashMap::new();
     for s in heading_sections(&tokens) {
         available.insert(s.anchor, s.raw);
@@ -641,6 +677,44 @@ mod tests {
         std::fs::remove_file(root.join("openwiki/a.md")).unwrap();
         assert_eq!(refs("retry"), ["openwiki/b.md#queue", "openwiki/c.md#backoff"], "a removed page");
         assert!(refs("thrice").is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Searches at the same time share the scope's one index: from cold,
+    /// one builds it and the others use it; warm, none builds; one entry.
+    #[test]
+    fn concurrent_searches_share_the_index() {
+        let root = std::env::temp_dir().join(format!("harlo-wiki-shared-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("openwiki")).unwrap();
+        unsafe { std::env::set_var("OPENWIKI_CONFIG_DIR", root.join("no-registry")) };
+        for i in 0..300 {
+            std::fs::write(root.join(format!("openwiki/p{i}.md")), format!("# Page {i}\n\n## Retry {i}\n\nJobs retry {i} times with backoff, then wait in queue {i}.\n")).unwrap();
+        }
+        let builds = || BUILT.lock().unwrap().iter().filter(|r| r.first().is_some_and(|r| r.ends_with(root.file_name().unwrap()))).count();
+        let at_once = || {
+            let started = std::time::Instant::now();
+            let times: Vec<u128> = std::thread::scope(|s| {
+                let all: Vec<_> = (0..4)
+                    .map(|_| {
+                        s.spawn(|| {
+                            let t = std::time::Instant::now();
+                            let found = search(&root, &SearchRequest { query: "retry backoff", paths: None, limit: Some(5.0), workspace: None }).unwrap();
+                            assert_eq!(found["results"].as_array().unwrap().len(), 5);
+                            t.elapsed().as_millis()
+                        })
+                    })
+                    .collect();
+                all.into_iter().map(|h| h.join().unwrap()).collect()
+            });
+            eprintln!("4 searches at once: {times:?} ms (all in {} ms)", started.elapsed().as_millis());
+        };
+        at_once();
+        assert_eq!(builds(), 1, "from cold, one search builds it");
+        at_once();
+        assert_eq!(builds(), 1, "warm: none builds");
+        let entries = INDEXES.lock().unwrap().iter().filter(|(r, _, _)| r.first().is_some_and(|r| r.ends_with(root.file_name().unwrap()))).count();
+        assert_eq!(entries, 1, "one entry for the scope");
         let _ = std::fs::remove_dir_all(&root);
     }
 }
