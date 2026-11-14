@@ -5,7 +5,7 @@ description: How Harlo's Rust wiki engine retrieves sections, selects linked wor
 tags: [openwiki, architecture, retrieval, claims, persistence]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-14T17:36:19.145Z
+    at: 2026-11-14T18:22:19.698Z
 sources:
   - id: openwiki-source-4af2dd3e4a0acae243d3b65c
     resource: repo://crates/harlo-core/src/openwiki.rs
@@ -29,7 +29,7 @@ sources:
     resource: repo://crates/harlo-wiki/src/tools.rs
   - id: openwiki-source-7df8fd612dbd67f186cd1d6e
     resource: repo://crates/harlo-wiki/src/workspaces.rs
-generated: { by: "harlo", at: "2026-11-14T17:36:19.145Z" }
+generated: { by: "harlo", at: "2026-11-14T18:22:19.698Z" }
 ---
 
 # Native wiki engine and evidence lifecycle
@@ -54,7 +54,7 @@ Search results are compact references such as `openwiki/architecture/wiki-engine
 
 ### Markdown limits isolate failure
 
-Retrieval's Markdown lexer grows its stack as needed and limits nested parsing to 3,000 levels and 16 MiB of cumulative parsing work. The work limit counts text again at each nested level, so it is not a 16 MiB file-size allowance. Exceeding either limit produces `TooDeep` rather than exhausting the worker thread's stack. Stack-aware inline traversal and token cleanup also protect deeply nested intermediate structures.
+Retrieval's Markdown lexer grows its stack as needed and applies three parsing budgets: 3,000 nesting levels, 16 MiB of cumulative work, and 1,048,576 closing-delimiter scans for emphasis and strikethrough. Work counts text again at each nested level and the remaining inline text at each rule-attempt position, so it is not a 16 MiB file-size allowance. The scan budget separately bounds repeated searches for closing `*`, `_`, and `~` delimiters. Exceeding a budget produces `TooDeep` rather than continuing pathological parsing or exhausting the worker thread's stack. Stack-aware inline traversal and token cleanup also protect deeply nested intermediate structures.
 
 Search propagates a parse failure from any page it must index; section read propagates a failure from its requested page. The tool boundary reports `OpenWiki MCP operation failed.` for this error. It is a failed call, not an empty match set or a process-wide shutdown: a subsequent read of another valid page can still succeed. Desktop page presentation uses core's separate Markdown renderer, so successful display is not proof that retrieval accepts the same nesting.
 
@@ -113,6 +113,8 @@ When changing this system, preserve the separation between disposable retrieval 
 Representative engine tests cover cache invalidation (`kept_index_follows_the_pages`), evidence canonicalization and moved ranges (`resources`, `ranges_follow_moved_lines`), safe storage, schema validation, and link/diagram processing. Core integration tests additionally exercise local reading without a server and native writer run-ID rejection.
 
 `concurrent_searches_share_the_index` verifies four simultaneous cold searches build one index and warm searches reuse it. `deep_nesting_fails_the_text_not_the_process` exercises the lexer on a 256 KiB thread stack, including accepted nesting and rejected depth/work cases. `setup_stays_inside_the_repository` checks outward file, parent-directory, wiki-directory, and dangling links as well as supported inward links. Core's `deep_page_fails_its_calls_only` verifies that search and read fail without preventing a subsequent valid read; `deep_pages_view_on_a_small_stack` covers the separate desktop rendering path.
+
+`delimiter_runs_stop_at_their_budget` checks that large mixed-delimiter headings and repeated `_a` headings fail with `TooDeep` within a bounded elapsed time, while smaller examples and headings with lone delimiters still parse. Together with the small-stack test, it covers expensive inline parsing as well as deeply nested blocks; a page need not exceed the nesting limit to be refused.
 
 ```sh
 cargo test -p harlo-wiki

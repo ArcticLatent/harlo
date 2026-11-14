@@ -9,11 +9,11 @@
       "completedRunId": "9b116427-ea1c-457a-969e-28b1368f1b02"
     },
     "/openwiki/architecture/wiki-engine.md": {
-      "pageVersion": "sha256:127072b86f8b4525b91ea19cf1fd679ffb783414678526597b8ff5ab34cae67b",
+      "pageVersion": "sha256:fd5a7a5bf53977ee89ede62bf3ed737a9032e761ab5086ae0dc8bdf501d82ece",
       "completedBy": "harlo",
-      "completedRunId": "0396adf2-cf48-40a3-bc68-2ce5ef8dc0cd",
-      "gitHead": "32437670ec30d817f485090755634daf0f37fa42",
-      "sourceFingerprint": "sha256:13e59334b06646fc5b568d49f24d894ef862fc053da478d086ada4723286dad9"
+      "completedRunId": "1c05e8f8-bf00-4fdb-bf6f-24a2052da493",
+      "gitHead": "5dcfb1d795a69d7601e1af25bda6b390c8c05b9f",
+      "sourceFingerprint": "sha256:f6ff8330541ea38aa5ab0ff8fc9391e74979b2489c6437e1efcac866e521b30f"
     },
     "/openwiki/concepts/agent-execution-and-safety.md": {
       "gitHead": "49e1c73cd96a97c140b16609f6f2478914f24596",
