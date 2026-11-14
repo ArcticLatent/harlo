@@ -206,11 +206,13 @@ Popup {
         id: writer
         property string op
         property string objectPrefix
+        // (Shared with the page's other writer: a save here refreshes both.)
         property int rev: 0
-        readonly property var all: {
-            if (rev < 0) return ({})
-            try { return JSON.parse(Workspace.setting("wiki_writer") || "{}") } catch (e) { return ({}) }
+        signal saved()
+        function stored() {
+            try { return JSON.parse(Workspace.setting("wiki_writer") || "{}") || ({}) } catch (e) { return ({}) }
         }
+        readonly property var all: rev >= 0 ? stored() : ({})
         // { agent, model, thinking } ({}: the project's own).
         readonly property var value: all[op] || ({})
         readonly property var providers: Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()).filter(p => p.canChat && p.enabled && p.state !== "missing") : []
@@ -230,10 +232,11 @@ Popup {
             return all.sort((a, b) => rank(a) - rank(b)).map(m => Object.assign(m, { label: m.name + (!m.local ? "" : up(m.id) ? " · local" : " · local, server stopped") }))
         }
         function save(v) {
-            const next = Object.assign({}, all)
+            // (Merged into what's stored now, not what this one read.)
+            const next = stored()
             if (v.agent) next[op] = v; else delete next[op]
             Workspace.setSetting("wiki_writer", Object.keys(next).length ? JSON.stringify(next) : "")
-            rev++
+            saved()
             Workspace.wikiWriterChanged()
         }
         function change(k, x) { const v = Object.assign({}, value); v[k] = x; save(v) }
@@ -2160,20 +2163,22 @@ Popup {
     Component {
         id: wikiPage
         ColumnLayout {
+            id: wikiWriters
             spacing: 0
+            property int rev: 0
             SectionHeader {
                 title: "Creating a wiki"
                 subtitle: "Reads the whole repository and plans every page: the biggest job, where a stronger model pays off."
                 more: "Create, and Continue on a first run that stopped, is a session of this agent spending its model's tokens. Unset, a project's own agent and model write it. On another machine, the project's model writes it (the one chosen here may not be there). Turning a project's wiki on or off is in Projects."
             }
-            WikiWriter { op: "create"; objectPrefix: "wikiCreate" }
+            WikiWriter { op: "create"; objectPrefix: "wikiCreate"; rev: wikiWriters.rev; onSaved: wikiWriters.rev++ }
             SectionHeader {
                 Layout.topMargin: 28
                 title: "Updating it"
                 subtitle: "Rewrites only the pages whose cited code changed: focused work a cheaper or local model does well."
                 more: "Update first checks, with no model, whether any fact's code changed or files were added; when none did, harlo records the update itself and no session starts. Otherwise a session of this agent updates the pages that need it."
             }
-            WikiWriter { op: "update"; objectPrefix: "wikiWriter" }
+            WikiWriter { op: "update"; objectPrefix: "wikiWriter"; rev: wikiWriters.rev; onSaved: wikiWriters.rev++ }
         }
     }
 

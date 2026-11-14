@@ -100,37 +100,38 @@ pub fn changed_paths(root: &Path, ignore: &Ignore, base: Option<&str>) -> Vec<St
 /// The files a wiki's run sets up beside it (not code it describes).
 const SETUP_FILES: [&str; 4] = ["AGENTS.md", "CLAUDE.md", ".openwikiignore", ".github/workflows/openwiki-update.yml"];
 
-/// harlo: files added since `base` (committed), staged or new in the work
-/// tree, past the wiki's and ignored ones, in code-unit order.
-pub fn added_paths(root: &Path, ignore: &Ignore, base: &str) -> Vec<String> {
-    let mut paths: Vec<String> = git_lines(root, &["diff", "--name-only", "--diff-filter=A", &format!("{base}..HEAD")]);
-    paths.extend(git_lines(root, &["diff", "--name-only", "--diff-filter=A", "HEAD"]));
-    paths.extend(git_lines(root, &["ls-files", "--others", "--exclude-standard"]));
+/// harlo: files added between `base` and `head` (the commit checked) or
+/// in the work tree since, past the wiki's, its setup files and ignored
+/// ones, in code-unit order. Err: git couldn't say (so nothing can be
+/// taken as unchanged).
+pub fn added_paths(root: &Path, ignore: &Ignore, base: &str, head: &str) -> std::result::Result<Vec<String>, String> {
+    let mut paths = split_nul(&git_strict(root, &["diff", "--name-only", "-z", "--no-ext-diff", "--diff-filter=A", base, head])?)?;
+    paths.extend(split_nul(&git_strict(root, &["diff", "--name-only", "-z", "--no-ext-diff", "--diff-filter=A", head])?)?);
+    paths.extend(split_nul(&git_strict(root, &["ls-files", "--others", "--exclude-standard", "-z"])?)?);
     let mut out: Vec<String> = Vec::new();
-    for p in paths.iter().map(|p| normalize_git_path(p)) {
+    for p in paths.iter().map(|p| p.replace('\\', "/")) {
         // (Added, then deleted again: not there.)
         if !p.is_empty() && !is_wiki_path(&p) && !SETUP_FILES.contains(&p.as_str()) && !ignore.ignores(&p, false) && !out.contains(&p) && root.join(&p).exists() {
             out.push(p);
         }
     }
     out.sort_by(|a, b| util::cmp16(a, b));
-    out
+    Ok(out)
 }
 
-/// harlo: source files changed since `base` (committed or in the work
-/// tree) by enough that the wiki may need to say more: a new top-level
-/// definition (outside tests), or `GROWN_LINES` lines or more added and
-/// removed. A small edit to code no fact cites needs no update; these may.
+/// harlo: lines added and removed in a source file since the last update
+/// from which it needs a model, whatever else changed (see grown_paths).
 pub const GROWN_LINES: usize = 50;
 
-const SOURCE_EXTENSIONS: [&str; 32] = [
-    "rs", "py", "js", "mjs", "cjs", "ts", "tsx", "jsx", "go", "java", "kt", "kts", "swift", "c", "h", "cc", "cpp", "hpp", "cs", "rb", "php", "qml", "sh", "lua",
-    "scala", "ex", "exs", "zig", "dart", "vue", "svelte", "sql",
+const SOURCE_EXTENSIONS: [&str; 39] = [
+    "rs", "py", "js", "mjs", "cjs", "ts", "mts", "cts", "tsx", "jsx", "go", "java", "kt", "kts", "swift", "c", "h", "cc", "cpp", "cxx", "hpp", "hh", "cs", "rb", "php",
+    "qml", "sh", "lua", "scala", "ex", "exs", "zig", "dart", "vue", "svelte", "sql", "m", "mm", "fs",
 ];
 
-/// The keywords that open a top-level definition, after any `export`,
-/// `default`, `pub(…)`, `async`, `unsafe` or `static`.
+/// Keywords that open a definition at any depth (a method too), after
+/// any modifiers.
 const DEFINITIONS: [&str; 16] = ["fn", "struct", "enum", "trait", "impl", "mod", "class", "def", "function", "interface", "type", "func", "object", "protocol", "extension", "module"];
+const MODIFIERS: [&str; 16] = ["export", "default", "async", "unsafe", "static", "abstract", "final", "public", "private", "protected", "internal", "open", "extern", "override", "inline", "virtual"];
 
 fn is_test_path(p: &str) -> bool {
     let name = p.rsplit('/').next().unwrap_or(p);
@@ -140,12 +141,10 @@ fn is_test_path(p: &str) -> bool {
         || ["_test.", ".test.", ".spec.", "Tests."].iter().any(|t| name.contains(t))
 }
 
-/// The name a top-level definition line defines ("pub fn run(" → "run"),
-/// if it is one.
+/// The name a definition line defines ("pub fn run(" → "run", "  def
+/// go(self):" → "go"), if a keyword says it is one.
 fn defined_name(line: &str) -> Option<String> {
-    if line.starts_with(char::is_whitespace) {
-        return None;
-    }
+    let line = line.trim_start();
     // (`pub(crate) …`: its scope in brackets.)
     let line = match line.strip_prefix("pub(").and_then(|r| r.split_once(')')) {
         Some((_, rest)) => rest.trim_start(),
@@ -158,7 +157,7 @@ fn defined_name(line: &str) -> Option<String> {
     }
     let mut words = line.split(|c: char| c.is_whitespace() || c == '(' || c == '<' || c == ':' || c == '{' || c == '=' || c == ';').filter(|w| !w.is_empty()).peekable();
     while let Some(w) = words.peek() {
-        if ["export", "default", "async", "unsafe", "static", "abstract", "final", "public", "private", "open", "extern", "const"].contains(w) || w.starts_with("pub") {
+        if MODIFIERS.contains(w) || *w == "pub" || *w == "const" {
             words.next();
         } else {
             break;
@@ -171,23 +170,103 @@ fn defined_name(line: &str) -> Option<String> {
     words.next().map(|n| n.trim_matches(|c: char| !(c.is_alphanumeric() || c == '_')).to_owned()).filter(|n| !n.is_empty())
 }
 
-pub fn grown_paths(root: &Path, ignore: &Ignore, base: &str) -> Vec<String> {
-    let Ok(out) = git_strict(root, &["-c", "core.quotePath=false", "diff", "-U0", "--no-color", "--no-ext-diff", "--no-renames", base]) else { return Vec::new() };
-    let text = String::from_utf8_lossy(&out);
-    // Per file: lines added and removed, names defined in each.
-    let mut files: Vec<(String, usize, HashSet<String>, HashSet<String>)> = Vec::new();
-    let mut current: Option<usize> = None;
-    for line in text.split('\n') {
-        if let Some(path) = line.strip_prefix("+++ ") {
-            current = path.strip_prefix("b/").map(|p| {
-                files.push((normalize_git_path(p), 0, HashSet::new(), HashSet::new()));
-                files.len() - 1
-            });
+/// What a top-level line declares, whatever the language: the line up to
+/// its value or body ("export const added = () => 2;" → "export const
+/// added", "int added(void) {" → "int added"), so a changed value keeps
+/// its key and a new name doesn't. None for lines that declare nothing:
+/// indented ones, blanks, comments, imports, closing brackets, attributes.
+fn top_level_key(line: &str) -> Option<String> {
+    if line.is_empty() || line.starts_with(char::is_whitespace) {
+        return None;
+    }
+    const SKIP: [&str; 21] = ["//", "/*", "*", "#", "--", "@", "}", ")", "]", "end", "import ", "from ", "use ", "using ", "package ", "require", "include", "extern crate", "\"\"\"", "'''", "<"];
+    if SKIP.iter().any(|p| line.starts_with(p)) {
+        return None;
+    }
+    let cut = line.find(['(', '=', '{', ':', ';', '[']).unwrap_or(line.len());
+    let key = line[..cut].split_whitespace().collect::<Vec<_>>().join(" ");
+    (!key.is_empty()).then_some(key)
+}
+
+/// A path git printed C-style quoted (`"src/a\tb.rs"`), as it is.
+fn unquote(p: &str) -> String {
+    let Some(inner) = p.strip_prefix('"').and_then(|p| p.strip_suffix('"')) else { return p.to_owned() };
+    let mut bytes: Vec<u8> = Vec::new();
+    let mut it = inner.bytes().peekable();
+    while let Some(b) = it.next() {
+        if b != b'\\' {
+            bytes.push(b);
             continue;
         }
-        if line.starts_with("--- ") || line.starts_with("diff --git ") {
-            if line.starts_with("diff --git ") {
-                current = None;
+        match it.next() {
+            Some(b'n') => bytes.push(b'\n'),
+            Some(b't') => bytes.push(b'\t'),
+            Some(b'r') => bytes.push(b'\r'),
+            Some(b'a') => bytes.push(7),
+            Some(b'b') => bytes.push(8),
+            Some(b'f') => bytes.push(12),
+            Some(b'v') => bytes.push(11),
+            Some(d @ b'0'..=b'7') => {
+                let mut v = (d - b'0') as u32;
+                for _ in 0..2 {
+                    match it.peek() {
+                        Some(n @ b'0'..=b'7') => {
+                            v = v * 8 + (*n - b'0') as u32;
+                            it.next();
+                        }
+                        _ => break,
+                    }
+                }
+                bytes.push(v as u8);
+            }
+            Some(c) => bytes.push(c),
+            None => bytes.push(b'\\'),
+        }
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+/// harlo: source files changed since `base` (committed or in the work
+/// tree) in a way the wiki may need to say more about: a new declaration
+/// (a keyword definition at any depth, or a top-level line declaring a
+/// new name, in any language; tests aside), or `GROWN_LINES` lines or
+/// more added and removed. A small edit to code no fact cites needs no
+/// update; these may. Err: git couldn't say.
+pub fn grown_paths(root: &Path, ignore: &Ignore, base: &str) -> std::result::Result<Vec<String>, String> {
+    // (Prefixes, quoting, colour, external tools and text conversion set
+    // here: a user's git settings don't change what's read.)
+    let out = git_strict(
+        root,
+        &["-c", "core.quotePath=false", "diff", "-U0", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames", "--src-prefix=a/", "--dst-prefix=b/", base],
+    )?;
+    let text = String::from_utf8_lossy(&out);
+    struct File {
+        path: String,
+        lines: usize,
+        new_names: HashSet<String>,
+        gone_names: HashSet<String>,
+        new_keys: HashSet<String>,
+        gone_keys: HashSet<String>,
+    }
+    let mut files: Vec<File> = Vec::new();
+    let mut current: Option<usize> = None;
+    let mut in_header = false;
+    for line in text.split('\n') {
+        if line.starts_with("diff --git ") {
+            current = None;
+            in_header = true;
+            continue;
+        }
+        if in_header {
+            if let Some(path) = line.strip_prefix("+++ ") {
+                let path = unquote(path);
+                current = path.strip_prefix("b/").map(|p| {
+                    files.push(File { path: p.replace('\\', "/"), lines: 0, new_names: HashSet::new(), gone_names: HashSet::new(), new_keys: HashSet::new(), gone_keys: HashSet::new() });
+                    files.len() - 1
+                });
+                in_header = false;
+            } else if line.starts_with("@@") {
+                in_header = false;
             }
             continue;
         }
@@ -198,21 +277,27 @@ pub fn grown_paths(root: &Path, ignore: &Ignore, base: &str) -> Vec<String> {
             _ => continue,
         };
         let f = &mut files[i];
-        f.1 += 1;
+        f.lines += 1;
         if let Some(name) = defined_name(body) {
-            if added { f.2.insert(name); } else { f.3.insert(name); }
+            if added { f.new_names.insert(name) } else { f.gone_names.insert(name) };
+        }
+        if let Some(key) = top_level_key(body) {
+            if added { f.new_keys.insert(key) } else { f.gone_keys.insert(key) };
         }
     }
     let mut out: Vec<String> = files
         .into_iter()
-        .filter(|(p, ..)| !is_wiki_path(p) && !SETUP_FILES.contains(&p.as_str()) && !ignore.ignores(p, false))
-        .filter(|(p, ..)| p.rsplit_once('.').is_some_and(|(_, ext)| SOURCE_EXTENSIONS.contains(&ext)))
-        .filter(|(p, lines, new, gone)| *lines >= GROWN_LINES || (!is_test_path(p) && new.iter().any(|n| !gone.contains(n))))
-        .map(|(p, ..)| p)
+        .filter(|f| !is_wiki_path(&f.path) && !SETUP_FILES.contains(&f.path.as_str()) && !ignore.ignores(&f.path, false))
+        .filter(|f| f.path.rsplit_once('.').is_some_and(|(_, ext)| SOURCE_EXTENSIONS.contains(&ext)))
+        .filter(|f| {
+            f.lines >= GROWN_LINES
+                || (!is_test_path(&f.path) && (f.new_names.iter().any(|n| !f.gone_names.contains(n)) || f.new_keys.iter().any(|k| !f.gone_keys.contains(k))))
+        })
+        .map(|f| f.path)
         .collect();
     out.dedup();
     out.sort_by(|a, b| util::cmp16(a, b));
-    out
+    Ok(out)
 }
 
 const COMMITS: usize = 20;
@@ -681,6 +766,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn declarations_are_keyed() {
+        assert_eq!(top_level_key("export const added = () => 2;").as_deref(), Some("export const added"));
+        assert_eq!(top_level_key("int added(void) { return 2; }").as_deref(), Some("int added"));
+        assert_eq!(top_level_key("pub const LIMIT: u32 = 100;").as_deref(), Some("pub const LIMIT"));
+        assert_eq!(top_level_key("LIMIT = 200").as_deref(), Some("LIMIT"));
+        for none in ["    x += 1;", "}", "// note", "# note", "use std::fs;", "import os", "#[derive(Debug)]", "@decorator", "", "#include <a.h>"] {
+            assert_eq!(top_level_key(none), None, "{none:?}");
+        }
+        assert_eq!(unquote(r#""src/a\tb.rs""#), "src/a\tb.rs");
+        assert_eq!(unquote(r#""src/\346\226\260.rs""#), "src/新.rs");
+        assert_eq!(unquote(r#""src/q\"x.rs""#), "src/q\"x.rs");
+        assert_eq!(unquote("src/plain.rs"), "src/plain.rs");
+    }
+
+    #[test]
     fn definitions_are_found() {
         assert_eq!(defined_name("pub fn run(x: u32) {").as_deref(), Some("run"));
         assert_eq!(defined_name("pub(crate) async fn go<T>() {}").as_deref(), Some("go"));
@@ -688,7 +788,7 @@ mod tests {
         assert_eq!(defined_name("class Queue:").as_deref(), Some("Queue"));
         assert_eq!(defined_name("async def fetch(url):").as_deref(), Some("fetch"));
         assert_eq!(defined_name("func (s *Server) Start() error {").as_deref(), Some("Start"), "a Go method: past its receiver");
-        assert_eq!(defined_name("    def inner(self):"), None, "not top level");
+        assert_eq!(defined_name("    def inner(self):").as_deref(), Some("inner"), "a method too");
         assert_eq!(defined_name("let x = 1;"), None);
         assert!(is_test_path("tests/test_orders.py") && is_test_path("src/a_test.go") && is_test_path("web/app.spec.ts") && !is_test_path("src/testing.rs"));
     }

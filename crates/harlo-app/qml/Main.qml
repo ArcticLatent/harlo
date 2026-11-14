@@ -9250,8 +9250,25 @@ ApplicationWindow {
             win.check(JSON.stringify(v) === JSON.stringify({ update: { agent: "harlo", model: "fake/fake-coder", thinking: "low" } }), "Settings → Wiki keeps Update's agent, model and thinking, Create's unset (" + JSON.stringify(v) + ")")
             const create = win.findName("wikiCreateAgent", settingsDialog.contentItem)
             win.check(create && create.currentText === "Same as the project", "Create has its own (" + (create ? create.currentText : "") + ")")
+            // Create's set after Update's, on the same page: both kept.
+            create.activated(create.model.indexOf("Harlo")) } }
+        ScriptAction { script: win.waitUntil(wikiOfferSteps, () => { const c = win.findName("wikiCreateModel", settingsDialog.contentItem); return c && c.visible && c.model.length > 1 }, 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const cm = win.findName("wikiCreateModel", settingsDialog.contentItem)
+            cm.activated(cm.ids.indexOf("fake/fake-helper") + 1)
+            const both = JSON.parse(Workspace.setting("wiki_writer") || "{}")
+            win.check(both.update && both.update.model === "fake/fake-coder" && both.create && both.create.model === "fake/fake-helper",
+                      "Create's and Update's writers both kept (" + JSON.stringify(both) + ")")
+            const um = win.findName("wikiWriterModel", settingsDialog.contentItem)
+            win.check(um.currentText.indexOf("Fake Coder") === 0 || um.currentText.indexOf("fake-coder") >= 0, "and Update's still shows its model (" + um.currentText + ")")
+            // (Back to the project's for Create, as the rest expects.)
+            const ca = win.findName("wikiCreateAgent", settingsDialog.contentItem)
+            ca.activated(0)
+            const left = JSON.parse(Workspace.setting("wiki_writer") || "{}")
+            win.check(!left.create && left.update && left.update.model === "fake/fake-coder", "unsetting Create leaves Update's (" + JSON.stringify(left) + ")")
             // (The stand-in models are served on this computer: local.)
-            win.check(model.model.slice(1).every(m => / · local$/.test(m)), "models from a server here say local (" + JSON.stringify(model.model) + ")")
+            win.check(um.model.slice(1).every(m => / · local$/.test(m)), "models from a server here say local (" + JSON.stringify(um.model) + ")")
             win.shotWindow("clicks-harlo-wiki-writer")
             settingsDialog.close()
             // (As it reads when shown.)

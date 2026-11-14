@@ -195,9 +195,13 @@ fn change_note(found: &Value) -> String {
         .collect();
     let added: Vec<String> = found["added"].as_array().into_iter().flatten().filter_map(|f| f.as_str()).map(|f| format!("`{f}`")).collect();
     let grown: Vec<String> = found["grown"].as_array().into_iter().flatten().filter_map(|f| f.as_str()).map(|f| format!("`{f}`")).collect();
+    let edited: Vec<String> = found["edited"].as_array().into_iter().flatten().filter_map(|f| f.as_str()).map(|f| format!("`{f}`")).collect();
     let mut parts = Vec::new();
     if !stale.is_empty() {
         parts.push(format!("pages with facts whose cited code changed: {}", list(stale, PAGES)));
+    }
+    if !edited.is_empty() {
+        parts.push(format!("pages edited since they were verified (check what they say now against the code): {}", list(edited, PAGES)));
     }
     if !added.is_empty() {
         parts.push(format!("files added since the last update: {}", list(added, FILES)));
@@ -1553,6 +1557,8 @@ esac; done"#
         let found = json!({"recorded": false, "stale": [{"page": "/openwiki/a.md", "files": ["src/a.rs", "src/b.rs"]}], "added": ["src/c.rs"], "grown": ["src/d.rs"]});
         let p = run_prompt_with("update", "", &[], Some(&found));
         assert!(p.contains("pages with facts whose cited code changed: `/openwiki/a.md` (`src/a.rs`, `src/b.rs`); files added since the last update: `src/c.rs`; files with new definitions or larger changes: `src/d.rs`."), "{p}");
+        let hand = json!({"edited": ["/openwiki/b.md"]});
+        assert!(run_prompt_with("update", "", &[], Some(&hand)).contains("found pages edited since they were verified (check what they say now against the code): `/openwiki/b.md`."));
         assert!(!run_prompt_with("create", "", &[], Some(&found)).contains("check before"));
         assert!(!run_prompt_with("update", "", &[], Some(&json!({"recorded": false, "reason": "x"}))).contains("check before"));
         let many = json!({"added": (0..40).map(|i| format!("f{i}")).collect::<Vec<_>>()});
