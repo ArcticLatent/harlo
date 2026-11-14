@@ -72,7 +72,9 @@ fn a_sign_in_ends_with_its_input_open() {
     // The browser's return.
     let by_browser = ends(|state, _| {
         let mut s = std::net::TcpStream::connect(("127.0.0.1", 1455)).unwrap();
-        write!(s, "GET /auth/callback?error=access_denied&state={state} HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
+        // (The server may answer from the first line and close before the
+        // rest is written: what's tested is that it ends, not the write.)
+        let _ = write!(s, "GET /auth/callback?error=access_denied&state={state} HTTP/1.1\r\nHost: localhost\r\n\r\n");
         let _ = BufReader::new(s).lines().next();
     });
     // The address pasted.
