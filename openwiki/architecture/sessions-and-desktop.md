@@ -5,7 +5,7 @@ description: How agent protocols become shared live sessions, durable conversati
 tags: [architecture, sessions, persistence, desktop]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-13T19:56:31.605Z
+    at: 2026-11-14T00:47:49.942Z
 sources:
   - id: openwiki-source-eda83df6b22941ed75ede295
     resource: repo://crates/harlo-app/qml/ChatView.qml
@@ -21,17 +21,23 @@ sources:
     resource: repo://crates/harlo-core/src/db.rs
   - id: openwiki-source-4007ae1962c00ddaf5da78d5
     resource: repo://crates/harlo-core/src/lib.rs
+  - id: openwiki-source-df09a2583df68f85f752b752
+    resource: repo://crates/harlo-core/src/markdown.rs
+  - id: openwiki-source-9c753af69e99af0009dee61f
+    resource: repo://crates/harlo-core/src/search.rs
   - id: openwiki-source-4db2ffefa327cd504d9b5a66
     resource: repo://crates/harlo-core/src/session.rs
   - id: openwiki-source-30ea8db2e7a53b0003af9129
     resource: repo://crates/harlo-core/src/sidebar.rs
+  - id: openwiki-source-a9697f23b0ad71a5ad25a2a8
+    resource: repo://crates/harlo-core/src/transcript.rs
   - id: openwiki-source-322c82102553742bfacf73ab
     resource: repo://crates/harlo-harness/src/claude_run.rs
   - id: openwiki-source-3ef6360b45fa7169c94b35d3
     resource: repo://crates/harlo-harness/src/lib.rs
   - id: openwiki-source-07a69ae82a0e133d3de748f1
     resource: repo://crates/harlo-harness/src/store.rs
-generated: { by: "harlo", at: "2026-11-13T19:56:31.605Z" }
+generated: { by: "harlo", at: "2026-11-14T00:47:49.942Z" }
 ---
 
 # Sessions, persistence, and desktop presentation
@@ -64,9 +70,9 @@ A subscriber receives a snapshot before deltas. During streaming, the driver bat
 
 Prompts return false when a session or daily spending hold is active, so callers must not assume every send was accepted. Harness exits become session state and notices rather than leaving a view permanently busy.
 
-Before a new turn, the driver takes its undo snapshot asynchronously and holds prompts while reporting `Preparing(true)`, including to newly attached subscribers. Stop remains responsive: it removes all held prompts, invalidates the snapshot completion token, and emits `Unsent(Vec<String>)` with their text in send order. A late snapshot completion cannot send the cancelled prompts. Steering during a busy turn and `/btw` do not start this new-turn snapshot path.
+Before a new turn, the driver takes its undo snapshot asynchronously and holds prompts while reporting `Preparing(true)`, including to newly attached subscribers. Stop remains responsive: it removes all held prompts, invalidates the snapshot completion token, and emits `Unsent(Vec<Unsent>)` in send order. Each returned message retains wire text, images, send mode, and optional `Typed` words and attachment paths. A late snapshot completion cannot send the cancelled prompts. Steering during a busy turn and `/btw` do not start this new-turn snapshot path.
 
-The desktop matches returned prompts to recent sends to recover the original typed text and attachments, rather than exposing injected file context or the plan-mode note. Unmatched text, such as a prompt sent from the phone, is returned with the trailing plan note removed. Restored messages go above any new composer draft; attachments are merged without duplicates. This preserves multiple cancelled sends and attachment-only messages instead of restoring only the last text.
+The sender supplies original words and attachment paths through `prompt_typed`, so recovery no longer depends on matching returned prompts to a view's recent sends. Without typed metadata, `Unsent::words` strips the trailing plan note and leading photo placeholders. The desktop saves supported inline pictures as content-named files when no original attachment paths exist, including pictures sent from the phone. Restored messages go above any new composer draft; attachments are merged without duplicates. This preserves multiple cancelled sends and attachment-only messages instead of restoring only the last text.
 
 Session metadata carries `cost_kind` separately from numeric cost, distinguishing plan/local usage, priced usage, partly known cost, and unknown cost. The context report forwards this classification rather than interpreting a numeric zero as evidence that usage was free.
 
@@ -75,6 +81,8 @@ Session metadata carries `cost_kind` separately from numeric cost, distinguishin
 `ChatSession` is a cxx-qt `QAbstractListModel`. Its `QtSink` queues updates onto the Qt thread. Each binding has a generation counter: queued updates from an old binding are ignored after switching sessions. Rebinding and dropping the model unsubscribe the old sink, while the registry can keep the session itself alive.
 
 This is the extension seam for desktop presentation: change row roles and QML consumers here, but keep event normalization in the harness and state reduction in core. The code editor has a similar split: `harlo-code` lays out and draws visible code in Rust without Qt; the app's CodeView presents its image and forwards input.
+
+Transcript Markdown uses `render_rows` to divide long code blocks into 150-line pieces and tables into 100-row pieces, rather than creating one enormous delegate. Continuation rows carry their part, first line, and first-row identity; the first code row retains the complete code for copying. Table pieces share column widths and show the header once. The still-streaming final piece is not cached; finished pieces can be reused. Ordinary `render`, used outside this transcript path, still returns whole blocks.
 
 ## Persistence is deliberately split
 
@@ -95,6 +103,8 @@ Agent `list_sessions` queries are deferred from the workspace UI handler to orch
 
 The desktop search dialog likewise queries off-thread. It records the newest query generation and skips an older waiting query after acquiring the reader lock, avoiding a backlog of obsolete searches. This does not cancel a query already executing. Slow-search behavior can be exercised with `HARLO_TEST_SLOW_SEARCH_MS`; the QML session-search scenario checks that the window continues drawing.
 
+Local Harlo history can now be indexed incrementally as well as local Claude history. The Harlo reader resumes only across complete JSONL lines when the saved tail still matches and new entries continue the previous leaf. Branching, rewriting, or incompatible resume state causes a full active-branch read instead. The search index tracks message row IDs separately so replacement and deletion do not require scanning all FTS content, and backfills this mapping for older indexes.
+
 ## Finished wiki sessions and approval presentation
 
 Finished wiki sessions use a separate **Wiki** shelf after **Settled**, with independent expansion state. The workspace marks an idle wiki session with the `wiki` settlement reason, deferring settlement while it is the active view or lacks a saved file. Disabled session settling, pinning, and archiving remain respected. This is session organization, not proof that the durable [OpenWiki run](../integrations/openwiki.md) completed successfully.
@@ -105,6 +115,8 @@ Approval messages marked as Markdown are rendered through the core Markdown rend
 
 - `finished_wiki_runs_have_a_shelf_of_their_own` checks separate Wiki shelf grouping and expansion.
 - `every_unsent_message_comes_back_with_its_files` checks ordered recovery, repeated text, attachment-only sends, and phone-origin text. The QML stop-before-send scenario also checks preservation of a newer draft and that cancelled messages never reach the model after the delayed snapshot finishes.
+- `a_harlo_session_is_read_on_while_it_goes_on_and_whole_when_it_branches` covers append, partial-line, branch, and rewrite behavior; `an_index_from_before_its_row_table_still_forgets` covers old-index migration and deletion.
+- Markdown's long-code/table and streaming-cache tests, together with `a_long_code_block_is_rows_of_one_card`, verify continuation boundaries and whole-block copying.
 
 - `session::tests::demo_run_reaches_subscribers` exercises idle → busy → idle, resulting user/tool/code rows, and equality of a late subscriber's snapshot with accumulated deltas.
 - `idle_session_restarts_when_used_again` verifies that an idle agent can stop to reload configuration and restart on the next prompt.

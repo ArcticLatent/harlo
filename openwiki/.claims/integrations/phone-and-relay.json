@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:df1ad7cd0c75bfe79aba7f7f6e5766791cae886083ce9cbb5490c9f4cc21ba68",
+  "pageVersion": "sha256:7b6c026be16f9985894e33d76754d3f219403ea2dbc75c146d46ef87aa433611",
   "claims": [
     {
       "id": "claim_6d0f3938d02847d89bfea69668b3d4ca",
@@ -137,10 +137,54 @@
           "version": "repo-lines-v1:sha256:c50750a6d49b11e7cf0008e400ef1f48bb4ad8d887943736aa452cd7e919d5eb:eyJzZWxlY3RlZExpbmVDb3VudCI6NTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjczMTFjZmIxODc0MTc0ZWFiMTZlNWE4NmRmN2I5YTZkYzZlNGJiNTg1NDk1ZDZjZjJjMGNlOWY4ZDZkYTkxM2QiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIzNzg3YjBiMTY3NTI4OWRkZmJjYWRhOWJjNGY2N2NjNzc4Y2E5Yjg3MDUyOTZkNGQ0ZDU1YjM0MzkzZTA4YjUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjFmMzg5Zjg1MWQ2YjNkOGY0ZTVjMGRmMDVlYTQxODU4NzQ4MDZhZmIyNDAyNTc3ZDE1ZDQ3M2FmYzU0YmQ5ZDkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJjZWZjMjkyNjYzZDZiMzAxMGQxZTczM2RmZDA0OTdkNmUxMjY0MmI4ZGQwOGM4YTM4MGFmNmJjZTYwYWE5ZGEifQ"
         }
       ]
+    },
+    {
+      "id": "claim_2f46d4b6dcac4951848c2f83572e63de",
+      "statement": "Cancelled held prompts produce a session-keyed unsent phone event containing original words and inline photos, not desktop-only file attachments; HarloKit prepends words above newer drafts and the composer restores returned photos ahead of newly selected ones.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-app/src/phone_server.rs#L334-L341",
+          "version": "repo-lines-v1:sha256:6589824b80290677b71b1e892881840740dfdd19af562f02990ae55a1ebdeecf:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiN2ZlNTc1YWE4MzFjZjkxODhjMmU3NjI0M2ZhOTI2MTg5OWE0OTFiMjFmNmUzYTFkNmI5YmFhNjI1MDkzZjYzNCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMjVhMWEzOGU3NDU5NzNjMDA0NTExNGU0NmRlNTc4NGZjOTZkNDA4YTA2MzUyYTI1Nzc2OGYzOTA0YTRkNjMzYSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNDA5ZTFkZjkzOGRkZTRjY2Y2Yzc5ZTJhNDVmNTM1MmU4YmEyMDM5MzJjZmUzMjhmNzA4YTMzZjRmNWM0ZmU4OCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNjA2M2M0ZDFhZjhjZDg5YmIwYmRkNzY1N2ZmY2JmNjgwNmE2MTBkNzlkNmM4ZDRjMzA3YzI0MWRmMzkwMDUyMiJ9"
+        },
+        {
+          "resource": "repo://ios/Harlo/Harlo/SessionView.swift#L979-L986",
+          "version": "repo-lines-v1:sha256:3dc3cda626c4a4635ed8d4197ff92a78a1f03385a8f60ac62e227d0bb46604cf:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiM2JlODZkYzhlNTEwZDM0Y2UwYjdjZWU4ZTQ0YjRjNmYzODc2NDdkNzhiNDgzZWMwZTk0MWI1M2NjY2M0YzMyYyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiOTk5YmRlZmVlYWNhNjM0MGUwMjkwZGM4NmU4ODljODlkNWUxODlhYTViYTQ0YjU4NWIzYjcwNzM0ZjRhNjJkOCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYjJiZTZiZTEyMmNjNjE3ZjI3ZjI3ZGYzYTE4MThiNjY0M2Y4OTE3ZTk0M2RlNTkzOGM4NzEyMTFkZDBhZjFlMCJ9"
+        },
+        {
+          "resource": "repo://ios/HarloKit/Sources/HarloKit/Messages.swift#L317-L322",
+          "version": "repo-lines-v1:sha256:f7e2e3d3e0cb882ce90271fc70eb64083fc7eb238db4a4e8dead90b53e786116:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMjczZDYxYzgxMTFkZTBiNmRhNTMyMjFlZTI1YjRiZTVhNjgxMjcyZGJiYmU5MDVkMWZkZDc4ODA1MTBmZDhmNSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNjBjNjhkODJiMDUwZTAzMjBiNTI1YjI2YzcwMjY2OWNlYmJmYjA2ZDdhNDljYjg3Yzg4YzYwMmI2ZTFmM2YwZCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYjAzNGYyOGE1MzY2OTlhOTE5Y2NmNWZkODI3MjIwMGIzNDVhOTgyNWI5MjI1NjJjOTczYTA5NTg5ZDIyOTgyNyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZTBhZGZkN2EyZDQxMjhhNDYwNWZlYjU4OWQ4ZjgyNDcwYWE5NDIwYmNlYmQxM2RhMTUyMWZjZTE5ODJlNWRkYiJ9"
+        },
+        {
+          "resource": "repo://ios/HarloKit/Sources/HarloKit/Model.swift#L276-L282",
+          "version": "repo-lines-v1:sha256:edbd216107cedd21b46cf93d23cdf39a02a11b27411f76dad293da5f00932c42:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiN2JlZDA4NWU1M2VmMjhkMjY3Njg5MWFjNzQyODkwNWYzN2RlNmQ5Mzc0ZWE2Yjc2Y2RhMzA1YjUyZTU4Y2YxNSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMmM1NDI1MDhjOGNlOWE1Yzk1NTEzNmI0NDViMjMyMjllZDRjOTg2MTRjYzc1M2I1YmFjNWUyMWRmNTI1NTc5ZCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYTQwMDAzZGVmYTMyZDBmMDQ4MTY2NmM1MWRjNWM2ZTJiNjg5NTg4NjI2MWQ1ZmZkOGI2YjJiZDc2YmFiMGEzMiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZWI5MTJlNGFiMzMxZjZiOTZjMDgyZmQ2MDlmMWE3OThjYjA5OTEzOTEyMDc0NzI3NDgxNGM2YTEwODM0NjhjZiJ9"
+        },
+        {
+          "resource": "repo://ios/HarloKit/Tests/HarloKitTests/HarloKitTests.swift#L1246-L1266",
+          "version": "repo-lines-v1:sha256:b9de53acc642c88671fa54ab986f7c77a0a66046eb3ce91279163f4c5ec1b2ce:eyJzZWxlY3RlZExpbmVDb3VudCI6MjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY5OTE5OGYwOTc1NDlkOGUxNjQyNzNjNWE0NjcyMGM0MGFiMzI2MTUyMmU3YWRhNmQ4NDllZmNiODU5Njg2YTAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjFhYTc3NjIyZGJhN2IwNzRkM2FkOWNiYjAwNTI0NDdlMTk1ZjE1YTM4OGMwY2I3NDUwOTdkMzA2ODU1MDU1ZWMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVhYTUyYWIxMzUxNGZhYzg1YWU2MGI2NmNmN2JiZmZiOTdlMTYyNTE2MzQxOTdkZGNjODY5OTNhZTcyMDVjODgifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_6520352aa2ce4fb799fc9471c0e10404",
+      "statement": "Phone serialization marks later split code rows as codePart, hidden by the iOS transcript view, while the first code row carries combined code subject to existing clipping.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-app/src/phone_server.rs#L203-L211",
+          "version": "repo-lines-v1:sha256:14cd027e576f0a25260469f9e7d0978db33ddf577ff5356283c5716ee9d49f36:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMDcyY2I1OWRmODNmNmRkOWExMGZhN2ZhMTc5NGQxZDhjNzkzNDQwMDQ3NzNmMjE4MGY1MzRmNTkxN2RkMWFhYyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNDEyY2EzNDVjY2Y3NWJmOWMwODA2YmNlNjk1YmU4ZGU4MDhiNzk5ODQyNTFhN2E1NGQyMDJjZjYxMDFkZDQ1MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMzUzNTE0YWVhN2QyMzllZWQxZDQyYzhiYzNjNTI3NDFlNTczOGY5ZTBkYjUzNjYyMmIxNmYyYzAwMzgzZGRjZSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiY2ZlYzgxMWEzODcxZTZjOTcyMDk2OThjMzYzZGRiZDNmNGFmN2U5YWM3NzNjMWQ0YzVlMDNhNGZhYTVmM2UxNSJ9"
+        },
+        {
+          "resource": "repo://crates/harlo-core/src/transcript.rs#L954-L974",
+          "version": "repo-lines-v1:sha256:a7cb146f0ee600bc450902bd088d75c342b9026710967e899e119421f04aa921:eyJzZWxlY3RlZExpbmVDb3VudCI6MjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ5YWI4YmEwZDA2Y2RiMjI1ZmM1ZmJiYmU3NTI1YTA5ZmNhYmJhNTQ3YjM1NzRkNWRkZDk2Mjc3OWY2ODQ2ZDAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZkZmY2YzE1MzUwNmRiNDEyMDk1ZmIzOTYxZTMxZmYwYjk5OGQxZTFmMjMzNDY1MDQxNGI0YWVlZWFiYmY1NzciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjM3ZDYwODljNTBmZDk2NDFmNGY3MjU1NGQyODI1NjRhMGY1YzAxYjBkNDMwNzVlZTNjZTNjNjlmOWI1MjFiYmUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJiZjhlNzQ3OTNiYWNkNjU1ZTkzY2UyYTM0ZDM4MGY0YThkODBkYTRiY2JjNGMzNThmNjI3MWY5YWMxMDNiMzgifQ"
+        },
+        {
+          "resource": "repo://ios/Harlo/Harlo/TranscriptViews.swift#L376-L386",
+          "version": "repo-lines-v1:sha256:79ee615821e16a8ce38b370e4a119dc2afb387b6ad83e631423457e4d96734ce:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJhYWUxODlkN2E2YTEwZTdlMWQzYzliYzdkOGNjN2E2ODY0YTY5ODliOWQ2OGFkYTQ5Yjk2MjJmMmQwY2I1NjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMwMDRmNDU3MGE3ODdhMTJlYzk5ZTdlMWM2MzE0MTNhZDQyZTA3MjhhZWJkYzJlM2RiODZhZWU5OTQ3YjNhMmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJlNmFjZTg0ZWU2Yjg2YTE5ZWM5NGVkNDcyZDZiNDhkNDI1NjVlZWIyNzAwZTU4NjUzNTExMGQ2MTYzM2Y4YjQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI0OTM3MTNlMjE5MGEzOTU4MzY5NjMxNjQ4OTZjMzQ5YWI1NTU1MThmMDM5N2RlNjdkOTc1YjkwODIxYzFiZjgifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-13T07:57:21.074Z"
+    "at": "2026-11-14T00:47:49.942Z"
   }
 }

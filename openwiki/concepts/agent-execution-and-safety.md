@@ -5,7 +5,7 @@ description: Harlo agent model-loop ordering, resumable history, RPC approvals, 
 tags: [agent, safety, sandbox, rpc, tools]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-13T19:56:31.605Z
+    at: 2026-11-14T00:47:49.942Z
 sources:
   - id: openwiki-source-0b93973e66ce9fb1db2bd77c
     resource: repo://crates/harlo-agent/src/agent.rs
@@ -33,7 +33,7 @@ sources:
     resource: repo://crates/harlo-agent/src/tools/mod.rs
   - id: openwiki-source-cc3a6736ec7398d0638b6f38
     resource: repo://crates/harlo-agent/src/used.rs
-generated: { by: "harlo", at: "2026-11-13T19:56:31.605Z" }
+generated: { by: "harlo", at: "2026-11-14T00:47:49.942Z" }
 ---
 
 # Agent execution and safety boundaries
@@ -48,17 +48,17 @@ The JSONL session log is the source of model history, not merely an activity exp
 
 ## Usage and provider capabilities
 
-`used::Used` is the shared accounting representation for requests, including compaction, side questions, searches, and subagents. Input includes cached tokens internally; persisted assistant usage separates uncached input from `cacheRead`. Token budgets count uncached input plus output. Cost is classified as plan, local, priced, unknown, or partly known when priced and unknown requests mix; unknown cost is not reported as a known zero.
+`used::Used` is the shared accounting representation for requests, including compaction, side questions, searches, and subagents. Input includes cached tokens internally; persisted assistant usage separates uncached input from `cacheRead`. Token budgets count uncached input plus output and estimates for missing usage. Cost is classified as plan, local, priced, unknown, or partly known when priced and unknown requests mix; unknown cost is not reported as a known zero.
 
 Configured model prices are dollars per million tokens, with cached input defaulting to the input price. Provider model metadata can map offered thinking levels to wire efforts through `thinkingLevelMap`; a null mapping suppresses that level. Built-in Responses web search is offered for plan/OpenAI providers unless `HARLO_AGENT_WEB_SEARCH=off`.
 
 An unpriced provider is free only when explicitly configured with `"free": true`; a loopback or LAN endpoint could proxy a paid service. An explicit model price or server-listed price takes precedence over that flag. See [model-server configuration](../integrations/remote-machines-and-models.md) for desktop defaults and migration.
 
-Missing usage is not measured zero: `Used.unreported` tracks requests without input-token reporting, persisted as `tokensUnknown` in assistant usage and `unreported` in aggregate tool details. A priced request without reported tokens becomes unknown-cost; plan and explicitly free requests retain their no-extra-cost classification. Subagent aggregation preserves costs, cost kinds, and unreported counts. Responses cut off by the server still have their reported usage charged and logged before the error propagates.
+Missing usage is not measured zero: `Used.unreported` tracks requests missing either input or output token reporting, persisted as `tokensUnknown` in assistant usage and `unreported` in aggregate tool details. A priced request with incomplete token reporting becomes unknown-cost; plan and explicitly free requests retain their no-extra-cost classification. Missing input and output can be estimated from request size and reply length for budget enforcement only: `tokensEstimated` in logs and `estimated` in tool details never become measured tokens or a price. Subagent aggregation preserves costs, cost kinds, unreported counts, and estimates. Responses cut off by the server still have their reported usage charged and logged before the error propagates.
 
 ## Request admission and auxiliary work
 
-Main requests, side questions, summaries/compaction, and built-in web searches pass through shared budget admission. In-flight requests hold estimated input plus 2,000 tokens of reply room; concurrent reservations use atomic updates. Once spent plus held tokens reaches the limit, another request is refused. This is a soft limit, not a hard output cap: an admitted request can cross it, and unreported tokens cannot be counted as measured spend.
+Main requests, side questions, summaries/compaction, and built-in web searches pass through shared budget admission. In-flight requests hold estimated input plus 2,000 tokens of reply room; concurrent reservations use atomic updates. Once spent plus held tokens reaches the limit, another request is refused. This is a soft limit, not a hard output cap: an admitted request can cross it. Unreported usage consumes the budget through estimates, without being presented as measured spend. Web searches settle their own spend before releasing the reservation, so a later search in the same batch sees it and parent aggregation does not charge it twice.
 
 Fallback does not reuse the failed model's prepared request. After recording and announcing the model change, the agent returns to its run loop so context preparation, capabilities, tools, and budget admission are evaluated for the fallback model. Exhausted-plan limits and transient server failures can trigger this route; request/sign-in refusals do not.
 
@@ -72,11 +72,15 @@ A run has a default cap of 200 tool rounds, configurable with positive `HARLO_AG
 
 MCP servers start concurrently before the first model request. Their default startup timeout is ten seconds, overridable by configuration; after two seconds the agent names any servers still pending and their remaining timeout allowance. Startup failures become notices rather than an unexplained wait.
 
+Stop can interrupt discovery of desktop tools and MCP startup; an incomplete MCP start is retried on a later prompt rather than permanently marking discovery complete. When combined MCP tool schemas exceed 12,000 bytes, the agent offers `mcp_tools` search and `mcp_call` instead of every full schema on every request. Search returns up to eight matches. `HARLO_AGENT_MCP_LISTED_PAST` overrides the threshold; zero disables this indirection. Calls resolve to the underlying tool before read-only classification, approval and plan-mode checks, preserving those boundaries.
+
 ## Tool context and bounded I/O
 
-File reads and changes append applicable nested `AGENTS.md` (or fallback `CLAUDE.md`) text to tool results once per folder while that text remains in model history. Top-level rules are already in the instructions; hidden folders, `node_modules`, and `vendor` are skipped. Each nested rule is capped at 8 KB with a continuation note. Resume, compaction, and output set-aside rebuild which rules are still present, allowing missing rules to be sent again.
+File reads append applicable nested `AGENTS.md` (or fallback `CLAUDE.md`) text to successful results once per folder while that text remains in model history. A write, edit or patch that encounters unseen rules is refused before any change, returns the rules, and must be requested again after considering them. Patch checks include deletions and both ends of moves. Top-level rules are already in the instructions; hidden folders, `node_modules`, and `vendor` are skipped. Each nested rule is capped at 8 KB with a continuation note. Resume, compaction, and output set-aside rebuild which rules are still present, allowing missing rules to be sent again.
 
 Large file reads stream selected lines while counting and hashing the full file, retaining stale-edit protection without retaining the whole file in memory. Grep streams matches into a bounded preview and spills excess output to a file. Foreground shell commands drain stdout and stderr independently, including when one stream closes before the other. Their process-group guard ends descendants on cancellation or timeout and also cleans up remaining group members after completion. Interrupted output warns that the command may already have partly run.
+
+A single overlong read line explicitly reports truncation and byte-range continuation guidance. File-name search also streams its results: it retains only the first bounded set in name order and a total count rather than collecting every path before sorting.
 
 Provider refusal bodies are retained only up to 64 KiB and read within the response timeout. Event-size enforcement also checks a complete SSE event before returning it, not only an unfinished event buffer.
 
@@ -116,6 +120,8 @@ Desktop helper sessions are different: orchestration starts independent sessions
 `the_file_tools_keep_to_it` covers hidden keys through direct paths, symlinks, and parent traversal as well as allowed project writes. `the_home_folder_is_never_the_writable_project` covers unsafe broad working directories.
 
 Additional focused checks include `a_used_budget_stops_every_kind_of_request`, `helpers_costs_come_back_whole`, `a_reply_without_usage_is_unknown_not_nothing`, `a_folders_rules_come_once_with_its_first_file`, `a_big_file_is_read_as_it_comes_the_same`, `a_timeout_ends_the_whole_group`, and `caches_dont_hold_changes_back`. These cover admission, accounting uncertainty, context rules, bounded reads, command cleanup, and isolated merge boundaries respectively.
+
+`unsaid_usage_is_estimated` verifies separate estimated spend and log/detail round trips. `a_cut_long_line_says_so` and `find_shows_the_first_names_and_the_count` cover bounded I/O guidance and ordering; nested-rule tests also verify that first edits, deletes and moves are held until their rules have been returned.
 
 Suggested checks:
 
