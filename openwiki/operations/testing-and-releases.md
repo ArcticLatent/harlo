@@ -5,7 +5,7 @@ description: Contributor build prerequisites, focused and integration verificati
 tags: [testing, build, packaging, releases, security]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-14T05:16:59.652Z
+    at: 2026-11-14T06:18:31.902Z
 sources:
   - id: openwiki-source-4d1d392666be6dfdd7a91a2e
     resource: repo://.github/workflows/release.yml
@@ -13,6 +13,10 @@ sources:
     resource: repo://.github/workflows/tests.yml
   - id: openwiki-source-f317ee207e1653d2033c81a4
     resource: repo://CONTRIBUTING.md
+  - id: openwiki-source-0b93973e66ce9fb1db2bd77c
+    resource: repo://crates/harlo-agent/src/agent.rs
+  - id: openwiki-source-f9cde46e266df585b9f891eb
+    resource: repo://crates/harlo-agent/src/chat.rs
   - id: openwiki-source-1ab0216479222bff9a772d8b
     resource: repo://crates/harlo-app/src/updates.rs
   - id: openwiki-source-7f90659c3ba3e62659b4a786
@@ -25,7 +29,7 @@ sources:
     resource: repo://site/README.md
   - id: openwiki-source-f1c29df965300759d3c1ff56
     resource: repo://wrangler.jsonc
-generated: { by: "harlo", at: "2026-11-14T05:16:59.652Z" }
+generated: { by: "harlo", at: "2026-11-14T06:18:31.902Z" }
 ---
 
 # Testing, packaging, and signed updates
@@ -64,7 +68,11 @@ For stream-accounting regressions, start narrowly before running the broader age
 ```sh
 cargo test --locked -p harlo-agent a_stream_that_breaks_keeps_what_it_said_it_used
 cargo test --locked -p harlo-agent a_later_report_of_part_keeps_the_rest
+cargo test --locked -p harlo-agent each_count_said_is_kept_on_its_own
+cargo test --locked -p harlo-agent each_try_is_counted_as_it_ends_and_the_next_admitted
 ```
+
+The partial-count check distinguishes output-only and input-only reports from measured zero, including budget-only estimation of missing input. The attempt-accounting check covers charging before retry admission and dropping an in-flight request after it has reported usage: the spend remains, the hold is released, and an empty snapshot does not add another charge. These unit boundaries complement the broken-stream and report-merging checks; they are not a claim that every provider's cancellation behavior has been tested.
 
 For phone code display/copy regressions, use the focused checks listed in [phone verification](../integrations/phone-and-relay.md#verification); core crypto tests alone are not a substitute for checking desktop serialization and the Swift renderer.
 

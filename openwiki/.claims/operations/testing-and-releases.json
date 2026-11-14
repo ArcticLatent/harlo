@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:d33e317dd8d5652dc7fffcce5129a41721d5735d683aa860b12e29dbafaa5add",
+  "pageVersion": "sha256:739211a3f14e87958f4ff3734c065fa535c36dc3d5dac46ac22286513e7a0863",
   "claims": [
     {
       "id": "claim_7a207a8ae4594d9ba376628ea349a6b4",
@@ -97,10 +97,24 @@
           "version": "repo-lines-v1:sha256:bb5374379429b9c9e546e315ceb5969ee5d97e692af33ad977a1dbf9ae1a9062:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZDQwMGVjZjU4MWMyOWYxYzg5MWI2N2RmYzQ0YjMzMWJiOTg4NzRlYTYwZDQ1MzEzOGJhYmZmYmY0NjE3NDkxZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYzU4ZTQ1NDVlNWI2NjRhNzdiMDM1OTFiNTc1ZmVhZjU3N2E4YzVhNjE0NWY0ODdlYzBiMDU4ZWNlZjQ1Mjc1NCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiODYxOTJjZTc5M2RkMjhjOTU5OGM1ZTBlM2UyZGI2MzE1MjcwOTkzY2YwM2E5NGJhNzU3NzE0Y2ExZDk4MjE4OSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMmJiODI1YmQzZmVjNTEwNDRjMGZmN2U2OGMzODdkNzZhMGMyMTEzOGFiOTE2Njg1YmRkZjkyNTMwZGUyMGYwZSJ9"
         }
       ]
+    },
+    {
+      "id": "claim_73acccc296f84d37bc7b1d7818748481",
+      "statement": "Focused agent tests cover independent input/output usage normalization with missing-input budget estimates and attempt accounting that preserves reported spend on stop, releases held budget, and avoids an extra charge from an empty snapshot.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L2653-L2691",
+          "version": "repo-lines-v1:sha256:116200b92e9429b6c1619bc1d886c29587af35beb47956b557ca2f9af30fd348:eyJzZWxlY3RlZExpbmVDb3VudCI6MzksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkyYjVlZGY1OTQ5Y2ZlYTY3ODIyY2Y2OTExMzIzNjNkNjhkNmYxZTE2OWY1ZTBkNGY3YzE0ZTVmYTFlNmQ0ZTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNkOTA4YzhkYjhiNTZjYjFmNTM0MmFjMGI3ZjQ2ODlmODZjMWI4Y2ZkMWM0MTk1NDU4YTdkZTgyN2Q5MDU3MTIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjViMWEwMmM1MWZmZTkyNzM5MWNjMWE3NTQ2ZjIzOGRkYjBkMTExYzIxYTI0ZTdjYTYwN2EwNDQ0NzRkNzBjYTYifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-agent/src/chat.rs#L610-L622",
+          "version": "repo-lines-v1:sha256:81154013a095dcb59d74499f232a8e957334c2be1c7100a1060944a2f474047a:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkyYjVlZGY1OTQ5Y2ZlYTY3ODIyY2Y2OTExMzIzNjNkNjhkNmYxZTE2OWY1ZTBkNGY3YzE0ZTVmYTFlNmQ0ZTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRkMzkyMTQ3NDg3ZTVjODJmYmU1YzNlYzQ2NmYwOTlhNjRhZjg2NDMwYmI4ZDExMGM5YmZlZWZhZDFkN2RlNmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk3Yjg3MTgwMmIxZjA3NTQzZmEzMTY2ZWQ1ZGEyZGZjOTI3NmRhNzA4ZjQwNTAzMDMyMWZhYjY2NDRiYWRmZjIifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-14T05:16:59.652Z"
+    "at": "2026-11-14T06:18:31.902Z"
   }
 }

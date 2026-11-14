@@ -5,7 +5,7 @@ description: Device authorization, replay-resistant NaCl channels, session subsc
 tags: [phone, ios, encryption, relay, apns]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-14T05:16:59.652Z
+    at: 2026-11-14T06:18:31.902Z
 sources:
   - id: openwiki-source-3e5d9e2412052022c04ac0ec
     resource: repo://crates/harlo-apns/src/lib.rs
@@ -47,7 +47,7 @@ sources:
     resource: repo://ios/HarloKit/Sources/HarloKit/Visuals.swift
   - id: openwiki-source-e36aee686debea4d83dc020e
     resource: repo://ios/HarloKit/Tests/HarloKitTests/HarloKitTests.swift
-generated: { by: "harlo", at: "2026-11-14T05:16:59.652Z" }
+generated: { by: "harlo", at: "2026-11-14T06:18:31.902Z" }
 ---
 
 # Phone pairing, encrypted transport, and relay
@@ -88,6 +88,8 @@ Long desktop code blocks are split into continuation rows by the shared transcri
 The HTML join preserves each piece's own trailing blank lines and restores only the separator newline between pieces. It therefore preserves blank lines at piece boundaries and at the end, rather than trimming them away. HarloKit preserves those trailing newlines in Harlo's direct `<pre>` blocks; it removes one renderer-added newline only when the block contains a single `<code>` wrapper, as in nested Markdown code.
 
 This does not remove transport bounds: reset starts with the latest 300 rows and frames are grouped at about 512 KiB. Ordinary row text and HTML use a 64 KiB clipping threshold with a continuation notice. Code blocks, whether whole or joined from pieces, instead use a separate 256 KiB HTML threshold: the server cuts at the last newline before that threshold when available, adds an omitted-line notice, and closes the `<pre>` wrapper. The notice and closing markup can extend the result slightly past the threshold. Copyable code bypasses the ordinary text limit and is reduced to the same retained line count when HTML is truncated; the omitted-line notice is not copied. The first row of a code block outside that window is not pulled into it merely because a later piece is visible.
+
+If the first code line alone exceeds the HTML allowance and there is no newline before the threshold, the server instead takes at most 32 KiB of that line's plain text, ending at a UTF-8 character boundary. It escapes that prefix into a fresh, unhighlighted `<pre>` wrapper and uses the identical prefix for copying. A display-only notice identifies the remaining part of the line and any later lines left on the computer. This avoids sending a huge copy payload or cutting through highlighting markup when even one complete line cannot fit.
 
 ## Wiki access from a phone session
 
@@ -131,6 +133,8 @@ Core tests exercise identity persistence, two-way crypto, replay/wrong-connectio
 `a_long_code_blocks_blank_lines_reach_phones` checks blank lines at piece boundaries and the end, including escaped characters in plain and highlighted code. `a_huge_code_block_is_cut_after_a_line` checks the larger HTML threshold, balanced highlighting spans, retained initial lines, and omitted-line count.
 
 `a_big_code_block_copies_what_it_shows` covers both split and unsplit code exceeding the ordinary row limit. The huge-block test also compares copied lines with displayed lines. HarloKit's `testACodeBlocksBlankLinesAreKept` distinguishes direct code-block trailing blanks from the newline added by a nested Markdown wrapper.
+
+`a_code_line_too_long_for_a_phone_is_cut_alike` exercises a roughly 5 MiB first line containing HTML-sensitive characters, with and without a second line. It checks bounded serialized frames, a copied prefix no larger than 32 KiB, equality between shown and copied text, and the omission notice.
 
 ```sh
 cargo test -p harlo-core --no-default-features phone

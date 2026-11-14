@@ -5,7 +5,7 @@ description: Harlo agent model-loop ordering, resumable history, RPC approvals, 
 tags: [agent, safety, sandbox, rpc, tools]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-14T05:16:59.652Z
+    at: 2026-11-14T06:18:31.902Z
 sources:
   - id: openwiki-source-0b93973e66ce9fb1db2bd77c
     resource: repo://crates/harlo-agent/src/agent.rs
@@ -37,7 +37,7 @@ sources:
     resource: repo://crates/harlo-agent/src/tools/mod.rs
   - id: openwiki-source-cc3a6736ec7398d0638b6f38
     resource: repo://crates/harlo-agent/src/used.rs
-generated: { by: "harlo", at: "2026-11-14T05:16:59.652Z" }
+generated: { by: "harlo", at: "2026-11-14T06:18:31.902Z" }
 ---
 
 # Agent execution and safety boundaries
@@ -65,6 +65,10 @@ Responses attempts cut off by the server retain their usage even if retried; a c
 Chat-completions usage reports merge field by field, including nested details: later non-null values replace earlier totals rather than being added, while omitted or null fields preserve earlier values. An error-local report overlays the accumulated report using the same rule. Counts are normalized to the shared Responses-style accounting shape. Reported zero remains measured zero; an error without any usage remains absent rather than becoming an unknown-sized request.
 
 Premature stream closure, connection failure, and idle timeout also carry any usage already reported by a chat-completions stream. The agent charges that dropped attempt through the same ledger before deciding whether to retry; a dropped stream without a usage object adds no failed-attempt charge. Retrying does not erase spend from the broken reply.
+
+Stopping a chat request while its stream is still running also preserves reported spend. The stream keeps the latest normalized usage in the request's `Tries` guard; dropping that guard charges the reported usage once and sends it to the accounting sink. A normally ended attempt clears this snapshot before success/error accounting, preventing a second charge on drop. A stop before any recognized token count has arrived adds no charge through this guard. Settlement prices and logs the retained usage separately from a completed reply.
+
+Input and output counts normalize independently. An output-only report keeps its measured output and leaves input unknown; the request-size estimate covers missing input for budget enforcement, not pricing. An input-only report likewise does not invent measured zero output. `each_count_said_is_kept_on_its_own` verifies these partial-report cases and an entirely empty report.
 
 ## Request admission and auxiliary work
 
@@ -142,6 +146,8 @@ Additional focused checks include `a_used_budget_stops_every_kind_of_request`, `
 `rules_from_a_batch_hold_its_later_changes` covers the same-batch rules barrier, including a direct rules-file read and a move. `call_arguments_are_an_object_or_not_sent` covers MCP argument normalization and rejection.
 
 `each_try_is_counted_as_it_ends_and_the_next_admitted` verifies immediate charging, refusal after exhaustion, and ledger retention when the request is dropped. Chat's `a_failed_reply_keeps_what_it_said_it_used` checks error-local and earlier usage reports, measured zero, and absent usage.
+
+The attempt-accounting test also checks stopping mid-attempt after usage was reported: spend is charged once, the budget hold is released, and an empty snapshot adds no duplicate ledger entry.
 
 `a_stream_that_breaks_keeps_what_it_said_it_used` covers usage followed by closure or an idle timeout, including continued retry eligibility. `a_later_report_of_part_keeps_the_rest` verifies partial-report merging and replacement of totals rather than double counting.
 
