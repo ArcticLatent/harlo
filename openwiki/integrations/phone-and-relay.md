@@ -5,7 +5,7 @@ description: Device authorization, replay-resistant NaCl channels, session subsc
 tags: [phone, ios, encryption, relay, apns]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-14T00:47:49.942Z
+    at: 2026-11-14T03:17:14.108Z
 sources:
   - id: openwiki-source-3e5d9e2412052022c04ac0ec
     resource: repo://crates/harlo-apns/src/lib.rs
@@ -23,6 +23,8 @@ sources:
     resource: repo://crates/harlo-app/src/phone.rs
   - id: openwiki-source-33d58143535fd8586f3e5352
     resource: repo://crates/harlo-core/src/phone.rs
+  - id: openwiki-source-4db2ffefa327cd504d9b5a66
+    resource: repo://crates/harlo-core/src/session.rs
   - id: openwiki-source-a9697f23b0ad71a5ad25a2a8
     resource: repo://crates/harlo-core/src/transcript.rs
   - id: openwiki-source-f6c0ec21414aa65ae7ca1f61
@@ -43,7 +45,7 @@ sources:
     resource: repo://ios/HarloKit/Sources/HarloKit/Visuals.swift
   - id: openwiki-source-e36aee686debea4d83dc020e
     resource: repo://ios/HarloKit/Tests/HarloKitTests/HarloKitTests.swift
-generated: { by: "harlo", at: "2026-11-14T00:47:49.942Z" }
+generated: { by: "harlo", at: "2026-11-14T03:17:14.108Z" }
 ---
 
 # Phone pairing, encrypted transport, and relay
@@ -77,7 +79,11 @@ The workspace bridge owns actions requiring desktop application state, including
 
 If Stop arrives while a new turn is still waiting for its undo snapshot, an `unsent` event returns the held messages' original words and inline photos. Desktop-only file attachments are not converted into phone attachments. HarloKit routes the event by session key, decodes valid base64 photos, prepends returned text above any newer draft, and queues photos for the composer. The SwiftUI composer puts returned photos before those selected meanwhile and clears the queue; a photo-only return leaves draft text unchanged.
 
-Long desktop code blocks are split into continuation rows by the shared transcript. Phone serialization marks later code pieces as `codePart`, which the iOS view hides; the first code row carries the combined code, subject to the phone transport's existing text clipping. This avoids displaying duplicate continuation cards on the phone.
+A phone subscription advertises that it has a composer. It can therefore receive messages returned after a failed agent start, as well as cancelled preparation. If recovery happened with no composer attached, the session retains the messages in memory and gives them to the first desktop or phone composer that subscribes; passive workspace watchers do not consume them.
+
+Long desktop code blocks are split into continuation rows by the shared transcript. Phone serialization marks later code pieces as `codePart`, which the iOS view hides; the first code row carries both combined copyable code and combined highlighted HTML. The server joins matching consecutive pieces into one `<pre>` block, rather than displaying only the first desktop piece. Reset frames use this joined representation, and insert/update deltas resend an affected first row after the other changes when it is within the phone's window. Hidden continuation rows remain in the protocol list to preserve row positions.
+
+This does not remove transport bounds: reset starts with the latest 300 rows, frames are grouped at about 512 KiB, and each row's text and HTML are clipped at 64 KiB with a continuation notice. The first row of a code block outside that window is not pulled into it merely because a later piece is visible.
 
 ## Wiki access from a phone session
 
@@ -115,6 +121,8 @@ Option-card inline text is parsed into styled spans in HarloKit (code, bold, ita
 Core tests exercise identity persistence, two-way crypto, replay/wrong-connection/wrong-key rejection, device offers, and TweetNaCl interoperability.
 
 `stopped_messages_reach_phones` checks ordered original words and pictures in the desktop event. HarloKit's `testStoppedMessagesComeBack` checks decoding, rejection of invalid base64 photos, preservation of newer draft text, and photo-only recovery.
+
+`a_long_code_block_reaches_phones_whole` checks reset delivery at 149/150/151/320 lines and streamed growth through piece boundaries, applying the frames as a phone does and comparing shown lines, copy text, and retained row counts.
 
 ```sh
 cargo test -p harlo-core --no-default-features phone

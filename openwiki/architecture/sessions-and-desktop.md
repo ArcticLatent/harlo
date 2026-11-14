@@ -5,7 +5,7 @@ description: How agent protocols become shared live sessions, durable conversati
 tags: [architecture, sessions, persistence, desktop]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-14T00:47:49.942Z
+    at: 2026-11-14T03:17:14.108Z
 sources:
   - id: openwiki-source-eda83df6b22941ed75ede295
     resource: repo://crates/harlo-app/qml/ChatView.qml
@@ -37,7 +37,7 @@ sources:
     resource: repo://crates/harlo-harness/src/lib.rs
   - id: openwiki-source-07a69ae82a0e133d3de748f1
     resource: repo://crates/harlo-harness/src/store.rs
-generated: { by: "harlo", at: "2026-11-14T00:47:49.942Z" }
+generated: { by: "harlo", at: "2026-11-14T03:17:14.108Z" }
 ---
 
 # Sessions, persistence, and desktop presentation
@@ -72,6 +72,8 @@ Prompts return false when a session or daily spending hold is active, so callers
 
 Before a new turn, the driver takes its undo snapshot asynchronously and holds prompts while reporting `Preparing(true)`, including to newly attached subscribers. Stop remains responsive: it removes all held prompts, invalidates the snapshot completion token, and emits `Unsent(Vec<Unsent>)` in send order. Each returned message retains wire text, images, send mode, and optional `Typed` words and attachment paths. A late snapshot completion cannot send the cancelled prompts. Steering during a busy turn and `/btw` do not start this new-turn snapshot path.
 
+Recovery also covers a harness that cannot start: the unsent prompt and any remaining held prompts are returned with a transcript notice. `SessionSink::composes` distinguishes desktop/phone composers from passive watchers. If no composing subscriber is attached, the driver keeps returned messages in memory until the first composing subscriber arrives, then drains them into that subscriber's initial updates. A later composer does not receive that backlog again; this is live-session state, not durable draft storage.
+
 The sender supplies original words and attachment paths through `prompt_typed`, so recovery no longer depends on matching returned prompts to a view's recent sends. Without typed metadata, `Unsent::words` strips the trailing plan note and leading photo placeholders. The desktop saves supported inline pictures as content-named files when no original attachment paths exist, including pictures sent from the phone. Restored messages go above any new composer draft; attachments are merged without duplicates. This preserves multiple cancelled sends and attachment-only messages instead of restoring only the last text.
 
 Session metadata carries `cost_kind` separately from numeric cost, distinguishing plan/local usage, priced usage, partly known cost, and unknown cost. The context report forwards this classification rather than interpreting a numeric zero as evidence that usage was free.
@@ -105,6 +107,8 @@ The desktop search dialog likewise queries off-thread. It records the newest que
 
 Local Harlo history can now be indexed incrementally as well as local Claude history. The Harlo reader resumes only across complete JSONL lines when the saved tail still matches and new entries continue the previous leaf. Branching, rewriting, or incompatible resume state causes a full active-branch read instead. The search index tracks message row IDs separately so replacement and deletion do not require scanning all FTS content, and backfills this mapping for older indexes.
 
+An indexed file that is still listed but temporarily unreadable is not treated as an empty conversation. Local read failures and failed remote copies return `None`; the index preserves existing hits and the previous file stamp, throttles retries, and replaces content only after a successful read. Files absent from the supplied file list still follow the ordinary deletion path.
+
 ## Finished wiki sessions and approval presentation
 
 Finished wiki sessions use a separate **Wiki** shelf after **Settled**, with independent expansion state. The workspace marks an idle wiki session with the `wiki` settlement reason, deferring settlement while it is the active view or lacks a saved file. Disabled session settling, pinning, and archiving remain respected. This is session organization, not proof that the durable [OpenWiki run](../integrations/openwiki.md) completed successfully.
@@ -114,6 +118,7 @@ Approval messages marked as Markdown are rendered through the core Markdown rend
 ## Focused verification
 
 - `finished_wiki_runs_have_a_shelf_of_their_own` checks separate Wiki shelf grouping and expansion.
+- `a_message_that_couldnt_be_sent_comes_back` checks launch-failure recovery with only a watcher attached, first-composer delivery, and no duplicate backlog for a later composer. `a_file_not_readable_now_keeps_its_hits` checks failed-read preservation, retry throttling, and successful replacement.
 - `every_unsent_message_comes_back_with_its_files` checks ordered recovery, repeated text, attachment-only sends, and phone-origin text. The QML stop-before-send scenario also checks preservation of a newer draft and that cancelled messages never reach the model after the delayed snapshot finishes.
 - `a_harlo_session_is_read_on_while_it_goes_on_and_whole_when_it_branches` covers append, partial-line, branch, and rewrite behavior; `an_index_from_before_its_row_table_still_forgets` covers old-index migration and deletion.
 - Markdown's long-code/table and streaming-cache tests, together with `a_long_code_block_is_rows_of_one_card`, verify continuation boundaries and whole-block copying.

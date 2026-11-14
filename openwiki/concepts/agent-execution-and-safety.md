@@ -5,7 +5,7 @@ description: Harlo agent model-loop ordering, resumable history, RPC approvals, 
 tags: [agent, safety, sandbox, rpc, tools]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-14T00:47:49.942Z
+    at: 2026-11-14T03:17:14.108Z
 sources:
   - id: openwiki-source-0b93973e66ce9fb1db2bd77c
     resource: repo://crates/harlo-agent/src/agent.rs
@@ -15,6 +15,8 @@ sources:
     resource: repo://crates/harlo-agent/src/isolate.rs
   - id: openwiki-source-6563011f1979331a41458e2d
     resource: repo://crates/harlo-agent/src/mcp.rs
+  - id: openwiki-source-ae4a49158d3f1eb8769fdbd5
+    resource: repo://crates/harlo-agent/src/program.rs
   - id: openwiki-source-f1322101a0183d196da191a3
     resource: repo://crates/harlo-agent/src/providers.rs
   - id: openwiki-source-ebc97281eed08eb8622307f8
@@ -33,7 +35,7 @@ sources:
     resource: repo://crates/harlo-agent/src/tools/mod.rs
   - id: openwiki-source-cc3a6736ec7398d0638b6f38
     resource: repo://crates/harlo-agent/src/used.rs
-generated: { by: "harlo", at: "2026-11-14T00:47:49.942Z" }
+generated: { by: "harlo", at: "2026-11-14T03:17:14.108Z" }
 ---
 
 # Agent execution and safety boundaries
@@ -54,7 +56,9 @@ Configured model prices are dollars per million tokens, with cached input defaul
 
 An unpriced provider is free only when explicitly configured with `"free": true`; a loopback or LAN endpoint could proxy a paid service. An explicit model price or server-listed price takes precedence over that flag. See [model-server configuration](../integrations/remote-machines-and-models.md) for desktop defaults and migration.
 
-Missing usage is not measured zero: `Used.unreported` tracks requests missing either input or output token reporting, persisted as `tokensUnknown` in assistant usage and `unreported` in aggregate tool details. A priced request with incomplete token reporting becomes unknown-cost; plan and explicitly free requests retain their no-extra-cost classification. Missing input and output can be estimated from request size and reply length for budget enforcement only: `tokensEstimated` in logs and `estimated` in tool details never become measured tokens or a price. Subagent aggregation preserves costs, cost kinds, unreported counts, and estimates. Responses cut off by the server still have their reported usage charged and logged before the error propagates.
+Missing usage is not measured zero: `Used.unreported` tracks requests missing either input or output token reporting, persisted as `tokensUnknown` in assistant usage and `unreported` in aggregate tool details. A priced request with incomplete token reporting becomes unknown-cost; plan and explicitly free requests retain their no-extra-cost classification. Missing input and output can be estimated from request size and reply length for budget enforcement only: `tokensEstimated` in logs and `estimated` in tool details never become measured tokens or a price. Subagent aggregation preserves costs, cost kinds, unreported counts, and estimates.
+
+Responses attempts cut off by the server retain their usage even if retried; a cutoff without reported usage is counted as unknown and estimated for the budget. Failed responses carrying a usage object also count, while failures without usage do not add a request to this failed-attempt accounting. `send` collects these attempts separately from the eventual successful reply. Main requests log and charge them before fallback or error propagation; side questions, compaction, and web searches also settle collected attempts rather than losing them when a retry succeeds.
 
 ## Request admission and auxiliary work
 
@@ -66,7 +70,7 @@ Side-question usage carries the originating session ID and log path. If a sessio
 
 ## Tool-round ordering
 
-An entirely read-only, permitted tool batch runs concurrently with `join_all`. Other batches are processed in call order. This prevents a mixed edit/read batch from acquiring surprising parallel semantics. Invalid JSON arguments return a tool error; unavailable tools are rejected. Cancellation distinguishes interrupted work from later calls that did not run—an interrupted command may already have effects.
+An entirely read-only, permitted tool batch runs concurrently with `join_all`. Other batches are processed in call order. This prevents a mixed edit/read batch from acquiring surprising parallel semantics. Invalid JSON arguments return a tool error; unavailable tools are rejected. On cancellation, a concurrent batch retains results and usage from calls that already completed and marks only unfinished calls interrupted. Sequential batches distinguish interrupted work from later calls that did not run—an interrupted command may already have effects.
 
 A run has a default cap of 200 tool rounds, configurable with positive `HARLO_AGENT_MAX_ROUNDS`. RPC permits only one active run: steering and follow-up messages queue rather than starting overlapping model loops.
 
@@ -74,9 +78,13 @@ MCP servers start concurrently before the first model request. Their default sta
 
 Stop can interrupt discovery of desktop tools and MCP startup; an incomplete MCP start is retried on a later prompt rather than permanently marking discovery complete. When combined MCP tool schemas exceed 12,000 bytes, the agent offers `mcp_tools` search and `mcp_call` instead of every full schema on every request. Search returns up to eight matches. `HARLO_AGENT_MCP_LISTED_PAST` overrides the threshold; zero disables this indirection. Calls resolve to the underlying tool before read-only classification, approval and plan-mode checks, preserving those boundaries.
 
+An indirect MCP call accepts arguments as an object or a JSON string containing an object. Missing/null arguments and blank strings normalize to an empty object; arrays, scalars, malformed JSON and strings containing non-object JSON are rejected rather than forwarded. Names may be the full exposed name, an unambiguous bare tool name, or a server-qualified name. `run_code` receives concrete read-only MCP tools, not the generic `mcp_call` dispatcher, so indirection does not widen its callable set.
+
 ## Tool context and bounded I/O
 
 File reads append applicable nested `AGENTS.md` (or fallback `CLAUDE.md`) text to successful results once per folder while that text remains in model history. A write, edit or patch that encounters unseen rules is refused before any change, returns the rules, and must be requested again after considering them. Patch checks include deletions and both ends of moves. Top-level rules are already in the instructions; hidden folders, `node_modules`, and `vendor` are skipped. Each nested rule is capped at 8 KB with a continuation note. Resume, compaction, and output set-aside rebuild which rules are still present, allowing missing rules to be sent again.
+
+Rules first delivered during a tool batch also block later changes under that folder in the same batch: the model requested those changes before it could read the results. This includes rules obtained by directly reading the rules file, repeated writes, and moves into the folder. The next model tool batch clears this unread-rules barrier; unrelated folders are not blocked.
 
 Large file reads stream selected lines while counting and hashing the full file, retaining stale-edit protection without retaining the whole file in memory. Grep streams matches into a bounded preview and spills excess output to a file. Foreground shell commands drain stdout and stderr independently, including when one stream closes before the other. Their process-group guard ends descendants on cancellation or timeout and also cleans up remaining group members after completion. Interrupted output warns that the command may already have partly run.
 
@@ -122,6 +130,8 @@ Desktop helper sessions are different: orchestration starts independent sessions
 Additional focused checks include `a_used_budget_stops_every_kind_of_request`, `helpers_costs_come_back_whole`, `a_reply_without_usage_is_unknown_not_nothing`, `a_folders_rules_come_once_with_its_first_file`, `a_big_file_is_read_as_it_comes_the_same`, `a_timeout_ends_the_whole_group`, and `caches_dont_hold_changes_back`. These cover admission, accounting uncertainty, context rules, bounded reads, command cleanup, and isolated merge boundaries respectively.
 
 `unsaid_usage_is_estimated` verifies separate estimated spend and log/detail round trips. `a_cut_long_line_says_so` and `find_shows_the_first_names_and_the_count` cover bounded I/O guidance and ordering; nested-rule tests also verify that first edits, deletes and moves are held until their rules have been returned.
+
+`rules_from_a_batch_hold_its_later_changes` covers the same-batch rules barrier, including a direct rules-file read and a move. `call_arguments_are_an_object_or_not_sent` covers MCP argument normalization and rejection.
 
 Suggested checks:
 
