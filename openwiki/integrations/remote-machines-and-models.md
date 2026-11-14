@@ -5,8 +5,16 @@ description: SSH-backed project paths, per-machine helper deployment and state, 
 tags: [ssh, remote, models, engines, configuration]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-13T07:57:21.074Z
+    at: 2026-11-13T19:56:31.605Z
 sources:
+  - id: openwiki-source-f1322101a0183d196da191a3
+    resource: repo://crates/harlo-agent/src/providers.rs
+  - id: openwiki-source-f3b7ddced6bd0e383fa959d1
+    resource: repo://crates/harlo-app/qml/ModelServerDialog.qml
+  - id: openwiki-source-9cb86229670695fb5654cb21
+    resource: repo://crates/harlo-app/qml/SettingsDialog.qml
+  - id: openwiki-source-6f4a8152df109bb50475dc85
+    resource: repo://crates/harlo-app/src/accounts.rs
   - id: openwiki-source-be6e7bfc466a23d5de0a4a6d
     resource: repo://crates/harlo-core/src/agent_host.rs
   - id: openwiki-source-2c80b958b3431bd2cf32f669
@@ -21,7 +29,7 @@ sources:
     resource: repo://crates/harlo-core/src/remote.rs
   - id: openwiki-source-5d94b2fabb592e050ff61e0a
     resource: repo://crates/harlo-core/src/servers.rs
-generated: { by: "harlo", at: "2026-11-13T07:57:21.074Z" }
+generated: { by: "harlo", at: "2026-11-13T19:56:31.605Z" }
 ---
 
 # Remote machines and model servers
@@ -58,6 +66,16 @@ Discovery also imports listed prices: OpenRouter-style per-token `prompt`, `comp
 `servers.rs` retains managed server commands and log locations. `ensure_running` returns if healthy; otherwise it starts the server and waits up to 15 minutes for readiness. A detected faulted engine can be stopped even if its endpoint answers before being relaunched. Post-start callbacks can refresh model context configuration; problems in those callbacks are logged as warnings.
 
 A server started by the remote helper survives that helper's exit. This is intentional: the helper returns once the long-lived server is available.
+
+## Free servers versus unknown costs
+
+A local address does not prove that inference is free: a loopback or LAN proxy may forward to a paid provider. Provider entries therefore carry an explicit `free` flag. Harlo's agent classifies an unpriced provider as no-extra-cost only when that flag is true; configured model prices, then server-listed prices, take precedence. Otherwise the cost is unknown, not a known zero. Plan-backed providers retain their separate plan classification.
+
+Core defaults newly added servers to free only when the address is local/network-local and either no real API key is supplied (empty or `none`) or Harlo has a start command for that endpoint. The desktop exposes **Free: it runs on hardware you own** during addition and in Harlo's local-server settings, so the user can override that assumption. A price can also be supplied for a local paid proxy; the price editor is not restricted to online addresses.
+
+Loading the desktop server list migrates Harlo provider entries missing `free` using the same core defaults. Entries already containing the field are left alone; repeated migration is a no-op. Migration write failures are logged as warnings. `servers_from_before_say_whether_they_are_free` checks keyless local servers, keyed local proxies, online endpoints, and preservation of an explicit false value.
+
+Spending limits depend on reported costs: an unpriced, non-free server cannot be reliably counted toward them. Even with a price, a response that omits token usage has unknown cost; see [agent accounting](../concepts/agent-execution-and-safety.md). Reachability, placement, and billing classification are independent states.
 
 ## Sharing servers across machines
 

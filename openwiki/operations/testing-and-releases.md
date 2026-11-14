@@ -5,10 +5,12 @@ description: Contributor build prerequisites, focused and integration verificati
 tags: [testing, build, packaging, releases, security]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-13T07:57:21.074Z
+    at: 2026-11-13T19:56:31.605Z
 sources:
   - id: openwiki-source-4d1d392666be6dfdd7a91a2e
     resource: repo://.github/workflows/release.yml
+  - id: openwiki-source-aa11f7ccdcbf0dd150735c18
+    resource: repo://.github/workflows/tests.yml
   - id: openwiki-source-f317ee207e1653d2033c81a4
     resource: repo://CONTRIBUTING.md
   - id: openwiki-source-1ab0216479222bff9a772d8b
@@ -23,7 +25,7 @@ sources:
     resource: repo://site/README.md
   - id: openwiki-source-f1c29df965300759d3c1ff56
     resource: repo://wrangler.jsonc
-generated: { by: "harlo", at: "2026-11-13T07:57:21.074Z" }
+generated: { by: "harlo", at: "2026-11-13T19:56:31.605Z" }
 ---
 
 # Testing, packaging, and signed updates
@@ -56,6 +58,18 @@ Use a scratch HOME or XDG data/config directories for interactive testing. Demo 
 | Packaging/update | Signing/core update tests | Installed package smoke tests and self-update scenario |
 
 Keep external-service checks distinct from hermetic unit tests. See [agent safety](../concepts/agent-execution-and-safety.md) and [phone integration](../integrations/phone-and-relay.md) for focused invariants.
+
+## Headless Rust CI
+
+`.github/workflows/tests.yml` runs the agent and core tests on pushes to `main`, pull requests, and manual dispatch. Push/PR changes confined to iOS, the website, wiki, or Markdown are ignored. Runs for the same ref cancel an older in-progress run.
+
+The job uses Ubuntu 24.04, stable Rust, a Cargo cache, and a 45-minute timeout. It installs native compiler/build dependencies and bubblewrap, then runs:
+
+```sh
+cargo test --locked -p harlo-agent -p harlo-core
+```
+
+This is not a whole-workspace or Qt UI job. The workflow disables Ubuntu's AppArmor restriction on unprivileged user namespaces on its runner so sandbox tests can execute bubblewrap rather than only checking generated arguments. That runner setup is a prerequisite for exercising the real sandbox boundary, not advice to change a production machine's security policy. Desktop interaction and end-to-end checks remain separate from this job.
 
 ## Release production
 

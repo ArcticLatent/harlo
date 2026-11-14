@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:ad69d2a0f945edf60a38dd5d705e2b384d79ba3eccb9ec26f8e9e9cd65a817cb",
+  "pageVersion": "sha256:c785afcd2d361d9b81b178c4c31e421edcea36934c6ac0c8f45a4d9ac6a3453c",
   "claims": [
     {
       "id": "claim_40719ccad61b4b4d8f75324bbf9767c6",
@@ -73,7 +73,7 @@
       "statement": "Reaching an unreachable forwarded remote model first restores the SSH forward, then asks the owning machine to start its server with a 20-minute call timeout.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-core/src/model_servers.rs#L743-L759",
+          "resource": "repo://crates/harlo-core/src/model_servers.rs#L797-L813",
           "version": "repo-lines-v1:sha256:20ef22df07266e51c2727faa37a56c5dc925f211241b48cef0e439acd8375d7e:eyJzZWxlY3RlZExpbmVDb3VudCI6MTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVjYWM1YTdhOTE2YmI0OTUxMWRlMGQxNjBiZGE5ZWFhY2FlNzAwYWRiNDIyZTYzZmRlZTRmNzVlZDc5NGY1MzciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ4OTc3MWZlMWI2NjI4ODc1YWEyM2U3ZGJlNGFhNzE0NjFkMDBjZGZiNjZkZGYxMWI5ZDgyMGFjNTg5N2ZkZjYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImYwZTQzMDQ3MzkzYWU0MGYxNmMyMjE2Njg3NWI3NGVlYjM0NThmNjViZTYxODMzYWEyYmNkNjFhZmJiN2MyZjQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdlOGJlMGE4MGE1MGFmMjg4NmZkMWMyZTJjY2QxMTAzODljNDAwMmI3OWJmN2Y2MDA5ZDY5MDk2NTBiYTI0ZmYifQ"
         }
       ]
@@ -91,14 +91,56 @@
           "version": "repo-lines-v1:sha256:a88179707972e039a0b6d190c05aeb9ac87c2c16a078504fc4f1442374ef0963:eyJzZWxlY3RlZExpbmVDb3VudCI6MzcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM3ZWE5ODczYTJkOWQzNmMyYWFiMDA5YjhkM2M5NGIwYTFmOTk0NWJkMjYwMjk1Zjk2NDNjODYwMGZhOWIzN2MiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI5ZGU3NjNlOGYwODJkYTk4Y2Y2N2RkYTcxNjk0ZDFjZTQxODJjNmYxNmQzYmJkNjFhNTY3N2JhNDExZDI3ZmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJiYmRlMzg5MWY0NWQ4YzE4OTg2YzMzNjc1ODNlYjJhZGZiNzlmZTYzNjBlMGJjY2ZlNDM4NDJlNGY0ZmU1NjQifQ"
         },
         {
-          "resource": "repo://crates/harlo-core/src/model_servers.rs#L837-L862",
+          "resource": "repo://crates/harlo-core/src/model_servers.rs#L907-L932",
           "version": "repo-lines-v1:sha256:e2048dee3918f669791fcaff3b3274726e1ee0b7f8e51b3894fcd1364d3451a4:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkyYjVlZGY1OTQ5Y2ZlYTY3ODIyY2Y2OTExMzIzNjNkNjhkNmYxZTE2OWY1ZTBkNGY3YzE0ZTVmYTFlNmQ0ZTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZlZDBkMzhlYmRhN2Q2MzEzNjJkMmFkMTE5YmYxNTJiNTYwYzFiNDc0YzQyZjhlODg1YzYyZjM4NWJkMTNhMDUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE0ZmZkMTJlNDQyYjU3OTA1Y2NjY2ViZGFiNWY0MmI1ZTgxZjg2ZGE4M2U0NjExYjkxYWNmZmQxMzU5ZmEwOTgifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_ac0156464513421ca7a0dc4fb33b7ec6",
+      "statement": "Provider billing classification uses explicit free metadata rather than network location; configured or listed model prices override free classification, and unpriced non-free providers have unknown cost.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-agent/src/providers.rs#L147-L158",
+          "version": "repo-lines-v1:sha256:78fedc81088225493bd04cb16c769a745cf4b887d4dcdd77c8e1a2e8c215fdaf:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2YjA0NDkxNDY5NzIyZTgzNjNhOTRlNDA0NDUzOGUwMTNhMmEyMTdlMzZiMWU1NjhiYTYwYWNiN2I0YzhmMmUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQwNjMzNGZiOTI3NmI4ZGM1NzFiODQ4NDMzOTA0MmUwOTYxZDJkMmEzZWQ2Yjg0ZjIxYzU5NjkwODAzMGY4ODgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImIyZGZlYTRkMTBjYTVkNTUxYzZhNDBiMjEyYmFjYWQ5ZjYzZWVlMGM3YTBkY2YwY2I4MWZkYWIyYjUxOTcwYTAifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_4f4d3f288ab54069857442ea9c5ab45a",
+      "statement": "Core defaults a new server to free only for local/network-local addresses with no real key or with a Harlo-managed start command, and migration applies those defaults only to entries missing the free field.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/model_servers.rs#L430-L484",
+          "version": "repo-lines-v1:sha256:2a473f040f5eb87882d95a1cbd422888622dd519290bf5e29b6e23490ab1f9c5:eyJzZWxlY3RlZExpbmVDb3VudCI6NTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM4NDhhYjU2NmE2MGQ4ODY0ZGU1YjU0MjAxMTZhN2JhYjk5OWMzYWZhMjhkMzFhODBhMGQ2YzYzY2M5OGE4MDYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYxYjc5ZmNiOTZjMDIyN2E2YjA5YjBkN2Y5NThiYWE1MmI5YWIxMGUxY2VlZjk1OGJhZjZhMzQ1YTJhYmQyOGEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImFmZDVlNWI1ZTM4YTMyYzk1MTEyOGY4NzAzNzM4ZDg1Mjk0OTdlMjAwMDA0NDEyNjYwYTJlMDgyYmQ2MDFlZmUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVlODFjNDA2MzNlZTIwMTBlZDhhZTMzMDdlM2IzZmMxYTVhMTgwYmM2ZmI0NWNlNDg2Zjc3YzcxNjgxYTJlNGYifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-core/src/model_servers.rs#L850-L866",
+          "version": "repo-lines-v1:sha256:457abc3503d356f7ac04bf6bed85c5141945fd99cef66c2c0811a081c776c01f:eyJzZWxlY3RlZExpbmVDb3VudCI6MTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwY2ZiNGE3MjE4YjE4OWQ3MTI3ZjNhYzcyMWI4MTQ3MjQ0MDFjZDkwMmEyNDA4YzkxYmQxNGJkMzI3Mjc5MDAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkyYjVlZGY1OTQ5Y2ZlYTY3ODIyY2Y2OTExMzIzNjNkNjhkNmYxZTE2OWY1ZTBkNGY3YzE0ZTVmYTFlNmQ0ZTUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQ5ZWMzYjNmYzljZWRmMDgyMDRiY2M0YWUwYTVmMTMwYzhkODEzYjgxNTQ0ZWQ0NGVhYWJjYTA4ODEzOTg2MzYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjE1MzY5MWI5ZTZmYzc4YzE5NmQ2YjViMDNkZGQ1Nzc4ODhkNjc5ZWE2MDU4NDI5YzRjOTkwNTIzNjIzMDAyYzIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_b68a16fe6fc34aa59ae1809f33e5bc7b",
+      "statement": "Desktop server loading migrates Harlo provider free metadata and warns on migration errors; the add-server and settings interfaces expose explicit free choices and permit pricing local paid proxies.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-app/qml/ModelServerDialog.qml#L171-L187",
+          "version": "repo-lines-v1:sha256:f180d502f2a820ca4f605caca9d9dd891ae5d69a8bd407b533cefcd05ed593db:eyJzZWxlY3RlZExpbmVDb3VudCI6MTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhkYjMzOWMxN2Q0Y2M1NGU3MGM0ZmNmZWNiNjExYmI5ZTdkMzYzZjI1YjE4ZTA5MjNhMWQzMDZjYzk1OTI0ZTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRiYjNhMzEzZjk0OTg5M2EzZGRhZjU5MGY0NDYwYmEzN2Q5NzkxN2FlMzI5Yzc4ZTZhOTUyNjQ4NTBiZjc2M2QiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImMzZGJlZDZhMjMyODJjYzVjMzY0NDhlZmIzNGMxNzVjMTgwYWUyYWE5YzJlNDMwNDQwZDM4MzNjNDkzYTVlYWMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVjNGMxODRiNWU4MWExYjBlMWZjMDFiM2NhNzRlMmU5NjAzZDZiYzBmM2RhZGJlMjRlMWYwMjZkYTAxOGNjMmEifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-app/qml/SettingsDialog.qml#L3482-L3509",
+          "version": "repo-lines-v1:sha256:ad20a44ea2bc781801c4002959273ec515c8d4e78cbb2b5ccbda3c8403a157e9:eyJzZWxlY3RlZExpbmVDb3VudCI6MjgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY3ODRjMzQ4MDdhMThmZWNkYTAxY2Q3ZmQwNjkzZjNjYzkwMTczYjNhZjFmYTJiYTc0YTExZWYxNGIxYmMzZWMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIwNzIzYjUwOGU0YmZkOTljNzBlYzM5MDUyOWQ1ZDUzMGNhZDE1NjBlMDUwYTQxNjk4ZDkwMTAwOTZjNjM0NGQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI1NjI5ZGY5YjAyNTAyOWI1NDFmNmRlMTBkM2ZiY2Y0MzI0NTc2MzMzM2ZlYjA2OGZlNjA3YWEzZjdhMWIyYjQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImI2MTY0ZjM1YmU1YzFmMjNmMzVhMTU3M2FkNWZmZGJiZTg1NmRmYTJhNTJlZGNjN2EwZjBjYjI0MWNhZjgxMjQifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-app/src/accounts.rs#L595-L606",
+          "version": "repo-lines-v1:sha256:afeab8e23db8fbb4c2d2b39375460214a6df4876ea8a77fddb086b3a24dc3f1a:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI4NGU4MDg0OTBjZTQzYTEzNjFhMjI4MWI2MWRkZWFjZGZiZDU3YjAyMGQwZGM4Y2ViZWQwMGIyN2Q5NTAyOTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZhZmYzMGFiZTQ2NTdiZDU5ZDllNDA3MDQ4YjJmZjA3MjY5ZGY3NGFiZDg0MzVmZTUwYTM3MGI2ZWIyNTFmMmUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImEyY2MwZDQ0ZGRlMzkxMDE4YTQ1OWMwNmIwOTBlZWVjOGRmNTA0MTg4Mjk3MzIwMmQwYTc2NWZjOTM1NjRjYTYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUyMzJhMmM3YTE1MThhZjBhMzFhMDg0YjViNjY2OWNiMWJmYTAzYWU4YjkyMzA2ODY1OTM1Y2E2ZTY4YTcwNTAifQ"
         }
       ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-13T07:57:21.074Z"
+    "at": "2026-11-13T19:56:31.605Z"
   }
 }

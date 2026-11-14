@@ -5,12 +5,14 @@ description: How agent protocols become shared live sessions, durable conversati
 tags: [architecture, sessions, persistence, desktop]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-13T07:57:21.074Z
+    at: 2026-11-13T19:56:31.605Z
 sources:
   - id: openwiki-source-eda83df6b22941ed75ede295
     resource: repo://crates/harlo-app/qml/ChatView.qml
   - id: openwiki-source-941abaef21aa1042a4672f7a
     resource: repo://crates/harlo-app/src/chat_session.rs
+  - id: openwiki-source-94aedfb131ba76701f9659c4
+    resource: repo://crates/harlo-app/src/orchestration.rs
   - id: openwiki-source-22e4ea3417daf80d96080fd6
     resource: repo://crates/harlo-app/src/workspace.rs
   - id: openwiki-source-6d4abd836eef5afa84bffc33
@@ -29,7 +31,7 @@ sources:
     resource: repo://crates/harlo-harness/src/lib.rs
   - id: openwiki-source-07a69ae82a0e133d3de748f1
     resource: repo://crates/harlo-harness/src/store.rs
-generated: { by: "harlo", at: "2026-11-13T07:57:21.074Z" }
+generated: { by: "harlo", at: "2026-11-13T19:56:31.605Z" }
 ---
 
 # Sessions, persistence, and desktop presentation
@@ -62,7 +64,9 @@ A subscriber receives a snapshot before deltas. During streaming, the driver bat
 
 Prompts return false when a session or daily spending hold is active, so callers must not assume every send was accepted. Harness exits become session state and notices rather than leaving a view permanently busy.
 
-Before a new turn, the driver takes its undo snapshot asynchronously and holds the prompt while reporting `Preparing(true)`. Stop remains responsive: it drops held prompts, invalidates the snapshot completion token, and emits `Unsent` so the desktop restores the last sent text to the composer. A late snapshot completion cannot send the cancelled prompt. Steering during a busy turn and `/btw` do not start this new-turn snapshot path.
+Before a new turn, the driver takes its undo snapshot asynchronously and holds prompts while reporting `Preparing(true)`, including to newly attached subscribers. Stop remains responsive: it removes all held prompts, invalidates the snapshot completion token, and emits `Unsent(Vec<String>)` with their text in send order. A late snapshot completion cannot send the cancelled prompts. Steering during a busy turn and `/btw` do not start this new-turn snapshot path.
+
+The desktop matches returned prompts to recent sends to recover the original typed text and attachments, rather than exposing injected file context or the plan-mode note. Unmatched text, such as a prompt sent from the phone, is returned with the trailing plan note removed. Restored messages go above any new composer draft; attachments are merged without duplicates. This preserves multiple cancelled sends and attachment-only messages instead of restoring only the last text.
 
 Session metadata carries `cost_kind` separately from numeric cost, distinguishing plan/local usage, priced usage, partly known cost, and unknown cost. The context report forwards this classification rather than interpreting a numeric zero as evidence that usage was free.
 
@@ -85,6 +89,12 @@ The database is not a replacement transcript store. The harness store builds sid
 
 When diagnosing missing history, first separate discovery of the agent's file from the app's project/visibility metadata. When diagnosing stale rendering, compare the reducer's rows with the subscriber snapshot before changing the protocol adapter.
 
+## Searching without blocking presentation
+
+Agent `list_sessions` queries are deferred from the workspace UI handler to orchestration's background completion path. The shared search reader performs the index query there; results return to the Qt thread to join workspace session metadata, filter by folder (unless `everywhere`), and exclude the calling session. The response contains at most eight sessions with up to two passages each.
+
+The desktop search dialog likewise queries off-thread. It records the newest query generation and skips an older waiting query after acquiring the reader lock, avoiding a backlog of obsolete searches. This does not cancel a query already executing. Slow-search behavior can be exercised with `HARLO_TEST_SLOW_SEARCH_MS`; the QML session-search scenario checks that the window continues drawing.
+
 ## Finished wiki sessions and approval presentation
 
 Finished wiki sessions use a separate **Wiki** shelf after **Settled**, with independent expansion state. The workspace marks an idle wiki session with the `wiki` settlement reason, deferring settlement while it is the active view or lacks a saved file. Disabled session settling, pinning, and archiving remain respected. This is session organization, not proof that the durable [OpenWiki run](../integrations/openwiki.md) completed successfully.
@@ -94,6 +104,7 @@ Approval messages marked as Markdown are rendered through the core Markdown rend
 ## Focused verification
 
 - `finished_wiki_runs_have_a_shelf_of_their_own` checks separate Wiki shelf grouping and expansion.
+- `every_unsent_message_comes_back_with_its_files` checks ordered recovery, repeated text, attachment-only sends, and phone-origin text. The QML stop-before-send scenario also checks preservation of a newer draft and that cancelled messages never reach the model after the delayed snapshot finishes.
 
 - `session::tests::demo_run_reaches_subscribers` exercises idle → busy → idle, resulting user/tool/code rows, and equality of a late subscriber's snapshot with accumulated deltas.
 - `idle_session_restarts_when_used_again` verifies that an idle agent can stop to reload configuration and restart on the next prompt.

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:35a1e579a08b28b414eaca7c95eeb0ee05825b83024c7f130324d73ff2daae1b",
+  "pageVersion": "sha256:39a7ae38b60b5d6909d6a109ad6b8599d48442a295def825e8b1877e3b23dcc9",
   "claims": [
     {
       "id": "claim_7a207a8ae4594d9ba376628ea349a6b4",
@@ -77,10 +77,30 @@
           "version": "repo-file-v1:sha256:51904141c286bc8c9824749f0327e427a1527ad456f54d958e43722a39283e42"
         }
       ]
+    },
+    {
+      "id": "claim_ee23584a2e96443bb723278d414fa3e5",
+      "statement": "The headless tests workflow runs locked agent/core tests on Ubuntu 24.04 with stable Rust and a 45-minute timeout, triggered by main pushes, pull requests and manual dispatch while ignoring changes confined to iOS, site, wiki or Markdown for push/PR events.",
+      "evidence": [
+        {
+          "resource": "repo://.github/workflows/tests.yml#L5-L38",
+          "version": "repo-lines-v1:sha256:862d46dc47f831e014a14b4a025cb87217a84f090de75b0c77672982aa82588a:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAwODIyYjNmOTc5NDMzMjlmNjViNTE1OWI0ODAyYTNkMGQzZTBiMjg1YmMwYTYwNGE0NzhjOTcxY2JjNzZlNTkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNiMGJiMDU1MWE4NzgyYjkyMzdkMzM4OTg4YWY1YWY5MjI1YTliZjZiN2Y0OTU4Y2FkNDM0ZTViMTM2YjA3NjciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZlYWE3Y2I4ZDU4ODhlODY4MTJlMDk0OWMwOTAxY2IxMDUzOWQ0NGRhMjg5NmVhOWQ3YmM5N2NkZTc5NTMzZWQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_be9ac8a931534308a23e8d3865a421bf",
+      "statement": "The Rust CI runner installs bubblewrap and disables the Ubuntu AppArmor unprivileged-user-namespace restriction so tests can exercise actual sandbox execution.",
+      "evidence": [
+        {
+          "resource": "repo://.github/workflows/tests.yml#L28-L34",
+          "version": "repo-lines-v1:sha256:bb5374379429b9c9e546e315ceb5969ee5d97e692af33ad977a1dbf9ae1a9062:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZDQwMGVjZjU4MWMyOWYxYzg5MWI2N2RmYzQ0YjMzMWJiOTg4NzRlYTYwZDQ1MzEzOGJhYmZmYmY0NjE3NDkxZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYzU4ZTQ1NDVlNWI2NjRhNzdiMDM1OTFiNTc1ZmVhZjU3N2E4YzVhNjE0NWY0ODdlYzBiMDU4ZWNlZjQ1Mjc1NCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiODYxOTJjZTc5M2RkMjhjOTU5OGM1ZTBlM2UyZGI2MzE1MjcwOTkzY2YwM2E5NGJhNzU3NzE0Y2ExZDk4MjE4OSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMmJiODI1YmQzZmVjNTEwNDRjMGZmN2U2OGMzODdkNzZhMGMyMTEzOGFiOTE2Njg1YmRkZjkyNTMwZGUyMGYwZSJ9"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-13T07:57:21.074Z"
+    "at": "2026-11-13T19:56:31.605Z"
   }
 }
