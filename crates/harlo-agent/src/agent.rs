@@ -308,6 +308,9 @@ fn spent_by(e: &anyhow::Error) -> Option<Value> {
     if let Some(c) = e.downcast_ref::<crate::responses::CutOff>() {
         return Some(if c.usage.is_object() { c.usage.clone() } else { Value::Null });
     }
+    if let Some(d) = e.downcast_ref::<crate::responses::Dropped>() {
+        return d.1.is_object().then(|| d.1.clone());
+    }
     e.downcast_ref::<crate::responses::Failed>().map(|f| &f.usage).filter(|u| u.is_object()).cloned()
 }
 

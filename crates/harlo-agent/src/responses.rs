@@ -89,8 +89,8 @@ pub(crate) fn span(d: Duration) -> String {
 pub(crate) async fn send(req: reqwest::RequestBuilder, base: &str) -> Result<reqwest::Response> {
     let wait = idle();
     match tokio::time::timeout(wait, req.send()).await {
-        Ok(r) => r.map_err(|e| Dropped(format!("Couldn't reach {base}: {e}")).into()),
-        Err(_) => Err(Dropped(format!("{base} sent nothing back for {}", span(wait))).into()),
+        Ok(r) => r.map_err(|e| Dropped(format!("Couldn't reach {base}: {e}"), Value::Null).into()),
+        Err(_) => Err(Dropped(format!("{base} sent nothing back for {}", span(wait)), Value::Null).into()),
     }
 }
 
@@ -149,8 +149,8 @@ impl Events {
                 bail!("The reply was stopped: one of its events passed {} MiB without ending", MAX_EVENT >> 20);
             }
             match tokio::time::timeout(self.idle, self.resp.chunk()).await {
-                Err(_) => return Err(Dropped(format!("The server sent nothing for {} during the reply", span(self.idle))).into()),
-                Ok(Err(e)) => return Err(Dropped(format!("The connection broke during the reply: {e}")).into()),
+                Err(_) => return Err(Dropped(format!("The server sent nothing for {} during the reply", span(self.idle)), Value::Null).into()),
+                Ok(Err(e)) => return Err(Dropped(format!("The connection broke during the reply: {e}"), Value::Null).into()),
                 Ok(Ok(None)) => return Ok(None),
                 Ok(Ok(Some(part))) => self.buf.extend_from_slice(&part),
             }
@@ -437,7 +437,7 @@ pub async fn stream(base: &str, token: Option<&str>, affinity: Option<&str>, hea
             _ => {}
         }
     }
-    Err(Dropped("The connection closed before the reply finished".into()).into())
+    Err(Dropped("The connection closed before the reply finished".into(), Value::Null).into())
 }
 
 fn index(ev: &Value) -> usize {
@@ -471,9 +471,10 @@ pub struct ApiError {
     pub resets_at: Option<i64>,
 }
 
-/// The request didn't reach the server, or the reply's stream broke.
+/// The request didn't reach the server, or the reply's stream broke: with
+/// what it used, when the server said that before it broke (Null: not).
 #[derive(Debug)]
-pub struct Dropped(pub String);
+pub struct Dropped(pub String, pub Value);
 
 impl std::fmt::Display for Dropped {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

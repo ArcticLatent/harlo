@@ -208,7 +208,13 @@ public enum RichText {
                 out.append(.quote(blocks(children)))
             case "pre":
                 var spans = inline(children, Style(code: true), keepSpace: true)
-                if let last = spans.last, last.text.hasSuffix("\n") {
+                // (A Markdown renderer's <pre><code> — a code block in a list
+                // or a quote — ends with a newline of its own. harlo's own
+                // code blocks are their lines exactly: one they end with is
+                // a blank line, kept.)
+                let wrapped: Bool
+                if children.count == 1, case .element("code", _, _) = children[0] { wrapped = true } else { wrapped = false }
+                if wrapped, let last = spans.last, last.text.hasSuffix("\n") {
                     spans[spans.count - 1].text.removeLast()
                     if spans[spans.count - 1].text.isEmpty { spans.removeLast() }
                 }

@@ -119,7 +119,7 @@ mod tests {
         assert_eq!(transient(&api(429, "", Some(600))), Some(("the server's rate limit", Some(600))));
         assert!(transient(&api(503, "", None)).is_some());
         assert!(transient(&api(500, "", None)).is_some());
-        assert!(transient(&Dropped("closed".into()).into()).is_some());
+        assert!(transient(&Dropped("closed".into(), serde_json::Value::Null).into()).is_some());
         assert!(transient(&Failed { code: "server_error".into(), message: "x".into(), usage: serde_json::Value::Null }.into()).is_some());
         assert!(transient(&Failed { code: String::new(), message: "Model is overloaded".into(), usage: serde_json::Value::Null }.into()).is_some());
     }

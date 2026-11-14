@@ -141,10 +141,10 @@ struct Reply {
 impl Reply {
     /// A chunk's events.
     fn take(&mut self, chunk: &Value, out: &mut Vec<Value>) {
-        // (A later report without the input counted doesn't replace one with
-        // it.)
-        if chunk["usage"].is_object() && (chunk["usage"]["prompt_tokens"].is_u64() || !self.usage["prompt_tokens"].is_u64()) {
-            self.usage = chunk["usage"].clone();
+        // (Each report is the whole so far, or part of it: what it says
+        // replaces what was said, and what it leaves out stays.)
+        if let Some(u) = chunk["usage"].as_object() {
+            merge(&mut self.usage, u);
         }
         let Some(choice) = chunk["choices"].get(0) else { return };
         let d = &choice["delta"];
@@ -259,12 +259,30 @@ fn usage(u: &Value) -> Value {
     out
 }
 
-/// What a reply that failed used, as the Responses API says it: the
-/// error's own report, else the last one before it; Null when neither
-/// said anything (so it isn't taken for a request of unknown size).
+/// A usage report into what was said before: its fields replace those
+/// (they're totals so far, not more to add), null ones say nothing.
+fn merge(into: &mut Value, from: &serde_json::Map<String, Value>) {
+    if !into.is_object() {
+        *into = json!({});
+    }
+    for (k, v) in from {
+        match v {
+            Value::Null => {}
+            Value::Object(o) if into[k].is_object() => merge(&mut into[k], o),
+            _ => into[k] = v.clone(),
+        }
+    }
+}
+
+/// What a reply that failed or broke used, as the Responses API says it:
+/// what was said before, with the error's own report over it; Null when
+/// nothing was said (so it isn't taken for a request of unknown size).
 fn failed_usage(chunk: &Value, before: &Value) -> Value {
-    let said = if chunk["usage"]["prompt_tokens"].is_u64() || !before.is_object() { &chunk["usage"] } else { before };
-    if said.is_object() { usage(said) } else { Value::Null }
+    let mut said = before.clone();
+    if let Some(u) = chunk["usage"].as_object() {
+        merge(&mut said, u);
+    }
+    if said.is_object() { usage(&said) } else { Value::Null }
 }
 
 /// Sends one request: `on` gets pi's stream events as they come; the
@@ -291,7 +309,17 @@ pub async fn stream(base: &str, token: Option<&str>, body: &Value, provider: &st
     let mut events = Vec::new();
     let mut reader = Events::new(resp);
     let mut done = false;
-    while let Some(data) = reader.next().await? {
+    // (A stream that breaks after saying what it used: still spent.)
+    let broke = |e: anyhow::Error, reply: &Reply| match e.downcast::<Dropped>() {
+        Ok(Dropped(why, _)) => Dropped(why, failed_usage(&Value::Null, &reply.usage)).into(),
+        Err(e) => e,
+    };
+    loop {
+        let data = match reader.next().await {
+            Ok(Some(d)) => d,
+            Ok(None) => break,
+            Err(e) => return Err(broke(e, &reply)),
+        };
         if data == "[DONE]" {
             done = true;
             break;
@@ -308,7 +336,7 @@ pub async fn stream(base: &str, token: Option<&str>, body: &Value, provider: &st
         }
     }
     if !done && reply.finish.is_none() {
-        return Err(Dropped("The connection closed before the reply finished".into()).into());
+        return Err(Dropped("The connection closed before the reply finished".into(), failed_usage(&Value::Null, &reply.usage)).into());
     }
     let content = reply.finish(&mut events);
     for e in events.drain(..) {
@@ -390,6 +418,13 @@ mod tests {
                             };
                             let error = format!("data: {{\"error\":{{\"type\":\"server_error\",\"message\":\"it broke\"}}{own}}}\n\n");
                             let _ = s.write_all(format!("{sse}{hello}{before}{error}").as_bytes()).await;
+                        }
+                        "usage-then-close" | "usage-then-stall" => {
+                            let usage = "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":1000,\"completion_tokens\":10}}\n\n";
+                            let _ = s.write_all(format!("{sse}{hello}{usage}").as_bytes()).await;
+                            if how == "usage-then-stall" {
+                                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                            }
                         }
                         "huge" => {
                             let _ = s.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nThe request was refused: ").await;
@@ -538,6 +573,34 @@ mod tests {
         assert_eq!((used.requests, used.unreported, used.input), (1, 0, 0), "{u}");
         // None said: none, so not a request of its own.
         assert!(failed(ask("error-bare").await.0).is_null());
+    }
+
+    #[tokio::test]
+    async fn a_stream_that_breaks_keeps_what_it_said_it_used() {
+        for how in ["usage-then-close", "usage-then-stall"] {
+            let e = ask(how).await.0.unwrap_err();
+            let d = e.downcast_ref::<Dropped>().expect("dropped");
+            assert_eq!((d.1["input_tokens"].as_u64(), d.1["output_tokens"].as_u64()), (Some(1000), Some(10)), "{how}: {e:#}");
+            assert!(crate::retry::transient(&e).is_some(), "{how}: still tried again");
+        }
+        // Nothing said before it broke: nothing to count.
+        assert!(ask("stall").await.0.unwrap_err().downcast_ref::<Dropped>().unwrap().1.is_null());
+    }
+
+    #[test]
+    fn a_later_report_of_part_keeps_the_rest() {
+        let d = json!({ "choices": [{ "index": 0, "delta": { "content": "x" } }] });
+        let (_, _, r) = feed(&[
+            d.clone(),
+            json!({ "choices": [], "usage": { "prompt_tokens": 1000, "completion_tokens": 10, "prompt_tokens_details": { "cached_tokens": 200 } } }),
+            json!({ "choices": [], "usage": { "prompt_tokens": 1000 } }),
+            json!({ "choices": [], "usage": null }),
+        ]);
+        let u = usage(&r.usage);
+        assert_eq!((u["input_tokens"].as_u64(), u["output_tokens"].as_u64(), u["input_tokens_details"]["cached_tokens"].as_u64()), (Some(1000), Some(10), Some(200)), "{u}");
+        // Totals so far, not more to add: a later, bigger one replaces it.
+        let (_, _, r) = feed(&[json!({ "choices": [], "usage": { "prompt_tokens": 1000, "completion_tokens": 10 } }), json!({ "choices": [], "usage": { "prompt_tokens": 1000, "completion_tokens": 25 } })]);
+        assert_eq!((usage(&r.usage)["input_tokens"].as_u64(), usage(&r.usage)["output_tokens"].as_u64()), (Some(1000), Some(25)));
     }
 
     #[test]

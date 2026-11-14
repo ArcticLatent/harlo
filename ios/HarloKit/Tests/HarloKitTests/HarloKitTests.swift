@@ -157,7 +157,7 @@ final class RichTextTests: XCTestCase {
     }
 
     func testCodeKeepsLinesAndTokens() {
-        let b = RichText.parse("<pre style=\"margin:0;\"><span class=\"s2\">fn</span> main() {\n    <span class=\"s3\">&quot;hi&quot;</span>\n}\n</pre>")
+        let b = RichText.parse("<pre style=\"margin:0;\"><span class=\"s2\">fn</span> main() {\n    <span class=\"s3\">&quot;hi&quot;</span>\n}</pre>")
         guard case .code(let spans)? = b.first else { return XCTFail("\(b)") }
         XCTAssertEqual(RichText.plain(spans), "fn main() {\n    \"hi\"\n}")
         XCTAssertEqual(spans.first?.token, 2)
@@ -177,6 +177,18 @@ final class RichTextTests: XCTestCase {
         let text = RichText.plain(spans).split(separator: "\n")
         XCTAssertEqual(text.count, 320)
         XCTAssertEqual(text.last, "echo line 320")
+    }
+
+    func testACodeBlocksBlankLinesAreKept() {
+        // harlo's own block: its lines exactly, blank ones at the end too.
+        let code = (1...452).map { [150, 300, 301, 450, 451, 452].contains($0) ? "" : "v\($0) = '&lt;\($0)&gt;'" }.joined(separator: "\n")
+        guard case .code(let spans)? = RichText.parse("<pre style=\"margin:0;\">" + code + "</pre>").first else { return XCTFail() }
+        let text = RichText.plain(spans)
+        XCTAssertEqual(text.components(separatedBy: "\n").count, 452)
+        XCTAssertTrue(text.hasSuffix("v449 = '<449>'\n\n\n"))
+        // A Markdown renderer's, in a list or a quote: its own last newline isn't a line.
+        guard case .code(let nested)? = RichText.parse("<pre><code class=\"language-sh\">ls\n</code></pre>").first else { return XCTFail() }
+        XCTAssertEqual(RichText.plain(nested), "ls")
     }
 
     func testTables() {
