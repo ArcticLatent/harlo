@@ -2638,23 +2638,12 @@ Popup {
                     SettingRow {
                         title: "Wiki"
                         detail: "A wiki of this project in openwiki/, written by your agent from the code. Agents search it and read the sections they need. On unless you switch it off."
-                        more: "Create and update it from the Wiki panel (right edge); each run spends your model's tokens. It's made with OpenWiki, which comes with harlo."
+                        more: "Create and update it from the Wiki panel (right edge); each run spends your model's tokens. Its pages and tools follow OpenWiki's (MIT), built into harlo."
                         icon: "book-open"
                         AppSwitch {
                             objectName: "projectWiki"
                             checked: featureGroup.on("wiki", true)
                             onToggled: featureGroup.set("wiki", checked)
-                        }
-                    }
-                    SettingRow {
-                        divider: true
-                        title: "Share OpenWiki's usage data"
-                        detail: "Lets OpenWiki send its anonymous usage data to its makers, for every project. Off unless you turn it on."
-                        icon: "bar-chart-2"
-                        AppSwitch {
-                            objectName: "openwikiTelemetry"
-                            checked: featureGroup.rev >= 0 && Workspace.setting("openwiki_telemetry") === "1"
-                            onToggled: { Workspace.setSetting("openwiki_telemetry", checked ? "1" : "0"); featureGroup.rev++ }
                         }
                     }
                     SettingRow {

@@ -17,6 +17,7 @@ notices under `/usr/share/licenses/harlo` (the AppImage under
 | JetBrains Mono | [JetBrains](https://github.com/JetBrains/JetBrainsMono) | SIL OFL 1.1 | [`crates/harlo-app/fonts/OFL.txt`](crates/harlo-app/fonts/OFL.txt) |
 | Notification sounds | [KDE's Ocean sound theme](https://invent.kde.org/plasma/ocean-sound-theme) (Guilherme Marçal Silva) | CC-BY-SA-4.0 | [`crates/harlo-app/sounds/NOTICE`](crates/harlo-app/sounds/NOTICE) |
 | TweetNaCl-js (the phone page's encryption) | [TweetNaCl-js](https://github.com/dchest/tweetnacl-js) | Public domain (Unlicense) | [`crates/harlo-app/phone/TWEETNACL-LICENSE`](crates/harlo-app/phone/TWEETNACL-LICENSE) |
+| The wiki (`crates/harlo-wiki`): its file formats, tools, checks and authoring instructions, ported | [OpenWiki](https://github.com/langchain-ai/openwiki) 0.9.0 | MIT | [`crates/harlo-wiki/LICENSE-OPENWIKI`](crates/harlo-wiki/LICENSE-OPENWIKI) |
 | Qt 6 (in the release packages) | [The Qt Company](https://www.qt.io) | LGPL-3.0 | installed with the packages (`qt/`) |
 | whisper.cpp (dictation) | [ggml-org](https://github.com/ggml-org/whisper.cpp) | MIT | built from the `whisper-rs` crate |
 

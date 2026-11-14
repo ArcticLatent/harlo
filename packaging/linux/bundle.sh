@@ -59,6 +59,8 @@ install -Dm644 crates/harlo-app/sounds/CC-BY-SA-4.0.txt "$LIC/sounds-CC-BY-SA-4.
 install -Dm644 crates/harlo-app/icons/providers/OPENCHAMBER-LICENSE "$LIC/provider-logos-LICENSE"
 install -Dm644 crates/harlo-app/phone/TWEETNACL-LICENSE "$LIC/tweetnacl-LICENSE"
 install -Dm644 crates/harlo-app/assets/mermaid/LICENSE "$LIC/mermaid-LICENSE"
+# (The wiki is ported from OpenWiki, MIT.)
+install -Dm644 crates/harlo-wiki/LICENSE-OPENWIKI "$LIC/openwiki-LICENSE"
 for f in crates/harlo-app/fonts/*LICENSE* crates/harlo-app/fonts/*OFL*; do [ -f "$f" ] && install -Dm644 "$f" "$LIC/fonts-$(basename "$f")"; done
 # (Qt's own licences: LGPLv3, linked dynamically.)
 [ -d "$QTDIR/../../Licenses" ] && cp -r "$QTDIR/../../Licenses" "$LIC/qt" || true
@@ -89,13 +91,6 @@ fi
 if [ -f "$OUT/helpers/harlo-engines-aarch64" ]; then
     install -Dm755 "$OUT/helpers/harlo-engines-aarch64" "$APPDIR/usr/lib/harlo/harlo-engines-aarch64"
 fi
-# OpenWiki, which keeps a project's wiki: its pinned Node and package, beside
-# the helpers (after linuxdeploy, which would rewrite its native module).
-packaging/openwiki/fetch.sh "${CARGO_TARGET_DIR:-target}/openwiki"
-cp -a "${CARGO_TARGET_DIR:-target}/openwiki" "$APPDIR/usr/lib/harlo/openwiki"
-for f in node openwiki packages; do
-    install -Dm644 "$APPDIR/usr/lib/harlo/openwiki/LICENSES/$f.txt" "$LIC/openwiki-$f.txt"
-done
 echo "appimage" > "$APPDIR/usr/install-kind"
 # The AppImage's own icon: a PNG and .DirIcon at its root (appimagetool no
 # longer takes the SVG linuxdeploy links there).

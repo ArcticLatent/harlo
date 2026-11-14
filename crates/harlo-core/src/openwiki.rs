@@ -3,16 +3,14 @@
 //! so an update redoes only the pages whose code changed. Agents search it
 //! and read just the sections they need.
 //!
-//! harlo ships OpenWiki (its own Node and a pinned package, in
-//! `lib/harlo/openwiki`) and runs its tool server (`openwiki mcp`), one per
-//! machine, started on first use: four tools that only read (search, read,
-//! and the linked wikis and workspaces) and six that write a wiki, one page
-//! at a time, with the session's own model. OpenWiki's telemetry stays off
-//! unless the user allows it. On another machine harlo puts the runtime in
-//! its cache there once per version (x86_64 or ARM, with the C library
-//! Node's builds need).
+//! The tools are harlo's own (the harlo-wiki crate, a port of OpenWiki's
+//! (MIT) that answers alike, with the same files): the four that only read
+//! (search, read, and the linked wikis and workspaces), and the six that
+//! write a wiki one page at a time with the session's own model. They run
+//! in this process here, and through harlo's agent on another machine
+//! (`harlo-agent wiki`, `--write` for a wiki session).
 //!
-//! What harlo shows without Node: the pages (from their frontmatter), the
+//! What harlo shows from the files: the pages (from their frontmatter), the
 //! links between them, how fresh the wiki is (`.last-update.json`, commits
 //! since), a run's progress (`.run.json`), and a plain text search.
 
@@ -21,13 +19,13 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
-use crate::remote::{self, Host};
+use crate::remote;
 
 /// The wiki's folder, at the repository's top.
 pub const DIR: &str = "openwiki";
@@ -43,8 +41,6 @@ const NOT_PAGES: [&str; 3] = ["index.md", "log.md", "INSTRUCTIONS.md"];
 fn is_page(path: &str) -> bool {
     !NOT_PAGES.contains(&path.rsplit('/').next().unwrap_or(path))
 }
-const CLI: &str = "node_modules/openwiki/dist/cli/cli.js";
-const SKILL: &str = "node_modules/openwiki/integrations/openwiki/SKILL.md";
 const PROTOCOL: &str = "2025-06-18";
 
 // ---- What sessions get ----
@@ -112,14 +108,14 @@ pub fn has_wiki(folder: &Path) -> bool {
     remote::is_remote(folder) || root_of(folder).join(DIR).is_dir()
 }
 
-/// What a wiki-writing session gets: OpenWiki's reading and writing tools,
-/// as its server lists them (their descriptions are its lifecycle), with
-/// `root` taken out (harlo fills it in).
-pub fn writing_tools(server: &Server) -> Vec<Value> {
+/// What a wiki-writing session gets: the reading and writing tools (their
+/// descriptions are OpenWiki's lifecycle), with `root` taken out (harlo
+/// fills it in).
+pub fn writing_tools() -> Vec<Value> {
     OFFERED
         .iter()
         .chain(&WRITE_TOOLS)
-        .filter_map(|n| server.tool(n))
+        .filter_map(|n| harlo_wiki::tools::tool(n))
         .map(|t| {
             let mut t = t.clone();
             if let Some(o) = t.pointer_mut("/inputSchema/properties").and_then(Value::as_object_mut) {
@@ -145,15 +141,14 @@ pub fn ignored(root: &Path) -> Vec<String> {
 /// "update", or "continue" an interrupted run of `run_mode`), the paths
 /// `.openwikiignore` keeps out (`ignored`: OpenWiki's own command line
 /// blocks reading them, but the session reads with its agent's tools, so
-/// it's told), then OpenWiki's own steps from the bundled version's skill.
-pub fn run_prompt(rt: &Runtime, mode: &str, run_mode: &str, ignored: &[String]) -> String {
+/// it's told), then OpenWiki's own steps (from its skill).
+pub fn run_prompt(mode: &str, run_mode: &str, ignored: &[String]) -> String {
     let ask = match mode {
         "create" => "Create this repository's wiki with OpenWiki: call openwiki_begin with mode \"init\".".to_owned(),
         "update" => "Update this repository's wiki with OpenWiki, so it matches the code again: call openwiki_begin with mode \"update\".".to_owned(),
         _ => format!("Continue the OpenWiki run that stopped part way in this repository: call openwiki_begin with mode \"{}\", then go on from where its queue is.", if run_mode == "init" { "init" } else { "update" }),
     };
-    let skill = rt.skill().unwrap_or_default();
-    let steps = skill.find("## Required sequence").map(|i| &skill[i..]).unwrap_or("Follow the openwiki tools' descriptions: begin, plan, then each page in turn, then finish.");
+    let steps = harlo_wiki::AUTHORING;
     // (harlo's message: shown as harlo's line, the whole text a click away.)
     let keep_out = if ignored.is_empty() {
         String::new()
@@ -166,92 +161,11 @@ pub fn run_prompt(rt: &Runtime, mode: &str, run_mode: &str, ignored: &[String]) 
     format!("{}{ask}{keep_out}\n\nharlo fills in `root` for every openwiki tool, so leave it out (and skip resolving the top-level). Write only the wiki: never change the code. OpenWiki's steps:\n\n{steps}", crate::transcript::HARLO_PREFIX)
 }
 
-// ---- The runtime ----
-
-/// harlo's OpenWiki: a folder with `bin/node`, the package, and `VERSION`
-/// ("openwiki 0.9.0, node 24.22.3 x64, lock …").
-#[derive(Debug, Clone, PartialEq)]
-pub struct Runtime {
-    pub dir: PathBuf,
-}
-
-impl Runtime {
-    pub fn node(&self) -> PathBuf {
-        self.dir.join("bin/node")
-    }
-
-    pub fn cli(&self) -> PathBuf {
-        self.dir.join(CLI)
-    }
-
-    /// What `VERSION` says, "" when it's missing.
-    pub fn version(&self) -> String {
-        std::fs::read_to_string(self.dir.join("VERSION")).map(|s| s.trim().to_owned()).unwrap_or_default()
-    }
-
-    /// OpenWiki's version ("0.9.0").
-    pub fn openwiki_version(&self) -> String {
-        self.version().strip_prefix("openwiki ").and_then(|s| s.split(',').next()).unwrap_or_default().to_owned()
-    }
-
-    /// The machines it runs on (`x86_64`, `aarch64`), from its Node's build.
-    pub fn arch(&self) -> &'static str {
-        if self.version().contains(" arm64") { "aarch64" } else { "x86_64" }
-    }
-
-    /// OpenWiki's own steps for writing a wiki through its tools (the
-    /// version's skill), for a wiki session's prompt.
-    pub fn skill(&self) -> Option<String> {
-        std::fs::read_to_string(self.dir.join(SKILL)).ok()
-    }
-
-    fn usable(&self) -> bool {
-        self.node().is_file() && self.cli().is_file()
-    }
-}
-
-/// Where the runtime might be, beside harlo's program in `exe_dir`: an
-/// install's `lib/harlo/openwiki`, else a build's `target/openwiki` (a
-/// test's program is in the build's deps folder).
-pub fn candidates(exe_dir: &Path) -> Vec<PathBuf> {
-    let mut out = vec![exe_dir.join("../lib/harlo/openwiki"), exe_dir.join("../openwiki")];
-    if exe_dir.ends_with("deps") {
-        out.push(exe_dir.join("../../openwiki"));
-    }
-    out
-}
-
-/// This harlo's runtime (`HARLO_OPENWIKI` names another, for tests).
-pub fn runtime() -> Option<Runtime> {
-    if let Some(dir) = std::env::var_os("HARLO_OPENWIKI").filter(|d| !d.is_empty()) {
-        return Some(Runtime { dir: dir.into() }).filter(Runtime::usable);
-    }
-    let exe = std::env::current_exe().ok()?;
-    candidates(exe.parent()?).into_iter().map(|dir| Runtime { dir }).find(Runtime::usable)
-}
-
-// ---- Telemetry ----
-
-static TELEMETRY: AtomicBool = AtomicBool::new(false);
-
-/// Whether OpenWiki may send its usage telemetry (the user's setting; off
-/// unless they allow it). A change restarts the servers.
-pub fn set_telemetry(allowed: bool) {
-    if TELEMETRY.swap(allowed, Ordering::SeqCst) != allowed {
-        stop_all();
-    }
-}
-
-/// What the server's environment says about telemetry.
-fn telemetry_env() -> &'static str {
-    if TELEMETRY.load(Ordering::SeqCst) { "" } else { "OPENWIKI_TELEMETRY_DISABLED=1 DO_NOT_TRACK=1" }
-}
-
 // ---- The tool server ----
 
 type Waiting = Arc<Mutex<HashMap<u64, mpsc::Sender<Value>>>>;
 
-/// A running `openwiki mcp`: requests go in on its stdin, answers come back
+/// A running wiki tool server (harlo's agent on another machine): requests go in on its stdin, answers come back
 /// by id on its stdout (a thread reads them), so sessions can call it at
 /// the same time.
 pub struct Server {
@@ -270,7 +184,12 @@ pub struct Server {
 impl Server {
     /// Starts `cmd` (a tool server on stdio), initializes it, lists its
     /// tools and checks OpenWiki's are all there.
-    pub fn start(mut cmd: Command) -> Result<Server> {
+    pub fn start(cmd: Command) -> Result<Server> {
+        Server::start_with(cmd, &[&READ_TOOLS[..], &WRITE_TOOLS[..]].concat())
+    }
+
+    /// The same, checking for the tools `expected`.
+    pub fn start_with(mut cmd: Command, expected: &[&str]) -> Result<Server> {
         cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
         let mut child = cmd.spawn().context("starting OpenWiki")?;
         let stdin = Arc::new(Mutex::new(child.stdin.take().expect("piped")));
@@ -328,7 +247,7 @@ impl Server {
         server.notify("notifications/initialized")?;
         let listed = server.request("tools/list", json!({}), Duration::from_secs(30))?;
         server.tools = listed["tools"].as_array().cloned().unwrap_or_default();
-        let missing: Vec<&str> = READ_TOOLS.iter().chain(&WRITE_TOOLS).copied().filter(|n| !server.tools.iter().any(|t| t["name"] == *n)).collect();
+        let missing: Vec<&str> = expected.iter().copied().filter(|n| !server.tools.iter().any(|t| t["name"] == *n)).collect();
         if !missing.is_empty() {
             bail!("{} doesn't have the tools harlo expects (no {}): this harlo needs its own OpenWiki", server.info, missing.join(", "));
         }
@@ -395,10 +314,15 @@ impl Drop for Server {
 /// The servers running, by machine ("" for this one).
 static SERVERS: Mutex<Vec<(String, Arc<Server>)>> = Mutex::new(Vec::new());
 
-/// The tool server for files on `host` (None: this machine), started (and
-/// on another machine, put there) when it isn't running.
-pub fn server(host: Option<&str>) -> Result<Arc<Server>> {
-    let key = host.unwrap_or_default().to_owned();
+/// The wiki tool server on `host`: harlo's own agent there (`harlo-agent
+/// wiki`, put there when it isn't), no Node needed. With `writing` (a
+/// repository's directory), the one that writes that repository's wiki
+/// (`--write`): one per repository, so runs in two don't meet.
+fn agent_server(host: &str, writing: Option<&str>) -> Result<Arc<Server>> {
+    let key = match writing {
+        Some(dir) => format!("writer:{host}:{dir}"),
+        None => format!("reader:{host}"),
+    };
     {
         let mut servers = SERVERS.lock().unwrap();
         servers.retain(|(_, s)| s.alive());
@@ -406,27 +330,14 @@ pub fn server(host: Option<&str>) -> Result<Arc<Server>> {
             return Ok(s.clone());
         }
     }
-    // (Started without the lock: putting it on a machine can take minutes.)
-    let rt = runtime().ok_or_else(|| anyhow::anyhow!("This harlo has no OpenWiki: reinstall harlo"))?;
-    let cmd = match host {
-        None => {
-            let mut cmd = Command::new(rt.node());
-            cmd.arg(rt.cli()).args(["mcp", "--host", "harlo"]);
-            if !TELEMETRY.load(Ordering::SeqCst) {
-                cmd.env("OPENWIKI_TELEMETRY_DISABLED", "1").env("DO_NOT_TRACK", "1");
-            }
-            cmd
-        }
-        Some(name) => {
-            let h = remote::host(name).ok_or_else(|| anyhow::anyhow!("No remote instance named {name}"))?;
-            let dir = on_host(&h, &rt)?;
-            let q = remote::quote_path;
-            remote::command(&h, &format!("{} exec {} {} mcp --host harlo", telemetry_env(), q(&format!("{dir}/bin/node")), q(&format!("{dir}/{CLI}"))))
-        }
+    let h = remote::host(host).ok_or_else(|| anyhow::anyhow!("No remote instance named {host}"))?;
+    let agent = crate::agent_host::program_on(host)?;
+    let (args, expected) = match writing {
+        Some(_) => (" --write harlo", [&READ_TOOLS[..], &WRITE_TOOLS[..]].concat()),
+        None => ("", READ_TOOLS.to_vec()),
     };
-    let started = Arc::new(Server::start(cmd)?);
+    let started = Arc::new(Server::start_with(remote::command(&h, &format!("exec {} wiki{args}", remote::quote_path(&agent))), &expected)?);
     let mut servers = SERVERS.lock().unwrap();
-    // (Another call may have started one meanwhile: that one stays.)
     if let Some((_, s)) = servers.iter().find(|(k, s)| *k == key && s.alive()) {
         return Ok(s.clone());
     }
@@ -434,15 +345,37 @@ pub fn server(host: Option<&str>) -> Result<Arc<Server>> {
     Ok(started)
 }
 
-/// Stops every tool server (harlo quitting, or the telemetry setting
-/// changed).
+/// The wiki's writer for a repository on this machine (by its path): one
+/// run at a time each, as OpenWiki's server keeps one.
+static WRITERS: Mutex<Vec<(String, Arc<Mutex<harlo_wiki::run::Writer>>)>> = Mutex::new(Vec::new());
+
+fn local_writer(dir: &str) -> Arc<Mutex<harlo_wiki::run::Writer>> {
+    let mut writers = WRITERS.lock().unwrap();
+    if let Some((_, w)) = writers.iter().find(|(k, _)| k == dir) {
+        return w.clone();
+    }
+    let w = Arc::new(Mutex::new(harlo_wiki::run::Writer::new("harlo")));
+    writers.push((dir.to_owned(), w.clone()));
+    w
+}
+
+/// Starts the writing server for a repository on another machine (a wiki
+/// session's first step, so a missing agent shows before the session
+/// starts); nothing to start here.
+pub fn prepare_writer(root: &Path) -> Result<()> {
+    match remote::split(root) {
+        Some((h, d)) => agent_server(&h, Some(&d)).map(|_| ()),
+        None => Ok(()),
+    }
+}
+
+/// Stops every tool server (harlo quitting).
 pub fn stop_all() {
     SERVERS.lock().unwrap().clear();
 }
 
-/// Calls an OpenWiki tool for the repository at `root` (here or on its
-/// host), `root` filled in as OpenWiki wants it (for the tools that take
-/// one).
+/// Calls a wiki tool for the repository at `root` (here or on its host),
+/// `root` filled in (for the tools that take one).
 pub fn call(root: &Path, tool: &str, mut args: Value) -> Result<Value> {
     let (host, dir) = match remote::split(root) {
         Some((h, d)) => (Some(h), d),
@@ -451,25 +384,31 @@ pub fn call(root: &Path, tool: &str, mut args: Value) -> Result<Value> {
     if !args.is_object() {
         args = json!({});
     }
-    let server = server(host.as_deref())?;
+    let Some(def) = harlo_wiki::tools::tool(tool) else { bail!("No tool {tool}") };
     // (Only the tools that take one: a run's later steps go by its id.)
-    match args.as_object_mut() {
-        Some(o) if server.tool(tool).is_some_and(|t| t.pointer("/inputSchema/properties/root").is_some()) => {
-            o.insert("root".into(), Value::String(dir));
-        }
-        Some(o) => {
+    if let Some(o) = args.as_object_mut() {
+        if def.pointer("/inputSchema/properties/root").is_some() {
+            o.insert("root".into(), Value::String(dir.clone()));
+        } else {
             o.remove("root");
         }
-        None => {}
     }
-    // (Writing a page checks its claims against the code: it can take a while.)
-    let timeout = Duration::from_secs(if READ_TOOLS.contains(&tool) { 90 } else { 600 });
-    let answer = server.call(tool, args, timeout);
+    let reading = READ_TOOLS.contains(&tool);
+    let answer = match (host, reading) {
+        (None, true) => Ok(harlo_wiki::mcp::result(harlo_wiki::tools::call_reading(tool, &args).unwrap_or_else(|| Err(format!("No tool {tool}"))))),
+        (None, false) => {
+            let w = local_writer(&dir);
+            let mut w = w.lock().unwrap();
+            Ok(harlo_wiki::mcp::result(harlo_wiki::tools::validate(tool, &args).and_then(|a| w.call(tool, &a).map_err(harlo_wiki::run::error_text))))
+        }
+        // (Writing a page checks its claims against the code: it can take a while.)
+        (Some(h), true) => agent_server(&h, None)?.call(tool, args, Duration::from_secs(90)),
+        (Some(h), false) => agent_server(&h, Some(&dir))?.call(tool, args, Duration::from_secs(600)),
+    };
     // A new wiki's first step also writes a GitHub workflow that updates it
-    // every day on an API key, with tracing on: not wanted here (updates
-    // are yours to start, telemetry is off). It goes once the run is done
-    // (before, OpenWiki would see its source change), unless git tracks it
-    // (one you keep).
+    // every day on an API key: not wanted here (updates are yours to
+    // start). It goes once the run is done (before, the run would see its
+    // source change), unless git tracks it (one you keep).
     if tool == "openwiki_finish" && file_exists(root, WORKFLOW) && !tracked(root, WORKFLOW) {
         remove_new_file(root, WORKFLOW);
     }
@@ -486,7 +425,7 @@ fn tracked(root: &Path, rel: &str) -> bool {
     }
 }
 
-/// The scheduled-update workflow OpenWiki writes into a repository.
+/// The scheduled-update workflow a new wiki's run writes into a repository.
 const WORKFLOW: &str = ".github/workflows/openwiki-update.yml";
 
 fn file_exists(root: &Path, rel: &str) -> bool {
@@ -515,74 +454,6 @@ fn remove_new_file(root: &Path, rel: &str) {
             }
         }
     }
-}
-
-/// Whether the runtime starts and has its tools: "openwiki 0.9.0", else
-/// what went wrong (a package's start check).
-pub fn check() -> Result<String> {
-    let rt = runtime().ok_or_else(|| anyhow::anyhow!("no OpenWiki beside harlo"))?;
-    let mut cmd = Command::new(rt.node());
-    cmd.arg(rt.cli()).args(["mcp", "--host", "harlo"]).env("OPENWIKI_TELEMETRY_DISABLED", "1").env("DO_NOT_TRACK", "1");
-    // (Its own home, so a check writes nothing of the user's.)
-    let home = std::env::temp_dir().join(format!("harlo-openwiki-check-{}", std::process::id()));
-    let _ = std::fs::create_dir_all(&home);
-    cmd.env("HOME", &home);
-    let out = Server::start(cmd).map(|s| format!("{} ({} tools)", s.info, s.tools.len()));
-    let _ = std::fs::remove_dir_all(&home);
-    out
-}
-
-// ---- On another machine ----
-
-/// The runtime as it goes over (tar, gzipped), and a name for this build.
-static PACKED: OnceLock<std::result::Result<(Vec<u8>, String), String>> = OnceLock::new();
-
-fn packed(rt: &Runtime) -> Result<&'static (Vec<u8>, String)> {
-    PACKED
-        .get_or_init(|| {
-            let version = rt.version();
-            let id = version.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100_0000_01b3));
-            let out = Command::new("tar").arg("-C").arg(&rt.dir).args(["-czf", "-", "."]).stdin(Stdio::null()).stderr(Stdio::null()).output().map_err(|e| format!("tar: {e}"))?;
-            if !out.status.success() {
-                return Err("packing OpenWiki failed".into());
-            }
-            Ok((out.stdout, format!("{id:016x}")))
-        })
-        .as_ref()
-        .map_err(|e| anyhow::anyhow!("{e}"))
-}
-
-/// The runtime's folder on `host`, put there first when this version isn't
-/// (older ones go).
-fn on_host(host: &Host, rt: &Runtime) -> Result<String> {
-    let arch = crate::remote_helper::arch_of(host)?;
-    if arch != rt.arch() {
-        bail!("harlo's OpenWiki runs on {} machines; {} is {arch}", rt.arch(), host.name);
-    }
-    let (gz, id) = packed(rt)?;
-    let home = remote::home(host)?;
-    let dir = format!("{home}/.cache/harlo/openwiki-{id}");
-    let q = remote::quote_path;
-    let out = remote::run(host, &format!("[ -x {}/bin/node ] && echo ready || echo missing", q(&dir)), Duration::from_secs(30))?;
-    if String::from_utf8_lossy(&out.stdout).trim() != "ready" {
-        let out = remote::run_with_input(host, &put_script(&dir), Some(gz), Duration::from_secs(900))?;
-        if !out.status.success() {
-            let err = String::from_utf8_lossy(&out.stderr);
-            bail!("harlo's OpenWiki doesn't run on {}: {}", host.name, err.lines().rfind(|l| !l.trim().is_empty()).unwrap_or("it failed").trim());
-        }
-    }
-    Ok(dir)
-}
-
-/// Unpacks the runtime from stdin into `dir` (beside it first, so a broken
-/// upload leaves nothing), checks Node and its native module load there,
-/// then drops older versions.
-fn put_script(dir: &str) -> String {
-    let q = remote::quote_path;
-    format!(
-        r#"d={dir}; t="$d.part.$$"; rm -rf "$t" && mkdir -p "$t" && tar -xzf - -C "$t" && "$t/bin/node" -e 'new (require(process.argv[1]))(":memory:")' "$t/node_modules/better-sqlite3" || {{ rm -rf "$t"; exit 1; }}; rm -rf "$d" && mv "$t" "$d" && for o in "${{d%/*}}"/openwiki-*; do [ "$o" = "$d" ] || rm -rf "$o"; done"#,
-        dir = q(dir)
-    )
 }
 
 // ---- The wiki, read from its files ----
@@ -821,6 +692,9 @@ pub fn state(root: &Path) -> State {
         let out = crate::git::output_in(root, &["rev-list", "--count", &format!("{}..HEAD", l.head), "--", ".", ":!openwiki", ":!AGENTS.md", ":!CLAUDE.md"]);
         out.trim().parse().ok()
     });
+    if exists && remote::split(root).is_none() {
+        harlo_wiki::marked::warm();
+    }
     State { exists, run, last, behind }
 }
 
@@ -1272,6 +1146,25 @@ mod tests {
         (root.clone(), Gone(root))
     }
 
+    /// The reading tools answer in this process: no OpenWiki, no runtime,
+    /// `root` filled in from the repository.
+    #[test]
+    fn reading_needs_no_openwiki() {
+        let (root, _gone) = fixture();
+        // (Linked wikis come from OpenWiki's registry: none here, not the user's.)
+        unsafe { std::env::set_var("OPENWIKI_CONFIG_DIR", root.join("no-registry")) };
+        assert!(Command::new("git").arg("-C").arg(&root).args(["init", "-q"]).status().unwrap().success());
+        let root = std::fs::canonicalize(&root).unwrap();
+        let found = answer(&call(&root, "openwiki_search", json!({"query": "how are failed jobs retried"})).unwrap()).unwrap();
+        let first = &found["results"][0];
+        assert_eq!(first["ref"][0], "openwiki/architecture/jobs.md#retry-control", "{found}");
+        let read = answer(&call(&root, "openwiki_read", json!({"page": "openwiki/architecture/jobs.md", "sections": ["retry-control"], "root": "/elsewhere"})).unwrap()).unwrap();
+        assert!(read.to_string().contains("three times"), "{read}");
+        let err = answer(&call(&root, "openwiki_read", json!({"page": "openwiki/gone.md", "sections": ["x"]})).unwrap()).unwrap_err();
+        assert_eq!(err, "invalid_input: The requested OpenWiki page does not exist.");
+        assert!(SERVERS.lock().unwrap().is_empty(), "no server started");
+    }
+
     #[test]
     fn pages_links_and_order() {
         let (root, _gone) = fixture();
@@ -1461,16 +1354,6 @@ mod tests {
         assert_eq!(asked["workspaces"][0]["name"], "Team");
     }
 
-    #[test]
-    fn runtime_places() {
-        let c = candidates(Path::new("/opt/harlo/bin"));
-        assert_eq!(c[0], Path::new("/opt/harlo/bin/../lib/harlo/openwiki"));
-        let c = candidates(Path::new("/w/target/debug/deps"));
-        assert_eq!(c[2], Path::new("/w/target/debug/deps/../../openwiki"));
-        let rt = Runtime { dir: "/nowhere".into() };
-        assert_eq!(rt.arch(), "x86_64");
-    }
-
     /// A stand-in tool server (a shell script): it answers initialize and
     /// tools/list with OpenWiki's tool names, and echoes a call's arguments.
     fn stand_in(tools: &[&str]) -> Command {
@@ -1510,60 +1393,52 @@ esac; done"#
         assert!(s.request("nope", json!({}), Duration::from_secs(10)).is_err());
     }
 
-    /// The real OpenWiki (target/openwiki, when fetched) starts, and
-    /// searches and reads a fixture wiki in a git repository.
+    /// The writing tools run here, natively: a new wiki's run begins in a
+    /// git repository, keeps its state, and a step for another run is
+    /// refused.
     #[test]
-    fn bundled_openwiki_searches() {
-        let Some(rt) = runtime() else { return };
-        assert!(check().unwrap().starts_with("openwiki "));
+    fn writing_runs_here() {
         let (root, _gone) = fixture();
         let git = |args: &[&str]| assert!(Command::new("git").arg("-C").arg(&root).args(args).output().unwrap().status.success());
         git(&["init", "-q"]);
-        git(&["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x"]);
-        let home = root.join("home");
-        std::fs::create_dir_all(&home).unwrap();
-        let mut cmd = Command::new(rt.node());
-        cmd.arg(rt.cli()).args(["mcp", "--host", "harlo"]).env("HOME", &home).env("OPENWIKI_TELEMETRY_DISABLED", "1");
-        let s = Server::start(cmd).unwrap();
-        let r = s.call("openwiki_search", json!({"root": root, "query": "how are failed jobs retried"}), Duration::from_secs(60)).unwrap();
-        let text = r.to_string();
-        assert!(text.contains("architecture/jobs.md"), "{text}");
-        let r = s.call("openwiki_read", json!({"root": root, "page": "openwiki/architecture/jobs.md", "sections": ["retry-control"]}), Duration::from_secs(60)).unwrap();
-        assert!(r.to_string().contains("three times"), "{r}");
-        assert!(rt.skill().unwrap().contains("openwiki_begin"));
-        // harlo's fix: a fact citing a newly ignored path is rechecked by
-        // the update rather than aborting it (packaging/openwiki/patches).
-        assert!(rt.version().contains(", patches "), "{}", rt.version());
-        let preflight = std::fs::read_to_string(rt.dir.join("node_modules/openwiki/dist/claims/brains/code/preflight.js")).unwrap();
-        assert!(preflight.contains("excluded by .openwikiignore"), "the bundled OpenWiki lacks harlo's patch");
+        std::fs::write(root.join("main.rs"), "fn main() {}\n").unwrap();
+        git(&["add", "main.rs"]);
+        git(&["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "x"]);
+        std::fs::remove_dir_all(root.join(DIR)).unwrap();
+        let r = call(&root, "openwiki_begin", json!({"mode": "init"})).unwrap();
+        assert_ne!(r["isError"], json!(true), "{r}");
+        let run = &r["structuredContent"];
+        assert_eq!(run["phase"], "planning", "{r}");
+        assert!(root.join("openwiki/.run.json").is_file());
+        let r = call(&root, "openwiki_next_page", json!({"runId": "00000000-0000-4000-8000-000000000000"})).unwrap();
+        assert_eq!(r["isError"], json!(true));
+        assert!(r.to_string().contains("invalid_state"), "{r}");
+        let r = call(&root, "openwiki_next_page", json!({"runId": run["runId"]})).unwrap();
+        assert!(r.to_string().contains("invalid_state"), "planning: no pages yet: {r}");
     }
 
     #[test]
     fn writing_session_tools_and_prompt() {
-        let all: Vec<&str> = READ_TOOLS.iter().chain(&WRITE_TOOLS).copied().collect();
-        let s = Server::start(stand_in(&all)).unwrap();
-        let tools = writing_tools(&s);
+        let tools = writing_tools();
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert_eq!(names.len(), 8);
         assert!(names.contains(&"openwiki_submit_page") && names.contains(&"openwiki_search") && !names.contains(&"openwiki_list_wikis"));
-        let rt = Runtime { dir: "/nowhere".into() };
-        let p = run_prompt(&rt, "create", "", &[]);
+        assert!(tools.iter().all(|t| t.pointer("/inputSchema/properties/root").is_none()), "harlo fills in root");
+        let p = run_prompt("create", "", &[]);
         assert!(p.contains("mode \"init\"") && p.contains("leave it out") && p.contains("never change the code"));
         assert!(!p.contains(".openwikiignore keeps"), "nothing ignored: not a word about it");
         let (root, _gone) = fixture();
         std::fs::write(root.join(".openwikiignore"), "# local tools\nscripts/\n\nTESTING.md\n").unwrap();
         let rules = ignored(&root);
         assert_eq!(rules, ["scripts/", "TESTING.md"]);
-        let kept = run_prompt(&rt, "update", "", &rules);
+        let kept = run_prompt("update", "", &rules);
         assert!(kept.contains("keeps these paths out of the wiki: `scripts/`, `TESTING.md`") && kept.contains("plan every page that mentions them"), "{kept}");
         // (Sent as harlo's: shown as its line, in words.)
         let said = p.strip_prefix(crate::transcript::HARLO_PREFIX).expect("harlo's message");
         assert!(crate::orchestration::said_plainly(said).starts_with("Wiki: create. The agent writes"));
-        assert!(run_prompt(&rt, "continue", "init", &[]).contains("mode \"init\""));
-        assert!(run_prompt(&rt, "continue", "update", &[]).contains("mode \"update\""));
-        if let Some(rt) = runtime() {
-            assert!(run_prompt(&rt, "update", "", &[]).contains("openwiki_submit_plan"));
-        }
+        assert!(run_prompt("continue", "init", &[]).contains("mode \"init\""));
+        assert!(run_prompt("continue", "update", &[]).contains("mode \"update\""));
+        assert!(run_prompt("update", "", &[]).contains("openwiki_submit_plan"));
     }
 
     #[test]

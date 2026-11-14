@@ -46,9 +46,6 @@ build() {
     if [ -d "$(rustc --print target-libdir --target x86_64-unknown-linux-musl 2>/dev/null)" ]; then
         CC_x86_64_unknown_linux_musl=gcc cargo build --frozen --profile agent -p harlo-agent --target x86_64-unknown-linux-musl
     fi
-    # OpenWiki, which keeps a project's wiki: its pinned Node and package
-    # (downloaded and checked against their checksums).
-    packaging/openwiki/fetch.sh target/openwiki
 }
 
 check() {
@@ -67,7 +64,6 @@ package() {
     if [ -f target/x86_64-unknown-linux-musl/agent/harlo-agent ]; then
         install -Dm755 target/x86_64-unknown-linux-musl/agent/harlo-agent "$pkgdir/usr/lib/harlo/harlo-agent-x86_64"
     fi
-    cp -a target/openwiki "$pkgdir/usr/lib/harlo/openwiki"
     install -Dm644 packaging/harlo.desktop "$pkgdir/usr/share/applications/harlo.desktop"
     install -Dm644 crates/harlo-app/icons/app/harlo.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/harlo.svg"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
@@ -83,7 +79,5 @@ package() {
     install -Dm644 crates/harlo-app/icons/PASEO-NOTICE "$pkgdir/usr/share/licenses/$pkgname/paseo-NOTICE"
     install -Dm644 crates/harlo-app/sounds/NOTICE "$pkgdir/usr/share/licenses/$pkgname/sounds-NOTICE"
     install -Dm644 crates/harlo-app/sounds/CC-BY-SA-4.0.txt "$pkgdir/usr/share/licenses/$pkgname/sounds-CC-BY-SA-4.0.txt"
-    for f in node openwiki packages; do
-        install -Dm644 "target/openwiki/LICENSES/$f.txt" "$pkgdir/usr/share/licenses/$pkgname/openwiki-$f.txt"
-    done
+    install -Dm644 crates/harlo-wiki/LICENSE-OPENWIKI "$pkgdir/usr/share/licenses/$pkgname/openwiki-LICENSE"
 }

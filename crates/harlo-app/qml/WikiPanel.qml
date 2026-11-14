@@ -369,18 +369,10 @@ Rectangle {
                 objectName: "wikiCreate"
                 Layout.topMargin: 4
                 variant: "primary"
-                enabled: !!root.st.runtime && !root.st.running
+                enabled: !root.st.running
                 text: root.st.running ? "Writing the wiki…" : "Create wiki"
                 font.pixelSize: Theme.px(12.5)
                 onClicked: root.start("create")
-            }
-            Label {
-                Layout.fillWidth: true
-                visible: !root.st.runtime
-                wrapMode: Text.Wrap
-                text: "This harlo has no OpenWiki: reinstall harlo to create one."
-                color: Theme.warning
-                font.pixelSize: Theme.px(12)
             }
         }
 
@@ -1165,7 +1157,7 @@ Rectangle {
                 }
                 FlatButton {
                     objectName: "wikiRun"
-                    visible: !root.st.running && !!root.st.runtime
+                    visible: !root.st.running
                     // (Behind the code: the one thing to do here.)
                     variant: footer.run || (root.st.behind || 0) > 0 ? "primary" : "outline"
                     text: footer.run ? "Continue" : "Update"

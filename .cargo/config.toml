@@ -2,3 +2,10 @@
 # whisper.cpp (dictation) for any x86-64 CPU with AVX2, not just the
 # build machine's: packages built here must run elsewhere.
 GGML_NATIVE = "OFF"
+# Harlo's agent for other machines (static, musl) is built with the system
+# gcc and glibc's headers: SQLite's large-file switch would make them ask
+# for open64, stat64 and the like, which musl doesn't have (its off_t is 64
+# bits anyway), and a gcc that fortifies by default (Ubuntu's) would make
+# them ask for __memcpy_chk and the like, glibc's too.
+CFLAGS_x86_64_unknown_linux_musl = "-DSQLITE_DISABLE_LFS -U_FORTIFY_SOURCE"
+CFLAGS_aarch64_unknown_linux_musl = "-DSQLITE_DISABLE_LFS -U_FORTIFY_SOURCE"

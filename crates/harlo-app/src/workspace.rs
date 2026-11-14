@@ -872,8 +872,9 @@ pub(crate) fn wiki_page_at(cwd: &Path, page: &str) -> serde_json::Value {
     }
 }
 
-/// A search of that wiki: OpenWiki's ranked sections, or the pages' own
-/// words when it can't run (`plain`). Blocking.
+/// A search of that wiki: its ranked sections, or the pages' own words
+/// when the search can't run (`plain`: another machine harlo's agent can't
+/// go on). Blocking.
 pub(crate) fn wiki_search_at(cwd: &Path, query: &str, workspace: &str) -> serde_json::Value {
     let root = harlo_core::openwiki::root_of(cwd);
     let mut args = json!({ "query": query, "limit": 12 });
@@ -887,7 +888,7 @@ pub(crate) fn wiki_search_at(cwd: &Path, query: &str, workspace: &str) -> serde_
             harlo_core::openwiki::restore_names(&mut found, |page| harlo_core::openwiki::read(&root, page).ok());
             found
         }
-        // (OpenWiki couldn't run: the pages' own words.)
+        // (The search couldn't run: the pages' own words.)
         Err(e) => {
             tracing::warn!("wiki search: {e}");
             json!({ "hits": harlo_core::openwiki::search_text(&root, query, 12), "workspaces": [], "plain": true })
@@ -1318,7 +1319,6 @@ impl cxx_qt::Initialize for Workspace {
                 let get = |k: &str| db.get(&format!("settings.{k}")).ok().flatten().unwrap_or_default();
                 let (family, mode, scale) = (get("theme_family"), get("theme_mode"), get("text_scale"));
                 crate::diagnostics::set_protocol_logging(get("debug_protocol") == "1");
-                harlo_core::openwiki::set_telemetry(get("openwiki_telemetry") == "1");
                 let mut this = self.as_mut().rust_mut();
                 this.ignored_repos = ignored_repos;
                 // (Ember was called OpenChamber before 1.0.)
@@ -2355,7 +2355,8 @@ impl Workspace {
             v["enabled"] = json!(enabled);
             v["running"] = json!(running);
             v["session"] = json!(writer);
-            v["runtime"] = json!(harlo_core::openwiki::runtime().is_some());
+            // (Writing is always there now; phones read it as canWrite.)
+            v["runtime"] = json!(true);
             v["loading"] = json!(loading);
             v["host"] = json!(harlo_core::remote::host_of(&cwd).unwrap_or_default());
             QString::from(&v.to_string())
@@ -2420,9 +2421,6 @@ impl Workspace {
         let Some((cwd, project)) = self.wiki_folder(&key.to_string()) else {
             return QString::from("The wiki is for a harlo project's sessions.");
         };
-        let Some(rt) = harlo_core::openwiki::runtime() else {
-            return QString::from("This harlo has no OpenWiki: reinstall harlo.");
-        };
         let kind = self.projects.iter().find(|p| p.id == project).map(|p| p.harness.clone()).filter(|h| !h.is_empty()).unwrap_or_else(|| self.default_harness());
         let Some(kind) = HarnessKind::parse(&kind) else {
             return QString::from("Pick a default agent first (Settings → General).");
@@ -2432,16 +2430,15 @@ impl Workspace {
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
             let root = harlo_core::openwiki::root_of(&cwd);
-            let host = harlo_core::remote::host_of(&root);
-            let ready = harlo_core::openwiki::server(host.as_deref());
+            let ready = harlo_core::openwiki::prepare_writer(&root);
             let run_mode = harlo_core::openwiki::state(&root).run.map(|r| r.mode).unwrap_or_default();
             let ignored = harlo_core::openwiki::ignored(&root);
             let _ = thread.queue(move |mut this| {
                 if let Err(e) = ready {
-                    this.as_mut().set_notice_text(&format!("OpenWiki didn't start: {e:#}"), true);
+                    this.as_mut().set_notice_text(&format!("The wiki's tools didn't start: {e:#}"), true);
                     return;
                 }
-                let prompt = harlo_core::openwiki::run_prompt(&rt, &mode, &run_mode, &ignored);
+                let prompt = harlo_core::openwiki::run_prompt(&mode, &run_mode, &ignored);
                 let title = match mode.as_str() { "create" => "Wiki: create", "update" => "Wiki: update", _ => "Wiki: continue" };
                 let cwd_of_run = root.clone();
                 let key = this.as_mut().start_session_budget(kind, root, &model, "", true, None);
@@ -4023,9 +4020,6 @@ impl Workspace {
         self.save_setting(&key, value.trim());
         if key == "debug_protocol" {
             crate::diagnostics::set_protocol_logging(value.trim() == "1");
-        }
-        if key == "openwiki_telemetry" {
-            harlo_core::openwiki::set_telemetry(value.trim() == "1");
         }
     }
 
@@ -6885,14 +6879,9 @@ impl Workspace {
             }
             let writing = caller.as_ref().is_some_and(|c| self.wiki_sessions.contains(c));
             if let Some((cwd, wiki, plan, commits)) = &features {
-                // (A wiki session: OpenWiki's tools as its server lists them,
-                // started before the session was.)
+                // (A wiki session: the reading and writing tools.)
                 if writing {
-                    let host = harlo_core::remote::host_of(cwd);
-                    match harlo_core::openwiki::server(host.as_deref()) {
-                        Ok(s) => tools.extend(harlo_core::openwiki::writing_tools(&s)),
-                        Err(e) => tracing::warn!("wiki session: OpenWiki: {e:#}"),
-                    }
+                    tools.extend(harlo_core::openwiki::writing_tools());
                 } else if *wiki && harlo_core::openwiki::has_wiki(cwd) {
                     tools.extend(harlo_core::openwiki::reading_tools().as_array().cloned().unwrap_or_default());
                 }

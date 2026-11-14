@@ -45,7 +45,7 @@ Many agent apps are a web page in an Electron window. harlo is a desktop app:
 | | |
 |---|---|
 | **Two agents, one chat** | **Harlo**, harlo's own agent, works with your ChatGPT plan, an OpenAI key or any OpenAI-compatible server, your own models included. It sees images, searches and reads the web, uses MCP servers and skills, splits work between subagents (each writer in a worktree of its own), and runs its commands in a sandbox. It counts every request's tokens and says what they cost, or that the cost is unknown, never a made-up $0. **Claude Code** uses your own login and settings, and your existing Claude Code sessions show up in the sidebar: click one to carry on. |
-| **A wiki of your code** | harlo comes with [OpenWiki](https://github.com/langchain-ai/openwiki). **Create wiki** has your agent write a linked wiki of the repository (its architecture, workflows and the reasons behind them), with every fact tied to the lines of code it came from. Your agents then search it and read only the sections they need. The Wiki panel lists the pages, reads them with their diagrams and sources, searches them and draws them as a graph. It also shows how far behind the code the wiki is, and Update rewrites only the pages whose code changed. |
+| **A wiki of your code** | harlo keeps wikis in [OpenWiki](https://github.com/langchain-ai/openwiki)'s format, with its tools built in. **Create wiki** has your agent write a linked wiki of the repository (its architecture, workflows and the reasons behind them), with every fact tied to the lines of code it came from. Your agents then search it and read only the sections they need. The Wiki panel lists the pages, reads them with their diagrams and sources, searches them and draws them as a graph. It also shows how far behind the code the wiki is, and Update rewrites only the pages whose code changed. |
 | **Plans and helpers** | For a bigger task the agent writes a plan you can edit, and works through it step by step. **Run with helpers** gives each step a session of its own, steps that don't depend on each other at the same time in worktrees, and each finished step is reviewed by another agent. An agent can also offer to split work between helpers; you decide. |
 | **Diagrams, choices and mockups** | Agents draw Mermaid diagrams, which harlo shows as pictures. A choice between approaches comes as cards with their pros and cons and a Choose button. A UI change comes as a mockup harlo renders, before and after. |
 | **Changes and diffs** | Every file an agent touched, side-by-side diffs, review comments sent back to the agent, and undo for any turn. A folder of repositories shows each one's changes. |
@@ -105,7 +105,7 @@ Download the file for your system from [harlo.run/download](https://harlo.run/do
 | Arch, Manjaro, EndeavourOS, CachyOS | `harlo-<version>-1-x86_64.pkg.tar.zst` | `sudo pacman -U ./harlo-*.pkg.tar.zst` |
 | Any other distribution | `harlo-<version>-x86_64.AppImage` | `chmod +x harlo-*.AppImage`, then run it |
 
-The packages bring their own Qt and OpenWiki (with the Node.js it runs on), and need glibc 2.35 or newer, an x86-64 CPU with AVX2, and git. harlo updates itself (Settings → General → Check for updates). Each release lists its files' SHA-256 sums in `SHA256SUMS`.
+The packages bring their own Qt and need glibc 2.35 or newer, an x86-64 CPU with AVX2, and git. harlo updates itself (Settings → General → Check for updates). Each release lists its files' SHA-256 sums in `SHA256SUMS`.
 
 On first start, harlo's setup guide helps you install and sign in the agents you want (`harlo --setup` opens it again). Once the iPhone app is in the App Store, get it, then Settings → Devices → Pair a device on your computer, and scan the code.
 
@@ -116,7 +116,6 @@ Needs Rust 1.85 or newer, Qt 6.9 or newer (`qt6-base`, `qt6-declarative`, `qt6-m
 ```sh
 cargo run -p harlo-app --release
 cargo build -p harlo-core --release --bin harlo-engines --no-default-features   # model servers on other machines
-packaging/openwiki/fetch.sh target/openwiki                                       # the wiki: OpenWiki and its Node.js
 cargo test --workspace
 ```
 
@@ -155,13 +154,14 @@ It speaks plain HTTP: put it behind something that adds HTTPS (Caddy, a Cloudfla
 |---|---|
 | `crates/harlo-harness` | Runs the agents (Harlo over its RPC, Claude Code's stream-json) and turns what they say into one stream of events |
 | `crates/harlo-agent` | Harlo, harlo's own agent (`harlo-agent`): the model loop, its tools, the sandbox, MCP and subagents |
-| `crates/harlo-core` | Sessions, transcripts, markdown, git, worktrees, search, plans, the wiki (OpenWiki), remote machines, model servers, phone protocol, state. No Qt. Its `harlo-engines` program sets up and runs model servers on other machines |
+| `crates/harlo-core` | Sessions, transcripts, markdown, git, worktrees, search, plans, the wiki's state, remote machines, model servers, phone protocol, state. No Qt. Its `harlo-engines` program sets up and runs model servers on other machines |
+| `crates/harlo-wiki` | The wiki: reading, searching and writing OpenWiki-format wikis, ported from OpenWiki (MIT) |
 | `crates/harlo-code` | The text and terminal views drawn by Rust: the editor, both sides of a diff, the terminal |
 | `crates/harlo-app` | The desktop app: cxx-qt bridges and the QML interface |
 | `crates/harlo-relay` | The relay |
 | `crates/harlo-apns` | Apple's push service, for the relay |
 | `crates/harlo-update-signing`, `crates/harlo-manifest-signer` | The signature on harlo's update manifest, and the release tool that signs it |
-| `packaging/` | The Linux packages, the AUR recipes and the pinned OpenWiki |
+| `packaging/` | The Linux packages and the AUR recipes |
 | `ios/` | The iPhone app (SwiftUI), its widgets and HarloKit, its client library |
 | `site/` | [harlo.run](https://harlo.run) |
 
@@ -176,4 +176,4 @@ harlo is open source and made by one person, so contributions are very welcome: 
 
 ## License
 
-MIT, see [LICENSE](LICENSE). Bundled themes, icons, fonts and other work by others keep their own licenses: see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). The packages also carry [OpenWiki](https://github.com/langchain-ai/openwiki) (MIT) and Node.js, with their licenses and those of OpenWiki's packages.
+MIT, see [LICENSE](LICENSE). Bundled themes, icons, fonts and other work by others keep their own licenses: see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). The wiki (`crates/harlo-wiki`) is ported from [OpenWiki](https://github.com/langchain-ai/openwiki) (MIT): see [its license](crates/harlo-wiki/LICENSE-OPENWIKI).

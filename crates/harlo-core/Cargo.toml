@@ -33,6 +33,8 @@ ureq = { version = "3", features = ["platform-verifier"] }
 # signed manifest.
 sha2 = "0.10"
 harlo-update-signing = { path = "../harlo-update-signing" }
+# The wiki's reading tools (search, read, linked wikis), native.
+harlo-wiki = { path = "../harlo-wiki" }
 # Phone pairing: NaCl box (X25519 + XSalsa20-Poly1305), as the phone's tweetnacl.
 crypto_box = { version = "0.9", features = ["std"] }
 base64 = "0.22"

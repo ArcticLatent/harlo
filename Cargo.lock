@@ -1351,6 +1351,7 @@ dependencies = [
  "base64 0.22.1",
  "futures-util",
  "getrandom 0.3.4",
+ "harlo-wiki",
  "htmd",
  "httpdate",
  "image",
@@ -1428,6 +1429,7 @@ dependencies = [
  "ed25519-dalek",
  "harlo-harness",
  "harlo-update-signing",
+ "harlo-wiki",
  "ignore",
  "libc",
  "nucleo-matcher",
@@ -1493,6 +1495,20 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "ed25519-dalek",
+]
+
+[[package]]
+name = "harlo-wiki"
+version = "1.1.1"
+dependencies = [
+ "fancy-regex 0.16.2",
+ "indexmap",
+ "libc",
+ "regex",
+ "rusqlite",
+ "serde_json",
+ "sha2 0.10.9",
+ "yaml-rust",
 ]
 
 [[package]]

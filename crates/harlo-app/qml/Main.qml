@@ -8539,9 +8539,9 @@ ApplicationWindow {
 
     // The wiki with Harlo and Claude Code: with Wiki on for a project that
     // has one, its search and read tools (no others) and a few lines on
-    // when to use them reach both through harlo's tools, and OpenWiki
-    // answers them from the repository's openwiki/; harlo starts OpenWiki
-    // with its telemetry off unless allowed; with Wiki off they're gone.
+    // when to use them reach both through harlo's tools, and harlo answers
+    // them itself from the repository's openwiki/;
+    // with Wiki off they're gone.
     property int wikiProject: -1
     property int wikiDone: 0
     property int wikiRequests: 0
@@ -8556,7 +8556,6 @@ ApplicationWindow {
         const last = tools[tools.length - 1]
         return last ? (typeof last.content === "string" ? last.content : JSON.stringify(last.content)) : ""
     }
-    function wikiEnvLog() { return TestInput.readFile(win.argValue("--cwd=") + "/../openwiki-env.log") || "" }
     SequentialAnimation {
         id: harloWikiSteps
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlowiki"
@@ -8590,10 +8589,8 @@ ApplicationWindow {
             const said = JSON.stringify((first.messages || []).filter(m => m.role === "system"))
             win.check(said.indexOf("This project has a wiki") >= 0 && said.indexOf("check it in the code") >= 0, "and a few lines on when to use them")
             const t = win.lastToolResult()
-            win.check(t.indexOf("openwiki/architecture/jobs.md") >= 0 && t.indexOf("retried three times") >= 0, "OpenWiki finds the section (" + t.slice(0, 240) + ")")
+            win.check(t.indexOf("openwiki/architecture/jobs.md") >= 0 && t.indexOf("retried three times") >= 0, "the search finds the section (" + t.slice(0, 240) + ")")
             win.check(win.findText("Search the wiki", chat.transcript) !== null, "its card says what it did")
-            const env = win.wikiEnvLog()
-            win.check(env.indexOf("start\nOPENWIKI_TELEMETRY_DISABLED=1") === 0 || (env.indexOf("start") === 0 && env.indexOf("OPENWIKI_TELEMETRY_DISABLED=1") > 0 && env.indexOf("DO_NOT_TRACK=1") > 0), "OpenWiki starts with its telemetry off (" + env.replace(/\n/g, " | ") + ")")
             win.sendWiki("read the wiki at openwiki/architecture/jobs.md#retry-control") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: win.waitUntil(harloWikiSteps, () => win.wikiAnswered(), 20000) }
@@ -8601,7 +8598,6 @@ ApplicationWindow {
         ScriptAction { script: {
             const t = win.lastToolResult()
             win.check(t.indexOf("Retry control") >= 0 && t.indexOf("three times") >= 0, "openwiki_read gives the section (" + t.slice(0, 240) + ")")
-            win.check(win.wikiEnvLog().split("start").length - 1 === 1, "one OpenWiki serves both calls")
             win.shotWindow("clicks-harlo-wiki")
             // Claude Code, through the same tools.
             win.claudeKey = Workspace.newSession(win.wikiProject, "claude") } }
@@ -8612,8 +8608,7 @@ ApplicationWindow {
         ScriptAction { script: {
             const t = win.chatText()
             win.check(t.indexOf("Wiki tools: openwiki_search, openwiki_read; wiki told; found: openwiki/architecture/jobs.md") >= 0, "Claude Code gets them and the lines too, and finds the page (" + t.slice(t.indexOf("Wiki tools:"), t.indexOf("Wiki tools:") + 200) + ")")
-            // Telemetry allowed: OpenWiki starts again without the switch.
-            Workspace.setSetting("openwiki_telemetry", "1")
+            // Back to Harlo: another search.
             Workspace.open(win.harloKey) } }
         PauseAnimation { duration: 600 }
         ScriptAction { script: win.sendWiki("search the wiki for backoff") }
@@ -8621,9 +8616,8 @@ ApplicationWindow {
         ScriptAction { script: win.waitUntil(harloWikiSteps, () => win.wikiAnswered(), 20000) }
         PauseAnimation { duration: 100 }
         ScriptAction { script: {
-            const runs = win.wikiEnvLog().split("start")
-            win.check(runs.length - 1 === 2 && runs[2].indexOf("OPENWIKI_TELEMETRY_DISABLED") < 0, "allowed, OpenWiki starts again with its telemetry on (" + win.wikiEnvLog().replace(/\n/g, " | ") + ")")
-            Workspace.setSetting("openwiki_telemetry", "0")
+            const t = win.lastToolResult()
+            win.check(t.indexOf("architecture/jobs.md") >= 0 && t.indexOf("backoff") >= 0, "it finds that too (" + t.slice(0, 160) + ")")
             // Wiki off: a new session gets neither the tools nor the lines.
             Workspace.setSetting("wiki_" + win.wikiProject, "0")
             win.wikiRequests = win.modelRequests().length
@@ -8649,7 +8643,8 @@ ApplicationWindow {
         ScriptAction { script: {
             win.check(win.chatText().indexOf("Wiki tools: none; wiki not told") >= 0, "nor for Claude Code (" + win.chatText().slice(-120) + ")")
             // Creating the wiki: a session of its own runs OpenWiki's steps
-            // with the writing tools, which only it gets.
+            // with the writing tools (harlo's own, in this process), which
+            // only it gets.
             Workspace.setSetting("default_harness", "harlo")
             // (Written with the project's model for Harlo.)
             Workspace.setSetting("project_model_" + win.wikiProject + "_harlo", "fake/fake-helper")
@@ -8664,7 +8659,7 @@ ApplicationWindow {
             const first = reqs[0] || {}
             const names = (first.tools || []).map(t => t.function.name)
             const asked = JSON.stringify(first.messages || [])
-            win.check(["openwiki_begin", "openwiki_submit_plan", "openwiki_next_page", "openwiki_submit_page", "openwiki_finish"].every(n => names.some(m => m.endsWith(n))), "the wiki session gets OpenWiki's writing tools (" + names.filter(n => n.indexOf("openwiki") >= 0).join(", ") + ")")
+            win.check(["openwiki_begin", "openwiki_submit_plan", "openwiki_next_page", "openwiki_submit_page", "openwiki_finish"].every(n => names.some(m => m.endsWith(n))), "the wiki session gets the writing tools (" + names.filter(n => n.indexOf("openwiki") >= 0).join(", ") + ")")
             win.check(asked.indexOf("Create this repository's wiki with OpenWiki") >= 0 && asked.indexOf("Required sequence") >= 0, "and OpenWiki's own steps as its prompt")
             win.check(chat.session.title === "Wiki: create", "titled Wiki: create (" + chat.session.title + ")")
             win.check(reqs.length > 0 && reqs.every(r => r.model === "fake-helper"), "with the project's model (" + reqs.map(r => r.model).filter((m, i, a) => a.indexOf(m) === i).join(", ") + ")")
@@ -8679,9 +8674,9 @@ ApplicationWindow {
             win.check(said.indexOf("Wiki: complete") >= 0, "the run finishes (" + said.slice(said.lastIndexOf("Wiki:"), said.lastIndexOf("Wiki:") + 300) + ")")
             const cwd = win.argValue("--cwd=")
             win.check((TestInput.readFile(cwd + "/openwiki/quickstart.md") || "").indexOf("greets the reader") >= 0, "the page is written")
-            win.check((TestInput.readFile(cwd + "/openwiki/.last-update.json") || "").indexOf("gitHead") >= 0, "OpenWiki records the update")
+            win.check((TestInput.readFile(cwd + "/openwiki/.last-update.json") || "").indexOf("gitHead") >= 0, "the run records the update")
             win.check((TestInput.readFile(cwd + "/AGENTS.md") || "").indexOf("OPENWIKI:START") >= 0, "and its block in AGENTS.md")
-            win.check(TestInput.readFile(cwd + "/.github/workflows/openwiki-update.yml") === "" && TestInput.listDir(cwd + "/.github") === "", "but not OpenWiki's daily update workflow")
+            win.check(TestInput.readFile(cwd + "/.github/workflows/openwiki-update.yml") === "" && TestInput.listDir(cwd + "/.github") === "", "but not the daily update workflow")
             win.shotWindow("clicks-harlo-wiki-create")
             // Done, and left: on the project's Wiki shelf, folded.
             Workspace.open(win.wikiKeyBefore) } }
@@ -8830,7 +8825,7 @@ ApplicationWindow {
         ScriptAction { script: {
             const hits = win.findAllNames("wikiHit", wikiPanel)
             win.check(hits[0].modelData.page.endsWith("architecture/jobs.md") && hits[0].modelData.section === "retry-control" && !wikiPanel.results.plain,
-                      "OpenWiki's search finds the section (" + JSON.stringify(hits[0].modelData) + ")")
+                      "the search finds the section (" + JSON.stringify(hits[0].modelData) + ")")
             win.check(win.findText("Retry control", wikiPanel) !== null, "shown by its heading")
             const snip = win.findName("wikiHitSnippet", hits[0])
             win.check(snip && snip.visible && /<b><font[^>]*>(failed|job|retried)<\/font><\/b>/i.test(snip.text)
@@ -8972,7 +8967,7 @@ ApplicationWindow {
     // the quickstart first, and how far behind the code it is; every page
     // opens; every link to a page goes to one, every link to code to a file
     // and lines that are there, every diagram draws; the graph has a box
-    // per page; OpenWiki's search finds the pages that answer each of
+    // per page; the search finds the pages that answer each of
     // wiki-queries.json; and a Harlo session searches and reads it.
     property var demoPages: []
     property var demoProblems: ({ opened: [], links: [], code: [], diagrams: [], search: [] })
@@ -9114,7 +9109,7 @@ ApplicationWindow {
             win.check(qi < 0 || (qbox && qx >= 0 && qx + qbox.width <= gbox.width + 1), "it opens with the page read last in view (" + Math.round(qx) + "+" + (qbox ? Math.round(qbox.width) : "-") + " in " + (gbox ? Math.round(gbox.width) + ", scrolled " + Math.round(gbox.contentX) + " of " + Math.round(gbox.contentWidth) : "-") + ")")
             win.shotWindow("wiki-demo-graph")
             wikiPanel.mode = "pages"
-            // Each search, as the panel asks it of OpenWiki.
+            // Each search, as the panel asks it.
             win.walk(win.demoQueries, q => wikiPanel.search(q.q), q => !wikiPanel.searching && wikiPanel.query === q.q,
                      (q, ok) => {
                          const hits = ok && wikiPanel.results ? wikiPanel.results.hits.map(h => h.page.replace(/^openwiki\//, "")) : []
@@ -9129,7 +9124,7 @@ ApplicationWindow {
         ScriptAction { script: win.waitUntil(wikiDemoSteps, () => walker.done, 300000) }
         PauseAnimation { duration: 600 }
         ScriptAction { script: {
-            win.check(win.demoProblems.search.length === 0, "OpenWiki's search finds the page for each question (" + win.demoQueries.length + (win.demoProblems.search.length ? "; missed: " + win.demoProblems.search.join("; ") : "") + ")")
+            win.check(win.demoProblems.search.length === 0, "the search finds the page for each question (" + win.demoQueries.length + (win.demoProblems.search.length ? "; missed: " + win.demoProblems.search.join("; ") : "") + ")")
             const snips = wikiPanel.results ? wikiPanel.results.hits.map(h => h.snippet).join(" | ") : ""
             win.check(/\b(place|amend|pay|refund)_order\b/.test(snips) && !/\b(place|amend|pay|refund) order\b/.test(snips),
                       "its hits keep the code's names (place_order, not \"place order\") (" + snips.slice(0, 160) + ")")
@@ -9290,9 +9285,9 @@ ApplicationWindow {
     }
 
     // The wiki on another machine (the test's SSH server; the demo project
-    // there): the bundled OpenWiki goes into the host's cache once, its
-    // server starts there over SSH, the panel lists, reads and searches the
-    // pages there, and a Harlo session there searches and reads them.
+    // there): the panel lists, reads and searches the pages there, and a
+    // Harlo session there searches and reads them, all through harlo's own
+    // agent there (`harlo-agent wiki`): no OpenWiki goes over.
     function hostOpenWiki() {
         const cache = win.selftestDir + "/sshd/home/.cache/harlo"
         return TestInput.listDir(cache).split("\n").filter(n => n.startsWith("openwiki-")).map(n => cache + "/" + n)
@@ -9347,15 +9342,14 @@ ApplicationWindow {
             wikiPanel.closePage()
             wikiPanel.search("assorted pallet weight") } }
         PauseAnimation { duration: 300 }
-        // (The first search puts OpenWiki on box: some 250 MB over SSH.)
+        // (The first search may put harlo's agent on box.)
         ScriptAction { script: win.waitUntil(wikiRemoteSteps, () => !wikiPanel.searching && wikiPanel.query === "assorted pallet weight", 150000) }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             const r = wikiPanel.results || {}, hits = (r.hits || []).map(h => h.page.replace(/^openwiki\//, ""))
-            win.check(!r.plain && hits[0] === "architecture/manifest.md", "OpenWiki on box finds the page (" + (r.plain ? "plain text search: " : "") + hits.slice(0, 3).join(", ") + (r.error ? " " + r.error : "") + ")")
-            const ow = win.hostOpenWiki()
-            win.check(ow.length === 1 && TestInput.listDir(ow[0] + "/bin").split("\n").indexOf("node") >= 0 && TestInput.readFile(ow[0] + "/VERSION") !== "", "put in box's cache, once (" + ow.join(", ") + ")")
-            win.check(TestInput.listDir(win.selftestDir + "/data/harlo").split("\n").every(n => !n.startsWith("openwiki")), "nothing of it in this computer's data")
+            win.check(!r.plain && hits[0] === "architecture/manifest.md", "the search on box finds the page (" + (r.plain ? "plain text search: " : "") + hits.slice(0, 3).join(", ") + (r.error ? " " + r.error : "") + ")")
+            win.check(win.hostOpenWiki().length === 0, "with no OpenWiki put on box (" + win.hostOpenWiki().join(", ") + ")")
+            win.check(TestInput.listDir(win.selftestDir + "/data/harlo").split("\n").every(n => !n.startsWith("openwiki")), "nor anything of it in this computer's data")
             win.shotWindow("wiki-remote-search")
             wikiPanel.search("") } }
         PauseAnimation { duration: 300 }
@@ -9379,8 +9373,36 @@ ApplicationWindow {
         ScriptAction { script: {
             const t = win.lastToolResult()
             win.check(t.length > 80 && t.indexOf("register") >= 0 && !/error|not found|Invalid/i.test(t.slice(0, 120)), "and reads it (" + win.demoBest + ": " + t.slice(0, 160) + ")")
-            win.check(win.hostOpenWiki().length === 1, "the same OpenWiki on box served both")
+            win.check(win.hostOpenWiki().length === 0, "still no OpenWiki on box")
             win.shotWindow("wiki-remote-session")
+            // Create, for another repository on box: a wiki session there,
+            // its writing tools harlo's agent there (`harlo-agent wiki
+            // --write`).
+            Workspace.addProject("ssh://box" + win.argValue("--cwd=") + "2") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const p = Workspace.projectList().map(l => l.split("\t")).find(p => p[1] === "repo2")
+            win.wikiProject = p ? Number(p[0]) : -1
+            win.check(win.wikiProject >= 0, "a second project on box")
+            Workspace.setSetting("default_harness", "harlo")
+            Workspace.setSetting("project_model_" + win.wikiProject + "_harlo", "fake/fake-helper")
+            win.wikiKeyBefore = Workspace.activeKey
+            win.check(Workspace.startWikiRun("project:" + win.wikiProject, "create") === "", "Create starts on box") } }
+        ScriptAction { script: win.waitUntil(wikiRemoteSteps, () => Workspace.activeKey !== win.wikiKeyBefore && chat.session.key === Workspace.activeKey, 60000) }
+        ScriptAction { script: win.waitUntil(wikiRemoteSteps, () => /Wiki: (complete|no update|the page|unexpected)/.test(win.chatText()) && chat.session.status === "idle", 90000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const said = win.chatText(), cwd = win.argValue("--cwd=") + "2"
+            win.check(chat.session.title === "Wiki: create" && chat.session.cwd === "ssh://box" + cwd, "a wiki session on box (" + chat.session.title + ", " + chat.session.cwd + ")")
+            win.check(said.indexOf("Wiki: complete") >= 0, "the run finishes there (" + said.slice(said.lastIndexOf("Wiki:"), said.lastIndexOf("Wiki:") + 300) + ")")
+            win.check((TestInput.readFile(cwd + "/openwiki/quickstart.md") || "").indexOf("greets the reader") >= 0, "the page is written on box")
+            const last = TestInput.readFile(cwd + "/openwiki/.last-update.json") || ""
+            win.check(last.indexOf("\"command\": \"init\"") >= 0 && last.indexOf("\"status\": \"complete\"") >= 0, "and the run recorded there (" + last.replace(/\s+/g, " ").slice(0, 160) + ")")
+            win.check((TestInput.readFile(cwd + "/AGENTS.md") || "").indexOf("OPENWIKI:START") >= 0, "with its block in AGENTS.md")
+            win.check(TestInput.listDir(cwd + "/.github") === "", "but not the daily update workflow")
+            win.check(TestInput.readFile(cwd + "/openwiki/.run.json") === "", "its run state gone")
+            win.check(win.hostOpenWiki().length === 0, "with no OpenWiki put on box")
+            win.shotWindow("wiki-remote-create")
             win.summary(); Qt.quit() } }
     }
 

@@ -85,6 +85,13 @@ async fn run(args: Vec<String>) -> Result<()> {
     match args.first().map(String::as_str) {
         Some("login") => login(sign_of(&args), args.iter().any(|a| a == "--paste")).await,
         Some("mcp") => mcp_sign(&args[1..]).await,
+        // The wiki's tools over stdio (how harlo reads a wiki on this machine).
+        Some("wiki") => {
+            // (`--write HOST`: the writing tools too, run as that host.)
+            let host = std::env::args().skip_while(|a| a != "--write").nth(1);
+            harlo_wiki::mcp::serve_as(host.as_deref());
+            Ok(())
+        }
         Some("logout") => {
             let sign = sign_of(&args);
             if auth::sign_out(sign)? {
