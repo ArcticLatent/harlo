@@ -168,7 +168,9 @@ impl MarkdownRenderer {
         let mut out = Vec::with_capacity(count);
         for (k, chunk) in lines.chunks(PIECE_LINES).enumerate() {
             let piece: String = chunk.concat();
-            let piece = piece.strip_suffix('\n').unwrap_or(&piece).to_owned();
+            // (Less the newline between it and the next: the last has none,
+            // so a newline it ends with is a blank line of the code's.)
+            let piece = if k + 1 < count { piece.strip_suffix('\n').unwrap_or(&piece).to_owned() } else { piece };
             let part = if k == 0 { Part::First } else if k + 1 == count { Part::Last } else { Part::Middle };
             let first_line = k * PIECE_LINES + 1;
             let mut h = DefaultHasher::new();

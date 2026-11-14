@@ -141,7 +141,9 @@ struct Reply {
 impl Reply {
     /// A chunk's events.
     fn take(&mut self, chunk: &Value, out: &mut Vec<Value>) {
-        if chunk["usage"].is_object() {
+        // (A later report without the input counted doesn't replace one with
+        // it.)
+        if chunk["usage"].is_object() && (chunk["usage"]["prompt_tokens"].is_u64() || !self.usage["prompt_tokens"].is_u64()) {
             self.usage = chunk["usage"].clone();
         }
         let Some(choice) = chunk["choices"].get(0) else { return };
@@ -257,6 +259,14 @@ fn usage(u: &Value) -> Value {
     out
 }
 
+/// What a reply that failed used, as the Responses API says it: the
+/// error's own report, else the last one before it; Null when neither
+/// said anything (so it isn't taken for a request of unknown size).
+fn failed_usage(chunk: &Value, before: &Value) -> Value {
+    let said = if chunk["usage"]["prompt_tokens"].is_u64() || !before.is_object() { &chunk["usage"] } else { before };
+    if said.is_object() { usage(said) } else { Value::Null }
+}
+
 /// Sends one request: `on` gets pi's stream events as they come; the
 /// reply is pi's assistant message, with its usage as the Responses API
 /// says it.
@@ -290,7 +300,7 @@ pub async fn stream(base: &str, token: Option<&str>, body: &Value, provider: &st
         if chunk["error"].is_object() || chunk["error"].is_string() {
             let e = &chunk["error"];
             let code = e["type"].as_str().or_else(|| e["code"].as_str()).unwrap_or_default().to_owned();
-            return Err(Failed { code, message: format!("{provider}: {}", e["message"].as_str().or_else(|| e.as_str()).unwrap_or("the request failed")), usage: chunk["usage"].clone() }.into());
+            return Err(Failed { code, message: format!("{provider}: {}", e["message"].as_str().or_else(|| e.as_str()).unwrap_or("the request failed")), usage: failed_usage(&chunk, &reply.usage) }.into());
         }
         reply.take(&chunk, &mut events);
         for e in events.drain(..) {
@@ -367,6 +377,19 @@ mod tests {
                                 let _ = s.flush().await;
                                 tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                             }
+                        }
+                        "error-usage" | "error-after-usage" | "error-bare" | "error-zero" => {
+                            let usage = "{\"prompt_tokens\":1000,\"completion_tokens\":10,\"prompt_tokens_details\":{\"cached_tokens\":200}}";
+                            let before = if how == "error-after-usage" { format!("data: {{\"choices\":[],\"usage\":{usage}}}\n\n") } else { String::new() };
+                            let own = match how {
+                                "error-usage" => format!(",\"usage\":{usage}"),
+                                "error-zero" => ",\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":0}".to_owned(),
+                                // (A null after a report doesn't wipe it.)
+                                "error-after-usage" => ",\"usage\":null".to_owned(),
+                                _ => String::new(),
+                            };
+                            let error = format!("data: {{\"error\":{{\"type\":\"server_error\",\"message\":\"it broke\"}}{own}}}\n\n");
+                            let _ = s.write_all(format!("{sse}{hello}{before}{error}").as_bytes()).await;
                         }
                         "huge" => {
                             let _ = s.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nThe request was refused: ").await;
@@ -497,6 +520,24 @@ mod tests {
         let mut sum = crate::used::Used::from_api(&json!({ "input_tokens": 1_000_000, "output_tokens": 0 })).priced(&price);
         sum.add(&used);
         assert_eq!((sum.cost, sum.cost_kind(), sum.unreported), (1.0, "partly", 1));
+    }
+
+    #[tokio::test]
+    async fn a_failed_reply_keeps_what_it_said_it_used() {
+        let failed = |r: Result<(Value, Value)>| r.unwrap_err().downcast::<Failed>().expect("a failed reply").usage;
+        // In the error itself, or before it: as the Responses API says it.
+        for how in ["error-usage", "error-after-usage"] {
+            let u = failed(ask(how).await.0);
+            assert_eq!((u["input_tokens"].as_u64(), u["output_tokens"].as_u64(), u["input_tokens_details"]["cached_tokens"].as_u64()), (Some(1000), Some(10), Some(200)), "{how}: {u}");
+            let used = crate::used::Used::from_api(&u);
+            assert_eq!((used.requests, used.unreported, used.input, used.output), (1, 0, 1000, 10), "{how}");
+        }
+        // A reported nothing is a measured nothing, not unknown.
+        let u = failed(ask("error-zero").await.0);
+        let used = crate::used::Used::from_api(&u);
+        assert_eq!((used.requests, used.unreported, used.input), (1, 0, 0), "{u}");
+        // None said: none, so not a request of its own.
+        assert!(failed(ask("error-bare").await.0).is_null());
     }
 
     #[test]

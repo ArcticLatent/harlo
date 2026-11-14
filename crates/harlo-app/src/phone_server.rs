@@ -172,6 +172,9 @@ const PHONE_ROWS: usize = 300;
 const FRAME_BYTES: usize = 512 * 1024;
 /// A row's text or HTML on a phone, at most (a huge tool output).
 const ROW_BYTES: usize = 64 * 1024;
+/// A long code block's whole HTML on a phone, at most (its highlighting
+/// takes several times its text).
+const CODE_BYTES: usize = 256 * 1024;
 
 fn clip(s: &str) -> String {
     if s.len() <= ROW_BYTES {
@@ -219,16 +222,30 @@ fn row_json(r: &harlo_core::Row, folder: &std::path::Path) -> Value {
 /// nothing. None: `i` isn't a first piece.
 fn whole_code(full: &[Arc<harlo_core::Row>], i: usize) -> Option<String> {
     let first = full.get(i).filter(|r| r.kind == harlo_core::RowKind::Code && r.label == "part-first")?;
-    // (Each piece is a <pre> of its own lines.)
+    // (Each piece is a <pre> of its own lines, exactly: less only the
+    // newline between it and the next, put back below. Its own last
+    // newlines are blank lines, kept.)
     let inner = |h: &str| -> String {
         let body = h.strip_prefix("<pre").and_then(|h| h.find('>').map(|at| &h[at + 1..])).unwrap_or(h);
-        body.strip_suffix("</pre>").unwrap_or(body).trim_end_matches('\n').to_owned()
+        body.strip_suffix("</pre>").unwrap_or(body).to_owned()
     };
     let mut html = String::from("<pre style=\"margin:0;\">");
     html.push_str(&inner(&first.html));
     for r in full[i + 1..].iter().take_while(|r| r.kind == harlo_core::RowKind::Code && matches!(r.label.as_str(), "part-middle" | "part-last") && r.summary == first.key) {
         html.push('\n');
         html.push_str(&inner(&r.html));
+    }
+    // (Too big: cut after a whole line, whose tags it closes itself, and
+    // said.)
+    if html.len() > CODE_BYTES {
+        let mut end = CODE_BYTES;
+        while !html.is_char_boundary(end) {
+            end -= 1;
+        }
+        let end = html[..end].rfind('\n').unwrap_or(end);
+        let left = html[end..].matches('\n').count();
+        html.truncate(end);
+        html.push_str(&format!("\n… ({left} more lines, in harlo on your computer)"));
     }
     html.push_str("</pre>");
     Some(html)
@@ -245,7 +262,7 @@ fn first_piece(full: &[Arc<harlo_core::Row>], i: usize) -> Option<usize> {
 fn phone_row(full: &[Arc<harlo_core::Row>], i: usize, folder: &std::path::Path) -> Value {
     let mut v = row_json(&full[i], folder);
     if let Some(html) = whole_code(full, i) {
-        v["html"] = json!(clip(&html));
+        v["html"] = json!(html);
     }
     v
 }
@@ -346,7 +363,7 @@ fn row_frames(key: &str, window: &mut Window, u: &SessionUpdate) -> Vec<Value> {
                         changed.insert(row.key.clone());
                         let mut v = row_json(&row, &cwd);
                         if let Some(html) = full.get(skipped + at).filter(|r| r.key == row.key).and_then(|_| whole_code(full, skipped + at)) {
-                            v["html"] = json!(clip(&html));
+                            v["html"] = json!(html);
                         }
                         values.push(json!({ "op": "update", "at": at, "row": v }));
                     }
@@ -1479,6 +1496,73 @@ pub(crate) mod tests {
     /// A long code block, in pieces on the desktop, is one whole block on a
     /// phone: its first row shows every line (what it copies), the others
     /// nothing; at the piece boundaries and as it streams in.
+    #[test]
+    fn a_long_code_blocks_blank_lines_reach_phones() {
+        use harlo_harness::HarnessEvent;
+        // (What the html shows, as text.)
+        let shown = |html: &str| -> String {
+            let mut text = String::new();
+            let mut tag = false;
+            for c in html.chars() {
+                match c {
+                    '<' => tag = true,
+                    '>' => tag = false,
+                    _ if !tag => text.push(c),
+                    _ => {}
+                }
+            }
+            text.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'").replace("&amp;", "&")
+        };
+        // Blank lines at every place pieces meet, two in a row at one, and
+        // at the end; lines with characters that are escaped.
+        let code: String = (1..=452)
+            .map(|i| match i {
+                150 | 300 | 301 | 450 | 451 | 452 => String::new(),
+                151 => "    x = \"<a & b>\"".into(),
+                _ => format!("v{i} = '{i}' # <{i}>"),
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        for lang in ["text", "python"] {
+            let mut t = harlo_core::transcript::Transcript::new();
+            let text = format!("```{lang}\n{code}\n```\n\nDone.");
+            t.apply(&HarnessEvent::MessageStart { id: "m".into(), message: json!({"role":"assistant","content":[]}) });
+            t.apply(&HarnessEvent::MessageEnd { id: "m".into(), message: json!({"role":"assistant","content":[{"type":"text","text":text}]}) });
+            let mut rows = Vec::new();
+            phone_applies(&mut rows, &row_frames("live:1", &mut Window::default(), &SessionUpdate::Reset(t.rows())));
+            let first = rows.iter().find(|r| r["kind"] == "code").unwrap();
+            // (Where two texts part, for the message.)
+            let near = |got: &str| {
+                let at = got.chars().zip(code.chars()).take_while(|(a, b)| a == b).count();
+                let around = |t: &str| t.chars().skip(at.saturating_sub(30)).take(60).collect::<String>();
+                format!("at {at}: {:?} vs {:?}", around(got), around(&code))
+            };
+            let copied = first["text"].as_str().unwrap();
+            assert!(copied == code, "{lang}: copies the code; {}", near(copied));
+            let html = shown(first["html"].as_str().unwrap());
+            assert!(html == code, "{lang}: shows exactly what it copies; {}", near(&html));
+        }
+    }
+
+    #[test]
+    fn a_huge_code_block_is_cut_after_a_line() {
+        use harlo_harness::HarnessEvent;
+        let code: String = (1..=6000).map(|i| format!("v{i} = '<{i}>'")).collect::<Vec<_>>().join("\n");
+        let mut t = harlo_core::transcript::Transcript::new();
+        t.apply(&HarnessEvent::MessageStart { id: "m".into(), message: json!({"role":"assistant","content":[]}) });
+        t.apply(&HarnessEvent::MessageEnd { id: "m".into(), message: json!({"role":"assistant","content":[{"type":"text","text":format!("```python\n{code}\n```")}]}) });
+        let mut rows = Vec::new();
+        phone_applies(&mut rows, &row_frames("live:1", &mut Window::default(), &SessionUpdate::Reset(t.rows())));
+        let html = rows.iter().find(|r| r["kind"] == "code").unwrap()["html"].as_str().unwrap().to_owned();
+        assert!(html.len() <= CODE_BYTES + 100 && html.ends_with("</pre>"), "{}", html.len());
+        // Every tag it opens, it closes; the lines shown are the code's first.
+        assert_eq!(html.matches("<span").count(), html.matches("</span>").count());
+        let lines = code_lines(&html);
+        let (shown, note) = lines.split_at(lines.len() - 1);
+        assert!(shown.len() > 1000 && shown.iter().enumerate().all(|(i, l)| *l == format!("v{} = '&lt;{}&gt;'", i + 1, i + 1)), "{:?}", &shown[shown.len() - 2..]);
+        assert_eq!(note[0], format!("… ({} more lines, in harlo on your computer)", 6000 - shown.len()));
+    }
+
     #[test]
     fn a_long_code_block_reaches_phones_whole() {
         use harlo_harness::HarnessEvent;

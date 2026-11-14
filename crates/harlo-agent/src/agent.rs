@@ -190,25 +190,24 @@ pub async fn aside(parts: &AsideParts, history: &[Value], question: &str, on_tex
     };
     // (It comes out of the session's budget: not once that's used.)
     let size = compact::estimate_text(&parts.system) + asked.iter().map(compact::estimate).sum::<u64>();
-    let hold = admit(parts.budget.as_ref(), size + REPLY_ROOM).map_err(|why| anyhow::anyhow!(why))?;
+    // (A try that failed or was cut off: out of the budget as it ends, and
+    // waiting with the side questions' to be logged in its session.)
+    let (side, session, path) = (parts.side.clone(), parts.session.clone(), parts.log_path.clone());
+    let sink = Box::new(move |s: Spent| {
+        let used = Used::from_api(&s.usage).estimating(&s.usage, s.size, 0).priced(&s.pricing);
+        side.lock().unwrap().push(SideUse { used, logged: used.log(&s.usage, &s.pricing), session: session.clone(), path: path.clone() });
+    });
+    let mut tries = Tries::admit(parts.budget.as_ref(), size + REPLY_ROOM, size, parts.pricing, "btw", sink).map_err(|why| anyhow::anyhow!(why))?;
     let a = Asked { model: &parts.model, effort: parts.effort.as_deref(), instructions: &parts.system, history: &asked, session: &parts.key, specs: &parts.specs, tools: false, images: parts.images, trigger: false };
-    let mut spent = Vec::new();
-    let sent = send(a, &mut show, &mut spent).await;
+    let (reply, usage) = send(a, &mut show, &mut tries).await?;
     // (Out of the budget and into the session's totals before its hold
-    // goes: a try that failed or was cut off spent what it says too.)
-    let settle = |usage: &Value, reply: u64| {
-        let used = Used::from_api(usage).estimating(usage, size, reply).priced(&parts.pricing);
-        if let Some(b) = &parts.budget {
-            b.spent.fetch_add(used.billed(), std::sync::atomic::Ordering::Relaxed);
-        }
-        parts.side.lock().unwrap().push(SideUse { used, logged: used.log(usage, &parts.pricing), session: parts.session.clone(), path: parts.log_path.clone() });
-    };
-    for usage in &spent {
-        settle(usage, 0);
+    // goes.)
+    let used = Used::from_api(&usage).estimating(&usage, size, compact::estimate(&reply)).priced(&parts.pricing);
+    if let Some(b) = &parts.budget {
+        b.spent.fetch_add(used.billed(), std::sync::atomic::Ordering::Relaxed);
     }
-    let (reply, usage) = sent?;
-    settle(&usage, compact::estimate(&reply));
-    drop(hold);
+    parts.side.lock().unwrap().push(SideUse { used, logged: used.log(&usage, &parts.pricing), session: parts.session.clone(), path: parts.log_path.clone() });
+    drop(tries);
     let said: String = reply["content"].as_array().into_iter().flatten().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect();
     Ok(if said.trim().is_empty() { text } else { said })
 }
@@ -337,6 +336,64 @@ impl Drop for Hold {
     }
 }
 
+/// What a try that failed or was cut off spent: out of the budget as it
+/// ended, then into the session's totals and log when it next can.
+pub struct Spent {
+    usage: Value,
+    size: u64,
+    pricing: crate::used::Pricing,
+    source: &'static str,
+}
+
+/// The tries a session's requests spent, waiting to be counted: kept apart
+/// from the requests, so a Stop that drops one doesn't drop them.
+type Ledger = Arc<Mutex<Vec<Spent>>>;
+
+/// A request's tries, let go one at a time. Each that ends having spent
+/// something comes out of the budget at once and goes to `sink`; another
+/// goes only if the budget still has room for it.
+struct Tries {
+    budget: Option<Arc<Budget>>,
+    hold: Option<Hold>,
+    /// What each try holds against the budget while it's out.
+    room: u64,
+    /// The request's size, for a try that doesn't say what it used.
+    size: u64,
+    pricing: crate::used::Pricing,
+    source: &'static str,
+    sink: Box<dyn Fn(Spent) + Send + Sync>,
+}
+
+impl Tries {
+    fn admit(budget: Option<&Arc<Budget>>, room: u64, size: u64, pricing: crate::used::Pricing, source: &'static str, sink: Box<dyn Fn(Spent) + Send + Sync>) -> Result<Self, String> {
+        let hold = admit(budget, room)?;
+        Ok(Self { budget: budget.cloned(), hold, room, size, pricing, source, sink })
+    }
+
+    /// Into a session's ledger.
+    fn into_ledger(budget: Option<&Arc<Budget>>, room: u64, size: u64, pricing: crate::used::Pricing, source: &'static str, ledger: &Ledger) -> Result<Self, String> {
+        let ledger = ledger.clone();
+        Self::admit(budget, room, size, pricing, source, Box::new(move |s| ledger.lock().unwrap().push(s)))
+    }
+
+    /// A try ended, having spent `usage` (Null: it didn't say).
+    fn ended(&self, usage: Value) {
+        if let Some(b) = &self.budget {
+            let used = Used::from_api(&usage).estimating(&usage, self.size, 0);
+            b.spent.fetch_add(used.billed(), std::sync::atomic::Ordering::Relaxed);
+        }
+        (self.sink)(Spent { usage, size: self.size, pricing: self.pricing, source: self.source });
+    }
+
+    /// Another try, if the budget has room for it (its own hold let go
+    /// first, so it isn't refused for that).
+    fn again(&mut self) -> Result<(), String> {
+        self.hold = None;
+        self.hold = admit(self.budget.as_ref(), self.room)?;
+        Ok(())
+    }
+}
+
 /// `412k`, `1.2m`.
 pub fn tokens(n: u64) -> String {
     match n {
@@ -461,6 +518,9 @@ pub struct Agent {
     pub spend: Arc<Mutex<Used>>,
     /// Side questions' requests, not yet in the totals and the log.
     side: Arc<Mutex<Vec<SideUse>>>,
+    /// Tries that failed or were cut off, not yet in the totals and the log
+    /// (their budget's had them).
+    unsettled: Ledger,
     /// The last request's usage (the context's size).
     pub last_usage: Value,
     /// How many of the history's messages that usage covers (its reply
@@ -533,6 +593,7 @@ impl Agent {
             totals: Used::default(),
             spend: Arc::new(Mutex::new(spent)),
             side: Arc::default(),
+            unsettled: Arc::default(),
             last_usage: Value::Null,
             measured: 0,
             anchor: 0,
@@ -851,11 +912,13 @@ impl Agent {
                 allowed: self.allowed,
                 task: task.as_ref(),
                 mcp: self.mcp.as_ref(),
-                search: Some((&self.model, &key, pricing, self.budget.as_ref())),
+                search: Some((&self.model, &key, pricing, self.budget.as_ref(), &self.unsettled)),
             };
             // (The rules sent with the last batch's results are read now.)
             self.tools.batch_starts();
             let outcomes = run_calls(&self.tools, &triples, &extra, stop).await;
+            // (Searches' tries that failed, finished or stopped.)
+            self.settle();
             handed_over |= hands_over(&names, &outcomes);
             let changed = names.iter().zip(&outcomes).any(|(n, o)| matches!(*n, "edit" | "write" | "apply_patch") && !o.failed);
             let (mut nudge, mut stuck) = (None, None);
@@ -924,6 +987,8 @@ impl Agent {
 
     /// The note a stopped turn leaves, for the model's next turn (not shown).
     fn stopped(&mut self, show: &mut (dyn FnMut(Shown) + Send)) -> Result<()> {
+        // (What tries ended before it spent: counted, not dropped with them.)
+        self.settle();
         self.push(json!({ "role": "custom", "customType": "turn_stopped", "content": STOPPED_NOTE, "display": false }), show)
     }
 
@@ -984,18 +1049,15 @@ impl Agent {
             show(Shown::Notice { level: "warning", text: &format!("Harlo's commands can't run: its sandbox can't start here ({why}). Install bubblewrap, or turn the sandbox off in Settings → Providers → Harlo.") });
             self.told_sandbox = true;
         }
-        // (Held until it's counted.)
-        let _hold = admit(self.budget.as_ref(), self.fresh_tokens() + REPLY_ROOM).map_err(|why| anyhow::anyhow!(why))?;
+        // (Held until it's counted; each try admitted on its own.)
+        let pricing = self.pricing().await;
+        let mut tries = Tries::into_ledger(self.budget.as_ref(), self.fresh_tokens() + REPLY_ROOM, self.estimate_whole(), pricing, "cut off", &self.unsettled).map_err(|why| anyhow::anyhow!(why))?;
         let (system, specs) = (self.system(), self.specs());
         let key = self.cache_key.clone().unwrap_or_else(|| self.log.id.clone());
         let asked = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &self.history, session: &key, specs: &specs, tools: true, images, trigger: false };
-        let mut spent = Vec::new();
-        let sent = send(asked, show, &mut spent).await;
+        let sent = send(asked, show, &mut tries).await;
         // (Tries cut off or failed spent what they say, retried or not.)
-        if !spent.is_empty() {
-            let pricing = self.pricing().await;
-            self.count_spent(&spent, self.estimate_whole(), &pricing, "cut off");
-        }
+        self.settle();
         let (mut message, usage) = match sent {
             Err(e) if let Some(back) = self.falls_back(&e) => {
                 // Goes on with the fallback: said, and in the log.
@@ -1295,14 +1357,16 @@ impl Agent {
         };
     }
 
-    /// Tries the server answered but didn't finish ([`spent_by`]), each
-    /// counted and logged as a request of its own (estimated at `size`
-    /// where it didn't say).
-    fn count_spent(&mut self, spent: &[Value], size: u64, pricing: &crate::used::Pricing, source: &str) {
-        for usage in spent {
-            let used = Used::from_api(usage).estimating(usage, size, 0).priced(pricing);
-            self.count(&used, true);
-            let _ = self.log.append(json!({ "type": "harlo_usage", "source": source, "usage": used.log(usage, pricing) }));
+    /// Tries the server answered but didn't finish ([`spent_by`]), its
+    /// own requests' and its searches', each counted and logged as a
+    /// request of its own (estimated where it didn't say): after a
+    /// request, after a batch of calls, and when stopped.
+    fn settle(&mut self) {
+        let spent = std::mem::take(&mut *self.unsettled.lock().unwrap());
+        for s in spent {
+            let used = Used::from_api(&s.usage).estimating(&s.usage, s.size, 0).priced(&s.pricing);
+            self.count(&used, false);
+            let _ = self.log.append(json!({ "type": "harlo_usage", "source": s.source, "usage": used.log(&s.usage, &s.pricing) }));
         }
     }
 
@@ -1489,7 +1553,8 @@ impl Agent {
             return Compacted::Nothing;
         }
         // (Not once the budget's used: the note stands then.)
-        let Ok(_hold) = admit(self.budget.as_ref(), size + compact::estimate_text(&self.system()) + REPLY_ROOM) else { return Compacted::Nothing };
+        let pricing = self.pricing().await;
+        let Ok(mut tries) = Tries::into_ledger(self.budget.as_ref(), size + compact::estimate_text(&self.system()) + REPLY_ROOM, size, pricing, "compaction", &self.unsettled) else { return Compacted::Nothing };
         show(Shown::CompactionStart { reason: "model change" });
         let mut asked: Vec<Value> = Vec::new();
         if from > 0 {
@@ -1497,19 +1562,17 @@ impl Agent {
         }
         asked.extend(before[from..].iter().cloned());
         asked.push(json!({ "role": "user", "content": [{ "type": "text", "text": compact::request(None, compact::turn_cut(&self.history, 1).as_deref()) }], "timestamp": now_ms() }));
-        let pricing = self.pricing().await;
         let (system, specs) = (self.system(), self.specs());
         let key = self.cache_key.clone().unwrap_or_else(|| self.log.id.clone());
         let images = self.takes_images().await;
         let request = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &asked, session: &key, specs: &specs, tools: false, images, trigger: false };
         let mut quiet = |_: Shown| {};
-        let mut spent = Vec::new();
         let sent = tokio::select! {
             biased;
             _ = stop.cancelled() => None,
-            r = send(request, &mut quiet, &mut spent) => Some(r),
+            r = send(request, &mut quiet, &mut tries) => Some(r),
         };
-        self.count_spent(&spent, size, &pricing, "compaction");
+        self.settle();
         let failed = |show: &mut (dyn FnMut(Shown) + Send), why: String| {
             let said = format!("{why}; it goes on with {made_by}'s note of the user's requests");
             show(Shown::CompactionEnd { reason: "model change", result: None, error: Some(&said), will_retry: false });
@@ -1564,13 +1627,13 @@ impl Agent {
         let Some(cut) = cut else { return Compacted::Nothing };
         let Some(first_kept) = self.ids.get(cut).cloned() else { return Compacted::Nothing };
         let size = compact::estimate_text(&self.system()) + self.history[..cut].iter().map(compact::estimate).sum::<u64>();
-        let hold = match admit(self.budget.as_ref(), size + REPLY_ROOM) {
-            Ok(h) => h,
+        let pricing = self.pricing().await;
+        let mut tries = match Tries::into_ledger(self.budget.as_ref(), size + REPLY_ROOM, size, pricing, "compaction", &self.unsettled) {
+            Ok(t) => t,
             Err(why) => return Compacted::Failed(why),
         };
         show(Shown::CompactionStart { reason });
         let tokens_before = self.next_tokens();
-        let pricing = self.pricing().await;
         let (system, specs) = (self.system(), self.specs());
         let key = self.cache_key.clone().unwrap_or_else(|| self.log.id.clone());
         let images = self.takes_images().await;
@@ -1581,13 +1644,12 @@ impl Agent {
         if let Some((pid, bare)) = providers::resolve(&self.model).ok().filter(|(p, _)| p.api == Api::Responses && compact::native(&p.id)).map(|(p, m)| (p.id, m)) {
             let request = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &self.history[..cut], session: &key, specs: &specs, tools: true, images, trigger: true };
             let mut quiet = |_: Shown| {};
-            let mut spent = Vec::new();
             let sent = tokio::select! {
                 biased;
                 _ = stop.cancelled() => None,
-                r = send(request, &mut quiet, &mut spent) => Some(r),
+                r = send(request, &mut quiet, &mut tries) => Some(r),
             };
-            self.count_spent(&spent, size, &pricing, "compaction");
+            self.settle();
             match sent {
                 None => {
                     show(Shown::CompactionEnd { reason, result: None, error: None, will_retry: false });
@@ -1629,9 +1691,9 @@ impl Agent {
             None => {
                 // (A request of its own, admitted on its own: the server's
                 // compaction before it may have used the rest.)
-                drop(hold);
-                let _hold = match admit(self.budget.as_ref(), size + REPLY_ROOM) {
-                    Ok(h) => h,
+                drop(tries);
+                let mut tries = match Tries::into_ledger(self.budget.as_ref(), size + REPLY_ROOM, size, pricing, "compaction", &self.unsettled) {
+                    Ok(t) => t,
                     Err(why) => return failed(show, why),
                 };
                 let mut asked: Vec<Value> = self.history[..cut].to_vec();
@@ -1640,13 +1702,12 @@ impl Agent {
                 let request = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &asked, session: &key, specs: &specs, tools: false, images, trigger: false };
                 // (The summary isn't shown as it's written.)
                 let mut quiet = |_: Shown| {};
-                let mut spent = Vec::new();
                 let sent = tokio::select! {
                     biased;
                     _ = stop.cancelled() => None,
-                    r = send(request, &mut quiet, &mut spent) => Some(r),
+                    r = send(request, &mut quiet, &mut tries) => Some(r),
                 };
-                self.count_spent(&spent, size, &pricing, "compaction");
+                self.settle();
                 let (mut reply, usage) = match sent {
                     None => {
                         show(Shown::CompactionEnd { reason, result: None, error: None, will_retry: false });
@@ -1723,21 +1784,27 @@ struct Asked<'a> {
 
 /// Sends a request: the reply, as pi's assistant message, and its usage.
 /// One that failed for a passing reason (see `retry`) is sent again, the
-/// reply it had started dropped, with a notice. What tries the server
-/// answered but didn't finish spent goes in `spent` ([`spent_by`]), as
-/// it happens: it's there if the request is stopped too.
-async fn send(a: Asked<'_>, show: &mut (dyn FnMut(Shown) + Send), spent: &mut Vec<Value>) -> Result<(Value, Value)> {
+/// reply it had started dropped, with a notice. What a try the server
+/// answered but didn't finish spent ([`spent_by`]) goes to `tries` as it
+/// ends (so a Stop doesn't lose it), and it's sent again only if the
+/// budget still has room.
+async fn send(a: Asked<'_>, show: &mut (dyn FnMut(Shown) + Send), tries: &mut Tries) -> Result<(Value, Value)> {
     let mut tried = 0;
     loop {
         let e = match send_once(a, show).await {
             Ok(r) => return Ok(r),
             Err(e) => e,
         };
-        spent.extend(spent_by(&e));
+        if let Some(usage) = spent_by(&e) {
+            tries.ended(usage);
+        }
         let Some((why, asked)) = crate::retry::transient(&e).filter(|_| tried < crate::retry::TRIES) else { return Err(e) };
         if let Some(secs) = asked.filter(|s| *s > crate::retry::MAX_WAIT) {
             let said = crate::retry::not_waiting(secs, crate::clock::now().unix);
             return Err(e.context(said));
+        }
+        if let Err(full) = tries.again() {
+            return Err(e.context(format!("Not tried again: {full}")));
         }
         tried += 1;
         let wait = crate::retry::delay(tried, asked);
@@ -1904,7 +1971,7 @@ struct Extra<'a> {
     task: Option<&'a crate::task::Ctx>,
     mcp: Option<&'a crate::mcp::Mcp>,
     /// The session's model, cache key, pricing and budget, for web searches.
-    search: Option<(&'a str, &'a str, crate::used::Pricing, Option<&'a Arc<Budget>>)>,
+    search: Option<(&'a str, &'a str, crate::used::Pricing, Option<&'a Arc<Budget>>, &'a Ledger)>,
 }
 
 impl Extra<'_> {
@@ -1916,7 +1983,7 @@ impl Extra<'_> {
 }
 
 /// A web search: a request of its own, with the server's search in it.
-async fn web_search(args: &Value, model: &str, key: &str, pricing: &crate::used::Pricing, budget: Option<&Arc<Budget>>) -> tools::Outcome {
+async fn web_search(args: &Value, model: &str, key: &str, pricing: crate::used::Pricing, budget: Option<&Arc<Budget>>, ledger: &Ledger) -> tools::Outcome {
     let Some(query) = args["query"].as_str().map(str::trim).filter(|q| !q.is_empty()) else {
         return tools::Outcome::new("Say what to search for in query.", true);
     };
@@ -1925,42 +1992,36 @@ async fn web_search(args: &Value, model: &str, key: &str, pricing: &crate::used:
     let key = format!("{key}-search");
     let asked = Asked { model, effort: Some("low"), instructions: crate::search::INSTRUCTIONS, history: &history, session: &key, specs: &specs, tools: true, images: false, trigger: false };
     let size = compact::estimate_text(crate::search::INSTRUCTIONS) + history.iter().map(compact::estimate).sum::<u64>();
-    let _hold = match admit(budget, size + REPLY_ROOM) {
-        Ok(h) => h,
+    // (Tries that failed or were cut off: out of the budget as each ends,
+    // into the session's ledger, which a Stop doesn't drop.)
+    let mut tries = match Tries::into_ledger(budget, size + REPLY_ROOM, size, pricing, "search", ledger) {
+        Ok(t) => t,
         Err(why) => return tools::Outcome::new(why, true),
     };
     let mut quiet = |_: Shown| {};
-    let mut spent = Vec::new();
-    let sent = send(asked, &mut quiet, &mut spent).await;
-    // (Its tries, each a request: out of the budget now, before its hold
-    // goes, so the next request, a search later in the same batch too,
-    // sees them.)
-    let mut used = Used::default();
-    for usage in &spent {
-        used.add(&Used::from_api(usage).estimating(usage, size, 0).priced(pricing));
-    }
-    let mut o = match sent {
+    let sent = send(asked, &mut quiet, &mut tries).await;
+    // (Its reply: out of the budget now, before its hold goes, so the next
+    // request, a search later in the same batch too, sees it.)
+    match sent {
         Ok((reply, usage)) => {
-            used.add(&Used::from_api(&usage).estimating(&usage, size, compact::estimate(&reply)).priced(pricing));
-            tools::Outcome::new(crate::search::findings(&reply), false)
+            let used = Used::from_api(&usage).estimating(&usage, size, compact::estimate(&reply)).priced(&pricing);
+            if let Some(b) = budget {
+                b.spent.fetch_add(used.billed(), std::sync::atomic::Ordering::Relaxed);
+            }
+            let mut o = tools::Outcome::new(crate::search::findings(&reply), false);
+            o.details = json!({ "usage": used.details() });
+            o
         }
         Err(e) => tools::Outcome::new(format!("The search failed: {e:#}"), true),
-    };
-    if used.requests > 0 {
-        if let Some(b) = budget {
-            b.spent.fetch_add(used.billed(), std::sync::atomic::Ordering::Relaxed);
-        }
-        o.details = json!({ "usage": used.details() });
     }
-    o
 }
 
 /// A call of ours or of an MCP server's.
-async fn call_tool(tools: &Tools, mcp: Option<&crate::mcp::Mcp>, search: Option<(&str, &str, crate::used::Pricing, Option<&Arc<Budget>>)>, name: &str, args: &Value) -> tools::Outcome {
+async fn call_tool(tools: &Tools, mcp: Option<&crate::mcp::Mcp>, search: Option<(&str, &str, crate::used::Pricing, Option<&Arc<Budget>>, &Ledger)>, name: &str, args: &Value) -> tools::Outcome {
     if name == crate::search::NAME
-        && let Some((model, key, pricing, budget)) = search
+        && let Some((model, key, pricing, budget, ledger)) = search
     {
-        return web_search(args, model, key, &pricing, budget).await;
+        return web_search(args, model, key, pricing, budget, ledger).await;
     }
     if name == "run_code" {
         let mut specs: Vec<Value> = tools::specs().as_array().cloned().unwrap_or_default();
@@ -2562,9 +2623,37 @@ mod tests {
         let mut quiet = |_: &str| {};
         let err = aside(&parts, &[], "Can you still answer?", &mut quiet).await.unwrap_err();
         assert!(format!("{err:#}").contains("token budget"), "{err:#}");
-        let o = web_search(&json!({ "query": "rust" }), "nowhere/model", "k", &crate::used::Pricing::Unknown, Some(&b)).await;
+        let o = web_search(&json!({ "query": "rust" }), "nowhere/model", "k", crate::used::Pricing::Unknown, Some(&b), &Ledger::default()).await;
         assert!(o.failed && o.text.contains("token budget"), "{}", o.text);
         assert_eq!(b.held.load(std::sync::atomic::Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn each_try_is_counted_as_it_ends_and_the_next_admitted() {
+        use std::sync::atomic::Ordering::Relaxed;
+        let b = Arc::new(Budget { limit: 2_000, ..Budget::default() });
+        let ledger = Ledger::default();
+        let mut tries = Tries::into_ledger(Some(&b), 500, 300, crate::used::Pricing::Unknown, "cut off", &ledger).unwrap();
+        assert_eq!(b.held.load(Relaxed), 500);
+        // A try that said what it used: out of the budget and in the ledger
+        // at once, before the request ends.
+        tries.ended(json!({ "input_tokens": 700, "output_tokens": 5 }));
+        assert_eq!(b.spent.load(Relaxed), 705);
+        assert_eq!(ledger.lock().unwrap().len(), 1);
+        // One that didn't: its size, estimated.
+        tries.ended(Value::Null);
+        assert_eq!(b.spent.load(Relaxed), 1_005);
+        // Room left: the next goes (its own hold isn't counted against it).
+        tries.again().unwrap();
+        assert_eq!(b.held.load(Relaxed), 500);
+        // Used up by a try: the next isn't sent, and nothing's left held.
+        tries.ended(json!({ "input_tokens": 1_000, "output_tokens": 0 }));
+        let refused = tries.again().unwrap_err();
+        assert!(refused.contains("token budget"), "{refused}");
+        assert_eq!(b.held.load(Relaxed), 0);
+        // Dropped (a Stop), the ledger keeps what they spent.
+        drop(tries);
+        assert_eq!(ledger.lock().unwrap().len(), 3);
     }
 
     #[test]
