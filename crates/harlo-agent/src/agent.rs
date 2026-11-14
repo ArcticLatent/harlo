@@ -374,10 +374,7 @@ struct Tries {
 /// far, counted once.
 impl Drop for Tries {
     fn drop(&mut self) {
-        let seen = std::mem::take(&mut self.seen);
-        if seen.is_object() {
-            self.ended(seen);
-        }
+        self.stopped();
     }
 }
 
@@ -400,6 +397,15 @@ impl Tries {
             b.spent.fetch_add(used.billed(), std::sync::atomic::Ordering::Relaxed);
         }
         (self.sink)(Spent { usage, size: self.size, pricing: self.pricing, source: self.source });
+    }
+
+    /// The try under way was stopped: what it had said it used, counted
+    /// (once: it's then cleared). Its request counts the ledger after this.
+    fn stopped(&mut self) {
+        let seen = std::mem::take(&mut self.seen);
+        if seen.is_object() {
+            self.ended(seen);
+        }
     }
 
     /// Another try, if the budget has room for it (its own hold let go
@@ -1589,6 +1595,7 @@ impl Agent {
             _ = stop.cancelled() => None,
             r = send(request, &mut quiet, &mut tries) => Some(r),
         };
+        tries.stopped();
         self.settle();
         let failed = |show: &mut (dyn FnMut(Shown) + Send), why: String| {
             let said = format!("{why}; it goes on with {made_by}'s note of the user's requests");
@@ -1666,6 +1673,7 @@ impl Agent {
                 _ = stop.cancelled() => None,
                 r = send(request, &mut quiet, &mut tries) => Some(r),
             };
+            tries.stopped();
             self.settle();
             match sent {
                 None => {
@@ -1724,6 +1732,7 @@ impl Agent {
                     _ = stop.cancelled() => None,
                     r = send(request, &mut quiet, &mut tries) => Some(r),
                 };
+                tries.stopped();
                 self.settle();
                 let (mut reply, usage) = match sent {
                     None => {
@@ -1810,13 +1819,17 @@ async fn send(a: Asked<'_>, show: &mut (dyn FnMut(Shown) + Send), tries: &mut Tr
     loop {
         let sent = send_once(a, show, &mut tries.seen).await;
         // (Ended: counted from here, by its caller or as it failed.)
-        tries.seen = Value::Null;
+        let seen = std::mem::take(&mut tries.seen);
         let e = match sent {
             Ok(r) => return Ok(r),
             Err(e) => e,
         };
-        if let Some(usage) = spent_by(&e) {
-            tries.ended(usage);
+        // (What the error says it used; one that says nothing, as an event
+        // too big to read, spent what the try had said so far.)
+        match spent_by(&e) {
+            Some(usage) => tries.ended(usage),
+            None if seen.is_object() => tries.ended(seen),
+            None => {}
         }
         let Some((why, asked)) = crate::retry::transient(&e).filter(|_| tried < crate::retry::TRIES) else { return Err(e) };
         if let Some(secs) = asked.filter(|s| *s > crate::retry::MAX_WAIT) {
