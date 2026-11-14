@@ -175,6 +175,9 @@ const ROW_BYTES: usize = 64 * 1024;
 /// A long code block's whole HTML on a phone, at most (its highlighting
 /// takes several times its text).
 const CODE_BYTES: usize = 256 * 1024;
+/// A code line too long for that: how much of it a phone gets, as plain
+/// text (escaped, it still fits).
+const LINE_BYTES: usize = 32 * 1024;
 
 fn clip(s: &str) -> String {
     if s.len() <= ROW_BYTES {
@@ -245,12 +248,31 @@ fn phone_code(full: &[Arc<harlo_core::Row>], i: usize) -> Option<(String, String
         while !html.is_char_boundary(end) {
             end -= 1;
         }
-        let end = html[..end].rfind('\n').unwrap_or(end);
-        let shown = html[..end].matches('\n').count() + 1;
-        let left = html[end..].matches('\n').count();
-        html.truncate(end);
-        html.push_str(&format!("\n… ({left} more lines, in harlo on your computer)"));
-        text = text.split('\n').take(shown).collect::<Vec<_>>().join("\n");
+        match html[..end].rfind('\n') {
+            Some(end) => {
+                let shown = html[..end].matches('\n').count() + 1;
+                let left = html[end..].matches('\n').count();
+                html.truncate(end);
+                html.push_str(&format!("\n… ({left} more lines, in harlo on your computer)"));
+                text = text.split('\n').take(shown).collect::<Vec<_>>().join("\n");
+            }
+            // Its first line alone is too long: that line's start, as
+            // plain text, shown and copied alike.
+            None => {
+                let line = text.split('\n').next().unwrap_or_default();
+                let mut cut = LINE_BYTES.min(line.len());
+                while !line.is_char_boundary(cut) {
+                    cut -= 1;
+                }
+                let more = match text.matches('\n').count() {
+                    0 => String::new(),
+                    1 => " and 1 more line".to_owned(),
+                    n => format!(" and {n} more lines"),
+                };
+                html = format!("<pre style=\"margin:0;\">{}\n… (the rest of this line{more}, in harlo on your computer)", harlo_core::transcript::escape_html(&line[..cut]));
+                text = line[..cut].to_owned();
+            }
+        }
     }
     html.push_str("</pre>");
     Some((html, text))
@@ -1570,6 +1592,30 @@ pub(crate) mod tests {
         let copied = rows.iter().find(|r| r["kind"] == "code").unwrap()["text"].as_str().unwrap().to_owned();
         let want: Vec<String> = (1..=shown.len()).map(|i| format!("v{i} = '<{i}>'")).collect();
         assert_eq!(copied, want.join("\n"));
+    }
+
+    #[test]
+    fn a_code_line_too_long_for_a_phone_is_cut_alike() {
+        use harlo_harness::HarnessEvent;
+        // A 5 MiB line (with characters that are escaped), then another.
+        let line = "<a&b> ".repeat(5 * 1024 * 1024 / 6);
+        for (code, more) in [(line.clone(), ""), (format!("{line}\nsecond"), " and 1 more line")] {
+            let mut t = harlo_core::transcript::Transcript::new();
+            t.apply(&HarnessEvent::MessageStart { id: "m".into(), message: json!({"role":"assistant","content":[]}) });
+            t.apply(&HarnessEvent::MessageEnd { id: "m".into(), message: json!({"role":"assistant","content":[{"type":"text","text":format!("```text\n{code}\n```")}]}) });
+            let frames = row_frames("live:1", &mut Window::default(), &SessionUpdate::Reset(t.rows()));
+            // Within what a phone and the relay take.
+            assert!(frames.iter().all(|f| f.to_string().len() < 2 * CODE_BYTES + 64 * 1024), "{:?}", frames.iter().map(|f| f.to_string().len()).collect::<Vec<_>>());
+            let mut rows = Vec::new();
+            phone_applies(&mut rows, &frames);
+            let first = rows.iter().find(|r| r["kind"] == "code").unwrap();
+            let (html, copied) = (first["html"].as_str().unwrap(), first["text"].as_str().unwrap());
+            assert!(copied.len() <= LINE_BYTES && line.starts_with(copied) && copied.len() > LINE_BYTES - 8, "{}", copied.len());
+            let lines = code_lines(html);
+            assert_eq!(lines.len(), 2, "{more}");
+            assert_eq!(lines[0].replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&"), copied, "shown as copied");
+            assert_eq!(lines[1], format!("… (the rest of this line{more}, in harlo on your computer)"));
+        }
     }
 
     #[test]

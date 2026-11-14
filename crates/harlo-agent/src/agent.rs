@@ -365,12 +365,26 @@ struct Tries {
     pricing: crate::used::Pricing,
     source: &'static str,
     sink: Box<dyn Fn(Spent) + Send + Sync>,
+    /// What the try under way has said it used so far (Null: nothing):
+    /// counted if it's dropped (a Stop) before it ends.
+    seen: Value,
+}
+
+/// A request stopped while a try was under way: what it said it used so
+/// far, counted once.
+impl Drop for Tries {
+    fn drop(&mut self) {
+        let seen = std::mem::take(&mut self.seen);
+        if seen.is_object() {
+            self.ended(seen);
+        }
+    }
 }
 
 impl Tries {
     fn admit(budget: Option<&Arc<Budget>>, room: u64, size: u64, pricing: crate::used::Pricing, source: &'static str, sink: Box<dyn Fn(Spent) + Send + Sync>) -> Result<Self, String> {
         let hold = admit(budget, room)?;
-        Ok(Self { budget: budget.cloned(), hold, room, size, pricing, source, sink })
+        Ok(Self { budget: budget.cloned(), hold, room, size, pricing, source, sink, seen: Value::Null })
     }
 
     /// Into a session's ledger.
@@ -1794,7 +1808,10 @@ struct Asked<'a> {
 async fn send(a: Asked<'_>, show: &mut (dyn FnMut(Shown) + Send), tries: &mut Tries) -> Result<(Value, Value)> {
     let mut tried = 0;
     loop {
-        let e = match send_once(a, show).await {
+        let sent = send_once(a, show, &mut tries.seen).await;
+        // (Ended: counted from here, by its caller or as it failed.)
+        tries.seen = Value::Null;
+        let e = match sent {
             Ok(r) => return Ok(r),
             Err(e) => e,
         };
@@ -1821,7 +1838,9 @@ async fn send(a: Asked<'_>, show: &mut (dyn FnMut(Shown) + Send), tries: &mut Tr
 
 /// One try. A token the plan refuses is refreshed once and the request
 /// sent again.
-async fn send_once(a: Asked<'_>, show: &mut (dyn FnMut(Shown) + Send)) -> Result<(Value, Value)> {
+/// `seen`: what it says it used as it goes (chat servers may say before
+/// the end), for a Stop.
+async fn send_once(a: Asked<'_>, show: &mut (dyn FnMut(Shown) + Send), seen: &mut Value) -> Result<(Value, Value)> {
     let (provider, model) = providers::resolve(a.model)?;
     let pid = provider.id.clone();
     let api = if provider.api == Api::Chat { "openai-completions" } else { "openai-responses" };
@@ -1833,7 +1852,7 @@ async fn send_once(a: Asked<'_>, show: &mut (dyn FnMut(Shown) + Send)) -> Result
             body["tool_choice"] = json!("none");
         }
         let token = provider.token(false).await?;
-        return chat::stream(&provider.base_url, token.as_deref(), &body, &pid, &model, |e| show(Shown::Stream(e))).await;
+        return chat::stream(&provider.base_url, token.as_deref(), &body, &pid, &model, |e| show(Shown::Stream(e)), seen).await;
     }
     let mut input = responses::input(a.history, &pid, &model, a.images);
     if a.trigger {
@@ -2657,6 +2676,18 @@ mod tests {
         // Dropped (a Stop), the ledger keeps what they spent.
         drop(tries);
         assert_eq!(ledger.lock().unwrap().len(), 3);
+        // Stopped while a try that had said what it used was under way:
+        // that counted, once.
+        let b = Arc::new(Budget { limit: 2_000, ..Budget::default() });
+        let ledger = Ledger::default();
+        let mut tries = Tries::into_ledger(Some(&b), 500, 300, crate::used::Pricing::Unknown, "cut off", &ledger).unwrap();
+        tries.seen = json!({ "input_tokens": 1_000, "output_tokens": 10 });
+        drop(tries);
+        assert_eq!((b.spent.load(Relaxed), b.held.load(Relaxed), ledger.lock().unwrap().len()), (1_010, 0, 1));
+        // One that ended (counted by its caller): nothing more.
+        let ledger = Ledger::default();
+        drop(Tries::into_ledger(Some(&b), 500, 300, crate::used::Pricing::Unknown, "cut off", &ledger).unwrap());
+        assert!(ledger.lock().unwrap().is_empty());
     }
 
     #[test]

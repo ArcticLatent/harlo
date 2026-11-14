@@ -240,21 +240,18 @@ impl Reply {
     }
 }
 
-/// The usage as the Responses API says it (what the rest reads); none
-/// when the server didn't say it (some local servers don't), so it isn't
-/// taken for a measured nothing.
+/// The usage as the Responses API says it (what the rest reads): each
+/// count the server said, on its own; what it didn't say is left out, so
+/// it isn't taken for a measured nothing (some local servers say none).
 fn usage(u: &Value) -> Value {
-    if !u["prompt_tokens"].is_u64() {
-        return json!({});
+    let mut out = json!({});
+    if let Some(n) = u["prompt_tokens"].as_u64() {
+        out["input_tokens"] = json!(n);
+        out["input_tokens_details"] = json!({ "cached_tokens": u["prompt_tokens_details"]["cached_tokens"].as_u64().or_else(|| u["cached_tokens"].as_u64()).unwrap_or(0) });
     }
-    let mut out = json!({
-        "input_tokens": u["prompt_tokens"].as_u64().unwrap_or(0),
-        "input_tokens_details": { "cached_tokens": u["prompt_tokens_details"]["cached_tokens"].as_u64().or_else(|| u["cached_tokens"].as_u64()).unwrap_or(0) },
-        "output_tokens_details": { "reasoning_tokens": u["completion_tokens_details"]["reasoning_tokens"].as_u64().unwrap_or(0) },
-    });
-    // (Not said: left out, not taken for none.)
     if let Some(n) = u["completion_tokens"].as_u64() {
         out["output_tokens"] = json!(n);
+        out["output_tokens_details"] = json!({ "reasoning_tokens": u["completion_tokens_details"]["reasoning_tokens"].as_u64().unwrap_or(0) });
     }
     out
 }
@@ -288,7 +285,7 @@ fn failed_usage(chunk: &Value, before: &Value) -> Value {
 /// Sends one request: `on` gets pi's stream events as they come; the
 /// reply is pi's assistant message, with its usage as the Responses API
 /// says it.
-pub async fn stream(base: &str, token: Option<&str>, body: &Value, provider: &str, model: &str, mut on: impl FnMut(&Value)) -> Result<(Value, Value)> {
+pub async fn stream(base: &str, token: Option<&str>, body: &Value, provider: &str, model: &str, mut on: impl FnMut(&Value), seen: &mut Value) -> Result<(Value, Value)> {
     let mut req = client().post(format!("{base}/chat/completions")).json(body);
     if let Some(t) = token {
         req = req.bearer_auth(t);
@@ -331,6 +328,13 @@ pub async fn stream(base: &str, token: Option<&str>, body: &Value, provider: &st
             return Err(Failed { code, message: format!("{provider}: {}", e["message"].as_str().or_else(|| e.as_str()).unwrap_or("the request failed")), usage: failed_usage(&chunk, &reply.usage) }.into());
         }
         reply.take(&chunk, &mut events);
+        // (What it's said it used so far, as it says it.)
+        if chunk["usage"].is_object() {
+            let u = usage(&reply.usage);
+            if u.as_object().is_some_and(|o| !o.is_empty()) {
+                *seen = u;
+            }
+        }
         for e in events.drain(..) {
             on(&e);
         }
@@ -448,7 +452,7 @@ mod tests {
         unsafe { std::env::set_var("HARLO_AGENT_IDLE_SECS", "1") };
         let base = stand_in(how).await;
         let started = std::time::Instant::now();
-        let r = stream(&base, None, &json!({}), "stand-in", "m", |_| {}).await;
+        let r = stream(&base, None, &json!({}), "stand-in", "m", |_| {}, &mut Value::Null).await;
         (r, started.elapsed())
     }
 
@@ -601,6 +605,20 @@ mod tests {
         // Totals so far, not more to add: a later, bigger one replaces it.
         let (_, _, r) = feed(&[json!({ "choices": [], "usage": { "prompt_tokens": 1000, "completion_tokens": 10 } }), json!({ "choices": [], "usage": { "prompt_tokens": 1000, "completion_tokens": 25 } })]);
         assert_eq!((usage(&r.usage)["input_tokens"].as_u64(), usage(&r.usage)["output_tokens"].as_u64()), (Some(1000), Some(25)));
+    }
+
+    #[test]
+    fn each_count_said_is_kept_on_its_own() {
+        // Only the output said: kept; the input unknown (estimated), not 0.
+        let u = usage(&json!({ "completion_tokens": 25 }));
+        assert_eq!((u["output_tokens"].as_u64(), u.get("input_tokens")), (Some(25), None), "{u}");
+        let used = crate::used::Used::from_api(&u).estimating(&u, 900, 0);
+        assert_eq!((used.requests, used.unreported, used.output, used.input, used.estimated), (1, 1, 25, 0, 900));
+        // Only the input: the output left out, not 0.
+        let u = usage(&json!({ "prompt_tokens": 1000, "prompt_tokens_details": { "cached_tokens": 200 } }));
+        assert_eq!((u["input_tokens"].as_u64(), u["input_tokens_details"]["cached_tokens"].as_u64(), u.get("output_tokens")), (Some(1000), Some(200), None), "{u}");
+        // Neither: nothing said.
+        assert_eq!(usage(&json!({})), json!({}));
     }
 
     #[test]
