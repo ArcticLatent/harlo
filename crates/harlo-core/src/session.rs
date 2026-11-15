@@ -165,6 +165,9 @@ pub enum SessionUpdate {
 pub struct Typed {
     pub words: String,
     pub files: Vec<String>,
+    /// You sent it (from a composer, or as a session's first message), not
+    /// an agent or a schedule: only then is `/plugin …` harlo's to run.
+    pub by_you: bool,
 }
 
 /// A message stopped before it was sent (`SessionUpdate::Unsent`): as it
@@ -970,6 +973,8 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
     // and the snapshot's number.
     let mut held: Vec<Unsent> = Vec::new();
     let mut snap_turn: u64 = 0;
+    // `/plugin …` runs so far (their notices' ids).
+    let mut plugin_runs: u64 = 0;
     // A conversation was just loaded: once its rows are built and sent,
     // what building them used goes back to the system.
     let mut loaded = false;
@@ -1176,6 +1181,21 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                     st.commands = parse_commands(&list);
                     pending.push(SessionUpdate::Commands(st.commands.clone()));
                 }
+                Aux::Plugin(id, args, ran) => {
+                    st.transcript.apply(&HarnessEvent::MessageEnd { id, message: plugin_message(&crate::plugins::notice(&args, Some(&ran)), !ran.ok) });
+                    dirty = true;
+                    // What's installed changed: the agent starts again to
+                    // load it (its skills, its "/" list), now when it's
+                    // idle, else once its run ends.
+                    if ran.ok && crate::plugins::changes(&args) && driver.harness.is_some() {
+                        if st.status == SessionStatus::Idle {
+                            driver.stop_idle(&mut st, &mut pending);
+                            driver.ensure_harness(&mut st, &mut pending);
+                        } else {
+                            driver.restart_settled = true;
+                        }
+                    }
+                }
                 // The snapshot's done: the turn's prompt goes now (unless
                 // it was stopped meanwhile).
                 Aux::Snapshotted(n) if n == snap_turn && !held.is_empty() => {
@@ -1210,6 +1230,25 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                     st.sinks.push((id, sink));
                 }
                 Some(Control::Unsubscribe(id)) => st.sinks.retain(|(s, _)| *s != id),
+                // `/plugin …`: Claude Code's plugin command, run by harlo
+                // (not sent to the agent), its result a notice.
+                Some(Control::Prompt(text, _, _, typed)) if plugin_args(&text, typed.as_ref()).is_some() => {
+                    let args = plugin_args(&text, typed.as_ref()).unwrap_or_default();
+                    plugin_runs += 1;
+                    let id = format!("harlo-plugin-{plugin_runs}");
+                    st.transcript.apply(&HarnessEvent::MessageEnd { id: id.clone(), message: plugin_message(&crate::plugins::notice(&args, None), false) });
+                    dirty = true;
+                    let (tx, cwd, program) = (driver.aux_tx.clone(), driver.cfg.cwd.clone(), claude_program(&driver.cfg));
+                    let host = driver.cfg.remote.as_ref().map(|r| crate::remote::hosts().into_iter().find(|h| h.name == r.host).ok_or(r.host.clone()));
+                    tokio::task::spawn_blocking(move || {
+                        let ran = match &host {
+                            Some(Err(name)) => crate::plugins::Ran { ok: false, detail: String::new(), output: format!("{name} isn't among the remote instances any more.") },
+                            Some(Ok(h)) => crate::plugins::run(&args, &cwd, Some(h), None),
+                            None => crate::plugins::run(&args, &cwd, None, program.as_deref()),
+                        };
+                        let _ = tx.send(Aux::Plugin(id, args, ran));
+                    });
+                }
                 // (One sent while a turn waits for its snapshot: after it.)
                 Some(Control::Prompt(text, images, mode, typed)) if !held.is_empty() => held.push(Unsent { text, images, mode, typed }),
                 Some(Control::Prompt(text, images, mode, typed)) => {
@@ -1585,6 +1624,8 @@ enum Aux {
     Commands(Value),
     /// The snapshot taken before turn `n` (see `Control::Prompt`) is done.
     Snapshotted(u64),
+    /// A `/plugin …` run (its notice's id, its words) ended.
+    Plugin(String, Vec<String>, crate::plugins::Ran),
 }
 
 async fn fetch_initial(harness: Arc<Harness>, tx: mpsc::UnboundedSender<Aux>, resume: bool) {
@@ -1663,9 +1704,32 @@ fn parse_commands(list: &Value) -> Vec<SlashCommand> {
                 .collect()
         })
         .unwrap_or_default();
+    // (harlo's own: `/plugin`, for either agent.)
+    if !out.iter().any(|c| c.name == "plugin") {
+        out.push(crate::plugins::command());
+    }
     out.sort_by(|a, b| a.name.cmp(&b.name));
     out.dedup_by(|a, b| a.name == b.name);
     out
+}
+
+/// `/plugin …`'s words, when it's harlo's to run: sent by you (an agent's
+/// or a schedule's goes to the agent as written).
+fn plugin_args(text: &str, typed: Option<&Typed>) -> Option<Vec<String>> {
+    typed.filter(|t| t.by_you)?;
+    crate::plugins::parse(text)
+}
+
+/// A `/plugin` run's notice, as a message (`failed`: drawn as an error).
+fn plugin_message(text: &str, failed: bool) -> Value {
+    json!({ "role": "custom", "customType": "harlo_plugin", "display": true, "content": text, "failed": failed })
+}
+
+/// The Claude Code to run `claude plugin` with here: Settings' (else found
+/// on PATH), or this Claude session's own.
+fn claude_program(cfg: &HarnessConfig) -> Option<PathBuf> {
+    let set = crate::db::Db::open(&crate::db::default_path()).ok().and_then(|d| d.get("settings.claude_path").ok().flatten()).filter(|p| !p.is_empty()).map(PathBuf::from);
+    set.or_else(|| (cfg.kind == HarnessKind::Claude).then(|| cfg.program.clone()).flatten())
 }
 
 fn apply_state(meta: &mut SessionMetaInfo, state: &Value) {
@@ -1819,6 +1883,17 @@ mod tests {
     }
 
     use super::*;
+
+    /// `/plugin …` is harlo's to run only when you sent it.
+    #[test]
+    fn plugin_commands_only_from_you() {
+        let you = Typed { words: "/plugin list".into(), files: Vec::new(), by_you: true };
+        let agent = Typed { by_you: false, ..you.clone() };
+        assert_eq!(plugin_args("/plugin install x@y", Some(&you)), Some(vec!["install".to_owned(), "x@y".to_owned()]));
+        assert_eq!(plugin_args("/plugin install x@y", Some(&agent)), None);
+        assert_eq!(plugin_args("/plugin install x@y", None), None);
+        assert_eq!(plugin_args("install x@y", Some(&you)), None);
+    }
 
     #[test]
     fn a_replys_text_is_plain_and_trimmed() {

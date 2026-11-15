@@ -3743,7 +3743,7 @@ impl Workspace {
             message = harlo_core::starters::wrap(s, &message);
         }
         let server = Some((harness_name.clone(), model.clone()));
-        let mut first = FirstPrompt { text: message, attachments: attachments.iter().map(|p| PathBuf::from(url_to_path(p))).collect(), server };
+        let mut first = FirstPrompt { text: message, attachments: attachments.iter().map(|p| PathBuf::from(url_to_path(p))).collect(), server, by_you: true };
         if first.text.trim().is_empty() && first.attachments.is_empty() {
             return QString::default();
         }
@@ -5169,7 +5169,7 @@ impl Workspace {
             message = harlo_core::starters::wrap(st, &message);
         }
         let attachments: Vec<PathBuf> = form["attachments"].as_array().map(|a| a.iter().filter_map(|p| p.as_str().map(|p| PathBuf::from(url_to_path(p)))).collect()).unwrap_or_default();
-        let first = FirstPrompt { text: message, attachments, server: None };
+        let first = FirstPrompt { text: message, attachments, server: None, by_you: true };
         let title: String = {
             let t = harlo_harness::file_blocks::title_text(&prompt);
             let t = if t.is_empty() { starter_info.map(|s| s.label.to_owned()).unwrap_or_default() } else { t };
@@ -6236,7 +6236,7 @@ impl Workspace {
                 self.as_mut().rebuild();
                 if (!first.trim().is_empty() || !images.is_empty())
                     && let Some(live) = registry::get(&key)
-                    && !live.handle.prompt_typed(&format!("{}{first}", image_blocks(images.len())), images, harlo_harness::SendMode::Normal, Some(harlo_core::Typed { words: first.clone(), files: Vec::new() }))
+                    && !live.handle.prompt_typed(&format!("{}{first}", image_blocks(images.len())), images, harlo_harness::SendMode::Normal, Some(harlo_core::Typed { words: first.clone(), files: Vec::new(), by_you: true }))
                 {
                     return json!({ "key": key, "harness": kind.as_str(), "model": model, "error": live.handle.held().unwrap_or_default() });
                 }
@@ -6299,7 +6299,7 @@ impl Workspace {
                 };
                 let images = phone_images(&msg["images"]);
                 // (As typed: its pictures are its images.)
-                let typed = Some(harlo_core::Typed { words: text("text"), files: Vec::new() });
+                let typed = Some(harlo_core::Typed { words: text("text"), files: Vec::new(), by_you: true });
                 let mut text = format!("{}{}", image_blocks(images.len()), text("text"));
                 // Plan mode: a plan first, no changes (as the desktop sends).
                 if self.modes.get(&key).is_some_and(|m| m.plan) && mode == harlo_harness::SendMode::Normal {
@@ -6809,6 +6809,9 @@ struct FirstPrompt {
     /// Its agent and model (`provider/id`): their server, when harlo can
     /// start it, started first if it's stopped.
     server: Option<(String, String)>,
+    /// You wrote it (the new session dialog, a run), not an agent or a
+    /// schedule (see `Typed::by_you`).
+    by_you: bool,
 }
 
 /// Sends a new session's first message (attachments are read off the UI
@@ -6837,7 +6840,7 @@ fn send_first_prompt(key: &str, first: FirstPrompt, notify: Option<CxxQtThread<W
         }
         let prepared = harlo_core::attach::prepare_for(&first.attachments, host.as_deref());
         let text = format!("{}{}", prepared.prefix, first.text);
-        let typed = harlo_core::Typed { words: first.text.clone(), files: first.attachments.iter().map(|p| p.to_string_lossy().into_owned()).collect() };
+        let typed = harlo_core::Typed { words: first.text.clone(), files: first.attachments.iter().map(|p| p.to_string_lossy().into_owned()).collect(), by_you: first.by_you };
         live.handle.prompt_typed(&text, prepared.images, harlo_harness::SendMode::Normal, Some(typed));
     });
 }

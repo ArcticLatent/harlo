@@ -399,7 +399,7 @@ struct RowView: View {
             ToolCard(row: row)
         case "notice" where row.fromHarlo:
             HarloMessage(row: row)
-        case "notice" where row.title == "background":
+        case "notice" where row.title == "command":
             BackgroundNotice(row: row)
         case "images":
             // (Its pictures only: under it, the ones its reply doesn't show.)

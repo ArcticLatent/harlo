@@ -981,7 +981,7 @@ impl ChatSession {
             text
         };
         // (As typed: what Stop gives back if it comes before it's sent.)
-        let typed = Some(harlo_core::Typed { words: original.clone(), files: self.attachments.iter().map(|p| p.to_string()).collect() });
+        let typed = Some(harlo_core::Typed { words: original.clone(), files: self.attachments.iter().map(|p| p.to_string()).collect(), by_you: true });
         let paths: Vec<PathBuf> = self.attachments.iter().map(|p| PathBuf::from(p.to_string())).collect();
         // Sessions it mentions (picked from the `@` list): read when it's sent.
         let named = harlo_core::session_ref::tokens(&text);
@@ -1853,7 +1853,7 @@ mod tests {
             text: text.into(),
             images: Vec::new(),
             mode: SendMode::Normal,
-            typed: Some(Typed { words: words.into(), files: files.iter().map(|f| f.to_string()).collect() }),
+            typed: Some(Typed { words: words.into(), files: files.iter().map(|f| f.to_string()).collect(), by_you: true }),
         };
         let png = json!({ "type": "image", "mimeType": "image/png", "data": base64::engine::general_purpose::STANDARD.encode(b"\x89PNG picture") });
         // A (plan mode, a file read in front), then 20 more, two with the

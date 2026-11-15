@@ -3046,6 +3046,7 @@ ApplicationWindow {
     }
     function chatText() { return chat.session.transcriptText() }
     SequentialAnimation {
+        id: claudeSteps
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksclaude"
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
@@ -3159,6 +3160,18 @@ ApplicationWindow {
             const open = win.bgNotice ? win.findName("backgroundOpen", win.bgNotice) : null
             win.check(open && open.visible && win.findContaining('print("checking")', open) !== null, "a click shows all of it")
             win.shotWindow("clicks-claude-background-open")
+            // /marketplace: harlo runs claude plugin marketplace add, and
+            // Claude never gets the words.
+            win.pluginAsked = win.chatText().split("Hello from fake claude").length
+            win.sendByKeys("/marketplace add obra/superpowers-marketplace") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(claudeSteps, () => win.findAllNames("backgroundHeadline", chat.transcript).some(h => h.text === "Marketplace added"), 10000) }
+        // (It starts again, idle, to load what was added.)
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            const cmd = win.findAllNames("backgroundCommand", chat.transcript).find(c => c.visible && c.text.indexOf("claude plugin") >= 0)
+            win.check(cmd && cmd.text === "$ claude plugin marketplace add obra/superpowers-marketplace", "/marketplace add runs claude plugin marketplace add (" + (cmd ? cmd.text : "none") + ")")
+            win.check(win.chatText().split("Hello from fake claude").length === win.pluginAsked && chat.session.status === "idle", "not sent to Claude (" + chat.session.status + ")")
             win.sendByKeys("go slow please") } }
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
@@ -5129,6 +5142,8 @@ ApplicationWindow {
     property real holdY: 0
     property var harloJobCard: null
     property var bgNotice: null
+    property var pluginNote: null
+    property int pluginAsked: 0
     property string harloRightWas: ""
     property var wrapBox: null
 
@@ -10962,6 +10977,43 @@ ApplicationWindow {
             const tools = sub ? (sub.tools || []).map(t => t.function.name) : []
             win.check(sub !== undefined && JSON.stringify(sub.messages).indexOf("REVIEWER-PROFILE") >= 0, "a task names Claude's agent profile: its instructions are the subagent's")
             win.check(tools.includes("read") && tools.includes("grep") && !tools.includes("write") && !tools.includes("bash"), "with its tools only (" + tools.join() + ")")
+            // /plugin: Claude Code's plugin command (the stand-in's), run
+            // by harlo in the project, never sent to the model.
+            Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
+            win.pluginAsked = win.modelRequests().length
+            win.check(chat.session.commands.some(c => c.indexOf("plugin") === 0), "the / list offers plugin")
+            win.sendByKeys("/plugin install hello@demo") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloSkillSteps, () => win.findAllNames("backgroundHeadline", chat.transcript).some(h => h.text === "Plugin installed"), 10000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const log = TestInput.readFile(win.argValue("--cwd=") + "/../home/plugin-log.txt").trim().split("\n").map(l => JSON.parse(l))
+            win.check(log.length === 1 && JSON.stringify(log[0].args) === '["install","hello@demo"]' && log[0].cwd.endsWith("/repo"), "harlo runs claude plugin install in the project (" + JSON.stringify(log) + ")")
+            win.check(win.modelRequests().length === win.pluginAsked, "and the model isn't asked")
+            const cmd = win.findAllNames("backgroundCommand", chat.transcript).find(c => c.visible && c.text.indexOf("claude plugin") >= 0)
+            win.check(cmd && cmd.text === "$ claude plugin install hello@demo", "its notice shows the command (" + (cmd ? cmd.text : "none") + ")")
+            win.shotWindow("clicks-harlo-plugin-installed") } }
+        // Harlo starts again (idle): the plugin's skill is in its / list.
+        ScriptAction { script: win.waitUntil(harloSkillSteps, () => chat.session.commands.some(c => c.indexOf("skill:hello:wave") >= 0), 15000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            win.check(chat.session.commands.some(c => c.indexOf("skill:hello:wave") >= 0), "Harlo loads the plugin's skill (" + chat.session.commands.filter(c => c.indexOf("skill") >= 0).join() + ")")
+            win.sendByKeys("/plugin install missing@demo") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(harloSkillSteps, () => win.findAllNames("backgroundHeadline", chat.transcript).some(h => h.text === "Plugin not installed"), 10000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const head = win.findAllNames("backgroundHeadline", chat.transcript).find(h => h.text === "Plugin not installed")
+            const note = head ? head.parent.parent : null
+            win.check(head && head.color === Theme.error && note && win.findContaining("exit code 1", note) !== null, "one that fails says so, in red, with its exit code")
+            win.clickItem(head, "the failed install")
+            win.pluginNote = note } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const open = win.pluginNote ? win.findName("backgroundOpen", win.pluginNote) : null
+            win.check(open && open.visible && win.findContaining("not found in any marketplace", open) !== null, "and why, a click away")
+            win.check(win.modelRequests().length === win.pluginAsked, "still nothing sent to the model")
+            win.shotWindow("clicks-harlo-plugin-failed")
             // A change to commit, and the message Harlo writes for it.
             TestInput.writeFile(win.argValue("--cwd=") + "/README.md", "hello\nmore\n")
             windowSettings.rightMode = "changes" } }

@@ -2544,7 +2544,7 @@ Item {
                     required property string rowState
                     // A background command that ended: how it went (label,
                     // subtitle), the command, its last lines (result).
-                    readonly property bool background: title === "background"
+                    readonly property bool background: title === "command"
                     // harlo's message to the agent (a helper's report, …): it
                     // opens a turn, as harlo's; `subtitle` is the session
                     // it's about.

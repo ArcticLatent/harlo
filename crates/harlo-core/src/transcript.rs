@@ -585,6 +585,10 @@ impl Transcript {
         // A background command's end is written for the agent (where its
         // whole output is, how to read it); people get it in plain words.
         let mut level = NoticeLevel::Info;
+        // (A `/plugin` run that failed.)
+        if message["customType"] == "harlo_plugin" && message["failed"] == true {
+            level = NoticeLevel::Error;
+        }
         if message["customType"] == "harlo_job" {
             if let Some((plain, failed)) = job_notice_for_people(&text) {
                 text = plain;
@@ -1013,10 +1017,14 @@ impl Transcript {
                 .into();
                 if let Some(Block::Text(t)) = item.blocks.first() {
                     r.text = t.clone();
-                    // A background command that ended: what it was and how
-                    // it went, drawn as such (`text` stays the plain line).
-                    if let Some(b) = background_notice(t) {
-                        r.title = "background".into();
+                    // A command harlo ran, or a background command that
+                    // ended: what it was and how it went, drawn as such
+                    // (`text` stays the plain line).
+                    if let Some((headline, detail, command, output, state)) = crate::plugins::parse_notice(t, level == NoticeLevel::Error) {
+                        r.title = "command".into();
+                        (r.label, r.subtitle, r.command, r.result, r.state) = (headline, detail, command, output, state.into());
+                    } else if let Some(b) = background_notice(t) {
+                        r.title = "command".into();
                         (r.label, r.subtitle, r.command, r.result, r.state) = (b.headline, b.detail, b.command, b.output, b.state.into());
                     }
                 }
@@ -1732,7 +1740,7 @@ mod tests {
         let mut t = Transcript::default();
         t.apply(&HarnessEvent::MessageEnd { id: "j".into(), message: json!({ "role": "custom", "customType": "task-notification", "display": true, "content": "Background command \"make all\" failed with exit code 2" }) });
         let rows = t.rows();
-        assert_eq!((rows[0].title.as_str(), rows[0].label.as_str(), rows[0].subtitle.as_str(), rows[0].command.as_str(), rows[0].state.as_str()), ("background", "Background command failed", "exit code 2", "make all", "error"));
+        assert_eq!((rows[0].title.as_str(), rows[0].label.as_str(), rows[0].subtitle.as_str(), rows[0].command.as_str(), rows[0].state.as_str()), ("command", "Background command failed", "exit code 2", "make all", "error"));
         for other in ["Background shell command didn't finish before the previous session ended", "A background task ended.", "Retrying (2 of 5)"] {
             assert_eq!(background_notice(other), None, "{other}");
         }

@@ -1484,7 +1484,7 @@ pub(crate) mod tests {
         use harlo_core::{Typed, Unsent};
         let pic = |d: &str| json!({ "type": "image", "data": d, "mimeType": "image/jpeg" });
         let held = vec![
-            Unsent { text: format!("<file a.rs>…</file>fix it{}", harlo_harness::file_blocks::PLAN_NOTE), images: vec![pic("AAAA")], mode: harlo_harness::SendMode::Normal, typed: Some(Typed { words: "fix it".into(), files: vec!["/p/a.rs".into(), "/p/s.jpg".into()] }) },
+            Unsent { text: format!("<file a.rs>…</file>fix it{}", harlo_harness::file_blocks::PLAN_NOTE), images: vec![pic("AAAA")], mode: harlo_harness::SendMode::Normal, typed: Some(Typed { words: "fix it".into(), files: vec!["/p/a.rs".into(), "/p/s.jpg".into()], by_you: true }) },
             Unsent { text: "<file name=\"Photo 1\"></file>\n".into(), images: vec![pic("BBBB")], mode: harlo_harness::SendMode::FollowUp, typed: Some(Typed::default()) },
             Unsent { text: "said elsewhere".into(), images: Vec::new(), mode: harlo_harness::SendMode::Normal, typed: None },
         ];

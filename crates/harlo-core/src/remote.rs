@@ -256,7 +256,7 @@ pub fn parse_ssh_command(text: &str) -> Result<Vec<String>> {
 }
 
 /// POSIX-ish word splitting: spaces separate, quotes group.
-fn shell_words(text: &str) -> Result<Vec<String>> {
+pub(crate) fn shell_words(text: &str) -> Result<Vec<String>> {
     let mut words = Vec::new();
     let mut cur = String::new();
     let mut in_word = false;

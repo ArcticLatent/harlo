@@ -37,6 +37,7 @@ pub mod palette;
 pub mod phone;
 pub mod pages;
 pub mod pictures;
+pub mod plugins;
 pub mod plan;
 pub mod quota;
 pub mod remote;
