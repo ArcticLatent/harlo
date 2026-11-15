@@ -5,12 +5,16 @@ description: Start building Harlo and find the right wiki guide for agent execut
 tags: [quickstart, navigation, build, architecture]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-14T20:46:59.159Z
+    at: 2026-11-15T01:24:14.237Z
 sources:
   - id: openwiki-source-651d1fb6c9e49916a916ab51
     resource: repo://Cargo.toml
   - id: openwiki-source-f317ee207e1653d2033c81a4
     resource: repo://CONTRIBUTING.md
+  - id: openwiki-source-9cb86229670695fb5654cb21
+    resource: repo://crates/harlo-app/qml/SettingsDialog.qml
+  - id: openwiki-source-22e4ea3417daf80d96080fd6
+    resource: repo://crates/harlo-app/src/workspace.rs
   - id: openwiki-source-be6e7bfc466a23d5de0a4a6d
     resource: repo://crates/harlo-core/src/agent_host.rs
   - id: openwiki-source-aa0d9221c1e01ca9decebdae
@@ -23,7 +27,9 @@ sources:
     resource: repo://crates/harlo-harness/src/store.rs
   - id: openwiki-source-325d02e6188e2718d48b8686
     resource: repo://crates/harlo-wiki/src/lib.rs
-generated: { by: "harlo", at: "2026-11-14T13:04:09.841Z" }
+  - id: openwiki-source-eb7f694aac7969d92da614ab
+    resource: repo://crates/harlo-wiki/src/run.rs
+generated: { by: "harlo", at: "2026-11-15T01:24:14.237Z" }
 ---
 
 # Quickstart and task routing
@@ -59,8 +65,8 @@ For the phone client library, `swift test --package-path ios/HarloKit` exercises
 | Local proxy billing, free-server flags, missing prices | [Free versus unknown cost](integrations/remote-machines-and-models.md#free-servers-versus-unknown-costs) | Provider configuration → runtime accounting |
 | Pairing, encrypted events, reconnects, push or relay deployment | [Phone and relay](integrations/phone-and-relay.md) | Core crypto, desktop server, HarloKit, relay/APNs |
 | Long code blocks, phone clipping, copied code and blank lines | [Phone transcript delivery](integrations/phone-and-relay.md#from-phone-requests-to-shared-sessions) | Transcript pieces → bounded phone frames → Swift rendering |
-| Wiki sessions, generation/resume, update offers, remote wiki calls | [OpenWiki integration](integrations/openwiki.md) | Core native tool dispatch → local engine or SSH agent |
-| Ranked wiki search, linked workspaces, evidence drift, durable claim state | [Native wiki engine](architecture/wiki-engine.md) | In-memory retrieval → repository evidence → persisted page queue |
+| Wiki sessions, generation/resume, separate create/update writers, update offers, remote wiki calls | [OpenWiki integration](integrations/openwiki.md) | Core native tool dispatch → local engine or SSH agent |
+| Ranked wiki search, linked workspaces, model-free update preflight, evidence drift, durable claim state | [Native wiki engine](architecture/wiki-engine.md) | In-memory retrieval → source-change preflight and repository evidence → persisted page queue |
 | Build dependencies, targeted checks, packages, signed self-updates | [Testing and releases](operations/testing-and-releases.md) | Contributor guide, CI, packaging, update verification |
 
 ## Architecture in one minute

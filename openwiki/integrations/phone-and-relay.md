@@ -5,7 +5,7 @@ description: Device authorization, replay-resistant NaCl channels, session subsc
 tags: [phone, ios, encryption, relay, apns]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-14T20:46:59.159Z
+    at: 2026-11-15T01:24:14.237Z
 sources:
   - id: openwiki-source-3e5d9e2412052022c04ac0ec
     resource: repo://crates/harlo-apns/src/lib.rs

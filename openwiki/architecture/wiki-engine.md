@@ -5,7 +5,7 @@ description: How Harlo's Rust wiki engine retrieves sections, selects linked wor
 tags: [openwiki, architecture, retrieval, claims, persistence]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-14T20:46:59.159Z
+    at: 2026-11-15T01:24:14.237Z
 sources:
   - id: openwiki-source-4af2dd3e4a0acae243d3b65c
     resource: repo://crates/harlo-core/src/openwiki.rs
@@ -19,6 +19,8 @@ sources:
     resource: repo://crates/harlo-wiki/src/marked.rs
   - id: openwiki-source-fccbfc8dec18dfaf10104a6c
     resource: repo://crates/harlo-wiki/src/mcp.rs
+  - id: openwiki-source-c990f63b0374f4d073e28b9d
+    resource: repo://crates/harlo-wiki/src/repo.rs
   - id: openwiki-source-c3f26d7f96c5e44628c83808
     resource: repo://crates/harlo-wiki/src/retrieval.rs
   - id: openwiki-source-eb7f694aac7969d92da614ab
@@ -29,7 +31,7 @@ sources:
     resource: repo://crates/harlo-wiki/src/tools.rs
   - id: openwiki-source-7df8fd612dbd67f186cd1d6e
     resource: repo://crates/harlo-wiki/src/workspaces.rs
-generated: { by: "harlo", at: "2026-11-14T18:22:19.698Z" }
+generated: { by: "harlo", at: "2026-11-15T01:24:14.237Z" }
 ---
 
 # Native wiki engine and evidence lifecycle
@@ -82,7 +84,13 @@ Begin also checks that the wiki folder and code-mode setup destinations resolve 
 
 On resume, a mode or language conflict is refused. If the source fingerprint changed, the persisted run returns to planning and its old plan is removed. Otherwise persisted completion records are reconciled and the run continues. Updates can return `noop` only when the update preflight, claim health, coverage, and stable source checks permit it.
 
-Plan validation canonicalizes paths, rejects reserved pages and duplicate jobs, prohibits deleting quickstart, and requires quickstart for initialization. Unless explicitly deferred, update plans automatically include pages with stale or unresolved evidence. The queue sorts page paths with quickstart last. The host should consume one assigned page at a time, even though pending-job validation itself checks job identity and status rather than enforcing the host's entire research workflow.
+### Model-free update preflight
+
+The desktop can ask `quiet_update` whether an update needs a writing session. It compares the last complete update's commit with the current commit and worktree, then checks page/claim coverage, hand-edited pages, stale cited resources, newly added files, and source files likely to contain material new facts. Added-file checks include committed additions, staged/worktree additions, and untracked files, excluding the wiki, setup files, ignored paths, and files no longer present. For changed source files, a new declaration/key can trigger an update; so can 50 or more added-and-removed diff lines. Definition detection covers keyword declarations at any depth and common method/function forms, while excluding test paths for smaller declaration-only changes. Small edits to uncited code do not by themselves start a model run.
+
+The check is deliberately conservative when Git cannot produce a trustworthy change list: it asks for a model-backed update rather than recording a clean result. It snapshots source before checking and verifies that snapshot again around claim finalization and manifest/update recording, so concurrent code changes remain for a later check. When nothing needs rewriting, it reanchors claims and records the update at the checked commit without starting a session. The large-update detector is a heuristic for likely wiki-relevant changes, not a semantic proof that every code fact is unchanged.
+
+Plan validation canonicalizes paths, rejects reserved pages and duplicate jobs, prohibits deleting quickstart, and requires quickstart for initialization. Unless explicitly deferred, update plans automatically include pages with stale or unresolved evidence; required rewrite pages (for edited or language-changed pages) are also added unless planned or deleted. The queue sorts by canonical path, with quickstart last. The host should consume one assigned page at a time, even though pending-job validation itself checks job identity and status rather than enforcing the host's entire research workflow.
 
 ### Sparse decisions preserve claim identity
 

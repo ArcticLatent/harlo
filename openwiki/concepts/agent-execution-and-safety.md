@@ -5,7 +5,7 @@ description: Harlo agent model-loop ordering, resumable history, RPC approvals, 
 tags: [agent, safety, sandbox, rpc, tools]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-14T20:46:59.159Z
+    at: 2026-11-15T01:24:14.237Z
 sources:
   - id: openwiki-source-0b93973e66ce9fb1db2bd77c
     resource: repo://crates/harlo-agent/src/agent.rs

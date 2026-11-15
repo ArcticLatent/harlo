@@ -5,8 +5,10 @@ description: How Harlo integrates native OpenWiki-format tools locally and over 
 tags: [openwiki, documentation, mcp, remote]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-14T20:46:59.159Z
+    at: 2026-11-15T01:24:14.237Z
 sources:
+  - id: openwiki-source-9cb86229670695fb5654cb21
+    resource: repo://crates/harlo-app/qml/SettingsDialog.qml
   - id: openwiki-source-4a2119659a0108ce888285c3
     resource: repo://crates/harlo-app/qml/WikiPanel.qml
   - id: openwiki-source-22e4ea3417daf80d96080fd6
@@ -15,7 +17,7 @@ sources:
     resource: repo://crates/harlo-core/src/openwiki.rs
   - id: openwiki-source-7206122c56875c37e0a62050
     resource: repo://crates/harlo-wiki/src/claims.rs
-generated: { by: "harlo", at: "2026-11-14T13:04:09.841Z" }
+generated: { by: "harlo", at: "2026-11-15T01:24:14.237Z" }
 ---
 
 # OpenWiki integration and wiki lifecycle
@@ -49,6 +51,8 @@ flowchart LR
 ```
 
 Harlo constructs the first prompt for create, update, or continue and appends the authoring sequence embedded in `harlo-wiki::AUTHORING`. Continuation calls begin again with the interrupted run's mode and proceeds from its durable queue. The prompt explicitly restricts the session to wiki work and says not to resolve or supply the root itself. That root shortcut is specific to Harlo's session adapter, which fills it in; it is not a rule for every external OpenWiki host.
+
+Settings → Wiki keeps independent writer profiles for **Creating a wiki** and **Updating it** in the `wiki_writer` setting (`create` and `update` entries, each with optional agent, model, and thinking). The UI explains creation as the full-repository planning job and positions updates as focused work suitable for a cheaper or local model. Saving either profile merges against the setting as currently stored, then refreshes both editors, so changing one does not overwrite the other. Workspace selection uses the selected profile only when its agent is usable; otherwise it falls back to the project's agent. A selected model is used on the local machine, while a remote project's own model is selected because a local model choice may not exist there. Continuing an interrupted initial creation uses the create profile; other continuations use update.
 
 Before starting that session, the desktop reads the repository's `.openwikiignore` through core. Blank lines and comments are omitted; unreadable or missing files yield no rules. When rules exist, the prompt lists them and prohibits reading, searching, running, citing, or describing excluded resources. Updates must plan every existing page mentioning them and remove that material. This instruction matters because the host agent researches with its own tools, outside OpenWiki's evidence resolver.
 

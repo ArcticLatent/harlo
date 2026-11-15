@@ -5,7 +5,7 @@ description: How agent protocols become shared live sessions, durable conversati
 tags: [architecture, sessions, persistence, desktop]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-14T20:46:59.159Z
+    at: 2026-11-15T01:24:14.237Z
 sources:
   - id: openwiki-source-eda83df6b22941ed75ede295
     resource: repo://crates/harlo-app/qml/ChatView.qml

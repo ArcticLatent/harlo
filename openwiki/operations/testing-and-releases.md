@@ -5,7 +5,7 @@ description: Contributor build prerequisites, focused and integration verificati
 tags: [testing, build, packaging, releases, security]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-14T20:46:59.159Z
+    at: 2026-11-15T01:24:14.237Z
 sources:
   - id: openwiki-source-4d1d392666be6dfdd7a91a2e
     resource: repo://.github/workflows/release.yml
@@ -39,7 +39,7 @@ sources:
     resource: repo://site/README.md
   - id: openwiki-source-f1c29df965300759d3c1ff56
     resource: repo://wrangler.jsonc
-generated: { by: "harlo", at: "2026-11-14T20:46:59.159Z" }
+generated: { by: "harlo", at: "2026-11-15T01:24:14.237Z" }
 ---
 
 # Testing, packaging, and signed updates
@@ -92,6 +92,8 @@ The wiki engine has its own crate-level test boundary as well as the core adapte
 cargo test -p harlo-wiki
 cargo test -p harlo-core --no-default-features openwiki
 ```
+
+For the model-free update detector specifically, `cargo test -p harlo-wiki quiet_updates_miss_nothing` exercises declaration detection across several languages, significant edits, test-path exclusions, oddly quoted Git paths and diff settings, Git failures, and source changes arriving during the check. `quiet_updates` covers cited-line movement versus changed evidence, new files, manually edited pages, and the no-run recording path. These focused cases validate the detector and local engine; they do not substitute for testing remote wiki calls.
 
 ## Headless Rust CI
 

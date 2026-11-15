@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:6f94684cdebd714d3b0294c40267d75da90d507cfb328a5485b510d656580a29",
+  "pageVersion": "sha256:741570236b6d4a4453f713771fd013c4427ed794fa4e0b4f11a55d1dfe352f62",
   "claims": [
     {
       "id": "claim_292a16b40b5241b4ac361dda40dea2cd",
@@ -59,11 +59,11 @@
       "statement": "The native harlo-wiki crate implements OpenWiki-format reading and writing; core invokes it directly locally and through harlo-agent wiki on SSH hosts without a separate Node runtime.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-core/src/openwiki.rs#L350-L387",
+          "resource": "repo://crates/harlo-core/src/openwiki.rs#L358-L395",
           "version": "repo-lines-v1:sha256:526df0bce0f7d2592aca8e045d7edb87c489c74c75ffaf5e43c2a703b2da46ea:eyJzZWxlY3RlZExpbmVDb3VudCI6MzgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRjMjI4ZDdmZDZhNzExN2E3ZjFiODMwZjQyNDg3NDBiNzQ4OTI1NjUwZmYyMTA5MDc4ZjZlODM4NmQ5NTQ3OGEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFkOWUxMjU0NjQyNTU3NmQzZGVhZThjOWI5ZGJmMTI4ZDVkNmRkYWY1ZDdmZTg1NzkzNDkyN2RlZmZhM2I5ZGQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRhNWNiNDI3ZGY1MjBjMTFlNGZmMjcxYjBjZGIxMmViNzg5YWYzMjg1NWY5YjkxMGExMjA5ZGQwYjAzNjNkNjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjM0ZTQ1ZjU1ZjgyZGZjZGI1ZDQ5NjFlZTg2YWNkNGY0MjY5M2NmNGRkYmM3NmU3MDBiNzViMDk4NmRjNzQzYmYifQ"
         },
         {
-          "resource": "repo://crates/harlo-core/src/openwiki.rs#L452-L485",
+          "resource": "repo://crates/harlo-core/src/openwiki.rs#L460-L493",
           "version": "repo-lines-v1:sha256:35fe755ab76a6cb09b8132a58c9c9c823bba5eaa94f3f9efea895eb8776190bd:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMxYTkwNjhjNTc2YzdlNmYwMGVkZTc0YzgxYjAwZWYzNTY1ZWU0ODExN2E0Y2UyMmYwMWI2Zjc1ZWRhNzk5ZWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY1N2RhZDhjNTY0NDgxYjhiNWRiZTZiYWU2OTQxYmUzMzExMzJjNzJjN2ZiYmE3MDk5ZmRmMDhjNzIyOTU3NWUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjRkMjk0NTk1NDY1ZGQ3OTY4NDFlZDc0YWFjZmY3ZTcyMjlmNzU3YzY1NDMyZjMxN2I0N2RmYjRkYTY1ODVjOTAifQ"
         },
         {
@@ -71,10 +71,34 @@
           "version": "repo-lines-v1:sha256:441e7c456dcc15ae99e5e51136c948b62f8ede53fb8321f7230dfc771581ad19:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJlYjQ5MTA2NzQ5M2VmNDJmZGQ2NTQ5ZWFiYzcyMWY2MDk1MDNmNWEyYmM1Y2E0Y2I2Zjc2NzZiODk5ZmFhZjkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE5ZDc3OTRmZGE2NmQzMjdkMjM5ZjVjYWQxOTM3NTkzY2RiNmYwNzA1NGU0MTM5MmZmZDJkOTUzYjY5NzYxZmEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImMwM2M3YzZjMTU3Zjg2ZDEyNDNlNjJhZjhlYWVjMTMzNzY2ZmI2MDUzNjc2YjA4NjMzNTFkOTgyNDA1ZGRjNDgifQ"
         }
       ]
+    },
+    {
+      "id": "claim_b16728d14c1b4ed8a5d7de0d3422d0c3",
+      "statement": "The native engine's `quiet_update` performs a model-free preflight that can determine whether an OpenWiki update needs a writing session based on coverage, edits, claim evidence, added files, and likely material source changes.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-wiki/src/run.rs#L1217-L1283",
+          "version": "repo-lines-v1:sha256:be9240c0bf62932d70eef6262bb060d3693f23955a1199c8a6c51cd3826182fe:eyJzZWxlY3RlZExpbmVDb3VudCI6NjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkwZmVhMzFjZGYxOTE3ZDg2NDZjZDM0YjNlOTI2YTczYWZmZTU2YTI3YTU0ZDk0OTMyNDI4Y2I5MWZjOTkwYjIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMyZDY4NDkxYWRmZWVhM2IzMTIxMTcyOTEwM2U3YTA4MjFiNGFhOTU2YzJlZGUxNTU0MTdhMzYzNjUxYjRmNGYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjZlNGFmYzI2NzczMjA2NTgwNTZiMzgyMjdlM2MzYmU5YTFmNmVhMjE1MDM1MjljZWI2YzE0MzBkN2VhY2RmN2UiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjkzMTI3Yjg4N2UwNjk2NDk3N2I0YjdkODE0MjgwYzdhZmE5OTViZDdhYjVmZjQ0M2M3YmEyM2NjYjQ3MmE3MjgifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_41f117831a964a8d871ac3a6516e123c",
+      "statement": "Harlo's Settings → Wiki presents separate create and update writer profiles, and workspace routing selects the corresponding profile for each kind of run.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-app/qml/SettingsDialog.qml#L2163-L2182",
+          "version": "repo-lines-v1:sha256:97bf197fb0797bae8aad7be81bd1b97e5c6c1fab00240ed07ff49b16d9426d4b:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg0YmRiMmRmYTRhZWZjY2Y1NTY0MDJiNTg1OTUzY2FhYWJmYjI4NmI5YjZmYWRiNDlhNTBhMDM2OWRmYzc5NDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2YjA0NDkxNDY5NzIyZTgzNjNhOTRlNDA0NDUzOGUwMTNhMmEyMTdlMzZiMWU1NjhiYTYwYWNiN2I0YzhmMmUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk5OWJkZWZlZWFjYTYzNDBlMDI5MGRjODZlODg5Yzg5ZDVlMTg5YWE1YmE0NGI1ODViM2I3MDczNGY0YTYyZDgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImExZTUyYmJjNmVjMTY3OGE0YTVmMWM5YTQxYmMyOWRlMjlmNGYzZDVjMTU5ZDMxOTBiOWVhZWM1ZTFmMTQ3YmUifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-app/src/workspace.rs#L2441-L2491",
+          "version": "repo-lines-v1:sha256:3d627af638200c022f31345ff1d209c8e32f8d59762a5e01463d0673b579b96f:eyJzZWxlY3RlZExpbmVDb3VudCI6NTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk2MzMyNDNkZGQ3MDA0MWVhM2E5NTYyZDVjZDIwNWZlZmQ3Y2RiNjJlOTMwYWY0ZGQwZWYxYWNjMTZkOTQ4NjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZlYmI0NzI3OGJkZDhmZjQxYzdjZjhhMzEzN2Y5MTNmZWNlZjE4NmZjZWQ0MGY3ZDQ0OWU4ZGQ3N2Y4OWJlNTkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImFjMGZkYjc1NTMzMjMxODBhNDNiZjk4Yjk5MWJmODg5Zjg0MGM5ODc5MGU0ZTEzNWQ0MDMyN2E2MWFiNGYzMDgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJiNjMwYjI3NDZiZWVmNjdlNTEyOGYzMjM2YjIzZDkzNWM3ODk0YTNjZjMyZjc2ODU2NGI4YjYwNzU2NGJlMzMifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-14T20:46:59.159Z"
+    "at": "2026-11-15T01:24:14.237Z"
   }
 }

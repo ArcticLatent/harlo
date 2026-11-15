@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:8bbb0454c4deb242eb8bf61bfb49008cdd6176c6b02f4d22600c7caaaa383af0",
+  "pageVersion": "sha256:2aaf1f07a50999493f201c6cafa64872c7fd205b0128d1fce09e491f4618477f",
   "claims": [
     {
       "id": "claim_7a207a8ae4594d9ba376628ea349a6b4",
@@ -117,7 +117,7 @@
       "statement": "The native wiki engine has focused crate-level tests for parser failure isolation, concurrent retrieval caching, and repository-contained setup writes, while core's OpenWiki tests exercise the desktop adapter boundary.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-core/src/openwiki.rs#L1110-L1140",
+          "resource": "repo://crates/harlo-core/src/openwiki.rs#L1118-L1148",
           "version": "repo-lines-v1:sha256:2af8e20328c1499f5a8026b77ac258dba2bbe451fab63a55fc97a8706cab8bec:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5YzEzNTkwNjY1NjMyM2QxYzVlYTQxNjU0ZWU2NmFmYjU4NWFjZGNmYWVhY2ExMjFkNWUzMGJmMTkzZWVkZDciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJmYzEzOGJkYTE0YjA2MjU3NGYzZjlhOTRhZjlkMDFhMTBiMmUwNzJkNDQ5Njg3N2ZiMDE1ZDQ5ODZhMTIxMTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImYzNmIzN2ZlYWMzNGFlOTRhM2E1MDRkNjZkNTc5NzdhMjFmZmI1ZDk3Y2VkOWIxY2UwMWU2ZjkyMWM3YTRkZDcifQ"
         },
         {
@@ -129,7 +129,7 @@
           "version": "repo-lines-v1:sha256:66d9ad95a39e0fa653518d54d436025eede80bbece8f059d19f72c0378972e44:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY2YzQ5M2IyNzVjNDUxYWQ5YjQyZWY2ZmJhZDgyODNjMzJhZGMyOGMyMzRjMGY0NGRlOThkYTNmZjZmYWIwZjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE0ZjMzMTBjOGVjNWZiNDE2YjYwNWJjYmMxNTBjNmFmOTQ3NGMxYzE2MzEwMWU5MmMwZGUzMjkzYmQzOGUyM2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImExN2M4YWJiMjUyMDRkMmUwNzc0NTc2NDIyMWI1MmIxNDU4ZDRkMWUwNmFiZGNiZWM1ZjJkM2YzMDljZThhZTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjgzNGRiYzk4Y2VmMzBiOGI2MGYxNjQwMjRhMGQ3ZTliNDQ3NDQxYmRmNTc2Njc4NGQ4ZGM1MGJiZjg5NmVmMDgifQ"
         },
         {
-          "resource": "repo://crates/harlo-wiki/src/run.rs#L1767-L1797",
+          "resource": "repo://crates/harlo-wiki/src/run.rs#L1851-L1881",
           "version": "repo-lines-v1:sha256:6c30386bbea151729a3946156837e38a713d2ab6c687033550f421fec2ccc110:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUzYTk1MjU0Zjk1MjdiODBmNGY2MzI5YWMyZjhmM2RmNmI5ZDhmN2EyOWFkZmZjYWViN2UyZDdlMGI0ODAyODkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc2NzA2NWQ2NDVkMmE0ODhkNWMzODFiNThkZDQyYjRmOTY4Y2I5NTcyNTZhZWU4OGVhMzE1YzUwZWVhNzRhZjQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJlYWY4Mzk3MjgwODhlZWYwYjZiZjI3Y2YxZmUwYjY4ZTEzNDFhMDJjZjgwMThkZWU3MWYyNWE3NDQwNzI4YmQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjAwZmZmZGRlYWE4YTEyMTRhMjFiZTdlMjBjMDcxMDI2ZWFmZTQ5NmZjZTE4NjQ4YmU2NjkxNTViODg5Njg5YjQifQ"
         }
       ]
@@ -143,10 +143,24 @@
           "version": "repo-lines-v1:sha256:d83769abbde0a834dcb7aee3dba259217e0ccace3539a9c50c129650e2fb71f2:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYzdlMzBmZDE2YzJkZmE5MzAyOTQ4MGMwM2Y3ZTM3NWMxZTMzNjIxMWRhOTcwZTFhYjAwYWE5N2I0YTE3YzNmYSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiM2I3NjZhYjU0ODJmMjdjNmYwN2Y3Y2VhNjllN2M5MjdiN2EzODM2NWE3OWJjNTIxZDc2NTUzZDc4M2U2NjFmYSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNWRlZTM0MTcxNmE1OGRhODcwZWRkYmM2MzEwNjFhY2VhMGExNzBmYzBhMTdkNzcxOTlmM2M2MTVmZDJkNWE1NiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZjNmN2YxYmM5MDA0OGQ2OTQ2NDVmMjJjZDM0YzFlMTdmMzI1NGE1NmFkZGRmNjlkZGMzYzg3YjNjNDRlN2VkYiJ9"
         }
       ]
+    },
+    {
+      "id": "claim_bb804e94d9314536a2a4bc816b04195c",
+      "statement": "The `quiet_updates_miss_nothing` lifecycle test covers new-definition detection across several languages, significant edits, test-path exclusions, unusual paths and Git diff settings, Git failures, and a source change arriving during the check; `quiet_updates` exercises moved versus changed cited lines, new files, hand-edited pages, and recording a no-op.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-wiki/src/run.rs#L1912-L2018",
+          "version": "repo-lines-v1:sha256:8f18c40311bb03c9968c5cbea052fa0fd24e11b1285594cfb1939258a67b6b31:eyJzZWxlY3RlZExpbmVDb3VudCI6MTA3LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJiN2FjNTYwY2ZjMjNhYzA3YmFjYTdhMDNhMWM1ZDM5MjVmZDkyODQ4NmI1NTEyMjUxMDhhM2M5ZTI5MmVjNzllIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI3MDU2ZTY3YjYxNzJlNjM1ZWQzNzBlM2Q4MDc2YTJjNTFhMWY1MzZiZGNhYWUyYWFiOTQyMzQxMzE0ZjNmMjc4IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI5OGY5YTgwZDkyYTg5NDg4M2E3ZGY2ZTRjZjFiY2IzMmQwNWU2YzRiN2FjYmRlNjUxNWE5OGM0MjA1NmNlOWMxIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI3ZmI4OThkZjM4ZmFmNTQ2MDEwNTJhN2Y4NjJjZGEwYjkzZWQxNmM5ZmJiMTFjZGVlMGYxMjIzM2ZmNjc5OWU1In0"
+        },
+        {
+          "resource": "repo://crates/harlo-wiki/src/run.rs#L2020-L2149",
+          "version": "repo-lines-v1:sha256:55a6a5990b4df364d6a37fe0693b3c9460194c3f02939a7f94d40b0fbc1a2c37:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMwLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiIxMWE2ZjZhMTliN2NlZDM2MDNmOGE4ODFhZWNhNzM4MzJhNGQ4MjhlNTM5MWNiZDNmNjczNGUxNTI2MDlkMTEyIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI3MjMxZDVkMjBlYTU2ZmJkODQyMDRiY2NiNmU0NDBkZmNjZjI3YjBmOTRmOTQyMTM3MTQ0NDBiYmFjNDBmNWIyIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJhZDQzY2JhZjYyNDRmMTZiMjRhMDU1ZjQxMDg2Mzk0ZTBiZjc3MGFhZWVkNzM1NTZhNmExZDMyODk3ZDE1OGRlIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJkM2JiNGVmMDAwMWViOTkxZWU0MjE0MzQ5YmY3NjE2ZTIxNGNhNjQ1YjEwNDBiODZjZWQzNGZhZWY4NjhkZTY3In0"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-14T20:46:59.159Z"
+    "at": "2026-11-15T01:24:14.237Z"
   }
 }

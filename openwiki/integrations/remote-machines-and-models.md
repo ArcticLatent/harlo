@@ -5,7 +5,7 @@ description: SSH-backed project paths, per-machine helper deployment and state, 
 tags: [ssh, remote, models, engines, configuration]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-14T20:46:59.159Z
+    at: 2026-11-15T01:24:14.237Z
 sources:
   - id: openwiki-source-72ec9ac0129b24bc305a0df1
     resource: repo://crates/harlo-agent/src/main.rs
