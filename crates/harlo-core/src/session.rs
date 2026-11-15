@@ -321,7 +321,6 @@ impl SessionHandle {
         if self.held().is_some() {
             return false;
         }
-        tracing::info!("message sent");
         let _ = self.control.send(Control::Prompt(text.to_owned(), images, mode, typed));
         true
     }
@@ -969,9 +968,6 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
     let mut early_asked: Vec<oneshot::Sender<Value>> = Vec::new();
     // A run was going (its end keeps a long session's report).
     let mut was_busy = false;
-    // A message of yours being sent: when it was taken, until its row shows
-    // (logged: how long that took).
-    let mut sending: Option<(Instant, String)> = None;
     let mut st = DriverState {
         transcript: Transcript::new(),
         since_open: (!spawn_now && session_file.is_some()).then(Vec::new),
@@ -1313,8 +1309,6 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                 // (One sent while a turn waits for its snapshot: after it.)
                 Some(Control::Prompt(text, images, mode, typed)) if !held.is_empty() => held.push(Unsent { text, images, mode, typed }),
                 Some(Control::Prompt(text, images, mode, typed)) => {
-                    tracing::info!(status = ?st.status, loading = st.since_open.is_some(), "message taken");
-                    sending = Some((Instant::now(), text.chars().take(40).collect()));
                     // A new turn (not steering or a queued one): the folder's
                     // files first, so the turn can be undone (git::snapshot_turn).
                     // That can take seconds (a big or remote repository), so
@@ -1516,12 +1510,6 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                     pending.push(SessionUpdate::Rows(changes));
                 }
                 dirty = false;
-            }
-            if let Some((at, start)) = &sending
-                && st.shown.iter().rev().take(8).any(|r| r.kind == crate::transcript::RowKind::User && r.text.starts_with(start.as_str()))
-            {
-                tracing::info!(ms = at.elapsed().as_millis() as u64, "message shown");
-                sending = None;
             }
             if !pending.is_empty() {
                 st.broadcast(std::mem::take(&mut pending));
