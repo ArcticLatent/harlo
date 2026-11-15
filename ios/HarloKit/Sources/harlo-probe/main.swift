@@ -47,6 +47,9 @@ func run(_ link: String) async {
     guard let s = model.session else { return }
     let opened = await waitFor(5) { !s.liveKey.isEmpty && !s.loading }
     check(opened && s.harness == "demo", "a session opens (\(s.harness), \(s.error ?? "no error"))")
+    // Its "/" commands, harlo's /plugin among them.
+    let commanded = await waitFor(5) { s.commands.contains { $0.name == "plugin" } }
+    check(commanded && SlashCommand.matching(s.commands, typed: "/").count == s.commands.count, "its / commands reach the phone (\(s.commands.map(\.name)))")
 
     // This harlo's features; plan limits (none on a scratch computer), and a
     // session's (the demo agent has no plan).

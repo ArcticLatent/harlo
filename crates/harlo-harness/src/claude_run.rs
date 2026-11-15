@@ -53,8 +53,12 @@ struct State {
     version: String,
     commands: Value,
     initialized: bool,
-    /// Lines to send once `initialize` is answered.
+    /// Lines to send once `initialize` is answered (and, on another
+    /// machine, the conversation it resumes is read).
     held: Vec<String>,
+    /// On another machine, lines wait for the read of the conversation it
+    /// resumes, so the copy fetched holds none of this run.
+    hold_for_read: bool,
     running: bool,
     streaming: Option<Streaming>,
     /// UI request id → what it answers.
@@ -176,6 +180,9 @@ struct Shared {
     /// On another machine: its Claude folder (`$CLAUDE_CONFIG_DIR` or
     /// `~/.claude`), as that machine sees it.
     remote_config: Option<String>,
+    /// Whether the conversation it resumes has been read (true when there's
+    /// none to read).
+    read: tokio::sync::watch::Sender<bool>,
 }
 
 /// The host's Claude folder (one quick SSH call).
@@ -296,7 +303,7 @@ impl Shared {
         let line = line.to_string();
         {
             let mut st = self.state.lock().unwrap();
-            if !st.initialized {
+            if !st.initialized || st.hold_for_read {
                 st.held.push(line);
                 return;
             }
@@ -361,39 +368,28 @@ pub(crate) fn spawn(cfg: HarnessConfig, program: PathBuf) -> Result<(Harness, mp
         program,
         generation: Default::default(),
         remote_config,
+        read: tokio::sync::watch::channel(true).0,
     });
-    // A resumed session: its conversation so far.
+    // A resumed session: its conversation so far, read beside Claude's
+    // start (a long one takes seconds), so what you send shows at once;
+    // what needs it waits for it (`needs_history`).
     if let SessionTarget::Resume(path) = &shared.cfg.session {
-        let file = shared.local_file(path);
-        // (Read one message at a time: what's needed of it is small.)
-        let mut read = Resumed::default();
-        // (How long it was, and whether its copy here is all of it.)
-        let (end, missing) = file.as_deref().map_or((0, 0), |f| {
-            let missing = if shared.cfg.remote.is_some() { crate::mirror::missing(f) } else { 0 };
-            (std::fs::metadata(f).map_or(0, |m| m.len()) + missing, missing)
-        });
-        let saved = match file.as_deref() {
-            Some(f) => claude::each_saved_message(f, &mut |m| read.add(&m)).map_err(|e| format!("reading {}: {e}", f.display())),
-            None => Err(format!("couldn't fetch {}", path.display())),
-        };
-        // (A transcript here that isn't written yet: nothing before this run.)
-        let unwritten = shared.cfg.remote.is_none() && !path.exists();
-        if let Err(e) = &saved && !unwritten {
-            tracing::warn!("the conversation Claude resumes: {e}");
-            shared.state.lock().unwrap().history_unread = Some(e.clone());
-        }
-        if saved.is_ok() {
-            let mut st = shared.state.lock().unwrap();
-            st.context_tokens = read.context;
-            st.history = Some(History { path: path.clone(), count: read.count, end, whole: missing == 0 });
-            st.todo = read.todo;
-            st.saved_model = if read.model.is_empty() { String::new() } else { format!("anthropic/{}", read.model) };
-            // Its window and where it compacts, as Claude said last time.
-            if let Some((window, at)) = claude::known_context(&model_id(&st)) {
-                (st.context_window, st.compact_at, st.compact_model) = (window, Some(at), st.model.clone());
+        // (Here: as long as it is now, before Claude adds to it. There:
+        // what's sent waits, so the copy fetched holds none of this run.)
+        let here = shared.cfg.remote.is_none().then(|| std::fs::metadata(path).map_or(0, |m| m.len()));
+        shared.state.lock().unwrap().hold_for_read = here.is_none();
+        shared.read.send_replace(false);
+        let (s, path) = (Arc::clone(&shared), path.clone());
+        tokio::spawn(async move {
+            let sh = Arc::clone(&s);
+            let read = tokio::task::spawn_blocking(move || read_resumed(&sh, &path, here)).await;
+            if let Ok(read) = read {
+                apply_resumed(&s, read);
             }
-        }
-        crate::store::after_reading(file.and_then(|f| std::fs::metadata(f).ok()).map_or(0, |m| m.len()));
+            s.state.lock().unwrap().hold_for_read = false;
+            s.read.send_replace(true);
+            send_held(&s).await;
+        });
     }
     {
         // (A new session: nothing else holds these yet.)
@@ -405,6 +401,15 @@ pub(crate) fn spawn(cfg: HarnessConfig, program: PathBuf) -> Result<(Harness, mp
     tokio::spawn(async move {
         while let Some(out) = rx.recv().await {
             match out {
+                // (What needs the conversation it resumes waits for its
+                // read, beside the rest.)
+                Outgoing::Frame(cmd) if needs_history(&cmd) && !*s.read.borrow() => {
+                    let (s, pending) = (Arc::clone(&s), Arc::clone(&pending));
+                    tokio::spawn(async move {
+                        let _ = s.read.subscribe().wait_for(|read| *read).await;
+                        command(&s, &pending, cmd).await;
+                    });
+                }
                 Outgoing::Frame(cmd) => command(&s, &pending, cmd).await,
                 Outgoing::Kill => {
                     stop(&s).await;
@@ -415,6 +420,87 @@ pub(crate) fn spawn(cfg: HarnessConfig, program: PathBuf) -> Result<(Harness, mp
         stop(&s).await;
     });
     Ok((harness, events_rx))
+}
+
+/// The commands that answer from the conversation a resumed session
+/// started from.
+fn needs_history(cmd: &Value) -> bool {
+    matches!(cmd["type"].as_str(), Some("get_messages" | "get_state" | "get_session_stats" | "fork"))
+}
+
+/// The conversation a resumed session starts from: what it needs of it, and
+/// where to read it again; `Err(None)` when it isn't written yet. `here`:
+/// its length here before Claude started.
+fn read_resumed(shared: &Shared, path: &Path, here: Option<u64>) -> Result<(Resumed, History), Option<String>> {
+    // (Read one message at a time: what's needed of it is small.)
+    let file = shared.local_file(path);
+    let mut read = Resumed::default();
+    // (How long it was, and whether its copy here is all of it.)
+    let (end, missing) = match (here, file.as_deref()) {
+        (Some(end), _) => (end, 0),
+        (None, Some(f)) => {
+            let missing = crate::mirror::missing(f);
+            (std::fs::metadata(f).map_or(0, |m| m.len()) + missing, missing)
+        }
+        (None, None) => (0, 0),
+    };
+    let saved = match file.as_deref() {
+        Some(f) => claude::each_saved_message_upto(f, end, &mut |m| read.add(&m)).map_err(|e| format!("reading {}: {e}", f.display())),
+        None => Err(format!("couldn't fetch {}", path.display())),
+    };
+    crate::store::after_reading(file.and_then(|f| std::fs::metadata(f).ok()).map_or(0, |m| m.len()));
+    match saved {
+        Ok(()) => {
+            let count = read.count;
+            Ok((read, History { path: path.to_path_buf(), count, end, whole: missing == 0 }))
+        }
+        // (A transcript here that isn't written yet: nothing before this run.)
+        Err(_) if here.is_some() && !path.exists() => Err(None),
+        Err(e) => {
+            tracing::warn!("the conversation Claude resumes: {e}");
+            Err(Some(e))
+        }
+    }
+}
+
+/// What was read of the conversation it resumed, under what came since.
+fn apply_resumed(shared: &Shared, read: Result<(Resumed, History), Option<String>>) {
+    let mut st = shared.state.lock().unwrap();
+    match read {
+        Ok((read, history)) => {
+            // (A reply since knows better.)
+            if st.context_tokens == 0 {
+                st.context_tokens = read.context;
+            }
+            st.history = Some(history);
+            let since = std::mem::take(&mut st.todo);
+            st.todo = read.todo;
+            st.todo.extend(since);
+            st.saved_model = if read.model.is_empty() { String::new() } else { format!("anthropic/{}", read.model) };
+            // Its window and where it compacts, as Claude said last time.
+            if st.compact_at.is_none()
+                && let Some((window, at)) = claude::known_context(&model_id(&st))
+            {
+                (st.context_window, st.compact_at, st.compact_model) = (window, Some(at), st.model.clone());
+            }
+        }
+        Err(Some(e)) => st.history_unread = Some(e),
+        Err(None) => {}
+    }
+}
+
+/// Sends what waited, once nothing holds it.
+async fn send_held(shared: &Shared) {
+    let held = {
+        let mut st = shared.state.lock().unwrap();
+        if !st.initialized || st.hold_for_read {
+            return;
+        }
+        std::mem::take(&mut st.held)
+    };
+    for line in held {
+        shared.write(line).await;
+    }
 }
 
 /// Starts (or restarts) `claude` with the session's current settings, into
@@ -564,7 +650,7 @@ fn start(shared: &Arc<Shared>, stdin_slot: &mut Option<tokio::process::ChildStdi
                     })
                     .collect(),
             );
-            std::mem::take(&mut st.held)
+            if st.hold_for_read { Vec::new() } else { std::mem::take(&mut st.held) }
         };
         for line in held {
             s.write(line).await;
@@ -1872,6 +1958,7 @@ mod tests {
             program: "claude".into(),
             generation: Default::default(),
             remote_config: None,
+            read: tokio::sync::watch::channel(true).0,
         });
         (shared, rx)
     }
@@ -2049,6 +2136,55 @@ mod tests {
         // A fork starts over, and its file goes.
         shared.state.lock().unwrap().start_over();
         assert!(!spill.exists() && shared.state.lock().unwrap().spilled.count == 0);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A long session resumed: what you send shows at once, while the
+    /// conversation it resumes is read beside it; what needs that read
+    /// (its messages, its to-do cards) waits for it, and has it whole.
+    #[tokio::test]
+    async fn a_resumed_session_shows_what_you_send_before_its_history_is_read() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("harlo-claude-resume-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // (A Claude that never answers: what's sent waits for it.)
+        let program = dir.join("claude");
+        std::fs::write(&program, "#!/bin/sh\nexec cat >/dev/null\n").unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = dir.join("s.jsonl");
+        let pad = "x".repeat(2000);
+        let mut text = String::new();
+        for i in 0..8000 {
+            let (kind, extra) = if i % 2 == 0 { ("user", String::new()) } else { ("assistant", r#","model":"claude-z""#.to_owned()) };
+            text += &format!(r#"{{"type":"{kind}","message":{{"id":"m{i}","role":"{kind}"{extra},"content":[{{"type":"text","text":"{i} {pad}"}}]}}}}"#);
+            text.push('\n');
+        }
+        text += r#"{"type":"assistant","message":{"id":"todo","role":"assistant","model":"claude-z","content":[{"type":"tool_use","id":"t1","name":"TodoWrite","input":{"todos":[{"content":"ship it","status":"pending"}]}}]}}"#;
+        text.push('\n');
+        std::fs::write(&path, &text).unwrap();
+        assert!((text.len() as u64) < crate::store::BIG_FILE, "(no history cache in a test)");
+        let cfg = HarnessConfig { kind: HarnessKind::Claude, program: None, cwd: dir.clone(), session: SessionTarget::Resume(path.clone()), extra_args: vec![], env: vec![], remote: None };
+
+        let started = std::time::Instant::now();
+        let (harness, mut events) = spawn(cfg, program).unwrap();
+        harness.prompt("next", vec![], crate::process::SendMode::Normal);
+        let shown = loop {
+            match events.recv().await.unwrap() {
+                HarnessEvent::MessageEnd { message, .. } if message["role"] == "user" => break started.elapsed(),
+                _ => {}
+            }
+        };
+        let messages = harness.request(json!({ "type": "get_messages" })).await.unwrap()["messages"].clone();
+        let read = started.elapsed();
+        let messages = messages.as_array().unwrap();
+        assert_eq!(messages.len(), 8002, "the history whole, then what was sent");
+        assert_eq!(messages.last().unwrap()["content"][0]["text"], "next");
+        assert!(shown * 4 < read, "shown after {shown:?}, the history read after {read:?}");
+        let state = harness.request(json!({ "type": "get_state" })).await.unwrap();
+        assert_eq!(state["model"]["id"], "claude-z", "{state}");
+        assert_eq!(state["todoPhases"][0]["tasks"][0]["content"], "ship it", "{state}");
+        drop(harness);
         let _ = std::fs::remove_dir_all(dir);
     }
 

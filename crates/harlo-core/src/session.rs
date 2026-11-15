@@ -509,6 +509,28 @@ fn keep_file(dir: &std::path::Path, file: &std::path::Path, data: &[u8]) {
     }
 }
 
+/// Where a project's "/" commands are kept, for an agent (and machine):
+/// a session that hasn't started its agent yet offers them.
+fn commands_file(dir: &std::path::Path, cfg: &HarnessConfig) -> PathBuf {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (cfg.kind.as_str(), cfg.remote.as_ref().map(|r| r.host.as_str()), &cfg.cwd).hash(&mut h);
+    dir.join("commands").join(format!("{}-{:016x}.json", cfg.kind.as_str(), h.finish()))
+}
+
+/// The commands last kept for this agent in this folder, else harlo's own.
+fn saved_commands(cfg: &HarnessConfig) -> Vec<SlashCommand> {
+    let kept = reports_dir().and_then(|d| std::fs::read(commands_file(&d, cfg)).ok()).and_then(|b| serde_json::from_slice::<Value>(&b).ok());
+    parse_commands(&kept.unwrap_or(Value::Null))
+}
+
+/// Keeps the agent's commands (as it listed them) for the next time.
+fn save_commands(cfg: &HarnessConfig, list: &Value) {
+    let Some(dir) = reports_dir().filter(|_| list.is_array()) else { return };
+    let (file, data) = (commands_file(&dir, cfg), serde_json::to_vec(list).unwrap_or_default());
+    tokio::task::spawn_blocking(move || keep_file(file.parent().unwrap_or(&dir), &file, &data));
+}
+
 /// The text a long session's kept rows hold at most.
 const KEPT_ROWS_TEXT: usize = 4 << 20;
 
@@ -939,7 +961,9 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
         status: if spawn_now { SessionStatus::Starting } else { SessionStatus::Loading },
         meta: SessionMetaInfo { session_file: session_file.clone(), ..Default::default() },
         queue: Default::default(),
-        commands: Vec::new(),
+        // (Those its agent listed last time in this folder: it may not
+        // start until something is sent.)
+        commands: saved_commands(&cfg),
         requests: Vec::new(),
         status_entries: Vec::new(),
         todos: Value::Null,
@@ -1178,6 +1202,7 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                     }
                 }
                 Aux::Commands(list) => {
+                    save_commands(&driver.cfg, &list);
                     st.commands = parse_commands(&list);
                     pending.push(SessionUpdate::Commands(st.commands.clone()));
                 }
@@ -1275,6 +1300,15 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                             let _ = tokio::task::spawn_blocking(move || crate::git::snapshot_turn(&dir)).await;
                             let _ = tx.send(Aux::Snapshotted(n));
                         });
+                        // The agent starts meanwhile (it touches nothing
+                        // before it's sent something); one that can't start
+                        // gives the message back now.
+                        if driver.ensure_harness(&mut st, &mut pending).is_none() {
+                            snap_turn += 1;
+                            pending.push(SessionUpdate::Preparing(false));
+                            give_back(&mut st, &mut pending, std::mem::take(&mut held), "Not sent");
+                            dirty = true;
+                        }
                     } else if let Some(h) = driver.ensure_harness(&mut st, &mut pending) {
                         // A prompt sent while idle must not carry a queue mode.
                         let mode = if st.status == SessionStatus::Busy { mode } else { SendMode::Normal };
@@ -1883,6 +1917,33 @@ mod tests {
     }
 
     use super::*;
+
+    /// A session that hasn't started its agent offers the commands that
+    /// agent listed last time in the same folder; anywhere else, harlo's
+    /// own (/plugin).
+    #[tokio::test]
+    async fn commands_are_kept_for_the_next_session() {
+        let _turn = REPORTS_TURN.lock().await;
+        let dir = std::env::temp_dir().join(format!("harlo-commands-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        *REPORTS_IN.lock().unwrap() = Some(dir.clone());
+        let cfg = |cwd: &str| HarnessConfig { kind: HarnessKind::Claude, program: None, cwd: cwd.into(), session: SessionTarget::New, extra_args: vec![], env: vec![], remote: None };
+        let names = |c: Vec<SlashCommand>| c.into_iter().map(|c| c.name).collect::<Vec<_>>();
+        assert_eq!(names(saved_commands(&cfg("/p/a"))), ["plugin"]);
+        save_commands(&cfg("/p/a"), &json!([{ "name": "compact", "description": "Compact" }, { "name": "review" }]));
+        let file = commands_file(&dir, &cfg("/p/a"));
+        for _ in 0..100 {
+            if file.exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(names(saved_commands(&cfg("/p/a"))), ["compact", "plugin", "review"]);
+        assert_eq!(names(saved_commands(&cfg("/p/b"))), ["plugin"]);
+        assert_eq!(names(saved_commands(&HarnessConfig { kind: HarnessKind::Harlo, ..cfg("/p/a") })), ["plugin"]);
+        *REPORTS_IN.lock().unwrap() = None;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// `/plugin …` is harlo's to run only when you sent it.
     #[test]

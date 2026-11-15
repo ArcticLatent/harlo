@@ -3196,6 +3196,10 @@ ApplicationWindow {
         ScriptAction { script: {
             win.check(win.chatText().indexOf("hello there") >= 0 && win.chatText().indexOf("You picked Postgres.") >= 0, "reopened, it shows its history")
             win.check(chat.session.title === "My Claude chat", "and its name (" + chat.session.title + ")")
+            // Not started yet (nothing sent): its / list is the one Claude
+            // gave last time in this folder, with harlo's /plugin.
+            win.check(chat.session.status !== "idle" && chat.session.commands.some(c => c.indexOf("review\t") === 0) && chat.session.commands.some(c => c.indexOf("plugin\t") === 0),
+                      "before it starts, its / list is Claude's from last time (" + chat.session.status + ": " + chat.session.commands.map(c => c.split("\t")[0]).join(", ") + ")")
             win.check(win.chatText().split('Background command "sleep 1; echo built" completed (exit code 0)').length === 2 && win.findContaining("<task-notification>", chat.transcript) === null, "the background command's notice, once, read back")
             if (chat.session.harness !== "claude") { win.check(false, "the reopened session is the Claude one"); win.summary(); Qt.quit() }
             else win.sendByKeys("one more") } }
