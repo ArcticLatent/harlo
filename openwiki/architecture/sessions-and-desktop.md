@@ -5,12 +5,16 @@ description: How agent protocols become shared live sessions, durable conversati
 tags: [architecture, sessions, persistence, desktop]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-15T14:13:54.485Z
+    at: 2026-11-15T20:21:41.902Z
 sources:
   - id: openwiki-source-eda83df6b22941ed75ede295
     resource: repo://crates/harlo-app/qml/ChatView.qml
   - id: openwiki-source-941abaef21aa1042a4672f7a
     resource: repo://crates/harlo-app/src/chat_session.rs
+  - id: openwiki-source-d0b354972196ec10b88a0e60
+    resource: repo://crates/harlo-app/src/image_view.rs
+  - id: openwiki-source-1d40907d1133795813cede65
+    resource: repo://crates/harlo-app/src/main.rs
   - id: openwiki-source-94aedfb131ba76701f9659c4
     resource: repo://crates/harlo-app/src/orchestration.rs
   - id: openwiki-source-22e4ea3417daf80d96080fd6
@@ -31,6 +35,8 @@ sources:
     resource: repo://crates/harlo-core/src/markdown.rs
   - id: openwiki-source-0603700f85841a0469cb7cb2
     resource: repo://crates/harlo-core/src/pages.rs
+  - id: openwiki-source-219837a34d3f25ea64fc9b95
+    resource: repo://crates/harlo-core/src/plugins.rs
   - id: openwiki-source-9c753af69e99af0009dee61f
     resource: repo://crates/harlo-core/src/search.rs
   - id: openwiki-source-4db2ffefa327cd504d9b5a66
@@ -43,9 +49,11 @@ sources:
     resource: repo://crates/harlo-harness/src/claude_run.rs
   - id: openwiki-source-3ef6360b45fa7169c94b35d3
     resource: repo://crates/harlo-harness/src/lib.rs
+  - id: openwiki-source-c0d5ffb66451b26dd04ddd63
+    resource: repo://crates/harlo-harness/src/process.rs
   - id: openwiki-source-07a69ae82a0e133d3de748f1
     resource: repo://crates/harlo-harness/src/store.rs
-generated: { by: "harlo", at: "2026-11-15T14:13:54.485Z" }
+generated: { by: "harlo", at: "2026-11-15T20:21:41.902Z" }
 ---
 
 # Sessions, persistence, and desktop presentation
@@ -90,6 +98,8 @@ Session metadata carries `cost_kind` separately from numeric cost, distinguishin
 
 Opening a saved conversation does not require loading every message into one vector. `harlo-harness::store::stream_saved_for` passes current-branch messages to the session one at a time. The session builds transcript rows and a context tally as messages arrive, and every 4,096 messages materializes rows and pages eligible older settled replies. The stream path works for Harlo JSONL and Claude's cached reader; when a remote session is opened, Harlo first copies what is available locally and reports any missing tail rather than treating an incomplete copy as a complete history.
 
+Opening a saved session fixes the history read at the file's initial byte length. Events arriving from a running agent meanwhile are retained and replayed over the loaded transcript, so a new prompt or reply is not lost or overwritten by the older history read. For a long opening, cached rows and then the latest rows can be shown before the full row list is built. Claude's harness likewise permits a prompt to be sent while resume history is being read, but history-dependent requests such as `get_messages` wait until that read finishes; an unreadable history is an error, not an empty conversation or partial substitute. Remote history uses the available local copy's size as its boundary and surfaces a missing-tail notice.
+
 The transcript deliberately keeps a short mutable tail in memory: only completed assistant replies whose tool results have arrived are settled. Settling releases duplicate source text, thinking, command arguments, and tool output when their rendered rows already hold what is needed. Paging then moves long row payloads and settled message blocks to a process-owned cache file, preserving lightweight row identity and metadata for ordering, search, and list updates. Page-out considers content beyond the retained row window and also pages older settled output when the latest retained text exceeds 8 MiB; each row payload must be at least 256 bytes to be written separately. A page-file failure leaves data resident in memory, so correctness degrades to higher memory use rather than losing transcript text. A paged row is read back when shown; the desktop model keeps at most 160 fully materialized rows in its own LRU cache. Page files are removed when their last references go away, and startup cleanup sweeps files left by dead processes.
 
 The context/activity report is accumulated incrementally alongside transcript loading. It keeps totals and the latest 300 activity rows, while its action log retains the newest 2,000 actions but still counts all calls. Tool calls are joined to results by call ID, so pending actions can be shown as still running and failed reads/edits are removed from the aggregate path sets. Action classification normalizes common names across Claude and Harlo tools and excludes todo updates. Markdown export also streams saved messages through two passes: one locates tool results, the next writes user/assistant turns and compact tool summaries without retaining a whole rendered export in memory.
@@ -108,6 +118,12 @@ Code splitting removes only the separator newline from nonfinal pieces. The fina
 
 For the phone-specific display and copy limits, follow [phone transcript windows](../integrations/phone-and-relay.md); desktop row splitting and transport truncation are separate concerns.
 
+## Plugins and image viewing stay at the app boundary
+
+When a user's own prompt starts with `/plugin`, `/plugins`, or `/marketplace`, the session driver intercepts it rather than passing it to the agent. Core runs `claude plugin …` in the session's working directory, locally or through the session's remote host, and returns a transcript notice with bounded plain-text output. A successful install, remove, enable, disable, update, or marketplace change restarts the agent once idle so Claude Code can reload plugins and Harlo can refresh its plugin-provided skills and slash-command list. Listing and informational commands do not trigger a restart. Agent-authored text that happens to begin with these words is not intercepted: the prompt must be marked as typed by the user.
+
+The desktop image viewer is separate from phone serialization. `ImageView`, `ImageThumb`, and the `Images` singleton decode on worker threads and share decoded pixels through a bounded cache; views upload pixels for GPU rendering, so zoom and pan do not repeatedly decode. Large stills use a screen-sized copy until zoom requires the original pixels, while long animations stream frames as they play. Closing the last image view drops the full-image cache; thumbnails have their own memory and disk caches. These cache budgets limit retained decoded images, not all process memory.
+
 ## Persistence is deliberately split
 
 | Data | Owner and storage |
@@ -116,8 +132,11 @@ For the phone-specific display and copy limits, follow [phone transcript windows
 | Harlo conversation history | Agent JSONL files under `$XDG_DATA_HOME/harlo-agent/sessions/--<abs-path>--/` |
 | Claude conversation history | Claude's own session files, read by the Claude adapter |
 | Active transcript and subscriptions | In-memory session driver and shared handles |
+| Last-listed slash commands | Small cache keyed by agent, remote host, and working directory beside the session report cache; used while an opened session's agent has not started |
 
 The database is not a replacement transcript store. The harness store builds sidebar session summaries from session files, reading only the head and tail of large Harlo logs. Display titles prefer the saved name, then the first prompt, then an untitled placeholder. Database initialization enables SQLite WAL mode.
+
+Harness children are isolated into their own process groups. Ordinary stop closes stdin and allows up to three seconds for exit before killing the child; desktop shutdown sends `SIGTERM` to tracked groups, waits briefly, then sends `SIGKILL` to remaining groups. This also cleans up descendants that an agent launched, rather than leaving them detached when Harlo exits.
 
 When diagnosing missing history, first separate discovery of the agent's file from the app's project/visibility metadata. When diagnosing stale rendering, compare the reducer's rows with the subscriber snapshot before changing the protocol adapter.
 
@@ -141,6 +160,7 @@ Approval messages marked as Markdown are rendered through the core Markdown rend
 
 - `finished_wiki_runs_have_a_shelf_of_their_own` checks separate Wiki shelf grouping and expansion.
 - `a_message_that_couldnt_be_sent_comes_back` checks launch-failure recovery with only a watcher attached, first-composer delivery, and no duplicate backlog for a later composer. `a_file_not_readable_now_keeps_its_hits` checks failed-read preservation, retry throttling, and successful replacement.
+- `a_message_sent_while_a_long_session_loads_shows_at_once` checks that a prompt sent during saved-history loading is visible without waiting for the file scan and is retained with the loaded conversation. Claude's `a_resumed_session_shows_what_you_send_before_its_history_is_read` checks the corresponding harness boundary and that history-dependent state is complete before it is returned.
 - `every_unsent_message_comes_back_with_its_files` checks ordered recovery, repeated text, attachment-only sends, and phone-origin text. The QML stop-before-send scenario also checks preservation of a newer draft and that cancelled messages never reach the model after the delayed snapshot finishes.
 - `a_harlo_session_is_read_on_while_it_goes_on_and_whole_when_it_branches` covers append, partial-line, branch, and rewrite behavior; `an_index_from_before_its_row_table_still_forgets` covers old-index migration and deletion.
 - Markdown's long-code/table and streaming-cache tests, together with `a_long_code_block_is_rows_of_one_card`, verify continuation boundaries and whole-block copying.
@@ -148,6 +168,8 @@ Approval messages marked as Markdown are rendered through the core Markdown rend
 
 - `session::tests::demo_run_reaches_subscribers` exercises idle → busy → idle, resulting user/tool/code rows, and equality of a late subscriber's snapshot with accumulated deltas.
 - `idle_session_restarts_when_used_again` verifies that an idle agent can stop to reload configuration and restart on the next prompt.
+- `plugin_commands_only_from_you` checks that only explicitly user-typed plugin commands are intercepted. `crates/harlo-core/src/plugins.rs` also tests command parsing, notices, output cleanup/bounds, and whether a successful operation changes installed state.
+- The image viewer's worker/cache behavior is implemented in `crates/harlo-app/src/image_view.rs`; phone picture serialization has separate size/format coverage on the phone page.
 - Harness framing tests cover chunk reassembly and rejection of out-of-order chunks.
 
 Run a focused test without the optional dictation dependency:

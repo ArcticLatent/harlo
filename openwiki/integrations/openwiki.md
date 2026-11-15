@@ -5,7 +5,7 @@ description: How Harlo integrates native OpenWiki-format tools locally and over 
 tags: [openwiki, documentation, mcp, remote]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-15T14:13:54.485Z
+    at: 2026-11-15T20:21:41.902Z
 sources:
   - id: openwiki-source-9cb86229670695fb5654cb21
     resource: repo://crates/harlo-app/qml/SettingsDialog.qml

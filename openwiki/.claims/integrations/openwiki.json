@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:a6583c46e2e0a72d58b932df1dd10b2911e4448bf7b78f6751dcefb305bf513f",
+  "pageVersion": "sha256:91b2745f4d1e667eca1599b5c506f2795ae923b1f787c14159912c6bc5c64b3e",
   "claims": [
     {
       "id": "claim_88f4c33cb3f943fba115f281cce0ba3e",
@@ -201,11 +201,11 @@
       "statement": "Settings stores separate OpenWiki writer profiles for create and update, each optionally specifying an agent, model, and thinking level; saving one profile merges with the current stored setting and refreshes both profile editors.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-app/qml/SettingsDialog.qml#L203-L243",
+          "resource": "repo://crates/harlo-app/qml/SettingsDialog.qml#L204-L244",
           "version": "repo-lines-v1:sha256:f679d2ed251b5ba7501d88cf1bc37a2817b7e4f50a439441cec3c91e3e892d4a:eyJzZWxlY3RlZExpbmVDb3VudCI6NDEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNkOTFmZGFlYTExMzVkMzA2NzhhYTY1Mjg4NjRmZDVhYjdiYzg1NjAzODA3MGVhOWI1NGY2YWZmNDFhNDRkMDMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU2MGQ0YTk5OTdiOGMxNjE5MzU0ZjNiYmMwM2Q2MjZlZGYyMjQzZTRjMjBmZmQ3ZDM0NDExYTE4ZDgwZGQwMDgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImVjYTg3NTU5ZjU1OGQ4MDY3ZDkzZDU3MDVjY2Q0NzA1NDJmMTYxYzNmOGRmM2ZhYjNlMmMyNGRhZDZhOTg3YzkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijg0M2RhMTQ2NWVkMDFjM2YxYjc0OTkxYmZmYmQwY2Y3NDczYTM2Njk0Y2I3M2U2MjAwOWRiNmUwMzQzNjdlMDQifQ"
         },
         {
-          "resource": "repo://crates/harlo-app/qml/SettingsDialog.qml#L2165-L2184",
+          "resource": "repo://crates/harlo-app/qml/SettingsDialog.qml#L2108-L2127",
           "version": "repo-lines-v1:sha256:97bf197fb0797bae8aad7be81bd1b97e5c6c1fab00240ed07ff49b16d9426d4b:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg0YmRiMmRmYTRhZWZjY2Y1NTY0MDJiNTg1OTUzY2FhYWJmYjI4NmI5YjZmYWRiNDlhNTBhMDM2OWRmYzc5NDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2YjA0NDkxNDY5NzIyZTgzNjNhOTRlNDA0NDUzOGUwMTNhMmEyMTdlMzZiMWU1NjhiYTYwYWNiN2I0YzhmMmUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk5OWJkZWZlZWFjYTYzNDBlMDI5MGRjODZlODg5Yzg5ZDVlMTg5YWE1YmE0NGI1ODViM2I3MDczNGY0YTYyZDgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImExZTUyYmJjNmVjMTY3OGE0YTVmMWM5YTQxYmMyOWRlMjlmNGYzZDVjMTU5ZDMxOTBiOWVhZWM1ZTFmMTQ3YmUifQ"
         }
       ]
@@ -227,6 +227,6 @@
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-15T14:13:54.485Z"
+    "at": "2026-11-15T20:21:41.902Z"
   }
 }

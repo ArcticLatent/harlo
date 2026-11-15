@@ -5,12 +5,14 @@ description: Start building Harlo and find the right wiki guide for agent execut
 tags: [quickstart, navigation, build, architecture]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-15T14:13:54.485Z
+    at: 2026-11-15T20:21:41.902Z
 sources:
   - id: openwiki-source-651d1fb6c9e49916a916ab51
     resource: repo://Cargo.toml
   - id: openwiki-source-f317ee207e1653d2033c81a4
     resource: repo://CONTRIBUTING.md
+  - id: openwiki-source-d59b76b96eb4918e43784eab
+    resource: repo://crates/harlo-agent/src/skills.rs
   - id: openwiki-source-9cb86229670695fb5654cb21
     resource: repo://crates/harlo-app/qml/SettingsDialog.qml
   - id: openwiki-source-22e4ea3417daf80d96080fd6
@@ -21,6 +23,8 @@ sources:
     resource: repo://crates/harlo-core/src/db.rs
   - id: openwiki-source-4af2dd3e4a0acae243d3b65c
     resource: repo://crates/harlo-core/src/openwiki.rs
+  - id: openwiki-source-4db2ffefa327cd504d9b5a66
+    resource: repo://crates/harlo-core/src/session.rs
   - id: openwiki-source-3ef6360b45fa7169c94b35d3
     resource: repo://crates/harlo-harness/src/lib.rs
   - id: openwiki-source-07a69ae82a0e133d3de748f1
@@ -29,7 +33,7 @@ sources:
     resource: repo://crates/harlo-wiki/src/lib.rs
   - id: openwiki-source-eb7f694aac7969d92da614ab
     resource: repo://crates/harlo-wiki/src/run.rs
-generated: { by: "harlo", at: "2026-11-15T14:13:54.485Z" }
+generated: { by: "harlo", at: "2026-11-15T18:32:57.877Z" }
 ---
 
 # Quickstart and task routing
@@ -60,6 +64,7 @@ For the phone client library, `swift test --package-path ios/HarloKit` exercises
 | Session context summaries, bounded action reports, and Markdown export | [Sessions and desktop](architecture/sessions-and-desktop.md) | Shared context report/export → desktop, phone, and action-log views |
 | Finding earlier work before launching helpers | [Prior-session discovery](workflows/plans-and-project-changes.md#finding-prior-work-before-starting-a-helper) | Background history search → workspace-scoped results |
 | Tool execution, approvals, sandbox access, resume, subagents | [Agent execution and safety](concepts/agent-execution-and-safety.md) | `harlo-agent` loop/RPC/tools/sandbox |
+| Install Claude Code plugins from a session, or use plugin-provided skills | [Sessions and desktop](architecture/sessions-and-desktop.md#plugins-and-image-viewing-stay-at-the-app-boundary), then [agent execution and safety](concepts/agent-execution-and-safety.md#skills-from-claude-code-plugins) | Session-host `claude plugin` command → agent skill discovery |
 | Token budgets, broken-stream spend, unknown or partly known costs | [Agent accounting](concepts/agent-execution-and-safety.md#usage-and-provider-capabilities) | Shared request usage and provider pricing |
 | Shared plan edits, helper worktrees, step commits, bring-over clashes | [Plans and project changes](workflows/plans-and-project-changes.md) | Core plan/git plus desktop orchestration |
 | Remote files/sessions, helper deployment, unavailable local models | [Remote machines and model servers](integrations/remote-machines-and-models.md) | SSH host routing, engine helper, provider configuration |

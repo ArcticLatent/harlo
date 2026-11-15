@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:a5a2f4c234a881230ebec0e2e9655746a2ffe05e75ba8d4017d7c1b3afc31366",
+  "pageVersion": "sha256:4ab6720304886ca0d939caccac1f2a43053034d2cbf941e0b365e2cfdd69b18c",
   "claims": [
     {
       "id": "claim_f2e5edb5ea144848b99636cceee494eb",
@@ -547,10 +547,46 @@
           "version": "repo-lines-v1:sha256:81154013a095dcb59d74499f232a8e957334c2be1c7100a1060944a2f474047a:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkyYjVlZGY1OTQ5Y2ZlYTY3ODIyY2Y2OTExMzIzNjNkNjhkNmYxZTE2OWY1ZTBkNGY3YzE0ZTVmYTFlNmQ0ZTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRkMzkyMTQ3NDg3ZTVjODJmYmU1YzNlYzQ2NmYwOTlhNjRhZjg2NDMwYmI4ZDExMGM5YmZlZWZhZDFkN2RlNmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk3Yjg3MTgwMmIxZjA3NTQzZmEzMTY2ZWQ1ZGEyZGZjOTI3NmRhNzA4ZjQwNTAzMDMyMWZhYjY2NDRiYWRmZjIifQ"
         }
       ]
+    },
+    {
+      "id": "claim_92ad9202779d41b89e1aad968417ec05",
+      "statement": "Harlo agent imports enabled skills from Claude Code's installed user/project plugins alongside normal skill folders, applies settings-based disablement and project applicability, deduplicates matching plugin skills against ordinary skills, and exposes skills through bounded instruction listings and explicit `/skill:` prompt expansion.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-agent/src/skills.rs#L113-L153",
+          "version": "repo-lines-v1:sha256:26a80a4005b889512b17c8fee99a0d83de9c43acb6ca638e1b9af35f16d81f6d:eyJzZWxlY3RlZExpbmVDb3VudCI6NDEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgxZjQyMjg1YjYzMzA1MDJkNGVmZTg5ODlmYjJkMDUwNzk2MDlmMWIzNTYzMDU5NjU5OTkwYzY4MDlhZjc2NmUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ5ZjI1NDFjMThiYjVmZTIyNDE5Zjg2NDVmMGI5NWU0NTY5OWQ3ZDBlYzU0Y2I4MmZkYjlhM2VkZjc1ZGM4MzkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY4ZDdiNjM0ZjcxMzZkZGE2Y2U0NDI4MzI4NTFiZWY4NTQ4MDRlMjAwM2Y3ZWMzMWZkOGNkMGVkZDM3NzkwMmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjczNTU2OWE4NTk3NDYwZWY3ZWI0ZmYzMmQ2MTdlNTk1NWUxYzQ3NTcxMTgyZWMwODdlMmFkMGQ4MWM3MmUzYjQifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-agent/src/skills.rs#L188-L225",
+          "version": "repo-lines-v1:sha256:bfdbd66cb6ab3d4bf10920a591c3700ad81748bc349713b71c1a0cd382da4875:eyJzZWxlY3RlZExpbmVDb3VudCI6MzgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU4YzlkMmYyMzI0Yjc1MjdjYWY3ZGJkODAxNWU2MjllYjk2Y2QxMDJjNmU5MTFkNzhjMjdlZDFhZmQwYzM1NzIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjFmODgyMzAxOGJhMTJkMWI2YjZkNGUxYjNkNjRkOTA4ZjRiNjc3ODJmYzNjMjlmOGE5NThmMjM2M2ZlZTYzNGUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQxMzYwZTc4OTM3Mjc0OTA3NjlhYzM4ZTYxMjRhNzZhMGIyOGZkZGJiZjFlYTM1ZDJiOTk4MDYzMjNiMWZjODUifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-agent/src/skills.rs#L64-L110",
+          "version": "repo-lines-v1:sha256:5d56ac4ec77a695c38ab6688bd4edba018deef8a9c205b13090ae5bc0a5e9428:eyJzZWxlY3RlZExpbmVDb3VudCI6NDcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk2ZGE2ZjYyNTk4Nzg1MTVmMzE5YTZhNTMyYjNhMzM3YzFmNDkyNDY3OWY2M2U4YWEyMjllMWMzZDY0NDE2MGIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjEzOTc2NzhmNWExMWViOWZhYTIyNTVhYzBlNGVmM2FkZDEyZmExNzk4ODVjMGM1NTk3MTQxNmZhZmRmOTE2OTMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJkOWQyODQ2Zjc1YmVhNTI5NWViZjdhMWUyMDUzODA5NTZhYzIzZTU0OWZhNGE0NWEzYzNjNzU4NjU2NDQ3YjgifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_6381c6e6212a474eb8d7a7199fed9b99",
+      "statement": "The Claude harness converts completion events for detached Claude-managed shells and subagents into retained custom transcript notices, formatting a command-only stopped-shell summary with its command and stopped status. This adapter path is distinct from Harlo's in-process task subagents and desktop helper sessions.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-harness/src/claude.rs#L198-L212",
+          "version": "repo-lines-v1:sha256:47570a8099a23abbca72c1f0776c8a7dbcde2461e7ffc1c980951331872030a1:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgzNjhjYjdkNGNlOWU3N2RjMGJkNWZiY2JkYWVmOGExYjM4Zjg4MWNjY2JiZGUyNTRmMjc4N2RiYTlkZDc4ZDUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYzN2FhNjVjYmUzNmU2NGE0ZGIwMzk1ZmVhNDZiYjA4ZjNmYzAyZTRlNjcyN2MyZTNhOThhNjI4N2FjMTMxMWMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJjZGMzMmIwYzM3NjY1MGNiODY1ZGQ1YjgyZjY4ZjFhYWQwZTBlOTM4NjdlNDU3NDgwMmI3MzM5NjYwMGU3YjIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjE5ZTc2MzU1Y2YxMTk5NDgwYzNmOTk4MzZiMTQ4NmM4NDFkODkxZmFhZDkwNGM2MDhlMDkzMDIyZDM3NTdhZWUifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-harness/src/claude_run.rs#L1784-L1810",
+          "version": "repo-lines-v1:sha256:eca4ded9e199547dad5f2841e4454f7de162cb8524012856c5c58b962b945def:eyJzZWxlY3RlZExpbmVDb3VudCI6MjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZmNjRlOGRmNzdiZGQyNGUxMjkwZjY5MzRlNTQ5YWRiOWU4YzgyODU0NjZlOTA3OWM0YzI3MWFiMTZkNzA0MGEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRmODBmZGE4Zjc0OGNlNGY0ZDNmYmI4ZGIxOGRmMDIwMzNmYWM0YzRiM2M2NmIxYTZkOTNjZjk2NjZlNmZlMDciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQxNGExYzJjMzQ2MTVkNTZlNTgyNmU4ODQ3NTE2M2I3ODNjNzhiOTg5MTc3NTM4MTFkYWEyZDZlMTI2NGNjZWIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQ4YjdhNjEwMTVmMzJkMjc2ODc0YzU0NzUxNjE5MDYyYzQ3ZTY0NmU2MWVmYmZlZDU2NWNkZDg5MTM4MmJlNDUifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-harness/src/claude_run.rs#L2279-L2320",
+          "version": "repo-lines-v1:sha256:ab7ec02485f9cde15d6710f68a60639015e9ef42e393287edc6c88287f95be34:eyJzZWxlY3RlZExpbmVDb3VudCI6NDIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBkNGVlZjhjYmZiYTA3NTZlNTgwNmE3NmZlMDMxMTJjYzc1YWQ0M2YyMWRjMGExYzYwYTVlMDcxMjY3NzY0Y2QiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE1NjA0NTFkY2MwZTEyMGMxZTlmYmI4YTdhYWVmZTQ3NTcwYWY2OWY3MzFiZDUwNTQ3ZmViMDI3ZDU2NzRkMGIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE3YTU4MDA3MGY1NTVjNGE5NWI4M2E2ZTA0NTk1NzVkODg1NGQ1YzEzODQ1MGJkNDMwZjE5NmM2NzcwNTcyYTkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImEwMGRiMDQwZjI5MDliZjk3OGZmMGE5NTZhNTVlODNjNjUzNDE4ZGU2YmI2OGY4MDQxZGE5NzZmOGQzZDIyNzAifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-15T14:13:54.485Z"
+    "at": "2026-11-15T20:21:41.902Z"
   }
 }

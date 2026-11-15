@@ -5,7 +5,7 @@ description: Device authorization, replay-resistant NaCl channels, session subsc
 tags: [phone, ios, encryption, relay, apns]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-15T14:13:54.485Z
+    at: 2026-11-15T20:21:41.902Z
 sources:
   - id: openwiki-source-3e5d9e2412052022c04ac0ec
     resource: repo://crates/harlo-apns/src/lib.rs
@@ -35,6 +35,8 @@ sources:
     resource: repo://ios/Harlo/Harlo/ActionLogView.swift
   - id: openwiki-source-2a9076f4b9c96d8d098111b9
     resource: repo://ios/Harlo/Harlo/SessionView.swift
+  - id: openwiki-source-d106fff79d94df591057ff07
+    resource: repo://ios/Harlo/Harlo/TranscriptViews.swift
   - id: openwiki-source-7d63dd608fb68281fc2c1857
     resource: repo://ios/Harlo/Harlo/WikiViews.swift
   - id: openwiki-source-8c23df65e9f6a257e8c67c14
@@ -49,7 +51,7 @@ sources:
     resource: repo://ios/HarloKit/Sources/HarloKit/Visuals.swift
   - id: openwiki-source-e36aee686debea4d83dc020e
     resource: repo://ios/HarloKit/Tests/HarloKitTests/HarloKitTests.swift
-generated: { by: "harlo", at: "2026-11-15T14:13:54.485Z" }
+generated: { by: "harlo", at: "2026-11-15T18:32:57.877Z" }
 ---
 
 # Phone pairing, encrypted transport, and relay
@@ -82,6 +84,8 @@ Phone requests carry `{id, op, …}` and receive correlated replies; asynchronou
 The workspace bridge owns actions requiring desktop application state, including making a session live without switching the visible tab, starting one, renaming/archiving, and sending with plan-mode context. Its watch channel publishes the session list only when it changes. See [sessions and desktop](../architecture/sessions-and-desktop.md) for snapshot/delta semantics.
 
 The phone's **Action log** is a separate read of the shared session context report, not a parallel execution trace. Harlo classifies tool calls from their names across agent protocols, joins results by call ID, and returns the newest 2,000 entries with totals and aggregate changed/read paths. The iOS view presents newest-first filters for commands, changes, and reads; file targets open in the file viewer and command targets copy to the clipboard. Each new turn refreshes the view. The same session driver also exposes Markdown export through a separate `markdown` operation.
+
+Background-command completion notices use a separate transcript row on iOS. The collapsed row shows the result label and first command line; tapping expands it to the complete command and output with text selection. Failed commands are highlighted as errors, while stopped commands receive a stop icon. This is presentation of a session notice, not an additional execution or action-log source.
 
 If Stop arrives while a new turn is still waiting for its undo snapshot, an `unsent` event returns the held messages' original words and inline photos. Desktop-only file attachments are not converted into phone attachments. HarloKit routes the event by session key, decodes valid base64 photos, prepends returned text above any newer draft, and queues photos for the composer. The SwiftUI composer puts returned photos before those selected meanwhile and clears the queue; a photo-only return leaves draft text unchanged.
 

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:e381b2260841767a85b5f1198b22843afe590fc1f68f9e4d9f4618367e96ae8d",
+  "pageVersion": "sha256:f072b3239e9a61879ae2a54bc7bf652a7304ca884fbee5787e013562dbdd97dd",
   "claims": [
     {
       "id": "claim_7a207a8ae4594d9ba376628ea349a6b4",
@@ -175,10 +175,58 @@
           "version": "repo-lines-v1:sha256:98f082b2134986015c073cd5aa78407f6209f35abe859f95debef0d719b03e2b:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZjNmMmZjOTkwNjRjMzE1OTRkZTQ5NmYzMGNlNTA3YzA2NmMyNmZhZjZmNzk2MDkzNDZmNWFlZTM5ODhiODZlOSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZDE1MmU5ZDQzZGY0NDQ3ZDk0ZTg4ZjgzM2JkM2Y4YTc2OTZhMWY0ZGY2NTgxNDUxZTAwZTIzNmRiNWUwOGZjMSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiODM1MDA3ODY1N2ZjMjEwNDUwOGMxOGM1ZjE1MDA4YjQ5ZTZkOWVmYmZjYzI5OTBhYjcwODhmMWExMjk0ZjIyZCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYzRmN2JmOTA2Mzc5NGMwNDg0ZWIxMTRmYjI2M2ZlNGI0MmE1MDgzOTBiMzgzZjVhZDZiZTA5ZGFkYzFmODU5OCJ9"
         }
       ]
+    },
+    {
+      "id": "claim_2392d4681db44a2b8edf570595ecc2a8",
+      "statement": "The Markdown exporter tests compare streamed output with whole-history output and verify that file exports spill text waiting behind late tool results after their memory threshold, including a stress case with a late result.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/export.rs#L605-L700",
+          "version": "repo-lines-v1:sha256:fae38a80ddf7fcb2bd359d87834aee6535a847f8bb01c992b617cb746db48bbe:eyJzZWxlY3RlZExpbmVDb3VudCI6OTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFiOTk2MzkyM2ExNWM2YjQ1ZjkwNTZhMmFjMWFhMzI0YTQxZTBkNGNlOGVhOTg2NDY4MDUyMTQ0YzgyYjYyZmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNiN2JhNjU0ZDM0NzE1NDU3MThjMzM3MDc0ODEwNjZiOWNkNDMwYTAyNDdmOTE4OTc0Nzc1ODFjNDVmMGYwMDQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImEwMGRiMDQwZjI5MDliZjk3OGZmMGE5NTZhNTVlODNjNjUzNDE4ZGU2YmI2OGY4MDQxZGE5NzZmOGQzZDIyNzAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQzNmU0NmU5NDExMmQ1YTdmMGM5MzMxM2RhMzdiMGQyZTQ0YjhlNDhjZmI1OGE2Y2U4ZTg5YmNiOTg1MTJhYmUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_5a811b23998d41148d6d37d4c2935cc9",
+      "statement": "Core session tests ensure that plugin-command interception is limited to messages marked as typed by the user, rather than agent-generated or otherwise untyped messages.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/session.rs#L1990-L2023",
+          "version": "repo-lines-v1:sha256:9439ab79ec7d1076d5ac4c4397cf2bf070e24577d8cfbd61afbd365e14939505:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQyYjYzZDEwZDA3OWJlNWQ4MDY0NTFlN2Q5ZGZmODNiYzBlZmE4MGQyOGY5NWQ1MGRjNzFkYTA3YzRhYjQ1ZTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIxZGRiMDk4NGNiZjQ5MzkzYWIyNWU0NWQ1OGMwMmY1MWIyZTQ0MmI1MWY3YWZhNjcxYjBkNWY0NzZmNzBiNGUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImFjZTljZGEyYTcyNzFlYWYzYjU0NDUwNjVlZWU0MmE1N2Q3YzJjZmE5NTRiYTdjMTkzOTQ2OTllOTVjN2M4MzciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJhYzEwOWMzNzNjNmI4Mzk2YzFiZjM3NmVhZTExZWZjNWVmY2UwYjk2NDAwYWRmNzkyZDU5NDM1NGM2YTkyZTEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_f40b8ec0ad314b2fb3ef0d8d6f29f11a",
+      "statement": "Agent skill-discovery tests cover Claude plugin skill installation scope, project-specific enablement overrides, added skill directories, matching-skill deduplication, and explicit `/skill:` expansion.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-agent/src/skills.rs#L266-L299",
+          "version": "repo-lines-v1:sha256:fe07c159b61fc0a7307394369abc4838f8ac1436dc552fcc9a1157f6ce9c0646:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMwMzhhODcwZTI1OGRhMGU0NTg5MjBiN2ExMzdlZjMwZGU5NWRhZjYyMzdjNTgxNzQ2YTU1NjkyOTZjYTQzZmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImExODljMDEyZmMzZDU2ZmU3ZWEwNzU3MGMzZTg1MGE1ODVkZTBjOWY0ODljODcwOTcyOThmZDNiYzk5ZjRiNDAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImEwMGRiMDQwZjI5MDliZjk3OGZmMGE5NTZhNTVlODNjNjUzNDE4ZGU2YmI2OGY4MDQxZGE5NzZmOGQzZDIyNzAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoyLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjM3OTRkMDJhODEyMTk0NGQxNzZkMjY1ZTliYjljYzU5ZjZhYjg5MGJjYWRmOGFlZmRlYmRiYmI0ZjJlYTg0NDQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_ae2643fcef6547f596da5596f577f9b6",
+      "statement": "Focused regression tests cover session events arriving while a long saved transcript loads, a Claude prompt appearing before resumed history finishes with history-dependent responses waiting for completion, and harness shutdown killing a process group with descendants that ignore SIGTERM.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/session.rs#L2788-L2840",
+          "version": "repo-lines-v1:sha256:3ce922d44c4784f0baf84c404595b20a6c2ebf8d8da5383188f62338233abaea:eyJzZWxlY3RlZExpbmVDb3VudCI6NTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkxY2M0MDY4N2QyNDRlOWRhZjkxY2VkNDY1MjMyNjU2OWE0ZmI2ZGZjODFkMDNmYmU3MjNhNWVhM2NjYmU5ZGYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ0MGU4YWQ0Yzc5NjEwZDc1ODJiYWUxNGRhNDY2MWU4NjhmYWJkMmI1MTk4ZTI4YzdlMTRlMzQyZDI2NzQ3NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjlkYTNhNjlkYTBhMGI0ZTdkMzAyMGJjM2RlMTIzN2NmM2IyNjRjZWY5YjI1M2ExZGRkODA0YjA1NWUzYjgxYmQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjUxZmZlNDI2NjZiY2M4NzY3N2M5ZjY3YTk0MDM4MTEwNjFhMzEzOTUxYmUwZTcxNzViOWI2N2EzN2ZkNTgzNzEifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-harness/src/claude_run.rs#L2170-L2220",
+          "version": "repo-lines-v1:sha256:11f8f352f24be31fd1f2e2360617f1eff223ccc6d677169da70aa03d4c16f5ca:eyJzZWxlY3RlZExpbmVDb3VudCI6NTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkxY2M0MDY4N2QyNDRlOWRhZjkxY2VkNDY1MjMyNjU2OWE0ZmI2ZGZjODFkMDNmYmU3MjNhNWVhM2NjYmU5ZGYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkyYjVlZGY1OTQ5Y2ZlYTY3ODIyY2Y2OTExMzIzNjNkNjhkNmYxZTE2OWY1ZTBkNGY3YzE0ZTVmYTFlNmQ0ZTUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQxMzJiMzIxNmRkZjUxYWE0YmU5MDY5NWJjOWYwYWYzMmQ0ZjgzYjU2ZDc0MDQzYWJkOWI5MmU1ZTE1MWJjYzciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNlMTYyMDlmN2ZhZjZjNDhkMTliODk0Njg4YmE1YmMwMTExZjhlYWIwOGM2Mzk2NWQyMmIwM2VjNTIxNTIzNTUifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-harness/src/process.rs#L570-L590",
+          "version": "repo-lines-v1:sha256:feb93f9321490d53fee2c5e0e67aad6c3f7e08e6701b7b93b3f9ce633910d47b:eyJzZWxlY3RlZExpbmVDb3VudCI6MjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI1Y2Y1ZmMyM2YyYTZkMjNjM2VhNTFlNzJmNWU4OTZjNzU1NWZiYWEwNWNkNWIxZWExODJiZjk2MThhOGU4MWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE4ODI3MmMzYjRjZWZiODc2NjNiNmZhYmUxNmJkZTliZDViMzBiMjY1ODgxZjIxZjdkNGJlZWJiNDNkNTU0OWEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImFjNGZmMjdkMzBlY2RhYmFhMWUzMWMxYjkyY2FiOWQzZjAxNTc3Y2Q0MWNjMDUxYWRjZGUwNTA5ZDJmMDRkNWEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhlYzk1NjZhMjVmMGM5Y2FhOTE5YWQyMmJlM2FkYWRhMzAyNGFhNTRjZjRkZWIwOGY4OTU5ODgyMjg2OWM2YmUifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-15T14:13:54.485Z"
+    "at": "2026-11-15T20:21:41.902Z"
   }
 }

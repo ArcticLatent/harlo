@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:bee0811baffee78ba0a5db31b3cd7c4ffd6e0602cd93a9bdb0d08c49cef15c2b",
+  "pageVersion": "sha256:c8b24595a0468f29af412d0e759e69ffbb183f7620c963153c03da4d739d7d22",
   "claims": [
     {
       "id": "claim_6d0f3938d02847d89bfea69668b3d4ca",
@@ -187,15 +187,15 @@
           "version": "repo-lines-v1:sha256:8bb7e31a006f1793c2c970bea76172bae65614cab9ff8c75538748caf530f9ff:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFmMTQzZWE0ZTk0YzZkMTNmODUyZjkxNDI5MWQxNzEzYjU0NDNhYjljODliN2NjZTY4MDc4MWYwMGVlM2FkZWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjZkOTVlNjIyOGEyMjk0MzhiNTViYjFmMWE4OGI3YTI0MGRhNzIzNTNiN2E1YTRjMTgwMTg0MjQwMzdlOGJiZDUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJiZjRkODE3OTg2OGJkYmEzMGYwNDcyMzkzODBkYjZmMzI2NzI4OGZmYmZmYTQ3NDEyZTI5MGNlOGQ0ZDdiMDgifQ"
         },
         {
-          "resource": "repo://crates/harlo-core/src/session.rs#L828-L843",
-          "version": "repo-lines-v1:sha256:098c2d0c35370432233fd646c8b0041bfdf537622cb5740eba76f4aa5d977925:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNhNjdhMjFjZTQ4OWFmMDMwYWQxNTA3MWMxOGNiYzBiMjdlNGUxOWQ1OWJhMThhNWE1M2MxYWY4MWU2NjMxYjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijc3ZTA5Mjg4NDdiZGZiY2NhMzBmNTdkOTdkNWY2ZjI4YzFmODJjYzAxYjM3ZmQ5ZjA0MzAyMjY0ZTVkYzUyYWQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFjY2QyNzgyN2RlMjMzOTIxMmQ5MmFmZDQ5N2ZlYTIwMDhmODcxNTUzOGY4ZTQwYmE0YTRlODg3ZDc1Njc3OGIifQ"
+          "resource": "repo://crates/harlo-core/src/session.rs#L932-L947",
+          "version": "repo-lines-v1:sha256:6088b7264107c0bb322be0ddbc5a1cc3a4edda0e6c91f95c6e623c79b0724cf2:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNhNjdhMjFjZTQ4OWFmMDMwYWQxNTA3MWMxOGNiYzBiMjdlNGUxOWQ1OWJhMThhNWE1M2MxYWY4MWU2NjMxYjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijc3ZTA5Mjg4NDdiZGZiY2NhMzBmNTdkOTdkNWY2ZjI4YzFmODJjYzAxYjM3ZmQ5ZjA0MzAyMjY0ZTVkYzUyYWQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFjY2QyNzgyN2RlMjMzOTIxMmQ5MmFmZDQ5N2ZlYTIwMDhmODcxNTUzOGY4ZTQwYmE0YTRlODg3ZDc1Njc3OGIifQ"
         },
         {
-          "resource": "repo://crates/harlo-core/src/session.rs#L1094-L1122",
+          "resource": "repo://crates/harlo-core/src/session.rs#L1257-L1285",
           "version": "repo-lines-v1:sha256:e9b2ae38f16f47f4c9929ce0fa18a1a6477ca9e4941c416b44cee3e9137fcf75:eyJzZWxlY3RlZExpbmVDb3VudCI6MjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJkZDhiMGIyMDk3Mzk3OWFkMjZiNDM1OTI3MGQ5Yzk2MzkyZTU5YzA3ZjhmZDJjMTVkNDI0ZjNhNWM4NTMwNGUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhkYjMzOWMxN2Q0Y2M1NGU3MGM0ZmNmZWNiNjExYmI5ZTdkMzYzZjI1YjE4ZTA5MjNhMWQzMDZjYzk1OTI0ZTUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImMzNWU2OGRmYTk1Nzc3MGRmNGYzMWVmZTViNmY0ODgwOWY5NDBmYTQyODNlYWYyNzYxYjcwOTJmMDhkOWRiMTEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRiYTgxZmEyYzVlYjBmZmY3ZTYwNWUyODE3ZmNhZjM4MzA5NjI5NGZhOTk3NGM5MjhmMmU4ZjgxMzk3YTcwYjgifQ"
         },
         {
-          "resource": "repo://crates/harlo-core/src/session.rs#L1153-L1169",
+          "resource": "repo://crates/harlo-core/src/session.rs#L1344-L1360",
           "version": "repo-lines-v1:sha256:294162920ea05c5459b20eedd7481e5b9bb6c9c5ce794ac10f44981a8e19a0b2:eyJzZWxlY3RlZExpbmVDb3VudCI6MTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUxODNiNjE5NTNiNDNmZjc3MDFmNTVkODdhNTFiOGI1YTlkOTRjODc4NmYzYzBmMDI2ZGUyZDNmNzViNzE1YjEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVkMWVhYWNiOWNmMDcyN2VjNGM3ZmQ3MWFkZDFjZjNhODc0ZjcyMDE2NGI3MmQzZjczZWM5OTY0OTM1YzM1OTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE3ZWJjYjA2MGNjODYxYmUyNGYzM2Q5Y2UzYTBkZGI5Mzc3MTMzMmI1NzdmOTEwOWExNTE0ODY1MzMxNDA1NWYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImI4MGY0NmIzOTA0MGJjMTM0MzBlYmNmMjhhOTExZTNlMzk1NDFmYzNlZjNiZDYyZWQ2NGQwYWQyYTdkZTVlYTMifQ"
         }
       ]
@@ -287,7 +287,7 @@
       "statement": "Phone image requests are restricted to pictures shown by the currently open session or files within its project folder, and the app resizes full images and thumbnails before encoding them for transport.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-app/src/image_view.rs#L770-L803",
+          "resource": "repo://crates/harlo-app/src/image_view.rs#L794-L827",
           "version": "repo-lines-v1:sha256:96924668fc9bef3e9e5f0e4ea216c361802b0497f402fa02faf6e721c6935b5a:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE4Nzk5ZmJjYjk3NzE2ZDIxODhmNGNlZDJkNzZiMGI0MmVhOWZmMWU0Y2M1MGIyN2NiZDkzNGFmYmJiYTZkMWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE3YWYxY2M2NTU2YzMzZDA2M2YzNzZjNGIwN2NhMzA5YTA1OGJkYjUxMjJkYmJjZDQ5M2Q5ZTFhMjViNTAxMTMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRhOTkxN2RkODdhN2RiMDNiOTdlNWM4Njk1YzhmYjNlNTYyM2M4NzRjNTE1Y2M0MGMyNDFjZDRhMTdiOWU3MTMifQ"
         },
         {
@@ -317,10 +317,20 @@
           "version": "repo-lines-v1:sha256:9136e7c93d1986b24401c593bf131ab46debc1e01192105b714e4a2fbc8edc5a:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIzZDFjYzQyMGU5NmVkYzVjMGIyMjM2Y2RkZmZiNWE4OTAyYjg2YzgyZWFhNDM0ODBkZTExNGVjNWE4Nzg3OGUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBjNjQ3OWNjMjMwNDQwZmQ0MWU4MjI0MjE4Njc5Njk4NTU5ZDI4OTNiZDY3YjQzODBhZmFiODExYjM4YTU1YWEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA1NTcyMDQzYWExY2QyZDk0Y2Q1ZDRhM2JjNDA4NDRjZmQxMTQxNDk4NTkxNzMyOTc1YzliZDA5OTBjMTJhYzciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUyYTExZGU5NmE1ZTViODI4NzNlZDM5MGI4ODZkODQxN2VhYTc3N2I5ZmJjNDliNjFhNWNlMGJjNDFlNmY0MWIifQ"
         }
       ]
+    },
+    {
+      "id": "claim_cb57bd20f8e94d92a07951ecd90c30bc",
+      "statement": "On iOS, background-command notices are rendered as collapsible transcript rows: the collapsed view shows the result label and first command line, and the expanded view exposes the full command and output; failure and stopped states use distinct icons/colors.",
+      "evidence": [
+        {
+          "resource": "repo://ios/Harlo/Harlo/TranscriptViews.swift#L399-L487",
+          "version": "repo-lines-v1:sha256:00781599f0ad7e258b8808d197921637eb2f3030a8b10b7ca85145269c0ec624:eyJzZWxlY3RlZExpbmVDb3VudCI6ODksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk3NThkMTg2MzkyMzE4MzA5ZWU5MDVlNDZjNjA2Njc5ZWRlMTFlYTY0Y2YxNTNkNjJmZjg2MzQyMjkwYzRkODgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRmZTg3NmVhZDc0ZWY4NTExYjliZjczNjQzYWRlZmZmNGY0MzRkN2Q2NTY5ZTY2MmJhMjZmNGVkMGRkZDgwYTkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImMwNDE5ZDQ4YmE5ZGJmZWQ0OWYwMTJjYTFkNmI0ZjE5N2YxMjI2NzI3ZDVhMzcwODQyNTQ2OGJhZTk4MjY5ZDMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjE5ZTc2MzU1Y2YxMTk5NDgwYzNmOTk4MzZiMTQ4NmM4NDFkODkxZmFhZDkwNGM2MDhlMDkzMDIyZDM3NTdhZWUifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-15T14:13:54.485Z"
+    "at": "2026-11-15T20:21:41.902Z"
   }
 }

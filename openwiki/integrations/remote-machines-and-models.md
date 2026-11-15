@@ -5,7 +5,7 @@ description: SSH-backed project paths, per-machine helper deployment and state, 
 tags: [ssh, remote, models, engines, configuration]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-15T14:13:54.485Z
+    at: 2026-11-15T20:21:41.902Z
 sources:
   - id: openwiki-source-72ec9ac0129b24bc305a0df1
     resource: repo://crates/harlo-agent/src/main.rs
@@ -27,13 +27,17 @@ sources:
     resource: repo://crates/harlo-core/src/model_servers.rs
   - id: openwiki-source-4af2dd3e4a0acae243d3b65c
     resource: repo://crates/harlo-core/src/openwiki.rs
+  - id: openwiki-source-219837a34d3f25ea64fc9b95
+    resource: repo://crates/harlo-core/src/plugins.rs
   - id: openwiki-source-3967b37bf3499aaa56517a6d
     resource: repo://crates/harlo-core/src/remote_helper.rs
   - id: openwiki-source-91f70adb7dede434bd1dac37
     resource: repo://crates/harlo-core/src/remote.rs
   - id: openwiki-source-5d94b2fabb592e050ff61e0a
     resource: repo://crates/harlo-core/src/servers.rs
-generated: { by: "harlo", at: "2026-11-14T20:46:59.159Z" }
+  - id: openwiki-source-4db2ffefa327cd504d9b5a66
+    resource: repo://crates/harlo-core/src/session.rs
+generated: { by: "harlo", at: "2026-11-15T18:32:57.877Z" }
 ---
 
 # Remote machines and model servers
@@ -95,6 +99,8 @@ Keep the three states separate when debugging: **configured model**, **working S
 ## Extension seams and tests
 
 New model engines belong in engine/setup/server machinery, while provider-file compatibility belongs in `model_servers` and the [agent provider layer](../concepts/agent-execution-and-safety.md). Keep machine-specific side effects behind the helper API. The [OpenWiki integration](openwiki.md) uses the same machine-routing principle but deploys Harlo's `harlo-agent` executable and invokes its native Rust wiki MCP endpoint; it does not deploy a separate Node runtime. Core caches remote wiki readers per host and writers per host and repository, and discards dead server processes before reuse. This is a separate routing path from `remote_helper::Helper`'s build-keyed engine/agent binary uploads.
+
+Claude Code plugin management is another session-host operation, separate from managed model servers. `/plugin` runs the `claude plugin` CLI in the session's working directory; for a remote session, Harlo executes it over SSH on that host, where Claude Code must be on `PATH` and where that machine's own Claude configuration and installed plugins apply. A missing CLI or unreachable host is reported as a failed command rather than falling back to the desktop's plugin installation. See [agent skills](../concepts/agent-execution-and-safety.md#skills-from-claude-code-plugins) for how the agent discovers installed plugin skills.
 
 Focused tests cover provider discovery, preserving existing provider configuration, and supported remote agent platforms. SSH forwarding tests (`forwards_a_port_there`, `reaches_a_server_there`) are ignored by default and require `HARLO_TEST_SSH`; do not count ordinary unit tests as exercising a real tunnel.
 

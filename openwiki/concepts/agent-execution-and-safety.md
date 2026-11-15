@@ -5,7 +5,7 @@ description: Harlo agent model-loop ordering, resumable history, RPC approvals, 
 tags: [agent, safety, sandbox, rpc, tools]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-15T14:13:54.485Z
+    at: 2026-11-15T20:21:41.902Z
 sources:
   - id: openwiki-source-0b93973e66ce9fb1db2bd77c
     resource: repo://crates/harlo-agent/src/agent.rs
@@ -29,6 +29,8 @@ sources:
     resource: repo://crates/harlo-agent/src/sandbox.rs
   - id: openwiki-source-4161c4acb03fe262f2e511cc
     resource: repo://crates/harlo-agent/src/session.rs
+  - id: openwiki-source-d59b76b96eb4918e43784eab
+    resource: repo://crates/harlo-agent/src/skills.rs
   - id: openwiki-source-4bc18039eb9945d481557773
     resource: repo://crates/harlo-agent/src/task.rs
   - id: openwiki-source-c6e4437e250a2aca2159e14a
@@ -37,7 +39,11 @@ sources:
     resource: repo://crates/harlo-agent/src/tools/mod.rs
   - id: openwiki-source-cc3a6736ec7398d0638b6f38
     resource: repo://crates/harlo-agent/src/used.rs
-generated: { by: "harlo", at: "2026-11-14T06:51:12.859Z" }
+  - id: openwiki-source-322c82102553742bfacf73ab
+    resource: repo://crates/harlo-harness/src/claude_run.rs
+  - id: openwiki-source-abb0937a4a786473efee240e
+    resource: repo://crates/harlo-harness/src/claude.rs
+generated: { by: "harlo", at: "2026-11-15T20:21:41.902Z" }
 ---
 
 # Agent execution and safety boundaries
@@ -92,6 +98,12 @@ Stop can interrupt discovery of desktop tools and MCP startup; an incomplete MCP
 
 An indirect MCP call accepts arguments as an object or a JSON string containing an object. Missing/null arguments and blank strings normalize to an empty object; arrays, scalars, malformed JSON and strings containing non-object JSON are rejected rather than forwarded. Names may be the full exposed name, an unambiguous bare tool name, or a server-qualified name. `run_code` receives concrete read-only MCP tools, not the generic `mcp_call` dispatcher, so indirection does not widen its callable set.
 
+## Skills from Claude Code plugins
+
+Harlo agent discovers skills from its configured skill directory, the user's `~/.agents/skills` and `~/.claude/skills`, project `.claude/skills` and `.agents/skills`, and enabled Claude Code plugins installed in the user's Claude configuration. Plugin installation metadata selects user-wide and applicable project installations; settings at user, project, and local-project scope can disable a plugin. Plugin metadata can add skill directories beyond the default `skills/` folder. Skills are named `plugin:skill`; a same-named skill with matching description in a regular skills folder suppresses the duplicate plugin entry, while later regular skill folders win by name.
+
+The agent lists at most 60 model-invokable skills in its instructions, with descriptions clipped to 400 characters. `/skill:<name>` loads that skill's body into the prompt, capped at 40,000 characters; `disable-model-invocation: true` hides it from the model's general list but does not prevent explicit invocation. Harlo's `/plugin` command is a separate session-driver operation that invokes Claude Code's plugin manager; it is not an agent tool call. After a successful plugin mutation, the session restarts the agent so plugin-provided skills can be rediscovered. See [sessions and desktop](../architecture/sessions-and-desktop.md#plugins-and-image-viewing-stay-at-the-app-boundary) for the command and restart path.
+
 ## Tool context and bounded I/O
 
 File reads append applicable nested `AGENTS.md` (or fallback `CLAUDE.md`) text to successful results once per folder while that text remains in model history. A write, edit or patch that encounters unseen rules is refused before any change, returns the rules, and must be requested again after considering them. Patch checks include deletions and both ends of moves. Top-level rules are already in the instructions; hidden folders, `node_modules`, and `vendor` are skipped. Each nested rule is capped at 8 KB with a continuation note. Resume, compaction, and output set-aside rebuild which rules are still present, allowing missing rules to be sent again.
@@ -134,6 +146,8 @@ Agent `task` subagents run inside the same process with restricted tools and sep
 With sandboxing enabled, explore-only helpers explicitly mount the project and shared Git directory read-only, even below a writable ancestor such as `/tmp`; scratch space remains writable. Without the sandbox this shell-level read-only guarantee is unavailable. Isolated editor snapshots exclude Python bytecode and common Python tool caches from capture and merge, so cache churn does not prevent real changes from being brought back.
 
 Desktop helper sessions are different: orchestration starts independent sessions, potentially using another harness or worktree. See [plans and project changes](../workflows/plans-and-project-changes.md).
+
+Claude Code's own background shells and detached subagents are a third, adapter-level case: Claude reports them through task events, and the harness adds a custom transcript notice when detached work finishes. A background shell notice includes the command and outcome when Claude's summary contains only the command (including a stopped command); detached subagents use Claude's summary. These are Claude-managed tasks, not Harlo `task` subagents or desktop helper sessions. The adapter test `a_background_task_ending_is_a_notice` covers these notices and cleanup of completed task tracking.
 
 ## Focused safety checks
 

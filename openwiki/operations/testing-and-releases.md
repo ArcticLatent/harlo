@@ -5,7 +5,7 @@ description: Contributor build prerequisites, focused and integration verificati
 tags: [testing, build, packaging, releases, security]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-15T14:13:54.485Z
+    at: 2026-11-15T20:21:41.902Z
 sources:
   - id: openwiki-source-4d1d392666be6dfdd7a91a2e
     resource: repo://.github/workflows/release.yml
@@ -17,14 +17,24 @@ sources:
     resource: repo://crates/harlo-agent/src/agent.rs
   - id: openwiki-source-f9cde46e266df585b9f891eb
     resource: repo://crates/harlo-agent/src/chat.rs
+  - id: openwiki-source-d59b76b96eb4918e43784eab
+    resource: repo://crates/harlo-agent/src/skills.rs
   - id: openwiki-source-1ab0216479222bff9a772d8b
     resource: repo://crates/harlo-app/src/updates.rs
+  - id: openwiki-source-5af0c90ff6d5f75199de24a2
+    resource: repo://crates/harlo-core/src/export.rs
   - id: openwiki-source-4af2dd3e4a0acae243d3b65c
     resource: repo://crates/harlo-core/src/openwiki.rs
+  - id: openwiki-source-4db2ffefa327cd504d9b5a66
+    resource: repo://crates/harlo-core/src/session.rs
   - id: openwiki-source-7f90659c3ba3e62659b4a786
     resource: repo://crates/harlo-core/src/updates.rs
   - id: openwiki-source-4ffdea106fc0bda2812d95f6
     resource: repo://crates/harlo-core/tests/memory.rs
+  - id: openwiki-source-322c82102553742bfacf73ab
+    resource: repo://crates/harlo-harness/src/claude_run.rs
+  - id: openwiki-source-c0d5ffb66451b26dd04ddd63
+    resource: repo://crates/harlo-harness/src/process.rs
   - id: openwiki-source-4dadc7b205a2f63287cbe0a8
     resource: repo://crates/harlo-update-signing/src/lib.rs
   - id: openwiki-source-056ac262dd327c0a8e1ed162
@@ -41,7 +51,7 @@ sources:
     resource: repo://site/README.md
   - id: openwiki-source-f1c29df965300759d3c1ff56
     resource: repo://wrangler.jsonc
-generated: { by: "harlo", at: "2026-11-15T14:13:54.485Z" }
+generated: { by: "harlo", at: "2026-11-15T20:21:41.902Z" }
 ---
 
 # Testing, packaging, and signed updates
@@ -90,6 +100,10 @@ The partial-count check distinguishes output-only and input-only reports from me
 For phone code display/copy regressions, use the focused checks listed in [phone verification](../integrations/phone-and-relay.md#verification); core crypto tests alone are not a substitute for checking desktop serialization and the Swift renderer.
 
 The `memory` integration-test target generates 64 MiB Harlo and Claude history files and measures additional allocations for current-branch reads, incremental Claude reads, branch outlines, and repeated transcript-row materialization. Its 8 MiB bound applies to those specific operations under the test harness, not the desktop's overall resident memory. Phone-server tests cover serialized transcript row limits, picture access, and code serialization; `phone_activity` tests check sealed Live Activity phases and leftover-card cleanup. Use the phone page's commands for the core phone and HarloKit suites, and do not infer APNs delivery from those local payload tests.
+
+For saved-session loading races, `a_message_sent_while_a_long_session_loads_shows_at_once` checks that the desktop session preserves new events while it reads history, and `a_resumed_session_shows_what_you_send_before_its_history_is_read` checks Claude's adapter boundary and complete history-dependent responses. `its_agents_end_with_it` checks that the harness process-group cleanup also ends descendants that ignore `SIGTERM`; this is a focused process-lifecycle test, not a general proof that every external process shuts down cleanly.
+
+For Markdown export and plugin regressions, the focused core tests `streamed_is_the_same_as_whole`, `what_waits_for_a_late_result_spills_the_same`, and `a_late_result_holds_little_of_what_came_between` cover streamed output equivalence and bounded waiting text behind late tool results. `plugin_commands_only_from_you` checks prompt ownership before the session intercepts a plugin command; `claude_codes_plugins_skills` checks plugin installation scope, enablement, and skill discovery in the agent. Image decoding/caching is app-side behavior and is not validated by the core session or phone serialization tests.
 
 The wiki engine has its own crate-level test boundary as well as the core adapter tests. `harlo-wiki` exercises native retrieval, Markdown parsing limits, evidence handling, storage, and lifecycle behavior; core tests check that the desktop uses the engine locally and routes remote operations through the agent. A parser failure is expected to return a tool error without terminating Harlo; a focused engine test alone does not prove the UI or SSH path.
 

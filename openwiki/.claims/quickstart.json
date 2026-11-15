@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:973846cf637363996f0f02d4ba60533560044397d6e29ba45e7a87db4bf204c8",
+  "pageVersion": "sha256:d8e8d1be1bcc5331a0bb7a423269fccb2d385c88ac03f335ab862bd6e6b7d793",
   "claims": [
     {
       "id": "claim_292a16b40b5241b4ac361dda40dea2cd",
@@ -87,7 +87,7 @@
       "statement": "Harlo's Settings → Wiki presents separate create and update writer profiles, and workspace routing selects the corresponding profile for each kind of run.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-app/qml/SettingsDialog.qml#L2165-L2184",
+          "resource": "repo://crates/harlo-app/qml/SettingsDialog.qml#L2108-L2127",
           "version": "repo-lines-v1:sha256:97bf197fb0797bae8aad7be81bd1b97e5c6c1fab00240ed07ff49b16d9426d4b:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg0YmRiMmRmYTRhZWZjY2Y1NTY0MDJiNTg1OTUzY2FhYWJmYjI4NmI5YjZmYWRiNDlhNTBhMDM2OWRmYzc5NDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2YjA0NDkxNDY5NzIyZTgzNjNhOTRlNDA0NDUzOGUwMTNhMmEyMTdlMzZiMWU1NjhiYTYwYWNiN2I0YzhmMmUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk5OWJkZWZlZWFjYTYzNDBlMDI5MGRjODZlODg5Yzg5ZDVlMTg5YWE1YmE0NGI1ODViM2I3MDczNGY0YTYyZDgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImExZTUyYmJjNmVjMTY3OGE0YTVmMWM5YTQxYmMyOWRlMjlmNGYzZDVjMTU5ZDMxOTBiOWVhZWM1ZTFmMTQ3YmUifQ"
         },
         {
@@ -95,10 +95,28 @@
           "version": "repo-lines-v1:sha256:3d627af638200c022f31345ff1d209c8e32f8d59762a5e01463d0673b579b96f:eyJzZWxlY3RlZExpbmVDb3VudCI6NTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk2MzMyNDNkZGQ3MDA0MWVhM2E5NTYyZDVjZDIwNWZlZmQ3Y2RiNjJlOTMwYWY0ZGQwZWYxYWNjMTZkOTQ4NjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZlYmI0NzI3OGJkZDhmZjQxYzdjZjhhMzEzN2Y5MTNmZWNlZjE4NmZjZWQ0MGY3ZDQ0OWU4ZGQ3N2Y4OWJlNTkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImFjMGZkYjc1NTMzMjMxODBhNDNiZjk4Yjk5MWJmODg5Zjg0MGM5ODc5MGU0ZTEzNWQ0MDMyN2E2MWFiNGYzMDgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJiNjMwYjI3NDZiZWVmNjdlNTEyOGYzMjM2YjIzZDkzNWM3ODk0YTNjZjMyZjc2ODU2NGI4YjYwNzU2NGJlMzMifQ"
         }
       ]
+    },
+    {
+      "id": "claim_b63e0d590e2345b3a78fb594e089498e",
+      "statement": "Harlo's `/plugin` session command invokes Claude Code's plugin manager on the session's host, and Harlo agent can discover skills from enabled installed plugins for explicit skill invocation.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-agent/src/skills.rs#L206-L224",
+          "version": "repo-lines-v1:sha256:692f0481fe790b7d76c315ac73c5de5f19db0a4c8ff9610629dd90cc39c143e2:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ4NTIwNGI2NjE1ZmVhNjY3ZWNjMjRlYWYxODE5Mjk3MzhjMjEyMTJkODM1MTJmMWY1NGNkMGE2MDcxNmEwNmMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImExM2Q1NjQ1ZTRjNjQ4MmE3OTY5ZjRiNGUzNGNmNmVhOTI5MWJjY2VhYTQ4ZTkyYWQ1NTM1YzczYTlkMWNmZjQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdiYzk4ZDZiMGRjNDkyYzUwMTZkZjEwODA1YTNhNTRlYjljMTg0YTVhNjEzN2U3ZjRiZWNmYTBjMjIwNTUwZDAifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-agent/src/skills.rs#L64-L110",
+          "version": "repo-lines-v1:sha256:5d56ac4ec77a695c38ab6688bd4edba018deef8a9c205b13090ae5bc0a5e9428:eyJzZWxlY3RlZExpbmVDb3VudCI6NDcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk2ZGE2ZjYyNTk4Nzg1MTVmMzE5YTZhNTMyYjNhMzM3YzFmNDkyNDY3OWY2M2U4YWEyMjllMWMzZDY0NDE2MGIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjEzOTc2NzhmNWExMWViOWZhYTIyNTVhYzBlNGVmM2FkZDEyZmExNzk4ODVjMGM1NTk3MTQxNmZhZmRmOTE2OTMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJkOWQyODQ2Zjc1YmVhNTI5NWViZjdhMWUyMDUzODA5NTZhYzIzZTU0OWZhNGE0NWEzYzNjNzU4NjU2NDQ3YjgifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-core/src/session.rs#L1290-L1307",
+          "version": "repo-lines-v1:sha256:1ba10a8dbc4ddc0fe2a933dd24a89de594f72d661d4f348a30bba4484b6ead38:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQzNTJjNjFlZTQ2OTVmNzFlYjBiNWRmYmU5OGQ5OTllYTRlYWUwOTJiYmEwNTFiYzAxODU5MzY0N2E3ODA2MDUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVkZWViNDc3OTNkMDE4NDIyYzNkMmUzNTA5NDA1OTE2ZmZmYmU2YjFlZjAxZDdhY2UyMDc3OTQ5MTJiZDY1MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNmOTE4NDc4ZDg3NmNhZWRhODJhNWY4M2RhNzA1MjhmMTg4ODkxZGJkNTRjZWY3NjU3NjdmMTgzYTE1MGY2ZjgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI4ZmQ2ZDQwNzQ2ZGRmYmFiMGU2YWNlZDYzYTYzYTk5NWZlMDE4YmVmMGIzMDZkNTA4YjFkYjgwMzEzMDYxZDAifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-15T14:13:54.485Z"
+    "at": "2026-11-15T20:21:41.902Z"
   }
 }
