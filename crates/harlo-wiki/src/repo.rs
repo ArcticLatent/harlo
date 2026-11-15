@@ -130,7 +130,11 @@ const SOURCE_EXTENSIONS: [&str; 39] = [
 
 /// Keywords that open a definition at any depth (a method too), after
 /// any modifiers.
-const DEFINITIONS: [&str; 16] = ["fn", "struct", "enum", "trait", "impl", "mod", "class", "def", "function", "interface", "type", "func", "object", "protocol", "extension", "module"];
+const DEFINITIONS: [&str; 17] = ["fn", "struct", "enum", "trait", "impl", "mod", "class", "def", "function", "interface", "type", "func", "fun", "object", "protocol", "extension", "module"];
+/// Words that open a statement, not a method, before a bracket and a body.
+const STATEMENTS: [&str; 24] = [
+    "if", "for", "while", "switch", "catch", "with", "return", "else", "elif", "elseif", "match", "when", "unless", "until", "foreach", "using", "lock", "fixed", "synchronized", "new", "await", "yield", "throw", "do",
+];
 const MODIFIERS: [&str; 16] = ["export", "default", "async", "unsafe", "static", "abstract", "final", "public", "private", "protected", "internal", "open", "extern", "override", "inline", "virtual"];
 
 fn is_test_path(p: &str) -> bool {
@@ -163,11 +167,65 @@ fn defined_name(line: &str) -> Option<String> {
             break;
         }
     }
-    let keyword = words.next()?;
+    let Some(keyword) = words.next() else { return method_name(line) };
     if !DEFINITIONS.contains(&keyword) {
-        return None;
+        return method_name(line);
     }
     words.next().map(|n| n.trim_matches(|c: char| !(c.is_alphanumeric() || c == '_')).to_owned()).filter(|n| !n.is_empty())
+}
+
+fn is_identifier(w: &str) -> bool {
+    w.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_' || c == '$') && w.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$')
+}
+
+/// A method or function declared without a keyword, at any depth: a name
+/// and its parameters, then its body (`added() { return 2; }`, `int
+/// added(void) {`, `get size(): number {`), or a name given a function
+/// (`added = () => 2;`, `added: async (x) => {`, `added: function () {`).
+fn method_name(line: &str) -> Option<String> {
+    let line = line.trim();
+    if line.starts_with(['}', ')', ']', '.', '(']) {
+        return None;
+    }
+    let open = line.find('(')?;
+    let head = &line[..open];
+    // (A name given a function.)
+    if let Some((name, value)) = head.split_once('=').or_else(|| head.split_once(':')).filter(|(n, _)| !n.contains(['=', '.', ':'])) {
+        let name = name.trim_end().rsplit(char::is_whitespace).next().unwrap_or_default();
+        let value = value.trim();
+        let value = value.strip_prefix("async").map_or(value, str::trim_start);
+        let fun = (value.is_empty() && line[open..].contains("=>")) || value == "function" || value.starts_with("function ");
+        return (fun && is_identifier(name)).then(|| name.to_owned());
+    }
+    // (A name and its parameters, then a body.)
+    if head.contains(['=', '.', '"', '\'', '!', ',', ';', '|']) || head.contains("::") || head.contains("->") {
+        return None;
+    }
+    let words: Vec<&str> = head.split_whitespace().map(|w| w.trim_start_matches(['*', '&'])).filter(|w| !w.is_empty()).collect();
+    let name = *words.last()?;
+    if !is_identifier(name) || STATEMENTS.contains(&words[0]) {
+        return None;
+    }
+    // (Its parameters close on this line, and a body opens after them.)
+    let mut depth = 0;
+    let mut close = None;
+    for (i, c) in line[open..].char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    close = Some(open + i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let rest = &line[close? + 1..];
+    let body = rest.find('{')?;
+    let between = &rest[..body];
+    (!between.contains(['(', ';', '=']) || between.trim_start().starts_with("->") || between.trim_start().starts_with(':')).then(|| name.to_owned()).filter(|_| !between.contains("=>"))
 }
 
 /// What a top-level line declares, whatever the language: the line up to
@@ -186,6 +244,24 @@ fn top_level_key(line: &str) -> Option<String> {
     let cut = line.find(['(', '=', '{', ':', ';', '[']).unwrap_or(line.len());
     let key = line[..cut].split_whitespace().collect::<Vec<_>>().join(" ");
     (!key.is_empty()).then_some(key)
+}
+
+/// The path on a diff's `+++ ` line: C-style quoted (`"src/a\tb.rs"`)
+/// when git quoted it, else up to the tab git ends a name with spaces with.
+fn header_path(p: &str) -> String {
+    if p.starts_with('"') {
+        // (Up to its closing quote: a backslash escapes the next byte.)
+        let mut escaped = false;
+        for (i, c) in p.char_indices().skip(1) {
+            match c {
+                '\\' if !escaped => escaped = true,
+                '"' if !escaped => return unquote(&p[..=i]),
+                _ => escaped = false,
+            }
+        }
+        return unquote(p);
+    }
+    p.trim_end_matches('\t').to_owned()
 }
 
 /// A path git printed C-style quoted (`"src/a\tb.rs"`), as it is.
@@ -259,7 +335,7 @@ pub fn grown_paths(root: &Path, ignore: &Ignore, base: &str) -> std::result::Res
         }
         if in_header {
             if let Some(path) = line.strip_prefix("+++ ") {
-                let path = unquote(path);
+                let path = header_path(path);
                 current = path.strip_prefix("b/").map(|p| {
                     files.push(File { path: p.replace('\\', "/"), lines: 0, new_names: HashSet::new(), gone_names: HashSet::new(), new_keys: HashSet::new(), gone_keys: HashSet::new() });
                     files.len() - 1
@@ -285,6 +361,14 @@ pub fn grown_paths(root: &Path, ignore: &Ignore, base: &str) -> std::result::Res
             if added { f.new_keys.insert(key) } else { f.gone_keys.insert(key) };
         }
     }
+    // (Every changed file git names, NUL-delimited: one the parsing above
+    // missed can't be taken as unchanged.)
+    let listed = git_strict(
+        root,
+        &["-c", "core.quotePath=false", "diff", "--name-only", "-z", "--no-renames", "--no-ext-diff", "--diff-filter=d", base],
+    )?;
+    let parsed: HashSet<String> = files.iter().map(|f| f.path.clone()).collect();
+    let missed: Vec<String> = split_nul(&listed).map_err(|e| e.to_string())?.into_iter().map(|p| p.replace('\\', "/")).filter(|p| !parsed.contains(p)).collect();
     let mut out: Vec<String> = files
         .into_iter()
         .filter(|f| !is_wiki_path(&f.path) && !SETUP_FILES.contains(&f.path.as_str()) && !ignore.ignores(&f.path, false))
@@ -294,9 +378,10 @@ pub fn grown_paths(root: &Path, ignore: &Ignore, base: &str) -> std::result::Res
                 || (!is_test_path(&f.path) && (f.new_names.iter().any(|n| !f.gone_names.contains(n)) || f.new_keys.iter().any(|k| !f.gone_keys.contains(k))))
         })
         .map(|f| f.path)
+        .chain(missed.into_iter().filter(|p| !is_wiki_path(p) && !SETUP_FILES.contains(&p.as_str()) && !ignore.ignores(p, false) && p.rsplit_once('.').is_some_and(|(_, ext)| SOURCE_EXTENSIONS.contains(&ext))))
         .collect();
-    out.dedup();
     out.sort_by(|a, b| util::cmp16(a, b));
+    out.dedup();
     Ok(out)
 }
 
@@ -790,6 +875,34 @@ mod tests {
         assert_eq!(defined_name("func (s *Server) Start() error {").as_deref(), Some("Start"), "a Go method: past its receiver");
         assert_eq!(defined_name("    def inner(self):").as_deref(), Some("inner"), "a method too");
         assert_eq!(defined_name("let x = 1;"), None);
+        // Methods and functions without a keyword.
+        for (line, name) in [
+            ("    added() { return 2; }", "added"),
+            ("  async load(id: string): Promise<Order> {", "load"),
+            ("  get size(): number {", "size"),
+            ("    public int added() {", "added"),
+            ("    int added(void) const {", "added"),
+            ("  private added = (): number => 2;", "added"),
+            ("  added = () => 2;", "added"),
+            ("  added: async (x) => {", "added"),
+            ("  added: function () {", "added"),
+            ("  *items() {", "items"),
+            ("  fun added() = 2", "added"),
+        ] {
+            assert_eq!(defined_name(line).as_deref(), Some(name), "{line}");
+        }
+        // Statements and calls aren't.
+        for line in [
+            "    if (x) {", "    } else if (x) {", "    for (const a of b) {", "    while (go()) {", "    catch (e) {", "    switch (k) {",
+            "    foo(x).then(y => {", "    describe(\"a\", () => {", "    spawn(async move {", "    items.forEach((x) => {", "    Some(x) => {",
+            "    let x = foo(1);", "    const y = bar(2);", "    print(x)", "    self.go(x)", "    return f(x) {", "    x == y(1)", "    onClicked: go()",
+            "    property var x: compute(a)", "    case 1: f(x)", "    a.b = function () {",
+        ] {
+            assert_eq!(defined_name(line), None, "{line}");
+        }
+        assert_eq!(header_path("b/src/space name.rs\t"), "b/src/space name.rs");
+        assert_eq!(header_path("\"b/src/t\\tab.rs\"\t"), "b/src/t\tab.rs");
+        assert_eq!(header_path("\"b/src/q\\\"uote.rs\""), "b/src/q\"uote.rs");
         assert!(is_test_path("tests/test_orders.py") && is_test_path("src/a_test.go") && is_test_path("web/app.spec.ts") && !is_test_path("src/testing.rs"));
     }
 

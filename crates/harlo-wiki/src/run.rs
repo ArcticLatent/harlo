@@ -398,6 +398,13 @@ fn current_completion(root: &Path, page: &str, source: &Checkpoint) -> Result<Op
 
 /// harlo: whether a page is as it was verified: its claims record a
 /// verification at its current text, the version its manifest entry has.
+/// harlo: the pages with a manifest entry whose Markdown or Claims
+/// changed since they were verified (edited by hand, say).
+fn edited_pages(root: &Path, pages: &[String]) -> Result<Vec<String>> {
+    let m = read_manifest(root)?;
+    Ok(pages.iter().filter(|p| m.get(*p).is_some_and(|e| !page_verified(root, p, e))).cloned().collect())
+}
+
 fn page_verified(root: &Path, page: &str, entry: &Value) -> bool {
     let st = Store::new(root);
     let (Ok(page), Some(version)) = (store::normalize_page(page), s(entry, "pageVersion")) else { return false };
@@ -743,7 +750,7 @@ fn job(path: &str, title: &str, purpose: &str, seeds: Vec<String>, related: Vec<
 }
 
 /// `createRepositoryPlan`.
-fn create_plan(mode: &str, input: &Value, issues: &[claims::Issue], required: &[String]) -> Result<Value> {
+fn create_plan(mode: &str, input: &Value, issues: &[claims::Issue], required: &[String], language_changed: bool) -> Result<Value> {
     let mut pages: Vec<Value> = Vec::new();
     for p in input["pages"].as_array().into_iter().flatten() {
         let path = plan_page_path(p["path"].as_str().unwrap_or(""))?;
@@ -806,7 +813,13 @@ fn create_plan(mode: &str, input: &Value, issues: &[claims::Issue], required: &[
             if planned.contains(&page) || deleted.contains(&page) {
                 continue;
             }
-            pages.push(job(&page, &title_from_path(&page), "Rewrite this existing page in the run's target language while preserving every accurate repository-supported fact and reconciling its complete Claim set.", vec![], vec![], vec![]));
+            // harlo: required without a language change: edited since verified.
+            let purpose = if language_changed {
+                "Rewrite this existing page in the run's target language while preserving every accurate repository-supported fact and reconciling its complete Claim set."
+            } else {
+                "This page changed since its Claims were verified (edited by hand, say). Check what it says now against current repository evidence, keep what is accurate, correct the rest, and reconcile its complete Claim set."
+            };
+            pages.push(job(&page, &title_from_path(&page), purpose, vec![], vec![], vec![]));
             planned.insert(page);
         }
     } else if defer {
@@ -1073,13 +1086,18 @@ fn update_windows(root: &Path, ignore: &Ignore, pages: &[String]) -> Result<Vec<
     Ok(out)
 }
 
-fn fast_forward(root: &Path, ignore: &Ignore, pages: &[String], source: &Checkpoint) -> Result<()> {
+fn fast_forward(root: &Path, ignore: &Ignore, pages: &[String], source: &Checkpoint, edited: &[String]) -> Result<()> {
     let Some(head) = &source.git_head else { return Ok(()) };
     let m = read_manifest(root)?;
     let mut unchanged: HashMap<String, bool> = HashMap::new();
     let mut sorted = pages.to_vec();
     sorted.sort_by(|a, b| cmp16(a, b));
     for page in sorted {
+        // harlo: a page changed since it was verified stays where it was,
+        // for the run to reconcile.
+        if edited.contains(&page) {
+            continue;
+        }
         let Some(entry) = m.get(&page) else { continue };
         let Some(base) = s(entry, "gitHead") else { continue };
         if base.is_empty() || &base == head {
@@ -1217,7 +1235,7 @@ pub fn quiet_update(root: &Path) -> Result<Quiet> {
     let m = read_manifest(root)?;
     let unfinished = !initial.iter().all(|p| m.contains_key(p));
     // (A page edited since it was verified: what it says now was never checked.)
-    let edited: Vec<String> = initial.iter().filter(|p| m.get(*p).is_some_and(|e| !page_verified(root, p, e))).cloned().collect();
+    let edited = edited_pages(root, &initial)?;
     // (Git couldn't say what changed: nothing can be taken as unchanged.)
     let (added, grown) = match (repo::added_paths(root, &ignore, &base, &head), repo::grown_paths(root, &ignore, &base)) {
         (Ok(a), Ok(g)) => {
@@ -1316,13 +1334,14 @@ pub fn begin(input: &Begin) -> Result<Begun> {
         let initial = Store::new(root).discover_pages()?;
         let source = repo::source_snapshot(root, &ignore).map_err(other)?;
         let update = input.mode == "update";
+        if let Some(h) = last.as_ref().filter(|l| update && l.status == "complete").and_then(|l| l.git_head.as_ref()) {
+            seed_manifest(root, &initial, h)?;
+        }
+        // harlo: pages edited since they were verified: a model reconciles
+        // them (they're required in the plan), however the code stands.
+        let edited = if update { edited_pages(root, &initial)? } else { Vec::new() };
         if update {
-            if let Some(l) = last.as_ref().filter(|l| l.status == "complete") {
-                if let Some(h) = &l.git_head {
-                    seed_manifest(root, &initial, h)?;
-                }
-            }
-            fast_forward(root, &ignore, &initial, &Checkpoint::of(&source))?;
+            fast_forward(root, &ignore, &initial, &Checkpoint::of(&source), &edited)?;
         }
         let complete_coverage = !update || {
             let m = read_manifest(root)?;
@@ -1330,7 +1349,7 @@ pub fn begin(input: &Begin) -> Result<Begun> {
         };
         if update && !input.force {
             if let Noop::Skip { git_head, model, language: noop_language } = repo::update_noop(root, &ignore, input.language.as_deref()).map_err(other)? {
-                if rt.issues.is_empty() && complete_coverage {
+                if rt.issues.is_empty() && complete_coverage && edited.is_empty() {
                     let first = repo::source_snapshot(root, &ignore).map_err(other)?;
                     rt.session.finalize(&rt.store, &util::now_iso(), &HashSet::new())?;
                     let stable = repo::source_snapshot(root, &ignore).map_err(other)?;
@@ -1351,7 +1370,7 @@ pub fn begin(input: &Begin) -> Result<Begun> {
         }
         let before = repo::content_snapshot(root).map_err(other)?;
         let prepared = finish::prepare(&backend, finish::concept_type(Some(&language))).map_err(|(_, e)| other(e))?;
-        let required: Vec<String> = if update && language_changed { initial.clone() } else { Vec::new() };
+        let required: Vec<String> = if update && language_changed { initial.clone() } else { edited.clone() };
         let mut st = Map::new();
         st.insert("schemaVersion".into(), 1.into());
         st.insert("runId".into(), util::new_id().into());
@@ -1458,7 +1477,7 @@ impl Run {
     pub fn submit_plan(&mut self, input: &Value) -> Result<Value> {
         let required = strings(&self.state["requiredRewritePages"]);
         if self.state.get("plan").is_some() {
-            let proposed = create_plan(self.st(), input, &self.claims.issues, &required)?;
+            let proposed = create_plan(self.st(), input, &self.claims.issues, &required, self.state["languageChanged"] == true)?;
             if simplified(&self.state["plan"]) != simplified(&proposed) {
                 return Err(fail("invalid_state", "This OpenWiki run already has a different persisted plan."));
             }
@@ -1467,7 +1486,7 @@ impl Run {
         if self.state["phase"] != "planning" {
             return Err(fail("invalid_state", "OpenWiki plan can only be submitted during planning."));
         }
-        let plan = create_plan(self.st(), input, &self.claims.issues, &required)?;
+        let plan = create_plan(self.st(), input, &self.claims.issues, &required, self.state["languageChanged"] == true)?;
         let total = plan["pages"].as_array().map_or(0, Vec::len);
         let mut next = self.state.clone();
         next["phase"] = "generating".into();
@@ -2045,6 +2064,8 @@ mod tests {
             ("src/e.py", "class A:\n    def one(self):\n        return 1\n", "class A:\n    def one(self):\n        return 1\n\n    def added(self):\n        return 2\n", true),
             ("src/e.go", "package e\n\nfunc (s *S) One() int { return 1 }\n", "package e\n\nfunc (s *S) One() int { return 1 }\nfunc (s *S) Added() int { return 2 }\n", true),
             ("src/f.ts", "export const LIMIT = 100;\nfunction one() {\n  return 1;\n}\n", "export const LIMIT = 200;\nfunction one() {\n  return 2;\n}\n", false),
+            ("src/g.ts", "export class A {\n  one() { return 1; }\n}\n", "export class A {\n  one() { return 1; }\n  added() { return 2; }\n}\n", true),
+            ("src/space name.rs", "pub fn one() {}\n", "pub fn one() {}\npub fn added() {}\n", true),
         ] {
             git(&["reset", "-q", "--hard", &at]);
             std::fs::write(r.join(file), before).unwrap();
@@ -2079,6 +2100,37 @@ mod tests {
         assert!(matches!(quiet_update(&r), Ok(Quiet::Needed { .. }) | Err(_)));
         std::fs::rename(r.join(".git/objects-away"), r.join(".git/objects")).unwrap();
         assert_eq!(std::fs::read(r.join("openwiki/.last-update.json")).unwrap(), before);
+        // A page edited by hand and committed: Update starts a run that
+        // reconciles it, with or without force, and is free again after.
+        git(&["reset", "-q", "--hard", &at]);
+        repo::write_last_update(&r, "update", "m", "complete", None, None).unwrap();
+        commit("recorded");
+        let page = r.join("openwiki/quickstart.md");
+        let edited = std::fs::read_to_string(&page).unwrap().replace("The limit is 100.", "The limit is 100.\n\nA note added by hand.");
+        std::fs::write(&page, &edited).unwrap();
+        commit("hand edit");
+        assert!(matches!(quiet_update(&r).unwrap(), Quiet::Needed { edited, .. } if edited == vec!["/openwiki/quickstart.md".to_owned()]));
+        for force in [false, true] {
+            let mut w = Writer::new("harlo");
+            let begun = w.call("openwiki_begin", &json!({"root": r.to_string_lossy(), "mode": "update", "force": force})).unwrap();
+            assert_eq!(begun["status"], "active", "force {force}: {begun}");
+            let run = begun["runId"].as_str().unwrap().to_owned();
+            let plan = w.call("openwiki_submit_plan", &json!({"runId": run, "pages": []})).unwrap();
+            assert_eq!(plan["totalPages"], 1, "the edited page is in the plan: {plan}");
+            let next = w.call("openwiki_next_page", &json!({"runId": run})).unwrap();
+            assert_eq!(next["job"]["path"], "/openwiki/quickstart.md", "{next}");
+            assert!(next["job"]["purpose"].as_str().unwrap().contains("changed since its Claims were verified"), "{next}");
+            let job = next["job"]["jobId"].as_str().or(next["job"]["id"].as_str()).unwrap().to_owned();
+            w.call("openwiki_submit_page", &json!({"runId": run, "jobId": job, "claims": [{"statement": "The limit is 100.", "evidence": [{"resource": "repo://src/a.rs#L2-L2"}]}]})).unwrap();
+            w.call("openwiki_next_page", &json!({"runId": run})).unwrap();
+            w.call("openwiki_finish", &json!({"runId": run})).unwrap();
+            let _ = std::fs::remove_file(r.join(".github/workflows/openwiki-update.yml"));
+            assert!(std::fs::read_to_string(&page).unwrap().contains(if force { "Another hand note." } else { "A note added by hand." }), "{}", std::fs::read_to_string(&page).unwrap());
+            commit(&format!("reconciled {force}"));
+            assert!(matches!(quiet_update(&r).unwrap(), Quiet::Recorded { .. }), "reconciled: free again");
+            std::fs::write(&page, std::fs::read_to_string(&page).unwrap().replace("A note added by hand.", "Another hand note.")).unwrap();
+            commit("hand edit again");
+        }
         let _ = std::fs::remove_dir_all(&r);
     }
 
