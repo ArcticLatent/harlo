@@ -329,6 +329,10 @@ pub struct Transcript {
     settle_from: usize,
     /// Items before this have been looked at to page out.
     paged_to: usize,
+    /// Replies the cursors above passed that aren't paged out yet: waiting
+    /// for a result then, or brought back since by something that came for
+    /// them. Looked at again each time, until they are.
+    again: std::collections::BTreeSet<usize>,
     pages: crate::pages::Pages,
     md: MarkdownRenderer,
 }
@@ -719,11 +723,18 @@ impl Transcript {
     /// them (a call's result, its pictures, come right after it).
     const SETTLE_AFTER: usize = 8;
 
-    /// Settles the replies far enough back that haven't been yet.
+    /// Settles the replies far enough back that haven't been yet, and
+    /// those passed before that can now.
     fn settle_old(&mut self) {
         let end = self.items.len().saturating_sub(Self::SETTLE_AFTER);
-        for i in self.settle_from..end {
+        let again: Vec<usize> = self.again.range(..end).copied().collect();
+        for i in again {
             self.settle(i);
+        }
+        for i in self.settle_from..end {
+            if !self.settle(i) && self.items[i].role == Role::Assistant {
+                self.again.insert(i);
+            }
         }
         self.settle_from = self.settle_from.max(end);
     }
@@ -732,19 +743,23 @@ impl Transcript {
     /// there is, so the copies they were made from go (a long session has
     /// tens of thousands): its thinking, its shell commands and outputs, each
     /// only where its row holds it whole, so `unsettle` gets it back exactly.
-    fn settle(&mut self, i: usize) {
+    /// True once it is (or was already).
+    fn settle(&mut self, i: usize) -> bool {
         let Self { items, tools, .. } = self;
         let Item { id, blocks, rows, rev, done, role, settled, .. } = &mut items[i];
-        let Some((built, rows)) = rows.as_ref() else { return };
-        if *settled || *built != *rev || !*done || *role != Role::Assistant {
-            return;
+        if *settled {
+            return true;
+        }
+        let Some((built, rows)) = rows.as_ref() else { return false };
+        if *built != *rev || !*done || *role != Role::Assistant {
+            return false;
         }
         let returned = blocks.iter().all(|b| match b {
             Block::Tool { call_id, .. } => call_id.starts_with(SEARCH) || tools.get(call_id).is_some_and(|r| r.ended && !r.running),
             _ => true,
         });
         if !returned {
-            return;
+            return false;
         }
         for r in rows.iter().filter(|r| r.kind == RowKind::Tool && r.full.is_none()) {
             if let Some(run) = tools.get_mut(&r.call_id).filter(|run| !run.output.is_empty() && *run.output == *r.text) {
@@ -764,6 +779,7 @@ impl Transcript {
             }
         }
         *settled = true;
+        true
     }
 
     /// Where its page file is made (tests; the cache otherwise).
@@ -786,10 +802,26 @@ impl Transcript {
         }
         let cut = cut.min(self.settle_from);
         let mut any = false;
+        // (Passed before, settled since: paged now. One the page file
+        // can't take stays as it is.)
+        let again: Vec<usize> = self.again.range(..cut).copied().collect();
+        for i in again {
+            any |= self.page_item(i);
+            if self.items[i].paged.is_some() || self.pages.failed() {
+                self.again.remove(&i);
+            }
+        }
         for i in self.paged_to..cut {
             any |= self.page_item(i);
+            if self.items[i].paged.is_none() && self.items[i].role == Role::Assistant && !self.pages.failed() {
+                self.again.insert(i);
+            }
         }
         self.paged_to = self.paged_to.max(cut);
+        // (Settled within the window: the cursor will come to it.)
+        let paged_to = self.paged_to;
+        let Self { again, items, .. } = self;
+        again.retain(|&i| i < paged_to || !items[i].settled);
         any
     }
 
@@ -856,6 +888,10 @@ impl Transcript {
             return;
         }
         self.page_in(pos);
+        // (Behind the cursors: looked at again until it's back on disk.)
+        if pos < self.settle_from {
+            self.again.insert(pos);
+        }
         let Self { items, tools, .. } = self;
         let Item { id, blocks, rows, rev, .. } = &mut items[pos];
         let rows: &[Arc<Row>] = rows.as_ref().map(|(_, rows)| rows.as_slice()).unwrap_or_default();
@@ -1727,6 +1763,57 @@ mod tests {
         let back: Vec<Row> = rows.iter().map(|r| (*whole(r)).clone()).collect();
         assert_eq!(back.iter().map(|r| (&r.key, r.full.as_ref().map(|f| f.0.len()))).collect::<Vec<_>>(), before.iter().map(|r| (&r.key, r.full.as_ref().map(|f| f.0.len()))).collect::<Vec<_>>());
         drop((t, rows, back));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A reply the cursors pass while it waits for a result, and one paged
+    /// out then brought back by a late result, are paged once they can be,
+    /// however many turns come after.
+    #[test]
+    fn late_changing_replies_page_out_after_all() {
+        let dir = std::env::temp_dir().join(format!("harlo-pages-late-{}", std::process::id()));
+        let mut t = Transcript::new();
+        t.set_pages_dir(dir.clone());
+        let mut n = 0;
+        let mut send = |t: &mut Transcript, message: Value| {
+            t.apply(&HarnessEvent::MessageEnd { id: format!("h{n}"), message });
+            n += 1;
+            format!("h{}", n - 1)
+        };
+        let result = |id: &str, text: &str| json!({ "role": "toolResult", "toolCallId": id, "content": [{ "type": "text", "text": text }] });
+        let turn = |t: &mut Transcript, send: &mut dyn FnMut(&mut Transcript, Value) -> String, i: usize| {
+            send(t, json!({ "role": "user", "content": format!("go {i}") }));
+            send(t, json!({ "role": "assistant", "content": [{ "type": "toolCall", "id": format!("c{i}"), "name": "bash", "arguments": { "command": format!("run {i}") } }] }));
+            send(t, result(&format!("c{i}"), &format!("ran {i}")));
+            t.rows();
+            t.page_out(20);
+        };
+        let paged = |t: &Transcript, id: &str| t.items[t.by_id[id]].paged.is_some();
+        // One waits for its result while the cursors pass it.
+        send(&mut t, json!({ "role": "user", "content": "start the server" }));
+        let waiting = send(&mut t, json!({ "role": "assistant", "content": [{ "type": "toolCall", "id": "w", "name": "bash", "arguments": { "command": "serve" } }] }));
+        for i in 0..40 {
+            turn(&mut t, &mut send, i);
+        }
+        assert!(!paged(&t, &waiting), "waiting: stays");
+        let early = t.by_id["h3"];
+        assert!(t.items[early].paged.is_some(), "the replies around it page out");
+        // Its result comes: paged once more turns go by.
+        send(&mut t, result("w", "stopped"));
+        for i in 40..80 {
+            turn(&mut t, &mut send, i);
+        }
+        assert!(paged(&t, &waiting), "its result came: paged after all");
+        // A paged one brought back by a late result: paged again.
+        t.apply(&HarnessEvent::ToolEnd { call_id: "c0".into(), result: json!({ "content": [{ "type": "text", "text": "CORRECTED" }] }), is_error: false });
+        t.rows();
+        assert!(!paged(&t, "h3"), "brought back");
+        for i in 80..120 {
+            turn(&mut t, &mut send, i);
+        }
+        assert!(paged(&t, "h3"), "brought back, then paged again");
+        assert!(t.again.is_empty(), "nothing left to look at: {:?}", t.again);
+        drop(t);
         let _ = std::fs::remove_dir_all(dir);
     }
 

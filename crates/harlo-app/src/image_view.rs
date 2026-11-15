@@ -276,7 +276,7 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, LazyLock, Mutex, MutexGuard};
-use std::time::{Duration, Instant, UNIX_EPOCH};
+use std::time::{Instant, UNIX_EPOCH};
 
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{QImage, QString};
@@ -449,6 +449,9 @@ const AHEAD_LIMIT: usize = 256 << 20;
 const FRAMES_BUDGET: usize = 128 << 20;
 /// Frames decoded ahead of the one shown, for one decoded as it plays.
 const FRAMES_AHEAD: usize = 3;
+/// A frame stepped to this few ahead of its player's next is waited for
+/// there rather than decoded again from the start.
+const STEP_AHEAD: i32 = 16;
 
 struct FullEntry {
     path: String,
@@ -626,16 +629,37 @@ fn frame_delay(asked: i32) -> i32 {
 /// A frame decoded as it plays: its number, pixels and how long it shows.
 type Played = (i32, Pixels, i32);
 
+/// An animation decoded as it plays, on a thread of its own: the frames
+/// it has sent, and the number of the next it will.
+struct Player {
+    rx: std::sync::mpsc::Receiver<Played>,
+    stop: Arc<AtomicBool>,
+    next: i32,
+}
+
+impl Drop for Player {
+    fn drop(&mut self) {
+        // (Its thread stops at the next frame, even while it's still
+        // decoding its way to where it starts.)
+        self.stop.store(true, Ordering::Relaxed);
+    }
+}
+
 /// Plays `path` from frame `from` on a thread of its own, a few frames
-/// ahead, from the start again after its last; it stops when the receiver
-/// is dropped.
-fn play_from(path: String, from: i32) -> std::sync::mpsc::Receiver<Played> {
+/// ahead, from the start again after its last; it stops when the
+/// [`Player`] is dropped.
+fn play_from(path: String, from: i32) -> Player {
     let (tx, rx) = std::sync::mpsc::sync_channel(FRAMES_AHEAD);
+    let stop = Arc::new(AtomicBool::new(false));
+    let stopped = Arc::clone(&stop);
     let _ = std::thread::Builder::new().name("harlo-frames".into()).spawn(move || {
         let q = qs(&path);
         let (mut from, mut i) = (from, 0);
         let mut reader = qobject::open_frames(&q);
         loop {
+            if stopped.load(Ordering::Relaxed) {
+                return;
+            }
             let Some(mut r) = reader.as_mut() else { return };
             let mut delay = 0;
             let img = Pixels(r.as_mut().next_frame(&mut delay));
@@ -655,7 +679,7 @@ fn play_from(path: String, from: i32) -> std::sync::mpsc::Receiver<Played> {
             }
         }
     });
-    rx
+    Player { rx, stop, next: from }
 }
 
 // ---- thumbnails -------------------------------------------------------------------
@@ -999,7 +1023,10 @@ pub struct ImageViewRust {
     decoded: Option<Arc<Decoded>>,
     /// An animation decoded as it plays: its frames as they come, and how
     /// long the one shown stays.
-    player: Option<std::sync::mpsc::Receiver<Played>>,
+    player: Option<Player>,
+    /// A frame stepped to that its player hasn't sent yet: shown when it
+    /// comes, the frames before it passed over.
+    want: Option<i32>,
     frame_ms: i32,
     frame_timer: i32,
     drag_from: Option<(f64, f64)>,
@@ -1042,6 +1069,7 @@ impl Default for ImageViewRust {
             anim_timer: 0,
             decoded: None,
             player: None,
+            want: None,
             frame_ms: 100,
             frame_timer: 0,
             drag_from: None,
@@ -1117,6 +1145,7 @@ impl qobject::ImageView {
             r.asked = Instant::now();
             r.decoded = None;
             r.player = None;
+            r.want = None;
             r.shown_full = false;
             r.copy_k = 1.0;
             r.own = None;
@@ -1558,6 +1587,10 @@ impl qobject::ImageView {
 
     pub fn set_playing(mut self: Pin<&mut Self>, on: bool) {
         let on = on && self.frame_count > 1;
+        if on {
+            // (Playing again: a frame stepped to isn't waited for.)
+            self.as_mut().rust_mut().want = None;
+        }
         if on == self.playing {
             return;
         }
@@ -1601,6 +1634,51 @@ impl qobject::ImageView {
         self.as_mut().show_image(&p.0);
     }
 
+    /// A frame its player sent, taken (its next one counted on).
+    fn take_played(mut self: Pin<&mut Self>) -> Result<Played, std::sync::mpsc::TryRecvError> {
+        let count = match self.decoded.as_deref() {
+            Some(Decoded::Stream { count, .. }) => (*count).max(1),
+            _ => 1,
+        };
+        let mut r = self.as_mut().rust_mut();
+        let player = r.player.as_mut().ok_or(std::sync::mpsc::TryRecvError::Disconnected)?;
+        let played = player.rx.try_recv()?;
+        player.next = (played.0 + 1).rem_euclid(count);
+        Ok(played)
+    }
+
+    /// Looks again for the frame stepped to in a moment.
+    fn look_again(mut self: Pin<&mut Self>) {
+        self.as_mut().stop_frames();
+        let id = self.as_mut().start_ticks(10);
+        self.as_mut().rust_mut().frame_timer = id;
+    }
+
+    /// The frame stepped to, once its player sends it (those before it
+    /// passed over); never waited for here.
+    fn seek_on(mut self: Pin<&mut Self>) {
+        use std::sync::mpsc::TryRecvError;
+        let Some(want) = self.want else { return };
+        loop {
+            match self.as_mut().take_played() {
+                Ok(played) if played.0 == want => {
+                    self.as_mut().stop_frames();
+                    self.as_mut().rust_mut().want = None;
+                    self.show_played(played);
+                    return;
+                }
+                Ok(_) => {}
+                Err(TryRecvError::Empty) => return self.look_again(),
+                // (Its file can't be read any more.)
+                Err(TryRecvError::Disconnected) => {
+                    self.as_mut().stop_frames();
+                    self.as_mut().rust_mut().want = None;
+                    return;
+                }
+            }
+        }
+    }
+
     /// Plays on: the next frame, or (one decoded as it plays, not ready
     /// yet) a look again shortly.
     fn next_frame(mut self: Pin<&mut Self>) {
@@ -1610,41 +1688,42 @@ impl qobject::ImageView {
             self.schedule_frame();
             return;
         }
+        if self.want.is_some() {
+            return self.seek_on();
+        }
         use std::sync::mpsc::TryRecvError;
-        let got = self.player.as_ref().map(|p| p.try_recv());
-        match got {
-            Some(Ok(played)) => {
+        match self.as_mut().take_played() {
+            Ok(played) => {
                 self.as_mut().show_played(played);
                 self.schedule_frame();
             }
-            Some(Err(TryRecvError::Empty)) => {
-                self.as_mut().stop_frames();
-                let id = self.as_mut().start_ticks(10);
-                self.as_mut().rust_mut().frame_timer = id;
-            }
+            Err(TryRecvError::Empty) => self.look_again(),
             // (Its file can't be read any more.)
-            _ => self.set_playing(false),
+            Err(TryRecvError::Disconnected) => self.set_playing(false),
         }
     }
 
     pub fn step_frame(mut self: Pin<&mut Self>, forward: bool) {
         self.as_mut().set_playing(false);
-        let i = self.frame + if forward { 1 } else { -1 };
         let Some(Decoded::Stream { count, .. }) = self.decoded.as_deref() else {
+            let i = self.frame + if forward { 1 } else { -1 };
             self.show_frame(i);
             return;
         };
-        // One decoded as it plays: the next comes from its player; an
-        // earlier one, from a player started there.
-        let i = i.rem_euclid((*count).max(1));
-        if !forward {
+        // One decoded as it plays: the frame comes from its player when
+        // it's ready, never waited for here. Steps count on from one still
+        // coming; its player goes on if the frame is a little ahead of it,
+        // or one is started there (one sent before it is passed over, and
+        // a player still on its way to an earlier frame stops).
+        let count = (*count).max(1);
+        let i = (self.want.unwrap_or(self.frame) + if forward { 1 } else { -1 }).rem_euclid(count);
+        let near = self.player.as_ref().is_some_and(|p| (i - p.next).rem_euclid(count) < STEP_AHEAD);
+        if !near {
             let path = self.path.to_string();
             self.as_mut().rust_mut().player = Some(play_from(path, i));
         }
-        let got = self.player.as_ref().and_then(|p| p.recv_timeout(Duration::from_secs(10)).ok());
-        if let Some(played) = got {
-            self.show_played(played);
-        }
+        self.as_mut().rust_mut().want = Some(i);
+        self.seek_on();
     }
 
     // ---- input ----

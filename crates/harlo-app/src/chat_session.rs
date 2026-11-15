@@ -536,8 +536,15 @@ impl RowIndex {
     }
 }
 
-/// Paged rows kept read back, at most.
+/// Paged rows kept read back, at most, and at most this much of their
+/// long text (a few long outputs are enough to fill it).
 const WHOLES: usize = 160;
+const WHOLES_TEXT: usize = 4 << 20;
+
+/// What a row read back holds of its long text.
+fn whole_text(row: &Row) -> usize {
+    row.html.len() + row.text.len() + row.diff.len() + row.command.len() + row.full.as_ref().map_or(0, |f| f.0.len())
+}
 
 impl ChatSessionRust {
     /// The row with its long text (read back from its page, for a row far
@@ -555,7 +562,13 @@ impl ChatSessionRust {
         w.paged = Some(paged.clone());
         let w = Arc::new(w);
         kept.push_front(w.clone());
-        kept.truncate(WHOLES);
+        // (The one just read stays, however long.)
+        let mut text = 0;
+        let keep = kept.iter().take(WHOLES).take_while(|r| {
+            text += whole_text(r);
+            text <= WHOLES_TEXT
+        }).count();
+        kept.truncate(keep.max(1));
         w
     }
 
@@ -621,6 +634,8 @@ impl ChatSession {
         }
         self.as_mut().rust_mut().generation += 1;
         self.host_files.borrow_mut().clear();
+        // (Rows read back are this session's: they and their page go.)
+        self.wholes.borrow_mut().clear();
         self.as_mut().set_preparing(false);
         unsafe {
             self.as_mut().begin_reset_model();
@@ -1517,6 +1532,7 @@ impl ChatSession {
                     self.as_mut().begin_reset_model();
                     self.as_mut().rust_mut().rows = rows;
                     *self.row_index.borrow_mut() = None;
+                    self.wholes.borrow_mut().clear();
                     self.as_mut().end_reset_model();
                 },
                 SessionUpdate::Rows(changes) => self.as_mut().apply_row_changes(changes),
@@ -1851,6 +1867,37 @@ mod tests {
         let bare = Unsent { text: format!("<file name=\"Photo 1\"></file>\nfrom elsewhere{note}"), images: vec![png], mode: SendMode::Normal, typed: None };
         let (words, files) = unsent_back(&[bare], |i| save_picture(&dir, i));
         assert_eq!((words.as_str(), files.len()), ("from elsewhere", 1));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Rows read back from the page file are kept by count and by size:
+    /// long outputs read back don't pile up.
+    #[test]
+    fn rows_read_back_are_kept_within_a_budget() {
+        let mut messages = Vec::new();
+        for i in 0..24 {
+            messages.push(serde_json::json!({ "role": "user", "content": format!("go {i}") }));
+            messages.push(serde_json::json!({ "role": "assistant", "content": [{ "type": "toolCall", "id": format!("c{i}"), "name": "bash", "arguments": { "command": format!("run {i}") } }] }));
+            messages.push(serde_json::json!({ "role": "toolResult", "toolCallId": format!("c{i}"), "content": [{ "type": "text", "text": format!("{i} {}", "y\n".repeat(1 << 19)) }] }));
+        }
+        let dir = std::env::temp_dir().join(format!("harlo-wholes-{}", std::process::id()));
+        let mut t = harlo_core::transcript::Transcript::new();
+        t.set_pages_dir(dir.clone());
+        t.load_messages(&messages);
+        t.rows();
+        t.page_out(1000);
+        let paged: Vec<Arc<Row>> = t.rows().into_iter().filter(|r| r.paged.is_some()).collect();
+        assert!(paged.len() >= 8, "{} paged", paged.len());
+        let s = ChatSessionRust::default();
+        for r in &paged {
+            let w = s.whole(r);
+            assert!(w.full.as_ref().is_some_and(|f| f.0.len() >= 1 << 20), "read back whole");
+        }
+        let kept: usize = s.wholes.borrow().iter().map(|r| whole_text(r)).sum();
+        let one = s.wholes.borrow().front().map_or(0, |r| whole_text(r));
+        assert!(kept <= WHOLES_TEXT.max(one), "kept {kept} bytes, {} rows", s.wholes.borrow().len());
+        assert!(!s.wholes.borrow().is_empty(), "the latest read stays");
+        drop((s, paged, t));
         let _ = std::fs::remove_dir_all(dir);
     }
 

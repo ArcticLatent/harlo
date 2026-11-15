@@ -260,10 +260,16 @@ pub fn give_back() {
 /// (a session file can be bigger than anything worth holding at once). A line
 /// that isn't text is passed over.
 pub(crate) fn for_each_line(path: &Path, from: u64, each: &mut dyn FnMut(u64, &str)) -> std::io::Result<()> {
-    use std::io::{BufRead, Seek, SeekFrom};
+    for_each_line_upto(path, from, u64::MAX, each)
+}
+
+/// [`for_each_line`] in the file's first `end` bytes: what a file still
+/// being added to held when `end` was its length.
+pub(crate) fn for_each_line_upto(path: &Path, from: u64, end: u64, each: &mut dyn FnMut(u64, &str)) -> std::io::Result<()> {
+    use std::io::{BufRead, Read, Seek, SeekFrom};
     let mut file = std::fs::File::open(path)?;
     file.seek(SeekFrom::Start(from))?;
-    let mut reader = std::io::BufReader::with_capacity(1024 * 1024, file);
+    let mut reader = std::io::BufReader::with_capacity(1024 * 1024, file.take(end.saturating_sub(from)));
     let (mut offset, mut line) = (from, Vec::new());
     loop {
         line.clear();
@@ -305,14 +311,21 @@ pub fn read_saved_for(kind: HarnessKind, path: &Path) -> std::io::Result<SavedSe
 /// worth holding at once). An error reading it is said, whatever was passed
 /// on before it.
 pub fn each_saved_message(kind: HarnessKind, path: &Path, each: &mut dyn FnMut(Value)) -> std::io::Result<()> {
+    each_saved_message_upto(kind, path, u64::MAX, each)
+}
+
+/// [`each_saved_message`] as the file was when it was `end` bytes long: a
+/// reader going over it twice (an export) sees the same messages both
+/// times, however much is added meanwhile.
+pub fn each_saved_message_upto(kind: HarnessKind, path: &Path, end: u64, each: &mut dyn FnMut(Value)) -> std::io::Result<()> {
     if kind == HarnessKind::Claude {
-        return crate::claude::each_saved_message(path, each);
+        return crate::claude::each_saved_message_upto(path, end, each);
     }
     drop(std::fs::File::open(path)?);
     let failed = std::cell::RefCell::new(None);
     branch_messages(
         &|e| {
-            if let Err(err) = for_each_line(path, 0, e) {
+            if let Err(err) = for_each_line_upto(path, 0, end, e) {
                 failed.borrow_mut().get_or_insert(err);
             }
         },

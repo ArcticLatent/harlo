@@ -594,11 +594,20 @@ async fn export_markdown(harness: Option<Arc<Harness>>, kind: HarnessKind, file:
         async move {
             let wrote = tokio::task::spawn_blocking(move || {
                 let unread = |e: String| format!("its conversation couldn't be read ({e})");
-                let local = if crate::remote::is_remote(&file) { crate::remote::local_copy(&file).map_err(|e| unread(format!("{e:#}")))? } else { file };
+                let local = if crate::remote::is_remote(&file) {
+                    let copy = crate::remote::local_copy(&file).map_err(|e| unread(format!("{e:#}")))?;
+                    whole_copy(&copy, &crate::remote::split(&file).map(|(host, _)| host).unwrap_or_default())?;
+                    copy
+                } else {
+                    file
+                };
+                // (Both of the export's readings stop where the file ended
+                // now: a call added meanwhile is in neither, never in the
+                // second without its result from the first.)
                 let size = std::fs::metadata(&local).map_or(0, |m| m.len());
                 let mut read_failed = false;
                 let wrote = write_export(
-                    &mut |each| harlo_harness::store::each_saved_message(kind, &local, each).inspect_err(|_| read_failed = true),
+                    &mut |each| harlo_harness::store::each_saved_message_upto(kind, &local, size, each).inspect_err(|_| read_failed = true),
                     &info,
                     to.as_deref(),
                 );
@@ -653,8 +662,22 @@ async fn export_markdown(harness: Option<Arc<Harness>>, kind: HarnessKind, file:
     write_export(&mut |_| Ok(()), &info, to.as_deref()).map_err(|e| e.to_string())
 }
 
+/// A remote session's copy here, if it all came over: an export of part
+/// of it (its end missing, the host out of reach) is an error, never a
+/// shorter Markdown passed off as the whole.
+fn whole_copy(copy: &std::path::Path, host: &str) -> Result<(), String> {
+    match harlo_harness::mirror::missing(copy) {
+        0 => Ok(()),
+        n => Err(format!(
+            "not all of it came over from {host}: its last {} (the latest messages) are missing. Try again once {host} can be reached",
+            crate::attach::human_size(n)
+        )),
+    }
+}
+
 /// The Markdown of the messages `read` passes on, written to `to` (through a
-/// file beside it, put in its place once whole) or answered.
+/// file beside it, put in its place once whole) or answered (whole in
+/// memory anyway, so nothing spills).
 fn write_export(read: &mut dyn FnMut(&mut dyn FnMut(Value)) -> std::io::Result<()>, info: &crate::export::Info, to: Option<&std::path::Path>) -> std::io::Result<String> {
     let Some(to) = to else {
         let mut out = Vec::new();
@@ -665,7 +688,8 @@ fn write_export(read: &mut dyn FnMut(&mut dyn FnMut(Value)) -> std::io::Result<(
     let part = to.with_file_name(format!(".{name}.part"));
     let written = (|| {
         let mut out = std::io::BufWriter::with_capacity(1024 * 1024, std::fs::File::create(&part)?);
-        crate::export::write_markdown(read, info, &mut out)?;
+        // (What waits behind a late result spills beside it, not into memory.)
+        crate::export::write_markdown_spilling(read, info, &mut out, to.parent())?;
         std::io::Write::flush(&mut out)?;
         drop(out);
         std::fs::rename(&part, to)
@@ -2446,6 +2470,62 @@ mod tests {
         assert_eq!(first["messages"].as_u64(), Some(6000), "none kept: the loaded one first");
         *REPORTS_IN.lock().unwrap() = None;
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A remote copy known to lack its end (the host said it was longer than
+    /// what came) isn't exported; a whole one is.
+    #[test]
+    fn a_copy_short_of_its_end_isnt_exported() {
+        let slot = std::env::temp_dir().join(format!("harlo-short-copy-{}", std::process::id()));
+        std::fs::create_dir_all(&slot).unwrap();
+        let copy = slot.join("s.jsonl");
+        std::fs::write(&copy, "x".repeat(1000)).unwrap();
+        std::fs::write(slot.join("source.json"), r#"{"host":"nas","path":"/s.jsonl","used":0,"size":1107}"#).unwrap();
+        let short = whole_copy(&copy, "nas");
+        assert!(short.as_ref().is_err_and(|e| e.contains("not all of it came over from nas") && e.contains("107")), "{short:?}");
+        std::fs::write(slot.join("source.json"), r#"{"host":"nas","path":"/s.jsonl","used":0,"size":1000}"#).unwrap();
+        assert_eq!(whole_copy(&copy, "nas"), Ok(()));
+        let _ = std::fs::remove_dir_all(&slot);
+    }
+
+    /// An export reads its file twice; a call (and its failed result) added
+    /// between the two is in neither, and the next export has it whole.
+    #[test]
+    fn an_export_reads_the_file_as_it_was() {
+        let path = std::env::temp_dir().join(format!("harlo-export-grows-{}.jsonl", std::process::id()));
+        std::fs::write(&path, concat!(
+            r#"{"type":"session","id":"s","cwd":"/w"}"#, "\n",
+            r#"{"type":"message","id":"a","parentId":null,"message":{"role":"user","content":"build it"}}"#, "\n",
+            r#"{"type":"message","id":"b","parentId":"a","message":{"role":"assistant","content":[{"type":"text","text":"Building."}]}}"#, "\n",
+        )).unwrap();
+        let added = concat!(
+            r#"{"type":"message","id":"c","parentId":"b","message":{"role":"assistant","content":[{"type":"toolCall","id":"t1","name":"bash","arguments":{"command":"make all"}}]}}"#, "\n",
+            r#"{"type":"message","id":"d","parentId":"c","message":{"role":"toolResult","toolCallId":"t1","toolName":"bash","content":[{"type":"text","text":"make: *** no rule"}],"isError":true}}"#, "\n",
+        );
+        let info = crate::export::Info { title: "t".into(), agent: "Harlo".into(), ..Default::default() };
+        let export = |path: &std::path::Path, grow: bool| {
+            let size = std::fs::metadata(path).unwrap().len();
+            let mut passes = 0;
+            write_export(
+                &mut |each| {
+                    let read = harlo_harness::store::each_saved_message_upto(HarnessKind::Harlo, path, size, each);
+                    passes += 1;
+                    if grow && passes == 1 {
+                        use std::io::Write;
+                        std::fs::OpenOptions::new().append(true).open(path).unwrap().write_all(added.as_bytes()).unwrap();
+                    }
+                    read
+                },
+                &info,
+                None,
+            )
+            .unwrap()
+        };
+        let first = export(&path, true);
+        assert!(first.contains("Building.") && !first.contains("make all"), "added between the passes: in neither\n{first}");
+        let next = export(&path, false);
+        assert!(next.contains("make all") && next.contains("failed") && next.contains("no rule"), "the next export has it whole\n{next}");
+        let _ = std::fs::remove_file(&path);
     }
 
     #[tokio::test]

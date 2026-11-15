@@ -7375,6 +7375,7 @@ ApplicationWindow {
     }
     property int imgFrames: 0
     property int imgLongAt: 0
+    property int imgStepMs: 0
     property var imgStats: null
     function imgView() { return chat.fileEditor.imageViewer.view }
     function imgOpen(name) { win.imgT0 = Date.now(); Workspace.openFileTab(win.imgDir + "/" + name) }
@@ -7576,16 +7577,25 @@ ApplicationWindow {
         ScriptAction { script: {
             const v = win.imgView()
             win.check(!v.playing && v.frame === win.imgLongAt, "P pauses it at frame " + v.frame)
-            TestInput.key(Qt.Key_Comma, 0) } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const v = win.imgView()
-            win.check(v.frame === (win.imgLongAt + 199) % 200, ", steps back a frame, decoded again (" + v.frame + ", was " + win.imgLongAt + ")")
-            TestInput.key(Qt.Key_Period, 0) } }
+            // Stepping back decodes it again from the start, off the
+            // window's thread: the keys come back at once.
+            win.imgT0 = Date.now()
+            for (let k = 0; k < 4; k++)
+                TestInput.key(Qt.Key_Comma, 0)
+            win.imgStepMs = Date.now() - win.imgT0 } }
+        ScriptAction { script: win.waitUntil(imgSteps, () => win.imgView().frame === (win.imgLongAt + 196) % 200, 10000) }
         PauseAnimation { duration: 200 }
         ScriptAction { script: {
             const v = win.imgView()
-            win.check(v.frame === win.imgLongAt, ". steps on again (" + v.frame + ")")
+            console.log("PERF four steps back on a long GIF:", win.imgStepMs, "ms for the keys,", Date.now() - win.imgT0, "ms to the frame")
+            win.check(win.imgStepMs < 40, ", ×4 never waits for the frames (" + win.imgStepMs + " ms for the keys)")
+            win.check(v.frame === (win.imgLongAt + 196) % 200, ", ×4 steps back four frames, decoded again (" + v.frame + ", was " + win.imgLongAt + ")")
+            TestInput.key(Qt.Key_Period, 0) } }
+        ScriptAction { script: win.waitUntil(imgSteps, () => win.imgView().frame === (win.imgLongAt + 197) % 200, 10000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            const v = win.imgView()
+            win.check(v.frame === (win.imgLongAt + 197) % 200, ". steps on again (" + v.frame + ")")
             win.imgOpen("logo.png") } }
         ScriptAction { script: win.waitUntil(imgSteps, () => win.imgReady("logo.png"), 10000) }
         PauseAnimation { duration: 200 }

@@ -95,6 +95,11 @@ impl Pages {
         Some(Paged { page, at, len: bytes.len() as u32 })
     }
 
+    /// It couldn't be made or written: nothing more goes to it.
+    pub fn failed(&self) -> bool {
+        self.failed
+    }
+
     /// The file, while there is one (tests).
     pub fn path(&self) -> Option<PathBuf> {
         self.page.as_ref().map(|p| p.path.clone())

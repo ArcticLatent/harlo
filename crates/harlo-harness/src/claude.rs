@@ -667,10 +667,16 @@ fn saved_cached_in(path: &Path, dir: &Path, from_size: u64) -> std::io::Result<c
 /// since, each as soon as nothing more can join it. The cache isn't
 /// written. A cache line that can't be read is an error, not a gap.
 pub fn each_saved_message(path: &Path, each: &mut dyn FnMut(Value)) -> std::io::Result<()> {
-    each_saved_in(path, cache_dir().as_deref(), crate::store::BIG_FILE, each)
+    each_saved_in(path, cache_dir().as_deref(), crate::store::BIG_FILE, u64::MAX, each)
 }
 
-fn each_saved_in(path: &Path, dir: Option<&Path>, from_size: u64, each: &mut dyn FnMut(Value)) -> std::io::Result<()> {
+/// [`each_saved_message`] as the transcript was when it was `end` bytes
+/// long (the cache only when it covers no more than that).
+pub fn each_saved_message_upto(path: &Path, end: u64, each: &mut dyn FnMut(Value)) -> std::io::Result<()> {
+    each_saved_in(path, cache_dir().as_deref(), crate::store::BIG_FILE, end, each)
+}
+
+fn each_saved_in(path: &Path, dir: Option<&Path>, from_size: u64, end: u64, each: &mut dyn FnMut(Value)) -> std::io::Result<()> {
     let mut reader = HistoryReader::default();
     let mut from = 0;
     let _one = dir.filter(|_| std::fs::metadata(path).is_ok_and(|m| m.len() >= from_size)).map(|dir| {
@@ -679,7 +685,7 @@ fn each_saved_in(path: &Path, dir: Option<&Path>, from_size: u64, each: &mut dyn
     });
     if let Some((_, (meta_path, lines_path))) = &_one {
         let meta = std::fs::read(meta_path).ok().and_then(|b| serde_json::from_slice::<CacheMeta>(&b).ok()).filter(|m| {
-            m.version == CACHE_VERSION && m.path == path && check_at(path, m.offset).is_ok_and(|c| c == m.check)
+            m.version == CACHE_VERSION && m.path == path && m.offset <= end && check_at(path, m.offset).is_ok_and(|c| c == m.check)
         });
         if let Some(m) = meta.filter(|m| lines_before(lines_path, m.bytes).is_ok_and(|n| n == m.index as u64)) {
             let mut passed = 0;
@@ -698,7 +704,7 @@ fn each_saved_in(path: &Path, dir: Option<&Path>, from_size: u64, each: &mut dyn
             from = m.offset;
         }
     }
-    crate::store::for_each_line(path, from, &mut |offset, line| {
+    crate::store::for_each_line_upto(path, from, end, &mut |offset, line| {
         reader.line(offset, line);
         // (Only the last can still grow: an assistant's next block joins it.)
         if reader.out.len() > 1 {
@@ -1243,6 +1249,29 @@ mod tests {
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
+    /// Read as it was at some length (an export's two readings), a
+    /// transcript gives what it held then, whether or not its cache, made
+    /// since, covers more.
+    #[test]
+    fn a_transcript_read_up_to_a_length_is_what_it_was_then() {
+        let text = transcript();
+        let path = temp_file("upto", "");
+        let dir = path.parent().unwrap().join("cache");
+        std::fs::write(&path, &text).unwrap();
+        for cut in text.char_indices().map(|(i, _)| i).step_by(41).chain([text.len()]) {
+            for cached in [false, true] {
+                let _ = std::fs::remove_dir_all(&dir);
+                if cached {
+                    saved_cached_in(&path, &dir, 0).unwrap();
+                }
+                let mut upto = Vec::new();
+                each_saved_in(&path, Some(&dir), 0, cut as u64, &mut |m| upto.push(m)).unwrap();
+                assert_eq!(upto, saved(&text[..cut]).messages, "cut at {cut}, cache made of all of it: {cached}");
+            }
+        }
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
     /// Opening a long transcript from its cache shows what reading all of it
     /// does: as it grows from wherever it was cut, after it was rewritten,
     /// and with its cache damaged.
@@ -1255,7 +1284,7 @@ mod tests {
         // (Passed on one at a time, from the cache as it is, or not using one.)
         let streamed = |dir: Option<&Path>| {
             let mut all = Vec::new();
-            each_saved_in(&path, dir, 0, &mut |m| all.push(m)).unwrap();
+            each_saved_in(&path, dir, 0, u64::MAX, &mut |m| all.push(m)).unwrap();
             all
         };
         for cut in text.char_indices().map(|(i, _)| i).step_by(53) {
