@@ -2066,6 +2066,10 @@ mod tests {
             ("src/f.ts", "export const LIMIT = 100;\nfunction one() {\n  return 1;\n}\n", "export const LIMIT = 200;\nfunction one() {\n  return 2;\n}\n", false),
             ("src/g.ts", "export class A {\n  one() { return 1; }\n}\n", "export class A {\n  one() { return 1; }\n  added() { return 2; }\n}\n", true),
             ("src/space name.rs", "pub fn one() {}\n", "pub fn one() {}\npub fn added() {}\n", true),
+            ("src/h.ts", "export class A {\n  one() { return 1; }\n}\n", "export class A {\n  one() { return 1; }\n  added(\n    value: number,\n  ): number {\n    return value;\n  }\n}\n", true),
+            ("src/i.ts", "export class A {\n  one() { return 1; }\n}\n", "export class A {\n  one() { return 1; }\n  added<T>(value: T): T { return value; }\n}\n", true),
+            ("src/j.ts", "export class A {\n  one() { return 1; }\n}\n", "export class A {\n  one() { return 1; }\n  added(value: number): number\n  {\n    return value;\n  }\n}\n", true),
+            ("src/k.ts", "export class A {\n  one(value: number): number {\n    return value;\n  }\n}\n", "export class A {\n  one(\n    value: number,\n  ): number {\n    return value + 1;\n  }\n}\n", false),
         ] {
             git(&["reset", "-q", "--hard", &at]);
             std::fs::write(r.join(file), before).unwrap();

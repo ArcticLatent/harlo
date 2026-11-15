@@ -132,8 +132,8 @@ const SOURCE_EXTENSIONS: [&str; 39] = [
 /// any modifiers.
 const DEFINITIONS: [&str; 17] = ["fn", "struct", "enum", "trait", "impl", "mod", "class", "def", "function", "interface", "type", "func", "fun", "object", "protocol", "extension", "module"];
 /// Words that open a statement, not a method, before a bracket and a body.
-const STATEMENTS: [&str; 24] = [
-    "if", "for", "while", "switch", "catch", "with", "return", "else", "elif", "elseif", "match", "when", "unless", "until", "foreach", "using", "lock", "fixed", "synchronized", "new", "await", "yield", "throw", "do",
+const STATEMENTS: [&str; 25] = [
+    "if", "for", "while", "switch", "catch", "with", "return", "else", "elif", "elseif", "case", "match", "when", "unless", "until", "foreach", "using", "lock", "fixed", "synchronized", "new", "await", "yield", "throw", "do",
 ];
 const MODIFIERS: [&str; 16] = ["export", "default", "async", "unsafe", "static", "abstract", "final", "public", "private", "protected", "internal", "open", "extern", "override", "inline", "virtual"];
 
@@ -188,9 +188,10 @@ fn method_name(line: &str) -> Option<String> {
         return None;
     }
     let open = line.find('(')?;
-    let head = &line[..open];
+    // (Generic parameters aside: `added<T>(`, `Map<K, V> added(`.)
+    let head = strip_generics(&line[..open]);
     // (A name given a function.)
-    if let Some((name, value)) = head.split_once('=').or_else(|| head.split_once(':')).filter(|(n, _)| !n.contains(['=', '.', ':'])) {
+    if let Some((name, value)) = head.split_once('=').or_else(|| head.split_once(':').filter(|_| !head.contains("::"))).filter(|(n, _)| !n.contains(['=', '.', ':'])) {
         let name = name.trim_end().rsplit(char::is_whitespace).next().unwrap_or_default();
         let value = value.trim();
         let value = value.strip_prefix("async").map_or(value, str::trim_start);
@@ -198,7 +199,7 @@ fn method_name(line: &str) -> Option<String> {
         return (fun && is_identifier(name)).then(|| name.to_owned());
     }
     // (A name and its parameters, then a body.)
-    if head.contains(['=', '.', '"', '\'', '!', ',', ';', '|']) || head.contains("::") || head.contains("->") {
+    if head.contains(['=', '.', '"', '\'', '!', ',', ';', '|']) || head.contains("->") {
         return None;
     }
     let words: Vec<&str> = head.split_whitespace().map(|w| w.trim_start_matches(['*', '&'])).filter(|w| !w.is_empty()).collect();
@@ -206,7 +207,8 @@ fn method_name(line: &str) -> Option<String> {
     if !is_identifier(name) || STATEMENTS.contains(&words[0]) {
         return None;
     }
-    // (Its parameters close on this line, and a body opens after them.)
+    // (Its parameters close, and a body opens after them, past a return
+    // type or a qualifier at most.)
     let mut depth = 0;
     let mut close = None;
     for (i, c) in line[open..].char_indices() {
@@ -223,9 +225,39 @@ fn method_name(line: &str) -> Option<String> {
         }
     }
     let rest = &line[close? + 1..];
-    let body = rest.find('{')?;
-    let between = &rest[..body];
-    (!between.contains(['(', ';', '=']) || between.trim_start().starts_with("->") || between.trim_start().starts_with(':')).then(|| name.to_owned()).filter(|_| !between.contains("=>"))
+    let between = rest[..rest.find('{')?].trim();
+    const QUALIFIERS: [&str; 10] = ["const", "noexcept", "override", "final", "throws", "volatile", "where", "mutating", "&", "&&"];
+    let qualified = between.is_empty() || between.starts_with(':') || between.starts_with("->") || between.split_whitespace().next().is_some_and(|w| QUALIFIERS.contains(&w));
+    (qualified && !between.contains("=>") && !between.contains(';')).then(|| name.to_owned())
+}
+
+/// `s` without its balanced `<…>` groups (as it is when they aren't).
+fn strip_generics(s: &str) -> String {
+    let mut out = String::new();
+    let mut depth = 0usize;
+    for c in s.chars() {
+        match c {
+            '<' => depth += 1,
+            '>' if depth > 0 => depth -= 1,
+            '>' => return s.to_owned(),
+            _ if depth == 0 => out.push(c),
+            _ => {}
+        }
+    }
+    if depth == 0 { out } else { s.to_owned() }
+}
+
+/// The name a run of added (or removed) lines declares at its `i`th: as
+/// defined_name, or a method whose parameters, return type or body go on
+/// over the next lines (`added(` … `): number {`, `{` on a line of its own).
+fn declared_name(run: &[&str], i: usize) -> Option<String> {
+    defined_name(run[i]).or_else(|| {
+        if !run[i].contains('(') || i + 1 >= run.len() {
+            return None;
+        }
+        let joined = run[i..run.len().min(i + 16)].iter().map(|l| l.trim()).collect::<Vec<_>>().join(" ");
+        method_name(&joined)
+    })
 }
 
 /// What a top-level line declares, whatever the language: the line up to
@@ -327,6 +359,9 @@ pub fn grown_paths(root: &Path, ignore: &Ignore, base: &str) -> std::result::Res
     let mut files: Vec<File> = Vec::new();
     let mut current: Option<usize> = None;
     let mut in_header = false;
+    // (Each changed line: its file and hunk, whether it was added, the line.)
+    let mut runs: Vec<(usize, usize, bool, &str)> = Vec::new();
+    let mut hunk = 0;
     for line in text.split('\n') {
         if line.starts_with("diff --git ") {
             current = None;
@@ -347,6 +382,10 @@ pub fn grown_paths(root: &Path, ignore: &Ignore, base: &str) -> std::result::Res
             continue;
         }
         let Some(i) = current else { continue };
+        if line.starts_with("@@") {
+            hunk += 1;
+            continue;
+        }
         let (added, body) = match line.as_bytes().first() {
             Some(b'+') => (true, &line[1..]),
             Some(b'-') => (false, &line[1..]),
@@ -354,12 +393,25 @@ pub fn grown_paths(root: &Path, ignore: &Ignore, base: &str) -> std::result::Res
         };
         let f = &mut files[i];
         f.lines += 1;
-        if let Some(name) = defined_name(body) {
-            if added { f.new_names.insert(name) } else { f.gone_names.insert(name) };
-        }
         if let Some(key) = top_level_key(body) {
             if added { f.new_keys.insert(key) } else { f.gone_keys.insert(key) };
         }
+        runs.push((i, hunk, added, body));
+    }
+    // (Names, from each run of lines added or removed together: a
+    // declaration may go on over several.)
+    let mut start = 0;
+    while start < runs.len() {
+        let (file, h, added, _) = runs[start];
+        let end = start + runs[start..].iter().take_while(|(f, n, a, _)| (*f, *n, *a) == (file, h, added)).count();
+        let run: Vec<&str> = runs[start..end].iter().map(|(_, _, _, l)| *l).collect();
+        for k in 0..run.len() {
+            if let Some(name) = declared_name(&run, k) {
+                let f = &mut files[file];
+                if added { f.new_names.insert(name) } else { f.gone_names.insert(name) };
+            }
+        }
+        start = end;
     }
     // (Every changed file git names, NUL-delimited: one the parsing above
     // missed can't be taken as unchanged.)
@@ -888,6 +940,10 @@ mod tests {
             ("  added: function () {", "added"),
             ("  *items() {", "items"),
             ("  fun added() = 2", "added"),
+            ("  added<T>(value: T): T { return value; }", "added"),
+            ("  added<K, V>(m: Map<K, V>): V {", "added"),
+            ("    std::vector<int> added(int n) const {", "added"),
+            ("  added = <T>(x: T) => x;", "added"),
         ] {
             assert_eq!(defined_name(line).as_deref(), Some(name), "{line}");
         }
@@ -899,6 +955,19 @@ mod tests {
             "    property var x: compute(a)", "    case 1: f(x)", "    a.b = function () {",
         ] {
             assert_eq!(defined_name(line), None, "{line}");
+        }
+        // Over several lines.
+        for (run, name) in [
+            (&["  added(", "    value: number,", "  ): number {", "    return value;", "  }"][..], Some("added")),
+            (&["  added(value: number): number", "  {", "    return value;", "  }"][..], Some("added")),
+            (&["int added(void)", "{"][..], Some("added")),
+            (&["  added<T>(", "    value: T,", "  ): T {"][..], Some("added")),
+            (&["    foo(", "      a,", "    );", "    if (b) {"][..], None),
+            (&["    print(x)", "    for k in {1, 2}:"][..], None),
+            (&["    go(x)", "    if (y) {"][..], None),
+            (&["    run(a, () => {", "      b();", "    });"][..], None),
+        ] {
+            assert_eq!(declared_name(run, 0).as_deref(), name, "{run:?}");
         }
         assert_eq!(header_path("b/src/space name.rs\t"), "b/src/space name.rs");
         assert_eq!(header_path("\"b/src/t\\tab.rs\"\t"), "b/src/t\tab.rs");
