@@ -217,7 +217,7 @@ impl Tracker {
         let (phase, now) = if let Some((_, approval)) = self.asks.first() {
             ("input", if *approval { "Waiting for your approval" } else { "Waiting for your answer" }.to_owned())
         } else if self.finished() || (!self.busy && self.worked) {
-            let last = rows.iter().rev().find(|r| r.kind == RowKind::Markdown).map(|r| harlo_core::markdown::plain_text(&r.html)).unwrap_or_default();
+            let last = rows.iter().rev().find(|r| r.kind == RowKind::Markdown).map(|r| harlo_core::markdown::plain_text(&harlo_core::transcript::whole(r).html)).unwrap_or_default();
             (if self.failed { "failed" } else { "done" }, clip(&last, 140))
         } else if let Some(r) = rows.last().filter(|r| r.state == "streaming" && r.kind != RowKind::Tool) {
             ("working", if r.kind == RowKind::Thinking { "Thinking" } else { "Writing" }.to_owned())

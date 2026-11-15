@@ -10,7 +10,7 @@ Popup {
     id: root
     property var shortcuts: []
     // Test hook: number of rows shown.
-    readonly property int rowCount: list.rowCount
+    readonly property int rowCount: list.item ? list.item.rowCount : 0
 
     x: Math.round((parent.width - width) / 2)
     y: Math.round((parent.height - height) / 2)
@@ -83,14 +83,18 @@ Popup {
                     clip: true
                     boundsBehavior: Flickable.StopAtBounds
                     ScrollBar.vertical: ScrollBar { }
-                    ShortcutList {
+                    // (Made while it's open: thousands of items otherwise kept.)
+                    Loader {
                         id: list
                         x: 20
                         y: 16
                         width: flick.width - 40
-                        shortcuts: root.shortcuts
-                        twoColumns: root.width > 640
-                        onActivated: run => { root.close(); Qt.callLater(run) }
+                        active: root.visible
+                        sourceComponent: ShortcutList {
+                            shortcuts: root.shortcuts
+                            twoColumns: root.width > 640
+                            onActivated: run => { root.close(); Qt.callLater(run) }
+                        }
                     }
                 }
                 // More below: the list fades into the footer.

@@ -15,9 +15,9 @@ Rectangle {
     clip: true
 
     readonly property var log: {
-        if (!session.contextJson) return null
-        const r = JSON.parse(session.contextJson)
-        return r.actions || { actions: [], commands: 0, failed: 0, changed: [], read: [] }
+        if (!session.activityJson) return null
+        const a = JSON.parse(session.activityJson)
+        return a || { actions: [], commands: 0, failed: 0, changed: [], read: [] }
     }
     // all | command | change | read | other
     property string filter: "all"

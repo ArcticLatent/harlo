@@ -83,28 +83,35 @@ Item {
         focus: true
         // (Esc is the viewer's: out of the grid first, then closed.)
         closePolicy: Popup.NoAutoClose
-        readonly property alias viewer: chatViewer
+        // (The viewer is built when a picture opens and let go when it closes.)
+        readonly property var viewer: viewerLoader.item
         function show(list, path, labels) {
-            chatViewer.gridMode = false
-            chatViewer.labels = labels || ({})
-            chatViewer.pictureList = list
-            chatViewer.path = path
-            chatViewer.source = path
+            viewerLoader.active = true
+            const v = viewerLoader.item
+            v.gridMode = false
+            v.labels = labels || ({})
+            v.pictureList = list
+            v.path = path
+            v.source = path
             open()
-            Qt.callLater(() => chatViewer.focusView())
+            Qt.callLater(() => { if (viewerLoader.item) viewerLoader.item.focusView() })
         }
         background: Rectangle { color: Theme.stage }
         Overlay.modal: Rectangle { color: "transparent" }
         enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Math.round(Theme.motion * 0.5) } }
         exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Math.round(Theme.motion * 0.4) } }
-        contentItem: ImageViewer {
-            id: chatViewer
-            pictureList: []
-            backdrop: Theme.stage
-            onCloseRequested: chatPictures.close()
-            onOpenInTab: p => { chatPictures.close(); root.openFile(p) }
+        contentItem: Loader {
+            id: viewerLoader
+            active: false
+            focus: true
+            sourceComponent: ImageViewer {
+                pictureList: []
+                backdrop: Theme.stage
+                onCloseRequested: chatPictures.close()
+                onOpenInTab: p => { chatPictures.close(); root.openFile(p) }
+            }
         }
-        onClosed: { chatViewer.source = ""; chatViewer.path = ""; chatViewer.pictureList = [] }
+        onClosed: viewerLoader.active = false
     }
     property alias chatPictures: chatPictures
 
@@ -266,7 +273,8 @@ Item {
             for (let p = item.parent; p && Math.abs(delta) > 0.5; p = p.parent) {
                 if (p.contentY === undefined || p.contentHeight === undefined || p.contentHeight <= p.height + 0.5) continue
                 if (p === view && view.follow) break
-                const lo = p.originY || 0, hi = lo + p.contentHeight - p.height
+                // (Past its content by its margins, a list's last step's.)
+                const lo = (p.originY || 0) - (p.topMargin || 0), hi = (p.originY || 0) + p.contentHeight + (p.bottomMargin || 0) - p.height
                 const to = Math.max(lo, Math.min(hi, p.contentY + delta))
                 delta -= to - p.contentY
                 p.contentY = to
@@ -287,6 +295,45 @@ Item {
         }
         walk(view.contentItem)
         return out.map(s => ({ s, y: s.mapToItem(view.contentItem, 0, 0).y })).sort((a, b) => a.y - b.y).map(o => o.s)
+    }
+    /// Step `j` of a run's box `list`: brought into its view (so it's
+    /// made), its line (null: there's none).
+    function boxStep(list, j) {
+        if (!list || j < 0 || j >= list.count) return null
+        list.pinned = false
+        list.positionViewAtIndex(j, ListView.Contain)
+        const it = list.itemAtIndex(j)
+        const find = x => {
+            for (const c of x.children) {
+                if (!c.visible) continue
+                if (c.objectName === "toolHead" || c.objectName === "thoughtHead") return c
+                const f = find(c)
+                if (f) return f
+            }
+            return null
+        }
+        return it ? find(it) : null
+    }
+    /// The list in run `group`'s box (null: it isn't in one).
+    function runBoxList(group) {
+        let found = null
+        const walk = it => {
+            for (const c of it.children) {
+                if (found || !c.visible) continue
+                if (c.objectName === "runBox" && c.group === group) found = findIn(c, "runBoxScroll")
+                else walk(c)
+            }
+        }
+        const findIn = (it, name) => {
+            for (const c of it.children) {
+                if (c.objectName === name) return c
+                const f = findIn(c, name)
+                if (f) return f
+            }
+            return null
+        }
+        walk(view.contentItem)
+        return found
     }
     function runHeaderOf(group) {
         let found = null
@@ -311,7 +358,7 @@ Item {
             if (f.pinned !== undefined) f.pinned = false
             if (y < f.contentY + 8) f.contentY = y - 8
             else if (y + item.height > f.contentY + f.height - 8) f.contentY = y + item.height - f.height + 8
-            if (f.objectName === "runBoxScroll") f.contentY = Math.max(0, Math.min(f.contentY, f.contentHeight - f.height))
+            if (f.objectName === "runBoxScroll") f.contentY = Math.max(f.originY, Math.min(f.contentY, f.originY + f.contentHeight + f.bottomMargin - f.height))
         }
     }
     // Into the runs from elsewhere (a key): the last run's line in view, or
@@ -345,6 +392,16 @@ Item {
     }
     // A step's keys (Up, Down, Escape); true when it moved.
     function stepKey(step, key) {
+        // In a run's box: by its place in the run (those far off aren't made).
+        let cell = step
+        while (cell && cell.boxList === undefined) cell = cell.parent
+        if (cell && (key === Qt.Key_Down || key === Qt.Key_Up)) {
+            const j = cell.index + (key === Qt.Key_Down ? 1 : -1)
+            if (j < 0) { focusStep(runHeaderOf(step.stepGroup)); return true }
+            const next = boxStep(cell.boxList, j)
+            if (next) focusStep(next)
+            return next !== null
+        }
         const steps = runSteps(step.stepGroup), i = steps.indexOf(step)
         if (key === Qt.Key_Down && i >= 0 && i + 1 < steps.length) focusStep(steps[i + 1])
         else if (key === Qt.Key_Up && i > 0) focusStep(steps[i - 1])
@@ -461,7 +518,12 @@ Item {
         Keys.onPressed: e => {
             root.clickedStep = null
             if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter || e.key === Qt.Key_Space) { view.toggleRun(runHead.group, runHead.dflt); e.accepted = true }
-            else if (e.key === Qt.Key_Down && runHead.isOpen) { const s = root.runSteps(runHead.group); if (s.length) { root.focusStep(s[0]); e.accepted = true } }
+            else if (e.key === Qt.Key_Down && runHead.isOpen) {
+                // (A long run's box makes its first steps when they're wanted.)
+                const list = root.runBoxList(runHead.group)
+                const s = list ? [root.boxStep(list, 0)].filter(x => x) : root.runSteps(runHead.group)
+                if (s.length) { root.focusStep(s[0]); e.accepted = true }
+            }
             else if (e.key === Qt.Key_Escape) { root.leaveRuns(""); e.accepted = true }
             else e.accepted = root.typedOn(e)
         }
@@ -1391,75 +1453,82 @@ Item {
         RunHeader { Layout.fillWidth: true; group: box.group; summary: box.summary; dflt: box.dflt }
         Item {
         Layout.fillWidth: true
-        Layout.preferredHeight: Math.min(boxCol.implicitHeight + 6, box.maxHeight)
-        Flickable {
+        Layout.preferredHeight: Math.min(boxFlick.contentHeight + 6, box.maxHeight)
+        // Its steps as a list of their own: only those in view and near it
+        // are made (a run of hundreds of calls makes a screenful or two).
+        ListView {
             id: boxFlick
             objectName: "runBoxScroll"
             anchors.fill: parent
-            contentHeight: boxCol.implicitHeight + 6
+            model: box.rows
+            spacing: 6
+            bottomMargin: 6
+            // (A run of up to 40 steps is made whole, as a column would be,
+            // so its cards keep their place and height; a longer one keeps two
+            // boxes' worth around the view, the step a key moves to with it.)
+            cacheBuffer: box.rows.length <= 40 ? 1000000 : Math.round(box.maxHeight * 2)
+            // (No current step: a ListView keeps its current one made.)
+            currentIndex: -1
+            keyNavigationEnabled: false
             clip: true
-            interactive: contentHeight > height
+            interactive: contentHeight + 6 > height
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {
                 id: boxBar
                 // (Shown while it's used or hovered: the prompt rail is beside it.)
-                policy: boxFlick.contentHeight > boxFlick.height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+                policy: boxFlick.contentHeight + 6 > boxFlick.height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
                 onPressedChanged: boxFlick.pinned = !pressed && boxFlick.atEnd()
             }
             // At its end until scrolled by hand, and again once scrolled back
-            // there (its cards measure themselves after it's made, and a
-            // Flickable keeps its contentY when the content grows).
+            // there (its cards measure themselves after they're made).
             // (A run of one call opens at its top, its call's line in view.)
             property bool pinned: (box.rows || []).filter(r => r.kind !== "thinking").length !== 1
-            function atEnd() { return contentY >= contentHeight - height - 2 }
-            function place() { if (pinned && height > 0) contentY = Math.max(0, contentHeight - height) }
+            function atEnd() { return atYEnd || contentHeight + 6 <= height }
+            function place() { if (pinned && height > 0) positionViewAtEnd() }
             onContentHeightChanged: place()
             onHeightChanged: place()
+            onCountChanged: place()
             onMovementStarted: pinned = false
             onMovementEnded: pinned = atEnd()
             // The run's line, from its first step to its last.
             Rectangle {
-                x: boxCol.x + 7
-                y: 4
+                parent: boxFlick.contentItem
+                x: 7
+                y: boxFlick.originY + 4
                 width: 1
-                height: Math.max(0, boxCol.implicitHeight - 12)
+                height: Math.max(0, boxFlick.contentHeight - 12)
                 color: Theme.border
             }
-            ColumnLayout {
-                id: boxCol
+            delegate: Loader {
+                id: cell
+                required property var modelData
+                required property int index
+                // (For the keys: the list it's in.)
+                readonly property var boxList: boxFlick
                 width: boxFlick.width - (boxBar.visible ? 14 : 0)
-                spacing: 6
-                Repeater {
-                    model: box.rows
-                    Loader {
-                        id: cell
-                        required property var modelData
-                        Layout.fillWidth: true
-                        sourceComponent: modelData.kind === "thinking" ? thoughtCell : toolCell
-                        Component {
-                            id: thoughtCell
-                            ThoughtLine { width: cell.width; group: box.group; rowKey: cell.modelData.rowKey; text: cell.modelData.text; rowState: cell.modelData.rowState }
-                        }
-                        Component {
-                            id: toolCell
-                            ToolCard {
-                                width: cell.width
-                                rowKey: cell.modelData.rowKey
-                                title: cell.modelData.title
-                                subtitle: cell.modelData.subtitle
-                                text: cell.modelData.text
-                                rowState: cell.modelData.rowState
-                                callId: cell.modelData.callId
-                                result: cell.modelData.result
-                                diff: cell.modelData.diff
-                                took: cell.modelData.took
-                                label: cell.modelData.label
-                                command: cell.modelData.command
-                                images: cell.modelData.images || ""
-                                readsAfter: (view.count, root.session.readsAfter(box.group, cell.modelData.rowKey))
-                                group: box.group
-                            }
-                        }
+                sourceComponent: modelData.kind === "thinking" ? thoughtCell : toolCell
+                Component {
+                    id: thoughtCell
+                    ThoughtLine { width: cell.width; group: box.group; rowKey: cell.modelData.rowKey; text: cell.modelData.text; rowState: cell.modelData.rowState }
+                }
+                Component {
+                    id: toolCell
+                    ToolCard {
+                        width: cell.width
+                        rowKey: cell.modelData.rowKey
+                        title: cell.modelData.title
+                        subtitle: cell.modelData.subtitle
+                        text: cell.modelData.text
+                        rowState: cell.modelData.rowState
+                        callId: cell.modelData.callId
+                        result: cell.modelData.result
+                        diff: cell.modelData.diff
+                        took: cell.modelData.took
+                        label: cell.modelData.label
+                        command: cell.modelData.command
+                        images: cell.modelData.images || ""
+                        readsAfter: (view.count, root.session.readsAfter(box.group, cell.modelData.rowKey))
+                        group: box.group
                     }
                 }
             }
@@ -1468,7 +1537,7 @@ Item {
         Rectangle {
             width: parent.width - (boxBar.visible ? 10 : 0)
             height: 22
-            visible: boxFlick.contentY > 1
+            visible: !boxFlick.atYBeginning
             gradient: Gradient {
                 GradientStop { position: 0; color: Theme.canvas }
                 GradientStop { position: 1; color: Qt.rgba(Theme.canvas.r, Theme.canvas.g, Theme.canvas.b, 0) }

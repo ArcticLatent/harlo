@@ -149,6 +149,30 @@ fn opening_a_session_reads_only_its_current_branch() {
     assert!(peak < ALLOWED, "held {} MB", peak / MB);
 }
 
+/// Opened a message at a time, a session as long as the file holds only the
+/// message being passed on.
+#[test]
+fn a_long_branch_streams_a_message_at_a_time() {
+    let _serial = SERIAL.lock().unwrap();
+    let temp = Temp::new("streamed");
+    let path = temp.file();
+    let body = "x".repeat(32 * 1024);
+    write_lines(&path, |i| match i {
+        0 => r#"{"type":"session","version":3,"id":"s","cwd":"/w"}"#.to_owned(),
+        _ => {
+            let parent = if i == 1 { "null".to_owned() } else { format!("\"m{}\"", i - 1) };
+            format!(r#"{{"type":"message","id":"m{i}","parentId":{parent},"message":{{"role":"user","content":"{body}"}}}}"#)
+        }
+    });
+    let ((n, saved), peak) = peak_of(|| {
+        let mut n = 0;
+        let saved = store::stream_saved_for(harlo_harness::HarnessKind::Harlo, &path, &mut |_| n += 1).unwrap();
+        (n, saved)
+    });
+    assert!(n > 1000 && saved.messages.is_empty(), "{n}");
+    assert!(peak < ALLOWED, "held {} MB", peak / MB);
+}
+
 #[test]
 fn a_claude_transcript_costs_only_its_conversation() {
     let _serial = SERIAL.lock().unwrap();

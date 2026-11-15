@@ -69,9 +69,14 @@ struct State {
     compact_at: Option<u64>,
     compact_model: String,
     cost: f64,
-    /// The conversation since this started (pi's message shape): with
-    /// `history`, what `get_messages` answers.
+    /// The latest of the conversation since this started (pi's message
+    /// shape), at most about `KEPT_BYTES` of it: with `history` and
+    /// `spilled`, what `get_messages` answers.
     messages: Vec<Value>,
+    /// How big `messages` is, as JSON.
+    kept_bytes: usize,
+    /// What came since this started that `messages` no longer holds.
+    spilled: Spill,
     /// The transcript the conversation before that is read from when asked
     /// (not kept: a long one is hundreds of MB once parsed), and how many of
     /// its messages came before `messages`.
@@ -309,13 +314,15 @@ pub(crate) fn spawn(cfg: HarnessConfig, program: PathBuf) -> Result<(Harness, mp
     // A resumed session: its conversation so far.
     if let SessionTarget::Resume(path) = &shared.cfg.session {
         let file = shared.local_file(path);
-        let saved = file.as_deref().and_then(|f| claude::saved_file_cached(f).ok());
-        if let Some(saved) = saved {
+        // (Read one message at a time: what's needed of it is small.)
+        let mut read = Resumed::default();
+        let saved = file.as_deref().is_some_and(|f| claude::each_saved_message(f, &mut |m| read.add(&m)).is_ok());
+        if saved {
             let mut st = shared.state.lock().unwrap();
-            st.context_tokens = claude::context_used(&saved.messages);
-            st.history = Some((path.clone(), saved.messages.len()));
-            st.todo = todo_of(&saved.messages);
-            st.saved_model = saved.model;
+            st.context_tokens = read.context;
+            st.history = Some((path.clone(), read.count));
+            st.todo = read.todo;
+            st.saved_model = if read.model.is_empty() { String::new() } else { format!("anthropic/{}", read.model) };
             // Its window and where it compacts, as Claude said last time.
             if let Some((window, at)) = claude::known_context(&model_id(&st)) {
                 (st.context_window, st.compact_at, st.compact_model) = (window, Some(at), st.model.clone());
@@ -704,30 +711,44 @@ async fn command(shared: &Arc<Shared>, pending: &Pending, cmd: Value) {
             reply(true, json!({ "commands": commands }), "");
         }
         "get_messages" => {
-            let (history, live) = {
+            let (history, spilled, live) = {
                 let st = shared.state.lock().unwrap();
-                (st.history.clone(), st.messages.clone())
+                (st.history.clone(), st.spilled.file.as_ref().map(|(p, _)| (p.clone(), st.spilled.count)), st.messages.clone())
             };
-            // (The history as it was read at the start, then what came since.)
-            let read = history.is_some();
-            let mut messages = match history {
+            // (The history as it was read at the start, then what came since;
+            // a history that can't be read whole is an error, not a part.)
+            let read = history.is_some() || spilled.is_some();
+            let history = match history {
                 Some((path, count)) => {
                     let sh = shared.clone();
                     tokio::task::spawn_blocking(move || {
-                        let file = sh.local_file(&path)?;
-                        let mut read = claude::saved_file_cached(&file).ok()?.messages;
+                        let file = sh.local_file(&path).ok_or_else(|| format!("couldn't fetch {}", path.display()))?;
+                        let mut read = claude::saved_file_cached(&file).map_err(|e| format!("reading {}: {e:#}", file.display()))?.messages;
+                        if read.len() < count {
+                            return Err(format!("{} has {} of its {count} messages now", file.display(), read.len()));
+                        }
                         read.truncate(count);
-                        Some(read)
+                        Ok(read)
                     })
                     .await
-                    .ok()
-                    .flatten()
-                    .unwrap_or_default()
+                    .unwrap_or_else(|e| Err(e.to_string()))
                 }
-                None => Default::default(),
+                None => Ok(Vec::new()),
             };
-            messages.extend(live);
-            reply(true, json!({ "messages": messages }), "");
+            // (Then what went from memory since, then what it holds.)
+            let spilled = match spilled {
+                Some((path, count)) => tokio::task::spawn_blocking(move || Spill::read(&path, count)).await.unwrap_or_else(|e| Err(e.to_string())),
+                None => Ok(Vec::new()),
+            };
+            let messages = history.and_then(|mut messages| {
+                messages.extend(spilled?);
+                messages.extend(live);
+                Ok(messages)
+            });
+            match &messages {
+                Ok(messages) => reply(true, json!({ "messages": messages }), ""),
+                Err(e) => reply(false, Value::Null, e),
+            }
             // (What reading the history used goes back, whatever its size.)
             drop(messages);
             if read {
@@ -780,7 +801,7 @@ async fn command(shared: &Arc<Shared>, pending: &Pending, cmd: Value) {
                         let mut st = shared.state.lock().unwrap();
                         st.history = file.as_ref().map(|f| (f.with_file_name(format!("{id}.jsonl")), messages.len()));
                         st.todo = todo_of(&messages);
-                        st.messages.clear();
+                        st.start_over();
                         st.session_id = id;
                         st.subagents.clear();
                         st.tasks.clear();
@@ -1245,11 +1266,167 @@ fn subagent_update(shared: &Arc<Shared>, call: &str, patch: Value) {
     shared.emit(HarnessEvent::SubagentActivity(json!({ "type": "subagent_lifecycle", "payload": entry })));
 }
 
+/// The live messages kept in memory, as JSON, before the oldest go to the
+/// spill file (down to half of it).
+const KEPT_BYTES: usize = 4 << 20;
+
 impl State {
     /// A message of the conversation's, as it ends.
     fn keep(&mut self, message: &Value) {
+        self.keep_within(message, KEPT_BYTES);
+    }
+
+    fn keep_within(&mut self, message: &Value, budget: usize) {
         keep_todo(&mut self.todo, message);
+        self.kept_bytes += json_len(message);
         self.messages.push(message.clone());
+        if self.kept_bytes > budget {
+            // (Written and flushed before they go; if they can't be, they stay.)
+            match self.spilled.write(&self.messages, self.kept_bytes, budget / 2) {
+                Ok((n, bytes)) => {
+                    self.messages.drain(..n);
+                    self.kept_bytes -= bytes;
+                }
+                Err(e) => tracing::warn!("keeping the conversation in memory: {e}"),
+            }
+        }
+    }
+
+    /// A new conversation (a fork): none of the old one's is kept.
+    fn start_over(&mut self) {
+        self.messages.clear();
+        self.kept_bytes = 0;
+        let dir = self.spilled.dir.take();
+        self.spilled = Spill::default();
+        self.spilled.dir = dir;
+    }
+}
+
+/// How long `v` is as JSON.
+fn json_len(v: &Value) -> usize {
+    struct Count(usize);
+    impl std::io::Write for Count {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            self.0 += b.len();
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut n = Count(0);
+    let _ = serde_json::to_writer(&mut n, v);
+    n.0
+}
+
+/// The live messages that went from memory: a file of them, one a line, in
+/// the order they came (only this process's; it goes with it).
+#[derive(Default)]
+struct Spill {
+    file: Option<(PathBuf, std::fs::File)>,
+    count: usize,
+    /// Writing failed once: messages stay in memory from then on.
+    failed: bool,
+    /// Where it's made (None: the cache's `live` folder).
+    dir: Option<PathBuf>,
+}
+
+impl Spill {
+    /// Writes the oldest of `messages` (`bytes` of JSON) until what's left is
+    /// at most `down_to`, and flushes them: how many and how many bytes.
+    fn write(&mut self, messages: &[Value], bytes: usize, down_to: usize) -> std::io::Result<(usize, usize)> {
+        use std::io::Write;
+        if self.failed {
+            return Err(std::io::Error::other("the spill file failed before"));
+        }
+        let wrote = (|| {
+            if self.file.is_none() {
+                self.file = Some(spill_file(self.dir.as_deref())?);
+            }
+            let (_, file) = self.file.as_mut().expect("opened");
+            let mut out = std::io::BufWriter::with_capacity(1 << 20, &mut *file);
+            let (mut n, mut gone) = (0, 0);
+            // (The latest stays.)
+            while bytes - gone > down_to && n + 1 < messages.len() {
+                let line = serde_json::to_vec(&messages[n])?;
+                out.write_all(&line)?;
+                out.write_all(b"\n")?;
+                gone += line.len();
+                n += 1;
+            }
+            out.flush()?;
+            drop(out);
+            file.sync_data()?;
+            Ok((n, gone))
+        })();
+        match wrote {
+            Ok((n, gone)) => {
+                self.count += n;
+                Ok((n, gone))
+            }
+            Err(e) => {
+                self.failed = true;
+                Err(e)
+            }
+        }
+    }
+
+    /// Its first `count` messages, read back.
+    fn read(path: &Path, count: usize) -> Result<Vec<Value>, String> {
+        let mut out = Vec::with_capacity(count);
+        crate::store::for_each_line(path, 0, &mut |_, line| {
+            if out.len() < count
+                && let Ok(v) = serde_json::from_str(line)
+            {
+                out.push(v);
+            }
+        })
+        .map_err(|e| format!("reading {}: {e}", path.display()))?;
+        if out.len() < count {
+            return Err(format!("{} has {} of its {count} messages", path.display(), out.len()));
+        }
+        Ok(out)
+    }
+}
+
+impl Drop for Spill {
+    fn drop(&mut self) {
+        if let Some((path, _)) = self.file.take() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+/// A new spill file, only you can read (in the cache, not a temporary
+/// folder: that can be memory too). Those of processes gone go first.
+fn spill_file(dir: Option<&Path>) -> std::io::Result<(PathBuf, std::fs::File)> {
+    let dir = match dir {
+        Some(dir) => dir.to_owned(),
+        None => claude::cache_dir().ok_or_else(|| std::io::Error::other("no cache folder"))?.join("live"),
+    };
+    crate::store::own_file(&dir, "jsonl")
+}
+
+/// What a resumed session needs of its transcript: how many messages, the
+/// to-do calls, the context its last reply used, its model.
+#[derive(Default)]
+struct Resumed {
+    count: usize,
+    todo: Vec<Value>,
+    context: u64,
+    model: String,
+}
+
+impl Resumed {
+    fn add(&mut self, m: &Value) {
+        self.count += 1;
+        keep_todo(&mut self.todo, m);
+        if let Some(n) = claude::context_of(m) {
+            self.context = n;
+        }
+        if let Some(model) = m["model"].as_str().filter(|s| !s.is_empty()) {
+            model.clone_into(&mut self.model);
+        }
     }
 }
 
@@ -1700,7 +1877,79 @@ mod tests {
         let messages = rx.await.unwrap()["data"]["messages"].clone();
         let texts: Vec<&str> = messages.as_array().unwrap().iter().filter_map(|m| m["content"][0]["text"].as_str()).collect();
         assert_eq!(texts, ["first", "reply", "second"]);
+        // A history that can't be read whole: an error, not the rest alone.
+        for broken in [Some(line("user", "first")), None] {
+            match &broken {
+                Some(part) => std::fs::write(&path, part.clone() + "\n").unwrap(),
+                None => std::fs::remove_file(&path).unwrap(),
+            }
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            pending.lock().unwrap().insert("m".into(), tx);
+            command(&shared, &pending, json!({ "type": "get_messages", "id": "m" })).await;
+            let answer = rx.await.unwrap();
+            assert_eq!(answer["success"], false, "{broken:?}: {answer}");
+            assert!(answer["data"]["messages"].is_null() && !answer["error"].as_str().unwrap().is_empty(), "{answer}");
+        }
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A long run keeps only its latest messages in memory; the rest are in
+    /// its spill file, and `get_messages` answers all of them in order.
+    #[tokio::test]
+    async fn a_long_run_keeps_its_latest_in_memory() {
+        let dir = std::env::temp_dir().join(format!("harlo-claude-spill-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (shared, _rx) = shared();
+        let message = |i: usize| json!({ "role": "assistant", "content": [{ "type": "text", "text": format!("{i}: {}", "x".repeat(1000)) }] });
+        let budget = 20_000;
+        {
+            let mut st = shared.state.lock().unwrap();
+            st.spilled.dir = Some(dir.clone());
+            for i in 0..200 {
+                st.keep_within(&message(i), budget);
+                assert!(st.kept_bytes <= budget && st.kept_bytes == st.messages.iter().map(json_len).sum::<usize>(), "{i}");
+            }
+            assert!(st.messages.len() < 20 && st.spilled.count + st.messages.len() == 200);
+        }
+        let ask = || async {
+            let pending = Pending::default();
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            pending.lock().unwrap().insert("m".into(), tx);
+            command(&shared, &pending, json!({ "type": "get_messages", "id": "m" })).await;
+            rx.await.unwrap()
+        };
+        let all = ask().await["data"]["messages"].clone();
+        assert_eq!(all.as_array().unwrap().len(), 200);
+        assert!((0..200).all(|i| all[i] == message(i)), "in order");
+        let spill = shared.state.lock().unwrap().spilled.file.as_ref().unwrap().0.clone();
+        assert!(spill.exists());
+        // Its file cut short: an error, not a gap.
+        std::fs::write(&spill, "").unwrap();
+        assert_eq!(ask().await["success"], false);
+        // A fork starts over, and its file goes.
+        shared.state.lock().unwrap().start_over();
+        assert!(!spill.exists() && shared.state.lock().unwrap().spilled.count == 0);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// What a resume reads one message at a time is what it read whole.
+    #[test]
+    fn a_resume_reads_what_it_read_whole() {
+        let messages = vec![
+            json!({ "role": "user", "content": [{ "type": "text", "text": "go" }] }),
+            json!({ "role": "assistant", "model": "claude-a", "usage": { "input": 10, "cacheRead": 5 }, "content": [{ "type": "toolCall", "id": "t1", "name": "TaskCreate", "arguments": {} }] }),
+            json!({ "role": "toolResult", "toolCallId": "t1", "content": [{ "type": "text", "text": "Task #1 created" }] }),
+            json!({ "role": "assistant", "model": "claude-b", "usage": { "input": 0 }, "content": [{ "type": "text", "text": "done" }] }),
+            json!({ "role": "assistant", "model": "", "content": [{ "type": "toolCall", "id": "t2", "name": "TodoWrite", "arguments": { "todos": [] } }] }),
+        ];
+        let mut read = Resumed::default();
+        messages.iter().for_each(|m| read.add(m));
+        assert_eq!(read.count, messages.len());
+        assert_eq!(read.todo, todo_of(&messages));
+        assert_eq!(read.context, claude::context_used(&messages));
+        assert_eq!(read.context, 15);
+        let whole = messages.iter().rev().find_map(|m| m["model"].as_str().filter(|s| !s.is_empty())).unwrap();
+        assert_eq!(read.model, whole);
     }
 
     #[tokio::test]

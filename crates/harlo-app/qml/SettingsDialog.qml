@@ -581,6 +581,8 @@ Popup {
                         id: pageLoader
                         anchors.fill: parent
                         sourceComponent: root.page === "usage" ? usagePage : scrolledPage
+                        // (Built while Settings is open.)
+                        active: root.visible
                     }
                     // A page's floating action bar (an MCP server's Save,
                     // Cancel, Delete), over the scrolled content.

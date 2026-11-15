@@ -211,6 +211,15 @@ fn clip_end(s: &str) -> String {
 /// it shows (`harlo_core::pictures::shown`, which a phone asks for with
 /// `picture`).
 fn row_json(r: &harlo_core::Row, folder: &std::path::Path) -> Value {
+    // (A row far back: its long text read from its page.)
+    let whole;
+    let r = match &r.paged {
+        Some(_) => {
+            whole = harlo_core::transcript::whole(&Arc::new(r.clone()));
+            &*whole
+        }
+        None => r,
+    };
     let text = if r.command.is_empty() { clip(&r.text) } else { clip_end(&r.text) };
     // (A long code block's pieces after its first: the phone shows the first,
     // which copies all of it.)
@@ -234,10 +243,11 @@ fn phone_code(full: &[Arc<harlo_core::Row>], i: usize) -> Option<(String, String
         body.strip_suffix("</pre>").unwrap_or(body).to_owned()
     };
     let mut html = String::from("<pre style=\"margin:0;\">");
+    let first = harlo_core::transcript::whole(first);
     html.push_str(&inner(&first.html));
     for r in full[i + 1..].iter().take_while(|r| r.kind == harlo_core::RowKind::Code && matches!(r.label.as_str(), "part-middle" | "part-last") && r.summary == first.key) {
         html.push('\n');
-        html.push_str(&inner(&r.html));
+        html.push_str(&inner(&harlo_core::transcript::whole(r).html));
     }
     // (Too big: cut after a whole line, whose tags it closes itself, and
     // said; what it copies is cut after the same line. Its text is never
@@ -752,8 +762,8 @@ async fn session_op(op: &str, msg: &Value, live: &crate::registry::LiveRef) -> V
         // The session as Markdown (to share).
         "markdown" => {
             return match live.handle.export_markdown().await {
-                Some(md) => json!({ "markdown": md }),
-                None => failed("That session isn't running.".into()),
+                Ok(md) => json!({ "markdown": md }),
+                Err(e) => failed(format!("Couldn't export it: {e}.")),
             };
         }
         // What it ran and touched (harlo_core::actions), from its messages.

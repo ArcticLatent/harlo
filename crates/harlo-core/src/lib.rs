@@ -35,6 +35,7 @@ pub mod mcp_probe;
 pub mod notifications;
 pub mod palette;
 pub mod phone;
+pub mod pages;
 pub mod pictures;
 pub mod plan;
 pub mod quota;

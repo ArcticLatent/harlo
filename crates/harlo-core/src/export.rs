@@ -77,16 +77,55 @@ fn fence(text: &str) -> String {
 
 /// The session as Markdown.
 pub fn markdown(messages: &[Value], info: &Info) -> String {
-    let mut results: std::collections::HashMap<&str, (String, bool)> = std::collections::HashMap::new();
-    for m in messages {
-        if m["role"] == "toolResult"
-            && let Some(id) = m["toolCallId"].as_str()
-        {
-            results.insert(id, (text_blocks(&m["content"]), m["isError"].as_bool().unwrap_or(false)));
+    let mut out = Vec::new();
+    write_markdown(
+        &mut |each| {
+            messages.iter().cloned().for_each(each);
+            Ok(())
+        },
+        info,
+        &mut out,
+    )
+    .expect("writing to memory");
+    String::from_utf8(out).expect("Markdown is text")
+}
+
+/// What the first pass learns of a call id: where its last result is, and
+/// how many calls name it.
+#[derive(Default)]
+struct CallId {
+    last_result: Option<usize>,
+    calls: usize,
+}
+
+/// [`markdown`] written to `out` as it's made, from messages `read` passes
+/// on one at a time (it's read twice: once for where each call's result is,
+/// then to write). What's held at once is a call waiting for its result and
+/// what follows it, never the conversation.
+pub fn write_markdown(read: &mut dyn FnMut(&mut dyn FnMut(Value)) -> std::io::Result<()>, info: &Info, out: &mut dyn std::io::Write) -> std::io::Result<()> {
+    let mut ids: std::collections::HashMap<String, CallId> = std::collections::HashMap::new();
+    let mut first_time = None;
+    let mut i = 0;
+    read(&mut |m| {
+        first_time = first_time.or_else(|| m["timestamp"].as_i64());
+        match m["role"].as_str() {
+            Some("toolResult") => {
+                if let Some(id) = m["toolCallId"].as_str() {
+                    ids.entry(id.to_owned()).or_default().last_result = Some(i);
+                }
+            }
+            Some("assistant") => {
+                for id in m["content"].as_array().into_iter().flatten().filter(|b| b["type"] == "toolCall").filter_map(|b| b["id"].as_str()) {
+                    ids.entry(id.to_owned()).or_default().calls += 1;
+                }
+            }
+            _ => {}
         }
-    }
-    let first_time = messages.iter().find_map(|m| m["timestamp"].as_i64());
-    let mut out = format!("# {}\n\n", if info.title.trim().is_empty() { "Session" } else { info.title.trim() });
+        i += 1;
+    })?;
+
+    let mut w = Trimmed { out, held: String::new(), failed: None };
+    w.push(&format!("# {}\n\n", if info.title.trim().is_empty() { "Session" } else { info.title.trim() }));
     let date = {
         use chrono::TimeZone;
         first_time.and_then(|ms| chrono::Local.timestamp_millis_opt(ms).single()).map(|t| t.format("%Y-%m-%d %H:%M").to_string()).unwrap_or_default()
@@ -96,12 +135,29 @@ pub fn markdown(messages: &[Value], info: &Info) -> String {
         .filter(|s| !s.is_empty())
         .collect();
     if !head.is_empty() {
-        out.push_str(&format!("*{}*\n\n", head.join(" · ")));
+        w.push(&format!("*{}*\n\n", head.join(" · ")));
     }
+    // Text written once what comes before it is; a call once its result
+    // (the last, if it has several) has been read.
+    enum Piece {
+        Text(String),
+        Call(Value),
+    }
+    let mut queue: std::collections::VecDeque<Piece> = std::collections::VecDeque::new();
+    // Results read whose calls aren't written yet.
+    let mut results: std::collections::HashMap<String, (String, bool)> = std::collections::HashMap::new();
     // The agent's turn: one heading, however many messages it takes.
     let mut in_reply = false;
-    for m in messages {
+    let mut i = 0;
+    read(&mut |m| {
         match m["role"].as_str() {
+            Some("toolResult") => {
+                if let Some(id) = m["toolCallId"].as_str()
+                    && ids.get(id).is_some_and(|c| c.calls > 0 && c.last_result == Some(i))
+                {
+                    results.insert(id.to_owned(), (text_blocks(&m["content"]), m["isError"].as_bool().unwrap_or(false)));
+                }
+            }
             Some("user") => {
                 use harlo_harness::file_blocks as fb;
                 let text = text_blocks(&m["content"]);
@@ -111,44 +167,98 @@ pub fn markdown(messages: &[Value], info: &Info) -> String {
                 let text = text.split("<harlo-").next().unwrap_or("");
                 let text = fb::strip_plan(fb::strip_ask_first(text).0).0.trim().to_owned();
                 let text = if files.is_empty() { text } else { format!("{text}\n\n*Attached: {}*", files.join(", ")).trim().to_owned() };
-                if text.is_empty() {
-                    continue;
+                if !text.is_empty() {
+                    let t = time_of(m["timestamp"].as_i64());
+                    queue.push_back(Piece::Text(format!("---\n\n## You{}\n\n{}\n\n", if t.is_empty() { String::new() } else { format!(" · {t}") }, demote(&text))));
+                    in_reply = false;
                 }
-                let t = time_of(m["timestamp"].as_i64());
-                out.push_str(&format!("---\n\n## You{}\n\n{}\n\n", if t.is_empty() { String::new() } else { format!(" · {t}") }, demote(&text)));
-                in_reply = false;
             }
             Some("assistant") => {
                 if !in_reply {
                     let t = time_of(m["timestamp"].as_i64());
-                    out.push_str(&format!("## {}{}\n\n", if info.agent.is_empty() { "Agent" } else { &info.agent }, if t.is_empty() { String::new() } else { format!(" · {t}") }));
+                    queue.push_back(Piece::Text(format!("## {}{}\n\n", if info.agent.is_empty() { "Agent" } else { &info.agent }, if t.is_empty() { String::new() } else { format!(" · {t}") })));
                     in_reply = true;
                 }
-                for b in m["content"].as_array().into_iter().flatten() {
+                let mut m = m;
+                for b in m["content"].as_array_mut().map(std::mem::take).into_iter().flatten() {
                     match b["type"].as_str() {
                         Some("text") => {
                             let text = demote(b["text"].as_str().unwrap_or("").trim());
                             if !text.is_empty() {
-                                out.push_str(&text);
-                                out.push_str("\n\n");
+                                queue.push_back(Piece::Text(text + "\n\n"));
                             }
                         }
-                        Some("toolCall") => out.push_str(&tool_call(b, &results)),
+                        Some("toolCall") => queue.push_back(Piece::Call(b)),
                         _ => {}
                     }
                 }
                 if let Some(e) = m["errorMessage"].as_str().filter(|e| !e.is_empty()) {
-                    out.push_str(&format!("> **Error:** {e}\n\n"));
+                    queue.push_back(Piece::Text(format!("> **Error:** {e}\n\n")));
                 }
             }
             _ => {}
         }
+        while let Some(piece) = queue.front() {
+            match piece {
+                Piece::Text(text) => w.push(text),
+                Piece::Call(b) => {
+                    let id = b["id"].as_str();
+                    let waiting = id.and_then(|id| ids.get(id)).and_then(|c| c.last_result).is_some_and(|at| at > i);
+                    if waiting {
+                        break;
+                    }
+                    w.push(&tool_call(b, id.and_then(|id| results.get(id))));
+                    if let Some(id) = id
+                        && let Some(c) = ids.get_mut(id)
+                    {
+                        c.calls -= 1;
+                        if c.calls == 0 {
+                            results.remove(id);
+                        }
+                    }
+                }
+            }
+            queue.pop_front();
+        }
+        i += 1;
+    })?;
+    // (Calls whose results never came: as they are.)
+    for piece in queue {
+        match piece {
+            Piece::Text(text) => w.push(&text),
+            Piece::Call(b) => w.push(&tool_call(&b, b["id"].as_str().and_then(|id| results.get(id)))),
+        }
     }
-    out.trim_end().to_owned() + "\n"
+    w.out.write_all(b"\n")?;
+    w.failed.map_or(Ok(()), Err)
+}
+
+/// Writes what it's given but the whitespace it ends with, until more
+/// comes (the Markdown ends with its last word, then a newline).
+struct Trimmed<'a> {
+    out: &'a mut dyn std::io::Write,
+    held: String,
+    failed: Option<std::io::Error>,
+}
+
+impl Trimmed<'_> {
+    fn push(&mut self, text: &str) {
+        let kept = text.trim_end();
+        if kept.is_empty() {
+            self.held.push_str(text);
+            return;
+        }
+        if self.failed.is_none()
+            && let Err(e) = self.out.write_all(self.held.as_bytes()).and_then(|()| self.out.write_all(kept.as_bytes()))
+        {
+            self.failed = Some(e);
+        }
+        self.held = text[kept.len()..].to_owned();
+    }
 }
 
 /// "- **bash** `cargo test` → 12 passed", and a short output.
-fn tool_call(b: &Value, results: &std::collections::HashMap<&str, (String, bool)>) -> String {
+fn tool_call(b: &Value, result: Option<&(String, bool)>) -> String {
     let name = b["name"].as_str().unwrap_or("tool");
     let kind = crate::actions::kind(name);
     if kind == "todo" {
@@ -157,7 +267,7 @@ fn tool_call(b: &Value, results: &std::collections::HashMap<&str, (String, bool)
     let args = &b["arguments"];
     let log = crate::actions::log(&[serde_json::json!({ "role": "assistant", "content": [b] })]);
     let target = log["actions"][0]["target"].as_str().unwrap_or("").to_owned();
-    let (output, error) = b["id"].as_str().and_then(|id| results.get(id)).cloned().unwrap_or_default();
+    let (output, error) = result.cloned().unwrap_or_default();
     let (result, _) = crate::tool_facts::facts(name, args, &output, error);
     let mut line = format!("- **{name}**");
     if !target.is_empty() {
@@ -211,6 +321,148 @@ mod tests {
         assert!(!md.contains("secret plan") && !md.contains("todo"), "thinking and todo updates stay out");
         assert!(md.contains("\n\nThanks\n") && !md.contains("harlo-starter"), "harlo's notes stay out: {md}");
         assert!(md.ends_with("Plan it\n"), "the plan note stays out: {md}");
+    }
+
+    /// How it was written before it streamed, whole in memory: the
+    /// streamed Markdown must be the same, byte for byte.
+    fn whole_markdown(messages: &[Value], info: &Info) -> String {
+        let mut results: std::collections::HashMap<&str, (String, bool)> = std::collections::HashMap::new();
+        for m in messages {
+            if m["role"] == "toolResult"
+                && let Some(id) = m["toolCallId"].as_str()
+            {
+                results.insert(id, (text_blocks(&m["content"]), m["isError"].as_bool().unwrap_or(false)));
+            }
+        }
+        let first_time = messages.iter().find_map(|m| m["timestamp"].as_i64());
+        let mut out = format!("# {}\n\n", if info.title.trim().is_empty() { "Session" } else { info.title.trim() });
+        let date = {
+            use chrono::TimeZone;
+            first_time.and_then(|ms| chrono::Local.timestamp_millis_opt(ms).single()).map(|t| t.format("%Y-%m-%d %H:%M").to_string()).unwrap_or_default()
+        };
+        let head: Vec<String> = [info.agent.clone(), info.model.clone(), if info.folder.is_empty() { String::new() } else { format!("`{}`", info.folder) }, date]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect();
+        if !head.is_empty() {
+            out.push_str(&format!("*{}*\n\n", head.join(" · ")));
+        }
+        // The agent's turn: one heading, however many messages it takes.
+        let mut in_reply = false;
+        for m in messages {
+            match m["role"].as_str() {
+                Some("user") => {
+                    use harlo_harness::file_blocks as fb;
+                    let text = text_blocks(&m["content"]);
+                    // harlo's own notes riding along with a message stay out
+                    // (attached files: their names).
+                    let (files, text) = fb::split_blocks(&text);
+                    let text = text.split("<harlo-").next().unwrap_or("");
+                    let text = fb::strip_plan(fb::strip_ask_first(text).0).0.trim().to_owned();
+                    let text = if files.is_empty() { text } else { format!("{text}\n\n*Attached: {}*", files.join(", ")).trim().to_owned() };
+                    if text.is_empty() {
+                        continue;
+                    }
+                    let t = time_of(m["timestamp"].as_i64());
+                    out.push_str(&format!("---\n\n## You{}\n\n{}\n\n", if t.is_empty() { String::new() } else { format!(" · {t}") }, demote(&text)));
+                    in_reply = false;
+                }
+                Some("assistant") => {
+                    if !in_reply {
+                        let t = time_of(m["timestamp"].as_i64());
+                        out.push_str(&format!("## {}{}\n\n", if info.agent.is_empty() { "Agent" } else { &info.agent }, if t.is_empty() { String::new() } else { format!(" · {t}") }));
+                        in_reply = true;
+                    }
+                    for b in m["content"].as_array().into_iter().flatten() {
+                        match b["type"].as_str() {
+                            Some("text") => {
+                                let text = demote(b["text"].as_str().unwrap_or("").trim());
+                                if !text.is_empty() {
+                                    out.push_str(&text);
+                                    out.push_str("\n\n");
+                                }
+                            }
+                            Some("toolCall") => out.push_str(&whole_tool_call(b, &results)),
+                            _ => {}
+                        }
+                    }
+                    if let Some(e) = m["errorMessage"].as_str().filter(|e| !e.is_empty()) {
+                        out.push_str(&format!("> **Error:** {e}\n\n"));
+                    }
+                }
+                _ => {}
+            }
+        }
+        out.trim_end().to_owned() + "\n"
+    }
+    fn whole_tool_call(b: &Value, results: &std::collections::HashMap<&str, (String, bool)>) -> String {
+        let name = b["name"].as_str().unwrap_or("tool");
+        let kind = crate::actions::kind(name);
+        if kind == "todo" {
+            return String::new();
+        }
+        let args = &b["arguments"];
+        let log = crate::actions::log(&[serde_json::json!({ "role": "assistant", "content": [b] })]);
+        let target = log["actions"][0]["target"].as_str().unwrap_or("").to_owned();
+        let (output, error) = b["id"].as_str().and_then(|id| results.get(id)).cloned().unwrap_or_default();
+        let (result, _) = crate::tool_facts::facts(name, args, &output, error);
+        let mut line = format!("- **{name}**");
+        if !target.is_empty() {
+            let f = if target.contains('`') { "``" } else { "`" };
+            line.push_str(&format!(" {f}{target}{f}"));
+        }
+        if error {
+            line.push_str(if result.is_empty() || result == "failed" { " → failed".to_owned() } else { format!(" → failed ({result})") }.as_str());
+        } else if !result.is_empty() {
+            line.push_str(&format!(" → {result}"));
+        }
+        line.push('\n');
+        // A command's output, when short.
+        let output = output.trim_end();
+        if kind == "command" && !output.is_empty() && output.lines().count() <= OUTPUT_LINES {
+            let f = fence(output);
+            line.push_str(&format!("\n  {f}\n{}\n  {f}\n", output.lines().map(|l| format!("  {l}")).collect::<Vec<_>>().join("\n")));
+        }
+        line.push('\n');
+        line
+    }
+
+    #[test]
+    fn streamed_is_the_same_as_whole() {
+        let call = |id: &str, name: &str, args: Value| json!({ "type": "toolCall", "id": id, "name": name, "arguments": args });
+        let result = |id: &str, text: &str, error: bool| json!({ "role": "toolResult", "toolCallId": id, "isError": error, "content": [{ "type": "text", "text": text }] });
+        let messages = vec![
+            json!({ "role": "user", "timestamp": 1_760_000_000_000i64, "content": "Go   \n\n" }),
+            // A result read before its call.
+            result("early", "1 passed", false),
+            json!({ "role": "assistant", "timestamp": 1_760_000_001_000i64, "content": [call("early", "bash", json!({ "command": "cargo test" }))] }),
+            // Results coming later, one twice (the last counts), one never.
+            json!({ "role": "assistant", "content": [
+                { "type": "text", "text": "# Plan\n\nfirst" },
+                call("a", "bash", json!({ "command": "ls" })),
+                call("never", "bash", json!({ "command": "sleep 9" })),
+                call("b", "edit", json!({ "path": "a.rs", "oldText": "x", "newText": "y\nz" })),
+                call("t", "todo", json!({})),
+                { "type": "text", "text": "after the calls  \n" } ] }),
+            result("a", "a\nb", false),
+            json!({ "role": "user", "content": "" }),
+            json!({ "role": "assistant", "content": [{ "type": "text", "text": "between" }], "errorMessage": "overloaded" }),
+            result("b", "first try", true),
+            result("b", "Edited a.rs", false),
+            // Two calls with one id: both see its result.
+            json!({ "role": "assistant", "content": [call("dup", "bash", json!({ "command": "echo 1" })), call("dup", "bash", json!({ "command": "echo 2" }))] }),
+            result("dup", "ok", false),
+            result("orphan", "no call", false),
+            json!({ "role": "user", "content": [{ "type": "text", "text": "Thanks" }, { "type": "image", "data": "x" }] }),
+            json!({ "role": "assistant", "content": [{ "type": "text", "text": "  \n" }] }),
+        ];
+        for info in [Info { title: "T".into(), agent: "Claude".into(), model: "Opus".into(), folder: "~/x".into() }, Info::default()] {
+            let streamed = markdown(&messages, &info);
+            assert_eq!(streamed, whole_markdown(&messages, &info));
+            for n in 0..messages.len() {
+                assert_eq!(markdown(&messages[..n], &info), whole_markdown(&messages[..n], &info), "the first {n}");
+            }
+        }
     }
 
     #[test]

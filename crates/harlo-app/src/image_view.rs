@@ -6,7 +6,9 @@
 //!
 //! - Full images: decoded at full size (an animation's frames all kept),
 //!   about 768 MB of them cached, the next and previous ones decoded ahead.
-//!   A big JPEG shows first at the screen's size, then whole.
+//!   A still much bigger than the screen is kept at the screen's size; its
+//!   own pixels are decoded for a view zoomed in past that, and let go when
+//!   it's zoomed back out.
 //! - Thumbnails: kept in memory (about 192 MB) and on disk under
 //!   `$XDG_CACHE_HOME/harlo/thumbnails`, made on every core, the newest
 //!   asked for (the ones coming into view) first.
@@ -42,6 +44,7 @@ pub mod qobject {
         type FrameReader;
         fn open_frames(path: &QString) -> UniquePtr<FrameReader>;
         fn animated(self: &FrameReader) -> bool;
+        fn frame_count(self: &FrameReader) -> i32;
         fn next_frame(self: Pin<&mut FrameReader>, delay_ms: &mut i32) -> QImage;
     }
 
@@ -51,8 +54,8 @@ pub mod qobject {
         #[qml_element]
         /// The file shown (a local path).
         #[qproperty(QString, path, READ, WRITE = set_path, NOTIFY)]
-        /// "" (none), "loading", "preview" (a smaller copy, the whole on its
-        /// way), "ready" or "error".
+        /// "" (none), "loading", "preview" (a smaller copy, more on its way:
+        /// the picture, or its own pixels for the zoom), "ready" or "error".
         #[qproperty(QString, status)]
         #[qproperty(QString, error)]
         /// The image's size (a photo's rotation applied); -1 unknown.
@@ -75,6 +78,10 @@ pub mod qobject {
         #[qproperty(f64, load_ms, cxx_name = "loadMs")]
         /// From asking to anything on screen (a preview or the whole, ms).
         #[qproperty(f64, first_ms, cxx_name = "firstMs")]
+        /// The picture's own pixels are on screen, not a smaller copy (a
+        /// picture much bigger than the screen shows a copy at the
+        /// screen's size until it's zoomed in past what that shows).
+        #[qproperty(bool, whole)]
         /// Being dragged.
         #[qproperty(bool, dragging)]
         type ImageView = super::ImageViewRust;
@@ -190,6 +197,9 @@ pub mod qobject {
         #[cxx_name = "pixelRatio"]
         fn pixel_ratio(self: &ImageView) -> f64;
         #[inherit]
+        #[cxx_name = "screenSide"]
+        fn screen_side(self: &ImageView) -> i32;
+        #[inherit]
         #[cxx_name = "showImage"]
         fn show_image(self: Pin<&mut ImageView>, image: &QImage);
         #[inherit]
@@ -264,9 +274,9 @@ pub mod qobject {
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, LazyLock, Mutex, MutexGuard};
-use std::time::{Instant, UNIX_EPOCH};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{QImage, QString};
@@ -289,25 +299,49 @@ impl Pixels {
     }
 }
 
-/// A whole image: a still, or an animation's frames and how long each shows.
+/// A decoded image: a still, an animation's frames and how long each
+/// shows, or (a still much bigger than the screen) a copy at the screen's
+/// size, with the picture's own size.
 enum Decoded {
     Still(Pixels),
     Frames(Vec<(Pixels, i32)>),
+    Copy { pixels: Pixels, width: i32, height: i32 },
+    /// An animation too long to keep: its first frame (and how long it
+    /// shows) and how many there are; the rest decoded as it plays.
+    Stream { first: Pixels, delay: i32, count: i32 },
 }
 
 impl Decoded {
     fn bytes(&self) -> usize {
         match self {
-            Decoded::Still(p) => p.bytes(),
+            Decoded::Still(p) | Decoded::Copy { pixels: p, .. } | Decoded::Stream { first: p, .. } => p.bytes(),
             Decoded::Frames(f) => f.iter().map(|(p, _)| p.bytes()).sum(),
         }
     }
     fn first(&self) -> &Pixels {
         match self {
-            Decoded::Still(p) => p,
+            Decoded::Still(p) | Decoded::Copy { pixels: p, .. } | Decoded::Stream { first: p, .. } => p,
             Decoded::Frames(f) => &f[0].0,
         }
     }
+    /// The picture's own size.
+    fn size(&self) -> (i32, i32) {
+        match self {
+            Decoded::Copy { width, height, .. } => (*width, *height),
+            _ => (self.first().0.width(), self.first().0.height()),
+        }
+    }
+}
+
+/// The longest side a still is kept at (device pixels): the largest screen
+/// a viewer has been on, at least 2048. Bigger ones are kept and shown at
+/// this size, their own pixels decoded only for a view zoomed in past it.
+static COPY_SIDE: AtomicI32 = AtomicI32::new(2048);
+
+/// Kept as a copy: a still at least half as big again as the copy's side
+/// (a little bigger isn't worth the second decode when zoomed in).
+fn kept_as_copy(width: i32, height: i32) -> bool {
+    width.max(height) as i64 * 2 > COPY_SIDE.load(Ordering::Relaxed) as i64 * 3
 }
 
 fn qs(s: &str) -> QString {
@@ -411,8 +445,10 @@ fn worker() {
 const FULL_BUDGET: usize = 768 << 20;
 /// Not decoded ahead past this (a decode that big is only worth doing when asked).
 const AHEAD_LIMIT: usize = 256 << 20;
-/// An animation's frames kept at most.
-const FRAMES_BUDGET: usize = 1 << 30;
+/// An animation's frames kept at most: a longer one is decoded as it plays.
+const FRAMES_BUDGET: usize = 128 << 20;
+/// Frames decoded ahead of the one shown, for one decoded as it plays.
+const FRAMES_AHEAD: usize = 3;
 
 struct FullEntry {
     path: String,
@@ -499,8 +535,10 @@ fn fetch_full(path: &str, lane: Lane, deliver: Option<Waiter>) {
                 let result = decode_full(&owned, ahead);
                 let waiters = {
                     let mut full = lock(&FULL);
-                    // (Decoded ahead for a viewer that has closed since: not kept.)
-                    let wanted = !ahead || VIEWS.load(Ordering::Acquire) > 0;
+                    // (Decoded for viewers that have all closed since: not
+                    // kept, ahead or asked for. Checked under the lock the
+                    // last one empties the cache under, so it can't refill it.)
+                    let wanted = VIEWS.load(Ordering::Acquire) > 0;
                     if let (Ok(pixels), true) = (&result, wanted) {
                         full.clock += 1;
                         let used = full.clock;
@@ -525,30 +563,45 @@ fn fetch_full(path: &str, lane: Lane, deliver: Option<Waiter>) {
 
 fn decode_full(path: &str, ahead: bool) -> Result<Arc<Decoded>, String> {
     let q = qs(path);
-    if ahead {
-        let (mut w, mut h) = (0, 0);
-        qobject::image_size(&q, &mut w, &mut h);
-        if w as usize * h.max(0) as usize * 4 > AHEAD_LIMIT {
-            return Err("too big to decode ahead".into());
-        }
+    let (mut w, mut h) = (0, 0);
+    qobject::image_size(&q, &mut w, &mut h);
+    if ahead && w as usize * h.max(0) as usize * 4 > AHEAD_LIMIT {
+        return Err("too big to decode ahead".into());
     }
     DECODED.fetch_add(1, Ordering::Relaxed);
     let mut reader = qobject::open_frames(&q);
     if let Some(mut r) = reader.as_mut().filter(|r| r.animated()) {
-        let mut frames = Vec::new();
-        let mut bytes = 0;
+        let said = r.frame_count();
+        let mut frames: Vec<(Pixels, i32)> = Vec::new();
+        let (mut bytes, mut count, mut streamed) = (0, 0, false);
         loop {
             let mut delay = 0;
             let img = Pixels(r.as_mut().next_frame(&mut delay));
             if !img.ok() {
                 break;
             }
+            count += 1;
             bytes += img.bytes();
-            // (Browsers show frames asking for 10 ms or less for 100 ms.)
-            frames.push((img, if delay <= 10 { 100 } else { delay }));
-            if bytes > FRAMES_BUDGET {
+            // Too long to keep (said so, or found so): only its first
+            // frame stays, the rest counted.
+            if !streamed && (bytes > FRAMES_BUDGET || (count == 1 && said > 1 && img.bytes() * said as usize > FRAMES_BUDGET)) {
+                streamed = true;
+                frames.truncate(1);
+                if count > 1 && said > 1 {
+                    break;
+                }
+            }
+            if !streamed || frames.is_empty() {
+                // (Browsers show frames asking for 10 ms or less for 100 ms.)
+                frames.push((img, frame_delay(delay)));
+            }
+            if streamed && said > 1 {
                 break;
             }
+        }
+        if streamed {
+            let (first, delay) = frames.pop().expect("its first frame");
+            return Ok(Arc::new(Decoded::Stream { first, delay, count: if said > 1 { said } else { count } }));
         }
         match frames.len() {
             0 => {}
@@ -557,8 +610,52 @@ fn decode_full(path: &str, ahead: bool) -> Result<Arc<Decoded>, String> {
         }
     }
     drop(reader);
+    if kept_as_copy(w, h) {
+        let img = Pixels(qobject::decode_image(&q, COPY_SIDE.load(Ordering::Relaxed)));
+        return if img.ok() { Ok(Arc::new(Decoded::Copy { pixels: img, width: w, height: h })) } else { Err("Could not read this image.".into()) };
+    }
     let img = Pixels(qobject::decode_image(&q, 0));
     if img.ok() { Ok(Arc::new(Decoded::Still(img))) } else { Err("Could not read this image.".into()) }
+}
+
+/// How long a frame shows: browsers show frames asking for 10 ms or less for 100 ms.
+fn frame_delay(asked: i32) -> i32 {
+    if asked <= 10 { 100 } else { asked }
+}
+
+/// A frame decoded as it plays: its number, pixels and how long it shows.
+type Played = (i32, Pixels, i32);
+
+/// Plays `path` from frame `from` on a thread of its own, a few frames
+/// ahead, from the start again after its last; it stops when the receiver
+/// is dropped.
+fn play_from(path: String, from: i32) -> std::sync::mpsc::Receiver<Played> {
+    let (tx, rx) = std::sync::mpsc::sync_channel(FRAMES_AHEAD);
+    let _ = std::thread::Builder::new().name("harlo-frames".into()).spawn(move || {
+        let q = qs(&path);
+        let (mut from, mut i) = (from, 0);
+        let mut reader = qobject::open_frames(&q);
+        loop {
+            let Some(mut r) = reader.as_mut() else { return };
+            let mut delay = 0;
+            let img = Pixels(r.as_mut().next_frame(&mut delay));
+            if !img.ok() {
+                if i == 0 {
+                    return;
+                }
+                (reader, i, from) = (qobject::open_frames(&q), 0, 0);
+                continue;
+            }
+            i += 1;
+            if i - 1 < from {
+                continue;
+            }
+            if tx.send((i - 1, img, frame_delay(delay))).is_err() {
+                return;
+            }
+        }
+    });
+    rx
 }
 
 // ---- thumbnails -------------------------------------------------------------------
@@ -863,15 +960,6 @@ struct ZoomAnim {
 
 const ZOOM_MS: f64 = 140.0;
 const MAX_ZOOM: f64 = 64.0;
-/// JPEGs bigger than this show a screen-sized copy first. (A JPEG decodes
-/// straight at a smaller size, quickly; other formats decode whole anyway.)
-const PREVIEW_PIXELS: i64 = 12_000_000;
-
-fn decodes_small(path: &str) -> bool {
-    let p = path.to_ascii_lowercase();
-    p.ends_with(".jpg") || p.ends_with(".jpeg") || p.ends_with(".jfif")
-}
-
 pub struct ImageViewRust {
     path: QString,
     status: QString,
@@ -887,6 +975,7 @@ pub struct ImageViewRust {
     pixelated: bool,
     load_ms: f64,
     first_ms: f64,
+    whole: bool,
     dragging: bool,
 
     /// Requests made; results for an earlier one are dropped.
@@ -895,12 +984,23 @@ pub struct ImageViewRust {
     /// Image pixels to a shown (texture) pixel: above 1 for a preview.
     shown_k: f64,
     shown_full: bool,
+    /// The picture's pixels to a pixel of the copy it's kept as (1: kept whole).
+    copy_k: f64,
+    /// Its own pixels, decoded for a zoom past what the copy shows.
+    own: Option<Pixels>,
+    /// Asked for (its count, so an answer to an earlier ask is dropped).
+    own_asked: bool,
+    own_ask: u64,
     /// Where the image's centre is (item pixels).
     cx: f64,
     cy: f64,
     anim: Option<ZoomAnim>,
     anim_timer: i32,
     decoded: Option<Arc<Decoded>>,
+    /// An animation decoded as it plays: its frames as they come, and how
+    /// long the one shown stays.
+    player: Option<std::sync::mpsc::Receiver<Played>>,
+    frame_ms: i32,
     frame_timer: i32,
     drag_from: Option<(f64, f64)>,
     /// Keep the zoom and position through the next image (a reload).
@@ -926,16 +1026,23 @@ impl Default for ImageViewRust {
             pixelated: false,
             load_ms: 0.0,
             first_ms: 0.0,
+            whole: false,
             dragging: false,
             generation: 0,
             asked: Instant::now(),
             shown_k: 1.0,
             shown_full: false,
+            copy_k: 1.0,
+            own: None,
+            own_asked: false,
+            own_ask: 0,
             cx: 0.0,
             cy: 0.0,
             anim: None,
             anim_timer: 0,
             decoded: None,
+            player: None,
+            frame_ms: 100,
             frame_timer: 0,
             drag_from: None,
             keep_view: false,
@@ -1009,8 +1116,15 @@ impl qobject::ImageView {
             r.generation += 1;
             r.asked = Instant::now();
             r.decoded = None;
+            r.player = None;
             r.shown_full = false;
+            r.copy_k = 1.0;
+            r.own = None;
+            r.own_asked = false;
         }
+        // (The biggest screen a viewer is on: pictures are kept at its size.)
+        let side = self.screen_side().max((self.width().max(self.height()) * self.pixel_ratio()).ceil() as i32);
+        COPY_SIDE.fetch_max(side, Ordering::Relaxed);
         self.as_mut().set_error(QString::default());
         self.as_mut().set_playing(false);
         self.as_mut().set_frame_count(0);
@@ -1046,40 +1160,15 @@ impl qobject::ImageView {
             self.as_mut().set_fit(true);
             self.as_mut().relayout();
         }
-        // Something to show meanwhile: a thumbnail already made, else (a
-        // big one) a copy at the screen's size.
-        let shown = if let Some(t) = cached_thumb(&path, 0, true, stamp(&path)).filter(|_| w > 0) {
+        // Something to show meanwhile: a thumbnail already made.
+        if let Some(t) = cached_thumb(&path, 0, true, stamp(&path)).filter(|_| w > 0) {
             THUMBS_FROM_MEMORY.fetch_add(1, Ordering::Relaxed);
-            self.as_mut().show_pixels(&t, false);
-            true
-        } else {
-            if !keep {
-                self.as_mut().clear_image();
-            }
-            false
-        };
+            self.as_mut().show_pixels(&t, false, false);
+        } else if !keep {
+            self.as_mut().clear_image();
+        }
         let thread = self.qt_thread();
         let g = self.generation;
-        if !shown && w > 0 && (w as i64) * (h as i64) > PREVIEW_PIXELS && decodes_small(&path) {
-            let side = (self.width().max(self.height()) * self.pixel_ratio()).ceil().max(512.0) as i32;
-            let thread = thread.clone();
-            let p = path.clone();
-            submit(
-                Lane::Now,
-                Job {
-                    key: format!("preview:{path}"),
-                    cancel: None,
-                    work: Box::new(move || {
-                        let img = Pixels(qobject::decode_image(&qs(&p), side));
-                        let _ = thread.queue(move |mut this| {
-                            if this.generation == g && !this.shown_full && img.ok() {
-                                this.as_mut().show_pixels(&img, false);
-                            }
-                        });
-                    }),
-                },
-            );
-        }
         fetch_full(
             &path,
             Lane::Now,
@@ -1097,7 +1186,7 @@ impl qobject::ImageView {
         match result {
             Ok(d) => {
                 let first = d.first().clone();
-                let (w, h) = (first.0.width(), first.0.height());
+                let (w, h) = d.size();
                 let size_changed = w != self.image_width || h != self.image_height;
                 self.as_mut().set_image_width(w);
                 self.as_mut().set_image_height(h);
@@ -1106,15 +1195,24 @@ impl qobject::ImageView {
                 }
                 let frames = match &*d {
                     Decoded::Frames(f) => f.len() as i32,
-                    Decoded::Still(_) => 1,
+                    Decoded::Stream { count, .. } => *count,
+                    _ => 1,
                 };
-                self.as_mut().rust_mut().decoded = Some(Arc::clone(&d));
+                let copy = matches!(&*d, Decoded::Copy { .. });
+                {
+                    let path = self.path.to_string();
+                    let mut r = self.as_mut().rust_mut();
+                    if let Decoded::Stream { delay, .. } = &*d {
+                        (r.player, r.frame_ms) = (Some(play_from(path, 1)), *delay);
+                    }
+                    r.decoded = Some(Arc::clone(&d));
+                    r.copy_k = if copy { w.max(1) as f64 / first.0.width().max(1) as f64 } else { 1.0 };
+                }
                 self.as_mut().set_frame_count(frames);
                 self.as_mut().set_frame(0);
-                self.as_mut().show_pixels(&first, true);
                 let ms = self.asked.elapsed().as_secs_f64() * 1000.0;
                 self.as_mut().set_load_ms(ms);
-                self.as_mut().set_status_text("ready");
+                self.as_mut().show_pixels(&first, !copy, true);
                 if frames > 1 {
                     self.as_mut().set_playing(true);
                 } else {
@@ -1129,8 +1227,62 @@ impl qobject::ImageView {
         }
     }
 
-    /// Puts pixels on screen: the whole image (`full`) or a smaller copy.
-    fn show_pixels(mut self: Pin<&mut Self>, p: &Pixels, full: bool) {
+    /// Its own pixels arrived, for a view zoomed in past its copy.
+    fn take_own(mut self: Pin<&mut Self>, generation: u64, ask: u64, pixels: Pixels) {
+        if generation != self.generation || ask != self.own_ask || !self.own_asked {
+            return;
+        }
+        self.as_mut().rust_mut().own_asked = false;
+        if !pixels.ok() {
+            self.as_mut().set_status_text("ready");
+            return;
+        }
+        self.as_mut().rust_mut().own = Some(pixels.clone());
+        self.show_pixels(&pixels, true, true);
+    }
+
+    /// A picture kept as a copy: zoomed in past what the copy shows, its own
+    /// pixels are decoded (shown when they come); back out of it, they go.
+    fn own_pixels_for_zoom(mut self: Pin<&mut Self>) {
+        let Some(Decoded::Copy { pixels, .. }) = self.decoded.as_deref() else { return };
+        let texel = self.target_zoom().max(self.zoom) * self.copy_k;
+        if texel > 1.0 + 1e-6 {
+            if self.own.is_some() || self.own_asked {
+                return;
+            }
+            let (g, path, thread) = (self.generation, self.path.to_string(), self.qt_thread());
+            let ask = {
+                let mut r = self.as_mut().rust_mut();
+                r.own_asked = true;
+                r.own_ask += 1;
+                r.own_ask
+            };
+            self.as_mut().set_status_text("preview");
+            submit(
+                Lane::Now,
+                Job {
+                    key: format!("own:{path}"),
+                    cancel: None,
+                    work: Box::new(move || {
+                        let pixels = Pixels(qobject::decode_image(&qs(&path), 0));
+                        let _ = thread.queue(move |this| this.take_own(g, ask, pixels));
+                    }),
+                },
+            );
+        } else if texel <= 0.8 && (self.own.is_some() || self.own_asked) {
+            let copy = pixels.clone();
+            {
+                let mut r = self.as_mut().rust_mut();
+                r.own = None;
+                r.own_asked = false;
+            }
+            self.show_pixels(&copy, false, true);
+        }
+    }
+
+    /// Puts pixels on screen: the whole image (`full`) or a smaller copy,
+    /// `enough` for the picture as it's zoomed ("ready") or not yet ("preview").
+    fn show_pixels(mut self: Pin<&mut Self>, p: &Pixels, full: bool, enough: bool) {
         let w = self.image_width.max(1) as f64;
         let k = if full || self.image_width <= 0 { 1.0 } else { w / p.0.width().max(1) as f64 };
         {
@@ -1146,9 +1298,8 @@ impl qobject::ImageView {
             self.as_mut().set_image_width(p.0.width());
             self.as_mut().set_image_height(p.0.height());
         }
-        if !full {
-            self.as_mut().set_status_text("preview");
-        }
+        self.as_mut().set_whole(full);
+        self.as_mut().set_status_text(if enough { "ready" } else { "preview" });
         self.as_mut().show_image(&p.0);
         self.relayout();
     }
@@ -1187,7 +1338,8 @@ impl qobject::ImageView {
             self.as_mut().set_zoom(z);
         }
         self.as_mut().clamp();
-        self.push_view();
+        self.as_mut().push_view();
+        self.own_pixels_for_zoom();
     }
 
     /// Centres an axis the image fits in; keeps the view covered in the others.
@@ -1261,7 +1413,8 @@ impl qobject::ImageView {
         }
         self.as_mut().set_zoom(zoom);
         self.as_mut().clamp();
-        self.push_view();
+        self.as_mut().push_view();
+        self.own_pixels_for_zoom();
     }
 
     fn animate_to(mut self: Pin<&mut Self>, zoom: f64, ax: f64, ay: f64) {
@@ -1270,6 +1423,8 @@ impl qobject::ImageView {
         // the new target times what was still to come.)
         let from = self.zoom.ln();
         self.as_mut().rust_mut().anim = Some(ZoomAnim { from, to: zoom.ln(), start: Instant::now(), anchor: (ax, ay) });
+        // (Its own pixels asked for now, if it's heading past its copy.)
+        self.as_mut().own_pixels_for_zoom();
         if self.anim_timer == 0 {
             let id = self.as_mut().start_ticks(8);
             self.as_mut().rust_mut().anim_timer = id;
@@ -1423,6 +1578,7 @@ impl qobject::ImageView {
         self.as_mut().stop_frames();
         let delay = match self.decoded.as_deref() {
             Some(Decoded::Frames(f)) => f.get(self.frame as usize).map_or(100, |x| x.1),
+            Some(Decoded::Stream { .. }) => self.frame_ms,
             _ => return,
         };
         let id = self.as_mut().start_ticks(delay.max(10));
@@ -1438,10 +1594,57 @@ impl qobject::ImageView {
         self.as_mut().show_image(&p.0);
     }
 
+    /// The next frame of one decoded as it plays, when it's ready.
+    fn show_played(mut self: Pin<&mut Self>, (i, p, ms): Played) {
+        self.as_mut().rust_mut().frame_ms = ms;
+        self.as_mut().set_frame(i);
+        self.as_mut().show_image(&p.0);
+    }
+
+    /// Plays on: the next frame, or (one decoded as it plays, not ready
+    /// yet) a look again shortly.
+    fn next_frame(mut self: Pin<&mut Self>) {
+        if !matches!(self.decoded.as_deref(), Some(Decoded::Stream { .. })) {
+            let next = self.frame + 1;
+            self.as_mut().show_frame(next);
+            self.schedule_frame();
+            return;
+        }
+        use std::sync::mpsc::TryRecvError;
+        let got = self.player.as_ref().map(|p| p.try_recv());
+        match got {
+            Some(Ok(played)) => {
+                self.as_mut().show_played(played);
+                self.schedule_frame();
+            }
+            Some(Err(TryRecvError::Empty)) => {
+                self.as_mut().stop_frames();
+                let id = self.as_mut().start_ticks(10);
+                self.as_mut().rust_mut().frame_timer = id;
+            }
+            // (Its file can't be read any more.)
+            _ => self.set_playing(false),
+        }
+    }
+
     pub fn step_frame(mut self: Pin<&mut Self>, forward: bool) {
         self.as_mut().set_playing(false);
         let i = self.frame + if forward { 1 } else { -1 };
-        self.show_frame(i);
+        let Some(Decoded::Stream { count, .. }) = self.decoded.as_deref() else {
+            self.show_frame(i);
+            return;
+        };
+        // One decoded as it plays: the next comes from its player; an
+        // earlier one, from a player started there.
+        let i = i.rem_euclid((*count).max(1));
+        if !forward {
+            let path = self.path.to_string();
+            self.as_mut().rust_mut().player = Some(play_from(path, i));
+        }
+        let got = self.player.as_ref().and_then(|p| p.recv_timeout(Duration::from_secs(10)).ok());
+        if let Some(played) = got {
+            self.show_played(played);
+        }
     }
 
     // ---- input ----
@@ -1518,13 +1721,11 @@ impl qobject::ImageView {
         self.relayout();
     }
 
-    pub fn timer_hook(mut self: Pin<&mut Self>, id: i32) {
+    pub fn timer_hook(self: Pin<&mut Self>, id: i32) {
         if id == self.anim_timer {
             self.tick_anim();
         } else if id == self.frame_timer {
-            let next = self.frame + 1;
-            self.as_mut().show_frame(next);
-            self.schedule_frame();
+            self.next_frame();
         }
     }
 }

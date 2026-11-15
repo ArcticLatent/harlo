@@ -1019,9 +1019,10 @@ ApplicationWindow {
     function scrollIntoView(item) {
         for (let f = item.parent; f; f = f.parent) {
             if (f.contentY === undefined || f.contentItem === undefined || f.contentHeight === undefined || f.height <= 0) continue
-            const top = item.mapToItem(f.contentItem, 0, 0).y
-            if (top < f.contentY) f.contentY = Math.max(0, top - 12)
-            else if (top + item.height > f.contentY + f.height) f.contentY = Math.min(f.contentHeight - f.height, top + item.height - f.height + 12)
+            // (A list's content can start above 0: its origin.)
+            const top = item.mapToItem(f.contentItem, 0, 0).y, start = f.originY || 0
+            if (top < f.contentY) f.contentY = Math.max(start, top - 12)
+            else if (top + item.height > f.contentY + f.height) f.contentY = Math.min(start + f.contentHeight + (f.bottomMargin || 0) - f.height, top + item.height - f.height + 12)
         }
     }
     /// Clicks the middle of `item` with a real mouse event.
@@ -4679,7 +4680,38 @@ ApplicationWindow {
         ScriptAction { script: {
             win.check(Theme.contrastOf(Theme.textFaint, Theme.background) >= 4.49 && Theme.contrastOf(Theme.textFaint, Theme.sidebar) >= 4.49, "faint text is readable (4.5:1), light")
             win.shotWindow("clicks-tool-cards-light")
-            Workspace.chooseThemeMode("dark")
+            Workspace.chooseThemeMode("dark") } }
+        // A run of 200 calls: its box makes the cards near its view, and the
+        // keys still go through every step.
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: win.sendByKeys("run two hundred commands") }
+        ScriptAction { script: win.waitUntil(toolCardSteps, () => win.chatText().indexOf("Ran all two hundred") >= 0 && chat.session.status === "idle", 30000) }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: {
+            const t = chat.transcript, boxes = win.findAllNames("runBox", t), box = boxes[boxes.length - 1], f = win.findName("runBoxScroll", box)
+            const made = () => { const out = []; const walk = it => { for (const c of it.children) { if (c.objectName === "toolHead") out.push(c); walk(c) } }; walk(box); return out }
+            const what = h => win.findAllNames("toolWhat", h).map(l => l.plain).join(" ")
+            win.bigMade = made().length
+            const calls = box.rows.filter(r => r.kind !== "thinking").length
+            win.check(f && calls === 200 && win.bigMade > 0 && win.bigMade < 80, "a run of 200 calls makes only the cards near its box's view (" + win.bigMade + " of " + calls + " calls, " + box.rows.map(r => r.kind).filter(k => k !== "tool").join(",") + ")")
+            win.check(made().some(h => /\bStep 199\b/.test(what(h))) && !made().some(h => /\bStep 0\b/.test(what(h))), "it opens at its end, its first steps not made yet (" + made().map(what).join(" | ").slice(0, 300) + ")")
+            win.clickItem(win.findName("composerInput"), "composer")
+            TestInput.key(Qt.Key_Up, Qt.ControlModifier | Qt.ShiftModifier)
+            const head = win.activeFocusItem
+            win.check(head && head.objectName === "runHeader" && head.group === box.group, "Ctrl+Shift+Up: the long run's line")
+            TestInput.key(Qt.Key_Down, 0)
+            const first = win.activeFocusItem
+            win.check(first && first.objectName === "toolHead" && /\bStep 0\b/.test(what(first)), "Down: its first step, made when it's wanted (" + (first ? what(first) : "") + ")")
+            for (let k = 0; k < 120; k++) TestInput.key(Qt.Key_Down, 0)
+            const far = win.activeFocusItem
+            win.check(far && far.objectName === "toolHead" && /\bStep 120\b/.test(what(far)), "Down ×120: the 121st, the box following (" + (far ? what(far) : "") + ")")
+            const p = far.mapToItem(f, 0, 0)
+            win.check(p.y >= -1 && p.y + far.height <= f.height + 1, "the step in the box's view")
+            win.check(made().length < 80, "still only those near the view (" + made().length + ")")
+            for (let k = 0; k < 20; k++) TestInput.key(Qt.Key_Up, 0)
+            const back = win.activeFocusItem
+            win.check(back && /\bStep 100\b/.test(what(back)), "Up ×20: back to the 101st (" + (back ? what(back) : "") + ")")
+            TestInput.key(Qt.Key_Escape, 0)
             win.summary(); Qt.quit() } }
     }
     // Listings: each kind of code a command or a read can show (cat -n,
@@ -4885,7 +4917,7 @@ ApplicationWindow {
         PauseAnimation { duration: 600 }
         ScriptAction { script: {
             const box = win.listingBox()
-            const shown = win.findAllNames("codeView", box).filter(v => v.visible && v.lines.length)
+            const shown = win.findAllNames("codeView", box).filter(v => v.visible && v.lines.length).sort((a, b) => a.mapToItem(box, 0, 0).y - b.mapToItem(box, 0, 0).y)
             win.check(shown.length === 3 && shown[0].lines[0].h.indexOf("c.rs") >= 0, "five reads: the last 3 show their lines (" + shown.map(v => v.lines.length && v.lines[0].h.replace(/<[^>]+>/g, "")) + ")")
             win.listingAt("a.rs")
             const aRead = win.findAllNames("toolWhat", box).find(l => l.plain.indexOf("a.rs") >= 0)
@@ -4952,6 +4984,13 @@ ApplicationWindow {
             const box = win.listingBox()
             const beyond = win.findAllNames("toolBeyond", box)[0]
             win.check(beyond && beyond.text === "More lines not shown here" && win.findAllNames("toolBeyondOpen", box).length === 0, "opened: more past these, no file jump for search results (" + (beyond ? beyond.text : "none") + ")")
+            } }
+        // (The log's card, past the opened listing, is made as the box comes
+        // to it, and placed again once what's above it has its height.)
+        ScriptAction { script: win.waitUntil(listingSteps, () => win.listingAt("Number the log"), 5000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const box = win.listingBox()
             win.listingAt("Number the log")
             win.shotWindow("listings-search-log")
             const up = win.findAllNames("toolEarlierLines", box)[0]
@@ -4975,6 +5014,78 @@ ApplicationWindow {
             win.shotWindow("listings-search-log-open")
             win.summary(); Qt.quit() } }
     }
+    // A long session's replies far back keep their long text in a page file:
+    // shown, run, found, listed and copied as if they never left.
+    SequentialAnimation {
+        id: pagingSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clickspaging"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const cwd = win.argValue("--cwd=")
+            const path = win.selftestDir + "/data/harlo-agent/sessions/--" + cwd.replace(/^\//, "").replace(/\//g, "-") + "--/paged000-0000-0000-0000-000000000000.jsonl"
+            Qt.callLater(() => Workspace.open(path)) } }
+        PauseAnimation { duration: 1500 }
+        // (5 rows a turn; then paged once they're sent.)
+        ScriptAction { script: win.waitUntil(pagingSteps, () => chat.transcript.listView.count >= 2000 && chat.session.status === "idle" && chat.session.pagedRows() > 0, 60000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const n = chat.session.pagedRows(), all = chat.transcript.listView.count
+            win.check(n > 500 && n < all - 500, "far back, rows keep their long text on disk; the latest stay whole (" + n + " of " + all + ")")
+            win.check(win.textHas("zebra399q", chat.transcript), "the latest reply shows")
+            chat.transcript.follow = false
+            chat.transcript.listView.positionViewAtBeginning() } }
+        PauseAnimation { duration: 700 }
+        ScriptAction { script: {
+            win.check(win.textHas("Fixed part 0: the zebra0q loop stopped one short", chat.transcript), "at the top, the first reply reads as it was")
+            const head = win.findAllNames("runHeader", chat.transcript)[0]
+            const run = head ? JSON.parse(chat.session.runJson(head.group)) : []
+            const out = run.length ? chat.session.callOutput(run[0].rowKey) : ""
+            win.check(run.length === 2 && run[0].command === "grep -n needle src/part0/file0.rs" && run[0].text.indexOf("12: needle 0-0 at line 12") >= 0 && out === run[0].text,
+                      "its run's calls: command and output read back, copied whole (" + run.length + " · " + (run.length ? run[0].command : "") + ")")
+            win.shotWindow("clicks-paging-top")
+            if (head) win.clickItem(head, "the first run's line") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const box = win.findAllNames("runBox", chat.transcript)[0]
+            win.check(box && win.findAllNames("toolWhat", box).length === 2, "opened, its two calls' cards")
+            win.shotWindow("clicks-paging-run")
+            chat.openFind()
+            TestInput.typeText("zebra3q") } }
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: {
+            const fb = chat.findBar
+            win.check(fb.hits.length === 1 && chat.transcript.wordMarks.length > 0 && win.textHas("zebra3q", chat.transcript), "find: a reply far back, found, shown and marked (" + fb.hits.length + " · " + chat.transcript.wordMarks.length + ")")
+            win.shotWindow("clicks-paging-find")
+            TestInput.key(Qt.Key_Escape, 0)
+            const prompts = JSON.parse(chat.session.userPrompts())
+            win.check(prompts.length === 400 && prompts[0].text === "Look at part 0 and fix what's wrong there, please.", "the prompt rail has every prompt (" + prompts.length + ")")
+            chat.transcript.revealIndex(prompts[200].i) } }
+        PauseAnimation { duration: 700 }
+        ScriptAction { script: {
+            win.check(win.textHas("Look at part 200 and fix", chat.transcript) && win.textHas("zebra200q", chat.transcript), "jumped to a prompt far back: it and its reply")
+            chat.transcript.listView.positionViewAtEnd()
+            chat.transcript.follow = true } }
+        PauseAnimation { duration: 700 }
+        ScriptAction { script: {
+            win.check(win.textHas("zebra399q", chat.transcript), "back at the end, the latest reply")
+            win.summary(); Qt.quit() } }
+    }
+    /// Some shown text under `root` has `part` in it (rich text included).
+    function textHas(part, root) {
+        const walk = item => {
+            for (const c of item.children) {
+                if (!c.visible || c.opacity <= 0) continue
+                if (typeof c.text === "string" && c.text.indexOf(part) >= 0 && shown(c)) return true
+                if (walk(c)) return true
+            }
+            return false
+        }
+        return walk(root)
+    }
     property real perfOpen: 0
     property real holdY: 0
     property var harloJobCard: null
@@ -4989,14 +5100,29 @@ ApplicationWindow {
     // Brings a card of the last run to its box's top, and the box into view.
     function listingAt(what, below) {
         const box = listingBox(), f = win.findName("runBoxScroll", box)
-        const w = win.findAllNames("toolWhat", box).find(l => l.plain.indexOf(what) >= 0)
-        if (!w) { win.check(false, "find the card " + what); return }
+        const find = () => win.findAllNames("toolWhat", box).find(l => l.plain.indexOf(what) >= 0)
+        let w = find()
+        // (Far from the box's view, its card isn't made yet: scrolled to it,
+        // as a hand would.)
+        if (!w) {
+            const j = (box.rows || []).findIndex(r => [r.label, r.subtitle, r.command, r.title].some(x => (x || "").indexOf(what) >= 0))
+            // (Laid out by the next frame: look again then.)
+            // (Once: then the box settles, what's above the card taking its
+            // height, before it's looked for again.)
+            if (j >= 0 && win.seeking !== what) { win.seeking = what; chat.transcript.follow = false; win.scrollIntoView(f); f.pinned = false; f.positionViewAtIndex(j, ListView.Beginning) }
+            if (j >= 0) return false
+        }
+        if (!w) { win.check(false, "find the card " + what); return false }
+        win.seeking = ""
         // (As a hand would: the session stops following its end, and the
         // box stays where it's put instead of going back to its end.)
         chat.transcript.follow = false
         win.scrollIntoView(f)
         f.pinned = false
-        f.contentY = Math.max(0, Math.min(f.contentHeight - f.height, w.mapToItem(f.contentItem, 0, 0).y - (below || 8)))
+        // (A list's content can start above 0: its origin.)
+        const top = f.originY || 0
+        f.contentY = Math.max(top, Math.min(top + f.contentHeight + (f.bottomMargin || 0) - f.height, w.mapToItem(f.contentItem, 0, 0).y - (below || 8)))
+        return true
     }
     property var toolBoxStart: []
     // Turns the wheel up over the last run box, `n` notches.
@@ -5006,6 +5132,8 @@ ApplicationWindow {
         for (let k = 0; k < n; k++) TestInput.wheel(p.x, p.y, 120)
     }
     property int toolBoxCount: 0
+    property int bigMade: 0
+    property string seeking: ""
 
     // Settings → Orchestration: the skills earlier versions installed are
     // gone (a user's own of the same name kept), and the page's switches.
@@ -6431,6 +6559,93 @@ ApplicationWindow {
         ScriptAction { script: Qt.quit() }
     }
 
+    // The memory benchmark (scripts/bench/memory-long.sh samples the process
+    // at each MEMMARK): a long saved session (`--open=`) opened, `--turns=`
+    // real-sized turns by the stand-in claude (`--fake-claude=`), the
+    // pictures in `--cwd=`/pics opened and closed `--cycles=` times, and the
+    // sessions in `--more=` (|-separated) opened beside it and closed.
+    property int memTurn: 0
+    property int memRowsBefore: 0
+    property var memMore: (win.argValue("--more=") || "").split("|").filter(f => f !== "")
+    function memMark(name) { win.log("MEMMARK " + name) }
+    function memShowing(rows) { return chat.session.key !== "" && chat.transcript.listView.count >= rows && chat.session.status !== "running" }
+    SequentialAnimation {
+        id: memLongSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "memlong"
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: win.memMark("start") }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: Workspace.open(win.argValue("--open=")) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: win.waitUntil(memLongSteps, () => win.memShowing(1000), 120000) }
+        PauseAnimation { duration: 4000 }
+        ScriptAction { script: { win.memMark("opened"); win.log("rows:", chat.transcript.listView.count); if (win.argValue("--warm=")) Qt.quit(); else Workspace.setSetting("claude_path", win.argValue("--fake-claude=")) } }
+        PauseAnimation { duration: 500 }
+        SequentialAnimation {
+            loops: Number(win.argValue("--turns=") || 30)
+            ScriptAction { script: { win.memTurn++; win.memRowsBefore = chat.transcript.listView.count; win.sendByKeys("heavy turn " + win.memTurn) } }
+            PauseAnimation { duration: 300 }
+            ScriptAction { script: win.waitUntil(memLongSteps, () => chat.session.status === "idle" && chat.transcript.listView.count >= win.memRowsBefore + 6, 120000) }
+            PauseAnimation { duration: 200 }
+            ScriptAction { script: if (win.memTurn % 25 === 0) win.memMark("turn-" + win.memTurn) }
+        }
+        PauseAnimation { duration: 3000 }
+        ScriptAction { script: win.memMark("after-turns") }
+        PauseAnimation { duration: 1500 }
+        SequentialAnimation {
+            loops: Number(win.argValue("--cycles=") || 5)
+            ScriptAction { script: win.imgOpen("img1.png") }
+            ScriptAction { script: win.waitUntil(memLongSteps, () => win.imgReady("img1.png"), 30000) }
+            PauseAnimation { duration: 200 }
+            ScriptAction { script: win.imgOpen("img9.png") }
+            ScriptAction { script: win.waitUntil(memLongSteps, () => win.imgReady("img9.png"), 30000) }
+            PauseAnimation { duration: 200 }
+            ScriptAction { script: win.imgOpen("img17.png") }
+            ScriptAction { script: win.waitUntil(memLongSteps, () => win.imgReady("img17.png"), 30000) }
+            PauseAnimation { duration: 200 }
+            ScriptAction { script: win.imgBig = TestInput.readFile(win.imgDir + "/big.png") !== "" ? "big.png" : "big.jpg" }
+            ScriptAction { script: win.imgOpen(win.imgBig) }
+            ScriptAction { script: win.waitUntil(memLongSteps, () => win.imgReady(win.imgBig), 30000) }
+            PauseAnimation { duration: 500 }
+            ScriptAction { script: win.memMark("pictures-open") }
+            PauseAnimation { duration: 1500 }
+            ScriptAction { script: {
+                Workspace.tabs.map(t => t.split("\t")[0]).filter(k => k.startsWith("file:" + win.imgDir + "/")).forEach(k => Workspace.closeTab(k))
+                Workspace.open(win.argValue("--open=")) } }
+            PauseAnimation { duration: 3000 }
+            ScriptAction { script: win.memMark("pictures-closed") }
+            PauseAnimation { duration: 1500 }
+        }
+        SequentialAnimation {
+            loops: 3
+            ScriptAction { script: if (win.memMore.length > 0) Workspace.open(win.memMore[0]) }
+            PauseAnimation { duration: 200 }
+            ScriptAction { script: win.waitUntil(memLongSteps, () => win.memShowing(100), 60000) }
+            PauseAnimation { duration: 1000 }
+            ScriptAction { script: if (win.memMore.length > 1) Workspace.open(win.memMore[1]) }
+            PauseAnimation { duration: 200 }
+            ScriptAction { script: win.waitUntil(memLongSteps, () => win.memShowing(100), 60000) }
+            PauseAnimation { duration: 1000 }
+            ScriptAction { script: if (win.memMore.length > 2) Workspace.open(win.memMore[2]) }
+            PauseAnimation { duration: 200 }
+            ScriptAction { script: win.waitUntil(memLongSteps, () => win.memShowing(100), 60000) }
+            PauseAnimation { duration: 1000 }
+            ScriptAction { script: Workspace.open(win.argValue("--open=")) }
+            PauseAnimation { duration: 3000 }
+            ScriptAction { script: win.memMark("sessions-open") }
+            PauseAnimation { duration: 1500 }
+        }
+        ScriptAction { script: {
+            const keep = Workspace.activeKey
+            Workspace.tabs.map(t => t.split("\t")[0]).filter(k => k !== keep && !k.startsWith("view:")).forEach(k => Workspace.closeTab(k)) } }
+        PauseAnimation { duration: 4000 }
+        ScriptAction { script: win.memMark("sessions-closed") }
+        PauseAnimation { duration: 3000 }
+        ScriptAction { script: { win.memMark("end"); win.log("turns:", win.memTurn, "rows:", chat.transcript.listView.count) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: Qt.quit() }
+    }
+
     // A subagent transcript file (`--open=`) in the subagent dialog.
     SequentialAnimation {
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "subagentfile"
@@ -7159,10 +7374,10 @@ ApplicationWindow {
         return [TestInput.colourAt(top.x, top.y), TestInput.colourAt(below.x, below.y)]
     }
     property int imgFrames: 0
-    property bool imgSawPreview: false
+    property int imgLongAt: 0
     property var imgStats: null
     function imgView() { return chat.fileEditor.imageViewer.view }
-    function imgOpen(name) { win.imgT0 = Date.now(); win.imgSawPreview = false; Workspace.openFileTab(win.imgDir + "/" + name) }
+    function imgOpen(name) { win.imgT0 = Date.now(); Workspace.openFileTab(win.imgDir + "/" + name) }
     function imgReady(name) { const v = win.imgView(); return v.path === win.imgDir + "/" + name && v.status === "ready" }
     function imgDpr() { return win.screen ? win.screen.devicePixelRatio : 1 }
     /// The grid's thumbnails in view.
@@ -7178,7 +7393,6 @@ ApplicationWindow {
     Connections {
         target: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksimages" ? chat.fileEditor.imageViewer.view : null
         function onFrameChanged() { win.imgFrames++ }
-        function onStatusChanged() { if (win.imgView().status === "preview") win.imgSawPreview = true }
     }
     SequentialAnimation {
         id: imgSteps
@@ -7196,9 +7410,20 @@ ApplicationWindow {
             const v = win.imgView()
             console.log("PERF image 9000x6000 " + win.imgBig + ": first on screen", v.firstMs.toFixed(1), "ms, whole", v.loadMs.toFixed(1), "ms")
             win.check(v.imageWidth === 9000 && v.imageHeight === 6000, "the big image whole: " + v.imageWidth + "×" + v.imageHeight + " (" + v.status + ")")
-            if (win.imgBig === "big.jpg")
-                win.check(win.imgSawPreview && v.firstMs < v.loadMs, "a copy at the screen's size first (" + v.firstMs.toFixed(0) + " ms), then the whole (" + v.loadMs.toFixed(0) + " ms)")
             win.check(v.fit && v.zoom < 0.2, "fitted to the view (" + (v.zoom * 100).toFixed(1) + "%)")
+            const st = JSON.parse(Images.stats())
+            win.check(!v.whole && st.fullMB < 64, "much bigger than the screen, it's kept at the screen's size (" + st.fullMB + " MB, not 206)")
+            v.actualSize() } }
+        ScriptAction { script: win.waitUntil(imgSteps, () => win.imgView().whole && win.imgView().status === "ready", 30000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const v = win.imgView()
+            win.check(v.whole && v.status === "ready" && Math.abs(v.zoom - 1) < 1e-9, "zoomed in past the copy, its own pixels (" + v.status + ", " + v.zoom + ")")
+            v.fitView() } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const v = win.imgView()
+            win.check(!v.whole && v.status === "ready" && v.fit, "fitted again, back to the copy (" + v.status + ")")
             win.imgOpen("img1.png") } }
         ScriptAction { script: win.waitUntil(imgSteps, () => win.imgReady("img1.png"), 10000) }
         PauseAnimation { duration: 300 }
@@ -7242,8 +7467,8 @@ ApplicationWindow {
         ScriptAction { script: {
             const v = win.imgView(), viewer = chat.fileEditor.imageViewer
             viewer.focusView()
-            win.check(viewer.images.length === 33 && viewer.images[2] === win.imgDir + "/img1.png" && viewer.images[3] === win.imgDir + "/img2.png" && viewer.images[11] === win.imgDir + "/img10.png",
-                      "the folder's 33 images in natural order (" + viewer.images.slice(0, 5).map(p => p.split("/").pop()).join(" ") + " …), not the text file")
+            win.check(viewer.images.length === 34 && viewer.images[2] === win.imgDir + "/img1.png" && viewer.images[3] === win.imgDir + "/img2.png" && viewer.images[11] === win.imgDir + "/img10.png",
+                      "the folder's 34 images in natural order (" + viewer.images.slice(0, 5).map(p => p.split("/").pop()).join(" ") + " …), not the text file")
             // Four wheel notches at a point left of the middle.
             const x = v.width * 0.35, y = v.height * 0.5
             win.imgBefore = JSON.parse(v.imagePointAt(x, y))
@@ -7333,6 +7558,34 @@ ApplicationWindow {
         PauseAnimation { duration: 100 }
         ScriptAction { script: {
             win.check(win.imgFrames === 1, ". shows the next frame (" + win.imgView().frame + ")")
+            win.imgStats = JSON.parse(Images.stats())
+            win.imgOpen("long.gif") } }
+        // Too long to keep decoded (200 frames, 160 MB): played as it's
+        // decoded, a few frames ahead.
+        ScriptAction { script: win.waitUntil(imgSteps, () => win.imgReady("long.gif"), 20000) }
+        ScriptAction { script: win.imgFrames = 0 }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            const v = win.imgView(), st = JSON.parse(Images.stats())
+            win.check(v.frameCount === 200 && v.playing && win.imgFrames >= 15, "a long GIF plays: " + v.frameCount + " frames, " + win.imgFrames + " shown in 1.5 s (at frame " + v.frame + ")")
+            const kept = st.fullMB - win.imgStats.fullMB
+            win.check(kept <= 2, "its frames aren't all kept (" + kept + " MB more decoded, not 160)")
+            TestInput.key(Qt.Key_P, 0)
+            win.imgLongAt = v.frame } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const v = win.imgView()
+            win.check(!v.playing && v.frame === win.imgLongAt, "P pauses it at frame " + v.frame)
+            TestInput.key(Qt.Key_Comma, 0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const v = win.imgView()
+            win.check(v.frame === (win.imgLongAt + 199) % 200, ", steps back a frame, decoded again (" + v.frame + ", was " + win.imgLongAt + ")")
+            TestInput.key(Qt.Key_Period, 0) } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            const v = win.imgView()
+            win.check(v.frame === win.imgLongAt, ". steps on again (" + v.frame + ")")
             win.imgOpen("logo.png") } }
         ScriptAction { script: win.waitUntil(imgSteps, () => win.imgReady("logo.png"), 10000) }
         PauseAnimation { duration: 200 }
@@ -7350,7 +7603,7 @@ ApplicationWindow {
             const shown = win.imgThumbs().length
             const st = JSON.parse(Images.stats())
             console.log("PERF image grid:", shown, "thumbnails made in", Date.now() - win.imgT0, "ms;", JSON.stringify(st))
-            win.check(viewer.gridMode && viewer.grid.count === 33 && viewer.grid.activeFocus, "G shows the folder's 33 images as a grid, with the keys")
+            win.check(viewer.gridMode && viewer.grid.count === 34 && viewer.grid.activeFocus, "G shows the folder's 34 images as a grid, with the keys")
             win.check(win.imgThumbsReady(), "every thumbnail in view is drawn (" + shown + ")")
             win.check(st.diskThumbs >= shown - 1 && st.thumbsMade - win.imgStats.thumbsMade >= shown - 1, "they're kept on disk (" + st.diskThumbs + " files)")
             win.check(viewer.grid.currentIndex === 32, "the grid starts at the image shown (" + viewer.grid.currentIndex + ")")

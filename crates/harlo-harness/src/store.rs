@@ -227,6 +227,23 @@ pub fn after_reading(size: u64) {
     }
 }
 
+/// Allocations of a megabyte or more get pages of their own, given back as
+/// soon as they're freed. (glibc otherwise raises that line to the size of
+/// the biggest block freed, up to 32 MiB, and a picture's pixels decoded
+/// after that stay with the process once it's let go: about 100 MiB after
+/// a few pictures were opened and closed.)
+pub fn map_big_allocations() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        const M_MMAP_THRESHOLD: i32 = -3;
+        unsafe extern "C" {
+            fn mallopt(param: i32, value: i32) -> i32;
+        }
+        // SAFETY: only sets where glibc's allocator maps blocks of their own.
+        unsafe { mallopt(M_MMAP_THRESHOLD, 1024 * 1024) };
+    }
+}
+
 /// Returns freed memory to the system.
 pub fn give_back() {
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
@@ -283,6 +300,48 @@ pub fn read_saved_for(kind: HarnessKind, path: &Path) -> std::io::Result<SavedSe
     if kind == HarnessKind::Claude { crate::claude::saved_file_cached(path) } else { read_saved(path) }
 }
 
+/// The messages [`read_saved_for`] gives, one at a time and in order, none
+/// held after it's passed on (an export of a session bigger than anything
+/// worth holding at once). An error reading it is said, whatever was passed
+/// on before it.
+pub fn each_saved_message(kind: HarnessKind, path: &Path, each: &mut dyn FnMut(Value)) -> std::io::Result<()> {
+    if kind == HarnessKind::Claude {
+        return crate::claude::each_saved_message(path, each);
+    }
+    drop(std::fs::File::open(path)?);
+    let failed = std::cell::RefCell::new(None);
+    branch_messages(
+        &|e| {
+            if let Err(err) = for_each_line(path, 0, e) {
+                failed.borrow_mut().get_or_insert(err);
+            }
+        },
+        each,
+    );
+    failed.into_inner().map_or(Ok(()), Err)
+}
+
+/// [`read_saved_for`], its messages passed on one at a time and in order
+/// rather than held (what it gives back has none): a long session opened
+/// without holding all of it. A long Claude transcript's cache is written
+/// as [`read_saved_for`] writes it.
+pub fn stream_saved_for(kind: HarnessKind, path: &Path, each: &mut dyn FnMut(Value)) -> std::io::Result<SavedSession> {
+    if kind == HarnessKind::Claude {
+        return crate::claude::stream_saved_cached(path, each);
+    }
+    drop(std::fs::File::open(path)?);
+    let failed = std::cell::RefCell::new(None);
+    let (saved, _) = branch_with_model(
+        &|e| {
+            if let Err(err) = for_each_line(path, 0, e) {
+                failed.borrow_mut().get_or_insert(err);
+            }
+        },
+        each,
+    );
+    failed.into_inner().map_or(Ok(saved), Err)
+}
+
 /// [`parse_saved`] for any harness's session file.
 pub fn parse_saved_for(kind: HarnessKind, text: &str) -> SavedSession {
     if kind == HarnessKind::Claude { crate::claude::saved(text) } else { parse_saved(text) }
@@ -323,6 +382,35 @@ fn saved_from(lines: &dyn Fn(&mut dyn FnMut(u64, &str))) -> SavedSession {
 
 /// [`saved_from`], and the id of the branch's last entry.
 fn saved_and_leaf(lines: &dyn Fn(&mut dyn FnMut(u64, &str))) -> (SavedSession, Option<String>) {
+    let mut messages = Vec::new();
+    let (saved, leaf) = branch_with_model(lines, &mut |m| messages.push(m));
+    (SavedSession { messages, ..saved }, leaf)
+}
+
+/// [`branch_messages`], and with no model change in it, the model of its
+/// last reply.
+fn branch_with_model(lines: &dyn Fn(&mut dyn FnMut(u64, &str)), each: &mut dyn FnMut(Value)) -> (SavedSession, Option<String>) {
+    let mut last = None;
+    let (mut saved, leaf) = branch_messages(lines, &mut |m| {
+        if m["role"] == "assistant"
+            && let (Some(provider), Some(model)) = (m["provider"].as_str(), m["model"].as_str())
+        {
+            last = Some(format!("{provider}/{model}"));
+        }
+        each(m);
+    });
+    if !saved.model_id.contains('/')
+        && let Some(model) = last
+    {
+        saved.model_id = model;
+    }
+    (saved, leaf)
+}
+
+/// The current branch's messages, each passed on in order (in the file's
+/// order as they're read when that's the branch's, as it is in any file
+/// written by appending), and what else the file says (no messages in it).
+fn branch_messages(lines: &dyn Fn(&mut dyn FnMut(u64, &str)), each: &mut dyn FnMut(Value)) -> (SavedSession, Option<String>) {
     let mut leaf = None;
     let mut entries: Vec<(u64, Option<String>)> = Vec::new();
     let mut index: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
@@ -365,21 +453,25 @@ fn saved_and_leaf(lines: &dyn Fn(&mut dyn FnMut(u64, &str))) -> (SavedSession, O
     }
     branch.reverse();
     let places: std::collections::HashMap<u64, usize> = branch.iter().enumerate().map(|(place, &i)| (entries[i].0, place)).collect();
-    let mut found: Vec<Option<Value>> = vec![None; branch.len()];
+    // (Entries are appended after the ones they follow, so the branch is in
+    // the file's order: passed on as found. Otherwise put in order first.)
+    let in_order = branch.windows(2).all(|w| entries[w[0]].0 < entries[w[1]].0);
+    drop((entries, index, branch));
+    let mut found: Vec<Option<Value>> = Vec::new();
+    if !in_order {
+        found.resize(places.len(), None);
+    }
     lines(&mut |offset, line| {
         let Some(&place) = places.get(&offset) else { return };
         let Ok(e) = serde_json::from_str::<Value>(line) else { return };
-        found[place] = branch_message(e);
-    });
-    let messages: Vec<Value> = found.into_iter().flatten().collect();
-    // No model change in it: the model of its last reply.
-    if !model_id.contains('/') {
-        let last = messages.iter().rev().find(|m| m["role"] == "assistant" && m["provider"].is_string() && m["model"].is_string());
-        if let Some(m) = last {
-            model_id = format!("{}/{}", m["provider"].as_str().unwrap_or_default(), m["model"].as_str().unwrap_or_default());
+        match branch_message(e) {
+            Some(m) if in_order => each(m),
+            m if !in_order => found[place] = m,
+            _ => {}
         }
-    }
-    (SavedSession { messages, model, model_id, thinking, name }, leaf)
+    });
+    found.into_iter().flatten().for_each(each);
+    (SavedSession { messages: Vec::new(), model, model_id, thinking, name }, leaf)
 }
 
 /// The message an entry on the branch is, if it's one.
@@ -497,6 +589,31 @@ fn first_line(s: &str, max: usize) -> String {
         out.push('…');
     }
     out
+}
+
+/// The files [`own_file`] made in `dir` for processes gone (a quit doesn't
+/// always wait to remove them).
+pub fn sweep_own_files(dir: &Path) {
+    for f in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let name = f.file_name().to_string_lossy().into_owned();
+        let pid = name.split('-').next().unwrap_or_default();
+        if !pid.is_empty() && pid.bytes().all(|b| b.is_ascii_digit()) && !Path::new("/proc").join(pid).exists() {
+            let _ = std::fs::remove_file(f.path());
+        }
+    }
+}
+
+/// A new file of this process's in `dir` (`<pid>-<n>.<ext>`), only you can
+/// read, opened to read and append; those of processes gone go first.
+pub fn own_file(dir: &Path, ext: &str) -> std::io::Result<(std::path::PathBuf, std::fs::File)> {
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
+    sweep_own_files(dir);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let path = dir.join(format!("{}-{n}.{ext}", std::process::id()));
+    let file = std::fs::OpenOptions::new().read(true).append(true).create_new(true).mode(0o600).open(&path)?;
+    Ok((path, file))
 }
 
 #[cfg(test)]
@@ -634,6 +751,41 @@ mod tests {
         let roles: Vec<_> = msgs.iter().map(|m| m["role"].as_str().unwrap()).collect();
         assert_eq!(roles, ["user", "assistant", "compactionSummary"]);
         assert_eq!(msgs[1]["content"], "kept");
+        let streamed = |path: &Path| {
+            let mut all = Vec::new();
+            each_saved_message(HarnessKind::Harlo, path, &mut |m| all.push(m)).unwrap();
+            all
+        };
+        assert_eq!(streamed(&path), msgs, "passed on one at a time, the same");
+        // A branch out of the file's order (not one harlo writes): in order still.
+        let shuffled = write(&dir, "e.jsonl", &[
+            r#"{"type":"session","id":"s","cwd":"/w"}"#,
+            r#"{"type":"message","id":"a","parentId":null,"message":{"role":"user","content":"first"}}"#,
+            r#"{"type":"message","id":"c","parentId":"b","message":{"role":"user","content":"third"}}"#,
+            r#"{"type":"message","id":"b","parentId":"a","message":{"role":"assistant","content":"second"}}"#,
+            r#"{"type":"label","id":"z","parentId":"c"}"#,
+        ]);
+        let texts = |m: Vec<Value>| m.iter().map(|m| m["content"].as_str().unwrap_or_default().to_owned()).collect::<Vec<_>>();
+        assert_eq!(texts(read_messages(&shuffled).unwrap()), ["first", "second", "third"]);
+        assert_eq!(texts(streamed(&shuffled)), ["first", "second", "third"]);
+        assert!(each_saved_message(HarnessKind::Harlo, &dir.join("gone.jsonl"), &mut |_| {}).is_err());
+        // Opened one at a time: the same messages, and what else it says.
+        let replies = write(&dir, "f.jsonl", &[
+            r#"{"type":"session","id":"s","cwd":"/w"}"#,
+            r#"{"type":"session_info","id":"i","name":"Named"}"#,
+            r#"{"type":"message","id":"a","parentId":null,"message":{"role":"user","content":"first"}}"#,
+            r#"{"type":"message","id":"b","parentId":"a","message":{"role":"assistant","content":"second","provider":"p","model":"m1"}}"#,
+            r#"{"type":"message","id":"c","parentId":"b","message":{"role":"assistant","content":"third","provider":"p","model":"m2"}}"#,
+        ]);
+        for file in [&path, &shuffled, &replies] {
+            let mut all = Vec::new();
+            let meta = stream_saved_for(HarnessKind::Harlo, file, &mut |m| all.push(m)).unwrap();
+            let whole = read_saved(file).unwrap();
+            assert!(meta.messages.is_empty());
+            assert_eq!((all, meta.model, meta.model_id, meta.thinking, meta.name), (whole.messages, whole.model, whole.model_id, whole.thinking, whole.name), "{}", file.display());
+        }
+        assert_eq!(read_saved(&replies).unwrap().model_id, "p/m2");
+        assert!(stream_saved_for(HarnessKind::Harlo, &dir.join("gone.jsonl"), &mut |_| {}).is_err());
     }
 
     #[test]

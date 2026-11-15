@@ -393,6 +393,8 @@ struct HistoryReader {
     /// ends what came before (an assistant's blocks join across lines), so
     /// reading on from it reads what reading from the start would.
     resume: (u64, usize),
+    /// Messages taken out of `out` as they were read (counted in `resume`).
+    drained: usize,
 }
 
 impl HistoryReader {
@@ -410,7 +412,7 @@ impl HistoryReader {
         }
         match head.kind.as_str() {
             Some("user") => {
-                self.resume = (offset, self.out.len());
+                self.resume = (offset, self.drained + self.out.len());
                 self.last_assistant = None;
                 let Ok(e) = serde_json::from_str::<Value>(line) else { return };
                 let content = &e["message"]["content"];
@@ -543,14 +545,13 @@ fn usage_of(u: &Value) -> Value {
 
 /// The context the last reply sent (what its next request starts from).
 pub fn context_used(messages: &[Value]) -> u64 {
-    messages
-        .iter()
-        .rev()
-        .find_map(|m| {
-            let u = m.get("usage").filter(|_| m["role"] == "assistant")?;
-            Some(["input", "cacheWrite", "cacheRead"].iter().filter_map(|k| u[*k].as_u64()).sum::<u64>()).filter(|n| *n > 0)
-        })
-        .unwrap_or(0)
+    messages.iter().rev().find_map(context_of).unwrap_or(0)
+}
+
+/// The context a reply says it used (None: not a reply, or it doesn't say).
+pub fn context_of(m: &Value) -> Option<u64> {
+    let u = m.get("usage").filter(|_| m["role"] == "assistant")?;
+    Some(["input", "cacheWrite", "cacheRead"].iter().filter_map(|k| u[*k].as_u64()).sum::<u64>()).filter(|n| *n > 0)
 }
 
 /// Each model's window and where Claude compacts it, as Claude last said
@@ -614,8 +615,15 @@ pub fn forget_cached(path: &Path) {
     let Some(dir) = cache_dir() else { return };
     let _one = CACHE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let (meta, lines) = cache_files(&dir, path);
+    let _ = std::fs::remove_file(meta.with_extension("report.json"));
     let _ = std::fs::remove_file(meta);
     let _ = std::fs::remove_file(lines);
+}
+
+/// Where the last context report of a session file (any agent's) is kept,
+/// beside its history cache: shown while the file opens again.
+pub fn report_file(dir: &Path, path: &Path) -> PathBuf {
+    cache_files(dir, path).0.with_extension("report.json")
 }
 
 fn saved_cached_in(path: &Path, dir: &Path, from_size: u64) -> std::io::Result<crate::store::SavedSession> {
@@ -652,6 +660,236 @@ fn saved_cached_in(path: &Path, dir: &Path, from_size: u64) -> std::io::Result<c
         tracing::warn!("caching {}: {e}", path.display());
     }
     Ok(reader.saved())
+}
+
+/// The messages [`saved_file_cached`] gives, one at a time and in order,
+/// none held after it's passed on: the cache's, then what Claude added
+/// since, each as soon as nothing more can join it. The cache isn't
+/// written. A cache line that can't be read is an error, not a gap.
+pub fn each_saved_message(path: &Path, each: &mut dyn FnMut(Value)) -> std::io::Result<()> {
+    each_saved_in(path, cache_dir().as_deref(), crate::store::BIG_FILE, each)
+}
+
+fn each_saved_in(path: &Path, dir: Option<&Path>, from_size: u64, each: &mut dyn FnMut(Value)) -> std::io::Result<()> {
+    let mut reader = HistoryReader::default();
+    let mut from = 0;
+    let _one = dir.filter(|_| std::fs::metadata(path).is_ok_and(|m| m.len() >= from_size)).map(|dir| {
+        let one = CACHE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        (one, cache_files(dir, path))
+    });
+    if let Some((_, (meta_path, lines_path))) = &_one {
+        let meta = std::fs::read(meta_path).ok().and_then(|b| serde_json::from_slice::<CacheMeta>(&b).ok()).filter(|m| {
+            m.version == CACHE_VERSION && m.path == path && check_at(path, m.offset).is_ok_and(|c| c == m.check)
+        });
+        if let Some(m) = meta.filter(|m| lines_before(lines_path, m.bytes).is_ok_and(|n| n == m.index as u64)) {
+            let mut passed = 0;
+            crate::store::for_each_line(lines_path, 0, &mut |offset, line| {
+                if offset < m.bytes
+                    && let Ok(v) = serde_json::from_str(line)
+                {
+                    each(v);
+                    passed += 1;
+                }
+            })?;
+            if passed != m.index {
+                return Err(std::io::Error::other(format!("{} has a damaged line", lines_path.display())));
+            }
+            reader = HistoryReader { subagent: Some(m.subagent), custom: m.custom, ai: m.ai, ..Default::default() };
+            from = m.offset;
+        }
+    }
+    crate::store::for_each_line(path, from, &mut |offset, line| {
+        reader.line(offset, line);
+        // (Only the last can still grow: an assistant's next block joins it.)
+        if reader.out.len() > 1 {
+            let done = reader.out.len() - 1;
+            reader.out.drain(..done).for_each(&mut *each);
+        }
+    })?;
+    reader.out.drain(..).for_each(each);
+    Ok(())
+}
+
+/// How many lines end in a file's first `bytes`.
+fn lines_before(path: &Path, bytes: u64) -> std::io::Result<u64> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?.take(bytes);
+    let (mut chunk, mut n) = (vec![0u8; 1024 * 1024], 0);
+    loop {
+        let read = file.read(&mut chunk)?;
+        if read == 0 {
+            return Ok(n);
+        }
+        n += chunk[..read].iter().filter(|&&b| b == b'\n').count() as u64;
+    }
+}
+
+/// [`saved_file_cached`], its messages passed on one at a time and in order
+/// rather than held (a long session opened without holding all of it), and
+/// its cache written as that writes it. What it gives back has no messages.
+pub fn stream_saved_cached(path: &Path, each: &mut dyn FnMut(Value)) -> std::io::Result<crate::store::SavedSession> {
+    stream_cached_in(path, cache_dir().as_deref(), crate::store::BIG_FILE, each)
+}
+
+fn stream_cached_in(path: &Path, dir: Option<&Path>, from_size: u64, each: &mut dyn FnMut(Value)) -> std::io::Result<crate::store::SavedSession> {
+    // (Its model: the last message's that says one.)
+    let mut model = String::new();
+    let mut pass = |m: Value, model: &mut String| {
+        if let Some(name) = m["model"].as_str().filter(|s| !s.is_empty()) {
+            name.clone_into(model);
+        }
+        each(m);
+    };
+    let big = dir.filter(|_| std::fs::metadata(path).is_ok_and(|m| m.len() >= from_size));
+    let Some(dir) = big else {
+        let mut reader = HistoryReader::default();
+        crate::store::for_each_line(path, 0, &mut |offset, line| {
+            reader.line(offset, line);
+            // (Only the last can still grow: an assistant's next block joins it.)
+            if reader.out.len() > 1 {
+                let done = reader.out.len() - 1;
+                reader.out.drain(..done).for_each(|m| pass(m, &mut model));
+            }
+        })?;
+        reader.out.drain(..).for_each(|m| pass(m, &mut model));
+        return Ok(streamed(reader, model));
+    };
+    let _one = CACHE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (meta_path, lines_path) = cache_files(dir, path);
+    let mut reader = HistoryReader::default();
+    let (mut cached, mut from) = ((0, 0), 0);
+    let meta = std::fs::read(&meta_path).ok().and_then(|b| serde_json::from_slice::<CacheMeta>(&b).ok()).filter(|m| {
+        m.version == CACHE_VERSION && m.path == path && check_at(path, m.offset).is_ok_and(|c| c == m.check)
+    });
+    if let Some(m) = meta.filter(|m| lines_before(&lines_path, m.bytes).is_ok_and(|n| n == m.index as u64)) {
+        let mut passed = 0;
+        crate::store::for_each_line(&lines_path, 0, &mut |offset, line| {
+            if offset < m.bytes
+                && let Ok(v) = serde_json::from_str(line)
+            {
+                pass(v, &mut model);
+                passed += 1;
+            }
+        })?;
+        if passed != m.index {
+            return Err(std::io::Error::other(format!("{} has a damaged line", lines_path.display())));
+        }
+        reader = HistoryReader { subagent: Some(m.subagent), custom: m.custom, ai: m.ai, resume: (m.offset, m.index), drained: m.index, ..Default::default() };
+        (cached, from) = ((m.index, m.bytes), m.offset);
+    }
+    // What's read is written to the cache as it's passed on; at the end it's
+    // cut back to what came before the last prompt (what nothing added later
+    // changes), as `write_cache` keeps.
+    let mut lines = CacheLines::open(dir, &lines_path, cached.1);
+    let write = |m: &Value, lines: &mut Option<CacheLines>| {
+        if let Some(l) = lines.as_mut()
+            && let Err(e) = l.add(m)
+        {
+            tracing::warn!("caching {}: {e}", path.display());
+            *lines = None;
+        }
+    };
+    crate::store::for_each_line(path, from, &mut |offset, line| {
+        reader.line(offset, line);
+        if reader.out.len() > 1 {
+            let done = reader.out.len() - 1;
+            reader.drained += done;
+            for m in reader.out.drain(..done) {
+                write(&m, &mut lines);
+                pass(m, &mut model);
+            }
+        }
+    })?;
+    let rest: Vec<Value> = reader.out.drain(..).collect();
+    reader.drained += rest.len();
+    for m in rest {
+        write(&m, &mut lines);
+        pass(m, &mut model);
+    }
+    let (offset, settled) = reader.resume;
+    if let Some(l) = lines {
+        let kept = if settled > cached.0 { l.ends[settled - cached.0 - 1] } else { cached.1 };
+        let done = l.finish(kept).and_then(|()| {
+            if settled <= cached.0 {
+                return Ok(());
+            }
+            let meta = CacheMeta {
+                version: CACHE_VERSION,
+                path: path.to_owned(),
+                offset,
+                index: settled,
+                check: check_at(path, offset)?,
+                bytes: kept,
+                subagent: reader.subagent.unwrap_or(false),
+                custom: reader.custom.clone(),
+                ai: reader.ai.clone(),
+            };
+            write_meta(&meta_path, &meta)
+        });
+        if let Err(e) = done {
+            tracing::warn!("caching {}: {e}", path.display());
+        }
+    }
+    Ok(streamed(reader, model))
+}
+
+/// What [`HistoryReader::saved`] says, its messages passed on already.
+fn streamed(reader: HistoryReader, model: String) -> crate::store::SavedSession {
+    let model = if model.is_empty() { model } else { format!("anthropic/{model}") };
+    crate::store::SavedSession { messages: Vec::new(), model, model_id: String::new(), thinking: String::new(), name: if reader.custom.is_empty() { reader.ai } else { reader.custom } }
+}
+
+/// A cache's lines being written on from what it held (the file opened
+/// at the first): where each message written ends.
+struct CacheLines {
+    dir: PathBuf,
+    path: PathBuf,
+    out: Option<std::io::BufWriter<std::fs::File>>,
+    from: u64,
+    bytes: u64,
+    ends: Vec<u64>,
+}
+
+impl CacheLines {
+    fn open(dir: &Path, lines_path: &Path, from: u64) -> Option<Self> {
+        Some(CacheLines { dir: dir.to_owned(), path: lines_path.to_owned(), out: None, from, bytes: from, ends: Vec::new() })
+    }
+
+    fn add(&mut self, m: &Value) -> std::io::Result<()> {
+        use std::io::Write;
+        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+        if self.out.is_none() {
+            std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&self.dir)?;
+            prune_caches(&self.dir);
+            // Its own words: only you can read it, as Claude's file.
+            let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(false).mode(0o600).open(&self.path)?;
+            file.set_len(self.from)?;
+            std::io::Seek::seek(&mut file, std::io::SeekFrom::End(0))?;
+            self.out = Some(std::io::BufWriter::with_capacity(1024 * 1024, file));
+        }
+        let out = self.out.as_mut().expect("opened");
+        let line = m.to_string();
+        out.write_all(line.as_bytes())?;
+        out.write_all(b"\n")?;
+        self.bytes += line.len() as u64 + 1;
+        self.ends.push(self.bytes);
+        Ok(())
+    }
+
+    /// Written out, and cut back to `kept` bytes.
+    fn finish(self, kept: u64) -> std::io::Result<()> {
+        let Some(out) = self.out else { return Ok(()) };
+        let file = out.into_inner().map_err(|e| e.into_error())?;
+        file.set_len(kept)
+    }
+}
+
+fn write_meta(meta_path: &Path, meta: &CacheMeta) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let tmp = meta_path.with_extension("json.tmp");
+    std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?.write_all(&serde_json::to_vec(meta)?)?;
+    std::fs::rename(tmp, meta_path)
 }
 
 fn write_cache(dir: &Path, meta_path: &Path, lines_path: &Path, reader: &HistoryReader, cached: (usize, u64), path: &Path, offset: u64) -> std::io::Result<()> {
@@ -1014,13 +1252,22 @@ mod tests {
         let path = temp_file("cached", "");
         let dir = path.parent().unwrap().join("cache");
         let same = |a: &crate::store::SavedSession, b: &crate::store::SavedSession| a.messages == b.messages && a.model == b.model && a.name == b.name;
+        // (Passed on one at a time, from the cache as it is, or not using one.)
+        let streamed = |dir: Option<&Path>| {
+            let mut all = Vec::new();
+            each_saved_in(&path, dir, 0, &mut |m| all.push(m)).unwrap();
+            all
+        };
         for cut in text.char_indices().map(|(i, _)| i).step_by(53) {
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::write(&path, &text[..cut]).unwrap();
             assert!(same(&saved_cached_in(&path, &dir, 0).unwrap(), &saved(&text[..cut])), "cut at {cut}");
             std::fs::write(&path, &text).unwrap();
+            assert_eq!(streamed(Some(&dir)), saved(&text).messages, "streamed, grown from {cut}");
             assert!(same(&saved_cached_in(&path, &dir, 0).unwrap(), &saved(&text)), "grown from {cut}");
             assert!(same(&saved_cached_in(&path, &dir, 0).unwrap(), &saved(&text)), "again from {cut}");
+            assert_eq!(streamed(Some(&dir)), saved(&text).messages, "streamed, again from {cut}");
+            assert_eq!(streamed(None), saved(&text).messages, "streamed, uncached");
         }
         assert_eq!(saved_cached_in(&path, &dir, 0).unwrap().name, "Named");
         // (Claude only adds to a transcript; these are what could still happen.)
@@ -1029,12 +1276,14 @@ mod tests {
         assert!(same(&saved_cached_in(&path, &dir, 0).unwrap(), &saved(&rewritten)), "rewritten");
         let shorter = &rewritten[..rewritten.len() / 3];
         std::fs::write(&path, shorter).unwrap();
+        assert_eq!(streamed(Some(&dir)), saved(shorter).messages, "streamed, cut shorter");
         assert!(same(&saved_cached_in(&path, &dir, 0).unwrap(), &saved(shorter)), "cut shorter");
         std::fs::write(&path, &rewritten).unwrap();
         assert!(same(&saved_cached_in(&path, &dir, 0).unwrap(), &saved(&rewritten)), "grown again");
         for f in std::fs::read_dir(&dir).unwrap().flatten().filter(|f| f.path().extension().is_some_and(|x| x == "jsonl")) {
             std::fs::write(f.path(), "not json\n").unwrap();
         }
+        assert_eq!(streamed(Some(&dir)), saved(&rewritten).messages, "streamed, damaged");
         assert!(same(&saved_cached_in(&path, &dir, 0).unwrap(), &saved(&rewritten)), "damaged");
         // A transcript that's gone takes its cache with it.
         let other = path.with_file_name("t.jsonl");
@@ -1044,6 +1293,67 @@ mod tests {
         std::fs::write(&path, text.clone() + &text).unwrap();
         saved_cached_in(&path, &dir, 0).unwrap();
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2, "only the one transcript's");
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    /// Opened one message at a time, a transcript reads as it does whole and
+    /// leaves the same cache behind, step by step as it grows.
+    #[test]
+    fn a_streamed_open_writes_the_cache_a_whole_one_does() {
+        let text = transcript().replacen("\n", "\n{\"type\":\"custom-title\",\"customTitle\":\"Named\"}\n", 1);
+        let path = temp_file("streamed", "");
+        let (whole_dir, streamed_dir) = (path.parent().unwrap().join("whole"), path.parent().unwrap().join("streamed"));
+        // (Its meta, and the lines it says are cached: what's past them is
+        // never read.)
+        let files = |dir: &Path| {
+            let Ok(d) = std::fs::read_dir(dir) else { return Vec::new() };
+            let mut all: Vec<(String, Vec<u8>)> = d.flatten().map(|f| (f.file_name().to_string_lossy().into_owned(), std::fs::read(f.path()).unwrap())).collect();
+            all.sort();
+            let meta = all.iter().find(|(n, _)| n.ends_with(".json")).and_then(|(_, b)| serde_json::from_slice::<CacheMeta>(b).ok());
+            // (One that no longer fits the transcript is never read.)
+            if meta.as_ref().is_none_or(|m| check_at(&path, m.offset).ok().as_ref() != Some(&m.check)) {
+                return Vec::new();
+            }
+            for (name, bytes) in &mut all {
+                if name.ends_with(".jsonl") {
+                    bytes.truncate(meta.as_ref().map_or(0, |m| m.bytes as usize));
+                }
+            }
+            all.retain(|(name, bytes)| !name.ends_with(".jsonl") || !bytes.is_empty());
+            all
+        };
+        let step = |contents: &str, what: &str| {
+            std::fs::write(&path, contents).unwrap();
+            let whole = saved_cached_in(&path, &whole_dir, 0).unwrap();
+            let mut messages = Vec::new();
+            let streamed = stream_cached_in(&path, Some(&streamed_dir), 0, &mut |m| messages.push(m)).unwrap();
+            assert_eq!(messages, whole.messages, "{what}");
+            assert_eq!((&streamed.model, &streamed.name), (&whole.model, &whole.name), "{what}");
+            assert!(streamed.messages.is_empty());
+            assert_eq!(files(&streamed_dir), files(&whole_dir), "the same cache: {what}");
+        };
+        for cut in text.char_indices().map(|(i, _)| i).step_by(97) {
+            step(&text[..cut], &format!("cut at {cut}"));
+            step(&text, &format!("grown from {cut}"));
+            step(&text, &format!("again from {cut}"));
+        }
+        let rewritten = text.replace("aside", "Aside");
+        step(&rewritten, "rewritten");
+        step(&rewritten[..rewritten.len() / 3], "cut shorter");
+        step(&rewritten, "grown again");
+        for dir in [&whole_dir, &streamed_dir] {
+            for f in std::fs::read_dir(dir).unwrap().flatten().filter(|f| f.path().extension().is_some_and(|x| x == "jsonl")) {
+                std::fs::write(f.path(), "not json\n").unwrap();
+            }
+        }
+        // (A damaged cache isn't used: read from the start.)
+        let mut messages = Vec::new();
+        stream_cached_in(&path, Some(&streamed_dir), 0, &mut |m| messages.push(m)).unwrap();
+        assert_eq!(messages, saved(&rewritten).messages, "damaged");
+        // (Small: no cache, the same messages.)
+        let mut small = Vec::new();
+        let meta = stream_cached_in(&path, Some(&streamed_dir), u64::MAX, &mut |m| small.push(m)).unwrap();
+        assert_eq!((small, meta.name), (saved(&rewritten).messages, "Named".to_owned()));
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 

@@ -67,8 +67,12 @@ pub mod qobject {
         #[qproperty(QStringList, file_matches, cxx_name = "fileMatches")]
         /// Image paths to send with the next prompt.
         #[qproperty(QStringList, attachments)]
-        /// Context report as JSON (see `harlo_core::context::report`).
+        /// Context report as JSON (see `harlo_core::context::report`),
+        /// without its Activity list.
         #[qproperty(QString, context_json, cxx_name = "contextJson")]
+        /// The report's Activity list (`actions`), as JSON: the Activity
+        /// panel's (apart: the Context panel's refreshes don't parse it).
+        #[qproperty(QString, activity_json, cxx_name = "activityJson")]
         #[qproperty(bool, has_request, cxx_name = "hasRequest")]
         #[qproperty(QString, request_id, cxx_name = "requestId")]
         #[qproperty(QString, request_method, cxx_name = "requestMethod")]
@@ -213,6 +217,9 @@ pub mod qobject {
         /// Every row as plain text, one per line (for tests).
         #[qinvokable]
         fn transcript_text(self: &ChatSession) -> QString;
+        /// How many rows keep their long text in a page file (for tests).
+        #[qinvokable]
+        fn paged_rows(self: &ChatSession) -> i32;
         /// Your messages, for the prompt rail: JSON `[{i: row, text: preview}]`.
         #[qinvokable]
         fn user_prompts(self: &ChatSession) -> QString;
@@ -403,6 +410,7 @@ pub struct ChatSessionRust {
     file_matches: QStringList,
     attachments: QStringList,
     context_json: QString,
+    activity_json: QString,
     has_request: bool,
     request_id: QString,
     request_method: QString,
@@ -444,6 +452,9 @@ pub struct ChatSessionRust {
     host_files: std::cell::RefCell<std::collections::HashMap<String, (std::time::Instant, Option<Arc<str>>)>>,
     /// Where each row is (see `RowIndex`), once asked after the rows change.
     row_index: std::cell::RefCell<Option<RowIndex>>,
+    /// Rows far back read whole from their page (see `harlo_core::pages`),
+    /// the latest asked for: what the rows in view show.
+    wholes: std::cell::RefCell<std::collections::VecDeque<Arc<Row>>>,
 }
 
 /// What to put back for messages stopped before they went (`held`, oldest
@@ -525,7 +536,29 @@ impl RowIndex {
     }
 }
 
+/// Paged rows kept read back, at most.
+const WHOLES: usize = 160;
+
 impl ChatSessionRust {
+    /// The row with its long text (read back from its page, for a row far
+    /// back: kept for the next ask, a view asks for each of its roles).
+    fn whole(&self, row: &Arc<Row>) -> Arc<Row> {
+        let Some(paged) = &row.paged else { return row.clone() };
+        let mut kept = self.wholes.borrow_mut();
+        if let Some(at) = kept.iter().position(|w| w.key == row.key && w.paged.as_ref() == Some(paged)) {
+            let w = kept.remove(at).expect("found");
+            kept.push_front(w.clone());
+            return w;
+        }
+        let mut w = (*harlo_core::transcript::whole(row)).clone();
+        // (Kept with where it came from: the same page's record is the same.)
+        w.paged = Some(paged.clone());
+        let w = Arc::new(w);
+        kept.push_front(w.clone());
+        kept.truncate(WHOLES);
+        w
+    }
+
     fn indexed<T>(&self, f: impl FnOnce(&RowIndex) -> T) -> T {
         f(self.row_index.borrow_mut().get_or_insert_with(|| RowIndex::of(&self.rows)))
     }
@@ -630,6 +663,7 @@ impl ChatSession {
         self.as_mut().set_context_fraction(0.0);
         self.as_mut().set_compact_fraction(0.0);
         self.as_mut().set_context_json(QString::default());
+        self.as_mut().set_activity_json(QString::default());
         self.as_mut().set_key(key.clone());
 
         self.as_mut().set_subagents_json(QString::default());
@@ -729,6 +763,7 @@ impl ChatSession {
             .iter()
             .enumerate()
             .filter(|(_, r)| r.key.starts_with(&prefix) && matches!(r.kind, RowKind::User | RowKind::Markdown | RowKind::Code))
+            .map(|(i, r)| (i, harlo_core::transcript::whole(r)))
             .map(|(i, r)| (i, if r.html.is_empty() { r.text.clone() } else { harlo_core::markdown::plain_text(&r.html) }))
             .collect();
         let texts: Vec<&str> = blocks.iter().map(|(_, text)| text.as_str()).collect();
@@ -746,6 +781,8 @@ impl ChatSession {
             .enumerate()
             .filter(|(_, r)| matches!(r.kind, RowKind::User | RowKind::Markdown | RowKind::Code))
             .filter(|(_, r)| {
+                // (Far back, read from its page.)
+                let r = harlo_core::transcript::whole(r);
                 let text = if r.html.is_empty() { r.text.to_lowercase() } else { harlo_core::markdown::plain_text(&r.html).to_lowercase() };
                 words.iter().all(|w| text.contains(w.as_str()))
             })
@@ -759,11 +796,16 @@ impl ChatSession {
         self.row_at(&key).map_or(-1, |i| i as i32)
     }
 
+    pub fn paged_rows(&self) -> i32 {
+        self.rows.iter().filter(|r| r.paged.is_some()).count() as i32
+    }
+
     pub fn transcript_text(&self) -> QString {
         let lines: Vec<String> = self
             .rows
             .iter()
             .map(|r| {
+                let r = harlo_core::transcript::whole(r);
                 let body = if r.html.is_empty() { r.text.clone() } else { harlo_core::markdown::plain_text(&r.html) };
                 [r.title.as_str(), r.subtitle.as_str(), body.as_str()].iter().filter(|s| !s.is_empty()).copied().collect::<Vec<_>>().join(" · ")
             })
@@ -1000,12 +1042,14 @@ impl ChatSession {
         for r in &self.rows {
             for p in self.shown_pictures(r) {
                 if !paths.contains(&p) {
-                    labels.push(harlo_core::pictures::origin(r, &p, &folder));
-                    texts.push(r.text.as_str());
+                    let r = self.whole(r);
+                    labels.push(harlo_core::pictures::origin(&r, &p, &folder));
+                    texts.push(r.text.clone());
                     paths.push(p);
                 }
             }
         }
+        let texts: Vec<&str> = texts.iter().map(String::as_str).collect();
         harlo_core::pictures::tell_apart(&mut labels, &texts);
         let map: serde_json::Map<String, serde_json::Value> = paths.into_iter().zip(labels).map(|(p, l)| (p, serde_json::Value::String(l))).collect();
         QString::from(&serde_json::Value::Object(map).to_string())
@@ -1013,7 +1057,7 @@ impl ChatSession {
 
     pub fn answer_after(&self, key: &QString) -> QString {
         let key = key.to_string();
-        let answer = self.row_at(&key).and_then(|at| self.rows[at + 1..].iter().find(|r| r.kind == harlo_core::RowKind::User));
+        let answer = self.row_at(&key).and_then(|at| self.rows[at + 1..].iter().find(|r| r.kind == harlo_core::RowKind::User)).map(|r| self.whole(r));
         let json = match answer {
             Some(r) => serde_json::json!({ "answered": true, "text": r.text }),
             None => serde_json::json!({ "answered": false, "text": "" }),
@@ -1167,6 +1211,7 @@ impl ChatSession {
             .run_rows(&group)
             .into_iter()
             .map(|r| {
+                let r = &self.whole(r);
                 let took = if r.time > 0 && r.ended >= r.time { r.ended - r.time } else { 0 };
                 serde_json::json!({
                     "rowKey": r.key, "kind": r.kind.as_str(), "text": r.text, "title": r.title, "subtitle": r.subtitle, "rowState": r.state,
@@ -1247,7 +1292,7 @@ impl ChatSession {
 
     pub fn call_output(&self, row_key: &QString) -> QString {
         let key = row_key.to_string();
-        match self.row_at(&key).map(|i| &self.rows[i]) {
+        match self.row_at(&key).map(|i| self.whole(&self.rows[i])) {
             Some(r) => QString::from(r.full.as_ref().map(|f| &*f.0).unwrap_or(r.text.as_str())),
             None => QString::default(),
         }
@@ -1354,11 +1399,13 @@ impl ChatSession {
         let thread = self.qt_thread();
         let generation = self.generation;
         crate::runtime().spawn(async move {
-            if let Some(report) = handle.context_report().await {
+            if let Some(mut report) = handle.context_report().await {
+                let actions = report.as_object_mut().and_then(|r| r.remove("actions")).unwrap_or(Value::Null).to_string();
                 let json = report.to_string();
                 let _ = thread.queue(move |mut this| {
                     if this.generation == generation {
                         this.as_mut().set_context_json(QString::from(&json));
+                        this.as_mut().set_activity_json(QString::from(&actions));
                     }
                 });
             }
@@ -1662,6 +1709,13 @@ impl ChatSession {
     pub fn data(&self, index: &QModelIndex, role: i32) -> QVariant {
         let Some(row) = self.rows.get(index.row() as usize) else {
             return QVariant::default();
+        };
+        let whole;
+        let row = if row.paged.is_some() && matches!(role, ROLE_HTML | ROLE_TEXT | ROLE_DIFF | ROLE_COMMAND) {
+            whole = self.whole(row);
+            &whole
+        } else {
+            row
         };
         let s = |v: &str| QVariant::from(&QString::from(v));
         match role {

@@ -106,6 +106,7 @@ fn main() {
     if let Some(url) = std::env::args().find_map(|a| a.strip_prefix("--relay=").map(str::to_owned)) {
         harlo_core::phone::use_relay_for_run(&url);
     }
+    harlo_harness::store::map_big_allocations();
     let migrated = harlo_core::migrate::from_piqt();
     // The bridge the agents get (orchestration): this very harlo.
     if let Ok(exe) = std::env::current_exe() {
@@ -127,6 +128,13 @@ fn main() {
     std::thread::spawn(harlo_core::mcp_catalog::on_start);
     // (Branch previews earlier harlos wrote and left behind.)
     std::thread::spawn(workspace::sweep_branch_previews);
+    // (Long sessions' page files and live tails earlier harlos left.)
+    std::thread::spawn(|| {
+        if let Some(dir) = harlo_harness::claude::cache_dir() {
+            harlo_harness::store::sweep_own_files(&dir.join("pages"));
+            harlo_harness::store::sweep_own_files(&dir.join("live"));
+        }
+    });
     harlo_core::servers::set_after_start(accounts::sync_context);
     diagnostics::init_logging();
     diagnostics::install_panic_hook();

@@ -13,6 +13,7 @@
 #include <QtGui/QMatrix4x4>
 #include <QtGui/QMouseEvent>
 #include <QtGui/QPointingDevice>
+#include <QtGui/QScreen>
 #include <QtGui/QNativeGestureEvent>
 #include <QtGui/QWheelEvent>
 #include <QtQuick/QQuickItem>
@@ -22,6 +23,7 @@
 #include <QtQuick/QSGTransformNode>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -161,6 +163,8 @@ public:
         m_reader.setAutoTransform(true);
     }
     bool animated() const { return m_reader.supportsAnimation() && m_reader.imageCount() != 1; }
+    // How many frames it has (0 unknown).
+    int frame_count() const { return std::max(0, m_reader.imageCount()); }
     // The next frame (null at the end), and how long it shows.
     QImage next_frame(int &delay_ms)
     {
@@ -192,6 +196,15 @@ public:
     }
 
     double pixelRatio() const { return window() ? window()->effectiveDevicePixelRatio() : 1.0; }
+    // The longer side of the screen it's on, in device pixels (0 unknown).
+    int screenSide() const
+    {
+        QScreen *s = window() ? window()->screen() : nullptr;
+        if (!s)
+            return 0;
+        const QSize z = s->size();
+        return int(std::ceil(std::max(z.width(), z.height()) * s->devicePixelRatio()));
+    }
 
     // Shows `image` (as decoded: premultiplied RGBA), uploaded on the next frame.
     void showImage(const QImage &image)

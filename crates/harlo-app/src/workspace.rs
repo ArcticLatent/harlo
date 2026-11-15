@@ -4165,10 +4165,7 @@ impl Workspace {
         };
         let thread = self.qt_thread();
         crate::runtime().spawn(async move {
-            let result = match live.handle.export_markdown().await {
-                Some(md) => std::fs::write(&path, md).map_err(|e| e.to_string()),
-                None => Err("The session closed.".to_owned()),
-            };
+            let result = live.handle.export_markdown_to(path.clone()).await;
             let _ = thread.queue(move |this| match result {
                 Ok(()) => this.set_notice_text(&format!("Saved as {}", sidebar::tilde(&path)), false),
                 Err(e) => this.set_notice_text(&format!("Couldn't save it: {e}"), true),
@@ -4189,7 +4186,10 @@ impl Workspace {
         let Some(live) = self.as_mut().make_live(&key.to_string()).and_then(|k| registry::get(&k)) else { return };
         let thread = self.qt_thread();
         crate::runtime().spawn(async move {
-            let Some(md) = live.handle.export_markdown().await else { return };
+            let md = match live.handle.export_markdown().await {
+                Ok(md) => md,
+                Err(e) => return drop(thread.queue(move |this| this.set_notice_text(&format!("Couldn't copy it: {e}."), true))),
+            };
             let _ = thread.queue(move |mut this| {
                 // (Set anew each time, so the same text copies again.)
                 this.as_mut().set_clipboard_text(QString::default());

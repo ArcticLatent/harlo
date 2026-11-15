@@ -99,6 +99,10 @@ pub fn markdown_images(text: &str) -> Vec<String> {
 /// backticks), in order, without repeats. Whether they exist is the
 /// caller's to check.
 pub fn mentioned(text: &str) -> Vec<String> {
+    // (Most text names none: a long output is looked through once.)
+    if !has_picture_suffix(text) {
+        return Vec::new();
+    }
     let mut out: Vec<String> = Vec::new();
     let mut push = |s: &str| {
         let s = s.trim_matches(|c: char| matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | '*' | '"' | '\'' | '(' | ')' | '[' | ']' | '<' | '>' | '{' | '}'));
@@ -115,12 +119,25 @@ pub fn mentioned(text: &str) -> Vec<String> {
             continue;
         }
         for word in part.split(|c: char| c.is_whitespace() || c == '=' || c == '|') {
+            if !word.contains('.') {
+                continue;
+            }
             // (A Markdown link's or image's target: the part in brackets.)
-            let word = word.rsplit("](").next().unwrap_or(word);
+            let word = if word.contains(']') { word.rsplit("](").next().unwrap_or(word) } else { word };
             push(word);
         }
     }
     out
+}
+
+/// A picture's suffix somewhere in `text` after a dot, ending there (what
+/// any name [`mentioned`] finds has).
+fn has_picture_suffix(text: &str) -> bool {
+    let b = text.as_bytes();
+    b.iter().enumerate().filter(|(_, c)| **c == b'.').any(|(i, _)| {
+        let rest = &b[i + 1..];
+        SUFFIXES.iter().any(|x| rest.len() >= x.len() && rest[..x.len()].eq_ignore_ascii_case(x.as_bytes()) && rest.get(x.len()).is_none_or(|c| !c.is_ascii_alphanumeric()))
+    })
 }
 
 /// A row's pictures to show: its own (a relative path is in the session's
@@ -251,6 +268,47 @@ mod tests {
         let t = "Saved it to out/cat.png. Also `/tmp/a b.webp`, see (docs/shot.JPG); not notes.txt or .png or https://x/y.png";
         assert_eq!(mentioned(t), ["out/cat.png", "/tmp/a b.webp", "docs/shot.JPG"]);
         assert_eq!(mentioned("python gen.py --out=art/sun.png"), ["art/sun.png"]);
+    }
+
+    /// The quick looks (no suffix anywhere, words without a dot) find what
+    /// looking at every word did.
+    #[test]
+    fn mentioned_finds_what_every_word_did() {
+        fn every_word(text: &str) -> Vec<String> {
+            let mut out: Vec<String> = Vec::new();
+            let mut push = |s: &str| {
+                let s = s.trim_matches(|c: char| matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | '*' | '"' | '\'' | '(' | ')' | '[' | ']' | '<' | '>' | '{' | '}'));
+                let s = s.strip_prefix("file://").unwrap_or(s);
+                if is_picture_name(s) && !s.contains("://") && !out.iter().any(|o| o == s) {
+                    out.push(s.to_owned());
+                }
+            };
+            for (i, part) in text.split('`').enumerate() {
+                if i % 2 == 1 && !part.contains('\n') {
+                    push(part.trim());
+                    continue;
+                }
+                for word in part.split(|c: char| c.is_whitespace() || c == '=' || c == '|') {
+                    push(word.rsplit("](").next().unwrap_or(word));
+                }
+            }
+            out
+        }
+        let pieces = ["a", "cat.png", "x.PNG", "b.jpeg,", "c.pngx", "d.png_", "(e.webp)", "![f](g/h.gif)", "[i](j.svg", "`k l.tif`", "`m\nn.png`",
+                      "o.png.", "file://p.avif", "https://q/r.png", ".png", "s.", "t.jx", "u.jxl!", "v.é.png", "w.pngé", "=x.bmp", "|y.heic|", "z](", "]", "](a.png)", "\n", " ", "`"];
+        let mut seed = 7u64;
+        for _ in 0..20_000 {
+            let mut text = String::new();
+            for _ in 0..(seed % 9) {
+                seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                text.push_str(pieces[(seed >> 33) as usize % pieces.len()]);
+                if seed & 1 == 0 {
+                    text.push(' ');
+                }
+            }
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            assert_eq!(mentioned(&text), every_word(&text), "{text:?}");
+        }
     }
 
     #[test]

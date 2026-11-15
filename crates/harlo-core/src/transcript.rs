@@ -107,6 +107,10 @@ pub struct Row {
     pub images: Vec<String>,
     /// Picture files it names, shown when they exist (maybe relative).
     pub mentions: Vec<String>,
+    /// Its long text is in a page file (see [`crate::pages`]): `html`,
+    /// `text`, `full`, `diff` and `command` are empty here, and [`whole`]
+    /// reads them back.
+    pub paged: Option<crate::pages::Paged>,
 }
 
 /// What harlo's own messages to an agent start with (a helper's report, an
@@ -164,7 +168,7 @@ enum Role {
     Other,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 enum Block {
     Text(String),
     Thinking(String),
@@ -188,6 +192,9 @@ struct Item {
     time: i64,
     /// A reply's model, as its message says ("" unknown).
     model: String,
+    /// A settled reply far back: its blocks are in the page file, its rows'
+    /// long text too (see `page_out`).
+    paged: Option<crate::pages::Paged>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -230,6 +237,80 @@ fn collect_strings(v: &Value, f: &mut impl FnMut(&str)) {
     }
 }
 
+/// A row with less long text than this stays whole when its reply is paged
+/// out (bytes).
+const PAGED_FROM: usize = 256;
+
+/// A paged row's long text, as written to its page.
+#[derive(serde::Serialize)]
+struct Body<'a> {
+    html: &'a str,
+    text: &'a str,
+    full: Option<&'a str>,
+    diff: &'a str,
+    command: &'a str,
+}
+
+#[derive(serde::Deserialize)]
+struct OwnedBody {
+    html: String,
+    text: String,
+    full: Option<String>,
+    diff: String,
+    command: String,
+}
+
+/// A row without its long text.
+fn light(row: &Row) -> Row {
+    Row {
+        key: row.key.clone(),
+        kind: row.kind,
+        html: String::new(),
+        text: String::new(),
+        full: None,
+        title: row.title.clone(),
+        subtitle: row.subtitle.clone(),
+        state: row.state.clone(),
+        call_id: row.call_id.clone(),
+        group: row.group.clone(),
+        summary: row.summary.clone(),
+        group_open: row.group_open,
+        time: row.time,
+        ended: row.ended,
+        result: row.result.clone(),
+        diff: String::new(),
+        run_ms: row.run_ms,
+        model: row.model.clone(),
+        label: row.label.clone(),
+        command: String::new(),
+        images: row.images.clone(),
+        mentions: row.mentions.clone(),
+        paged: row.paged.clone(),
+    }
+}
+
+/// The latest rows' long text kept whole at most (bytes): past it, settled
+/// replies are paged out even within the latest rows kept.
+pub const KEPT_TEXT: usize = 8 << 20;
+
+/// What of a row goes to the page file (bytes).
+fn long_text(row: &Row) -> usize {
+    row.html.len() + row.text.len() + row.diff.len() + row.command.len() + row.full.as_ref().map_or(0, |f| f.0.len())
+}
+
+/// The row with its long text: as it is, or read back from its page (as
+/// it is, without it, if the page can't be read).
+pub fn whole(row: &Arc<Row>) -> Arc<Row> {
+    let Some(paged) = &row.paged else { return row.clone() };
+    match paged.read().map_err(|e| e.to_string()).and_then(|b| serde_json::from_slice::<OwnedBody>(&b).map_err(|e| e.to_string())) {
+        Ok(b) => Arc::new(Row { html: b.html, text: b.text, full: b.full.map(|f| FullOutput(f.into())), diff: b.diff, command: b.command, paged: None, ..light(row) }),
+        Err(e) => {
+            tracing::warn!("a paged row couldn't be read back: {e}");
+            row.clone()
+        }
+    }
+}
+
 /// Tool output beyond this is cut from the front for display.
 const TOOL_OUTPUT_DISPLAY_CHARS: usize = 6000;
 /// A shell command shown with its call, at most (characters).
@@ -246,6 +327,9 @@ pub struct Transcript {
     compacting: Option<String>,
     /// Items before this have been looked at to settle.
     settle_from: usize,
+    /// Items before this have been looked at to page out.
+    paged_to: usize,
+    pages: crate::pages::Pages,
     md: MarkdownRenderer,
 }
 
@@ -420,10 +504,22 @@ impl Transcript {
 
     /// Loads a message list (from `get_messages`), replacing the transcript.
     pub fn load_messages(&mut self, messages: &[Value]) {
-        *self = Self { md: std::mem::take(&mut self.md), ..Self::default() };
+        self.begin_load();
         for (i, m) in messages.iter().enumerate() {
-            self.upsert_message(&format!("h{i}"), m, true);
+            self.load_one(i, m);
         }
+    }
+
+    /// Starts loading a conversation a message at a time ([`Self::load_one`]),
+    /// replacing the transcript.
+    pub fn begin_load(&mut self) {
+        let pages = crate::pages::Pages::in_dir(self.pages.dir.take());
+        *self = Self { md: std::mem::take(&mut self.md), pages, ..Self::default() };
+    }
+
+    /// Message `i` of the conversation being loaded.
+    pub fn load_one(&mut self, i: usize, m: &Value) {
+        self.upsert_message(&format!("h{i}"), m, true);
     }
 
     fn item_mut(&mut self, id: &str) -> Option<&mut Item> {
@@ -432,6 +528,7 @@ impl Transcript {
     }
 
     fn touch(&mut self, pos: usize) {
+        self.unsettle_at(pos);
         if let Some(item) = self.items.get_mut(pos) {
             item.rev += 1;
         }
@@ -460,6 +557,7 @@ impl Transcript {
             rev: 0,
             rows: None,
             settled: false,
+            paged: None,
             time: now_ms(),
             model: String::new(),
         });
@@ -502,6 +600,7 @@ impl Transcript {
             rev: 0,
             rows: None,
             settled: false,
+            paged: None,
             time: message_time(message),
             model: String::new(),
         });
@@ -553,6 +652,7 @@ impl Transcript {
                     rev: 0,
                     rows: None,
                     settled: false,
+            paged: None,
                     time: message_time(message),
                     model: String::new(),
                 });
@@ -602,11 +702,11 @@ impl Transcript {
         self.rows_from(first)
     }
 
-    /// Item `i`'s rows, built if it changed since (a settled one's stay:
-    /// only a message of its own changes it, and that unsettles it).
+    /// Item `i`'s rows, built if it changed since (whatever changes a
+    /// settled one unsettles it first, so they're built from all there was).
     fn fresh_rows(&mut self, i: usize) -> &[Arc<Row>] {
         let item = &self.items[i];
-        let fresh = matches!(&item.rows, Some((rev, _)) if *rev == item.rev || item.settled);
+        let fresh = matches!(&item.rows, Some((rev, _)) if *rev == item.rev);
         if !fresh {
             let rows = self.build_rows(i);
             let item = &mut self.items[i];
@@ -630,52 +730,154 @@ impl Transcript {
 
     /// A finished reply whose calls have all returned: its rows say all
     /// there is, so the copies they were made from go (a long session has
-    /// tens of thousands): its calls' arguments, its thinking, and outputs
-    /// its rows hold whole.
+    /// tens of thousands): its thinking, its shell commands and outputs, each
+    /// only where its row holds it whole, so `unsettle` gets it back exactly.
     fn settle(&mut self, i: usize) {
         let Self { items, tools, .. } = self;
-        let item = &mut items[i];
-        let built = matches!(&item.rows, Some((rev, _)) if *rev == item.rev);
-        if item.settled || !built || !item.done || item.role != Role::Assistant {
+        let Item { id, blocks, rows, rev, done, role, settled, .. } = &mut items[i];
+        let Some((built, rows)) = rows.as_ref() else { return };
+        if *settled || *built != *rev || !*done || *role != Role::Assistant {
             return;
         }
-        let returned = item.blocks.iter().all(|b| match b {
+        let returned = blocks.iter().all(|b| match b {
             Block::Tool { call_id, .. } => call_id.starts_with(SEARCH) || tools.get(call_id).is_some_and(|r| r.ended && !r.running),
             _ => true,
         });
         if !returned {
             return;
         }
-        for r in item.rows.iter().flat_map(|(_, rows)| rows).filter(|r| r.kind == RowKind::Tool && r.full.is_none()) {
+        for r in rows.iter().filter(|r| r.kind == RowKind::Tool && r.full.is_none()) {
             if let Some(run) = tools.get_mut(&r.call_id).filter(|run| !run.output.is_empty() && *run.output == *r.text) {
                 (run.output, run.dropped) = (Arc::from(""), true);
             }
         }
-        for b in &mut item.blocks {
+        for (bi, b) in blocks.iter_mut().enumerate() {
+            let Some(row) = block_row(id, rows, bi) else { continue };
             match b {
-                Block::Tool { args, .. } => *args = Value::Null,
-                Block::Thinking(t) => *t = String::new(),
+                Block::Thinking(t) if row.kind == RowKind::Thinking && !t.is_empty() && *t == row.text => *t = String::new(),
+                Block::Tool { name, args, .. } if crate::tool_facts::is_shell(name) && !row.command.is_empty() => {
+                    if let Some(command) = args.get_mut("command").filter(|c| c.as_str() == Some(row.command.as_str())) {
+                        *command = Value::Null;
+                    }
+                }
                 _ => {}
             }
         }
-        item.settled = true;
+        *settled = true;
     }
 
-    /// Message `id` changes again: what `settle` let go of comes back
-    /// (its blocks with the message; outputs from its rows).
+    /// Where its page file is made (tests; the cache otherwise).
+    pub fn set_pages_dir(&mut self, dir: std::path::PathBuf) {
+        self.pages = crate::pages::Pages::in_dir(Some(dir));
+    }
+
+    /// Settled replies more than `keep_rows` rows from the end, or past
+    /// [`KEPT_TEXT`] of long text, move their long text to the page file:
+    /// their blocks, and their rows' html, text, outputs, diffs and commands
+    /// (rows keep the rest, so lists, runs and keys are as they were). True
+    /// if any did: their rows are new.
+    pub fn page_out(&mut self, keep_rows: usize) -> bool {
+        let (mut cut, mut n, mut text) = (self.items.len(), 0, 0);
+        while cut > self.paged_to && n < keep_rows && text < KEPT_TEXT {
+            cut -= 1;
+            let rows = self.items[cut].rows.as_ref().map_or(&[][..], |(_, rows)| rows.as_slice());
+            n += rows.len();
+            text += rows.iter().map(|r| long_text(r)).sum::<usize>();
+        }
+        let cut = cut.min(self.settle_from);
+        let mut any = false;
+        for i in self.paged_to..cut {
+            any |= self.page_item(i);
+        }
+        self.paged_to = self.paged_to.max(cut);
+        any
+    }
+
+    fn page_item(&mut self, i: usize) -> bool {
+        let Self { items, pages, tools, .. } = self;
+        let item = &mut items[i];
+        let Some((built, rows)) = item.rows.as_mut() else { return false };
+        if !item.settled || item.paged.is_some() || *built != item.rev {
+            return false;
+        }
+        let mut any = false;
+        for row in rows.iter_mut() {
+            if row.paged.is_some() || long_text(row) < PAGED_FROM {
+                continue;
+            }
+            let body = Body { html: &row.html, text: &row.text, full: row.full.as_ref().map(|f| &*f.0), diff: &row.diff, command: &row.command };
+            let Some(paged) = serde_json::to_vec(&body).ok().and_then(|b| pages.write(&b)) else { return any };
+            // (A whole output its row kept goes with it; it comes back from the row.)
+            if let (Some(full), Some(run)) = (&row.full, tools.get_mut(&row.call_id))
+                && Arc::ptr_eq(&full.0, &run.output)
+            {
+                (run.output, run.dropped) = (Arc::from(""), true);
+            }
+            let r = Row { paged: Some(paged), ..light(row) };
+            *row = Arc::new(r);
+            any = true;
+        }
+        if let Some(paged) = serde_json::to_vec(&item.blocks).ok().and_then(|b| pages.write(&b)) {
+            item.blocks = Vec::new();
+            item.paged = Some(paged);
+        }
+        any
+    }
+
+    /// Item `pos`, paged out, gets its blocks and its rows' long text back.
+    fn page_in(&mut self, pos: usize) {
+        let item = &mut self.items[pos];
+        if let Some(paged) = item.paged.take() {
+            match paged.read().map_err(|e| e.to_string()).and_then(|b| serde_json::from_slice(&b).map_err(|e| e.to_string())) {
+                Ok(blocks) => item.blocks = blocks,
+                Err(e) => tracing::warn!("a paged reply couldn't be read back: {e}"),
+            }
+        }
+        for row in item.rows.iter_mut().flat_map(|(_, rows)| rows) {
+            if row.paged.is_some() {
+                *row = whole(row);
+            }
+        }
+    }
+
+    /// Message `id` changes again: what `settle` let go of comes back.
     fn unsettle(&mut self, id: &str) {
-        let Some(&pos) = self.by_id.get(id) else { return };
-        let Self { items, tools, .. } = self;
-        let item = &mut items[pos];
+        if let Some(&pos) = self.by_id.get(id) {
+            self.unsettle_at(pos);
+        }
+    }
+
+    /// Item `pos` changes again: what `settle` let go of comes back from
+    /// its rows (its thinking, commands and outputs), so it's built anew
+    /// from all there was.
+    fn unsettle_at(&mut self, pos: usize) {
+        let Some(item) = self.items.get_mut(pos) else { return };
         if !std::mem::take(&mut item.settled) {
             return;
         }
-        for r in item.rows.iter().flat_map(|(_, rows)| rows).filter(|r| r.kind == RowKind::Tool) {
+        self.page_in(pos);
+        let Self { items, tools, .. } = self;
+        let Item { id, blocks, rows, rev, .. } = &mut items[pos];
+        let rows: &[Arc<Row>] = rows.as_ref().map(|(_, rows)| rows.as_slice()).unwrap_or_default();
+        for r in rows.iter().filter(|r| r.kind == RowKind::Tool) {
             if let Some(run) = tools.get_mut(&r.call_id).filter(|run| run.dropped) {
-                (run.output, run.dropped) = (Arc::from(r.text.as_str()), false);
+                let output = r.full.as_ref().map_or_else(|| Arc::from(r.text.as_str()), |f| f.0.clone());
+                (run.output, run.dropped) = (output, false);
             }
         }
-        item.rev += 1;
+        for (bi, b) in blocks.iter_mut().enumerate() {
+            let Some(row) = block_row(id, rows, bi) else { continue };
+            match b {
+                Block::Thinking(t) if t.is_empty() && row.kind == RowKind::Thinking => *t = row.text.clone(),
+                Block::Tool { name, args, .. } if crate::tool_facts::is_shell(name) && !row.command.is_empty() => {
+                    if let Some(command) = args.get_mut("command").filter(|c| c.is_null()) {
+                        *command = Value::String(row.command.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+        *rev += 1;
     }
 
     fn rows_from(&mut self, first: usize) -> Vec<Arc<Row>> {
@@ -911,6 +1113,12 @@ impl Transcript {
         }
         rows
     }
+}
+
+/// The row block `bi` of message `id` made (thinking, a tool call).
+fn block_row<'a>(id: &str, rows: &'a [Arc<Row>], bi: usize) -> Option<&'a Row> {
+    let key = format!("{id}:{bi}");
+    rows.iter().find(|r| r.key == key).map(|r| &**r)
 }
 
 fn ensure_block(item: &mut Item, index: usize, kind: BlockKind) {
@@ -1409,7 +1617,8 @@ mod tests {
         let first = t.by_id["h1"];
         assert!(t.items[first].settled);
         assert!(t.items[first].blocks.iter().all(|b| match b {
-            Block::Tool { args, .. } => args.is_null(),
+            Block::Tool { name, args, .. } if name == "bash" => args["command"].is_null() && args["description"] == "Run it",
+            Block::Tool { args, .. } => args["newText"] == "y0",
             Block::Thinking(text) => text.is_empty(),
             _ => true,
         }));
@@ -1427,6 +1636,193 @@ mod tests {
         let row = again.iter().find(|r| r.call_id == "e0").unwrap();
         assert!(!row.diff.is_empty() && row.result == "+1 −1", "{row:?}");
         assert!(again.iter().any(|r| r.kind == RowKind::Thinking && r.text == "thought 0"));
+    }
+
+    /// A settled reply takes whatever comes for it later as if it had never
+    /// settled: a corrected result, more thinking, a block made anew.
+    #[test]
+    fn settled_replies_take_late_events() {
+        let reply = |i: usize| json!({ "role": "assistant", "content": [
+            { "type": "thinking", "thinking": format!("thought {i}") },
+            { "type": "toolCall", "id": format!("c{i}"), "name": "bash", "arguments": { "command": format!("echo {i} && cargo test") } }] });
+        let load = || {
+            let mut messages = Vec::new();
+            for i in 0..20 {
+                messages.push(json!({ "role": "user", "content": format!("go {i}") }));
+                messages.push(reply(i));
+                messages.push(json!({ "role": "toolResult", "toolCallId": format!("c{i}"), "content": [{ "type": "text", "text": format!("{i}\ntest result: ok. 3 passed") }] }));
+            }
+            for (n, m) in messages.iter_mut().enumerate() {
+                m["timestamp"] = json!(1_000 + n);
+            }
+            let mut settled = Transcript::new();
+            settled.load_messages(&messages);
+            settled.rows();
+            assert!(settled.items[settled.by_id["h1"]].settled);
+            // The same, never settled (each row built once, as it came).
+            let mut plain = Transcript::new();
+            for (n, m) in messages.iter().enumerate() {
+                plain.apply(&HarnessEvent::MessageEnd { id: format!("h{n}"), message: m.clone() });
+            }
+            (settled, plain)
+        };
+        let rows = |t: &mut Transcript| t.rows().iter().map(|r| (**r).clone()).collect::<Vec<Row>>();
+        let corrected = json!({ "content": [{ "type": "text", "text": "CORRECTED RESULT" }] });
+        let cases: Vec<(&str, Vec<HarnessEvent>)> = vec![
+            ("a corrected result", vec![HarnessEvent::ToolEnd { call_id: "c0".into(), result: corrected.clone(), is_error: true }]),
+            ("a corrected result message", vec![HarnessEvent::MessageEnd {
+                id: "late".into(),
+                message: json!({ "role": "toolResult", "toolCallId": "c0", "isError": true, "content": corrected["content"] }),
+            }]),
+            ("more thinking", vec![HarnessEvent::BlockDelta { id: "h1".into(), index: 0, kind: BlockKind::Thinking, delta: " and more".into() }]),
+            ("its thinking made anew", vec![
+                HarnessEvent::BlockStart { id: "h1".into(), index: 0, kind: BlockKind::Thinking, tool: None },
+                HarnessEvent::BlockEnd { id: "h1".into(), index: 0, kind: BlockKind::Thinking, content: json!("thought again") },
+            ]),
+        ];
+        for (what, events) in cases {
+            let (mut settled, mut plain) = load();
+            for e in &events {
+                settled.apply(e);
+                plain.apply(e);
+            }
+            let (got, want) = (rows(&mut settled), rows(&mut plain));
+            assert_eq!(got, want, "{what}");
+            let tool = got.iter().find(|r| r.call_id == "c0").unwrap();
+            assert_eq!(tool.command, "echo 0 && cargo test", "{what}");
+        }
+        let (mut settled, _) = load();
+        settled.apply(&HarnessEvent::ToolEnd { call_id: "c0".into(), result: corrected, is_error: true });
+        let tool = rows(&mut settled).into_iter().find(|r| r.call_id == "c0").unwrap();
+        assert_eq!((tool.text.as_str(), tool.state.as_str()), ("CORRECTED RESULT", "error"));
+        let (mut settled, _) = load();
+        settled.apply(&HarnessEvent::BlockDelta { id: "h1".into(), index: 0, kind: BlockKind::Thinking, delta: " and more".into() });
+        assert!(rows(&mut settled).iter().any(|r| r.kind == RowKind::Thinking && r.text == "thought 0 and more"));
+    }
+
+    /// A paged-out reply reads back as it was, takes what comes for it
+    /// later as if it never left, and its page goes with the last row of it.
+    #[test]
+    fn rows_past_their_text_budget_page_out_however_few() {
+        // 24 replies with a 1 MiB output each: far fewer rows than kept,
+        // but more text than kept whole.
+        let mut messages = Vec::new();
+        for i in 0..24 {
+            messages.push(json!({ "role": "user", "content": format!("go {i}") }));
+            messages.push(json!({ "role": "assistant", "content": [{ "type": "toolCall", "id": format!("c{i}"), "name": "bash", "arguments": { "command": format!("run {i}") } }] }));
+            messages.push(json!({ "role": "toolResult", "toolCallId": format!("c{i}"), "content": [{ "type": "text", "text": format!("{i} {}", "y".repeat(1 << 20)) }] }));
+        }
+        let dir = std::env::temp_dir().join(format!("harlo-pages-budget-{}", std::process::id()));
+        let mut t = Transcript::new();
+        t.set_pages_dir(dir.clone());
+        t.load_messages(&messages);
+        let before: Vec<Row> = t.rows().iter().map(|r| (**r).clone()).collect();
+        assert!(before.len() < 1000);
+        assert!(t.page_out(1000));
+        let rows = t.rows();
+        let whole_text: usize = rows.iter().filter(|r| r.paged.is_none()).map(|r| long_text(r)).sum();
+        assert!(rows.iter().any(|r| r.paged.is_some()), "the oldest paged");
+        assert!(whole_text <= KEPT_TEXT + (2 << 20), "about the budget kept whole: {whole_text}");
+        assert!(rows.last().is_some_and(|r| r.paged.is_none()), "the latest whole");
+        let back: Vec<Row> = rows.iter().map(|r| (*whole(r)).clone()).collect();
+        assert_eq!(back.iter().map(|r| (&r.key, r.full.as_ref().map(|f| f.0.len()))).collect::<Vec<_>>(), before.iter().map(|r| (&r.key, r.full.as_ref().map(|f| f.0.len()))).collect::<Vec<_>>());
+        drop((t, rows, back));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn paged_replies_read_back_whole() {
+        let long = |what: &str, i: usize| format!("{what} {i} {}", "x".repeat(400));
+        let reply = |i: usize| json!({ "role": "assistant", "content": [
+            { "type": "thinking", "thinking": long("thought", i) },
+            { "type": "text", "text": long("said", i) },
+            { "type": "toolCall", "id": format!("c{i}"), "name": "bash", "arguments": { "command": long("echo", i) } },
+            { "type": "toolCall", "id": format!("e{i}"), "name": "edit", "arguments": { "path": "a.rs", "oldText": "x", "newText": long("y", i) } }] });
+        let mut messages = Vec::new();
+        for i in 0..30 {
+            messages.push(json!({ "role": "user", "content": format!("go {i}") }));
+            messages.push(reply(i));
+            // (Some cut for display, their whole output kept with the row.)
+            let out = if i % 3 == 0 { long("out", i).repeat(20) } else { long("out", i) };
+            messages.push(json!({ "role": "toolResult", "toolCallId": format!("c{i}"), "content": [{ "type": "text", "text": out }] }));
+            messages.push(json!({ "role": "toolResult", "toolCallId": format!("e{i}"), "content": [{ "type": "text", "text": "Edited a.rs" }] }));
+        }
+        for (n, m) in messages.iter_mut().enumerate() {
+            m["timestamp"] = json!(1_000 + n);
+        }
+        let dir = std::env::temp_dir().join(format!("harlo-pages-test-{}", std::process::id()));
+        let load = || {
+            let mut t = Transcript::new();
+            t.set_pages_dir(dir.clone());
+            t.load_messages(&messages);
+            t.rows();
+            t
+        };
+        // (Whole outputs compared by what they say.)
+        let rows = |t: &mut Transcript| {
+            t.rows().iter().map(|r| {
+                let mut r = (*whole(r)).clone();
+                let full = r.full.take().map(|f| f.0.to_string());
+                (r, full)
+            }).collect::<Vec<_>>()
+        };
+        let mut t = load();
+        let before = rows(&mut t);
+        assert!(t.page_out(20));
+        let paged = t.rows();
+        let first = t.by_id["h1"];
+        assert!(t.items[first].paged.is_some() && t.items[first].blocks.is_empty());
+        assert!(before.iter().any(|(r, full)| r.call_id == "c0" && full.is_some()) && t.tools["c0"].output.is_empty(), "a whole output goes with its row");
+        assert!(paged.iter().filter(|r| r.paged.is_some()).all(|r| r.text.is_empty() && r.html.is_empty() && r.command.is_empty() && r.diff.is_empty()));
+        assert!(paged.iter().filter(|r| r.paged.is_some()).count() > 50, "most rows far back");
+        assert!(paged[paged.len() - 20..].iter().all(|r| r.paged.is_none()), "the latest stay whole");
+        assert!(!t.page_out(20), "once");
+        assert_eq!(rows(&mut t), before);
+        // Paged as it loads, as a session file is opened: the same rows.
+        let mut streamed = Transcript::new();
+        streamed.set_pages_dir(dir.clone());
+        streamed.begin_load();
+        for (i, m) in messages.iter().enumerate() {
+            streamed.load_one(i, m);
+            if i % 7 == 6 {
+                streamed.rows();
+                streamed.page_out(20);
+            }
+        }
+        streamed.rows();
+        streamed.page_out(20);
+        assert!(streamed.rows().iter().filter(|r| r.paged.is_some()).count() > 50);
+        assert_eq!(rows(&mut streamed), before);
+        // What comes later for one: as if it was never paged.
+        let corrected = json!({ "content": [{ "type": "text", "text": "CORRECTED RESULT" }] });
+        let cases: Vec<(&str, Vec<HarnessEvent>)> = vec![
+            ("a corrected result", vec![HarnessEvent::ToolEnd { call_id: "c0".into(), result: corrected.clone(), is_error: true }]),
+            ("more thinking", vec![HarnessEvent::BlockDelta { id: "h1".into(), index: 0, kind: BlockKind::Thinking, delta: " and more".into() }]),
+            ("its message again", vec![HarnessEvent::MessageEnd { id: "h1".into(), message: reply(0) }]),
+        ];
+        for (what, events) in cases {
+            let (mut paged, mut plain) = (load(), Transcript::new());
+            paged.page_out(20);
+            for (n, m) in messages.iter().enumerate() {
+                plain.apply(&HarnessEvent::MessageEnd { id: format!("h{n}"), message: m.clone() });
+            }
+            for e in &events {
+                paged.apply(e);
+                plain.apply(e);
+            }
+            assert_eq!(rows(&mut paged), rows(&mut plain), "{what}");
+            assert!(paged.items[paged.by_id["h1"]].paged.is_none(), "{what}");
+        }
+        // Its page goes when nothing points into it: loaded again, the old
+        // rows still read back until they go.
+        let file = t.pages.path().unwrap();
+        let kept = paged.clone();
+        t.load_messages(&messages);
+        assert!(file.exists() && whole(&kept[1]).text == before[1].0.text);
+        drop((kept, paged));
+        assert!(!file.exists());
+        drop(t);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

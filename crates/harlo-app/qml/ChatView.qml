@@ -19,7 +19,7 @@ Rectangle {
     property alias planDock: planDock
     property alias branchDialog: branchDialog
     property alias subagentDialog: subagentDialog
-    property alias statsView: statsView
+    readonly property var statsView: statsLoader.item
     property alias diffView: diffView
     property alias unsavedDialog: unsavedDialog
     property alias undoDialog: undoDialog
@@ -352,11 +352,15 @@ Rectangle {
             visible: Workspace.activeKey.startsWith("view:run:")
             runId: visible ? Workspace.activeKey.substring(9) : ""
         }
-        StatsView {
-            id: statsView
+        // (Built the first time it's shown, then kept: its period and
+        // project stay picked.)
+        Loader {
+            id: statsLoader
             Layout.fillWidth: true
             Layout.fillHeight: true
             visible: Workspace.activeKey === "view:stats"
+            active: visible || item !== null
+            sourceComponent: StatsView { }
         }
 
         // Header: the session's name, and what runs it under it.
