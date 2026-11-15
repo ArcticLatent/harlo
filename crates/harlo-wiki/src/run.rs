@@ -2069,6 +2069,9 @@ mod tests {
             ("src/h.ts", "export class A {\n  one() { return 1; }\n}\n", "export class A {\n  one() { return 1; }\n  added(\n    value: number,\n  ): number {\n    return value;\n  }\n}\n", true),
             ("src/i.ts", "export class A {\n  one() { return 1; }\n}\n", "export class A {\n  one() { return 1; }\n  added<T>(value: T): T { return value; }\n}\n", true),
             ("src/j.ts", "export class A {\n  one() { return 1; }\n}\n", "export class A {\n  one() { return 1; }\n  added(value: number): number\n  {\n    return value;\n  }\n}\n", true),
+            ("src/l.ts", "export class A {\n  one() { return 1; }\n}\n", "export class A {\n  one() { return 1; }\n  added<\n    T,\n  >(value: T): T {\n    return value;\n  }\n}\n", true),
+            ("src/m.ts", "export class A {\n  one() { return 1; }\n}\n", "export class A {\n  one() { return 1; }\n  added<T extends (...args: any[]) => any>(value: T): T {\n    return value;\n  }\n}\n", true),
+            ("src/n.ts", "export class A {\n  one() { return 1; }\n}\n", "export class A {\n  one() { return 1; }\n  added(\n  options: {\n    f0: number;\n    f1: number;\n    f2: number;\n    f3: number;\n    f4: number;\n    f5: number;\n    f6: number;\n    f7: number;\n    f8: number;\n    f9: number;\n    f10: number;\n    f11: number;\n    f12: number;\n    f13: number;\n  },\n  ): number {\n    return options.f0;\n  }\n}\n", true),
             ("src/k.ts", "export class A {\n  one(value: number): number {\n    return value;\n  }\n}\n", "export class A {\n  one(\n    value: number,\n  ): number {\n    return value + 1;\n  }\n}\n", false),
         ] {
             git(&["reset", "-q", "--hard", &at]);

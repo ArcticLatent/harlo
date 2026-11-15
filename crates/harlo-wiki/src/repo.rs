@@ -167,9 +167,9 @@ fn defined_name(line: &str) -> Option<String> {
             break;
         }
     }
-    let Some(keyword) = words.next() else { return method_name(line) };
+    let keyword = words.next()?;
     if !DEFINITIONS.contains(&keyword) {
-        return method_name(line);
+        return None;
     }
     words.next().map(|n| n.trim_matches(|c: char| !(c.is_alphanumeric() || c == '_')).to_owned()).filter(|n| !n.is_empty())
 }
@@ -178,86 +178,134 @@ fn is_identifier(w: &str) -> bool {
     w.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_' || c == '$') && w.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$')
 }
 
-/// A method or function declared without a keyword, at any depth: a name
-/// and its parameters, then its body (`added() { return 2; }`, `int
-/// added(void) {`, `get size(): number {`), or a name given a function
-/// (`added = () => 2;`, `added: async (x) => {`, `added: function () {`).
-fn method_name(line: &str) -> Option<String> {
-    let line = line.trim();
-    if line.starts_with(['}', ')', ']', '.', '(']) {
+/// A method or function declared without a keyword, at any depth, read
+/// from `text` (a changed line and the changed lines after it): a name,
+/// its generic parameters, its parameters, then its body (`added() {`,
+/// `int added(void) const {`, `added<T extends (...a: any[]) => any>(v:
+/// T): T {`, `{` on a line of its own), a signature only (`added(v:
+/// number): number;`), or a name given a function (`added = () => 2;`,
+/// `added: async (x) => {`). When the text ends inside one (its generics
+/// or parameters still open, a return type and no body yet), it counts:
+/// what can't be read isn't taken as unchanged.
+fn method_name(text: &str) -> Option<String> {
+    let t = text.trim_start();
+    if !t.starts_with(|c: char| c.is_alphabetic() || c == '_' || c == '$' || c == '*' || c == '&') {
         return None;
     }
-    let open = line.find('(')?;
-    // (Generic parameters aside: `added<T>(`, `Map<K, V> added(`.)
-    let head = strip_generics(&line[..open]);
-    // (A name given a function.)
-    if let Some((name, value)) = head.split_once('=').or_else(|| head.split_once(':').filter(|_| !head.contains("::"))).filter(|(n, _)| !n.contains(['=', '.', ':'])) {
-        let name = name.trim_end().rsplit(char::is_whitespace).next().unwrap_or_default();
-        let value = value.trim();
-        let value = value.strip_prefix("async").map_or(value, str::trim_start);
-        let fun = (value.is_empty() && line[open..].contains("=>")) || value == "function" || value.starts_with("function ");
-        return (fun && is_identifier(name)).then(|| name.to_owned());
+    let chars: Vec<char> = t.chars().collect();
+    let at = |i: usize| chars.get(i).copied().unwrap_or('\0');
+    // The head: up to the first `(` outside generic parameters, which are
+    // set aside (their brackets, `=>` and `->` included).
+    let mut head = String::new();
+    let mut i = 0;
+    let mut angle = 0usize;
+    let mut inner = 0usize;
+    let ended_in_head = loop {
+        let Some(&c) = chars.get(i) else { break true };
+        if angle > 0 {
+            match c {
+                '(' | '[' | '{' => inner += 1,
+                ')' | ']' | '}' => inner = inner.saturating_sub(1),
+                ';' if inner == 0 => return None,
+                '<' if inner == 0 => angle += 1,
+                '>' if inner == 0 && !matches!(at(i.wrapping_sub(1)), '=' | '-') => angle -= 1,
+                _ => {}
+            }
+        } else {
+            match c {
+                '(' => break false,
+                ';' | '{' | '}' => return None,
+                // (Generics follow a name, or open a function's value.)
+                '<' if head.trim_end().is_empty() || head.trim_end().ends_with(|c: char| c.is_alphanumeric() || matches!(c, '_' | '$' | '=' | ':')) => angle = 1,
+                _ => head.push(c),
+            }
+        }
+        i += 1;
+    };
+    let head = head.trim();
+    let first = head.split_whitespace().next().unwrap_or_default();
+    if STATEMENTS.contains(&first) {
+        return None;
     }
-    // (A name and its parameters, then a body.)
-    if head.contains(['=', '.', '"', '\'', '!', ',', ';', '|']) || head.contains("->") {
+    // (A name given a function: split at its `=` or its one `:`.)
+    let split = head.find('=').or_else(|| head.find(':').filter(|_| !head.contains("::")));
+    if let Some(at_split) = split {
+        let (name, value) = (head[..at_split].trim_end(), head[at_split + 1..].trim());
+        if name.contains(['=', '.', ':']) {
+            return None;
+        }
+        let name = name.rsplit(char::is_whitespace).next().unwrap_or_default();
+        let value = value.strip_prefix("async").map_or(value, str::trim_start);
+        if !is_identifier(name) || !(value.is_empty() || value == "function") {
+            return None;
+        }
+        if value == "function" || ended_in_head {
+            return Some(name.to_owned());
+        }
+        // (An arrow after its parameters, or the text ending before one.)
+        let rest: String = chars[i..].iter().collect();
+        let rest = rest.split(';').next().unwrap_or_default();
+        return (rest.contains("=>") || !rest.contains(')')).then(|| name.to_owned());
+    }
+    if head.contains(['=', '.', '"', '\'', '!', ',', ';', '|', '?', '[', ']', '@', '#', '+', '%', '^', '~', '/']) || head.contains("->") {
         return None;
     }
     let words: Vec<&str> = head.split_whitespace().map(|w| w.trim_start_matches(['*', '&'])).filter(|w| !w.is_empty()).collect();
     let name = *words.last()?;
-    if !is_identifier(name) || STATEMENTS.contains(&words[0]) {
+    if !is_identifier(name) || name.contains("::") {
         return None;
     }
-    // (Its parameters close, and a body opens after them, past a return
-    // type or a qualifier at most.)
-    let mut depth = 0;
+    if ended_in_head {
+        // (Its generics still open: `added<` and the text ends.)
+        return (angle > 0).then(|| name.to_owned());
+    }
+    // Its parameters, to their closing bracket.
+    let mut depth = 0usize;
     let mut close = None;
-    for (i, c) in line[open..].char_indices() {
-        match c {
-            '(' => depth += 1,
-            ')' => {
+    let mut j = i;
+    while j < chars.len() {
+        match chars[j] {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => {
                 depth -= 1;
                 if depth == 0 {
-                    close = Some(open + i);
+                    close = Some(j);
                     break;
+                }
+            }
+            q @ ('"' | '`') => {
+                j += 1;
+                while j < chars.len() && chars[j] != q {
+                    j += if chars[j] == '\\' { 2 } else { 1 };
                 }
             }
             _ => {}
         }
+        j += 1;
     }
-    let rest = &line[close? + 1..];
-    let between = rest[..rest.find('{')?].trim();
+    // (Still open where the text ends.)
+    let Some(close) = close else { return Some(name.to_owned()) };
+    // Then a body or a signature's end, past a return type or a qualifier.
+    let rest: String = chars[close + 1..].iter().collect();
+    let end = rest.find(['{', ';']);
+    let between = rest[..end.unwrap_or(rest.len())].trim();
     const QUALIFIERS: [&str; 10] = ["const", "noexcept", "override", "final", "throws", "volatile", "where", "mutating", "&", "&&"];
-    let qualified = between.is_empty() || between.starts_with(':') || between.starts_with("->") || between.split_whitespace().next().is_some_and(|w| QUALIFIERS.contains(&w));
-    (qualified && !between.contains("=>") && !between.contains(';')).then(|| name.to_owned())
-}
-
-/// `s` without its balanced `<…>` groups (as it is when they aren't).
-fn strip_generics(s: &str) -> String {
-    let mut out = String::new();
-    let mut depth = 0usize;
-    for c in s.chars() {
-        match c {
-            '<' => depth += 1,
-            '>' if depth > 0 => depth -= 1,
-            '>' => return s.to_owned(),
-            _ if depth == 0 => out.push(c),
-            _ => {}
-        }
+    let typed = between.starts_with(':') || between.starts_with("->");
+    let qualified = typed || between.split_whitespace().next().is_some_and(|w| QUALIFIERS.contains(&w));
+    match end.map(|e| rest[e..].starts_with('{')) {
+        // (A body.)
+        Some(true) => ((between.is_empty() || qualified) && (typed || !between.contains("=>"))).then(|| name.to_owned()),
+        // (A signature only: typed.)
+        Some(false) => typed.then(|| name.to_owned()),
+        // (The text ends: a return type or qualifier means a body may follow.)
+        None => (!between.is_empty() && qualified).then(|| name.to_owned()),
     }
-    if depth == 0 { out } else { s.to_owned() }
 }
 
-/// The name a run of added (or removed) lines declares at its `i`th: as
-/// defined_name, or a method whose parameters, return type or body go on
-/// over the next lines (`added(` … `): number {`, `{` on a line of its own).
+/// The name a run of added (or removed) lines declares at its `i`th: by
+/// a keyword on that line, or a method read on through the lines after it.
 fn declared_name(run: &[&str], i: usize) -> Option<String> {
-    defined_name(run[i]).or_else(|| {
-        if !run[i].contains('(') || i + 1 >= run.len() {
-            return None;
-        }
-        let joined = run[i..run.len().min(i + 16)].iter().map(|l| l.trim()).collect::<Vec<_>>().join(" ");
-        method_name(&joined)
-    })
+    defined_name(run[i]).or_else(|| method_name(&run[i..].join("\n")))
 }
 
 /// What a top-level line declares, whatever the language: the line up to
@@ -404,6 +452,11 @@ pub fn grown_paths(root: &Path, ignore: &Ignore, base: &str) -> std::result::Res
     while start < runs.len() {
         let (file, h, added, _) = runs[start];
         let end = start + runs[start..].iter().take_while(|(f, n, a, _)| (*f, *n, *a) == (file, h, added)).count();
+        // (A file with GROWN_LINES changed needs a model anyway.)
+        if files[file].lines >= GROWN_LINES {
+            start = end;
+            continue;
+        }
         let run: Vec<&str> = runs[start..end].iter().map(|(_, _, _, l)| *l).collect();
         for k in 0..run.len() {
             if let Some(name) = declared_name(&run, k) {
@@ -944,17 +997,21 @@ mod tests {
             ("  added<K, V>(m: Map<K, V>): V {", "added"),
             ("    std::vector<int> added(int n) const {", "added"),
             ("  added = <T>(x: T) => x;", "added"),
+            ("  added<T extends (...args: any[]) => any>(value: T): T {", "added"),
+            ("  added<T extends { a: (x: number) => void }>(value: T): T {", "added"),
+            ("  added(value: number): number;", "added"),
+            ("  added(): () => void {", "added"),
         ] {
-            assert_eq!(defined_name(line).as_deref(), Some(name), "{line}");
+            assert_eq!(declared_name(&[line], 0).as_deref(), Some(name), "{line}");
         }
         // Statements and calls aren't.
         for line in [
             "    if (x) {", "    } else if (x) {", "    for (const a of b) {", "    while (go()) {", "    catch (e) {", "    switch (k) {",
-            "    foo(x).then(y => {", "    describe(\"a\", () => {", "    spawn(async move {", "    items.forEach((x) => {", "    Some(x) => {",
+            "    foo(x).then(y => {", "    items.forEach((x) => {", "    Some(x) => {", "    foo(x);", "    foo<Bar>(x);", "    a ? f(x) : g(y);",
             "    let x = foo(1);", "    const y = bar(2);", "    print(x)", "    self.go(x)", "    return f(x) {", "    x == y(1)", "    onClicked: go()",
             "    property var x: compute(a)", "    case 1: f(x)", "    a.b = function () {",
         ] {
-            assert_eq!(defined_name(line), None, "{line}");
+            assert_eq!(declared_name(&[line], 0), None, "{line}");
         }
         // Over several lines.
         for (run, name) in [
@@ -966,6 +1023,18 @@ mod tests {
             (&["    print(x)", "    for k in {1, 2}:"][..], None),
             (&["    go(x)", "    if (y) {"][..], None),
             (&["    run(a, () => {", "      b();", "    });"][..], None),
+            (&["    describe(\"a\", () => {", "      it();", "    });"][..], None),
+            (&["    spawn(async move {", "      go().await;", "    });"][..], None),
+            (&["    foo(x)", "    bar(y)"][..], None),
+            // Generics over lines, a constraint with a function type, a
+            // long signature: all read through.
+            (&["  added<", "    T,", "  >(value: T): T {", "    return value;", "  }"][..], Some("added")),
+            (&["  added<T extends (...args: any[]) => any>(value: T): T {", "    return value;", "  }"][..], Some("added")),
+            (&["static int", "added(void)", "{"][..], Some("added")),
+            // Ending inside one: counted, not taken as unchanged.
+            (&["  added<", "    T,"][..], Some("added")),
+            (&["  added(", "    value: number,"][..], Some("added")),
+            (&["  added(value: number): number"][..], Some("added")),
         ] {
             assert_eq!(declared_name(run, 0).as_deref(), name, "{run:?}");
         }
