@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use crate::listdiff::{ListChange, diff_by};
 use crate::markdown::{MarkdownRenderer, MdBlockKind, committed_prefix, escape_into};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum RowKind {
     User,
     #[default]
@@ -51,7 +51,10 @@ impl PartialEq for FullOutput {
 }
 impl Eq for FullOutput {}
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+// (Kept as JSON for a long session's next opening: its full outputs and
+// page records aren't.)
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Row {
     /// Stable identity across snapshots.
     pub key: String,
@@ -61,6 +64,7 @@ pub struct Row {
     /// Plain text: user prompt, thinking, raw code, tool output, notice.
     pub text: String,
     /// A call's whole output when `text` keeps only part of it (to copy).
+    #[serde(skip)]
     pub full: Option<FullOutput>,
     /// Tool name, code language, notice level.
     pub title: String,
@@ -110,6 +114,7 @@ pub struct Row {
     /// Its long text is in a page file (see [`crate::pages`]): `html`,
     /// `text`, `full`, `diff` and `command` are empty here, and [`whole`]
     /// reads them back.
+    #[serde(skip)]
     pub paged: Option<crate::pages::Paged>,
 }
 

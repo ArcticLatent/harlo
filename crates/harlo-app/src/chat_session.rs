@@ -282,6 +282,10 @@ pub mod qobject {
         #[qsignal]
         #[cxx_name = "sendFailed"]
         fn send_failed(self: Pin<&mut ChatSession>, message: &QString);
+        /// A tool call ended (or came in ended): files may have changed.
+        #[qsignal]
+        #[cxx_name = "toolEnded"]
+        fn tool_ended(self: Pin<&mut ChatSession>);
         #[inherit]
         #[qsignal]
         #[cxx_name = "dataChanged"]
@@ -1691,11 +1695,14 @@ impl ChatSession {
 
     fn apply_row_changes(mut self: Pin<&mut Self>, changes: Vec<RowChange>) {
         let root = QModelIndex::default();
+        let ended = |r: &Row| r.kind == RowKind::Tool && !matches!(r.state.as_str(), "running" | "pending" | "streaming");
+        let mut tool_ended = false;
         // (The index is dropped as each change lands, before it's told:
         // views ask at once, mid-way through the changes.)
         for change in changes {
             match change {
                 RowChange::Update { at, row } => {
+                    tool_ended |= ended(&row) && !ended(&self.rows[at]);
                     self.as_mut().rust_mut().rows[at] = row;
                     *self.row_index.borrow_mut() = None;
                     let idx = self.index(at as i32, 0, &root);
@@ -1708,6 +1715,7 @@ impl ChatSession {
                     self.as_mut().end_remove_rows();
                 },
                 RowChange::Insert { at, rows } => unsafe {
+                    tool_ended |= rows.iter().any(|r| ended(r));
                     let last = at + rows.len() - 1;
                     self.as_mut().begin_insert_rows(&root, at as i32, last as i32);
                     self.as_mut().rust_mut().rows.splice(at..at, rows);
@@ -1718,7 +1726,10 @@ impl ChatSession {
         }
         // An approval can arrive before its tool row shows up.
         if self.request_is_approval && self.approval_row.is_empty() {
-            self.match_approval();
+            self.as_mut().match_approval();
+        }
+        if tool_ended {
+            self.tool_ended();
         }
     }
 

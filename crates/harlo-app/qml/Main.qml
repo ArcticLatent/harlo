@@ -41,7 +41,11 @@ ApplicationWindow {
     palette.dark: Theme.subtle
     palette.shadow: "#000000"
 
-    onActiveChanged: Workspace.setWindowActive(active)
+    onActiveChanged: {
+        Workspace.setWindowActive(active)
+        // (Changes made while it was in the back show at once.)
+        if (active) git.refresh(false)
+    }
     // Every hover tip (`ToolTip.text` on a control) is the one shared
     // ToolTip: dressed once here like the pills (their surface) and faded
     // in, for every window.
@@ -237,6 +241,9 @@ ApplicationWindow {
     Connections {
         target: chat.session
         function onCwdChanged() { win.syncGitFolder() }
+        // A tool call ended: what it changed shows (at most every 0.7 s,
+        // the window in front or not).
+        function onToolEnded() { if (!gitKick.running) gitKick.start() }
         function onStatusChanged() {
             // A finished run is when files most likely changed.
             if (win.lastStatus === "busy" && chat.session.status !== "busy")
@@ -262,9 +269,18 @@ ApplicationWindow {
         // `--theme-mode=` (self-tests): every scenario in that appearance.
         if (selftestDir !== "" && argValue("--theme-mode=")) Workspace.chooseThemeMode(argValue("--theme-mode="))
     }
+    Timer { id: gitKick; interval: 700; onTriggered: git.refresh(false) }
+    // Test hook: no polling, only what happens refreshes the panel.
+    property bool gitPollOff: false
     // Cheap `git status` poll to catch edits made elsewhere: often while the
-    // panel is open, slowly otherwise (the header shows the change count).
-    Timer { interval: changes.visible ? 4000 : 15000; repeat: true; running: win.active; onTriggered: git.refresh(false) }
+    // panel is open (in front or not), slowly otherwise (the header shows
+    // the change count); at once when the window comes to the front.
+    Timer {
+        interval: changes.visible ? 4000 : 15000
+        repeat: true
+        running: !win.gitPollOff && (win.active || changes.visible && win.visibility !== Window.Minimized && win.visibility !== Window.Hidden)
+        onTriggered: git.refresh(false)
+    }
 
     // Fit the side panes into the window: saved widths when there is room,
     // otherwise shrink the sidebar, then the changes panel, so the chat
@@ -6564,6 +6580,47 @@ ApplicationWindow {
     // real-sized turns by the stand-in claude (`--fake-claude=`), the
     // pictures in `--cwd=`/pics opened and closed `--cycles=` times, and the
     // sessions in `--more=` (|-separated) opened beside it and closed.
+    // The Changes panel follows the agent's edits as each tool call ends,
+    // not at the next poll or the run's end.
+    property real liveWritten: 0
+    SequentialAnimation {
+        id: changesLiveSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlochanges"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo") }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.waitUntil(changesLiveSteps, () => chat.session.modelName !== "", 10000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            windowSettings.rightMode = "changes"
+            git.refresh(true) } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: {
+            win.check(!git.files.some(f => f.startsWith("live-change.txt\t")), "the file isn't there yet (" + git.files + ")")
+            win.gitPollOff = true
+            win.sendByKeys("write and wait") } }
+        // (Its write asks first.)
+        ScriptAction { script: win.waitUntil(changesLiveSteps, () => chat.session.hasRequest, 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: { win.clickText("Approve", chat.transcript); win.liveWritten = Date.now(); win.log("window in front:", win.active) } }
+        ScriptAction { script: win.waitUntil(changesLiveSteps, () => git.files.some(f => f.startsWith("live-change.txt\t")), 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            const ms = Date.now() - win.liveWritten
+            win.check(ms < 2000 && chat.session.status === "busy", "the Changes panel lists the agent's new file " + ms + " ms after its write was approved, while it still works (" + chat.session.status + ")")
+            win.shotWindow("clicks-changes-live") } }
+        // (Then its slow step, asked too.)
+        ScriptAction { script: win.waitUntil(changesLiveSteps, () => chat.session.hasRequest, 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: win.clickText("Approve", chat.transcript) }
+        ScriptAction { script: win.waitUntil(changesLiveSteps, () => chat.session.status === "idle", 20000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: { win.summary(); Qt.quit() } }
+    }
     property int memTurn: 0
     property int memRowsBefore: 0
     property var memMore: (win.argValue("--more=") || "").split("|").filter(f => f !== "")

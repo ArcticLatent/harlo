@@ -616,6 +616,7 @@ pub fn forget_cached(path: &Path) {
     let _one = CACHE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let (meta, lines) = cache_files(&dir, path);
     let _ = std::fs::remove_file(meta.with_extension("report.json"));
+    let _ = std::fs::remove_file(meta.with_extension("rows.json"));
     let _ = std::fs::remove_file(meta);
     let _ = std::fs::remove_file(lines);
 }
@@ -624,6 +625,12 @@ pub fn forget_cached(path: &Path) {
 /// beside its history cache: shown while the file opens again.
 pub fn report_file(dir: &Path, path: &Path) -> PathBuf {
     cache_files(dir, path).0.with_extension("report.json")
+}
+
+/// Where the last rows a session showed are kept, beside its history cache
+/// in `dir`.
+pub fn rows_file(dir: &Path, path: &Path) -> PathBuf {
+    cache_files(dir, path).0.with_extension("rows.json")
 }
 
 fn saved_cached_in(path: &Path, dir: &Path, from_size: u64) -> std::io::Result<crate::store::SavedSession> {

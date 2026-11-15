@@ -474,6 +474,9 @@ fn reports_dir() -> Option<PathBuf> {
 }
 #[cfg(test)]
 static REPORTS_IN: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+/// (Tests setting `REPORTS_IN` take turns.)
+#[cfg(test)]
+static REPORTS_TURN: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// The report last kept for a session file (see [`save_report`]).
 fn saved_report(path: &std::path::Path) -> Option<Value> {
@@ -485,18 +488,57 @@ fn saved_report(path: &std::path::Path) -> Option<Value> {
 /// and Activity panels show it at once, until the file has loaded (off the
 /// session's loop).
 fn save_report(path: PathBuf, report: Value) {
-    static N: AtomicU64 = AtomicU64::new(0);
     let Some(dir) = reports_dir() else { return };
     tokio::task::spawn_blocking(move || {
         let file = harlo_harness::claude::report_file(&dir, &path);
-        let tmp = file.with_extension(format!("{}.{}.tmp", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
-        let wrote = std::fs::create_dir_all(&dir)
-            .and_then(|_| std::fs::write(&tmp, serde_json::to_vec(&report).unwrap_or_default()))
-            .and_then(|_| std::fs::rename(&tmp, &file));
-        if let Err(e) = wrote {
-            tracing::debug!("the context report wasn't kept: {e}");
-            let _ = std::fs::remove_file(&tmp);
+        keep_file(&dir, &file, &serde_json::to_vec(&report).unwrap_or_default());
+    });
+}
+
+/// Writes `file` in `dir` whole or not at all.
+fn keep_file(dir: &std::path::Path, file: &std::path::Path, data: &[u8]) {
+    static N: AtomicU64 = AtomicU64::new(0);
+    let tmp = file.with_extension(format!("{}.{}.tmp", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+    let wrote = std::fs::create_dir_all(dir).and_then(|_| std::fs::write(&tmp, data)).and_then(|_| std::fs::rename(&tmp, file));
+    if let Err(e) = wrote {
+        tracing::debug!("{} wasn't kept: {e}", file.display());
+        let _ = std::fs::remove_file(&tmp);
+    }
+}
+
+/// The text a long session's kept rows hold at most.
+const KEPT_ROWS_TEXT: usize = 4 << 20;
+
+/// The rows last kept for a session file (see [`save_rows`]).
+fn saved_rows(path: &std::path::Path) -> Option<Vec<Arc<Row>>> {
+    let file = harlo_harness::claude::rows_file(&reports_dir()?, path);
+    let rows: Vec<Row> = serde_json::from_slice(&std::fs::read(file).ok()?).ok()?;
+    Some(rows.into_iter().map(Arc::new).collect()).filter(|r: &Vec<_>| !r.is_empty())
+}
+
+/// Keeps a long session's last rows (about [`SHOWN_FIRST`], and about
+/// [`KEPT_ROWS_TEXT`] of text) for the next time it opens: they show at
+/// once, until the file has loaded (off the session's loop).
+fn save_rows(path: PathBuf, rows: &[Arc<Row>]) {
+    let Some(dir) = reports_dir() else { return };
+    let (mut start, mut text) = (rows.len(), 0);
+    // (`last_rows` starts at a message of yours, a little past SHOWN_FIRST.)
+    while start > 0 && rows.len() - start < 2 * SHOWN_FIRST {
+        let r = &rows[start - 1];
+        let size = r.html.len() + r.text.len() + r.result.len() + r.diff.len() + r.command.len() + r.summary.len();
+        // (Rows with their text in a page file stay out, as does the
+        // row before them.)
+        if r.paged.is_some() || (text + size > KEPT_ROWS_TEXT && start < rows.len()) {
+            break;
         }
+        text += size;
+        start -= 1;
+    }
+    let tail = rows[start..].to_vec();
+    tokio::task::spawn_blocking(move || {
+        let file = harlo_harness::claude::rows_file(&dir, &path);
+        let rows: Vec<&Row> = tail.iter().map(|r| &**r).collect();
+        keep_file(&dir, &file, &serde_json::to_vec(&rows).unwrap_or_default());
     });
 }
 
@@ -931,6 +973,8 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
     // A conversation was just loaded: once its rows are built and sent,
     // what building them used goes back to the system.
     let mut loaded = false;
+    // Rows kept from the last time are shown, until it has loaded.
+    let mut early_rows = false;
 
     if spawn_now {
         driver.ensure_harness(&mut st, &mut pending);
@@ -938,6 +982,9 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
         let tx = aux_tx.clone();
         tokio::task::spawn_blocking(move || {
             let _ = tx.send(Aux::Early(saved_report(&path).map(Box::new)));
+            if let Some(rows) = saved_rows(&path) {
+                let _ = tx.send(Aux::EarlyRows(rows));
+            }
             let opened = open_session_file(kind, &path);
             if opened.count >= MANY {
                 harlo_harness::store::give_back();
@@ -997,6 +1044,7 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                 Aux::Loaded(opened) => {
                     let Opened { saved, missing, transcript, tally, count, first_message, last_reply, context } = *opened;
                     st.transcript = transcript;
+                    early_rows = false;
                     // (A copy is the start of the host's file: what didn't
                     // come is the end, its latest messages.)
                     if missing > 0 {
@@ -1037,6 +1085,9 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                     if count >= MANY {
                         let first = st.transcript.last_rows(SHOWN_FIRST);
                         let changes = diff_rows(&st.shown, &first);
+                        if let Some(path) = &session_file {
+                            save_rows(path.clone(), &first);
+                        }
                         st.shown = first;
                         if !changes.is_empty() {
                             pending.push(SessionUpdate::Rows(changes));
@@ -1062,6 +1113,17 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                         export(&st, &driver, to, reply);
                     }
                     dirty = true;
+                }
+                // The rows kept from last time, shown while it loads.
+                Aux::EarlyRows(rows) => {
+                    if st.status == SessionStatus::Loading && st.shown.is_empty() {
+                        let changes = diff_rows(&st.shown, &rows);
+                        st.shown = rows;
+                        early_rows = true;
+                        pending.push(SessionUpdate::Rows(changes));
+                        st.broadcast(std::mem::take(&mut pending));
+                        last_flush = Instant::now();
+                    }
                 }
                 Aux::Early(report) => {
                     if let (Some(report), SessionStatus::Loading) = (report, st.status) {
@@ -1313,11 +1375,16 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
         if was_busy && !busy && st.message_count >= MANY
             && let Some(path) = session_file.clone().or_else(|| st.meta.session_file.clone())
         {
+            save_rows(path.clone(), &st.transcript.last_rows(SHOWN_FIRST));
             save_report(path, st.report());
         }
         was_busy = busy;
 
         if (dirty || !pending.is_empty()) && last_flush.elapsed() >= STREAM_FLUSH {
+            // (The rows kept from last time stay until it has loaded.)
+            if early_rows {
+                dirty = false;
+            }
             if dirty {
                 let mut rows = st.transcript.rows();
                 // (Replies far back keep their long text on disk: sent so.)
@@ -1508,6 +1575,9 @@ enum Aux {
     /// The report kept from the last time the file was open, read before
     /// it loads (None: none kept).
     Early(Option<Box<Value>>),
+    /// The rows kept from the last time the file was open, read before it
+    /// loads.
+    EarlyRows(Vec<Arc<Row>>),
     /// Messages from the harness (`get_messages`), and their tally.
     History(Vec<Value>, crate::context::Tally),
     State(Value),
@@ -2428,6 +2498,7 @@ mod tests {
     /// is the loaded one, never one of zeros.
     #[tokio::test]
     async fn a_long_session_shows_its_last_report_while_it_opens() {
+        let _turn = REPORTS_TURN.lock().await;
         let dir = std::env::temp_dir().join(format!("harlo-reports-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let reports = dir.join("history");
@@ -2468,6 +2539,70 @@ mod tests {
         let handle = SessionHandle::open_saved(cfg(HarnessKind::Harlo, SessionTarget::Resume(none_kept.clone())));
         let first = handle.context_report().await.expect("a report");
         assert_eq!(first["messages"].as_u64(), Some(6000), "none kept: the loaded one first");
+        *REPORTS_IN.lock().unwrap() = None;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A long session opens with the rows kept from last time, shown before
+    /// it has loaded, then its own; those are kept for its next opening.
+    #[tokio::test]
+    async fn a_long_session_shows_its_last_rows_while_it_opens() {
+        let _turn = REPORTS_TURN.lock().await;
+        let dir = std::env::temp_dir().join(format!("harlo-kept-rows-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let reports = dir.join("history");
+        std::fs::create_dir_all(&reports).unwrap();
+        *REPORTS_IN.lock().unwrap() = Some(reports.clone());
+        let mut text = String::from("{\"type\":\"session\",\"id\":\"s\",\"cwd\":\"/w\"}\n");
+        let mut parent = "null".to_owned();
+        for i in 0..3000 {
+            text += &format!("{{\"type\":\"message\",\"id\":\"u{i}\",\"parentId\":{parent},\"message\":{{\"role\":\"user\",\"content\":\"request {i}\"}}}}\n");
+            text += &format!("{{\"type\":\"message\",\"id\":\"a{i}\",\"parentId\":\"u{i}\",\"message\":{{\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",\"text\":\"answer {i}\"}}]}}}}\n");
+            parent = format!("\"a{i}\"");
+        }
+        let file = dir.join("long.jsonl");
+        std::fs::write(&file, &text).unwrap();
+        let kept = harlo_harness::claude::rows_file(&reports, &file);
+        let row = Row { key: "kept".into(), kind: crate::transcript::RowKind::Markdown, text: "kept from last time".into(), ..Default::default() };
+        std::fs::write(&kept, serde_json::to_vec(&[&row]).unwrap()).unwrap();
+
+        let handle = SessionHandle::open_saved(cfg(HarnessKind::Harlo, SessionTarget::Resume(file.clone())));
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        handle.subscribe(ChannelSink(tx));
+        // Before it has loaded: the kept row.
+        let mut rows = Vec::new();
+        let mut before = Vec::new();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+        let mut offline = false;
+        while let Ok(Some(u)) = tokio::time::timeout_at(deadline, rx.recv()).await {
+            match u {
+                SessionUpdate::Reset(r) => rows = r,
+                SessionUpdate::Rows(changes) => apply(&mut rows, changes),
+                SessionUpdate::Status(SessionStatus::Offline) => offline = true,
+                _ => {}
+            }
+            if before.is_empty() && !rows.is_empty() && !offline {
+                before = rows.iter().map(|r| r.text.clone()).collect();
+            }
+            if offline && rows.iter().any(|r| r.html.contains("answer 2999")) {
+                break;
+            }
+        }
+        assert_eq!(before, ["kept from last time"], "shown while it loads");
+        let shown: Vec<&str> = rows.iter().map(|r| r.text.as_str()).collect();
+        assert!(!shown.contains(&"kept from last time"), "replaced once loaded");
+        assert!(rows.iter().any(|r| r.html.contains("answer 2999")), "its own rows: {:?}", &shown[shown.len().saturating_sub(3)..]);
+        // Its own last rows kept for next time (off the loop: a moment later).
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let now_kept = loop {
+            let r: Vec<Row> = std::fs::read(&kept).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+            if r.iter().any(|r| r.html.contains("answer 2999")) || Instant::now() > deadline {
+                break r;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        };
+        assert!(now_kept.iter().any(|r| r.html.contains("answer 2999")) && now_kept.len() >= SHOWN_FIRST && now_kept.len() <= 2 * SHOWN_FIRST, "kept {}", now_kept.len());
+        assert_eq!(now_kept[0].kind, crate::transcript::RowKind::User, "from a message of yours");
         *REPORTS_IN.lock().unwrap() = None;
         let _ = std::fs::remove_dir_all(&dir);
     }

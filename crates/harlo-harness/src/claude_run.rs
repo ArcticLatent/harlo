@@ -78,9 +78,8 @@ struct State {
     /// What came since this started that `messages` no longer holds.
     spilled: Spill,
     /// The transcript the conversation before that is read from when asked
-    /// (not kept: a long one is hundreds of MB once parsed), and how many of
-    /// its messages came before `messages`.
-    history: Option<(PathBuf, usize)>,
+    /// (not kept: a long one is hundreds of MB once parsed).
+    history: Option<History>,
     /// What the to-do card is made from: the to-do calls (and their results'
     /// task ids), from the history and since.
     todo: Vec<Value>,
@@ -108,6 +107,55 @@ struct State {
 struct Held {
     text: String,
     content: Vec<Value>,
+}
+
+/// The transcript a resumed (or forked) Claude's conversation before it
+/// started is in, read when asked.
+#[derive(Clone)]
+struct History {
+    path: PathBuf,
+    /// Its messages then.
+    count: usize,
+    /// How long it was then, in bytes.
+    end: u64,
+    /// All of it was here then (a remote one's copy can come over in part:
+    /// `count` is then what the part had, and `end` what the host said).
+    whole: bool,
+}
+
+/// The messages of `h` from `file` (its copy here; `host`, when it came
+/// from one), as they were when this started. A copy short of what the
+/// host has, or a transcript with fewer messages than then, is an error,
+/// never a conversation missing its middle.
+fn history_messages(file: &Path, h: &History, host: Option<&str>) -> Result<Vec<Value>, String> {
+    if let Some(host) = host {
+        let missing = crate::mirror::missing(file);
+        if missing > 0 {
+            let size = match missing {
+                n if n >= 1 << 20 => format!("{:.1} MB", n as f64 / (1 << 20) as f64),
+                n if n >= 1 << 10 => format!("{:.0} KB", n as f64 / (1 << 10) as f64),
+                n => format!("{n} bytes"),
+            };
+            return Err(format!("not all of it came over from {host}: its last {size} (the latest messages) are missing. Try again once {host} can be reached"));
+        }
+    }
+    if !h.whole {
+        // (Its copy was short when this started: the messages up to where
+        // the host's file ended then.)
+        let have = std::fs::metadata(file).map_or(0, |m| m.len());
+        if have < h.end {
+            return Err(format!("{} has {have} of its {} bytes", file.display(), h.end));
+        }
+        let mut read = Vec::new();
+        claude::each_saved_message_upto(file, h.end, &mut |m| read.push(m)).map_err(|e| format!("reading {}: {e:#}", file.display()))?;
+        return Ok(read);
+    }
+    let mut read = claude::saved_file_cached(file).map_err(|e| format!("reading {}: {e:#}", file.display()))?.messages;
+    if read.len() < h.count {
+        return Err(format!("{} has {} of its {} messages now", file.display(), read.len(), h.count));
+    }
+    read.truncate(h.count);
+    Ok(read)
 }
 
 struct Shared {
@@ -316,11 +364,16 @@ pub(crate) fn spawn(cfg: HarnessConfig, program: PathBuf) -> Result<(Harness, mp
         let file = shared.local_file(path);
         // (Read one message at a time: what's needed of it is small.)
         let mut read = Resumed::default();
+        // (How long it was, and whether its copy here is all of it.)
+        let (end, missing) = file.as_deref().map_or((0, 0), |f| {
+            let missing = if shared.cfg.remote.is_some() { crate::mirror::missing(f) } else { 0 };
+            (std::fs::metadata(f).map_or(0, |m| m.len()) + missing, missing)
+        });
         let saved = file.as_deref().is_some_and(|f| claude::each_saved_message(f, &mut |m| read.add(&m)).is_ok());
         if saved {
             let mut st = shared.state.lock().unwrap();
             st.context_tokens = read.context;
-            st.history = Some((path.clone(), read.count));
+            st.history = Some(History { path: path.clone(), count: read.count, end, whole: missing == 0 });
             st.todo = read.todo;
             st.saved_model = if read.model.is_empty() { String::new() } else { format!("anthropic/{}", read.model) };
             // Its window and where it compacts, as Claude said last time.
@@ -719,16 +772,11 @@ async fn command(shared: &Arc<Shared>, pending: &Pending, cmd: Value) {
             // a history that can't be read whole is an error, not a part.)
             let read = history.is_some() || spilled.is_some();
             let history = match history {
-                Some((path, count)) => {
+                Some(h) => {
                     let sh = shared.clone();
                     tokio::task::spawn_blocking(move || {
-                        let file = sh.local_file(&path).ok_or_else(|| format!("couldn't fetch {}", path.display()))?;
-                        let mut read = claude::saved_file_cached(&file).map_err(|e| format!("reading {}: {e:#}", file.display()))?.messages;
-                        if read.len() < count {
-                            return Err(format!("{} has {} of its {count} messages now", file.display(), read.len()));
-                        }
-                        read.truncate(count);
-                        Ok(read)
+                        let file = sh.local_file(&h.path).ok_or_else(|| format!("couldn't fetch {}", h.path.display()))?;
+                        history_messages(&file, &h, sh.cfg.remote.as_ref().map(|r| r.host.as_str()))
                     })
                     .await
                     .unwrap_or_else(|e| Err(e.to_string()))
@@ -796,10 +844,11 @@ async fn command(shared: &Arc<Shared>, pending: &Pending, cmd: Value) {
             match forked {
                 Some(Ok((id, text, out))) => {
                     let messages = claude::history(&out);
+                    let end = out.len() as u64;
                     drop(out);
                     {
                         let mut st = shared.state.lock().unwrap();
-                        st.history = file.as_ref().map(|f| (f.with_file_name(format!("{id}.jsonl")), messages.len()));
+                        st.history = file.as_ref().map(|f| History { path: f.with_file_name(format!("{id}.jsonl")), count: messages.len(), end, whole: true });
                         st.todo = todo_of(&messages);
                         st.start_over();
                         st.session_id = id;
@@ -1858,6 +1907,41 @@ mod tests {
     /// The conversation isn't kept: it's the transcript as it was read when
     /// the session started (what Claude adds to it later is in `messages`
     /// already), then what came since.
+    /// A remote transcript's copy short of what the host has is an error,
+    /// whether it was short when Claude started or came over in part now;
+    /// one short then and whole now gives the messages there were then.
+    #[test]
+    fn a_remote_history_short_of_the_host_is_an_error() {
+        let slot = std::env::temp_dir().join(format!("harlo-claude-short-{}", std::process::id()));
+        std::fs::create_dir_all(&slot).unwrap();
+        let copy = slot.join("s.jsonl");
+        let line = |kind: &str, content: &str| format!(r#"{{"type":"{kind}","message":{{"id":"{content}","role":"{kind}","content":[{{"type":"text","text":"{content}"}}]}}}}"#) + "\n";
+        let then = [line("user", "first"), line("assistant", "reply"), line("user", "again"), line("assistant", "more")].concat();
+        let source = |size: usize| std::fs::write(slot.join("source.json"), format!(r#"{{"host":"nas","path":"/s.jsonl","used":0,"size":{size}}}"#)).unwrap();
+        let texts = |m: &[Value]| m.iter().filter_map(|m| m["content"][0]["text"].as_str().map(str::to_owned)).collect::<Vec<_>>();
+        // Claude started with only the first two here (the host had four).
+        let part = [line("user", "first"), line("assistant", "reply")].concat();
+        std::fs::write(&copy, &part).unwrap();
+        source(then.len());
+        let short = History { path: "/s.jsonl".into(), count: 2, end: then.len() as u64, whole: false };
+        let err = history_messages(&copy, &short, Some("nas")).unwrap_err();
+        assert!(err.contains("not all of it came over from nas"), "{err}");
+        // The rest came, and Claude has written more since: the four then.
+        let now = then.clone() + &line("user", "since");
+        std::fs::write(&copy, &now).unwrap();
+        source(now.len());
+        assert_eq!(texts(&history_messages(&copy, &short, Some("nas")).unwrap()), ["first", "reply", "again", "more"]);
+        // Whole when it started, short now (the host's file grew, the copy
+        // didn't all come): an error, not the part.
+        let whole = History { path: "/s.jsonl".into(), count: 4, end: then.len() as u64, whole: true };
+        source(now.len() + 500);
+        let err = history_messages(&copy, &whole, Some("nas")).unwrap_err();
+        assert!(err.contains("not all of it came over from nas") && err.contains("500 bytes"), "{err}");
+        source(now.len());
+        assert_eq!(texts(&history_messages(&copy, &whole, Some("nas")).unwrap()), ["first", "reply", "again", "more"]);
+        let _ = std::fs::remove_dir_all(&slot);
+    }
+
     #[tokio::test]
     async fn its_messages_are_the_transcript_then_what_came_since() {
         let dir = std::env::temp_dir().join(format!("harlo-claude-history-{}", std::process::id()));
@@ -1866,7 +1950,8 @@ mod tests {
         let line = |kind: &str, content: &str| format!(r#"{{"type":"{kind}","message":{{"id":"{content}","role":"{kind}","content":[{{"type":"text","text":"{content}"}}]}}}}"#);
         std::fs::write(&path, [line("user", "first"), line("assistant", "reply")].join("\n") + "\n").unwrap();
         let (shared, _rx) = shared();
-        shared.state.lock().unwrap().history = Some((path.clone(), 2));
+        let end = std::fs::metadata(&path).unwrap().len();
+        shared.state.lock().unwrap().history = Some(History { path: path.clone(), count: 2, end, whole: true });
         command(&shared, &Pending::default(), json!({ "type": "prompt", "message": "second" })).await;
         // (Claude writes it down too.)
         std::fs::write(&path, [line("user", "first"), line("assistant", "reply"), line("user", "second")].join("\n") + "\n").unwrap();
