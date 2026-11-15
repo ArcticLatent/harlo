@@ -188,7 +188,8 @@ fn is_identifier(w: &str) -> bool {
 /// or parameters still open, a return type and no body yet), it counts:
 /// what can't be read isn't taken as unchanged.
 fn method_name(text: &str) -> Option<String> {
-    let t = text.trim_start();
+    let blanked = blank_literals(text.trim_start());
+    let t = blanked.as_str();
     if !t.starts_with(|c: char| c.is_alphabetic() || c == '_' || c == '$' || c == '*' || c == '&') {
         return None;
     }
@@ -215,8 +216,9 @@ fn method_name(text: &str) -> Option<String> {
             match c {
                 '(' => break false,
                 ';' | '{' | '}' => return None,
-                // (Generics follow a name, or open a function's value.)
-                '<' if head.trim_end().is_empty() || head.trim_end().ends_with(|c: char| c.is_alphanumeric() || matches!(c, '_' | '$' | '=' | ':')) => angle = 1,
+                // (Generics follow a name, an optional one too, or open a
+                // function's value.)
+                '<' if head.trim_end().is_empty() || head.trim_end().ends_with(|c: char| c.is_alphanumeric() || matches!(c, '_' | '$' | '=' | ':' | '?')) => angle = 1,
                 _ => head.push(c),
             }
         }
@@ -235,6 +237,8 @@ fn method_name(text: &str) -> Option<String> {
             return None;
         }
         let name = name.rsplit(char::is_whitespace).next().unwrap_or_default();
+        // (An optional member: `added?: () => number`.)
+        let name = optional(name).unwrap_or(name);
         let value = value.strip_prefix("async").map_or(value, str::trim_start);
         if !is_identifier(name) || !(value.is_empty() || value == "function") {
             return None;
@@ -247,6 +251,9 @@ fn method_name(text: &str) -> Option<String> {
         let rest = rest.split(';').next().unwrap_or_default();
         return (rest.contains("=>") || !rest.contains(')')).then(|| name.to_owned());
     }
+    // (An optional member, `added?(): number;`: its `?` against its name,
+    // where a ternary's has space around it.)
+    let head = optional(head).unwrap_or(head);
     if head.contains(['=', '.', '"', '\'', '!', ',', ';', '|', '?', '[', ']', '@', '#', '+', '%', '^', '~', '/']) || head.contains("->") {
         return None;
     }
@@ -273,12 +280,6 @@ fn method_name(text: &str) -> Option<String> {
                     break;
                 }
             }
-            q @ ('"' | '`') => {
-                j += 1;
-                while j < chars.len() && chars[j] != q {
-                    j += if chars[j] == '\\' { 2 } else { 1 };
-                }
-            }
             _ => {}
         }
         j += 1;
@@ -300,6 +301,68 @@ fn method_name(text: &str) -> Option<String> {
         // (The text ends: a return type or qualifier means a body may follow.)
         None => (!between.is_empty() && qualified).then(|| name.to_owned()),
     }
+}
+
+/// `name?` without its `?`, when it ends so (straight after a name).
+fn optional(head: &str) -> Option<&str> {
+    let bare = head.strip_suffix('?')?;
+    bare.ends_with(|c: char| c.is_alphanumeric() || c == '_' || c == '$').then_some(bare)
+}
+
+/// `text` with its string literals' contents and its comments blanked
+/// (to spaces, lines kept), so a bracket in them closes nothing. A `'`
+/// opens a literal only when the line closes it (Rust's `'a` doesn't).
+fn blank_literals(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        let next = chars.get(i + 1).copied().unwrap_or('\0');
+        if c == '/' && next == '/' {
+            while i < chars.len() && chars[i] != '\n' {
+                out.push(' ');
+                i += 1;
+            }
+            continue;
+        }
+        if c == '/' && next == '*' {
+            out.push_str("  ");
+            i += 2;
+            while i < chars.len() && !(chars[i] == '*' && chars.get(i + 1) == Some(&'/')) {
+                out.push(if chars[i] == '\n' { '\n' } else { ' ' });
+                i += 1;
+            }
+            if i < chars.len() {
+                out.push_str("  ");
+                i += 2;
+            }
+            continue;
+        }
+        if matches!(c, '"' | '`' | '\'') {
+            // (Its end: the next unescaped same quote, on this line for '.)
+            let mut j = i + 1;
+            while j < chars.len() && chars[j] != c && !(c == '\'' && chars[j] == '\n') {
+                j += if chars[j] == '\\' { 2 } else { 1 };
+            }
+            if j < chars.len() && chars[j] == c {
+                out.push(c);
+                out.extend(chars[i + 1..j].iter().map(|&x| if x == '\n' { '\n' } else { ' ' }));
+                out.push(c);
+                i = j + 1;
+                continue;
+            }
+            if c != '\'' {
+                // (Not closed: blank to the end.)
+                out.push(c);
+                out.extend(chars[i + 1..].iter().map(|&x| if x == '\n' { '\n' } else { ' ' }));
+                break;
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
 }
 
 /// The name a run of added (or removed) lines declares at its `i`th: by
@@ -1001,13 +1064,20 @@ mod tests {
             ("  added<T extends { a: (x: number) => void }>(value: T): T {", "added"),
             ("  added(value: number): number;", "added"),
             ("  added(): () => void {", "added"),
+            ("  added(value = ')'): string { return value; }", "added"),
+            ("  added(value = \")\"): string { return value; }", "added"),
+            ("  added(value = `)`): string { return value; }", "added"),
+            ("  added(value: number /* ) */): number { return value; }", "added"),
+            ("  added?(): number;", "added"),
+            ("  added?<T>(value: T): T;", "added"),
+            ("  added?: () => number;", "added"),
         ] {
             assert_eq!(declared_name(&[line], 0).as_deref(), Some(name), "{line}");
         }
         // Statements and calls aren't.
         for line in [
             "    if (x) {", "    } else if (x) {", "    for (const a of b) {", "    while (go()) {", "    catch (e) {", "    switch (k) {",
-            "    foo(x).then(y => {", "    items.forEach((x) => {", "    Some(x) => {", "    foo(x);", "    foo<Bar>(x);", "    a ? f(x) : g(y);",
+            "    foo(x).then(y => {", "    items.forEach((x) => {", "    Some(x) => {", "    foo(x);", "    foo<Bar>(x);", "    a ? f(x) : g(y);", "    a ?(b) : c;", "    log(')') // ) {", "    go(x) /* { */;",
             "    let x = foo(1);", "    const y = bar(2);", "    print(x)", "    self.go(x)", "    return f(x) {", "    x == y(1)", "    onClicked: go()",
             "    property var x: compute(a)", "    case 1: f(x)", "    a.b = function () {",
         ] {
@@ -1035,6 +1105,8 @@ mod tests {
             (&["  added<", "    T,"][..], Some("added")),
             (&["  added(", "    value: number,"][..], Some("added")),
             (&["  added(value: number): number"][..], Some("added")),
+            (&["  added(", "    value: number, // ) {", "  ): number {"][..], Some("added")),
+            (&["  added(x: &'a str) -> u8 {"][..], Some("added")),
         ] {
             assert_eq!(declared_name(run, 0).as_deref(), name, "{run:?}");
         }
