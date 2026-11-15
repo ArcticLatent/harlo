@@ -313,11 +313,19 @@ impl Shared {
 
     /// A control request; waits for its answer.
     async fn control(&self, request: Value) -> Value {
+        let rx = self.control_sent(request).await;
+        tokio::time::timeout(std::time::Duration::from_secs(30), rx).await.ok().and_then(Result::ok).unwrap_or(Value::Null)
+    }
+
+    /// A control request, written now (before anything sent after it); its
+    /// answer comes on what's returned. (Until Claude has started, seconds:
+    /// what's sent after it needn't wait for that.)
+    async fn control_sent(&self, request: Value) -> tokio::sync::oneshot::Receiver<Value> {
         let id = self.next_id("harlo_ctl_");
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.state.lock().unwrap().control.insert(id.clone(), tx);
         self.write(json!({ "type": "control_request", "request_id": id, "request": request }).to_string()).await;
-        tokio::time::timeout(std::time::Duration::from_secs(30), rx).await.ok().and_then(Result::ok).unwrap_or(Value::Null)
+        rx
     }
 
     async fn reply_control(&self, request_id: &str, response: Value) {
@@ -565,6 +573,7 @@ fn start(shared: &Arc<Shared>, stdin_slot: &mut Option<tokio::process::ChildStdi
     };
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true).process_group(0);
     let mut child = cmd.spawn().with_context(|| format!("starting {}", shared.program.display()))?;
+    crate::process::started(child.id());
     tracing::info!(program = %shared.program.display(), cwd = %shared.cfg.cwd.display(), "spawned claude");
     *shared.log.lock().unwrap() = ProtocolLog::open(HarnessKind::Claude, &shared.program, &args, &shared.cfg.cwd);
     let stdout = child.stdout.take().expect("piped stdout");
@@ -608,7 +617,12 @@ fn start(shared: &Arc<Shared>, stdin_slot: &mut Option<tokio::process::ChildStdi
             return;
         }
         let code = match child.as_mut() {
-            Some(c) => c.wait().await.ok().and_then(|st| st.code()),
+            Some(c) => {
+                let pid = c.id();
+                let code = c.wait().await.ok().and_then(|st| st.code());
+                crate::process::ended(pid);
+                code
+            }
             None => return, // stopped on purpose (a restart)
         };
         *child = None;
@@ -673,7 +687,9 @@ async fn stop(shared: &Shared) {
                 libc::kill(-(pid as i32), libc::SIGTERM);
             }
         }
+        let pid = child.id();
         let _ = child.kill().await;
+        crate::process::ended(pid);
     }
 }
 
@@ -825,8 +841,13 @@ async fn command(shared: &Arc<Shared>, pending: &Pending, cmd: Value) {
             shared.state.lock().unwrap().model = model.clone();
             let running = shared.child.lock().await.is_some();
             if running {
-                shared.control(json!({ "subtype": "set_model", "model": model })).await;
-                ask_compact_at(shared);
+                // (Its compaction point once it has changed.)
+                let set = shared.control_sent(json!({ "subtype": "set_model", "model": model })).await;
+                let s = Arc::clone(shared);
+                tokio::spawn(async move {
+                    let _ = tokio::time::timeout(std::time::Duration::from_secs(30), set).await;
+                    ask_compact_at(&s);
+                });
             }
             let m = current_model(&shared.state.lock().unwrap());
             shared.emit(HarnessEvent::ModelChanged(m.clone()));
@@ -854,7 +875,9 @@ async fn command(shared: &Arc<Shared>, pending: &Pending, cmd: Value) {
         "harlo_set_modes" => {
             let mode = claude_mode(cmd["approval"].as_str().unwrap_or_default(), cmd["plan"].as_bool().unwrap_or(false));
             shared.state.lock().unwrap().permission_mode = mode.to_owned();
-            shared.control(json!({ "subtype": "set_permission_mode", "mode": mode })).await;
+            // (Written before what's sent next; not waited for: a message
+            // sent as it starts shows at once.)
+            drop(shared.control_sent(json!({ "subtype": "set_permission_mode", "mode": mode })).await);
             reply(true, Value::Null, "");
         }
         "get_commands" | "get_available_commands" => {
@@ -2168,6 +2191,9 @@ mod tests {
 
         let started = std::time::Instant::now();
         let (harness, mut events) = spawn(cfg, program).unwrap();
+        // (As harlo starts one: its modes first, which Claude answers only
+        // once it has started; the message doesn't wait for that.)
+        harness.send(json!({ "type": "harlo_set_modes", "approval": "auto", "plan": false }));
         harness.prompt("next", vec![], crate::process::SendMode::Normal);
         let shown = loop {
             match events.recv().await.unwrap() {

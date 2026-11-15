@@ -210,21 +210,51 @@ pub fn read_session(path: &Path) -> Option<SessionInfo> {
     let size = meta.len();
     let (head, tail) = crate::store::head_and_tail(path, size)?;
     let mut info = session_from_text(path, size, meta.modified().unwrap_or(SystemTime::UNIX_EPOCH), &head, &tail)?;
-    // Its folder was moved or renamed: where it last ran, if that's still there.
-    if !info.cwd.is_dir()
-        && let Some(cwd) = last_folder(if tail.is_empty() { &head } else { &tail })
-    {
-        info.cwd = cwd;
+    // Its folder was moved or renamed: where it last ran, if that's still
+    // there. (Its last lines can be bigger than the tail read, a picture or a
+    // long output: then further back, so it doesn't fall to the old folder's.)
+    if !info.cwd.is_dir() {
+        let found = last_folder(if tail.is_empty() { &head } else { &tail }).or_else(|| {
+            [(4 << 20, crate::store::PART_BYTES), (32 << 20, 4 << 20)].into_iter().filter(|&(_, read)| size > read).find_map(|(n, _)| last_folder(&last_bytes(path, n)?))
+        });
+        if let Some(cwd) = found {
+            info.cwd = cwd;
+        }
     }
     Some(info)
+}
+
+/// A file's last `n` bytes, as text.
+fn last_bytes(path: &Path, n: u64) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    file.seek(SeekFrom::Start(len.saturating_sub(n))).ok()?;
+    let mut bytes = Vec::new();
+    file.take(n).read_to_end(&mut bytes).ok()?;
+    Some(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 /// The latest folder in a transcript's text that's still there, or the top of
 /// the repository it's in (the session's own folder: a command can leave it in
 /// one further down).
-fn last_folder(tail: &str) -> Option<PathBuf> {
-    let cwd = tail.lines().rev().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter(|e| e["isSidechain"] != true).filter_map(|e| e["cwd"].as_str().map(PathBuf::from)).find(|c| c.is_dir())?;
+fn last_folder(text: &str) -> Option<PathBuf> {
+    let cwd = text.lines().rev().filter(|l| !l.contains(r#""isSidechain":true"#)).filter_map(cwd_of).find(|c| c.is_dir())?;
     Some(cwd.ancestors().find(|d| d.join(".git").exists()).unwrap_or(&cwd).to_path_buf())
+}
+
+/// A transcript line's folder, without parsing the line (one can be
+/// megabytes): its first `"cwd":"…"`, the line's own (it comes before the
+/// message; a quote in a message's text is escaped).
+fn cwd_of(line: &str) -> Option<PathBuf> {
+    let rest = &line[line.find(r#""cwd":""#)? + 7..];
+    let bytes = rest.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() && bytes[i] != b'"' {
+        i += if bytes[i] == b'\\' { 2 } else { 1 };
+    }
+    let quoted = rest.get(..i).filter(|_| i < bytes.len())?;
+    serde_json::from_str::<String>(&format!("\"{quoted}\"")).ok().map(PathBuf::from)
 }
 
 /// Whether a transcript is the Claude extension for pi's: it ran Claude Code
@@ -741,10 +771,16 @@ fn lines_before(path: &Path, bytes: u64) -> std::io::Result<u64> {
 /// rather than held (a long session opened without holding all of it), and
 /// its cache written as that writes it. What it gives back has no messages.
 pub fn stream_saved_cached(path: &Path, each: &mut dyn FnMut(Value)) -> std::io::Result<crate::store::SavedSession> {
-    stream_cached_in(path, cache_dir().as_deref(), crate::store::BIG_FILE, each)
+    stream_saved_cached_upto(path, u64::MAX, each)
 }
 
-fn stream_cached_in(path: &Path, dir: Option<&Path>, from_size: u64, each: &mut dyn FnMut(Value)) -> std::io::Result<crate::store::SavedSession> {
+/// [`stream_saved_cached`] as the transcript was when it was `end` bytes
+/// long (what's added meanwhile is left for whoever's adding it).
+pub fn stream_saved_cached_upto(path: &Path, end: u64, each: &mut dyn FnMut(Value)) -> std::io::Result<crate::store::SavedSession> {
+    stream_cached_in(path, cache_dir().as_deref(), crate::store::BIG_FILE, end, each)
+}
+
+fn stream_cached_in(path: &Path, dir: Option<&Path>, from_size: u64, end: u64, each: &mut dyn FnMut(Value)) -> std::io::Result<crate::store::SavedSession> {
     // (Its model: the last message's that says one.)
     let mut model = String::new();
     let mut pass = |m: Value, model: &mut String| {
@@ -756,7 +792,7 @@ fn stream_cached_in(path: &Path, dir: Option<&Path>, from_size: u64, each: &mut 
     let big = dir.filter(|_| std::fs::metadata(path).is_ok_and(|m| m.len() >= from_size));
     let Some(dir) = big else {
         let mut reader = HistoryReader::default();
-        crate::store::for_each_line(path, 0, &mut |offset, line| {
+        crate::store::for_each_line_upto(path, 0, end, &mut |offset, line| {
             reader.line(offset, line);
             // (Only the last can still grow: an assistant's next block joins it.)
             if reader.out.len() > 1 {
@@ -772,7 +808,7 @@ fn stream_cached_in(path: &Path, dir: Option<&Path>, from_size: u64, each: &mut 
     let mut reader = HistoryReader::default();
     let (mut cached, mut from) = ((0, 0), 0);
     let meta = std::fs::read(&meta_path).ok().and_then(|b| serde_json::from_slice::<CacheMeta>(&b).ok()).filter(|m| {
-        m.version == CACHE_VERSION && m.path == path && check_at(path, m.offset).is_ok_and(|c| c == m.check)
+        m.version == CACHE_VERSION && m.path == path && m.offset <= end && check_at(path, m.offset).is_ok_and(|c| c == m.check)
     });
     if let Some(m) = meta.filter(|m| lines_before(&lines_path, m.bytes).is_ok_and(|n| n == m.index as u64)) {
         let mut passed = 0;
@@ -802,7 +838,7 @@ fn stream_cached_in(path: &Path, dir: Option<&Path>, from_size: u64, each: &mut 
             *lines = None;
         }
     };
-    crate::store::for_each_line(path, from, &mut |offset, line| {
+    crate::store::for_each_line_upto(path, from, end, &mut |offset, line| {
         reader.line(offset, line);
         if reader.out.len() > 1 {
             let done = reader.out.len() - 1;
@@ -1362,7 +1398,7 @@ mod tests {
             std::fs::write(&path, contents).unwrap();
             let whole = saved_cached_in(&path, &whole_dir, 0).unwrap();
             let mut messages = Vec::new();
-            let streamed = stream_cached_in(&path, Some(&streamed_dir), 0, &mut |m| messages.push(m)).unwrap();
+            let streamed = stream_cached_in(&path, Some(&streamed_dir), 0, u64::MAX, &mut |m| messages.push(m)).unwrap();
             assert_eq!(messages, whole.messages, "{what}");
             assert_eq!((&streamed.model, &streamed.name), (&whole.model, &whole.name), "{what}");
             assert!(streamed.messages.is_empty());
@@ -1384,11 +1420,11 @@ mod tests {
         }
         // (A damaged cache isn't used: read from the start.)
         let mut messages = Vec::new();
-        stream_cached_in(&path, Some(&streamed_dir), 0, &mut |m| messages.push(m)).unwrap();
+        stream_cached_in(&path, Some(&streamed_dir), 0, u64::MAX, &mut |m| messages.push(m)).unwrap();
         assert_eq!(messages, saved(&rewritten).messages, "damaged");
         // (Small: no cache, the same messages.)
         let mut small = Vec::new();
-        let meta = stream_cached_in(&path, Some(&streamed_dir), u64::MAX, &mut |m| small.push(m)).unwrap();
+        let meta = stream_cached_in(&path, Some(&streamed_dir), u64::MAX, u64::MAX, &mut |m| small.push(m)).unwrap();
         assert_eq!((small, meta.name), (saved(&rewritten).messages, "Named".to_owned()));
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
@@ -1519,6 +1555,17 @@ mod tests {
         // Renamed: the repository it's in now.
         write(&[line(&gone, false), line(&inner, false), line(&gone, true)]);
         assert_eq!(read_session(&path).unwrap().cwd, dir.join("repo"));
+        // A long one whose last line (a picture) is bigger than the tail
+        // read: still where it last ran, not the old folder.
+        let filler: Vec<String> = (0..2000).map(|_| line(&gone, false)).collect();
+        let picture = format!(r#"{{"type":"user","isSidechain":false,"cwd":"{}","message":{{"role":"user","content":[{{"type":"image","source":{{"data":"{}"}}}}]}}}}"#, inner.display(), "A".repeat(300_000));
+        let mut lines = filler;
+        lines.extend([line(&inner, false), picture]);
+        write(&lines);
+        assert!(std::fs::metadata(&path).unwrap().len() > crate::store::FULL_READ_LIMIT_BYTES);
+        assert_eq!(read_session(&path).unwrap().cwd, dir.join("repo"));
+        assert_eq!(cwd_of(r#"{"cwd":"/a \"b\"","message":{"text":"\"cwd\":\"/x\""}}"#), Some(PathBuf::from("/a \"b\"")));
+        assert_eq!(cwd_of(r#"{"cwd":"/cut"#), None);
         // Nowhere left: as it was.
         write(&[line(&gone, false)]);
         assert_eq!(read_session(&path).unwrap().cwd, gone);

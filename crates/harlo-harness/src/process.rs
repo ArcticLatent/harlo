@@ -112,6 +112,51 @@ pub struct Harness {
 
 const STDERR_TAIL_LINES: usize = 80;
 
+/// The agents harlo started that are running: each leads its own process
+/// group (what it starts is in it too). They end with harlo ([`stop_all`]):
+/// the runtime that holds them is never dropped, so nothing else would.
+static GROUPS: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+
+/// An agent started (its pid leads its group).
+pub(crate) fn started(pid: Option<u32>) {
+    if let Some(pid) = pid {
+        GROUPS.lock().unwrap().push(pid);
+    }
+}
+
+/// An agent ended and was waited for (its pid can be another's now).
+pub(crate) fn ended(pid: Option<u32>) {
+    if let Some(pid) = pid {
+        GROUPS.lock().unwrap().retain(|p| *p != pid);
+    }
+}
+
+/// Ends every agent harlo started, and what they started: asked first, then
+/// made to, after a moment. For when harlo quits.
+pub fn stop_all() {
+    stop_groups(std::mem::take(&mut *GROUPS.lock().unwrap()));
+}
+
+fn stop_groups(groups: Vec<u32>) {
+    let signal = |sig| {
+        for pid in &groups {
+            // SAFETY: plain syscall on a group harlo started.
+            unsafe {
+                libc::kill(-(*pid as i32), sig);
+            }
+        }
+    };
+    signal(libc::SIGTERM);
+    // (Ended once nothing's left in them; one that's done but not waited
+    // for yet still counts, so this waits a second at most.)
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    // SAFETY: signal 0 only asks whether the group is there.
+    while std::time::Instant::now() < deadline && groups.iter().any(|pid| unsafe { libc::kill(-(*pid as i32), 0) } == 0) {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    signal(libc::SIGKILL);
+}
+
 impl Harness {
     /// Spawns the harness. Must be called inside a tokio runtime context.
     pub fn spawn(cfg: HarnessConfig) -> Result<(Self, mpsc::UnboundedReceiver<HarnessEvent>)> {
@@ -165,6 +210,7 @@ impl Harness {
             // and the whole tree can be torn down together later.
             .process_group(0);
         let mut child = cmd.spawn().with_context(|| format!("failed to start {}", program.display()))?;
+        started(child.id());
         tracing::info!(program = %program.display(), cwd = %cfg.cwd.display(), remote = cfg.remote.is_some(), "spawned harness");
         let log = ProtocolLog::open(cfg.kind, &program, &args, &cfg.cwd);
 
@@ -512,7 +558,9 @@ async fn wait_loop(
             }
         }
     }
+    let pid = child.id();
     let code = child.wait().await.ok().and_then(|s| s.code());
+    ended(pid);
     // What it said last (a child that kept stderr open isn't waited for).
     let _ = tokio::time::timeout(std::time::Duration::from_millis(500), stderr_done).await;
     let stderr_tail = stderr_tail.lock().unwrap().iter().cloned().collect::<Vec<_>>().join("\n");
@@ -521,6 +569,28 @@ async fn wait_loop(
 
 #[cfg(test)]
 mod tests {
+    /// An agent and what it started end with harlo, even one that doesn't
+    /// stop when asked.
+    #[test]
+    fn its_agents_end_with_it() {
+        use std::os::unix::process::CommandExt;
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", "trap '' TERM; sleep 60 & sleep 60; wait"])
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        // SAFETY: signal 0 only asks.
+        assert_eq!(unsafe { libc::kill(-(pid as i32), 0) }, 0, "running");
+        let started = std::time::Instant::now();
+        stop_groups(vec![pid]);
+        let _ = child.wait();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert_ne!(unsafe { libc::kill(-(pid as i32), 0) }, 0, "all of it gone");
+        assert!(started.elapsed() < std::time::Duration::from_secs(3));
+    }
+
     use super::*;
 
     #[test]

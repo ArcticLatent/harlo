@@ -207,6 +207,9 @@ fn main() {
     for h in harlo_core::remote::hosts() {
         harlo_core::remote::set_disconnected(&h.name, true);
     }
+    // The agents it started (Claude Code, Harlo's), and what they started:
+    // a session's agent outlives harlo otherwise, and carries on with it.
+    harlo_harness::process::stop_all();
     // Model servers harlo started (Settings → Model servers).
     harlo_core::servers::stop_started_servers();
     harlo_core::remote::disconnect_all();

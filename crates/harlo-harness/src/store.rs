@@ -339,14 +339,20 @@ pub fn each_saved_message_upto(kind: HarnessKind, path: &Path, end: u64, each: &
 /// without holding all of it. A long Claude transcript's cache is written
 /// as [`read_saved_for`] writes it.
 pub fn stream_saved_for(kind: HarnessKind, path: &Path, each: &mut dyn FnMut(Value)) -> std::io::Result<SavedSession> {
+    stream_saved_for_upto(kind, path, u64::MAX, each)
+}
+
+/// [`stream_saved_for`] as the file was when it was `end` bytes long (what
+/// its agent adds meanwhile is the agent's to show).
+pub fn stream_saved_for_upto(kind: HarnessKind, path: &Path, end: u64, each: &mut dyn FnMut(Value)) -> std::io::Result<SavedSession> {
     if kind == HarnessKind::Claude {
-        return crate::claude::stream_saved_cached(path, each);
+        return crate::claude::stream_saved_cached_upto(path, end, each);
     }
     drop(std::fs::File::open(path)?);
     let failed = std::cell::RefCell::new(None);
     let (saved, _) = branch_with_model(
         &|e| {
-            if let Err(err) = for_each_line(path, 0, e) {
+            if let Err(err) = for_each_line_upto(path, 0, end, e) {
                 failed.borrow_mut().get_or_insert(err);
             }
         },

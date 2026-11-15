@@ -321,6 +321,7 @@ impl SessionHandle {
         if self.held().is_some() {
             return false;
         }
+        tracing::info!("message sent");
         let _ = self.control.send(Control::Prompt(text.to_owned(), images, mode, typed));
         true
     }
@@ -412,6 +413,9 @@ impl SessionHandle {
 
 struct DriverState {
     transcript: Transcript,
+    /// While a saved session's file loads: what came meanwhile (a message
+    /// you sent, its reply), for the loaded transcript too.
+    since_open: Option<Vec<HarnessEvent>>,
     shown: Vec<Arc<Row>>,
     status: SessionStatus,
     meta: SessionMetaInfo,
@@ -621,15 +625,17 @@ fn open_session_file(kind: HarnessKind, path: &std::path::Path) -> Opened {
     };
     let (missing, size, read) = if crate::remote::is_remote(path) {
         match crate::remote::local_copy(path) {
-            Ok(copy) => (
-                harlo_harness::mirror::missing(&copy),
-                std::fs::metadata(&copy).map_or(0, |m| m.len()),
-                harlo_harness::store::stream_saved_for(kind, &copy, &mut pass).map_err(anyhow::Error::from),
-            ),
+            Ok(copy) => {
+                let size = std::fs::metadata(&copy).map_or(0, |m| m.len());
+                (harlo_harness::mirror::missing(&copy), size, harlo_harness::store::stream_saved_for_upto(kind, &copy, size, &mut pass).map_err(anyhow::Error::from))
+            }
             Err(e) => (0, 0, Err(e)),
         }
     } else {
-        (0, std::fs::metadata(path).map_or(0, |m| m.len()), harlo_harness::store::stream_saved_for(kind, path, &mut pass).map_err(anyhow::Error::from))
+        // (As long as it is now: what its agent adds while this reads, if
+        // something's sent meanwhile, comes from the agent.)
+        let size = std::fs::metadata(path).map_or(0, |m| m.len());
+        (0, size, harlo_harness::store::stream_saved_for_upto(kind, path, size, &mut pass).map_err(anyhow::Error::from))
     };
     (opened.tally, opened.missing) = (tally, missing);
     match read {
@@ -785,6 +791,14 @@ fn done_with(messages: Vec<Value>) {
 const RECENT: usize = 32;
 
 impl DriverState {
+    /// An event into the transcript (kept for the loaded one, while it loads).
+    fn apply(&mut self, ev: &HarnessEvent) -> bool {
+        if let Some(since) = &mut self.since_open {
+            since.push(ev.clone());
+        }
+        self.transcript.apply(ev)
+    }
+
     /// The context report (the Context and Activity panels', the phone's):
     /// the tally with the messages ended since, and the agent's own figures.
     fn report(&self) -> Value {
@@ -899,7 +913,7 @@ impl Driver {
                 Some(harness)
             }
             Err(e) => {
-                st.transcript.apply(&match gone {
+                st.apply(&match gone {
                     Some(cwd) => HarnessEvent::Notice { level: harlo_harness::NoticeLevel::Error, text: format!("This session can't continue: its folder, {}, is gone.", cwd.display()), system: false },
                     None => HarnessEvent::ProtocolError(format!("{e:#}")),
                 });
@@ -924,7 +938,7 @@ fn give_back(st: &mut DriverState, pending: &mut Vec<SessionUpdate>, unsent: Vec
         return;
     }
     let said = if unsent.len() == 1 { format!("{why}: your message is back in the box.") } else { format!("{why}: your messages are back in the box.") };
-    st.transcript.apply(&HarnessEvent::Notice { level: harlo_harness::NoticeLevel::Info, text: said, system: false });
+    st.apply(&HarnessEvent::Notice { level: harlo_harness::NoticeLevel::Info, text: said, system: false });
     if st.sinks.iter().any(|(_, s)| s.composes()) {
         pending.push(SessionUpdate::Unsent(unsent));
     } else {
@@ -955,8 +969,12 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
     let mut early_asked: Vec<oneshot::Sender<Value>> = Vec::new();
     // A run was going (its end keeps a long session's report).
     let mut was_busy = false;
+    // A message of yours being sent: when it was taken, until its row shows
+    // (logged: how long that took).
+    let mut sending: Option<(Instant, String)> = None;
     let mut st = DriverState {
         transcript: Transcript::new(),
+        since_open: (!spawn_now && session_file.is_some()).then(Vec::new),
         shown: Vec::new(),
         status: if spawn_now { SessionStatus::Starting } else { SessionStatus::Loading },
         meta: SessionMetaInfo { session_file: session_file.clone(), ..Default::default() },
@@ -1002,8 +1020,10 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
     // A conversation was just loaded: once its rows are built and sent,
     // what building them used goes back to the system.
     let mut loaded = false;
-    // Rows kept from the last time are shown, until it has loaded.
+    // Rows kept from the last time are shown, until it has loaded (with
+    // what comes meanwhile under them).
     let mut early_rows = false;
+    let mut early_list: Vec<Arc<Row>> = Vec::new();
 
     if spawn_now {
         driver.ensure_harness(&mut st, &mut pending);
@@ -1014,8 +1034,14 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
             if let Some(rows) = saved_rows(&path) {
                 let _ = tx.send(Aux::EarlyRows(rows));
             }
-            let opened = open_session_file(kind, &path);
+            let mut opened = open_session_file(kind, &path);
             if opened.count >= MANY {
+                // A long one's rows are built here, not on the session's
+                // loop, where a message sent meanwhile would wait for them
+                // (seconds): its latest first, shown while the rest are.
+                let _ = tx.send(Aux::EarlyRows(opened.transcript.last_rows(SHOWN_FIRST)));
+                opened.transcript.rows();
+                opened.transcript.page_out(KEPT_ROWS);
                 harlo_harness::store::give_back();
             }
             let _ = tx.send(Aux::Loaded(Box::new(opened)));
@@ -1041,8 +1067,8 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                 // Its host disconnected by hand: said as that, not as a failure.
                 let by_hand = matches!(ev, HarnessEvent::Exited { .. }).then(|| driver.cfg.remote.as_ref().map(|r| r.host.clone()).filter(|h| crate::remote::is_disconnected(h))).flatten();
                 dirty |= match by_hand {
-                    Some(host) => st.transcript.apply(&HarnessEvent::Notice { level: harlo_harness::NoticeLevel::Info, text: format!("Disconnected from {host}."), system: false }),
-                    None => st.transcript.apply(&ev),
+                    Some(host) => st.apply(&HarnessEvent::Notice { level: harlo_harness::NoticeLevel::Info, text: format!("Disconnected from {host}."), system: false }),
+                    None => st.apply(&ev),
                 };
                 let login = match &ev {
                     HarnessEvent::Response { success: false, error: Some(e), .. } => Some(asks_for_login(e)),
@@ -1073,7 +1099,12 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                 Aux::Loaded(opened) => {
                     let Opened { saved, missing, transcript, tally, count, first_message, last_reply, context } = *opened;
                     st.transcript = transcript;
+                    // (What came while it loaded, after it.)
+                    for ev in st.since_open.take().unwrap_or_default() {
+                        st.transcript.apply(&ev);
+                    }
                     early_rows = false;
+                    early_list = Vec::new();
                     // (A copy is the start of the host's file: what didn't
                     // come is the end, its latest messages.)
                     if missing > 0 {
@@ -1082,7 +1113,7 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                             "Not all of this session came over from {host}: its last {} (the latest messages) aren't shown. Close it and open it again to fetch the rest.",
                             crate::attach::human_size(missing)
                         );
-                        st.transcript.apply(&HarnessEvent::Notice { level: harlo_harness::NoticeLevel::Warning, text, system: false });
+                        st.apply(&HarnessEvent::Notice { level: harlo_harness::NoticeLevel::Warning, text, system: false });
                     }
                     st.meta.first_message = first_message.unwrap_or_default();
                     if !saved.name.is_empty() {
@@ -1144,11 +1175,16 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                     dirty = true;
                 }
                 // The rows kept from last time, shown while it loads.
+                // (Kept from last time, or its latest once read: with what
+                // came since under them.)
                 Aux::EarlyRows(rows) => {
-                    if st.status == SessionStatus::Loading && st.shown.is_empty() {
+                    if st.since_open.is_some() {
+                        early_list = rows;
+                        early_rows = true;
+                        let mut rows = early_list.clone();
+                        rows.extend(st.transcript.rows());
                         let changes = diff_rows(&st.shown, &rows);
                         st.shown = rows;
-                        early_rows = true;
                         pending.push(SessionUpdate::Rows(changes));
                         st.broadcast(std::mem::take(&mut pending));
                         last_flush = Instant::now();
@@ -1207,7 +1243,7 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                     pending.push(SessionUpdate::Commands(st.commands.clone()));
                 }
                 Aux::Plugin(id, args, ran) => {
-                    st.transcript.apply(&HarnessEvent::MessageEnd { id, message: plugin_message(&crate::plugins::notice(&args, Some(&ran)), !ran.ok) });
+                    st.apply(&HarnessEvent::MessageEnd { id, message: plugin_message(&crate::plugins::notice(&args, Some(&ran)), !ran.ok) });
                     dirty = true;
                     // What's installed changed: the agent starts again to
                     // load it (its skills, its "/" list), now when it's
@@ -1261,7 +1297,7 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                     let args = plugin_args(&text, typed.as_ref()).unwrap_or_default();
                     plugin_runs += 1;
                     let id = format!("harlo-plugin-{plugin_runs}");
-                    st.transcript.apply(&HarnessEvent::MessageEnd { id: id.clone(), message: plugin_message(&crate::plugins::notice(&args, None), false) });
+                    st.apply(&HarnessEvent::MessageEnd { id: id.clone(), message: plugin_message(&crate::plugins::notice(&args, None), false) });
                     dirty = true;
                     let (tx, cwd, program) = (driver.aux_tx.clone(), driver.cfg.cwd.clone(), claude_program(&driver.cfg));
                     let host = driver.cfg.remote.as_ref().map(|r| crate::remote::hosts().into_iter().find(|h| h.name == r.host).ok_or(r.host.clone()));
@@ -1277,6 +1313,8 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                 // (One sent while a turn waits for its snapshot: after it.)
                 Some(Control::Prompt(text, images, mode, typed)) if !held.is_empty() => held.push(Unsent { text, images, mode, typed }),
                 Some(Control::Prompt(text, images, mode, typed)) => {
+                    tracing::info!(status = ?st.status, loading = st.since_open.is_some(), "message taken");
+                    sending = Some((Instant::now(), text.chars().take(40).collect()));
                     // A new turn (not steering or a queued one): the folder's
                     // files first, so the turn can be undone (git::snapshot_turn).
                     // That can take seconds (a big or remote repository), so
@@ -1454,8 +1492,16 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
         was_busy = busy;
 
         if (dirty || !pending.is_empty()) && last_flush.elapsed() >= STREAM_FLUSH {
-            // (The rows kept from last time stay until it has loaded.)
-            if early_rows {
+            // (The rows kept from last time stay until it has loaded, with
+            // what came since under them.)
+            if dirty && early_rows {
+                let mut rows = early_list.clone();
+                rows.extend(st.transcript.rows());
+                let changes = diff_rows(&st.shown, &rows);
+                st.shown = rows;
+                if !changes.is_empty() {
+                    pending.push(SessionUpdate::Rows(changes));
+                }
                 dirty = false;
             }
             if dirty {
@@ -1470,6 +1516,12 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                     pending.push(SessionUpdate::Rows(changes));
                 }
                 dirty = false;
+            }
+            if let Some((at, start)) = &sending
+                && st.shown.iter().rev().take(8).any(|r| r.kind == crate::transcript::RowKind::User && r.text.starts_with(start.as_str()))
+            {
+                tracing::info!(ms = at.elapsed().as_millis() as u64, "message shown");
+                sending = None;
             }
             if !pending.is_empty() {
                 st.broadcast(std::mem::take(&mut pending));
@@ -2740,6 +2792,67 @@ mod tests {
         assert!(now_kept.iter().any(|r| r.html.contains("answer 2999")) && now_kept.len() >= SHOWN_FIRST && now_kept.len() <= 2 * SHOWN_FIRST, "kept {}", now_kept.len());
         assert_eq!(now_kept[0].kind, crate::transcript::RowKind::User, "from a message of yours");
         *REPORTS_IN.lock().unwrap() = None;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A message sent while a long session still loads shows at once, under
+    /// the rows kept from last time, and stays, once, when it has loaded.
+    #[tokio::test]
+    async fn a_message_sent_while_a_long_session_loads_shows_at_once() {
+        let _turn = REPORTS_TURN.lock().await;
+        let dir = std::env::temp_dir().join(format!("harlo-send-while-loading-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let reports = dir.join("history");
+        std::fs::create_dir_all(&reports).unwrap();
+        std::fs::create_dir_all(dir.join("work")).unwrap();
+        *REPORTS_IN.lock().unwrap() = Some(reports.clone());
+        let mut text = String::from("{\"type\":\"session\",\"id\":\"s\",\"cwd\":\"/w\"}\n");
+        let mut parent = "null".to_owned();
+        let pad = "x".repeat(400);
+        for i in 0..30000 {
+            text += &format!("{{\"type\":\"message\",\"id\":\"q{i}\",\"parentId\":{parent},\"message\":{{\"role\":\"user\",\"content\":\"request {i}\"}}}}\n");
+            text += &format!("{{\"type\":\"message\",\"id\":\"r{i}\",\"parentId\":\"q{i}\",\"message\":{{\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",\"text\":\"answer {i} {pad}\"}}]}}}}\n");
+            parent = format!("\"r{i}\"");
+        }
+        let file = dir.join("long.jsonl");
+        std::fs::write(&file, &text).unwrap();
+        let row = Row { key: "kept".into(), kind: crate::transcript::RowKind::Markdown, text: "kept from last time".into(), ..Default::default() };
+        std::fs::write(harlo_harness::claude::rows_file(&reports, &file), serde_json::to_vec(&[&row]).unwrap()).unwrap();
+
+        let mut config = cfg(HarnessKind::Demo, SessionTarget::Resume(file.clone()));
+        config.cwd = dir.join("work");
+        let handle = SessionHandle::open_saved(config);
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        handle.subscribe(ChannelSink(tx));
+        let mut rows: Vec<Arc<Row>> = Vec::new();
+        let (mut sent, mut shown_early, mut loaded) = (false, false, false);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+        while let Ok(Some(u)) = tokio::time::timeout_at(deadline, rx.recv()).await {
+            match u {
+                SessionUpdate::Reset(r) => rows = r,
+                SessionUpdate::Rows(changes) => apply(&mut rows, changes),
+                _ => {}
+            }
+            let has = |t: &str| rows.iter().any(|r| r.text.contains(t) || r.html.contains(t));
+            if !sent && has("kept from last time") {
+                handle.prompt("show the todos now", Vec::new(), harlo_harness::SendMode::Normal);
+                sent = true;
+            }
+            if sent && !loaded && has("show the todos now") && has("kept from last time") && !has("answer 29999") {
+                shown_early = true;
+            }
+            if has("answer 29999") && has("show the todos now") {
+                loaded = true;
+                break;
+            }
+        }
+        assert!(shown_early, "shown under the kept rows before it had loaded");
+        assert!(loaded, "with its own rows once loaded");
+        let mine = rows.iter().filter(|r| r.kind == crate::transcript::RowKind::User && r.text.contains("show the todos now")).count();
+        assert_eq!(mine, 1, "once");
+        assert!(!rows.iter().any(|r| r.text == "kept from last time"), "the kept rows gone once loaded");
+        *REPORTS_IN.lock().unwrap() = None;
+        drop(handle);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
