@@ -69,8 +69,16 @@ struct State {
     compact_at: Option<u64>,
     compact_model: String,
     cost: f64,
-    /// The conversation so far (pi's message shape), for `get_messages`.
+    /// The conversation since this started (pi's message shape): with
+    /// `history`, what `get_messages` answers.
     messages: Vec<Value>,
+    /// The transcript the conversation before that is read from when asked
+    /// (not kept: a long one is hundreds of MB once parsed), and how many of
+    /// its messages came before `messages`.
+    history: Option<(PathBuf, usize)>,
+    /// What the to-do card is made from: the to-do calls (and their results'
+    /// task ids), from the history and since.
+    todo: Vec<Value>,
     /// The model the transcript last used (`anthropic/…`).
     saved_model: String,
     /// Sent while it works: each goes when the turn before it ends. A run you
@@ -305,7 +313,8 @@ pub(crate) fn spawn(cfg: HarnessConfig, program: PathBuf) -> Result<(Harness, mp
         if let Some(saved) = saved {
             let mut st = shared.state.lock().unwrap();
             st.context_tokens = claude::context_used(&saved.messages);
-            st.messages = saved.messages;
+            st.history = Some((path.clone(), saved.messages.len()));
+            st.todo = todo_of(&saved.messages);
             st.saved_model = saved.model;
             // Its window and where it compacts, as Claude said last time.
             if let Some((window, at)) = claude::known_context(&model_id(&st)) {
@@ -541,7 +550,7 @@ async fn send_message(shared: &Arc<Shared>, content: Vec<Value>, steer: bool) {
         line["priority"] = json!("next");
     }
     let message = json!({ "role": "user", "content": content.iter().map(to_pi_block).collect::<Vec<_>>() });
-    shared.state.lock().unwrap().messages.push(message.clone());
+    shared.state.lock().unwrap().keep(&message);
     shared.emit(HarnessEvent::MessageEnd { id: format!("u{uuid}"), message });
     shared.send(line).await;
 }
@@ -633,7 +642,7 @@ async fn command(shared: &Arc<Shared>, pending: &Pending, cmd: Value) {
                 true,
                 json!({ "model": current_model(&st), "thinkingLevel": thinking, "sessionId": st.session_id,
                         "sessionFile": file.map(|f| f.to_string_lossy().into_owned()), "isStreaming": st.running,
-                        "permissionMode": st.permission_mode, "todoPhases": todo_phases(&st.messages) }),
+                        "permissionMode": st.permission_mode, "todoPhases": todo_phases(&st.todo) }),
                 "",
             );
         }
@@ -695,8 +704,35 @@ async fn command(shared: &Arc<Shared>, pending: &Pending, cmd: Value) {
             reply(true, json!({ "commands": commands }), "");
         }
         "get_messages" => {
-            let messages = shared.state.lock().unwrap().messages.clone();
+            let (history, live) = {
+                let st = shared.state.lock().unwrap();
+                (st.history.clone(), st.messages.clone())
+            };
+            // (The history as it was read at the start, then what came since.)
+            let read = history.is_some();
+            let mut messages = match history {
+                Some((path, count)) => {
+                    let sh = shared.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let file = sh.local_file(&path)?;
+                        let mut read = claude::saved_file_cached(&file).ok()?.messages;
+                        read.truncate(count);
+                        Some(read)
+                    })
+                    .await
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default()
+                }
+                None => Default::default(),
+            };
+            messages.extend(live);
             reply(true, json!({ "messages": messages }), "");
+            // (What reading the history used goes back, whatever its size.)
+            drop(messages);
+            if read {
+                let _ = tokio::task::spawn_blocking(crate::store::give_back).await;
+            }
         }
         "compact" => {
             let uuid = new_uuid();
@@ -739,10 +775,13 @@ async fn command(shared: &Arc<Shared>, pending: &Pending, cmd: Value) {
             match forked {
                 Some(Ok((id, text, out))) => {
                     let messages = claude::history(&out);
+                    drop(out);
                     {
                         let mut st = shared.state.lock().unwrap();
+                        st.history = file.as_ref().map(|f| (f.with_file_name(format!("{id}.jsonl")), messages.len()));
+                        st.todo = todo_of(&messages);
+                        st.messages.clear();
                         st.session_id = id;
-                        st.messages = messages;
                         st.subagents.clear();
                         st.tasks.clear();
                     }
@@ -890,7 +929,7 @@ async fn incoming(shared: &Arc<Shared>, frame: Value) {
                 let message = json!({
                     "role": "toolResult", "toolCallId": call_id, "content": result_content(&b["content"]), "isError": is_error
                 });
-                shared.state.lock().unwrap().messages.push(message.clone());
+                shared.state.lock().unwrap().keep(&message);
                 subagent_result(shared, &call_id, &text, is_error);
                 shared.emit(HarnessEvent::ToolEnd { call_id: call_id.clone(), result: json!({ "content": message["content"] }), is_error });
                 // As a message too, as the other agents send it: the session's
@@ -914,7 +953,7 @@ async fn incoming(shared: &Arc<Shared>, frame: Value) {
             // Built-in commands (/usage, …) answer only here.
             if show && !text.is_empty() && frame["subtype"] == "success" {
                 let message = json!({ "role": "assistant", "content": [{ "type": "text", "text": text }] });
-                shared.state.lock().unwrap().messages.push(message.clone());
+                shared.state.lock().unwrap().keep(&message);
                 shared.emit(HarnessEvent::MessageEnd { id: shared.next_id("r"), message });
             }
             // A stop ends the turn "during execution": nothing went wrong.
@@ -1120,7 +1159,7 @@ fn stream(shared: &Arc<Shared>, ev: &Value) {
                         })
                         .collect();
                     let message = json!({ "role": "assistant", "content": content, "model": s.model });
-                    st.messages.push(message.clone());
+                    st.keep(&message);
                     out.push(HarnessEvent::MessageEnd { id: s.id, message });
                 }
             }
@@ -1159,7 +1198,7 @@ fn assistant(shared: &Arc<Shared>, message: &Value) {
                 if blocks.iter().any(|b| b["type"] == "text") {
                     st.turn_text = true;
                 }
-                st.messages.push(message.clone());
+                st.keep(&message);
                 out.push(HarnessEvent::MessageEnd { id: if id.is_empty() { format!("a{}", st.next) } else { id }, message });
             }
         }
@@ -1204,6 +1243,49 @@ fn subagent_update(shared: &Arc<Shared>, call: &str, patch: Value) {
         e.clone()
     };
     shared.emit(HarnessEvent::SubagentActivity(json!({ "type": "subagent_lifecycle", "payload": entry })));
+}
+
+impl State {
+    /// A message of the conversation's, as it ends.
+    fn keep(&mut self, message: &Value) {
+        keep_todo(&mut self.todo, message);
+        self.messages.push(message.clone());
+    }
+}
+
+/// What `todo_phases` reads of a conversation.
+fn todo_of(messages: &[Value]) -> Vec<Value> {
+    let mut todo = Vec::new();
+    for m in messages {
+        keep_todo(&mut todo, m);
+    }
+    todo
+}
+
+/// Adds what `todo_phases` reads of a message to `todo`: an assistant
+/// message's to-do calls, and a created task's result (its id is in it).
+fn keep_todo(todo: &mut Vec<Value>, message: &Value) {
+    match message["role"].as_str() {
+        Some("assistant") => {
+            let calls: Vec<&Value> = message["content"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|b| b["type"] == "toolCall" && matches!(b["name"].as_str(), Some("TodoWrite" | "TaskCreate" | "TaskUpdate")))
+                .collect();
+            if !calls.is_empty() {
+                todo.push(json!({ "role": "assistant", "content": calls }));
+            }
+        }
+        Some("toolResult") => {
+            let id = &message["toolCallId"];
+            let created = todo.iter().rev().flat_map(|m| m["content"].as_array().into_iter().flatten()).any(|b| b["name"] == "TaskCreate" && b["id"] == *id);
+            if created {
+                todo.push(json!({ "role": "toolResult", "toolCallId": id, "content": [{ "type": "text", "text": message["content"][0]["text"] }] }));
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Claude's to-do list as harlo's to-do card shows it (one phase without a
@@ -1371,7 +1453,7 @@ fn background_task(shared: &Arc<Shared>, task: &str, frame: &Value) {
         (None, None) => "A background task ended.".to_owned(),
     };
     let message = json!({ "role": "custom", "customType": "task-notification", "display": true, "content": text });
-    shared.state.lock().unwrap().messages.push(message.clone());
+    shared.state.lock().unwrap().keep(&message);
     shared.emit(HarnessEvent::MessageEnd { id: shared.next_id("n"), message });
 }
 
@@ -1596,6 +1678,31 @@ mod tests {
         assert!(shared.state.lock().unwrap().messages.iter().any(|m| m.to_string().contains("after a stop")));
     }
 
+    /// The conversation isn't kept: it's the transcript as it was read when
+    /// the session started (what Claude adds to it later is in `messages`
+    /// already), then what came since.
+    #[tokio::test]
+    async fn its_messages_are_the_transcript_then_what_came_since() {
+        let dir = std::env::temp_dir().join(format!("harlo-claude-history-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("s.jsonl");
+        let line = |kind: &str, content: &str| format!(r#"{{"type":"{kind}","message":{{"id":"{content}","role":"{kind}","content":[{{"type":"text","text":"{content}"}}]}}}}"#);
+        std::fs::write(&path, [line("user", "first"), line("assistant", "reply")].join("\n") + "\n").unwrap();
+        let (shared, _rx) = shared();
+        shared.state.lock().unwrap().history = Some((path.clone(), 2));
+        command(&shared, &Pending::default(), json!({ "type": "prompt", "message": "second" })).await;
+        // (Claude writes it down too.)
+        std::fs::write(&path, [line("user", "first"), line("assistant", "reply"), line("user", "second")].join("\n") + "\n").unwrap();
+        let pending = Pending::default();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        pending.lock().unwrap().insert("m".into(), tx);
+        command(&shared, &pending, json!({ "type": "get_messages", "id": "m" })).await;
+        let messages = rx.await.unwrap()["data"]["messages"].clone();
+        let texts: Vec<&str> = messages.as_array().unwrap().iter().filter_map(|m| m["content"][0]["text"].as_str()).collect();
+        assert_eq!(texts, ["first", "reply", "second"]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[tokio::test]
     async fn replays_a_real_session() {
         let (s, mut rx) = shared();
@@ -1683,6 +1790,8 @@ mod tests {
             json!({ "role": "assistant", "content": [{ "type": "toolCall", "id": "r", "name": "Read", "arguments": {} }] }),
         ];
         assert_eq!(todo_phases(&messages), json!([{ "name": "", "tasks": [{ "content": "Write it", "status": "completed" }, { "content": "Test it", "status": "in_progress" }] }]));
+        assert_eq!(todo_phases(&todo_of(&messages)), todo_phases(&messages));
+        assert_eq!(todo_of(&messages).len(), 2);
         // An emptied list: no card.
         assert_eq!(todo_phases(&[call(json!([]))]), json!([]));
     }
@@ -1705,6 +1814,14 @@ mod tests {
         ];
         assert_eq!(todo_phases(&messages), json!([{ "name": "", "tasks": [
             { "content": "Decide", "status": "completed" }, { "content": "Write it", "status": "in_progress" }, { "content": "Check", "status": "pending" }] }]));
+        // What's kept of the conversation for the card reads the same.
+        let mut all = messages.clone();
+        all.insert(1, json!({ "role": "user", "content": [{ "type": "text", "text": "a #2 aside" }] }));
+        all.insert(2, use_("r", "Read", json!({ "file_path": "x" })));
+        all.insert(3, result("r", "line #1"));
+        let kept = todo_of(&all);
+        assert_eq!(todo_phases(&kept), todo_phases(&messages));
+        assert_eq!(kept.len(), 8, "only the to-do calls and the created tasks' results: {kept:?}");
         let mut gone = messages.clone();
         gone.push(use_("h", "TaskUpdate", json!({ "taskId": "3", "status": "deleted" })));
         assert_eq!(todo_phases(&gone)[0]["tasks"].as_array().map(Vec::len), Some(2));

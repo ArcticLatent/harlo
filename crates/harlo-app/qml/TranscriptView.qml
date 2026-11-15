@@ -2307,7 +2307,7 @@ Item {
                     width: view.width
                     implicitHeight: thinkRow.boxed ? (head > 0 ? gap + thinkBox.implicitHeight + 4 : 0)
                                   : thinkRow.folded ? (head > 0 ? gap + head : 0)
-                                  : thinkLine.implicitHeight + gap + head + 10
+                                  : (thinkLine.item ? thinkLine.item.implicitHeight : 0) + gap + head + 10
                     visible: implicitHeight > 0
                     RunHeader {
                         visible: thinkRow.head > 0 && !thinkRow.boxed
@@ -2326,16 +2326,21 @@ Item {
                         width: view.columnWidth
                         sourceComponent: RunBox { width: thinkBox.width; group: thinkRow.group; summary: thinkRow.summary; dflt: thinkRow.groupOpen }
                     }
-                    ThoughtLine {
+                    // (Made only while it shows on its own: folded or in its
+                    // run's box, a long run's rows would each hold one.)
+                    Loader {
                         id: thinkLine
-                        group: thinkRow.group
-                        visible: !thinkRow.folded && !thinkRow.boxed
+                        active: !thinkRow.folded && !thinkRow.boxed
                         x: view.columnX
                         y: thinkRow.gap + thinkRow.head + 5
                         width: view.columnWidth
-                        rowKey: thinkRow.rowKey
-                        text: thinkRow.text
-                        rowState: thinkRow.rowState
+                        sourceComponent: ThoughtLine {
+                            group: thinkRow.group
+                            width: thinkLine.width
+                            rowKey: thinkRow.rowKey
+                            text: thinkRow.text
+                            rowState: thinkRow.rowState
+                        }
                     }
                 }
             }
@@ -2416,32 +2421,37 @@ Item {
                         x: view.columnX - 8
                         y: toolRow.gap + toolRow.head
                         width: view.columnWidth + 8
-                        height: toolCard.implicitHeight + (toolRow.asking ? 20 : 10)
+                        height: (toolCard.item ? toolCard.item.implicitHeight : 0) + (toolRow.asking ? 20 : 10)
                         radius: 8
                         // (Solid when it asks: a row under it doesn't show through.)
                         color: toolRow.asking ? Qt.tint(Theme.raised, Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, 0.06)) : "transparent"
                         border.color: toolRow.asking ? Theme.warning : "transparent"
-                        ToolCard {
+                        // (Made only while it shows on its own: see the thinking row.)
+                        Loader {
                             id: toolCard
+                            active: !toolRow.folded && !toolRow.boxed
                             x: 8
                             y: toolRow.asking ? 10 : 5
                             width: parent.width - 16
-                            rowKey: toolRow.rowKey
-                            title: toolRow.title
-                            subtitle: toolRow.subtitle
-                            text: toolRow.text
-                            rowState: toolRow.rowState
-                            callId: toolRow.callId
-                            result: toolRow.result
-                            diff: toolRow.diff
-                            took: toolRow.took
-                            label: toolRow.label
-                            command: toolRow.command
-                            images: toolRow.images
-                            asking: toolRow.asking
-                            askLines: toolRow.askLines
-                            readsAfter: (view.count, root.session.readsAfter(toolRow.group, toolRow.rowKey))
-                            group: toolRow.group
+                            sourceComponent: ToolCard {
+                                width: toolCard.width
+                                rowKey: toolRow.rowKey
+                                title: toolRow.title
+                                subtitle: toolRow.subtitle
+                                text: toolRow.text
+                                rowState: toolRow.rowState
+                                callId: toolRow.callId
+                                result: toolRow.result
+                                diff: toolRow.diff
+                                took: toolRow.took
+                                label: toolRow.label
+                                command: toolRow.command
+                                images: toolRow.images
+                                asking: toolRow.asking
+                                askLines: toolRow.askLines
+                                readsAfter: (view.count, root.session.readsAfter(toolRow.group, toolRow.rowKey))
+                                group: toolRow.group
+                            }
                         }
                     }
                 }

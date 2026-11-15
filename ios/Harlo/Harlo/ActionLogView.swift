@@ -84,7 +84,8 @@ struct ActionLogView: View {
         if log.failed > 0 { parts.append("\(log.failed) failed") }
         parts.append(log.changed.count == 1 ? "1 file changed" : "\(log.changed.count) files changed")
         parts.append("\(log.read.count) read")
-        return parts.joined(separator: " · ") + ". Tap a file to open it, a command to copy it."
+        let latest = log.entries.count < log.total ? " The latest \(log.entries.count.formatted()) of \(log.total.formatted()) are listed." : ""
+        return parts.joined(separator: " · ") + "." + latest + " Tap a file to open it, a command to copy it."
     }
 }
 

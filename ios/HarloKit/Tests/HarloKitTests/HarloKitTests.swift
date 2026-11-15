@@ -314,6 +314,8 @@ final class ModelPartsTests: XCTestCase {
             ["ts": nil, "kind": "command", "tool": "bash", "target": "make", "result": "exit 2", "error": true],
             ["kind": "edit", "tool": "patch", "target": "x.rs, y.rs", "pending": true]]])
         XCTAssertEqual(log.entries.map(\.kind), ["edit", "command", "edit"])
+        XCTAssertEqual(log.total, 3, "no total: the entries are all of them")
+        XCTAssertEqual(ActionLog(["total": 28412, "actions": [["kind": "read", "tool": "read", "target": "a.rs"]]]).total, 28412)
         XCTAssertEqual(log.entries[0].time, 1000)
         XCTAssertNil(log.entries[1].time)
         XCTAssertTrue(log.entries[1].failed && log.entries[2].running)

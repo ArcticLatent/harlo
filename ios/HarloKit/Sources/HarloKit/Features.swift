@@ -155,6 +155,8 @@ public struct ActionLog: Equatable, Sendable {
     }
 
     public var entries: [Entry]
+    /// Every action (a long session's entries are its latest).
+    public var total: Int
     public var commands: Int
     public var failed: Int
     public var changed: [String]
@@ -165,6 +167,7 @@ public struct ActionLog: Equatable, Sendable {
             Entry(id: i, time: a["ts"].int, kind: a["kind"].text, tool: a["tool"].text, target: a["target"].text, result: a["result"].text,
                   failed: a["error"].bool ?? false, running: a["pending"].bool ?? false)
         }
+        total = Int(v["total"].int ?? Int64(entries.count))
         commands = Int(v["commands"].int ?? 0)
         failed = Int(v["failed"].int ?? 0)
         changed = (v["changed"].array ?? []).compactMap(\.string)

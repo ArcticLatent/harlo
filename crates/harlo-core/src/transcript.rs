@@ -181,6 +181,9 @@ struct Item {
     error: Option<String>,
     rev: u64,
     rows: Option<(u64, Vec<Arc<Row>>)>,
+    /// A finished reply whose calls have all returned: its rows say all
+    /// there is, so what they were made from went (see `settle`).
+    settled: bool,
     /// When it started (unix ms).
     time: i64,
     /// A reply's model, as its message says ("" unknown).
@@ -199,6 +202,8 @@ struct ToolRun {
     ended_at: i64,
     /// Pictures it returned (files in the cache).
     images: Vec<String>,
+    /// `output` let go: its row has it (see `settle`).
+    dropped: bool,
 }
 
 /// A tool's output naming more picture files than this is a listing: they
@@ -239,6 +244,8 @@ pub struct Transcript {
     notice_seq: u64,
     /// The compaction under way: its line, which says how it went.
     compacting: Option<String>,
+    /// Items before this have been looked at to settle.
+    settle_from: usize,
     md: MarkdownRenderer,
 }
 
@@ -262,6 +269,7 @@ impl Transcript {
             E::MessageStart { id, message } => self.upsert_message(id, message, false),
             E::MessageEnd { id, message } => self.upsert_message(id, message, true),
             E::BlockStart { id, index, kind, tool } => {
+                self.unsettle(id);
                 let Some(item) = self.item_mut(id) else { return false };
                 ensure_block(item, *index, *kind);
                 if let (Some((call_id, name)), Some(Block::Tool { call_id: c, name: n, .. })) =
@@ -278,6 +286,7 @@ impl Transcript {
                 true
             }
             E::BlockDelta { id, index, kind, delta } => {
+                self.unsettle(id);
                 let Some(item) = self.item_mut(id) else { return false };
                 ensure_block(item, *index, *kind);
                 match &mut item.blocks[*index] {
@@ -290,6 +299,7 @@ impl Transcript {
                 true
             }
             E::BlockEnd { id, index, kind, content } => {
+                self.unsettle(id);
                 let Some(item) = self.item_mut(id) else { return false };
                 ensure_block(item, *index, *kind);
                 let block = match kind {
@@ -325,7 +335,7 @@ impl Transcript {
                     return false;
                 }
                 run.running = true;
-                run.output = content_text(&partial["content"]).into();
+                (run.output, run.dropped) = (content_text(&partial["content"]).into(), false);
                 self.touch_tool(call_id)
             }
             E::ToolEnd { call_id, result, is_error } => {
@@ -333,7 +343,7 @@ impl Transcript {
                 run.running = false;
                 run.ended = true;
                 run.is_error = *is_error;
-                run.output = content_text(&result["content"]).into();
+                (run.output, run.dropped) = (content_text(&result["content"]).into(), false);
                 if run.ended_at == 0 {
                     run.ended_at = now_ms();
                 }
@@ -449,6 +459,7 @@ impl Transcript {
             error: None,
             rev: 0,
             rows: None,
+            settled: false,
             time: now_ms(),
             model: String::new(),
         });
@@ -490,6 +501,7 @@ impl Transcript {
             error: None,
             rev: 0,
             rows: None,
+            settled: false,
             time: message_time(message),
             model: String::new(),
         });
@@ -509,7 +521,7 @@ impl Transcript {
                 run.running = false;
                 run.ended = true;
                 run.is_error = message["isError"].as_bool().unwrap_or(false);
-                run.output = content_text(&message["content"]).into();
+                (run.output, run.dropped) = (content_text(&message["content"]).into(), false);
                 run.images = message["content"]
                     .as_array()
                     .map(|a| a.iter().filter(|b| b["type"] == "image").filter_map(crate::pictures::inline_file).collect())
@@ -540,6 +552,7 @@ impl Transcript {
                     error: None,
                     rev: 0,
                     rows: None,
+                    settled: false,
                     time: message_time(message),
                     model: String::new(),
                 });
@@ -551,6 +564,7 @@ impl Transcript {
                 self.tool_owner.insert(call_id.clone(), pos);
             }
         }
+        self.unsettle(id);
         let item = &mut self.items[pos];
         // message_start of a streaming assistant message is empty; keep any
         // blocks that deltas already built rather than wiping them.
@@ -588,15 +602,80 @@ impl Transcript {
         self.rows_from(first)
     }
 
-    /// Item `i`'s rows, built if it changed since.
+    /// Item `i`'s rows, built if it changed since (a settled one's stay:
+    /// only a message of its own changes it, and that unsettles it).
     fn fresh_rows(&mut self, i: usize) -> &[Arc<Row>] {
-        let fresh = matches!(&self.items[i].rows, Some((rev, _)) if *rev == self.items[i].rev);
+        let item = &self.items[i];
+        let fresh = matches!(&item.rows, Some((rev, _)) if *rev == item.rev || item.settled);
         if !fresh {
             let rows = self.build_rows(i);
             let item = &mut self.items[i];
             item.rows = Some((item.rev, rows));
         }
         &self.items[i].rows.as_ref().expect("rows built").1
+    }
+
+    /// Replies this far back settle (see `settle`): nothing more comes for
+    /// them (a call's result, its pictures, come right after it).
+    const SETTLE_AFTER: usize = 8;
+
+    /// Settles the replies far enough back that haven't been yet.
+    fn settle_old(&mut self) {
+        let end = self.items.len().saturating_sub(Self::SETTLE_AFTER);
+        for i in self.settle_from..end {
+            self.settle(i);
+        }
+        self.settle_from = self.settle_from.max(end);
+    }
+
+    /// A finished reply whose calls have all returned: its rows say all
+    /// there is, so the copies they were made from go (a long session has
+    /// tens of thousands): its calls' arguments, its thinking, and outputs
+    /// its rows hold whole.
+    fn settle(&mut self, i: usize) {
+        let Self { items, tools, .. } = self;
+        let item = &mut items[i];
+        let built = matches!(&item.rows, Some((rev, _)) if *rev == item.rev);
+        if item.settled || !built || !item.done || item.role != Role::Assistant {
+            return;
+        }
+        let returned = item.blocks.iter().all(|b| match b {
+            Block::Tool { call_id, .. } => call_id.starts_with(SEARCH) || tools.get(call_id).is_some_and(|r| r.ended && !r.running),
+            _ => true,
+        });
+        if !returned {
+            return;
+        }
+        for r in item.rows.iter().flat_map(|(_, rows)| rows).filter(|r| r.kind == RowKind::Tool && r.full.is_none()) {
+            if let Some(run) = tools.get_mut(&r.call_id).filter(|run| !run.output.is_empty() && *run.output == *r.text) {
+                (run.output, run.dropped) = (Arc::from(""), true);
+            }
+        }
+        for b in &mut item.blocks {
+            match b {
+                Block::Tool { args, .. } => *args = Value::Null,
+                Block::Thinking(t) => *t = String::new(),
+                _ => {}
+            }
+        }
+        item.settled = true;
+    }
+
+    /// Message `id` changes again: what `settle` let go of comes back
+    /// (its blocks with the message; outputs from its rows).
+    fn unsettle(&mut self, id: &str) {
+        let Some(&pos) = self.by_id.get(id) else { return };
+        let Self { items, tools, .. } = self;
+        let item = &mut items[pos];
+        if !std::mem::take(&mut item.settled) {
+            return;
+        }
+        for r in item.rows.iter().flat_map(|(_, rows)| rows).filter(|r| r.kind == RowKind::Tool) {
+            if let Some(run) = tools.get_mut(&r.call_id).filter(|run| run.dropped) {
+                (run.output, run.dropped) = (Arc::from(r.text.as_str()), false);
+            }
+        }
+        item.rev += 1;
     }
 
     fn rows_from(&mut self, first: usize) -> Vec<Arc<Row>> {
@@ -611,6 +690,10 @@ impl Transcript {
         let mut shown = out.iter();
         for row in self.items[first..].iter_mut().flat_map(|item| item.rows.iter_mut().flat_map(|(_, rows)| rows)) {
             *row = shown.next().expect("a row for each kept").clone();
+        }
+        // (All rows built: those far enough back can settle.)
+        if first == 0 {
+            self.settle_old();
         }
         out
     }
@@ -1304,6 +1387,47 @@ fn job_notice_for_people(text: &str) -> Option<(String, bool)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Replies far enough back let go of what their rows were made from;
+    /// the rows stay the same, and a message of theirs brings it back.
+    #[test]
+    fn settled_replies_keep_their_rows() {
+        let reply = |i: usize| json!({ "role": "assistant", "content": [
+            { "type": "thinking", "thinking": format!("thought {i}") },
+            { "type": "toolCall", "id": format!("c{i}"), "name": "bash", "arguments": { "command": format!("echo {i} && cargo test"), "description": "Run it" } },
+            { "type": "toolCall", "id": format!("e{i}"), "name": "edit", "arguments": { "path": "a.rs", "oldText": "x", "newText": format!("y{i}") } }] });
+        let mut messages = Vec::new();
+        for i in 0..20 {
+            messages.push(json!({ "role": "user", "content": format!("go {i}") }));
+            messages.push(reply(i));
+            messages.push(json!({ "role": "toolResult", "toolCallId": format!("c{i}"), "content": [{ "type": "text", "text": format!("{i}\ntest result: ok. 3 passed") }] }));
+            messages.push(json!({ "role": "toolResult", "toolCallId": format!("e{i}"), "content": [{ "type": "text", "text": "Edited a.rs" }] }));
+        }
+        let mut t = Transcript::new();
+        t.load_messages(&messages);
+        let before: Vec<Row> = t.rows().iter().map(|r| (**r).clone()).collect();
+        let first = t.by_id["h1"];
+        assert!(t.items[first].settled);
+        assert!(t.items[first].blocks.iter().all(|b| match b {
+            Block::Tool { args, .. } => args.is_null(),
+            Block::Thinking(text) => text.is_empty(),
+            _ => true,
+        }));
+        assert!(t.tools["c0"].dropped && t.tools["c0"].output.is_empty(), "its row has it");
+        let last = t.by_id[&format!("h{}", messages.len() - 3)];
+        assert!(!t.items[last].settled, "the latest stay as they are");
+        // Touched, it's as it was; its message again, made anew, the same.
+        t.apply(&HarnessEvent::ToolEnd { call_id: "c0".into(), result: json!({ "content": [{ "type": "text", "text": "0\ntest result: ok. 3 passed" }] }), is_error: false });
+        assert_eq!(t.rows().iter().map(|r| (**r).clone()).collect::<Vec<_>>(), before);
+        t.apply(&HarnessEvent::MessageEnd { id: "h1".into(), message: reply(0) });
+        t.apply(&HarnessEvent::MessageEnd { id: "h2".into(), message: messages[2].clone() });
+        assert!(!t.items[first].settled || t.items[first].rows.is_some());
+        let again: Vec<Row> = t.rows().iter().map(|r| (**r).clone()).collect();
+        assert_eq!(again, before);
+        let row = again.iter().find(|r| r.call_id == "e0").unwrap();
+        assert!(!row.diff.is_empty() && row.result == "+1 −1", "{row:?}");
+        assert!(again.iter().any(|r| r.kind == RowKind::Thinking && r.text == "thought 0"));
+    }
 
     #[test]
     fn job_notices_read_plainly() {

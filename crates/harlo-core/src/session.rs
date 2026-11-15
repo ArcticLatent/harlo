@@ -412,7 +412,17 @@ struct DriverState {
     /// Messages given back while nothing with a box to type in was there:
     /// for the next one that is.
     unsent: Vec<Unsent>,
-    messages: KeptMessages,
+    /// The text of the last reply that had some (for the finished
+    /// notification).
+    last_reply: String,
+    /// How many messages the conversation has (about: those loaded and
+    /// those ended since).
+    message_count: usize,
+    /// The context report and Activity log so far (not the messages: they
+    /// aren't kept), and the latest messages not in it yet (one may end
+    /// again, as it's filled in).
+    tally: crate::context::Tally,
+    recent: Vec<(String, Value)>,
     /// Why the current run failed, if it did (reported when it settles).
     run_error: Option<String>,
     /// Subagents already reported as finished.
@@ -421,66 +431,91 @@ struct DriverState {
     aborted: bool,
 }
 
-/// Complete messages (history plus finished live ones) for reports, as JSON
-/// text: only reports read them, and parsed they take twice the memory.
-#[derive(Default)]
-struct KeptMessages {
-    list: Vec<Box<str>>,
-    index: std::collections::HashMap<String, usize>,
+/// The last assistant reply's text (plain, trimmed), if it has some.
+fn reply_text(message: &Value) -> Option<String> {
+    if message["role"] != "assistant" {
+        return None;
+    }
+    let text = match &message["content"] {
+        Value::String(s) => s.clone(),
+        Value::Array(blocks) => blocks.iter().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join("\n"),
+        _ => String::new(),
+    };
+    Some(text.trim().to_owned()).filter(|t| !t.is_empty())
 }
 
-impl KeptMessages {
-    /// From this many, what parsing them used goes back to the system.
-    const MANY: usize = 2000;
+/// From this many messages, what reading them used goes back to the system.
+const MANY: usize = 2000;
 
-    fn set(&mut self, messages: Vec<Value>) {
-        self.list = messages.iter().map(|m| m.to_string().into_boxed_str()).collect();
-        self.index.clear();
-        drop(messages);
-        self.release();
-    }
+/// A saved session as read here: from its file, or a remote one's copy
+/// brought up to date over SSH with what was added (and how much of the
+/// host's file didn't come). What reading used is given back.
+fn read_session_file(kind: HarnessKind, path: &std::path::Path) -> (harlo_harness::store::SavedSession, u64) {
+    let (saved, size, missing) = if crate::remote::is_remote(path) {
+        match crate::remote::local_copy(path) {
+            Ok(copy) => (
+                harlo_harness::store::read_saved_for(kind, &copy).map_err(anyhow::Error::from),
+                std::fs::metadata(&copy).map_or(0, |m| m.len()),
+                harlo_harness::mirror::missing(&copy),
+            ),
+            Err(e) => (Err(e), 0, 0),
+        }
+    } else {
+        let size = std::fs::metadata(path).map_or(0, |m| m.len());
+        (harlo_harness::store::read_saved_for(kind, path).map_err(anyhow::Error::from), size, 0)
+    };
+    let saved = saved.unwrap_or_else(|e| {
+        tracing::warn!("reading {}: {e:#}", path.display());
+        Default::default()
+    });
+    harlo_harness::store::after_reading(size);
+    (saved, missing)
+}
 
-    fn upsert(&mut self, id: &str, message: &Value) {
-        let text = message.to_string().into_boxed_str();
-        match self.index.get(id) {
-            Some(&i) => self.list[i] = text,
-            None => {
-                self.index.insert(id.to_owned(), self.list.len());
-                self.list.push(text);
-            }
+/// The whole conversation, for a report (the context report, an export):
+/// not kept (a long one is hundreds of MB), but asked of the agent while
+/// it runs, read from the session file when it doesn't.
+async fn conversation(harness: Option<Arc<Harness>>, kind: HarnessKind, file: Option<PathBuf>) -> Vec<Value> {
+    if let Some(h) = harness {
+        match h.request(json!({ "type": "get_messages" })).await {
+            Ok(mut data) => return serde_json::from_value(data["messages"].take()).unwrap_or_default(),
+            Err(e) => tracing::warn!("get_messages failed: {e}"),
         }
     }
+    let Some(file) = file else { return Vec::new() };
+    tokio::task::spawn_blocking(move || read_session_file(kind, &file).0.messages).await.unwrap_or_default()
+}
 
-    fn all(&self) -> Vec<Value> {
-        self.list.iter().filter_map(|m| serde_json::from_str(m).ok()).collect()
+/// After reading a conversation: what reading it used goes back to the
+/// system (on a blocking thread: trimming a big heap takes a moment).
+fn done_with(messages: Vec<Value>) {
+    if messages.is_empty() {
+        return;
     }
-
-    /// After using `all`.
-    fn release(&self) {
-        if self.list.len() >= Self::MANY {
-            harlo_harness::store::give_back();
-        }
-    }
-
-    /// The last assistant reply's text (plain, trimmed).
-    fn last_reply(&self) -> String {
-        self.list
-            .iter()
-            .rev()
-            .filter_map(|m| serde_json::from_str::<Value>(m).ok())
-            .filter(|m| m["role"] == "assistant")
-            .map(|m| match &m["content"] {
-                Value::String(s) => s.clone(),
-                Value::Array(blocks) => blocks.iter().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join("\n"),
-                _ => String::new(),
-            })
-            .find(|t| !t.trim().is_empty())
-            .map(|t| t.trim().to_owned())
-            .unwrap_or_default()
+    drop(messages);
+    match tokio::runtime::Handle::try_current() {
+        Ok(rt) => drop(rt.spawn_blocking(harlo_harness::store::give_back)),
+        Err(_) => harlo_harness::store::give_back(),
     }
 }
+
+/// Messages that ended kept out of the tally for a while (one may end
+/// again: a reply filled in after it streamed).
+const RECENT: usize = 32;
 
 impl DriverState {
+    /// A message that ended (again, if it's one of the latest).
+    fn ended(&mut self, id: &str, message: &Value) {
+        match self.recent.iter_mut().find(|(i, _)| i == id) {
+            Some(m) => m.1 = message.clone(),
+            None => self.recent.push((id.to_owned(), message.clone())),
+        }
+        if self.recent.len() > RECENT {
+            let (_, m) = self.recent.remove(0);
+            self.tally.add(&m);
+        }
+    }
+
     fn snapshot(&self) -> Vec<SessionUpdate> {
         let mut out = vec![
             SessionUpdate::Reset(self.shown.clone()),
@@ -635,7 +670,10 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
         file_asked: false,
         sinks: Vec::new(),
         unsent: Vec::new(),
-        messages: KeptMessages::default(),
+        last_reply: String::new(),
+        message_count: 0,
+        tally: Default::default(),
+        recent: Vec::new(),
         run_error: None,
         subagents_done: Default::default(),
         aborted: false,
@@ -657,33 +695,23 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
     // and the snapshot's number.
     let mut held: Vec<Unsent> = Vec::new();
     let mut snap_turn: u64 = 0;
+    // A conversation was just loaded: once its rows are built and sent,
+    // what building them used goes back to the system.
+    let mut loaded = false;
 
     if spawn_now {
         driver.ensure_harness(&mut st, &mut pending);
     } else if let Some(path) = session_file {
         let tx = aux_tx.clone();
         tokio::task::spawn_blocking(move || {
-            // A remote session: read from its copy here, brought up to date
-            // over SSH with what was added.
-            let (saved, size, missing) = if crate::remote::is_remote(&path) {
-                match crate::remote::local_copy(&path) {
-                    Ok(copy) => (
-                        harlo_harness::store::read_saved_for(kind, &copy).map_err(anyhow::Error::from),
-                        std::fs::metadata(&copy).map_or(0, |m| m.len()),
-                        harlo_harness::mirror::missing(&copy),
-                    ),
-                    Err(e) => (Err(e), 0, 0),
-                }
-            } else {
-                let size = std::fs::metadata(&path).map_or(0, |m| m.len());
-                (harlo_harness::store::read_saved_for(kind, &path).map_err(anyhow::Error::from), size, 0)
-            };
-            let saved = saved.unwrap_or_else(|e| {
-                tracing::warn!("reading {}: {e:#}", path.display());
-                Default::default()
-            });
-            harlo_harness::store::after_reading(size);
-            let _ = tx.send(Aux::Loaded(saved, missing));
+            let (saved, missing) = read_session_file(kind, &path);
+            // (Here, before its rows are built: what it takes goes back with
+            // the rest.)
+            let tally = crate::context::Tally::of(&saved.messages);
+            if saved.messages.len() >= MANY {
+                harlo_harness::store::give_back();
+            }
+            let _ = tx.send(Aux::Loaded(saved, missing, tally));
         });
     }
 
@@ -735,7 +763,7 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                 }
             }
             Some(aux) = aux_rx.recv() => match aux {
-                Aux::Loaded(saved, missing) => {
+                Aux::Loaded(saved, missing, tally) => {
                     st.transcript.load_messages(&saved.messages);
                     // (A copy is the start of the host's file: what didn't
                     // come is the end, its latest messages.)
@@ -774,7 +802,7 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                     }
                     // A long one: its latest rows at once, the rest above them
                     // once they're built.
-                    if saved.messages.len() >= KeptMessages::MANY {
+                    if saved.messages.len() >= MANY {
                         let first = st.transcript.last_rows(SHOWN_FIRST);
                         let changes = diff_rows(&st.shown, &first);
                         st.shown = first;
@@ -784,19 +812,27 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                         st.broadcast(std::mem::take(&mut pending));
                         last_flush = Instant::now();
                     }
-                    st.messages.set(saved.messages);
+                    st.last_reply = saved.messages.iter().rev().find_map(reply_text).unwrap_or_default();
+                    st.message_count = saved.messages.len();
+                    (st.tally, st.recent) = (tally, Vec::new());
+                    done_with(saved.messages);
+                    loaded = true;
                     for reply in exports.drain(..) {
-                        let _ = reply.send(export(&st, &driver));
+                        export(&st, &driver, reply);
                     }
                     dirty = true;
                 }
-                Aux::History(messages) => {
+                Aux::History(messages, tally) => {
                     st.transcript.load_messages(&messages);
                     if st.meta.first_message.is_empty() {
                         st.meta.first_message = first_user_text(&messages);
                         pending.push(SessionUpdate::Meta(st.meta.clone()));
                     }
-                    st.messages.set(messages);
+                    st.last_reply = messages.iter().rev().find_map(reply_text).unwrap_or_default();
+                    st.message_count = messages.len();
+                    (st.tally, st.recent) = (tally, Vec::new());
+                    done_with(messages);
+                    loaded = true;
                     dirty = true;
                 }
                 Aux::State(state) => {
@@ -970,16 +1006,17 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                 }
                 Some(Control::ContextReport(reply)) => {
                     let live = (st.meta.context_window > 0).then_some((st.meta.context_tokens, st.meta.context_window, st.meta.cost));
-                    let mut report = crate::context::report(&st.messages.all(), live);
+                    let mut tally = st.tally.clone();
+                    for (_, m) in &st.recent {
+                        tally.add(m);
+                    }
+                    let mut report = tally.report(live);
                     report["costKind"] = serde_json::json!(st.meta.cost_kind);
                     let _ = reply.send(report);
-                    st.messages.release();
                 }
                 // (A saved session still loading: once it has.)
                 Some(Control::Export(reply)) if st.status == SessionStatus::Loading => exports.push(reply),
-                Some(Control::Export(reply)) => {
-                    let _ = reply.send(export(&st, &driver));
-                }
+                Some(Control::Export(reply)) => export(&st, &driver, reply),
                 Some(Control::Reload) => {
                     if let Some(h) = driver.harness.clone() {
                         tokio::spawn(fetch_initial(h, driver.aux_tx.clone(), true));
@@ -1037,9 +1074,16 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                 st.broadcast(std::mem::take(&mut pending));
             }
             last_flush = Instant::now();
+            // (A moment later: the window builds its rows from these.)
+            if std::mem::take(&mut loaded) && !dirty {
+                tokio::spawn(async {
+                    tokio::time::sleep(GIVE_BACK_AFTER).await;
+                    let _ = tokio::task::spawn_blocking(harlo_harness::store::give_back).await;
+                });
+            }
         }
     }
-    st.messages.list.len() >= KeptMessages::MANY
+    st.message_count >= MANY
 }
 
 fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<SessionUpdate>, driver: &mut Driver) {
@@ -1090,7 +1134,7 @@ fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<Sessi
                 let notable = match st.run_error.take() {
                     Some(message) => Some(Notable::Error { message }),
                     None if aborted => None,
-                    None => Some(Notable::Completed { last_message: st.messages.last_reply(), background: st.background }),
+                    None => Some(Notable::Completed { last_message: st.last_reply.clone(), background: st.background }),
                 };
                 pending.extend(notable.map(SessionUpdate::Notable));
                 if aborted {
@@ -1106,7 +1150,11 @@ fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<Sessi
             if message["role"] == "assistant" && message["stopReason"] == "error" {
                 st.run_error = Some(message["errorMessage"].as_str().unwrap_or("The model returned an error.").to_owned());
             }
-            st.messages.upsert(id, message);
+            if let Some(text) = reply_text(message) {
+                st.last_reply = text;
+            }
+            st.message_count += 1;
+            st.ended(id, message);
         }
         HarnessEvent::Retry { started: false, error: Some(error), .. } => st.run_error = Some(error.clone()),
         HarnessEvent::Notice { level: harlo_harness::NoticeLevel::Error, text, system: false } => {
@@ -1193,10 +1241,11 @@ fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<Sessi
 
 enum Aux {
     /// The session file's branch, model and thinking level; with a remote
-    /// one's, how much of it didn't come over (its end).
-    Loaded(harlo_harness::store::SavedSession, u64),
-    /// Messages from the harness (`get_messages`).
-    History(Vec<Value>),
+    /// one's, how much of it didn't come over (its end); and its tally (see
+    /// `DriverState::tally`).
+    Loaded(harlo_harness::store::SavedSession, u64, crate::context::Tally),
+    /// Messages from the harness (`get_messages`), and their tally.
+    History(Vec<Value>, crate::context::Tally),
     State(Value),
     Stats(Value),
     Commands(Value),
@@ -1207,9 +1256,16 @@ enum Aux {
 async fn fetch_initial(harness: Arc<Harness>, tx: mpsc::UnboundedSender<Aux>, resume: bool) {
     if resume {
         match harness.request(json!({ "type": "get_messages" })).await {
-            Ok(data) => {
-                let messages = data["messages"].as_array().cloned().unwrap_or_default();
-                let _ = tx.send(Aux::History(messages));
+            Ok(mut data) => {
+                let messages: Vec<Value> = serde_json::from_value(data["messages"].take()).unwrap_or_default();
+                // (Off the session's loop: a long one takes a moment.)
+                let (messages, tally) = tokio::task::spawn_blocking(move || {
+                    let tally = crate::context::Tally::of(&messages);
+                    (messages, tally)
+                })
+                .await
+                .unwrap_or_default();
+                let _ = tx.send(Aux::History(messages, tally));
             }
             Err(e) => tracing::warn!("get_messages failed: {e}"),
         }
@@ -1217,17 +1273,21 @@ async fn fetch_initial(harness: Arc<Harness>, tx: mpsc::UnboundedSender<Aux>, re
     fetch_state(harness, tx).await;
 }
 
-/// The session as Markdown, as it is now.
-fn export(st: &DriverState, driver: &Driver) -> String {
+/// The session as Markdown, as it is now, to `reply`.
+fn export(st: &DriverState, driver: &Driver, reply: oneshot::Sender<String>) {
     let info = crate::export::Info {
         title: if st.meta.name.is_empty() { st.meta.first_message.clone() } else { st.meta.name.clone() },
         agent: driver.cfg.kind.label().to_owned(),
         model: st.meta.model.clone(),
         folder: crate::sidebar::tilde(&driver.cfg.cwd),
     };
-    let markdown = crate::export::markdown(&st.messages.all(), &info);
-    st.messages.release();
-    markdown
+    let read = conversation(driver.harness.clone(), driver.cfg.kind, st.meta.session_file.clone());
+    tokio::spawn(async move {
+        let messages = read.await;
+        let markdown = crate::export::markdown(&messages, &info);
+        done_with(messages);
+        let _ = reply.send(markdown);
+    });
 }
 
 /// Refreshes model, thinking level, session file/name and context stats.
@@ -1429,26 +1489,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn kept_messages_read_back_as_they_were() {
-        let (user, reply, partial) = (
-            json!({ "role": "user", "content": "hi", "timestamp": 1_792_000_000_000_i64 }),
-            json!({ "role": "assistant", "content": [{ "type": "text", "text": " one " }, { "type": "text", "text": "two" }], "usage": { "cost": { "total": 0.0125 } } }),
-            json!({ "role": "assistant", "content": [{ "type": "toolCall", "name": "bash" }] }),
-        );
-        let mut kept = KeptMessages::default();
-        kept.set(vec![user.clone(), reply.clone()]);
-        assert_eq!(kept.all(), [user.clone(), reply.clone()]);
-        assert_eq!(kept.last_reply(), "one \ntwo", "plain and trimmed");
-
-        kept.upsert("live", &partial);
-        assert_eq!(kept.last_reply(), "one \ntwo", "a reply without text is passed over");
-        let done = json!({ "role": "assistant", "content": "done" });
-        kept.upsert("live", &done);
-        assert_eq!(kept.all(), [user, reply, done], "the same message again replaces it");
-        assert_eq!(kept.last_reply(), "done");
-
-        kept.set(Vec::new());
-        assert_eq!(kept.last_reply(), "");
+    fn a_replys_text_is_plain_and_trimmed() {
+        let reply = json!({ "role": "assistant", "content": [{ "type": "text", "text": " one " }, { "type": "toolCall", "name": "bash" }, { "type": "text", "text": "two" }] });
+        assert_eq!(reply_text(&reply).as_deref(), Some("one \ntwo"));
+        assert_eq!(reply_text(&json!({ "role": "assistant", "content": "done" })).as_deref(), Some("done"));
+        assert_eq!(reply_text(&json!({ "role": "assistant", "content": [{ "type": "toolCall", "name": "bash" }] })), None, "a reply without text is passed over");
+        assert_eq!(reply_text(&json!({ "role": "user", "content": "hi" })), None);
     }
 
     use harlo_harness::HarnessKind;
@@ -2132,6 +2178,11 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].text, "saved prompt");
         assert!(rows[1].html.contains("saved answer"));
+        // Reports read the file as it is (the conversation isn't kept).
+        let markdown = handle.export_markdown().await.expect("an export");
+        assert!(markdown.contains("saved prompt") && markdown.contains("saved answer"), "{markdown}");
+        let report = handle.context_report().await.expect("a report");
+        assert_eq!((report["messages"].as_u64(), report["user"].as_u64()), (Some(2), Some(1)), "{report}");
         let _ = std::fs::remove_file(path);
     }
 

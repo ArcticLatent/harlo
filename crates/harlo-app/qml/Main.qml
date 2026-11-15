@@ -4667,6 +4667,12 @@ ApplicationWindow {
         ScriptAction { script: {
             const t = chat.transcript
             win.check(win.findAllNames("runBox", t).length === win.toolBoxCount - 1, "its line folds the run")
+            // (A folded run's rows, or those in a box, make no cards of their own.)
+            // (Hidden ones too: findAllNames passes them over.)
+            const cards = []
+            const walk = it => { for (const c of it.children) { if (c.objectName === "toolHead" || c.objectName === "thoughtHead") cards.push(c); walk(c) } }
+            walk(t)
+            win.check(cards.length > 0 && cards.every(h => h.visible), "no hidden cards are made (" + cards.filter(h => !h.visible).length + " of " + cards.length + " hidden)")
             win.check(Theme.contrastOf(Theme.textFaint, Theme.background) >= 4.49 && Theme.contrastOf(Theme.textMuted, Theme.background) > Theme.contrastOf(Theme.textFaint, Theme.background), "faint text is readable (4.5:1) and below muted, dark")
             Workspace.chooseThemeMode("light") } }
         PauseAnimation { duration: 400 }
@@ -7403,6 +7409,14 @@ ApplicationWindow {
             const pale = Theme.fileTint("#ffd54f")
             const contrast = (Math.max(Theme.relativeLuminance(pale), Theme.relativeLuminance(Theme.background)) + 0.05) / (Math.min(Theme.relativeLuminance(pale), Theme.relativeLuminance(Theme.background)) + 0.05)
             win.check(contrast >= 2.9, "a pale colour still stands out from the background (" + contrast.toFixed(2) + ":1)")
+            const st = JSON.parse(Images.stats())
+            win.check(st.full >= 1, "while it's open, decoded pictures are kept (" + st.full + ", " + st.fullMB + " MB)")
+            // Every picture's tab closed: what was decoded goes.
+            Workspace.tabs.map(t => t.split("\t")[0]).filter(k => k.startsWith("file:" + win.imgDir + "/")).forEach(k => Workspace.closeTab(k)) } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const st = JSON.parse(Images.stats())
+            win.check(st.full === 0 && st.fullMB === 0, "once no viewer shows one, no decoded picture is kept (" + st.full + ", " + st.fullMB + " MB)")
             win.summary(); Qt.quit() } }
     }
 

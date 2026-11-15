@@ -406,6 +406,8 @@ fn worker() {
 
 // ---- full images ----------------------------------------------------------------
 
+/// Decoded images kept while a viewer is open (to step back and forth
+/// quickly); the last viewer closing lets them all go.
 const FULL_BUDGET: usize = 768 << 20;
 /// Not decoded ahead past this (a decode that big is only worth doing when asked).
 const AHEAD_LIMIT: usize = 256 << 20;
@@ -430,6 +432,23 @@ struct Full {
 }
 
 static FULL: LazyLock<Mutex<Full>> = LazyLock::new(Mutex::default);
+
+/// Image views showing a picture: none, and no decoded image is kept.
+static VIEWS: AtomicU64 = AtomicU64::new(0);
+
+/// A view stopped showing a picture (it closed, or was emptied): the last
+/// one lets the decoded pictures go (a thumbnail or the disk cache brings
+/// them back quickly).
+fn view_emptied() {
+    if VIEWS.fetch_sub(1, Ordering::AcqRel) == 1 {
+        let gone = std::mem::take(&mut lock(&FULL).entries);
+        // (Off the window's thread: trimming a big heap takes a moment.)
+        std::thread::spawn(move || {
+            drop(gone);
+            harlo_harness::store::give_back();
+        });
+    }
+}
 
 static DECODED: AtomicU64 = AtomicU64::new(0);
 static THUMBS_MADE: AtomicU64 = AtomicU64::new(0);
@@ -480,7 +499,9 @@ fn fetch_full(path: &str, lane: Lane, deliver: Option<Waiter>) {
                 let result = decode_full(&owned, ahead);
                 let waiters = {
                     let mut full = lock(&FULL);
-                    if let Ok(pixels) = &result {
+                    // (Decoded ahead for a viewer that has closed since: not kept.)
+                    let wanted = !ahead || VIEWS.load(Ordering::Acquire) > 0;
+                    if let (Ok(pixels), true) = (&result, wanted) {
                         full.clock += 1;
                         let used = full.clock;
                         full.entries.retain(|e| e.path != owned);
@@ -545,7 +566,8 @@ fn decode_full(path: &str, ahead: bool) -> Result<Arc<Decoded>, String> {
 /// Thumbnail sizes (the longer side, in pixels): the smallest that's big
 /// enough is made.
 const THUMB_SIDES: [i32; 3] = [128, 256, 512];
-const THUMB_BUDGET: usize = 192 << 20;
+/// Thumbnails kept in memory (more are on disk: reading one back is quick).
+const THUMB_BUDGET: usize = 64 << 20;
 
 #[derive(Default)]
 struct Thumbs {
@@ -923,6 +945,15 @@ impl Default for ImageViewRust {
     }
 }
 
+impl Drop for ImageViewRust {
+    fn drop(&mut self) {
+        if !self.path.is_empty() {
+            self.decoded = None;
+            view_emptied();
+        }
+    }
+}
+
 impl cxx_qt::Initialize for qobject::ImageView {
     fn initialize(self: Pin<&mut Self>) {
         let (light, dark) = (self.light, self.dark);
@@ -941,10 +972,18 @@ impl qobject::ImageView {
         if path == self.path {
             return;
         }
+        let (was, now) = (!self.path.is_empty(), !path.is_empty());
         self.as_mut().rust_mut().path = path.clone();
         self.as_mut().path_changed();
         self.as_mut().rust_mut().keep_view = false;
-        self.load();
+        if now && !was {
+            VIEWS.fetch_add(1, Ordering::AcqRel);
+        }
+        self.as_mut().load();
+        // (After load: it no longer holds its picture either.)
+        if was && !now {
+            view_emptied();
+        }
     }
 
     pub fn reload(mut self: Pin<&mut Self>) {

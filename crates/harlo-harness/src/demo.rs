@@ -24,6 +24,7 @@
 //!   `set_thinking_level` and `set_session_name` change what `get_state`
 //!   reports.
 //! - Each prompt costs $0.25 (`get_session_stats`), for spending limits.
+//! - `get_messages` gives the messages it ended, as an agent does.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -37,9 +38,27 @@ use crate::process::{Harness, Outgoing};
 
 pub(crate) fn spawn() -> (Harness, mpsc::UnboundedReceiver<HarnessEvent>) {
     let (tx, mut rx) = mpsc::unbounded_channel::<Outgoing>();
-    let (events, events_rx) = mpsc::unbounded_channel();
+    let (out, events_rx) = mpsc::unbounded_channel();
     let pending = Arc::default();
     let harness = Harness::from_parts(HarnessKind::Demo, tx, Arc::clone(&pending));
+    // The conversation (`get_messages`): the messages its events end.
+    let (events, mut sent) = mpsc::unbounded_channel::<HarnessEvent>();
+    let kept: Arc<std::sync::Mutex<Vec<(String, Value)>>> = Arc::default();
+    let keep = Arc::clone(&kept);
+    tokio::spawn(async move {
+        while let Some(ev) = sent.recv().await {
+            if let HarnessEvent::MessageEnd { id, message } = &ev {
+                let mut list = keep.lock().unwrap();
+                match list.iter_mut().find(|(i, _)| i == id) {
+                    Some(m) => m.1 = message.clone(),
+                    None => list.push((id.clone(), message.clone())),
+                }
+            }
+            if out.send(ev).is_err() {
+                break;
+            }
+        }
+    });
 
     tokio::spawn(async move {
         let _ = events.send(HarnessEvent::Ready);
@@ -158,6 +177,7 @@ pub(crate) fn spawn() -> (Harness, mpsc::UnboundedReceiver<HarnessEvent>) {
                     respond(if ty == "remove_queued_message" { json!({ "removed": found }) } else { json!({ "promoted": found }) });
                     let _ = events.send(HarnessEvent::QueueChanged { steering: snapshot.0, follow_up: snapshot.1 });
                 }
+                "get_messages" => respond(json!({ "messages": kept.lock().unwrap().iter().map(|(_, m)| m.clone()).collect::<Vec<_>>() })),
                 "get_session_stats" => respond(json!({ "contextUsage": { "tokens": 0, "contextWindow": 0 }, "cost": cost })),
                 "get_state" => {
                     let mut state = json!({ "model": model, "thinkingLevel": thinking, "todoPhases": todos.lock().unwrap().clone() });

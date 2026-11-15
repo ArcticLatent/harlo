@@ -26,9 +26,15 @@ Rectangle {
         return log.actions.filter(a => filter === "all" || kinds[filter].indexOf(a.kind) >= 0).slice().reverse()
     }
     readonly property var kinds: ({ command: ["command"], change: ["edit", "write"], read: ["read", "search"], other: ["web", "agent", "other"] })
-    function kindCount(id) { return log ? log.actions.filter(a => kinds[id].indexOf(a.kind) >= 0).length : 0 }
+    // Every action, and of each kind (a long session lists only its latest).
+    readonly property int total: log ? (log.total !== undefined ? log.total : log.actions.length) : 0
+    function kindCount(id) {
+        if (!log) return 0
+        if (log.kinds) return kinds[id].reduce((n, k) => n + (log.kinds[k] || 0), 0)
+        return log.actions.filter(a => kinds[id].indexOf(a.kind) >= 0).length
+    }
     // (A filter no longer offered goes back to all.)
-    onLogChanged: if (filter !== "all" && (kindCount(filter) === 0 || kindCount(filter) === log.actions.length)) filter = "all"
+    onLogChanged: if (filter !== "all" && (kindCount(filter) === 0 || kindCount(filter) === total)) filter = "all"
     // (Every row the same tool: its name under each says nothing.)
     readonly property bool oneTool: shown.length > 1 && shown.every(a => a.tool === shown[0].tool)
     function when(ms) { return ms ? new Date(ms).toLocaleTimeString(Qt.locale(), "h:mm AP") : "" }
@@ -46,6 +52,7 @@ Rectangle {
     /// The log as Markdown (Copy).
     function markdown() {
         const lines = ["# " + (session.title || "Session") + ": what the agent did", ""]
+        if (log.actions.length < total) lines.push("The latest " + log.actions.length.toLocaleString(Qt.locale(), "f", 0) + " of " + total.toLocaleString(Qt.locale(), "f", 0) + " actions.", "")
         for (const a of log.actions) {
             const result = a.error ? "failed" + (a.result && a.result !== "failed" ? " (" + a.result + ")" : "") : a.result
             lines.push("- " + root.when(a.ts) + " **" + a.tool + "** `" + a.target.replace(/`/g, "'") + "`" + (result ? " — " + result : ""))
@@ -104,13 +111,13 @@ Rectangle {
             spacing: 6
             Repeater {
                 model: root.log ? [
-                    { id: "all", label: root.log.actions.length + " actions" },
+                    { id: "all", label: root.total.toLocaleString(Qt.locale(), "f", 0) + " actions" },
                     { id: "command", label: root.log.commands + (root.log.commands === 1 ? " command" : " commands") + (root.log.failed > 0 ? " · " + root.log.failed + " failed" : "") },
                     { id: "change", label: root.log.changed.length + (root.log.changed.length === 1 ? " file changed" : " files changed") },
                     { id: "read", label: root.log.read.length + " read" },
                     { id: "other", label: root.kindCount("other") + " other" },
                 // (A filter that would show nothing, or the same as all, isn't offered.)
-                ].filter(f => f.id === "all" || (root.kindCount(f.id) > 0 && root.kindCount(f.id) < root.log.actions.length)) : []
+                ].filter(f => f.id === "all" || (root.kindCount(f.id) > 0 && root.kindCount(f.id) < root.total)) : []
                 Button {
                     id: filterChip
                     required property var modelData
@@ -128,6 +135,20 @@ Rectangle {
                     background: ControlSurface { control: filterChip; variant: root.filter === filterChip.modelData.id ? "selected" : "outline"; radius: 14 }
                 }
             }
+        }
+
+        // A long session: only its latest are listed.
+        Label {
+            objectName: "activityLatest"
+            Layout.fillWidth: true
+            Layout.leftMargin: 18
+            Layout.rightMargin: 18
+            Layout.topMargin: 8
+            visible: !!root.log && root.log.actions.length < root.total
+            text: root.log ? "The latest " + root.log.actions.length.toLocaleString(Qt.locale(), "f", 0) + " are listed." : ""
+            color: Theme.textFaint
+            font.pixelSize: Theme.px(11.5)
+            wrapMode: Text.Wrap
         }
 
         ListView {
