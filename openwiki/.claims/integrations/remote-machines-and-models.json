@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:ef6675c2140ec18f91e3c38c73e946636627f10d1f97b62027fb5bd3bc1f4b62",
+  "pageVersion": "sha256:779432763311ded091c507319bceaa19371eca166fd03a6ccedb6d2183a3f19a",
   "claims": [
     {
       "id": "claim_40719ccad61b4b4d8f75324bbf9767c6",
@@ -129,7 +129,7 @@
           "version": "repo-lines-v1:sha256:f180d502f2a820ca4f605caca9d9dd891ae5d69a8bd407b533cefcd05ed593db:eyJzZWxlY3RlZExpbmVDb3VudCI6MTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhkYjMzOWMxN2Q0Y2M1NGU3MGM0ZmNmZWNiNjExYmI5ZTdkMzYzZjI1YjE4ZTA5MjNhMWQzMDZjYzk1OTI0ZTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRiYjNhMzEzZjk0OTg5M2EzZGRhZjU5MGY0NDYwYmEzN2Q5NzkxN2FlMzI5Yzc4ZTZhOTUyNjQ4NTBiZjc2M2QiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImMzZGJlZDZhMjMyODJjYzVjMzY0NDhlZmIzNGMxNzVjMTgwYWUyYWE5YzJlNDMwNDQwZDM4MzNjNDkzYTVlYWMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVjNGMxODRiNWU4MWExYjBlMWZjMDFiM2NhNzRlMmU5NjAzZDZiYzBmM2RhZGJlMjRlMWYwMjZkYTAxOGNjMmEifQ"
         },
         {
-          "resource": "repo://crates/harlo-app/qml/SettingsDialog.qml#L3594-L3621",
+          "resource": "repo://crates/harlo-app/qml/SettingsDialog.qml#L3596-L3623",
           "version": "repo-lines-v1:sha256:ad20a44ea2bc781801c4002959273ec515c8d4e78cbb2b5ccbda3c8403a157e9:eyJzZWxlY3RlZExpbmVDb3VudCI6MjgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY3ODRjMzQ4MDdhMThmZWNkYTAxY2Q3ZmQwNjkzZjNjYzkwMTczYjNhZjFmYTJiYTc0YTExZWYxNGIxYmMzZWMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIwNzIzYjUwOGU0YmZkOTljNzBlYzM5MDUyOWQ1ZDUzMGNhZDE1NjBlMDUwYTQxNjk4ZDkwMTAwOTZjNjM0NGQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI1NjI5ZGY5YjAyNTAyOWI1NDFmNmRlMTBkM2ZiY2Y0MzI0NTc2MzMzM2ZlYjA2OGZlNjA3YWEzZjdhMWIyYjQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImI2MTY0ZjM1YmU1YzFmMjNmMzVhMTU3M2FkNWZmZGJiZTg1NmRmYTJhNTJlZGNjN2EwZjBjYjI0MWNhZjgxMjQifQ"
         },
         {
@@ -155,6 +155,6 @@
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-15T01:24:14.237Z"
+    "at": "2026-11-15T14:13:54.485Z"
   }
 }

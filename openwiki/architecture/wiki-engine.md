@@ -5,7 +5,7 @@ description: How Harlo's Rust wiki engine retrieves sections, selects linked wor
 tags: [openwiki, architecture, retrieval, claims, persistence]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-15T01:24:14.237Z
+    at: 2026-11-15T14:13:54.485Z
 sources:
   - id: openwiki-source-4af2dd3e4a0acae243d3b65c
     resource: repo://crates/harlo-core/src/openwiki.rs
@@ -31,7 +31,7 @@ sources:
     resource: repo://crates/harlo-wiki/src/tools.rs
   - id: openwiki-source-7df8fd612dbd67f186cd1d6e
     resource: repo://crates/harlo-wiki/src/workspaces.rs
-generated: { by: "harlo", at: "2026-11-15T01:24:14.237Z" }
+generated: { by: "harlo", at: "2026-11-15T14:13:54.485Z" }
 ---
 
 # Native wiki engine and evidence lifecycle
@@ -90,6 +90,8 @@ The desktop can ask `quiet_update` whether an update needs a writing session. It
 
 The check is deliberately conservative when Git cannot produce a trustworthy change list: it asks for a model-backed update rather than recording a clean result. It snapshots source before checking and verifies that snapshot again around claim finalization and manifest/update recording, so concurrent code changes remain for a later check. When nothing needs rewriting, it reanchors claims and records the update at the checked commit without starting a session. The large-update detector is a heuristic for likely wiki-relevant changes, not a semantic proof that every code fact is unchanged.
 
+The detector's definition heuristic is intentionally broader than exported API names: it recognizes keyword declarations at any nesting depth, newly introduced keys, and common method/function declarations inferred from changed-line runs in supported source extensions. It compares added and removed names so a pure rename-away does not count as a surviving new fact; for test paths, declaration-only changes are ignored, while the 50-line change threshold still applies. Git output is parsed with controlled diff options and NUL-delimited file lists so unusual filenames or user diff settings do not silently turn an unobserved source change into a clean result. This remains a trigger heuristic: once a run starts, the writing agent still decides which pages actually need edits.
+
 Plan validation canonicalizes paths, rejects reserved pages and duplicate jobs, prohibits deleting quickstart, and requires quickstart for initialization. Unless explicitly deferred, update plans automatically include pages with stale or unresolved evidence; required rewrite pages (for edited or language-changed pages) are also added unless planned or deleted. The queue sorts by canonical path, with quickstart last. The host should consume one assigned page at a time, even though pending-job validation itself checks job identity and status rather than enforcing the host's entire research workflow.
 
 ### Sparse decisions preserve claim identity
@@ -119,6 +121,8 @@ When changing this system, preserve the separation between disposable retrieval 
 ## Focused verification
 
 Representative engine tests cover cache invalidation (`kept_index_follows_the_pages`), evidence canonicalization and moved ranges (`resources`, `ranges_follow_moved_lines`), safe storage, schema validation, and link/diagram processing. Core integration tests additionally exercise local reading without a server and native writer run-ID rejection.
+
+The model-free preflight tests (`quiet_updates`, `quiet_updates_miss_nothing`) cover cited-line movement versus changes, uncited small edits versus substantial/new declarations, added and untracked files, hand-edited pages, incomplete claims, active runs, Git settings and unusual paths, Git failures, and source changing during the check. These tests exercise the detector's conservative boundaries; they do not prove it can decide semantic documentation relevance without a model.
 
 `concurrent_searches_share_the_index` verifies four simultaneous cold searches build one index and warm searches reuse it. `deep_nesting_fails_the_text_not_the_process` exercises the lexer on a 256 KiB thread stack, including accepted nesting and rejected depth/work cases. `setup_stays_inside_the_repository` checks outward file, parent-directory, wiki-directory, and dangling links as well as supported inward links. Core's `deep_page_fails_its_calls_only` verifies that search and read fail without preventing a subsequent valid read; `deep_pages_view_on_a_small_stack` covers the separate desktop rendering path.
 

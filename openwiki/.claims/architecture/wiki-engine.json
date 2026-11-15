@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:feb49d3c1040b9ffccf860d6323fe402c3461d7aca9dc799bbf3aa75b9a0c355",
+  "pageVersion": "sha256:a7a3caf26f2498f3ac4442619a5cf9b6ccc8f8d167d27b24aa088a93e1b5716b",
   "claims": [
     {
       "id": "claim_cd31b18fb1af473882d2c2d91575eaea",
@@ -327,10 +327,42 @@
           "version": "repo-lines-v1:sha256:2d10f826635ab44d4d3bf1b35c2eff5283d51e193bad3aae1cf6499fe700a4b8:eyJzZWxlY3RlZExpbmVDb3VudCI6MTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkyMDg1YWJiYTdiMjM2MjlhM2Y4ODFjMzZiYjJlOTg5NDkyNTJmMDJlZWU0OTAxNWE5MmU2NzIzNmY4YjNhYjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ5OTU5NjA3Njc4MGVmZjYzN2E4MTc1YjFiN2E5MDk2MmE2YzM4MzA5ZWU4ZjgwMzI3MTY2NWFkMWU5MTVmOWYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImVkNTU1NmNiZjkzMTQ2MjNmZmI0Y2MwZGZmYjVlZmNhZGNhNzQwNDZhZTI3MmYyZTY3Y2U0MjdhOGZlZDUxZWMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ4NmJmNGQ4MThiOGIyMzA2ODA3NTg1ODU5ZGJhYWVlOWU1ZTRhMDM2ZDc0NzAzODY0Mzk5NGE4YzYyNWM0M2EifQ"
         }
       ]
+    },
+    {
+      "id": "claim_a6de5acd606a4c56b8d209bfbfd19e94",
+      "statement": "The quiet update preflight starts a writing run for unresolved/stale claims, hand-edited or uncovered pages, added files, and changed source files with detected new declarations or at least 50 changed lines; it records a no-model update only when the evidence and coverage checks pass and source remains stable through finalization.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-wiki/src/run.rs#L1208-L1246",
+          "version": "repo-lines-v1:sha256:c88b8fe619e4f46d9ffe6307a7bc2fdf0ec272f4f7d6d3ac1eb6c3370fbda6ff:eyJzZWxlY3RlZExpbmVDb3VudCI6MzksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRjYzZmN2JiM2ZlNWVjMGI3ODc4ODEyOGFkZTVhYzRiOWY2MTFiODhhNzBkZjY1NmFlMjY2NjRmYjUzYmU3ZTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFkOWUxMjU0NjQyNTU3NmQzZGVhZThjOWI5ZGJmMTI4ZDVkNmRkYWY1ZDdmZTg1NzkzNDkyN2RlZmZhM2I5ZGQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE5ZTc2MzU1Y2YxMTk5NDgwYzNmOTk4MzZiMTQ4NmM4NDFkODkxZmFhZDkwNGM2MDhlMDkzMDIyZDM3NTdhZWUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjcyNGRhMDlmNWIwYmY2ZjA0ODFlZWYwOGE2NGQ0YzkzY2RjMDdjZTVmOGQ0ZWQyNTJmZjgyN2MzYzkzZmZhYjEifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-wiki/src/run.rs#L1253-L1307",
+          "version": "repo-lines-v1:sha256:36b6793168c02ceab25a9d5cceb08d5129c28d0f45fa98e7cc12ec2c16ec70ff:eyJzZWxlY3RlZExpbmVDb3VudCI6NTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE5Nzk5OTgzYjYzMmRlMGE5NDFhYjJiNzQwM2Y4M2FjZTE5NjI1OTAyYzBmOWVhNDk3OWIwODkwMTU5M2FkNjEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUyNDBjNGE5NWQ5NGMyMDc0NTczZTU4ZWRiODViMmI1ZjQyYjg3OTQxOWIyY2E5ZDE1NjhjMDc1ZjczMTgyYWIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQ0Y2ZjZGFmNGU1YjIwNjc0ODQ4OGNlODU5ZjU5ZWRiMmM5NmU1NDIxZWQyYjhkMzEzMWI2NjdmZWRjNzdjN2YiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjliNDE0M2U4YjZmMmNmYjBjNGE1MmJkODgwOTU0YjY4OTlkNDhlZTg2MzMzZTI4NDVjODU2NmMyM2U0NDExYTIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_6a868c78190a45459b837c38fc12420f",
+      "statement": "The preflight's source-change heuristic detects declarations and newly introduced keys across supported source files, ignores declaration-only changes in test paths, and treats large diffs as update-worthy; the detector uses controlled Git diff options and separately checks file names to avoid silently missing unparsed paths.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-wiki/src/repo.rs#L122-L129",
+          "version": "repo-lines-v1:sha256:5454d8346ab2a78d4edbd40c0a206e53680608e5b93494f52da67b580cd68086:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZGE0ZDkyNGM5NWM2NWExNmRkYzYzZDc4NjI5NzFkYzMyZDY4MDc0NGYyYTVhYTcwNmRlNjljMDA5YTllZGJiZSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYjAyZDJjMGQ2ZGM1ZTc0ZDkyZmExNGI5MWRiZWEyNjQwOTBiZWIzNWZkYjkxODhkOWIzNDExODFkY2U5ZjRjZSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZjVhY2ZkYjgwMjVmNjA1MjBlNTcxNmNmNjc4ODU5YmVlMzliMThlMjZmMzVhZWYxNWMzMjlkZGIxNzA3OWYyMCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYWIzNzRlMzY2ZTZlOTMyMGM1NGMzMTdiNDAxZTFjZDQ5MTc3MzNhMzQxYmJlYWI4MTAxODYxYTMwMjlmNzQ2OCJ9"
+        },
+        {
+          "resource": "repo://crates/harlo-wiki/src/repo.rs#L448-L460",
+          "version": "repo-lines-v1:sha256:bd2cf76f460c08015060d081a564f9c9ea0e89b921f62f0b4c617980921356d1:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEyNjRhNDhmMzE3NTU2NTU1YmFiYzhjZWM4NmJhM2QyYTI4ZmE1YWQ4NDUxYmZhNzQwYjU5ZGNmNzY0ODYwYmMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI5MzQwYjM1MjYxNTg1ZmI1ZGQ4YmRjODExYjYzZTZmYmIyNTQwYjIyYWJkNWQ2MjI1MDA4Mjg1YmE1NTQwN2EiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjUyZTYxM2JhYWFiMmFkNzdkODI0MzA5Yjc0NjExMGU5NThkMTg4ZTdkNzViNWM3ZjUyYmMzOTM3NjVlZmE4NjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdkZWMyNmE1NDhlNGU4MGFmNjI0YmYyODI5Njc4N2Y2NTA3MjYxZGMwMzFiZGI3MGMzNmI4M2VhZGRmMzRhYTgifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-wiki/src/repo.rs#L500-L545",
+          "version": "repo-lines-v1:sha256:32380612208c78c782bc94edc61bbe8afa2ef7a095d6ce379ee7cd5a239906f9:eyJzZWxlY3RlZExpbmVDb3VudCI6NDYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY2ODRlNGNmZmZmYzlkMjdjZTdhYTU5ZDA1NjljMGYxYTgzYjBiM2YzZGY0N2NkMzMyZTNkZmY2NjFjOWY4ZTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc4MTZhZmFkNzk2M2U1OTIxZTJhOTY2ODlkZTUyMmVkNTRhYjFjN2Y3MzJmMDkwMTRlYjA0MDQ0M2E2NTg5ODUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA1OWFkNjc0YzhmM2UwYzBmYzkzZmQxODBkYzEwZDU2NzVjODMwNDlhZDdmZmMwODYzMThhZDVmZDg5YjEwYzkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijc2ODYzZWJiNmM2NTU3NzQ3ZmI3ZTNhOTFkNzZhYTk4YmQ1NjFjOTcxYzcwMjgwMDg1YjViYjkyOWQ2Nzc1OGQifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-15T01:24:14.237Z"
+    "at": "2026-11-15T14:13:54.485Z"
   }
 }

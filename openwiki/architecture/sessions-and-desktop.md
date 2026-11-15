@@ -5,7 +5,7 @@ description: How agent protocols become shared live sessions, durable conversati
 tags: [architecture, sessions, persistence, desktop]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-15T01:24:14.237Z
+    at: 2026-11-15T14:13:54.485Z
 sources:
   - id: openwiki-source-eda83df6b22941ed75ede295
     resource: repo://crates/harlo-app/qml/ChatView.qml
@@ -17,12 +17,20 @@ sources:
     resource: repo://crates/harlo-app/src/workspace.rs
   - id: openwiki-source-6d4abd836eef5afa84bffc33
     resource: repo://crates/harlo-code/src/lib.rs
+  - id: openwiki-source-9a97dd54ff550316a9b1d806
+    resource: repo://crates/harlo-core/src/actions.rs
+  - id: openwiki-source-546c3dbed233b7b9ff5ec273
+    resource: repo://crates/harlo-core/src/context.rs
   - id: openwiki-source-aa0d9221c1e01ca9decebdae
     resource: repo://crates/harlo-core/src/db.rs
+  - id: openwiki-source-5af0c90ff6d5f75199de24a2
+    resource: repo://crates/harlo-core/src/export.rs
   - id: openwiki-source-4007ae1962c00ddaf5da78d5
     resource: repo://crates/harlo-core/src/lib.rs
   - id: openwiki-source-df09a2583df68f85f752b752
     resource: repo://crates/harlo-core/src/markdown.rs
+  - id: openwiki-source-0603700f85841a0469cb7cb2
+    resource: repo://crates/harlo-core/src/pages.rs
   - id: openwiki-source-9c753af69e99af0009dee61f
     resource: repo://crates/harlo-core/src/search.rs
   - id: openwiki-source-4db2ffefa327cd504d9b5a66
@@ -37,7 +45,7 @@ sources:
     resource: repo://crates/harlo-harness/src/lib.rs
   - id: openwiki-source-07a69ae82a0e133d3de748f1
     resource: repo://crates/harlo-harness/src/store.rs
-generated: { by: "harlo", at: "2026-11-14T05:16:59.652Z" }
+generated: { by: "harlo", at: "2026-11-15T14:13:54.485Z" }
 ---
 
 # Sessions, persistence, and desktop presentation
@@ -77,6 +85,16 @@ Recovery also covers a harness that cannot start: the unsent prompt and any rema
 The sender supplies original words and attachment paths through `prompt_typed`, so recovery no longer depends on matching returned prompts to a view's recent sends. Without typed metadata, `Unsent::words` strips the trailing plan note and leading photo placeholders. The desktop saves supported inline pictures as content-named files when no original attachment paths exist, including pictures sent from the phone. Restored messages go above any new composer draft; attachments are merged without duplicates. This preserves multiple cancelled sends and attachment-only messages instead of restoring only the last text.
 
 Session metadata carries `cost_kind` separately from numeric cost, distinguishing plan/local usage, priced usage, partly known cost, and unknown cost. The context report forwards this classification rather than interpreting a numeric zero as evidence that usage was free.
+
+## Long history is streamed, settled, and paged
+
+Opening a saved conversation does not require loading every message into one vector. `harlo-harness::store::stream_saved_for` passes current-branch messages to the session one at a time. The session builds transcript rows and a context tally as messages arrive, and every 4,096 messages materializes rows and pages eligible older settled replies. The stream path works for Harlo JSONL and Claude's cached reader; when a remote session is opened, Harlo first copies what is available locally and reports any missing tail rather than treating an incomplete copy as a complete history.
+
+The transcript deliberately keeps a short mutable tail in memory: only completed assistant replies whose tool results have arrived are settled. Settling releases duplicate source text, thinking, command arguments, and tool output when their rendered rows already hold what is needed. Paging then moves long row payloads and settled message blocks to a process-owned cache file, preserving lightweight row identity and metadata for ordering, search, and list updates. Page-out considers content beyond the retained row window and also pages older settled output when the latest retained text exceeds 8 MiB; each row payload must be at least 256 bytes to be written separately. A page-file failure leaves data resident in memory, so correctness degrades to higher memory use rather than losing transcript text. A paged row is read back when shown; the desktop model keeps at most 160 fully materialized rows in its own LRU cache. Page files are removed when their last references go away, and startup cleanup sweeps files left by dead processes.
+
+The context/activity report is accumulated incrementally alongside transcript loading. It keeps totals and the latest 300 activity rows, while its action log retains the newest 2,000 actions but still counts all calls. Tool calls are joined to results by call ID, so pending actions can be shown as still running and failed reads/edits are removed from the aggregate path sets. Action classification normalizes common names across Claude and Harlo tools and excludes todo updates. Markdown export also streams saved messages through two passes: one locates tool results, the next writes user/assistant turns and compact tool summaries without retaining a whole rendered export in memory.
+
+These are bounded-retention strategies, not a fixed ceiling on total process memory: current rows, indexes, tallies, Qt caches, and active messages still occupy memory. The memory tests assert relative allocation bounds for representative generated logs rather than measuring a complete application's resident set.
 
 ## Crossing into Qt safely
 
@@ -126,6 +144,7 @@ Approval messages marked as Markdown are rendered through the core Markdown rend
 - `every_unsent_message_comes_back_with_its_files` checks ordered recovery, repeated text, attachment-only sends, and phone-origin text. The QML stop-before-send scenario also checks preservation of a newer draft and that cancelled messages never reach the model after the delayed snapshot finishes.
 - `a_harlo_session_is_read_on_while_it_goes_on_and_whole_when_it_branches` covers append, partial-line, branch, and rewrite behavior; `an_index_from_before_its_row_table_still_forgets` covers old-index migration and deletion.
 - Markdown's long-code/table and streaming-cache tests, together with `a_long_code_block_is_rows_of_one_card`, verify continuation boundaries and whole-block copying.
+- `a_long_session_shows_its_last_report_while_it_opens` checks that a cached report is available during loading and replaced with the recomputed report afterward. Transcript tests cover paging and read-back (`paged_replies_read_back_whole`, `rows_past_their_text_budget_page_out_however_few`); `crates/harlo-core/tests/memory.rs` checks streaming session/branch reads, Claude incremental reads, and that repeated row materialization does not duplicate tool output.
 
 - `session::tests::demo_run_reaches_subscribers` exercises idle → busy → idle, resulting user/tool/code rows, and equality of a late subscriber's snapshot with accumulated deltas.
 - `idle_session_restarts_when_used_again` verifies that an idle agent can stop to reload configuration and restart on the next prompt.

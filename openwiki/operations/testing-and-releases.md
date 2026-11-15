@@ -5,7 +5,7 @@ description: Contributor build prerequisites, focused and integration verificati
 tags: [testing, build, packaging, releases, security]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-15T01:24:14.237Z
+    at: 2026-11-15T14:13:54.485Z
 sources:
   - id: openwiki-source-4d1d392666be6dfdd7a91a2e
     resource: repo://.github/workflows/release.yml
@@ -23,6 +23,8 @@ sources:
     resource: repo://crates/harlo-core/src/openwiki.rs
   - id: openwiki-source-7f90659c3ba3e62659b4a786
     resource: repo://crates/harlo-core/src/updates.rs
+  - id: openwiki-source-4ffdea106fc0bda2812d95f6
+    resource: repo://crates/harlo-core/tests/memory.rs
   - id: openwiki-source-4dadc7b205a2f63287cbe0a8
     resource: repo://crates/harlo-update-signing/src/lib.rs
   - id: openwiki-source-056ac262dd327c0a8e1ed162
@@ -39,7 +41,7 @@ sources:
     resource: repo://site/README.md
   - id: openwiki-source-f1c29df965300759d3c1ff56
     resource: repo://wrangler.jsonc
-generated: { by: "harlo", at: "2026-11-15T01:24:14.237Z" }
+generated: { by: "harlo", at: "2026-11-15T14:13:54.485Z" }
 ---
 
 # Testing, packaging, and signed updates
@@ -66,6 +68,7 @@ Use a scratch HOME or XDG data/config directories for interactive testing. Demo 
 | --- | --- | --- |
 | Wire translation or framing | `cargo test -p harlo-harness` | Real/scripted agent protocol integration |
 | Session reduction or metadata | Focused core tests | Demo subscriber lifecycle and UI behavior |
+| Streaming saved histories or retained transcript memory | `cargo test -p harlo-core --test memory` and focused transcript/session tests | Representative long-session UI behavior and remote history loading |
 | Sandbox or agent tools | `cargo test -p harlo-agent` | Actual OS sandbox behavior |
 | Phone protocol | Core phone tests, `swift test --package-path ios/HarloKit` | Direct and relay transport behavior |
 | OpenWiki integration | `cargo test -p harlo-wiki` and the core `openwiki` test filter | Native local engine behavior and remote `harlo-agent wiki` tool-server behavior |
@@ -85,6 +88,8 @@ cargo test --locked -p harlo-agent each_try_is_counted_as_it_ends_and_the_next_a
 The partial-count check distinguishes output-only and input-only reports from measured zero, including budget-only estimation of missing input. The attempt-accounting check covers charging before retry admission and dropping an in-flight request after it has reported usage: the spend remains, the hold is released, and an empty snapshot does not add another charge. These unit boundaries complement the broken-stream and report-merging checks; they are not a claim that every provider's cancellation behavior has been tested.
 
 For phone code display/copy regressions, use the focused checks listed in [phone verification](../integrations/phone-and-relay.md#verification); core crypto tests alone are not a substitute for checking desktop serialization and the Swift renderer.
+
+The `memory` integration-test target generates 64 MiB Harlo and Claude history files and measures additional allocations for current-branch reads, incremental Claude reads, branch outlines, and repeated transcript-row materialization. Its 8 MiB bound applies to those specific operations under the test harness, not the desktop's overall resident memory. Phone-server tests cover serialized transcript row limits, picture access, and code serialization; `phone_activity` tests check sealed Live Activity phases and leftover-card cleanup. Use the phone page's commands for the core phone and HarloKit suites, and do not infer APNs delivery from those local payload tests.
 
 The wiki engine has its own crate-level test boundary as well as the core adapter tests. `harlo-wiki` exercises native retrieval, Markdown parsing limits, evidence handling, storage, and lifecycle behavior; core tests check that the desktop uses the engine locally and routes remote operations through the agent. A parser failure is expected to return a tool error without terminating Harlo; a focused engine test alone does not prove the UI or SSH path.
 

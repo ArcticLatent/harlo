@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:741570236b6d4a4453f713771fd013c4427ed794fa4e0b4f11a55d1dfe352f62",
+  "pageVersion": "sha256:973846cf637363996f0f02d4ba60533560044397d6e29ba45e7a87db4bf204c8",
   "claims": [
     {
       "id": "claim_292a16b40b5241b4ac361dda40dea2cd",
@@ -87,7 +87,7 @@
       "statement": "Harlo's Settings → Wiki presents separate create and update writer profiles, and workspace routing selects the corresponding profile for each kind of run.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-app/qml/SettingsDialog.qml#L2163-L2182",
+          "resource": "repo://crates/harlo-app/qml/SettingsDialog.qml#L2165-L2184",
           "version": "repo-lines-v1:sha256:97bf197fb0797bae8aad7be81bd1b97e5c6c1fab00240ed07ff49b16d9426d4b:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg0YmRiMmRmYTRhZWZjY2Y1NTY0MDJiNTg1OTUzY2FhYWJmYjI4NmI5YjZmYWRiNDlhNTBhMDM2OWRmYzc5NDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2YjA0NDkxNDY5NzIyZTgzNjNhOTRlNDA0NDUzOGUwMTNhMmEyMTdlMzZiMWU1NjhiYTYwYWNiN2I0YzhmMmUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk5OWJkZWZlZWFjYTYzNDBlMDI5MGRjODZlODg5Yzg5ZDVlMTg5YWE1YmE0NGI1ODViM2I3MDczNGY0YTYyZDgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImExZTUyYmJjNmVjMTY3OGE0YTVmMWM5YTQxYmMyOWRlMjlmNGYzZDVjMTU5ZDMxOTBiOWVhZWM1ZTFmMTQ3YmUifQ"
         },
         {
@@ -99,6 +99,6 @@
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-15T01:24:14.237Z"
+    "at": "2026-11-15T14:13:54.485Z"
   }
 }

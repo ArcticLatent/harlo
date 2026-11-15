@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:2aaf1f07a50999493f201c6cafa64872c7fd205b0128d1fce09e491f4618477f",
+  "pageVersion": "sha256:e381b2260841767a85b5f1198b22843afe590fc1f68f9e4d9f4618367e96ae8d",
   "claims": [
     {
       "id": "claim_7a207a8ae4594d9ba376628ea349a6b4",
@@ -157,10 +157,28 @@
           "version": "repo-lines-v1:sha256:55a6a5990b4df364d6a37fe0693b3c9460194c3f02939a7f94d40b0fbc1a2c37:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMwLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiIxMWE2ZjZhMTliN2NlZDM2MDNmOGE4ODFhZWNhNzM4MzJhNGQ4MjhlNTM5MWNiZDNmNjczNGUxNTI2MDlkMTEyIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI3MjMxZDVkMjBlYTU2ZmJkODQyMDRiY2NiNmU0NDBkZmNjZjI3YjBmOTRmOTQyMTM3MTQ0NDBiYmFjNDBmNWIyIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJhZDQzY2JhZjYyNDRmMTZiMjRhMDU1ZjQxMDg2Mzk0ZTBiZjc3MGFhZWVkNzM1NTZhNmExZDMyODk3ZDE1OGRlIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJkM2JiNGVmMDAwMWViOTkxZWU0MjE0MzQ5YmY3NjE2ZTIxNGNhNjQ1YjEwNDBiODZjZWQzNGZhZWY4NjhkZTY3In0"
         }
       ]
+    },
+    {
+      "id": "claim_987bab58d48f465fb676077fcf27ccf9",
+      "statement": "The core memory integration tests create 64 MiB Harlo and Claude session fixtures and assert under 8 MiB of additional allocations for selected saved-history, branch-outline, Claude-incremental-read, and repeated transcript-row operations; these are operation-level allocation checks, not whole-application resident-memory limits.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/tests/memory.rs#L126-L190",
+          "version": "repo-lines-v1:sha256:f5308f97927a88020b573cab4f72cf812abb60f3b6e14ace51107eb91af548a2:eyJzZWxlY3RlZExpbmVDb3VudCI6NjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQyY2Q0ZGI0OGEzNTBlOGYwYjQ3OTQ0YzQ2ZTNmZmRiYmExMzJkMjI5MGE5MWQ3MDEyYjU2ZWI0NmM4YWI0ZjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY5MzM4OGEwMGM0YjE0YTM1ZWEwNGI4MzhlMWFmNWM2MjA1NmI2NTE1ZWVjZmJmZDY1MDg3MjhkOGMwOWE0MTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRmYWI3MTBkZGY3ODU5ZTU3NTc2NGE5MTNhMDAyYzc0NTg1ZmZhNzAwMTUxMGNiODgxMWRhODNkMmNmNzRiMzQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdmOWFkNDYzYmU3MWM1ZjQyMDk0NmFmYmYwN2QwZmU5ZjVmMTFkYTgyZjFlOTQ5MDNjYzMzOTVkOGMxYTBiMzgifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-core/tests/memory.rs#L208-L232",
+          "version": "repo-lines-v1:sha256:697447662ce856082415ebe8991a1c446bd00f7fdb98f5a7457bac201ac6d522:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNjYjgxMzc2NjlkZWQ5ZDM5ZjhiOWZjZTEzYTk5OGQ3ODljMWU4ZjZmOTUyMWE5NWE2ZTBmYzdkNWZlODE4YmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhhYmFmMDJjZTExOTVmMGNkYzM2ZWU3ZjM0MWVhMjYzYThhYjM2MDJkMGFjOTdlZDg4YmQzZjNkMThmN2U3NjEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-core/tests/memory.rs#L48-L55",
+          "version": "repo-lines-v1:sha256:98f082b2134986015c073cd5aa78407f6209f35abe859f95debef0d719b03e2b:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZjNmMmZjOTkwNjRjMzE1OTRkZTQ5NmYzMGNlNTA3YzA2NmMyNmZhZjZmNzk2MDkzNDZmNWFlZTM5ODhiODZlOSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZDE1MmU5ZDQzZGY0NDQ3ZDk0ZTg4ZjgzM2JkM2Y4YTc2OTZhMWY0ZGY2NTgxNDUxZTAwZTIzNmRiNWUwOGZjMSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiODM1MDA3ODY1N2ZjMjEwNDUwOGMxOGM1ZjE1MDA4YjQ5ZTZkOWVmYmZjYzI5OTBhYjcwODhmMWExMjk0ZjIyZCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYzRmN2JmOTA2Mzc5NGMwNDg0ZWIxMTRmYjI2M2ZlNGI0MmE1MDgzOTBiMzgzZjVhZDZiZTA5ZGFkYzFmODU5OCJ9"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-15T01:24:14.237Z"
+    "at": "2026-11-15T14:13:54.485Z"
   }
 }

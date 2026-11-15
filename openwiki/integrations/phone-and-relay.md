@@ -5,10 +5,12 @@ description: Device authorization, replay-resistant NaCl channels, session subsc
 tags: [phone, ios, encryption, relay, apns]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-15T01:24:14.237Z
+    at: 2026-11-15T14:13:54.485Z
 sources:
   - id: openwiki-source-3e5d9e2412052022c04ac0ec
     resource: repo://crates/harlo-apns/src/lib.rs
+  - id: openwiki-source-d0b354972196ec10b88a0e60
+    resource: repo://crates/harlo-app/src/image_view.rs
   - id: openwiki-source-1d40907d1133795813cede65
     resource: repo://crates/harlo-app/src/main.rs
   - id: openwiki-source-9f29fe751f9cc19b273be74f
@@ -21,18 +23,18 @@ sources:
     resource: repo://crates/harlo-app/src/phone_server.rs
   - id: openwiki-source-fb73cab443b13627be975e74
     resource: repo://crates/harlo-app/src/phone.rs
+  - id: openwiki-source-9a97dd54ff550316a9b1d806
+    resource: repo://crates/harlo-core/src/actions.rs
   - id: openwiki-source-33d58143535fd8586f3e5352
     resource: repo://crates/harlo-core/src/phone.rs
   - id: openwiki-source-4db2ffefa327cd504d9b5a66
     resource: repo://crates/harlo-core/src/session.rs
-  - id: openwiki-source-a9697f23b0ad71a5ad25a2a8
-    resource: repo://crates/harlo-core/src/transcript.rs
   - id: openwiki-source-f6c0ec21414aa65ae7ca1f61
     resource: repo://crates/harlo-relay/src/lib.rs
+  - id: openwiki-source-23acde496d3c31944280356b
+    resource: repo://ios/Harlo/Harlo/ActionLogView.swift
   - id: openwiki-source-2a9076f4b9c96d8d098111b9
     resource: repo://ios/Harlo/Harlo/SessionView.swift
-  - id: openwiki-source-d106fff79d94df591057ff07
-    resource: repo://ios/Harlo/Harlo/TranscriptViews.swift
   - id: openwiki-source-7d63dd608fb68281fc2c1857
     resource: repo://ios/Harlo/Harlo/WikiViews.swift
   - id: openwiki-source-8c23df65e9f6a257e8c67c14
@@ -47,7 +49,7 @@ sources:
     resource: repo://ios/HarloKit/Sources/HarloKit/Visuals.swift
   - id: openwiki-source-e36aee686debea4d83dc020e
     resource: repo://ios/HarloKit/Tests/HarloKitTests/HarloKitTests.swift
-generated: { by: "harlo", at: "2026-11-14T06:18:31.902Z" }
+generated: { by: "harlo", at: "2026-11-15T14:13:54.485Z" }
 ---
 
 # Phone pairing, encrypted transport, and relay
@@ -79,9 +81,13 @@ Phone requests carry `{id, op, …}` and receive correlated replies; asynchronou
 
 The workspace bridge owns actions requiring desktop application state, including making a session live without switching the visible tab, starting one, renaming/archiving, and sending with plan-mode context. Its watch channel publishes the session list only when it changes. See [sessions and desktop](../architecture/sessions-and-desktop.md) for snapshot/delta semantics.
 
+The phone's **Action log** is a separate read of the shared session context report, not a parallel execution trace. Harlo classifies tool calls from their names across agent protocols, joins results by call ID, and returns the newest 2,000 entries with totals and aggregate changed/read paths. The iOS view presents newest-first filters for commands, changes, and reads; file targets open in the file viewer and command targets copy to the clipboard. Each new turn refreshes the view. The same session driver also exposes Markdown export through a separate `markdown` operation.
+
 If Stop arrives while a new turn is still waiting for its undo snapshot, an `unsent` event returns the held messages' original words and inline photos. Desktop-only file attachments are not converted into phone attachments. HarloKit routes the event by session key, decodes valid base64 photos, prepends returned text above any newer draft, and queues photos for the composer. The SwiftUI composer puts returned photos before those selected meanwhile and clears the queue; a photo-only return leaves draft text unchanged.
 
 A phone subscription advertises that it has a composer. It can therefore receive messages returned after a failed agent start, as well as cancelled preparation. If recovery happened with no composer attached, the session retains the messages in memory and gives them to the first desktop or phone composer that subscribes; passive workspace watchers do not consume them.
+
+Pictures are fetched separately through the `picture` operation after a row names them. The server permits pictures already shown by the open session or files resolved inside its local project folder; it does not fetch a remote host's project picture. Desktop decoding fits full images to a 2,048-pixel side and thumbnails to 512 pixels, normally encodes photos as JPEG, and preserves lossless formats or transparency as PNG where possible. If a PNG exceeds 2.5 MB it retries as JPEG; an oversized JPEG is re-encoded at lower quality. This is a size-reduction policy rather than a hard encoded-byte cap.
 
 Long desktop code blocks are split into continuation rows by the shared transcript. Phone serialization marks later code pieces as `codePart`, which the iOS view hides; the first code row carries both combined copyable code and combined highlighted HTML. The server joins matching consecutive pieces into one `<pre>` block, rather than displaying only the first desktop piece. Reset frames use this joined representation, and insert/update deltas resend an affected first row after the other changes when it is within the phone's window. Hidden continuation rows remain in the protocol list to preserve row positions.
 
@@ -118,9 +124,13 @@ A relay with the app team's APNs credentials accepts `/push`; `GET /push` report
 
 Desktop seals notification content for the phone before forwarding it, leaving the relay and Apple a placeholder. The notification extension decrypts the content. Currently connected phones do not receive these ordinary pushes because the app is already open. Live Activity updates use their own APNs tokens and sealed content as well. `harlo-apns` signs provider tokens with ES256 and renews them after 40 minutes.
 
+Live Activities are a distinct APNs update stream, registered against a running session and tracked by `phone_activity`. It reduces the shared session events to working/input/done/failed, the latest short activity label, todo progress, and start time. A pending approval or question becomes the input phase; a quiet period after work settles to done/failed, while a short startup grace handles an activity registered before the process begins. Content such as the project title and command label is sealed for each phone, leaving Apple and the relay only phase, counts, and timestamps. Ordinary activity changes are rate-limited to once per eight seconds, phase changes/end are urgent, and quiet sessions send a ten-minute keepalive; APNs marks updates stale after 25 minutes. The list of active registrations is written to the phone data directory so startup/shutdown can best-effort end orphaned lock-screen cards. This is not a retry queue: cleanup consumes the persisted list before sending.
+
 ## Verification
 
 Live Activity registrations are also recorded in the desktop phone data directory's `activities.json`. Startup and shutdown attempt to end leftover cards with encrypted “harlo was closed” content and immediate dismissal; shutdown waits at most three seconds. The persisted list is consumed before delivery, so this is best-effort cleanup, not a durable retry queue. `cards_left_over_are_ended` checks registration replacement/removal, encrypted end payloads, immediate dismissal, and one-time consumption. On returning to the iPhone app, ended cards are dismissed and active/stale cards are reconciled with session status.
+
+`says_what_the_run_does` checks activity status transitions, approval state, todo progress, and the settling delay; `sealed_for_the_phone` verifies command/title privacy, phase metadata, and stale/end timing. For action history, the phone server exposes the shared context report through the `actions` operation, while HarloKit tests cover decoding the shared session and action data models.
 
 Option-card inline text is parsed into styled spans in HarloKit (code, bold, italic, strike, and HTTP(S) links). Unclosed marks remain text, and the plain-text projection supports reading the same content aloud.
 

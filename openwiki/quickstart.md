@@ -5,7 +5,7 @@ description: Start building Harlo and find the right wiki guide for agent execut
 tags: [quickstart, navigation, build, architecture]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-15T01:24:14.237Z
+    at: 2026-11-15T14:13:54.485Z
 sources:
   - id: openwiki-source-651d1fb6c9e49916a916ab51
     resource: repo://Cargo.toml
@@ -29,7 +29,7 @@ sources:
     resource: repo://crates/harlo-wiki/src/lib.rs
   - id: openwiki-source-eb7f694aac7969d92da614ab
     resource: repo://crates/harlo-wiki/src/run.rs
-generated: { by: "harlo", at: "2026-11-15T01:24:14.237Z" }
+generated: { by: "harlo", at: "2026-11-15T14:13:54.485Z" }
 ---
 
 # Quickstart and task routing
@@ -56,23 +56,24 @@ For the phone client library, `swift test --package-path ios/HarloKit` exercises
 
 | Your task or symptom | Read first | Primary source boundary |
 | --- | --- | --- |
-| Chat state, lost rows, session switching, persistence, Qt threading | [Sessions and desktop](architecture/sessions-and-desktop.md) | Harness events → core session/reducer → app model |
+| Chat state, lost rows, session switching, long saved histories, persistence, Qt threading | [Sessions and desktop](architecture/sessions-and-desktop.md) | Harness events → core session/reducer → app model |
+| Session context summaries, bounded action reports, and Markdown export | [Sessions and desktop](architecture/sessions-and-desktop.md) | Shared context report/export → desktop, phone, and action-log views |
 | Finding earlier work before launching helpers | [Prior-session discovery](workflows/plans-and-project-changes.md#finding-prior-work-before-starting-a-helper) | Background history search → workspace-scoped results |
 | Tool execution, approvals, sandbox access, resume, subagents | [Agent execution and safety](concepts/agent-execution-and-safety.md) | `harlo-agent` loop/RPC/tools/sandbox |
 | Token budgets, broken-stream spend, unknown or partly known costs | [Agent accounting](concepts/agent-execution-and-safety.md#usage-and-provider-capabilities) | Shared request usage and provider pricing |
 | Shared plan edits, helper worktrees, step commits, bring-over clashes | [Plans and project changes](workflows/plans-and-project-changes.md) | Core plan/git plus desktop orchestration |
 | Remote files/sessions, helper deployment, unavailable local models | [Remote machines and model servers](integrations/remote-machines-and-models.md) | SSH host routing, engine helper, provider configuration |
 | Local proxy billing, free-server flags, missing prices | [Free versus unknown cost](integrations/remote-machines-and-models.md#free-servers-versus-unknown-costs) | Provider configuration → runtime accounting |
-| Pairing, encrypted events, reconnects, push or relay deployment | [Phone and relay](integrations/phone-and-relay.md) | Core crypto, desktop server, HarloKit, relay/APNs |
+| Pairing, encrypted events, reconnects, lock-screen Live Activities, push or relay deployment | [Phone and relay](integrations/phone-and-relay.md) | Core crypto, desktop server, HarloKit, relay/APNs |
 | Long code blocks, phone clipping, copied code and blank lines | [Phone transcript delivery](integrations/phone-and-relay.md#from-phone-requests-to-shared-sessions) | Transcript pieces → bounded phone frames → Swift rendering |
 | Wiki sessions, generation/resume, separate create/update writers, update offers, remote wiki calls | [OpenWiki integration](integrations/openwiki.md) | Core native tool dispatch → local engine or SSH agent |
 | Ranked wiki search, linked workspaces, model-free update preflight, evidence drift, durable claim state | [Native wiki engine](architecture/wiki-engine.md) | In-memory retrieval → source-change preflight and repository evidence → persisted page queue |
-| Build dependencies, targeted checks, packages, signed self-updates | [Testing and releases](operations/testing-and-releases.md) | Contributor guide, CI, packaging, update verification |
+| Build dependencies, targeted checks (including long-history allocation regressions), packages, signed self-updates | [Testing and releases](operations/testing-and-releases.md) | Contributor guide, focused tests, CI, packaging, update verification |
 
 ## Architecture in one minute
 
 - **Harness:** starts agents and converts their protocols into shared events. Claude stream-json and Harlo RPC do not leak into each UI component.
-- **Core:** UI-independent session state, transcript reduction, application metadata, Git, remotes, models, and phone crypto.
+- **Core:** UI-independent session state, transcript reduction and paged saved-history reads, bounded context reports, application metadata, Git, remotes, models, and phone crypto.
 - **Desktop:** cxx-qt/QML presentation and workspace coordination. The code view has a separate Qt-independent Rust drawing crate.
 - **Agent:** an independent executable with its own model loop, tools, session log, and safety policy.
 - **Wiki:** `harlo-wiki` implements OpenWiki-format retrieval and authoring natively. Core calls it directly locally or through `harlo-agent wiki` over SSH; no separate Node runtime is needed.
