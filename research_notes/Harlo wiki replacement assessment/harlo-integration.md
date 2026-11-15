@@ -12,7 +12,7 @@ Harlo’s working integration is **the npm package `openwiki@0.9.0`, with a Harl
 
 - Research date: **2026-11-13**. `git rev-parse HEAD` was checked twice and returned **`563992a39e12a546d13170faa8d118719becd2ad`**. Thus this checkout really is still at the historical review commit, but **the working tree is not that clean historical snapshot**. Initially four agent source files were modified; later changes also appeared in `crates/harlo-app/src/{chat_session,workspace}.rs` and `crates/harlo-core/src/{lib,session}.rs`. Generated wiki files and untracked research/review material were present throughout. No user changes were overwritten. The inspection snapshot records status and source hashes at **20:59:41 UTC**. [Inspection record][E-inspection] [Commit][H-commit]
 - The later `workspace.rs` diff changes typed-message forwarding, not the wiki adapter/tool-selection implementation. It inserts two lines before the phone wiki handlers and a further line before orchestration; therefore the immutable commit links below deliberately give stable line ranges for the unchanged wiki logic. Live working-tree line numbers after these insertions can differ by two or three lines. The wiki prompt is still forwarded through the existing session machinery. [Workspace source][H-workspace] [Inspection record][E-inspection]
-- Harlo’s real wiki metadata, inspected read-only, records `updatedAt: "2026-11-13T20:01:57.508Z"`, `gitHead: "563992a39e12a546d13170faa8d118719becd2ad"`, `model: "host-agent/harlo"`, `status: "complete"`, and `language: "en"`. `.run.json` was absent; `.page-manifest.json` contained eight pages. This corroborates the user’s report of a functioning integration; it is not evidence that newly arriving uncommitted changes have already been reconciled. [Inspection record][E-inspection] [Last-update metadata](file:///home/burce/Projects/harlo/openwiki/.last-update.json)
+- Harlo’s real wiki metadata, inspected read-only, records `updatedAt: "2026-11-13T20:01:57.508Z"`, `gitHead: "563992a39e12a546d13170faa8d118719becd2ad"`, `model: "host-agent/harlo"`, `status: "complete"`, and `language: "en"`. `.run.json` was absent; `.page-manifest.json` contained eight pages. This corroborates the user’s report of a functioning integration; it is not evidence that newly arriving uncommitted changes have already been reconciled. [Inspection record][E-inspection] [Last-update metadata](../../openwiki/.last-update.json)
 - Applicable `AGENTS.md` was read. Application analysis was read-only. Only these notes and isolated `/tmp/opencode` probe artifacts were written. The probes used synthetic repositories and isolated homes, made no generation calls, and used no model/embedding credentials. Existing application tests were **read, not executed**. [Repository instructions][H-agents] [Probe script][E-script] [Probe results][E-results]
 
 #### Exact artifact identity
@@ -22,7 +22,7 @@ Harlo’s working integration is **the npm package `openwiki@0.9.0`, with a Harl
 | Harlo package pin | `packaging/openwiki/package.json`: `"openwiki": "0.9.0"`; same in the lockfile. [Manifest][H-package] |
 | npm artifact | `https://registry.npmjs.org/openwiki/-/openwiki-0.9.0.tgz`; integrity `sha512-ARArQcKjvBWD56cAl0L5SGNmPfrE957zTPVvY+Hi1wVqBg7FqWWeqquPA4+fkA+iHAWclCScD9Snu7jUB9DCHw==`. [Registry metadata][N-package] [Lockfile][H-lock] |
 | Published source provenance | The npm SLSA attestation declares source commit **`b7027e3299c666e426cf218b3412a05767f702b6`**, built by `.github/workflows/release.yml`, invocation `41995917083/attempts/1`. This is registry provenance metadata, not an independently reproduced build. [Attestation][N-attestation] |
-| Prepared runtime | `/home/burce/Projects/harlo/target/openwiki/VERSION` says **`openwiki 0.9.0, node 24.22.3 x64, lock c8fc6a74922e82b4, patches 84d855bf42356cc3`**. [Inspection record][E-inspection] [Runtime VERSION](file:///home/burce/Projects/harlo/target/openwiki/VERSION) |
+| Prepared runtime | `target/openwiki/VERSION` says **`openwiki 0.9.0, node 24.22.3 x64, lock c8fc6a74922e82b4, patches 84d855bf42356cc3`**. [Inspection record][E-inspection] [Runtime VERSION](../../target/openwiki/VERSION) |
 | Full lock SHA-256 | `c8fc6a74922e82b4fb519e9f5acb2304ab560720a4d1c7c0ca21335750967324`; prepared-runtime lock and repository lock matched. [Inspection record][E-inspection] |
 | Patch | `packaging/openwiki/patches/ignored-evidence-unresolved.patch`; concatenated patch SHA-256 `84d855bf42356cc38aad6e4f24fcea663839dfa0368ba6ca19b22c9ed3ecd827`. It makes newly ignored evidence unresolved instead of aborting preflight. [Patch][H-patch] |
 | Node pin | `24.22.3`; Linux x64 archive SHA-256 `4f2b175a6d53a5c617a80dba2676238a0688cef28c6da4eba35c7d844e66fcfb`; ARM64 `6e51a2ada00f0011cc266f65d98922b403d7ad88f809ca2aa615a5fe1ce6e86c`. [Node manifest][H-node] |
@@ -369,7 +369,7 @@ High-priority questions for the coordinator/follow-on POC, in order:
 7. **How should existing interrupted runs and linked workspace registries migrate?** No forced regeneration, no silent state deletion, explicit reversible adoption. The local default workspace registry was absent, but that does not establish absence on remote machines or other users’ installs.
 
 [H-commit]: https://github.com/ArcticLatent/harlo/commit/563992a39e12a546d13170faa8d118719becd2ad
-[H-agents]: file:///home/burce/Projects/harlo/AGENTS.md
+[H-agents]: ../../AGENTS.md
 [H-package]: https://github.com/ArcticLatent/harlo/blob/563992a39e12a546d13170faa8d118719becd2ad/packaging/openwiki/package.json
 [H-lock]: https://github.com/ArcticLatent/harlo/blob/563992a39e12a546d13170faa8d118719becd2ad/packaging/openwiki/package-lock.json#L3356-L3410
 [H-fetch]: https://github.com/ArcticLatent/harlo/blob/563992a39e12a546d13170faa8d118719becd2ad/packaging/openwiki/fetch.sh#L23-L106
@@ -415,19 +415,19 @@ High-priority questions for the coordinator/follow-on POC, in order:
 [N-attestation]: https://registry.npmjs.org/-/npm/v1/attestations/openwiki@0.9.0
 [O-head]: https://github.com/langchain-ai/openwiki/commit/41c92c4a00d6dadaa3769c6bf93023ed5a618076
 [O-head-package]: https://github.com/langchain-ai/openwiki/blob/41c92c4a00d6dadaa3769c6bf93023ed5a618076/package.json
-[O-cli]: file:///home/burce/Projects/harlo/target/openwiki/node_modules/openwiki/dist/cli/cli.js
-[O-stdio]: file:///home/burce/Projects/harlo/target/openwiki/node_modules/openwiki/dist/integrations/mcp/stdio.js
-[O-manager]: file:///home/burce/Projects/harlo/target/openwiki/node_modules/openwiki/dist/integrations/core/session-manager.js
-[O-mcp]: file:///home/burce/Projects/harlo/target/openwiki/node_modules/openwiki/dist/integrations/mcp/server.js
-[O-protocol]: file:///home/burce/Projects/harlo/target/openwiki/node_modules/openwiki/dist/integrations/core/protocol.js
-[O-read-tools]: file:///home/burce/Projects/harlo/target/openwiki/node_modules/openwiki/dist/integrations/core/retrieval-tools.js
-[O-retrieval]: file:///home/burce/Projects/harlo/target/openwiki/node_modules/openwiki/dist/retrieval/wiki.js
-[O-lifecycle]: file:///home/burce/Projects/harlo/target/openwiki/node_modules/openwiki/dist/generation/repository-run.js
-[O-manifest]: file:///home/burce/Projects/harlo/target/openwiki/node_modules/openwiki/dist/generation/page-manifest.js
-[O-run-state]: file:///home/burce/Projects/harlo/target/openwiki/node_modules/openwiki/dist/generation/run-state.js
-[O-workspaces]: file:///home/burce/Projects/harlo/target/openwiki/node_modules/openwiki/dist/linking/wiki-workspaces.js
-[O-home]: file:///home/burce/Projects/harlo/target/openwiki/node_modules/openwiki/dist/config/openwiki-home.js
-[O-skill]: file:///home/burce/Projects/harlo/target/openwiki/node_modules/openwiki/integrations/openwiki/SKILL.md
+[O-cli]: ../../target/openwiki/node_modules/openwiki/dist/cli/cli.js
+[O-stdio]: ../../target/openwiki/node_modules/openwiki/dist/integrations/mcp/stdio.js
+[O-manager]: ../../target/openwiki/node_modules/openwiki/dist/integrations/core/session-manager.js
+[O-mcp]: ../../target/openwiki/node_modules/openwiki/dist/integrations/mcp/server.js
+[O-protocol]: ../../target/openwiki/node_modules/openwiki/dist/integrations/core/protocol.js
+[O-read-tools]: ../../target/openwiki/node_modules/openwiki/dist/integrations/core/retrieval-tools.js
+[O-retrieval]: ../../target/openwiki/node_modules/openwiki/dist/retrieval/wiki.js
+[O-lifecycle]: ../../target/openwiki/node_modules/openwiki/dist/generation/repository-run.js
+[O-manifest]: ../../target/openwiki/node_modules/openwiki/dist/generation/page-manifest.js
+[O-run-state]: ../../target/openwiki/node_modules/openwiki/dist/generation/run-state.js
+[O-workspaces]: ../../target/openwiki/node_modules/openwiki/dist/linking/wiki-workspaces.js
+[O-home]: ../../target/openwiki/node_modules/openwiki/dist/config/openwiki-home.js
+[O-skill]: ../../target/openwiki/node_modules/openwiki/integrations/openwiki/SKILL.md
 [L-head]: https://github.com/geronimo-iia/llm-wiki/commit/f42c5898877e2fefde54e29c4772ec3f4cde0feb
 [L-cargo]: https://github.com/geronimo-iia/llm-wiki/blob/f42c5898877e2fefde54e29c4772ec3f4cde0feb/Cargo.toml
 [L-readme]: https://github.com/geronimo-iia/llm-wiki/blob/f42c5898877e2fefde54e29c4772ec3f4cde0feb/README.md
