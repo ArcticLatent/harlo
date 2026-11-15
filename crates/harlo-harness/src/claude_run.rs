@@ -106,6 +106,8 @@ struct State {
     /// Claude's tasks in the background (shells, and agents sent there):
     /// their end is a notice, as the transcript keeps it.
     background: HashSet<String>,
+    /// The tasks that are shell commands (Claude says only when they start).
+    shells: HashSet<String>,
     /// A name given before the transcript exists (written once it does).
     pending_title: Option<String>,
 }
@@ -1784,6 +1786,9 @@ fn task_frame(shared: &Arc<Shared>, frame: &Value) {
 /// transcript again shows it. (Claude reports a shell command that runs a
 /// while as a task too, in the foreground: its card says how it went.)
 fn background_task(shared: &Arc<Shared>, task: &str, frame: &Value) {
+    if frame["subtype"] == "task_started" && frame["task_type"] == "local_bash" {
+        shared.state.lock().unwrap().shells.insert(task.to_owned());
+    }
     let started = frame["subtype"] == "task_started" && frame["is_backgrounded"] == true;
     if started || frame["patch"]["is_backgrounded"] == true {
         shared.state.lock().unwrap().background.insert(task.to_owned());
@@ -1792,19 +1797,16 @@ fn background_task(shared: &Arc<Shared>, task: &str, frame: &Value) {
     if frame["subtype"] != "task_notification" {
         return;
     }
-    let detached = {
+    let (command, detached) = {
         let mut st = shared.state.lock().unwrap();
         let call = st.tasks.get(task).cloned().unwrap_or_default();
-        st.background.remove(task) || st.subagents.get(&call).is_some_and(|e| e["detached"] == true)
+        let command = st.shells.remove(task);
+        (command, st.background.remove(task) || st.subagents.get(&call).is_some_and(|e| e["detached"] == true))
     };
     if !detached {
         return;
     }
-    let text = match (frame["summary"].as_str().map(str::trim).filter(|s| !s.is_empty()), frame["status"].as_str().filter(|s| !s.is_empty())) {
-        (Some(summary), _) => summary.to_owned(),
-        (None, Some(status)) => format!("A background task {status}."),
-        (None, None) => "A background task ended.".to_owned(),
-    };
+    let text = claude::task_text(frame["summary"].as_str(), frame["status"].as_str(), command);
     let message = json!({ "role": "custom", "customType": "task-notification", "display": true, "content": text });
     shared.state.lock().unwrap().keep(&message);
     shared.emit(HarnessEvent::MessageEnd { id: shared.next_id("n"), message });
@@ -2293,6 +2295,14 @@ mod tests {
             json!({ "subtype": "task_started", "task_id": "a2", "tool_use_id": "t2", "task_type": "local_agent", "subagent_type": "Explore" }),
             json!({ "subtype": "task_updated", "task_id": "a2", "patch": { "is_backgrounded": true } }),
             json!({ "subtype": "task_notification", "task_id": "a2", "tool_use_id": "t2", "status": "failed" }),
+            // A background shell that was stopped: Claude gives only its
+            // command; said as the others are.
+            json!({ "subtype": "task_started", "task_id": "b2", "task_type": "local_bash", "description": "verify.sh changed", "is_backgrounded": true }),
+            json!({ "subtype": "task_notification", "task_id": "b2", "status": "stopped", "summary": "verify.sh changed > /tmp/v.txt" }),
+            // A subagent sent to the background: its summary as it is.
+            json!({ "subtype": "task_started", "task_id": "a3", "tool_use_id": "t3", "task_type": "local_agent", "subagent_type": "Explore" }),
+            json!({ "subtype": "task_updated", "task_id": "a3", "patch": { "is_backgrounded": true } }),
+            json!({ "subtype": "task_notification", "task_id": "a3", "tool_use_id": "t3", "status": "completed", "summary": "Found it." }),
         ] {
             incoming(&s, system(frame)).await;
         }
@@ -2305,9 +2315,9 @@ mod tests {
                 notices.push(message["content"].as_str().unwrap_or_default().to_owned());
             }
         }
-        assert_eq!(notices, ["Background command \"cargo test\" completed (exit code 0)", "A background task failed."]);
-        assert_eq!(s.state.lock().unwrap().messages.iter().filter(|m| m["role"] == "custom").count(), 2, "kept with the messages");
-        assert!(s.state.lock().unwrap().background.is_empty(), "ended ones are forgotten");
+        assert_eq!(notices, ["Background command \"cargo test\" completed (exit code 0)", "A background task failed.", "Background command \"verify.sh changed > /tmp/v.txt\" was stopped", "Found it."]);
+        assert_eq!(s.state.lock().unwrap().messages.iter().filter(|m| m["role"] == "custom").count(), 4, "kept with the messages");
+        assert!(s.state.lock().unwrap().background.is_empty() && s.state.lock().unwrap().shells.is_empty(), "ended ones are forgotten");
     }
 
     #[test]

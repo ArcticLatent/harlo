@@ -189,11 +189,33 @@ fn task_notice(entry: &Value) -> Option<String> {
     if entry["origin"]["kind"] != "task-notification" && !t.starts_with("<task-notification>") {
         return None;
     }
-    let summary = tag(t, "summary").filter(|s| !s.is_empty()).map(str::to_owned);
-    Some(summary.unwrap_or_else(|| match tag(t, "status") {
-        Some(status) if !status.is_empty() => format!("A background task {status}."),
-        _ => "A background task ended.".to_owned(),
-    }))
+    // (A command's task is `b…`; its text is XML-escaped here.)
+    let command = tag(t, "task-id").is_some_and(|id| id.starts_with('b'));
+    Some(task_text(tag(t, "summary").map(unescape).as_deref(), tag(t, "status"), command))
+}
+
+/// A background task's notice: Claude's sentence, or, when it gives only the
+/// command (one that was stopped, say), the same sentence made of the
+/// command and how it ended, so it reads as the others do.
+pub(crate) fn task_text(summary: Option<&str>, status: Option<&str>, command: bool) -> String {
+    let summary = summary.map(str::trim).filter(|s| !s.is_empty());
+    match (summary, status.filter(|s| !s.is_empty())) {
+        (Some(said), Some(status)) if command && !said.starts_with("Background ") => {
+            let how = match status {
+                "killed" | "stopped" => "was stopped",
+                other => other,
+            };
+            format!("Background command \"{said}\" {how}")
+        }
+        (Some(said), _) => said.to_owned(),
+        (None, Some(status)) => format!("A background task {status}."),
+        (None, None) => "A background task ended.".to_owned(),
+    }
+}
+
+/// XML's escapes, undone.
+fn unescape(text: &str) -> String {
+    text.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&#39;", "'").replace("&amp;", "&")
 }
 
 fn tag<'a>(text: &'a str, name: &str) -> Option<&'a str> {
@@ -1498,10 +1520,13 @@ mod tests {
             r#"{"type":"assistant","isSidechain":false,"message":{"id":"m2","model":"claude-haiku-4-5","role":"assistant","content":[{"type":"text","text":"hello"}]}}"#,
             r#"{"type":"ai-title","aiTitle":"Read the notes","sessionId":"s1"}"#,
             r#"{"type":"user","uuid":"n1","isSidechain":false,"origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification>\n<task-id>b1</task-id>\n<status>stopped</status>\n<summary>Background shell command didn't finish before the previous session ended</summary>\n</task-notification>"}}"#,
+            r#"{"type":"user","uuid":"n2","isSidechain":false,"origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification>\n<task-id>bqx0d4d4w</task-id>\n<status>stopped</status>\n<summary>cd /w; make &gt; /tmp/out.txt 2&gt;&amp;1</summary>\n</task-notification>"}}"#,
         ]
         .join("\n");
         let h = history(&text);
-        assert_eq!(h.len(), 5, "{h:#?}");
+        assert_eq!(h.len(), 6, "{h:#?}");
+        // A stopped command, given as its command alone: said as the others are.
+        assert_eq!(h[5]["content"], "Background command \"cd /w; make > /tmp/out.txt 2>&1\" was stopped");
         // Claude Code's notice that a background task ended isn't the user's.
         assert_eq!(h[4], json!({"role":"custom","customType":"task-notification","display":true,"content":"Background shell command didn't finish before the previous session ended"}));
         assert!(!user_entries_text(&text).contains(&"n1".to_owned()), "and not one of their prompts");
