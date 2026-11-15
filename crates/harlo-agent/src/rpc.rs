@@ -681,7 +681,7 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
             let cwd = std::env::current_dir().unwrap_or_default();
             let home = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default();
             for s in crate::skills::find(&cwd, &home, &crate::auth::config_dir()) {
-                commands.push(json!({ "name": format!("skill:{}", s.name), "description": s.description, "source": "skill", "path": s.path, "input": { "hint": "what to do (optional)" } }));
+                commands.push(json!({ "name": format!("skill:{}", s.name), "description": s.description, "source": "skill", "path": s.path, "input": { "hint": s.hint.as_deref().unwrap_or("what to do (optional)") } }));
             }
             reply(Ok(json!({ "commands": commands })))
         }

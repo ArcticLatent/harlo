@@ -407,66 +407,14 @@ Popup {
                     }
                 }
             }
-            Heading { Layout.leftMargin: 24; Layout.rightMargin: 24; Layout.topMargin: 10; title: "Theme"; subtitle: themes.families.length + " themes, each in light and dark." }
-            GridLayout {
-                Layout.fillWidth: true
+            Heading { Layout.leftMargin: 24; Layout.rightMargin: 24; Layout.topMargin: 10; title: "Theme"; subtitle: themes.families.length + " themes, each in light and dark. Shown in " + (Theme.isLight ? "light" : "dark") + ", as chosen above." }
+            ThemeList {
+                Layout.topMargin: 4
                 Layout.leftMargin: 24
                 Layout.rightMargin: 24
                 Layout.bottomMargin: 20
-                columns: Math.max(2, Math.floor((width + 10) / 170))
-                columnSpacing: 10
-                rowSpacing: 10
-                Repeater {
-                    model: themes.families
-                    Rectangle {
-                        id: themeCard
-                        required property var modelData
-                        objectName: "setupTheme-" + modelData.name
-                        readonly property bool current: Workspace.themeFamily === modelData.name
-                        Layout.fillWidth: true
-                        implicitHeight: 100
-                        radius: 12
-                        color: themeHover.hovered ? Theme.rowHover : Theme.raised
-                        border.color: current ? Theme.accent : Theme.hairline
-                        border.width: current ? 2 : 1
-                        HoverHandler { id: themeHover; cursorShape: Qt.PointingHandCursor }
-                        TapHandler { onTapped: Workspace.chooseTheme(themeCard.modelData.name) }
-                        Row {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            y: 12
-                            spacing: 10
-                            Repeater {
-                                model: ["light", "dark"]
-                                Item {
-                                    required property string modelData
-                                    readonly property var cols: themeCard.modelData[modelData]
-                                    width: 46
-                                    height: 46
-                                    visible: cols[0] !== ""
-                                    Rectangle {
-                                        visible: themeCard.current && Theme.variant === parent.modelData
-                                        anchors.fill: parent
-                                        radius: width / 2
-                                        color: "transparent"
-                                        border.color: Theme.accent
-                                        border.width: 2
-                                    }
-                                    ThemeOrb { anchors.centerIn: parent; width: 38; height: 38; colors: parent.cols }
-                                }
-                            }
-                        }
-                        Label {
-                            x: 12
-                            y: parent.height - height - 10
-                            width: parent.width - 24
-                            text: themeCard.modelData.name
-                            color: themeCard.current ? Theme.text : Theme.textMuted
-                            font.pixelSize: Theme.px(12.5)
-                            font.weight: themeCard.current ? Font.DemiBold : Font.Normal
-                            elide: Text.ElideRight
-                        }
-                    }
-                }
+                families: themes.families
+                objectPrefix: "setupTheme-"
             }
         }
     }

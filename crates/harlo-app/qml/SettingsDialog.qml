@@ -45,7 +45,8 @@ Popup {
         { id: "orchestration", title: "Orchestration", icon: "ai-agent", group: "agents", keywords: "orchestration handoff advisor committee second opinion delegate subagent agents start sessions mcp tools" },
         { id: "remote", title: "Remote Instances", icon: "server", group: "agents", keywords: "remote ssh server host machine nas instance connect" },
         { id: "about", title: "About Harlo", icon: "information", group: "about", keywords: "about version release licence license mit website source code github changelog what's new report problem issue bug logs" },
-        { id: "providers", title: "Providers", icon: "robot-2", group: "agents", keywords: "providers harnesses harlo claude binary path program agent models version enable disable debug log logs protocol crash diagnostics sandbox bubblewrap sign in login log in account accounts api key oauth credentials code intelligence language server lsp rust-analyzer pyright gopls clangd typescript" },
+        { id: "providers", title: "Providers", icon: "robot-2", group: "agents", keywords: "providers harnesses harlo claude binary path program agent models version enable disable debug log logs protocol crash diagnostics sandbox bubblewrap sign in login log in account accounts api key oauth credentials" },
+        { id: "lsp", title: "LSP", icon: "code-box", group: "agents", keywords: "lsp code intelligence language server servers definition references calls rust-analyzer pyright gopls clangd typescript" },
         { id: "servers", title: "Model servers", icon: "server", group: "agents", keywords: "model servers local models ollama lm studio llama.cpp vllm sglang gateway openai compatible custom provider providers.json harlo basalt" },
     ]
     // (About goes last, under no heading.)
@@ -788,7 +789,7 @@ Popup {
                     Layout.fillWidth: true
                     sourceComponent: ({
                         general: generalPage, appearance: appearancePage, notifications: notificationsPage, voice: voicePage, devices: devicesPage,
-                        shortcuts: shortcutsPage, projects: projectsPage, wiki: wikiPage, worktrees: worktreesPage, git: gitPage, schedules: schedulesPage, providers: providersPage, servers: serversPage, remote: remotePage, mcp: mcpPage, orchestration: orchestrationPage,
+                        shortcuts: shortcutsPage, projects: projectsPage, wiki: wikiPage, worktrees: worktreesPage, git: gitPage, schedules: schedulesPage, providers: providersPage, lsp: lspPage, servers: serversPage, remote: remotePage, mcp: mcpPage, orchestration: orchestrationPage,
                         about: aboutPage
                     })[root.page] || null
                 }
@@ -1107,68 +1108,10 @@ Popup {
                 }
             }
             Rule { }
-            SectionHeader { title: "Themes"; subtitle: appearance.families.length + " themes, each in light and dark." }
-            GridLayout {
-                Layout.fillWidth: true
-                Layout.topMargin: 10
-                columns: Math.max(2, Math.floor((width + 12) / 200))
-                columnSpacing: 12
-                rowSpacing: 12
-                Repeater {
-                    model: appearance.families
-                    Rectangle {
-                        id: themeCard
-                        required property var modelData
-                        objectName: "theme-" + modelData.name
-                        readonly property bool current: Workspace.themeFamily === modelData.name
-                        Layout.fillWidth: true
-                        // (Compact: 31 of them make a long page.)
-                        implicitHeight: 94
-                        radius: 12
-                        color: themeHover.hovered ? Theme.rowHover : Theme.raised
-                        Behavior on color { ColorAnimation { duration: Theme.hoverMotion } }
-                        border.color: current ? Theme.accent : Theme.hairline
-                        border.width: current ? 2 : 1
-                        HoverHandler { id: themeHover; cursorShape: Qt.PointingHandCursor }
-                        TapHandler { onTapped: Workspace.chooseTheme(themeCard.modelData.name) }
-                        Row {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            y: 11
-                            spacing: 12
-                            Repeater {
-                                model: ["light", "dark"]
-                                Item {
-                                    required property string modelData
-                                    readonly property var cols: themeCard.modelData[modelData]
-                                    // The variant showing now: ringed.
-                                    readonly property bool showing: themeCard.current && Theme.variant === modelData
-                                    width: 46
-                                    height: 46
-                                    visible: cols[0] !== ""
-                                    Rectangle {
-                                        visible: parent.showing
-                                        anchors.fill: parent
-                                        radius: width / 2
-                                        color: "transparent"
-                                        border.color: Theme.accent
-                                        border.width: 2
-                                    }
-                                    ThemeOrb { anchors.centerIn: parent; width: 38; height: 38; colors: parent.cols }
-                                }
-                            }
-                        }
-                        Label {
-                            x: 14
-                            y: parent.height - height - 10
-                            width: parent.width - 28
-                            text: themeCard.modelData.name
-                            color: themeCard.current ? Theme.text : Theme.textMuted
-                            font.pixelSize: Theme.px(13)
-                            font.weight: themeCard.current ? Font.DemiBold : Font.Normal
-                            elide: Text.ElideRight
-                        }
-                    }
-                }
+            SectionHeader { title: "Themes"; subtitle: appearance.families.length + " themes, each in light and dark. Shown in " + (Theme.isLight ? "light" : "dark") + ", as chosen above." }
+            ThemeList {
+                Layout.topMargin: 14
+                families: appearance.families
             }
             Rule { }
             SectionHeader { title: "Interface" }
@@ -4274,6 +4217,121 @@ Popup {
     }
 
     Component {
+        id: lspPage
+        ColumnLayout {
+            spacing: 0
+            SectionHeader {
+                title: "Language servers"
+                subtitle: "The ones installed on this computer; harlo finds them, it doesn't install them."
+            }
+            Group {
+                // The language servers found here (it doesn't install them).
+                SettingRow {
+                    id: codeIntel
+                    readonly property var info: Accounts.languageServers === "" ? ({}) : JSON.parse(Accounts.languageServers)
+                    title: "Code intelligence"
+                    detail: "Harlo asks a language server where code is defined, used and called from."
+                    more: "For when a text search can't tell same-named things apart, for far fewer tokens on those questions. It uses the servers installed on this computer: install one for a language you work in, then start a new session."
+                        + (codeIntel.info.state === "failed" ? "\n" + codeIntel.info.error : "")
+                    icon: "code-box"
+                    Component.onCompleted: Accounts.loadLanguageServers()
+                    FlatButton {
+                        objectName: "harloLanguageServersCheck"
+                        text: codeIntel.info.state === "loading" ? "Checking…" : "Check again"
+                        enabled: codeIntel.info.state !== "loading"
+                        font.pixelSize: Theme.px(12)
+                        onClicked: Accounts.loadLanguageServers()
+                    }
+                }
+                ColumnLayout {
+                    objectName: "harloLanguageServers"
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 60
+                    Layout.rightMargin: 16
+                    Layout.bottomMargin: 14
+                    spacing: 10
+                    // Copies through a hidden TextEdit (QML has no clipboard API).
+                    TextEdit {
+                        id: lspCopier
+                        visible: false
+                        function copyText(t) { text = t; selectAll(); copy(); deselect(); text = "" }
+                    }
+                    Repeater {
+                        model: codeIntel.info.list || []
+                        // Each language: its name, then where its server is or how to install it.
+                        ColumnLayout {
+                            id: lsRow
+                            required property var modelData
+                            readonly property bool ready: modelData.state === "ready"
+                            readonly property bool broken: modelData.state === "broken"
+                            readonly property bool command: !ready && modelData.install.indexOf("Install ") !== 0
+                            Layout.fillWidth: true
+                            spacing: 2
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+                                Icon {
+                                    name: lsRow.ready ? "checkbox-circle" : "close-circle"
+                                    color: lsRow.ready ? Theme.success : lsRow.broken ? Theme.warning : Theme.textMuted
+                                    implicitWidth: 14
+                                    implicitHeight: 14
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: lsRow.modelData.language + (lsRow.ready ? "" : lsRow.broken ? " · doesn't start" : " · not installed")
+                                    color: Theme.text
+                                    font.pixelSize: Theme.px(12.5)
+                                    elide: Text.ElideRight
+                                }
+                                // (Hidden, not removed, so every row is as tall.)
+                                FlatButton {
+                                    opacity: lsRow.command ? 1 : 0
+                                    enabled: lsRow.command
+                                    text: "Copy"
+                                    font.pixelSize: Theme.px(11.5)
+                                    onClicked: lspCopier.copyText(lsRow.modelData.install)
+                                }
+                            }
+                            // Why, in its first clause; all of it (and the
+                            // program's path) on hover.
+                            Label {
+                                id: lsWhy
+                                objectName: "lspWhy"
+                                visible: lsRow.broken
+                                Layout.fillWidth: true
+                                Layout.leftMargin: 22
+                                readonly property string full: lsRow.modelData.path + ": " + lsRow.modelData.why.replace(/\.+$/, "") + "."
+                                text: lsRow.modelData.why.split(/[,;:] | because /)[0].replace(/\.+$/, "") + "."
+                                color: Theme.warning
+                                font.pixelSize: Theme.px(12)
+                                elide: Text.ElideRight
+                                HoverHandler { id: lsWhyHover }
+                                ToolTip.visible: lsWhyHover.hovered
+                                ToolTip.text: lsWhy.full
+                                ToolTip.delay: 300
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                Layout.leftMargin: 22
+                                text: lsRow.ready ? lsRow.modelData.path : lsRow.modelData.install
+                                color: Theme.textMuted
+                                font.family: lsRow.ready || lsRow.command ? Theme.mono : Theme.uiFont
+                                font.pixelSize: Theme.px(12)
+                                // (A path shortened in the middle; a command in full.)
+                                elide: lsRow.ready ? Text.ElideMiddle : Text.ElideNone
+                                wrapMode: lsRow.ready ? Text.NoWrap : Text.Wrap
+                                ToolTip.visible: lsHover.hovered && truncated
+                                ToolTip.text: text
+                                HoverHandler { id: lsHover }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Component {
         id: providersPage
         ColumnLayout {
             spacing: 0
@@ -4765,109 +4823,6 @@ Popup {
                         onActivated: i => {
                             budgetRow.saved = budgetRow.choices[i]
                             Workspace.setSetting("harlo_helper_budget", budgetRow.saved)
-                        }
-                    }
-                }
-                // The language servers Harlo finds here (it doesn't install them).
-                SettingRow {
-                    id: codeIntel
-                    divider: true
-                    readonly property var info: Accounts.languageServers === "" ? ({}) : JSON.parse(Accounts.languageServers)
-                    title: "Code intelligence"
-                    detail: "Harlo asks a language server where code is defined, used and called from."
-                    more: "For when a text search can't tell same-named things apart, for far fewer tokens on those questions. It uses the servers installed on this computer: install one for a language you work in, then start a new session."
-                        + (codeIntel.info.state === "failed" ? "\n" + codeIntel.info.error : "")
-                    icon: "code-box"
-                    Component.onCompleted: Accounts.loadLanguageServers()
-                    FlatButton {
-                        objectName: "harloLanguageServersCheck"
-                        text: codeIntel.info.state === "loading" ? "Checking…" : "Check again"
-                        enabled: codeIntel.info.state !== "loading"
-                        font.pixelSize: Theme.px(12)
-                        onClicked: Accounts.loadLanguageServers()
-                    }
-                }
-                ColumnLayout {
-                    objectName: "harloLanguageServers"
-                    Layout.fillWidth: true
-                    Layout.leftMargin: 60
-                    Layout.rightMargin: 16
-                    Layout.bottomMargin: 14
-                    spacing: 10
-                    // Copies through a hidden TextEdit (QML has no clipboard API).
-                    TextEdit {
-                        id: lspCopier
-                        visible: false
-                        function copyText(t) { text = t; selectAll(); copy(); deselect(); text = "" }
-                    }
-                    Repeater {
-                        model: codeIntel.info.list || []
-                        // Each language: its name, then where its server is or how to install it.
-                        ColumnLayout {
-                            id: lsRow
-                            required property var modelData
-                            readonly property bool ready: modelData.state === "ready"
-                            readonly property bool broken: modelData.state === "broken"
-                            readonly property bool command: !ready && modelData.install.indexOf("Install ") !== 0
-                            Layout.fillWidth: true
-                            spacing: 2
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 8
-                                Icon {
-                                    name: lsRow.ready ? "checkbox-circle" : "close-circle"
-                                    color: lsRow.ready ? Theme.success : lsRow.broken ? Theme.warning : Theme.textMuted
-                                    implicitWidth: 14
-                                    implicitHeight: 14
-                                }
-                                Label {
-                                    Layout.fillWidth: true
-                                    text: lsRow.modelData.language + (lsRow.ready ? "" : lsRow.broken ? " · doesn't start" : " · not installed")
-                                    color: Theme.text
-                                    font.pixelSize: Theme.px(12.5)
-                                    elide: Text.ElideRight
-                                }
-                                // (Hidden, not removed, so every row is as tall.)
-                                FlatButton {
-                                    opacity: lsRow.command ? 1 : 0
-                                    enabled: lsRow.command
-                                    text: "Copy"
-                                    font.pixelSize: Theme.px(11.5)
-                                    onClicked: lspCopier.copyText(lsRow.modelData.install)
-                                }
-                            }
-                            // Why, in its first clause; all of it (and the
-                            // program's path) on hover.
-                            Label {
-                                id: lsWhy
-                                objectName: "lspWhy"
-                                visible: lsRow.broken
-                                Layout.fillWidth: true
-                                Layout.leftMargin: 22
-                                readonly property string full: lsRow.modelData.path + ": " + lsRow.modelData.why.replace(/\.+$/, "") + "."
-                                text: lsRow.modelData.why.split(/[,;:] | because /)[0].replace(/\.+$/, "") + "."
-                                color: Theme.warning
-                                font.pixelSize: Theme.px(12)
-                                elide: Text.ElideRight
-                                HoverHandler { id: lsWhyHover }
-                                ToolTip.visible: lsWhyHover.hovered
-                                ToolTip.text: lsWhy.full
-                                ToolTip.delay: 300
-                            }
-                            Label {
-                                Layout.fillWidth: true
-                                Layout.leftMargin: 22
-                                text: lsRow.ready ? lsRow.modelData.path : lsRow.modelData.install
-                                color: Theme.textMuted
-                                font.family: lsRow.ready || lsRow.command ? Theme.mono : Theme.uiFont
-                                font.pixelSize: Theme.px(12)
-                                // (A path shortened in the middle; a command in full.)
-                                elide: lsRow.ready ? Text.ElideMiddle : Text.ElideNone
-                                wrapMode: lsRow.ready ? Text.NoWrap : Text.Wrap
-                                ToolTip.visible: lsHover.hovered && truncated
-                                ToolTip.text: text
-                                HoverHandler { id: lsHover }
-                            }
                         }
                     }
                 }

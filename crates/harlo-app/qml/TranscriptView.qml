@@ -2539,6 +2539,12 @@ Item {
                     required property string title
                     required property string subtitle
                     required property string label
+                    required property string command
+                    required property string result
+                    required property string rowState
+                    // A background command that ended: how it went (label,
+                    // subtitle), the command, its last lines (result).
+                    readonly property bool background: title === "background"
                     // harlo's message to the agent (a helper's report, …): it
                     // opens a turn, as harlo's; `subtitle` is the session
                     // it's about.
@@ -2550,10 +2556,132 @@ Item {
                     readonly property real gap: root.gapAbove(harlo ? "harlo" : "notice", ListView.previousSection)
                     AgentHead { replyModel: noticeRow.rowModel; visible: !noticeRow.harlo && root.opensTurn(noticeRow.ListView.previousSection); y: noticeRow.gap - height - 10 }
                     width: view.width
-                    implicitHeight: (harlo ? harloCol.implicitHeight + 6 : noticeText.implicitHeight + 4) + gap
+                    implicitHeight: (harlo ? harloCol.implicitHeight + 6 : background ? bgCol.implicitHeight + 4 : noticeText.implicitHeight + 4) + gap
+                    Column {
+                        id: bgCol
+                        objectName: "backgroundNotice"
+                        visible: noticeRow.background
+                        x: view.columnX
+                        y: noticeRow.gap
+                        width: view.columnWidth
+                        spacing: 4
+                        readonly property bool failed: noticeRow.rowState === "error"
+                        readonly property bool open: view.expanded[noticeRow.rowKey] === true
+                        // (The command's first line: the rest, and its last
+                        // lines, a click away.)
+                        readonly property string firstLine: noticeRow.command.split("\n")[0].trim()
+                        readonly property bool more: noticeRow.command.indexOf("\n") >= 0 || noticeRow.result !== ""
+                        Row {
+                            id: bgHead
+                            spacing: 7
+                            width: parent.width
+                            Icon {
+                                name: "terminal-box"
+                                width: Theme.px(14)
+                                height: width
+                                color: bgCol.failed ? Theme.error : Theme.textMuted
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                            Label {
+                                objectName: "backgroundHeadline"
+                                text: noticeRow.label
+                                color: bgCol.failed ? Theme.error : Theme.textMuted
+                                font.pixelSize: Theme.px(12.5)
+                                font.weight: Font.Medium
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                            Label {
+                                visible: noticeRow.subtitle !== ""
+                                // (Cut short when the column is narrow.)
+                                width: Math.max(0, Math.min(implicitWidth, bgHead.width - x - (bgMore.visible ? bgMore.width + bgHead.spacing : 0)))
+                                text: noticeRow.subtitle
+                                elide: Text.ElideRight
+                                color: Theme.textFaint
+                                font.pixelSize: Theme.px(12)
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                            Icon {
+                                id: bgMore
+                                visible: bgCol.more || bgLine.truncated
+                                name: bgCol.open ? "arrow-down-s" : "arrow-right-s"
+                                color: Theme.textFaint
+                                width: Theme.px(14)
+                                height: width
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                            TapHandler { enabled: bgCol.more || bgLine.truncated; onTapped: view.toggle(noticeRow.rowKey) }
+                            HoverHandler { enabled: bgCol.more || bgLine.truncated; cursorShape: Qt.PointingHandCursor }
+                        }
+                        // The command: one line, cut at the end; opened, all of it.
+                        Item {
+                            width: parent.width
+                            height: bgLine.implicitHeight
+                            visible: !bgCol.open
+                            Label {
+                                id: bgLine
+                                objectName: "backgroundCommand"
+                                x: Theme.px(14) + 7
+                                width: parent.width - x
+                                text: "$ " + bgCol.firstLine + (noticeRow.command.indexOf("\n") >= 0 ? " …" : "")
+                                textFormat: Text.PlainText
+                                color: Theme.textFaint
+                                font.family: Theme.mono
+                                font.pixelSize: Theme.px(12)
+                                elide: Text.ElideRight
+                                maximumLineCount: 1
+                                wrapMode: Text.NoWrap
+                            }
+                            TapHandler { enabled: bgCol.more || bgLine.truncated; onTapped: view.toggle(noticeRow.rowKey) }
+                            HoverHandler { enabled: bgCol.more || bgLine.truncated; cursorShape: Qt.PointingHandCursor }
+                            ToolTip.visible: bgHover.hovered && (bgCol.more || bgLine.truncated)
+                            ToolTip.delay: 600
+                            ToolTip.text: "Show the whole command" + (noticeRow.result !== "" ? " and its last lines" : "")
+                            HoverHandler { id: bgHover }
+                        }
+                        Rectangle {
+                            objectName: "backgroundOpen"
+                            visible: bgCol.open
+                            width: parent.width
+                            height: bgOpen.implicitHeight + 16
+                            radius: 6
+                            color: Theme.codeBg
+                            Column {
+                                id: bgOpen
+                                x: 10
+                                y: 8
+                                width: parent.width - 20
+                                spacing: 8
+                                TextEdit {
+                                    width: parent.width
+                                    readOnly: true
+                                    selectByMouse: true
+                                    text: "$ " + noticeRow.command
+                                    textFormat: TextEdit.PlainText
+                                    wrapMode: TextEdit.Wrap
+                                    color: Theme.textMuted
+                                    selectionColor: Theme.selection
+                                    font.family: Theme.mono
+                                    font.pixelSize: Theme.px(12)
+                                }
+                                TextEdit {
+                                    visible: noticeRow.result !== ""
+                                    width: parent.width
+                                    readOnly: true
+                                    selectByMouse: true
+                                    text: noticeRow.result
+                                    textFormat: TextEdit.PlainText
+                                    wrapMode: TextEdit.Wrap
+                                    color: Theme.text
+                                    selectionColor: Theme.selection
+                                    font.family: Theme.mono
+                                    font.pixelSize: Theme.px(12)
+                                }
+                            }
+                        }
+                    }
                     Label {
                         id: noticeText
-                        visible: !noticeRow.harlo
+                        visible: !noticeRow.harlo && !noticeRow.background
                         x: view.columnX
                         y: noticeRow.gap
                         width: view.columnWidth

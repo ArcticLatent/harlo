@@ -12,6 +12,8 @@ Rectangle {
     required property ChatSession session
     property alias text: input.text
     readonly property bool completionVisible: completion.visible
+    // Test hook.
+    readonly property alias completionList: list
     readonly property bool inputFocused: input.activeFocus
     signal submitted(string text, string mode)
     /// Sign this agent in on that host.
@@ -236,51 +238,151 @@ Rectangle {
         completionMode = ""
     }
 
+    /// A command's description on one line: its first paragraph, spaces
+    /// and line breaks run together (skills' descriptions go on for lines).
+    function oneLine(text) {
+        return (text || "").split(/\n\s*\n/)[0].replace(/\s+/g, " ").trim()
+    }
+    /// `name` with the part matching `query` marked (accent, bold).
+    function markedName(name, query) {
+        const esc = t => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        const at = query ? name.toLowerCase().indexOf(query.toLowerCase()) : -1
+        if (at < 0) return esc(name)
+        return esc(name.substring(0, at)) + "<b><font color='" + Theme.rgb(Theme.accent) + "'>" + esc(name.substring(at, at + query.length))
+            + "</font></b>" + esc(name.substring(at + query.length))
+    }
+
     Popup {
         id: completion
+        objectName: "completionPopup"
+        readonly property bool commands: root.completionMode === "command"
+        // (Commands: two lines each, about seven in view; files one line.)
+        readonly property int rowHeight: commands ? 46 : 30
         y: -height - 6
         x: 8
-        width: Math.min(root.width - 16, 560)
-        height: Math.min(list.contentHeight + 12, 300)
+        width: Math.min(root.width - 16, commands ? 600 : 560)
+        height: Math.min(list.contentHeight, rowHeight * (commands ? 7 : 10)) + (footer.visible ? footer.implicitHeight + 6 : 0) + 12
         padding: 6
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
         background: GlassSurface { radius: 10 }
-        ListView {
-            id: list
+        ColumnLayout {
             anchors.fill: parent
-            clip: true
-            model: root.completionItems
-            boundsBehavior: Flickable.StopAtBounds
-            highlightMoveDuration: 0
-            delegate: ItemDelegate {
-                id: item
-                required property var modelData
-                required property int index
-                width: ListView.view.width
-                height: 28
-                highlighted: ListView.isCurrentItem
-                background: Rectangle { radius: 4; color: item.highlighted ? Theme.selected : item.hovered ? Theme.hover : "transparent" }
-                contentItem: RowLayout {
-                    spacing: 10
-                    FileIcon { visible: root.completionMode === "file" && item.modelData.kind !== "session"; path: visible ? item.modelData.name : ""; Layout.preferredWidth: 16; Layout.preferredHeight: 16 }
-                    Icon { visible: item.modelData.kind === "session"; name: "chat-thread"; Layout.preferredWidth: 16; Layout.preferredHeight: 16 }
-                    Label {
-                        text: (root.completionMode === "command" ? "/" : "") + item.modelData.name
-                        color: Theme.foreground
-                        font.family: root.completionMode === "file" && item.modelData.kind !== "session" ? Theme.mono : Qt.application.font.family
-                        font.pixelSize: Theme.px(13)
-                        elide: Text.ElideMiddle
-                        Layout.maximumWidth: item.modelData.kind === "session" ? list.width - 190 : root.completionMode === "file" ? list.width - 46 : 220
+            spacing: 6
+            ListView {
+                id: list
+                objectName: "completionList"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                model: root.completionItems
+                boundsBehavior: Flickable.StopAtBounds
+                highlightMoveDuration: 0
+                // (The arrow keys keep the chosen one in view.)
+                onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
+                ScrollBar.vertical: ScrollBar { policy: list.contentHeight > list.height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff }
+                delegate: ItemDelegate {
+                    id: item
+                    required property var modelData
+                    required property int index
+                    readonly property bool command: completion.commands
+                    readonly property string description: command ? root.oneLine(modelData.detail) : modelData.detail
+                    width: ListView.view.width
+                    height: completion.rowHeight
+                    padding: 0
+                    leftPadding: 10
+                    rightPadding: 10
+                    highlighted: ListView.isCurrentItem
+                    background: Rectangle { radius: 6; color: item.highlighted ? Theme.selected : item.hovered ? Theme.hover : "transparent" }
+                    contentItem: Item {
+                        // A command: its name and what it takes, then what it does.
+                        ColumnLayout {
+                            visible: item.command
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 2
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+                                Label {
+                                    objectName: "commandName"
+                                    text: "/" + root.markedName(item.modelData.name, root.completionQuery)
+                                    textFormat: Text.StyledText
+                                    color: Theme.foreground
+                                    font.family: Theme.mono
+                                    font.pixelSize: Theme.px(13)
+                                    elide: Text.ElideRight
+                                    Layout.maximumWidth: list.width * 0.55
+                                }
+                                Label {
+                                    objectName: "commandHint"
+                                    Layout.fillWidth: true
+                                    visible: text !== ""
+                                    text: item.command ? root.oneLine(item.modelData.hint) : ""
+                                    textFormat: Text.PlainText
+                                    color: Theme.textFaint
+                                    font.family: Theme.mono
+                                    font.pixelSize: Theme.px(11.5)
+                                    elide: Text.ElideRight
+                                    maximumLineCount: 1
+                                }
+                                Item { Layout.fillWidth: true; visible: !item.modelData.hint }
+                            }
+                            Label {
+                                objectName: "commandDescription"
+                                Layout.fillWidth: true
+                                visible: text !== ""
+                                text: item.command ? item.description : ""
+                                textFormat: Text.PlainText
+                                color: Theme.textMuted
+                                font.pixelSize: Theme.px(12.5)
+                                elide: Text.ElideRight
+                                maximumLineCount: 1
+                                wrapMode: Text.NoWrap
+                            }
+                        }
+                        // A file or a session: one line.
+                        RowLayout {
+                            visible: !item.command
+                            anchors.fill: parent
+                            spacing: 10
+                            FileIcon { visible: item.modelData.kind === "file"; path: visible ? item.modelData.name : ""; Layout.preferredWidth: 16; Layout.preferredHeight: 16 }
+                            Icon { visible: item.modelData.kind === "session"; name: "chat-thread"; Layout.preferredWidth: 16; Layout.preferredHeight: 16 }
+                            Label {
+                                text: item.command ? "" : item.modelData.name
+                                color: Theme.foreground
+                                font.family: item.modelData.kind === "file" ? Theme.mono : Qt.application.font.family
+                                font.pixelSize: Theme.px(13)
+                                elide: Text.ElideMiddle
+                                maximumLineCount: 1
+                                Layout.fillWidth: item.modelData.kind === "file"
+                                Layout.maximumWidth: item.modelData.kind === "session" ? list.width - 190 : list.width - 46
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                visible: item.modelData.kind === "session"
+                                text: item.command ? "" : item.description
+                                color: Theme.textMuted
+                                font.pixelSize: Theme.px(12)
+                                elide: Text.ElideRight
+                                maximumLineCount: 1
+                            }
+                        }
                     }
-                    Label {
-                        Layout.fillWidth: true
-                        text: item.modelData.hint ? item.modelData.hint + "  " + item.modelData.detail : item.modelData.detail
-                        color: Theme.muted
-                        font.pixelSize: Theme.px(12)
-                        elide: Text.ElideRight
-                    }
+                    onClicked: { list.currentIndex = index; root.acceptCompletion() }
                 }
-                onClicked: { list.currentIndex = index; root.acceptCompletion() }
+            }
+            Label {
+                id: footer
+                objectName: "completionFooter"
+                visible: completion.commands
+                Layout.fillWidth: true
+                Layout.leftMargin: 10
+                Layout.rightMargin: 10
+                text: completion.width < 460 ? "↑↓ to choose · Tab or Enter to insert" : "↑↓ to choose · Tab or Enter to insert · Esc to close"
+                color: Theme.textMuted
+                font.pixelSize: Theme.px(11)
+                elide: Text.ElideRight
             }
         }
     }

@@ -80,6 +80,9 @@ struct State {
     /// The transcript the conversation before that is read from when asked
     /// (not kept: a long one is hundreds of MB once parsed).
     history: Option<History>,
+    /// Why the transcript a resumed session started from couldn't be read
+    /// then: its conversation before this run is unknown, never empty.
+    history_unread: Option<String>,
     /// What the to-do card is made from: the to-do calls (and their results'
     /// task ids), from the history and since.
     todo: Vec<Value>,
@@ -369,8 +372,17 @@ pub(crate) fn spawn(cfg: HarnessConfig, program: PathBuf) -> Result<(Harness, mp
             let missing = if shared.cfg.remote.is_some() { crate::mirror::missing(f) } else { 0 };
             (std::fs::metadata(f).map_or(0, |m| m.len()) + missing, missing)
         });
-        let saved = file.as_deref().is_some_and(|f| claude::each_saved_message(f, &mut |m| read.add(&m)).is_ok());
-        if saved {
+        let saved = match file.as_deref() {
+            Some(f) => claude::each_saved_message(f, &mut |m| read.add(&m)).map_err(|e| format!("reading {}: {e}", f.display())),
+            None => Err(format!("couldn't fetch {}", path.display())),
+        };
+        // (A transcript here that isn't written yet: nothing before this run.)
+        let unwritten = shared.cfg.remote.is_none() && !path.exists();
+        if let Err(e) = &saved && !unwritten {
+            tracing::warn!("the conversation Claude resumes: {e}");
+            shared.state.lock().unwrap().history_unread = Some(e.clone());
+        }
+        if saved.is_ok() {
             let mut st = shared.state.lock().unwrap();
             st.context_tokens = read.context;
             st.history = Some(History { path: path.clone(), count: read.count, end, whole: missing == 0 });
@@ -764,10 +776,15 @@ async fn command(shared: &Arc<Shared>, pending: &Pending, cmd: Value) {
             reply(true, json!({ "commands": commands }), "");
         }
         "get_messages" => {
-            let (history, spilled, live) = {
+            let (history, spilled, live, unread) = {
                 let st = shared.state.lock().unwrap();
-                (st.history.clone(), st.spilled.file.as_ref().map(|(p, _)| (p.clone(), st.spilled.count)), st.messages.clone())
+                (st.history.clone(), st.spilled.file.as_ref().map(|(p, _)| (p.clone(), st.spilled.count)), st.messages.clone(), st.history_unread.clone())
             };
+            // (The conversation it started from couldn't be read: not an
+            // empty one.)
+            if let Some(e) = unread {
+                return reply(false, Value::Null, &format!("the conversation before this run couldn't be read ({e})"));
+            }
             // (The history as it was read at the start, then what came since;
             // a history that can't be read whole is an error, not a part.)
             let read = history.is_some() || spilled.is_some();
@@ -850,6 +867,7 @@ async fn command(shared: &Arc<Shared>, pending: &Pending, cmd: Value) {
                         let mut st = shared.state.lock().unwrap();
                         st.history = file.as_ref().map(|f| History { path: f.with_file_name(format!("{id}.jsonl")), count: messages.len(), end, whole: true });
                         st.todo = todo_of(&messages);
+                        st.history_unread = None;
                         st.start_over();
                         st.session_id = id;
                         st.subagents.clear();
@@ -1940,6 +1958,23 @@ mod tests {
         source(now.len());
         assert_eq!(texts(&history_messages(&copy, &whole, Some("nas")).unwrap()), ["first", "reply", "again", "more"]);
         let _ = std::fs::remove_dir_all(&slot);
+    }
+
+    /// A resumed session whose transcript couldn't be read when it started
+    /// answers get_messages with an error, never an empty conversation
+    /// (with what came since alone).
+    #[tokio::test]
+    async fn an_unread_history_isnt_an_empty_one() {
+        let (shared, _rx) = shared();
+        shared.state.lock().unwrap().history_unread = Some("couldn't fetch /s.jsonl".into());
+        command(&shared, &Pending::default(), json!({ "type": "prompt", "message": "since" })).await;
+        let pending = Pending::default();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        pending.lock().unwrap().insert("m".into(), tx);
+        command(&shared, &pending, json!({ "type": "get_messages", "id": "m" })).await;
+        let answer = rx.await.unwrap();
+        assert_eq!(answer["success"], false, "{answer}");
+        assert!(answer["error"].as_str().unwrap().contains("couldn't be read (couldn't fetch /s.jsonl)"), "{answer}");
     }
 
     #[tokio::test]

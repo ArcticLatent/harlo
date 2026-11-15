@@ -3136,6 +3136,29 @@ ApplicationWindow {
             const said = 'Background command "sleep 1; echo built" completed (exit code 0)'
             win.check(win.chatText().split(said).length === 2 && win.chatText().indexOf("It finished: built.") >= 0, "a background command's end is a notice as it comes (" + win.chatText().slice(-160) + ")")
             win.check(win.findContaining("<task-notification>", chat.transcript) === null, "not a message of yours")
+            const bg = win.findAllNames("backgroundNotice", chat.transcript).filter(n => n.visible)
+            const head = bg.length ? win.findName("backgroundHeadline", bg[0]) : null
+            const cmd = bg.length ? win.findName("backgroundCommand", bg[0]) : null
+            win.check(bg.length === 1 && head && head.text === "Background command finished" && cmd && cmd.text === "$ sleep 1; echo built", "drawn as how it went over its command (" + (head ? head.text : "none") + " | " + (cmd ? cmd.text : "none") + ")")
+            win.shotWindow("clicks-claude-background")
+            win.sendByKeys("run a script in the background") } }
+        // A long one that fails: its first line, a click away from all of it.
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            const bg = win.findAllNames("backgroundNotice", chat.transcript).filter(n => n.visible)
+            const last = bg[bg.length - 1]
+            const head = last ? win.findName("backgroundHeadline", last) : null
+            const cmd = last ? win.findName("backgroundCommand", last) : null
+            win.check(bg.length === 2 && head && head.text === "Background command failed" && head.color === Theme.error, "a failed one says so, in red (" + (head ? head.text : "none") + ")")
+            win.check(cmd && cmd.text === "$ cd /tmp; python3 - <<'EOF' …" && cmd.lineCount === 1, "its command on one line (" + (cmd ? cmd.text : "none") + ")")
+            win.check(last && win.findContaining("exit code 1", last) !== null, "with its exit code")
+            win.bgNotice = last
+            if (head) win.clickItem(head, "the failed command's line") } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const open = win.bgNotice ? win.findName("backgroundOpen", win.bgNotice) : null
+            win.check(open && open.visible && win.findContaining('print("checking")', open) !== null, "a click shows all of it")
+            win.shotWindow("clicks-claude-background-open")
             win.sendByKeys("go slow please") } }
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
@@ -5105,6 +5128,7 @@ ApplicationWindow {
     property real perfOpen: 0
     property real holdY: 0
     property var harloJobCard: null
+    property var bgNotice: null
     property string harloRightWas: ""
     property var wrapBox: null
 
@@ -5733,7 +5757,11 @@ ApplicationWindow {
             win.clickItem(win.findName("theme-Dracula"), "Dracula") } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
-            win.check(Workspace.themeFamily === "Dracula", "a theme card picks the theme (" + Workspace.themeFamily + ")")
+            win.check(Workspace.themeFamily === "Dracula", "a theme's row picks the theme (" + Workspace.themeFamily + ")")
+            const row = win.findName("theme-Dracula")
+            win.check(row.current && !win.findName("theme-Midnight").current, "and only it is chosen")
+            win.check(row.cols[0] === row.modelData.light[0], "the themes show in light, as chosen (" + row.cols[0] + ")")
+            win.scrollIntoView(row)
             win.shotWindow("clicks-appearance-dracula-light")
             win.clickItem(win.findName("scheme-dark"), "Dark") } }
         PauseAnimation { duration: 400 }
@@ -5741,6 +5769,10 @@ ApplicationWindow {
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
             win.check(Workspace.themeFamily === "Midnight" && String(Theme.accent) === "#b986fd", "Midnight: navy and purple (" + Workspace.themeFamily + ", " + Theme.accent + ")")
+            const mid = win.findName("theme-Midnight")
+            win.check(mid.cols[0] === mid.modelData.dark[0], "and in dark once Dark is (" + mid.cols[0] + ")")
+            win.scrollIntoView(mid)
+            win.shotWindow("clicks-appearance-themes-dark")
             settingsDialog.close()
             win.shotWindow("clicks-appearance-midnight") } }
         PauseAnimation { duration: 500 }
@@ -8819,7 +8851,10 @@ ApplicationWindow {
             const t = win.chatText()
             win.check(t.indexOf("Started in the background as j1") >= 0, "the command starts as a job (" + t.slice(-300) + ")")
             win.check(t.indexOf("The background job ended: built-ok") >= 0, "its end comes as a notice, with its output, and starts a run by itself")
-            win.check(win.findContaining("The background command finished", chat.transcript) !== null && win.findContaining("read or grep it", chat.transcript) === null, "the notice shows in the conversation, in plain words")
+            const bg = win.findAllNames("backgroundNotice", chat.transcript).filter(n => n.visible)
+            const head = bg.length ? win.findName("backgroundHeadline", bg[0]) : null
+            const cmd = bg.length ? win.findName("backgroundCommand", bg[0]) : null
+            win.check(bg.length === 1 && head && head.text === "Background command finished" && cmd && cmd.text === "$ sleep 1; echo built-ok" && win.findContaining("read or grep it", chat.transcript) === null, "the notice shows how it went and its command, apart (" + (head ? head.text : "none") + " | " + (cmd ? cmd.text : "none") + ")")
             win.shotWindow("clicks-harlo-job")
             // Its one line, cut short to the well: a click shows all of it.
             const w = win.findAllNames("toolWhat", chat.transcript).find(l => l.plain.indexOf("echo built-ok") >= 0)
@@ -10486,9 +10521,9 @@ ApplicationWindow {
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
             Workspace.addProject(win.argValue("--cwd="))
-            settingsDialog.openPage("providers") } }
+            settingsDialog.openPage("lsp") } }
         PauseAnimation { duration: 600 }
-        // Code intelligence: each language's server, found where it's
+        // Settings → LSP: each language's server, found where it's
         // usually installed too (a stand-in gopls in the home's go/bin).
         ScriptAction { script: win.waitUntil(harloSettingsSteps, () => Accounts.languageServers !== "" && JSON.parse(Accounts.languageServers).state === "ready", 20000) }
         PauseAnimation { duration: 100 }
@@ -10507,6 +10542,11 @@ ApplicationWindow {
             win.check((JSON.parse(Accounts.languageServers).list || []).length === 5, "Check again asks again")
             win.scrollIntoView(win.findName("harloLanguageServers", settingsDialog.contentItem))
             win.shotWindow("clicks-harlo-language-servers")
+            win.check(settingsDialog.current.title === "LSP", "on a page of its own, LSP")
+            settingsDialog.openPage("providers") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            win.check(win.findName("harloLanguageServers", settingsDialog.contentItem) === null, "and no longer under Providers")
             // Picked from Harlo's models and the budget's choices.
             const pick = (name, text) => {
                 const box = win.findName(name, settingsDialog.contentItem)
@@ -10883,6 +10923,22 @@ ApplicationWindow {
         ScriptAction { script: {
             win.check(chat.composerItem.completionVisible && chat.composerItem.completionItems.some(c => JSON.stringify(c).indexOf("skill:greet") >= 0), "typing / suggests it")
             win.shotWindow("clicks-harlo-skill-completion")
+            // Each command a row of its own: its description on one line,
+            // nothing reaching into the next row.
+            const listView = chat.composerItem.completionList
+            const names = win.findAllNames("commandName", listView).filter(n => n.visible)
+            const notes = win.findAllNames("commandDescription", listView).filter(n => n.visible)
+            const inside = n => { let row = n; while (row && row.parent && row.parent !== listView.contentItem) row = row.parent
+                                  const p = n.mapToItem(row, 0, 0); return p.y >= 0 && p.y + n.height <= row.height + 0.5 }
+            const grammar = notes.find(n => n.text.indexOf("Checks the grammar") === 0)
+            win.check(names.length >= 2 && notes.length >= 2 && notes.every(n => n.lineCount === 1) && names.concat(notes).every(inside),
+                      "every suggestion fits its row, its description on one line (" + names.length + " rows, " + notes.map(n => n.lineCount).join(",") + " lines)")
+            win.check(grammar && grammar.text.indexOf("\n") < 0 && grammar.text.indexOf("SKIP") < 0 && grammar.truncated,
+                      "a long description runs together and is cut at the row's end (" + (grammar ? grammar.text.slice(0, 60) : "none") + ")")
+            const hint = win.findAllNames("commandHint", listView).find(n => n.visible && n.text.indexOf("file") >= 0)
+            win.check(hint && hint.text === "<file> [--strict]" && hint.contentWidth > 40, "an argument hint with <…> shows as written (" + (hint ? hint.text + ", " + Math.round(hint.contentWidth) + " px" : "none") + ")")
+            const footer = win.findName("completionFooter", listView.parent)
+            win.check(footer && footer.visible && footer.text.indexOf("Tab or Enter") >= 0, "its footer says how to choose")
             // (The rest typed out: the suggestion isn't picked.)
             TestInput.key(Qt.Key_A, Qt.ControlModifier)
             TestInput.typeText("/skill:greet the team")

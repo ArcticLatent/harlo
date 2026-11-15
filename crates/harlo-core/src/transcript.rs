@@ -1013,6 +1013,12 @@ impl Transcript {
                 .into();
                 if let Some(Block::Text(t)) = item.blocks.first() {
                     r.text = t.clone();
+                    // A background command that ended: what it was and how
+                    // it went, drawn as such (`text` stays the plain line).
+                    if let Some(b) = background_notice(t) {
+                        r.title = "background".into();
+                        (r.label, r.subtitle, r.command, r.result, r.state) = (b.headline, b.detail, b.command, b.output, b.state.into());
+                    }
                 }
                 rows.push(Arc::new(r));
             }
@@ -1633,9 +1639,104 @@ fn job_notice_for_people(text: &str) -> Option<(String, bool)> {
     Some((out, failed))
 }
 
+/// A background command's end, as a notice row shows it.
+#[derive(Debug, PartialEq)]
+struct Background {
+    /// "Background command finished" / "… failed" / "… stopped".
+    headline: String,
+    /// "exit code 1 · after 3 s" ("" when nothing more is known).
+    detail: String,
+    command: String,
+    /// Its last lines (harlo-agent's say; Claude's don't).
+    output: String,
+    /// `done`, `error` or `stopped`.
+    state: &'static str,
+}
+
+/// The notice of a background command's end, in either agent's words:
+/// harlo-agent's (`job_notice_for_people`: "The background command
+/// finished after 3 s: cmd\nLast lines:\n  …") or Claude Code's
+/// ("Background command \"cmd\" completed (exit code 0)").
+fn background_notice(text: &str) -> Option<Background> {
+    let exit = |s: &str| s.split("exit code ").nth(1).map(|c| c.chars().take_while(|c| c.is_ascii_digit() || *c == '-').collect::<String>()).filter(|c| !c.is_empty());
+    let after = |s: &str| s.split(" after ").nth(1).map(|a| a.split(" (").next().unwrap_or(a).trim().to_owned()).filter(|a| !a.is_empty());
+    let (command, how, output) = if let Some(rest) = text.strip_prefix("The background command ") {
+        let (how, rest) = rest.split_once(": ")?;
+        let (command, output) = match rest.split_once("\nLast lines:\n") {
+            Some((c, o)) => (c, o.lines().map(str::trim).collect::<Vec<_>>().join("\n")),
+            None => (rest, String::new()),
+        };
+        (command.trim().to_owned(), how.to_owned(), output)
+    } else {
+        let rest = text.strip_prefix("Background command \"")?;
+        let (command, how) = rest.rsplit_once("\" ")?;
+        (command.trim().to_owned(), how.trim().to_owned(), String::new())
+    };
+    if command.is_empty() {
+        return None;
+    }
+    let code = exit(&how);
+    let state = if how.starts_with("was stopped") || how.contains("killed") || how.starts_with("stopped") {
+        "stopped"
+    } else if how.starts_with("failed") || code.as_deref().is_some_and(|c| c != "0") {
+        "error"
+    } else if how.starts_with("finished") || how.starts_with("completed") {
+        "done"
+    } else {
+        return None;
+    };
+    let headline = format!("Background command {}", match state { "done" => "finished", "error" => "failed", _ => "stopped" });
+    let mut detail = Vec::new();
+    if let Some(c) = code.filter(|c| state != "done" || c != "0") {
+        detail.push(format!("exit code {c}"));
+    }
+    if how.contains("ran too long") {
+        detail.push("it ran too long".to_owned());
+    } else if how.contains("by a signal") {
+        detail.push("by a signal".to_owned());
+    }
+    if let Some(a) = after(&how) {
+        detail.push(format!("after {a}"));
+    }
+    Some(Background { headline, detail: detail.join(" · "), command, output, state })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Both agents' notices of a background command's end read the same:
+    /// how it went, the command, its last lines; anything else stays a plain
+    /// notice.
+    #[test]
+    fn background_command_notices() {
+        let b = |headline: &str, detail: &str, command: &str, output: &str, state| {
+            Some(Background { headline: headline.into(), detail: detail.into(), command: command.into(), output: output.into(), state })
+        };
+        assert_eq!(
+            background_notice("Background command \"cd /x; python3 - <<'EOF'\nprint(\"hi\")\nEOF\" completed (exit code 0)"),
+            b("Background command finished", "", "cd /x; python3 - <<'EOF'\nprint(\"hi\")\nEOF", "", "done")
+        );
+        assert_eq!(background_notice("Background command \"make\" failed with exit code 2"), b("Background command failed", "exit code 2", "make", "", "error"));
+        assert_eq!(background_notice("Background command \"sleep 99\" was stopped"), b("Background command stopped", "", "sleep 99", "", "stopped"));
+        assert_eq!(
+            background_notice("The background command failed after 3 s (exit code 1): cargo test\nLast lines:\n  test a ... FAILED\n  error: 1 failed"),
+            b("Background command failed", "exit code 1 · after 3 s", "cargo test", "test a ... FAILED\nerror: 1 failed", "error")
+        );
+        assert_eq!(background_notice("The background command finished after 1 s: sleep 1; echo built-ok"), b("Background command finished", "after 1 s", "sleep 1; echo built-ok", "", "done"));
+        assert_eq!(
+            background_notice("The background command was stopped after 10 min (it ran too long): npm run dev"),
+            b("Background command stopped", "it ran too long · after 10 min", "npm run dev", "", "stopped")
+        );
+        // (Through the rows too: a job's notice from harlo-agent.)
+        let mut t = Transcript::default();
+        t.apply(&HarnessEvent::MessageEnd { id: "j".into(), message: json!({ "role": "custom", "customType": "task-notification", "display": true, "content": "Background command \"make all\" failed with exit code 2" }) });
+        let rows = t.rows();
+        assert_eq!((rows[0].title.as_str(), rows[0].label.as_str(), rows[0].subtitle.as_str(), rows[0].command.as_str(), rows[0].state.as_str()), ("background", "Background command failed", "exit code 2", "make all", "error"));
+        for other in ["Background shell command didn't finish before the previous session ended", "A background task ended.", "Retrying (2 of 5)"] {
+            assert_eq!(background_notice(other), None, "{other}");
+        }
+    }
 
     /// Replies far enough back let go of what their rows were made from;
     /// the rows stay the same, and a message of theirs brings it back.

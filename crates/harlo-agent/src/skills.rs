@@ -25,6 +25,8 @@ pub struct Skill {
     pub path: PathBuf,
     /// `disable-model-invocation: true`: only when the user sends it.
     pub by_hand: bool,
+    /// `argument-hint`: what to write after its name, as the / list shows it.
+    pub hint: Option<String>,
 }
 
 /// Where they're looked for: the user's, then the project's (from `cwd`
@@ -133,7 +135,8 @@ pub fn find(cwd: &Path, home: &Path, config: &Path) -> Vec<Skill> {
             };
             let description = field(head, "description").unwrap_or_default();
             let by_hand = field(head, "disable-model-invocation").is_some_and(|v| v == "true");
-            let skill = Skill { name, description, path: file, by_hand };
+            let hint = field(head, "argument-hint").filter(|h| !h.is_empty());
+            let skill = Skill { name, description, path: file, by_hand, hint };
             match found.iter_mut().find(|s| s.name == skill.name) {
                 Some(s) => *s = skill,
                 None => found.push(skill),
@@ -239,7 +242,7 @@ mod tests {
         write(&home.join(".claude/skills/deploy/SKILL.md"), "---\nname: deploy\ndescription: \"Deploy the app (the user's way)\"\n---\nUser's deploy steps.\n");
         write(&config.join("skills/review/SKILL.md"), "---\ndescription: >\n  Review a change\n  for bugs.\n---\n# Review\nLook hard.\n");
         write(&home.join(".agents/skills/secret/SKILL.md"), "---\nname: secret\ndescription: by hand only\ndisable-model-invocation: true\n---\nShh.\n");
-        write(&proj.join(".claude/skills/deploy/SKILL.md"), "---\nname: deploy\ndescription: Deploy this project\n---\nProject deploy: run ./ship.\n");
+        write(&proj.join(".claude/skills/deploy/SKILL.md"), "---\nname: deploy\ndescription: Deploy this project\nargument-hint: \"<environment> [--dry-run]\"\n---\nProject deploy: run ./ship.\n");
         write(&proj.join(".agents/skills/broken/README.md"), "no SKILL.md here");
         let skills = find(&proj, &home, &config);
         let names: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();
@@ -247,6 +250,8 @@ mod tests {
         assert_eq!(skills[0].description, "Deploy this project");
         assert!(skills[0].path.starts_with(&proj));
         assert_eq!(skills[1].description, "Review a change for bugs.");
+        // (What to write after its name, when it says; none else.)
+        assert_eq!((skills[0].hint.as_deref(), skills[1].hint.as_deref()), (Some("<environment> [--dry-run]"), None));
         let l = listing(&skills);
         assert!(l.contains("- deploy: Deploy this project (") && l.contains("- review: Review a change for bugs.") && !l.contains("secret"), "{l}");
         let sent = expand("/skill:deploy to staging", &skills).unwrap();

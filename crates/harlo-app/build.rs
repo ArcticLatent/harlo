@@ -59,7 +59,7 @@ fn main() {
                 "qml/RightRail.qml",
                 "qml/LeftRail.qml",
                 "qml/MiniWindow.qml",
-                "qml/ThemeOrb.qml",
+                "qml/ThemeList.qml",
                 "qml/GitHostCard.qml",
                 "qml/SetupGuide.qml",
                 "qml/PullRequestDialog.qml",
