@@ -6,7 +6,7 @@ import PackageDescription
 
 let package = Package(
     name: "HarloKit",
-    platforms: [.iOS(.v17), .macOS(.v14)],
+    platforms: [.iOS(.v18), .macOS(.v14)],
     products: [
         .library(name: "HarloKit", targets: ["HarloKit"]),
     ],
@@ -17,5 +17,5 @@ let package = Package(
         .executableTarget(name: "harlo-probe", dependencies: ["HarloKit"]),
         .testTarget(name: "HarloKitTests", dependencies: ["HarloKit"]),
     ],
-    swiftLanguageModes: [.v5]
+    swiftLanguageModes: [.v6]
 )

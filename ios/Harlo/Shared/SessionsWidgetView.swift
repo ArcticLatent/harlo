@@ -9,7 +9,7 @@ import WidgetKit
 struct SessionsWidgetView: View {
     let snapshot: WidgetSnapshot
     let family: WidgetFamily
-    var now = Date()
+    var now = Date.now
     @Environment(\.colorScheme) private var scheme
 
     var p: Palette { Theme.standard.palette(dark: scheme == .dark) }
@@ -169,27 +169,5 @@ struct SessionsWidgetView: View {
         if s < 3600 { return "\(Int(s / 60))m ago" }
         if s < 86400 { return "\(Int(s / 3600))h ago" }
         return "\(Int(s / 86400))d ago"
-    }
-}
-
-/// An agent's tile: its mark, dark, on a rounded square of its colour.
-struct AgentMark: View {
-    let harness: String
-    let size: CGFloat
-    let palette: Palette
-
-    var body: some View {
-        let t = palette.agentTile(harness)
-        RoundedRectangle(cornerRadius: size * 0.27, style: .continuous)
-            .fill(Color(.sRGB, red: t.fill.r, green: t.fill.g, blue: t.fill.b, opacity: t.fill.a))
-            .frame(width: size, height: size)
-            .overlay(
-                Image(["harlo", "claude"].contains(harness) ? "Mark-" + harness : "Mark-demo")
-                    .resizable()
-                    .renderingMode(.template)
-                    .scaledToFit()
-                    .frame(width: size * 0.5, height: size * 0.5)
-                    .foregroundStyle(Color(.sRGB, red: t.ink.r, green: t.ink.g, blue: t.ink.b, opacity: t.ink.a))
-            )
     }
 }

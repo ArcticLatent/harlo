@@ -9,7 +9,7 @@ import WidgetKit
 struct LimitsWidgetView: View {
     let snapshot: LimitsSnapshot
     let family: WidgetFamily
-    var now = Date()
+    var now = Date.now
     @Environment(\.colorScheme) private var scheme
 
     var p: Palette { Theme.standard.palette(dark: scheme == .dark) }
@@ -125,7 +125,7 @@ struct LimitsWidgetView: View {
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .foregroundStyle(color(tint(w)))
             }
-            Bar(fraction: w.usedFraction, tint: color(tint(w)), track: color(p.hairline))
+            LimitsBar(fraction: w.usedFraction, tint: color(tint(w)), track: color(p.hairline))
             if w.resetsAt > 0 {
                 Text("Resets " + resetTime(w.resetsAt, now: now))
                     .font(.system(size: 11))
@@ -181,21 +181,4 @@ struct LimitsWidgetView: View {
     }
 
     func color(_ c: RGBA) -> Color { Color(.sRGB, red: c.r, green: c.g, blue: c.b, opacity: c.a) }
-}
-
-/// A thin bar: how much of a window is used.
-private struct Bar: View {
-    let fraction: Double
-    let tint: Color
-    let track: Color
-
-    var body: some View {
-        GeometryReader { g in
-            ZStack(alignment: .leading) {
-                Capsule().fill(track)
-                Capsule().fill(tint).frame(width: max(fraction > 0 ? 4 : 0, g.size.width * min(max(fraction, 0), 1)))
-            }
-        }
-        .frame(height: 5)
-    }
 }

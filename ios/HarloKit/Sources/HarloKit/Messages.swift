@@ -338,7 +338,7 @@ extension SessionSummary {
     /// Sessions by when they last changed: Today, Yesterday, Previous 7
     /// days, Previous 30 days, Older (pinned ones first, in their own group),
     /// newest first. One working now counts as today.
-    public static func byDay(_ list: [SessionSummary], now: Date = Date(), calendar: Calendar = .current) -> [(name: String, sessions: [SessionSummary])] {
+    public static func byDay(_ list: [SessionSummary], now: Date = Date.now, calendar: Calendar = .current) -> [(name: String, sessions: [SessionSummary])] {
         let today = calendar.startOfDay(for: now)
         func when(_ s: SessionSummary) -> Date {
             s.modified > 0 ? Date(timeIntervalSince1970: TimeInterval(s.modified)) : now

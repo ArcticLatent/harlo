@@ -57,7 +57,7 @@ public struct LimitsSnapshot: Codable, Equatable, Sendable {
 
     static let storeName = "widget-limits"
 
-    public init(paired: Bool, accounts: [Account], updated: Date = Date()) {
+    public init(paired: Bool, accounts: [Account], updated: Date = Date.now) {
         self.paired = paired
         self.accounts = accounts
         self.updated = updated
@@ -68,7 +68,7 @@ public struct LimitsSnapshot: Codable, Equatable, Sendable {
 
     /// From harlo's plan limits: harlo's computer first, then each machine
     /// (an account signed in on several shows once, as the first has it).
-    public static func of(_ limits: PlanLimits, now: Date = Date()) -> LimitsSnapshot {
+    public static func of(_ limits: PlanLimits, now: Date = Date.now) -> LimitsSnapshot {
         var seen = Set<String>()
         var accounts: [Account] = []
         for m in limits.machines {
@@ -131,7 +131,7 @@ public struct LimitsSnapshot: Codable, Equatable, Sendable {
     }
 
     /// Sample accounts (the widget gallery, previews).
-    public static func sample(now: Date = Date()) -> LimitsSnapshot {
+    public static func sample(now: Date = Date.now) -> LimitsSnapshot {
         of(HarloModel.sampleLimits(now: now), now: now)
     }
 }

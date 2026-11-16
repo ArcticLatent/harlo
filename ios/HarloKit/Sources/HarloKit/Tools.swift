@@ -58,7 +58,7 @@ public enum ToolName {
     public static func words(_ tool: String, running: Bool) -> String {
         let h = harloTool(tool)
         if let said = plan[h] ?? wiki[h] ?? harlo[h] { return said }
-        if let m = mcp(tool) { return m.server + " " + m.tool.replacingOccurrences(of: "_", with: " ") }
+        if let m = mcp(tool) { return m.server + " " + m.tool.replacing("_", with: " ") }
         let pick = { (now: String, done: String) in running ? now : done }
         switch tool.lowercased() {
         case "read", "view", "cat": return pick("Reading file", "Read file")
@@ -85,7 +85,7 @@ public enum ToolName {
         default:
             // (As the desktop says one it doesn't know: "web_thing" → "Web thing".)
             guard !tool.isEmpty else { return "Tool" }
-            let spaced = tool.replacingOccurrences(of: "_", with: " ")
+            let spaced = tool.replacing("_", with: " ")
             return spaced.prefix(1).uppercased() + spaced.dropFirst()
         }
     }

@@ -453,7 +453,7 @@ public struct TodoPhase: Equatable, Sendable, Identifiable {
         }
     }
 
-    public var done: Int { tasks.filter { $0.status == "completed" }.count }
+    public var done: Int { tasks.count(where: { $0.status == "completed" }) }
 }
 
 /// A subagent the session started.
@@ -517,13 +517,13 @@ public struct Helper: Equatable, Sendable, Identifiable {
         }
 
         static func tokens(_ n: Int64) -> String {
-            if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
-            if n >= 1000 { return String(format: "%.1fk", Double(n) / 1000) }
+            if n >= 1_000_000 { return "\((Double(n) / 1_000_000).formatted(.number.precision(.fractionLength(1))))M" }
+            if n >= 1000 { return "\((Double(n) / 1000).formatted(.number.precision(.fractionLength(1))))k" }
             return "\(n)"
         }
 
         static func cost(_ c: Double) -> String {
-            c < 0.01 ? "<$0.01" : String(format: "$%.2f", c)
+            c < 0.01 ? "<$0.01" : "$\(c.formatted(.number.precision(.fractionLength(2))))"
         }
 
         /// Several helpers' together.
@@ -977,7 +977,7 @@ public struct ReviewComment: Equatable, Sendable, Identifiable {
     public static func message(_ comments: [ReviewComment]) -> String {
         var lines = ["Review comments on your changes. Please address each one:", ""]
         for c in comments.sorted(by: { ($0.path, $0.line) < ($1.path, $1.line) }) {
-            let code = c.code.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "`", with: "'")
+            let code = c.code.trimmingCharacters(in: .whitespaces).replacing("`", with: "'")
             lines.append("- `\(c.path):\(c.line)`" + (c.side == "old" ? " (a line you removed)" : "") + (code.isEmpty ? "" : ": `\(code)`"))
             for t in c.text.split(separator: "\n", omittingEmptySubsequences: false) { lines.append("  " + t) }
         }

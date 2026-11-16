@@ -22,13 +22,13 @@ enum LiveActivities {
 
     /// No news from harlo by then: it shows as stale (harlo's updates move
     /// it on; `phone_activity`'s STALE_AFTER).
-    static var staleDate: Date { Date().addingTimeInterval(25 * 60) }
+    static var staleDate: Date { Date.now.addingTimeInterval(25 * 60) }
 
     static func start(for s: OpenSession, model: HarloModel) {
         let key = s.liveKey
         guard enabled, !model.demo, !key.isEmpty, ActivityAuthorizationInfo().areActivitiesEnabled else { return }
-        started[key] = Date()
-        let state = SessionActivityAttributes.ContentState(phase: "working", since: Date().timeIntervalSince1970, until: 0, done: 0, total: 0, sealed: "", now: "Working")
+        started[key] = Date.now
+        let state = SessionActivityAttributes.ContentState(phase: "working", since: Date.now.timeIntervalSince1970, until: 0, done: 0, total: 0, sealed: "", now: "Working")
         let mine = Activity<SessionActivityAttributes>.activities.filter { $0.attributes.key == key }
         // Still showing this session's run: it goes on (harlo gets the token again).
         if let running = mine.first(where: { $0.activityState == .active }) {
@@ -60,7 +60,7 @@ enum LiveActivities {
         }
         for a in Activity<SessionActivityAttributes>.activities where a.activityState == .active || a.activityState == .stale {
             guard let s = sessions.first(where: { $0.key == a.attributes.key }),
-                  Date().timeIntervalSince(started[s.key] ?? .distantPast) > 20 else { continue }
+                  Date.now.timeIntervalSince(started[s.key] ?? .distantPast) > 20 else { continue }
             if !["busy", "starting", "input"].contains(s.status) {
                 Task { await a.end(nil, dismissalPolicy: .immediate) }
                 tokens[a.attributes.key] = nil

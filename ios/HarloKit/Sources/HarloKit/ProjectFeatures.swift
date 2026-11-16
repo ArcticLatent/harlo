@@ -139,7 +139,7 @@ public struct Plan: Equatable, Sendable {
 
     /// Shown: on, with steps.
     public var shows: Bool { enabled && !steps.isEmpty }
-    public var finished: Int { steps.filter { $0.status == "done" || $0.status == "skipped" }.count }
+    public var finished: Int { steps.count(where: { $0.status == "done" || $0.status == "skipped" }) }
     public var current: PlanStep? { steps.first { $0.status == "active" } }
 
     /// It can run with helpers (again, when paused): steps are left, and it
@@ -208,7 +208,7 @@ public struct WikiPage: Equatable, Sendable, Identifiable {
     public var group: String {
         guard let slash = path.lastIndex(of: "/") else { return "" }
         let folder = path[..<slash].split(separator: "/").last.map(String.init) ?? ""
-        let words = folder.replacingOccurrences(of: "-", with: " ").replacingOccurrences(of: "_", with: " ")
+        let words = folder.replacing("-", with: " ").replacing("_", with: " ")
         return words.prefix(1).uppercased() + words.dropFirst()
     }
 }
@@ -297,7 +297,7 @@ public struct Wiki: Equatable, Sendable {
     /// Its freshness in words: "Writing pages: 2 of 5", "Updated 3 days ago
     /// · 4 commits since", "A run stopped part way (1 of 3 pages).", "Checking
     /// what changed…".
-    public func freshness(now: Date = Date()) -> String {
+    public func freshness(now: Date = Date.now) -> String {
         if let r = run, running {
             return r.phase == "planning" || r.total == 0 ? "Planning the wiki…" : "Writing pages: \(r.done) of \(r.total)"
         }
@@ -328,7 +328,7 @@ public struct Wiki: Equatable, Sendable {
 
     /// "just now", "5 minutes ago", "yesterday", "3 days ago", from an ISO
     /// time (as the desktop says it).
-    public static func ago(_ iso: String, now: Date = Date()) -> String {
+    public static func ago(_ iso: String, now: Date = Date.now) -> String {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         guard let t = f.date(from: iso) ?? ISO8601DateFormatter().date(from: iso) else { return "" }
@@ -360,8 +360,8 @@ public struct Wiki: Equatable, Sendable {
         let at = Dictionary(shown.enumerated().map { ($1.path, $0) }, uniquingKeysWith: { a, _ in a })
         var out = "flowchart LR\n"
         for (i, p) in shown.enumerated() {
-            var title = p.title.replacingOccurrences(of: "\"", with: "#quot;")
-            for c in ["[", "]", "{", "}", "<", ">"] { title = title.replacingOccurrences(of: c, with: " ") }
+            var title = p.title.replacing("\"", with: "#quot;")
+            for c in ["[", "]", "{", "}", "<", ">"] { title = title.replacing(c, with: " ") }
             out += "  p\(i)[\"\(title)\"]\n"
         }
         for (i, p) in shown.enumerated() {

@@ -33,8 +33,6 @@ struct NewSessionView: View {
     /// At the largest text sizes the agent and model get a row of their
     /// own, above the buttons, so the model's name isn't cut.
     var big: Bool { typeSize.isAccessibilitySize }
-    /// Your name, for the greeting (Settings).
-    @AppStorage("yourName") private var name = ""
 
     var project: Project? { choices?.project(place) }
     /// The machine it starts on ("" harlo's computer).
@@ -92,7 +90,7 @@ struct NewSessionView: View {
                     .padding(.top, 8)
                 VStack(alignment: .leading, spacing: 14) {
                     UserAvatar(size: 64)
-                    greeting
+                    Greeting()
                 }
                 .padding(.top, 72)
                 if choices == nil && !loading {
@@ -116,7 +114,7 @@ struct NewSessionView: View {
             if let c = choices { composer(c) }
         }
         .screen()
-        .toolbar(.hidden, for: .navigationBar)
+        .toolbarVisibility(.hidden, for: .navigationBar)
         // The choices: when it connects (again).
         .task(id: model.state == .connected) {
             guard model.state == .connected || choices == nil else { return }
@@ -129,27 +127,15 @@ struct NewSessionView: View {
         }
     }
 
-    /// "Good morning, Robin / What are we building today?"
-    var greeting: some View {
-        let first = name.trimmingCharacters(in: .whitespaces)
-        return (Text(Style.greeting() + (first.isEmpty ? "" : ", "))
-            + Text(first).foregroundColor(Color(p.primary))
-            + Text("\nWhat are we building today?"))
-            .scaledFont(32, .medium)
-            .tracking(-0.3)
-            .lineSpacing(4)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-
     func composer(_ c: NewSessionChoices) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            if !c.templates.isEmpty { templates(c) }
+            if !c.templates.isEmpty { TemplateStrip(templates: c.templates) { apply($0, c) } }
             // As the session's composer: where it starts on top (a "To:"
             // line), the message, then photos, the agent and its model, what
             // runs without asking, dictation and start, all on one line (the
             // agent and model on a line of their own at the largest sizes).
             VStack(alignment: .leading, spacing: 8) {
-                placeRow(c)
+                PlacePicker(choices: c, place: $place, connecting: connecting, text: placeText, path: placePath)
                 Rectangle().fill(Color(p.hairline)).frame(height: 1)
                 if !photos.isEmpty { PhotoStrip(photos: $photos) }
                 TextField("What should the agent do?", text: $text, axis: .vertical)
@@ -159,14 +145,14 @@ struct NewSessionView: View {
                     .padding(.top, 2)
                 if big {
                     HStack(spacing: 0) {
-                        agentAndModel(c)
+                        agentModel(c)
                         Spacer(minLength: 0)
                     }
                 }
                 HStack(spacing: 6) {
                     PhotoButton(photos: $photos, size: 34)
-                    if !big { agentAndModel(c) }
-                    permissions(c)
+                    if !big { agentModel(c) }
+                    PermissionsMenu(starts: c.approval(for: agent, in: project), approval: $approval)
                     Spacer(minLength: 0)
                     MicButton(text: $text, size: 34)
                     Button(action: start) {
@@ -178,7 +164,7 @@ struct NewSessionView: View {
                             }
                         }
                         .frame(width: 36, height: 36)
-                        .background(Circle().fill(Color(canStart || starting ? p.primary : p.subtle)))
+                        .background { Circle().fill(Color(canStart || starting ? p.primary : p.subtle)) }
                         .foregroundStyle(Color(canStart ? p.onPrimary : p.muted))
                     }
                     .buttonStyle(.plain)
@@ -216,158 +202,8 @@ struct NewSessionView: View {
         }
     }
 
-    /// Where it starts: a project, or a machine's home folder (by machine:
-    /// this computer's, then each other one's), with its folder.
-    func placeRow(_ c: NewSessionChoices) -> some View {
-        Menu {
-            Picker("Where", selection: $place) {
-                ForEach(c.machines, id: \.host) { m in
-                    Section(machineTitle(m.host, c)) {
-                        if m.host.isEmpty || (c.machine(m.host) != nil && model.canConnect) {
-                            Label("Home folder", systemImage: "house").tag(SessionPlace.home(m.host))
-                        }
-                        ForEach(m.projects) { pr in
-                            Label(pr.name, systemImage: "folder").tag(SessionPlace.project(pr.id))
-                        }
-                    }
-                }
-            }
-        } label: {
-            HStack(spacing: 8) {
-                Group {
-                    if connecting != nil {
-                        ProgressView().controlSize(.mini)
-                    } else {
-                        Image(systemName: !host.isEmpty ? "server.rack" : project == nil ? "house" : "folder")
-                            .scaledFont(14, .medium)
-                            .foregroundStyle(Color(p.primary))
-                    }
-                }
-                .frame(width: 20)
-                Text(placeText)
-                    .scaledFont(15, .semibold)
-                    .lineLimit(1)
-                    .layoutPriority(1)
-                Text(placePath)
-                    .font(Style.mono(12))
-                    // (The smallest words here: muted, but readable on the card.)
-                    .foregroundStyle(Color(p.muted.legible(on: p.raised, toward: p.foreground)))
-                    .lineLimit(1)
-                    .truncationMode(.head)
-                Spacer(minLength: 4)
-                Image(systemName: "chevron.down")
-                    .scaledFont(11, .semibold)
-                    .foregroundStyle(Color(p.muted))
-            }
-            .foregroundStyle(Color(p.foreground))
-            .padding(.horizontal, 4)
-            .frame(minHeight: 32)
-            .contentShape(Rectangle())
-        }
-        .disabled(connecting != nil)
-        .accessibilityLabel("Where: \(placeText)")
-    }
-
-    /// The agent's tile and the model's name; its menu picks either.
-    /// (Used before first, then every model the agent offers; another
-    /// machine's agent picks its own.)
-    func agentAndModel(_ c: NewSessionChoices) -> some View {
-        let agentName = c.agents.first { $0.id == agent }?.label ?? "Agent"
-        let modelName = c.modelChoices(for: agent).first { $0.id == modelId }?.name ?? defaultModel(c)
-        return Menu {
-            Picker(selection: $agent) {
-                ForEach(c.agents(for: place)) { a in
-                    Text(a.label).tag(a.id)
-                }
-            } label: {
-                Label("Agent: \(agentName)", systemImage: "person.crop.circle")
-            }
-            .pickerStyle(.menu)
-            Picker(selection: $modelId) {
-                Text(defaultModel(c)).tag("")
-                ForEach(!host.isEmpty ? [] : c.modelChoices(for: agent), id: \.id) { m in
-                    Text(stopped[m.id].map { "\(m.name) (\($0) stopped)" } ?? m.name).tag(m.id)
-                }
-            } label: {
-                Label("Model: \(modelName)", systemImage: "cpu")
-            }
-            .pickerStyle(.menu)
-        } label: {
-            HStack(spacing: 6) {
-                AgentTile(harness: agent, size: 20)
-                Text(modelName)
-                    .scaledFont(13.5, .medium)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .frame(maxWidth: big ? nil : 130, alignment: .leading)
-                    .fixedSize(horizontal: !big, vertical: false)
-                Image(systemName: "chevron.down").scaledFont(9, .bold).foregroundStyle(Color(p.muted))
-            }
-            .padding(.leading, 6)
-            .padding(.trailing, 10)
-            .frame(minHeight: 34)
-            .background(Capsule().fill(Color(p.raised.mix(p.foreground, 0.04))))
-            .overlay(Capsule().strokeBorder(Color(p.hairline), lineWidth: 1))
-            .foregroundStyle(Color(p.foreground))
-            .contentShape(Capsule())
-        }
-        .accessibilityLabel("\(agentName), \(modelName)")
-    }
-
-    /// What runs without asking (agents that ask): a shield, lit when
-    /// nothing asks first.
-    @ViewBuilder
-    func permissions(_ c: NewSessionChoices) -> some View {
-        let starts = c.approval(for: agent, in: project)
-        if !starts.isEmpty {
-            let mode = approval.isEmpty ? starts : approval
-            let yolo = mode == "yolo"
-            Menu {
-                Picker("Permissions", selection: Binding(get: { mode }, set: { approval = $0 })) {
-                    ForEach(["always-ask", "write", "yolo"], id: \.self) { m in
-                        Text(Modes.label(m)).tag(m)
-                    }
-                }
-            } label: {
-                Image(systemName: yolo ? "bolt.shield" : "shield")
-                    .font(.system(size: 15, weight: .medium))
-                    .frame(width: 34, height: 34)
-                    .background(Circle().fill(Color(yolo ? p.accentSoft.over(p.raised) : p.raised.mix(p.foreground, 0.04))))
-                    .overlay(Circle().strokeBorder(Color(yolo ? p.primary.mix(p.raised, 0.4) : p.hairline), lineWidth: 1))
-                    .foregroundStyle(Color(yolo ? p.primary : p.muted))
-            }
-            .accessibilityLabel("Permissions: \(Modes.label(mode))")
-        }
-    }
-
-    /// A machine's section in the place picker.
-    func machineTitle(_ host: String, _ c: NewSessionChoices) -> String {
-        if host.isEmpty { return "This computer" }
-        return c.machine(host)?.connected == false ? "\(host) · connects first" : host
-    }
-
-    /// Templates saved in harlo: one fills the composer (send it when ready).
-    func templates(_ c: NewSessionChoices) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(c.templates) { t in
-                    Button { apply(t, c) } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "bookmark").scaledFont(12, .semibold).foregroundStyle(Color(p.primary))
-                            Text(t.name).scaledFont(14, .medium).lineLimit(1)
-                        }
-                        .padding(.horizontal, 12)
-                        .frame(minHeight: 32)
-                        .background(Capsule().fill(Color(p.raised)))
-                        .overlay(Capsule().strokeBorder(Color(p.hairline), lineWidth: 1))
-                        .foregroundStyle(Color(p.foreground))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityHint("Fills in the agent, model, permissions and message")
-                }
-            }
-            .padding(.horizontal, 2)
-        }
+    func agentModel(_ c: NewSessionChoices) -> AgentModelMenu {
+        AgentModelMenu(choices: c, place: place, agent: $agent, modelId: $modelId, stopped: stopped, defaultModel: defaultModel(c), big: big)
     }
 
     func apply(_ t: SessionTemplate, _ c: NewSessionChoices) {

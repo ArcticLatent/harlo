@@ -196,7 +196,7 @@ public enum PictureNames {
     /// desktop says it ("Read shot.png", "Screenshot").
     public static func toolWords(_ tool: String, _ subtitle: String) -> String {
         var t = ToolName.mcp(tool)?.tool ?? tool
-        t = t.replacingOccurrences(of: "_", with: " ")
+        t = t.replacing("_", with: " ")
         t = t.prefix(1).uppercased() + t.dropFirst()
         var what = subtitle.contains("/") && !subtitle.contains(" ") ? name(subtitle) : subtitle
         if what.count > 28 { what = String(what.prefix(27)) + "…" }

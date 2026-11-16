@@ -37,7 +37,7 @@ struct SettingsView: View {
                         .frame(width: 40, height: 40)
                         .clipShape(Circle())
                         .padding(3)
-                        .overlay(Circle().stroke(Color(p.primary), lineWidth: name == current ? 2 : 0))
+                        .overlay { Circle().stroke(Color(p.primary), lineWidth: name == current ? 2 : 0) }
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Penguin, \(name)")
@@ -187,7 +187,7 @@ struct SettingsView: View {
             .screen()
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar(inTab ? .hidden : .visible, for: .navigationBar)
+            .toolbarVisibility(inTab ? .hidden : .visible, for: .navigationBar)
             .toolbar {
                 if !inTab {
                     ToolbarItem(placement: .confirmationAction) {

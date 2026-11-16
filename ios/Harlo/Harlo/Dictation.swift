@@ -85,7 +85,6 @@ final class Dictation {
         let current = text.wrappedValue
         base = current.isEmpty || current.hasSuffix(" ") || current.hasSuffix("\n") ? current : current + " "
         state = .listening
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
         task = recognizer.recognitionTask(with: request) { [weak self] result, error in
             Task { @MainActor in
                 guard let self, let text = self.text else { return }
@@ -109,7 +108,7 @@ final class Dictation {
         }
         // (Apple's recognition stops after about a minute anyway.)
         timeout = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 120_000_000_000)
+            try? await Task.sleep(for: .seconds(120))
             guard !Task.isCancelled else { return }
             self?.stop()
         }
@@ -123,7 +122,7 @@ final class Dictation {
         stopAudio()
         let mine = run
         Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            try? await Task.sleep(for: .seconds(2))
             if let self, self.run == mine { self.release() }
         }
     }
@@ -138,7 +137,6 @@ final class Dictation {
         engine = nil
         if listening {
             state = .idle
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
         }
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
@@ -159,42 +157,5 @@ final class Dictation {
 
     func clearFailure() {
         if case .failed = state { state = .idle }
-    }
-}
-
-/// The mic: tap to dictate into `text`, tap again to stop (red while it
-/// listens).
-struct MicButton: View {
-    @Environment(\.palette) private var p
-    @Binding var text: String
-    var size: CGFloat = 34
-    @State private var dictation = Dictation()
-
-    var failure: String? {
-        if case .failed(let why) = dictation.state { return why }
-        return nil
-    }
-
-    var body: some View {
-        Button {
-            dictation.toggle(into: $text)
-        } label: {
-            Image(systemName: dictation.listening ? "waveform" : "mic")
-                .scaledFont(16, .semibold)
-                .symbolEffect(.variableColor.iterative, isActive: dictation.state == .listening)
-                .frame(width: size, height: size)
-                .background(Circle().fill(Color(dictation.listening ? p.error : p.subtle)))
-                .overlay(Circle().strokeBorder(Color(dictation.listening ? p.error : p.border), lineWidth: 1))
-                .foregroundStyle(dictation.listening ? Color.white : Color(p.muted))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(dictation.listening ? "Stop dictating" : "Dictate")
-        .alert("Dictation", isPresented: Binding(get: { failure != nil }, set: { if !$0 { dictation.clearFailure() } })) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(failure ?? "")
-        }
-        // Leaving the screen stops it.
-        .onDisappear { dictation.stop() }
     }
 }

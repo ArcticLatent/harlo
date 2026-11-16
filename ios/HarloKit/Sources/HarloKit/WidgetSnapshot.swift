@@ -38,7 +38,7 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
     public static let shown = 8
     static let storeName = "widget"
 
-    public init(host: String, items: [Item], working: Int, waiting: Int, total: Int, updated: Date = Date()) {
+    public init(host: String, items: [Item], working: Int, waiting: Int, total: Int, updated: Date = Date.now) {
         self.host = host
         self.items = items
         self.working = working
@@ -53,7 +53,7 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
     /// From the session list: what waits on you first, then what works,
     /// what finished unseen, then the most recent (settled ones only while
     /// they work or wait).
-    public static func of(host: String, sessions: [SessionSummary], unread: (SessionSummary) -> Bool, now: Date = Date()) -> WidgetSnapshot {
+    public static func of(host: String, sessions: [SessionSummary], unread: (SessionSummary) -> Bool, now: Date = Date.now) -> WidgetSnapshot {
         let listed = sessions.filter { $0.settled.isEmpty || ["busy", "starting", "input"].contains($0.status) || !$0.requests.isEmpty }
         let items = listed.map { s -> Item in
             let status = ["busy", "starting"].contains(s.status) ? "busy" : s.status == "input" || !s.requests.isEmpty ? "input" : unread(s) ? "unread" : ""
@@ -66,13 +66,13 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
             if a.element.modified != b.element.modified { return a.element.modified > b.element.modified }
             return a.offset < b.offset
         }.map(\.element)
-        return WidgetSnapshot(host: host, items: Array(ordered.prefix(shown)), working: items.filter { $0.status == "busy" }.count,
-                              waiting: items.filter { $0.status == "input" }.count, total: items.count, updated: now)
+        return WidgetSnapshot(host: host, items: Array(ordered.prefix(shown)), working: items.count(where: { $0.status == "busy" }),
+                              waiting: items.count(where: { $0.status == "input" }), total: items.count, updated: now)
     }
 
     /// A notification while the app is closed: its session needs you, or
     /// finished (or failed); it moves to the front.
-    public mutating func apply(_ push: PushContent, now: Date = Date()) {
+    public mutating func apply(_ push: PushContent, now: Date = Date.now) {
         let status: String
         switch push.kind {
         case "ask": status = "input"
@@ -94,8 +94,8 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
             total += 1
             items = Array(items.prefix(Self.shown))
         }
-        working = items.filter { $0.status == "busy" }.count
-        waiting = items.filter { $0.status == "input" }.count
+        working = items.count(where: { $0.status == "busy" })
+        waiting = items.count(where: { $0.status == "input" })
         updated = now
     }
 
@@ -114,7 +114,7 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
     }
 
     /// Sample sessions (the widget gallery, previews, the screenshots).
-    public static func sample(now: Date = Date()) -> WidgetSnapshot {
+    public static func sample(now: Date = Date.now) -> WidgetSnapshot {
         let t = Int64(now.timeIntervalSince1970)
         return WidgetSnapshot(host: "archlinux", items: [
             Item(key: "s1", title: "Fix the session list", harness: "claude", status: "busy", modified: t - 30),

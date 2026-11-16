@@ -119,7 +119,7 @@ public struct PairedHarlo: Codable, Equatable, Sendable, Identifiable {
 
     public var id: String { key }
 
-    public init(key: String, name: String, endpoints: [URL], pairedAt: Date = Date()) {
+    public init(key: String, name: String, endpoints: [URL], pairedAt: Date = Date.now) {
         self.key = key
         self.name = name
         self.endpoints = endpoints

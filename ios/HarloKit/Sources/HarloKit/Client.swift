@@ -98,7 +98,7 @@ public actor HarloClient {
         }
         // Nothing within `timeout`: the socket is closed, which ends the wait.
         let timer = Task { [task] in
-            try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+            try? await Task.sleep(for: .seconds(timeout))
             if !Task.isCancelled { task.cancel(with: .goingAway, reason: nil) }
         }
         defer { timer.cancel() }
@@ -587,7 +587,7 @@ public actor HarloClient {
         // Something every 30 s, so relays and proxies keep a quiet connection.
         pinger = Task {
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                try? await Task.sleep(for: .seconds(30))
                 if Task.isCancelled { return }
                 _ = try? await self.call("ping")
             }
@@ -614,7 +614,7 @@ func firstOf(timeout: Double, _ body: @escaping @Sendable () async -> Bool) asyn
         once.set(cont)
         Task { once.resume(await body()) }
         Task {
-            try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+            try? await Task.sleep(for: .seconds(timeout))
             once.resume(false)
         }
     }

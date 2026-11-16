@@ -6,7 +6,7 @@ import Foundation
 extension HarloModel {
     /// A paired, connected-looking model with sessions in two projects
     /// (`busier`: another approval waiting, for the screenshots).
-    public static func sample(now: Date = Date(), busier: Bool = false) -> HarloModel {
+    public static func sample(now: Date = Date.now, busier: Bool = false) -> HarloModel {
         let m = HarloModel(store: MemoryStore(), deviceName: "iPhone")
         m.samples = .standard
         m.host = PairedHarlo(key: Base64.encode(Data(repeating: 7, count: 32)), name: "archlinux", endpoints: [URL(string: "ws://192.168.1.20:7676/ws")!])
@@ -56,12 +56,12 @@ extension HarloModel {
 
     /// Opens a sample session: a finished exchange, a run of tool calls,
     /// code, todos, subagents, and (when `asking`) an approval waiting.
-    public func openSample(asking: Bool = false, now: Date = Date()) {
+    public func openSample(asking: Bool = false, now: Date = Date.now) {
         session = Self.sampleSession(asking: asking, now: now)
     }
 
     /// The sample session `openSample` opens.
-    static func sampleSession(asking: Bool = false, now: Date = Date()) -> OpenSession {
+    static func sampleSession(asking: Bool = false, now: Date = Date.now) -> OpenSession {
         let s = OpenSession(key: "live:1", title: "Fix the session list's scrolling", harness: "harlo")
         let ms = Int64(now.timeIntervalSince1970 * 1000)
         s.liveKey = "live:1"

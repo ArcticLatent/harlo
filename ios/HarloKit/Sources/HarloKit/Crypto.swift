@@ -33,8 +33,8 @@ public enum Base64 {
 
     public static func decode(_ s: String) throws -> Data {
         var t = s.trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "-", with: "+")
-            .replacingOccurrences(of: "_", with: "/")
+            .replacing("-", with: "+")
+            .replacing("_", with: "/")
         while t.count % 4 != 0 { t += "=" }
         guard let d = Data(base64Encoded: t) else { throw HarloError.badBase64 }
         return d
@@ -42,8 +42,8 @@ public enum Base64 {
 
     /// URL-safe, unpadded (pairing offers).
     public static func encodeURL(_ data: Data) -> String {
-        encode(data).replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "=", with: "")
+        encode(data).replacing("+", with: "-").replacing("/", with: "_")
+            .replacing("=", with: "")
     }
 }
 
@@ -68,8 +68,7 @@ public struct KeyPair: Sendable, Equatable {
     }
 
     public static func generate() -> KeyPair {
-        // swiftlint:disable:next force_try
-        try! KeyPair(secret: randomBytes(32))
+        do { return try KeyPair(secret: randomBytes(32)) } catch { fatalError("32 random bytes are always a key: \(error)") }
     }
 }
 

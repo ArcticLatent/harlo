@@ -10,7 +10,7 @@ extension HarloModel {
     /// The demo's computer.
     public static let demoName = "Demo computer"
 
-    public func startDemo(now: Date = Date()) {
+    public func startDemo(now: Date = Date.now) {
         hangUp()
         let sample = HarloModel.sample(now: now, busier: true)
         samples = .standard
@@ -71,18 +71,18 @@ extension HarloModel {
             let question = String(text.dropFirst(5)).trimmingCharacters(in: .whitespaces)
             s.aside = Aside(["question": .string(question), "text": "", "done": false])
             Task { @MainActor [weak s] in
-                try? await Task.sleep(nanoseconds: 900_000_000)
+                try? await Task.sleep(for: .milliseconds(900))
                 s?.aside = Aside(["question": .string(question), "done": true,
                                   "text": "In the demo, no agent answers. Paired with harlo, Harlo answers a side question from the conversation so far, without adding it to the conversation."])
             }
             return true
         }
         demoCount += 1
-        let n = demoCount, ms = Int64(Date().timeIntervalSince1970 * 1000)
+        let n = demoCount, ms = Int64(Date.now.timeIntervalSince1970 * 1000)
         s.rows.append(Row(key: "demo-u\(n)", kind: "user", text: text, time: ms))
         s.status = "busy"
         Task { @MainActor [weak self, weak s] in
-            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            try? await Task.sleep(for: .milliseconds(1200))
             guard let s else { return }
             s.rows.append(Row(key: "demo-a\(n)", kind: "markdown",
                               html: "<p>In the demo, no agent runs. Paired with harlo on your computer, your message goes to the session's agent there, and its reply streams back here as it works.</p>",
@@ -99,7 +99,7 @@ extension HarloModel {
         demoCount += 1
         let key = "demo-session-\(demoCount)"
         let title = String(text.split(separator: "\n").first ?? "").prefix(80)
-        let now = Int64(Date().timeIntervalSince1970)
+        let now = Int64(Date.now.timeIntervalSince1970)
         sessions.insert(SessionSummary(["key": .string(key), "title": .string(String(title)), "project": .string(project?.name ?? ""),
                                         "harness": .string(agent), "status": "busy", "modified": .int(now)]), at: 0)
         let s = OpenSession(key: key, title: String(title), harness: agent)
@@ -122,7 +122,7 @@ extension HarloModel {
         let denied = UIRequest.role(of: value) == .deny
         demoCount += 1
         s.rows.append(Row(key: "demo-n\(demoCount)", kind: "notice", text: denied ? "Denied: the agent won't run it." : "Approved: the agent goes on.",
-                          title: denied ? "warning" : "info", time: Int64(Date().timeIntervalSince1970 * 1000)))
+                          title: denied ? "warning" : "info", time: Int64(Date.now.timeIntervalSince1970 * 1000)))
     }
 
     /// A demo session's state on the list.
@@ -166,7 +166,7 @@ extension HarloModel {
                  links: ["quickstart.md"]),
         WikiPage(path: "workflows/release.md", title: "Releasing", summary: "How a release is built, signed and published.", kind: "workflow",
                  links: ["architecture/sessions.md"]),
-    ], updatedAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3 * 86400)), behind: 4)
+    ], updatedAt: ISO8601DateFormatter().string(from: Date.now.addingTimeInterval(-3 * 86400)), behind: 4)
 
     nonisolated static func sampleWikiPage(_ path: String) -> WikiPageText {
         let page = sampleWiki.pages.first { $0.path == path } ?? sampleWiki.pages[0]
@@ -175,7 +175,7 @@ extension HarloModel {
                               "blocks": [["kind": "prose", "html": "<h1>Quickstart</h1><p>harlo runs coding agents in <a href=\"architecture/sessions.md\">sessions</a>, each streaming its transcript to the desktop and the phone.</p>"],
                                          ["kind": "mermaid", "code": "flowchart LR\n  phone --> desktop --> agent"]]],
             "architecture/sessions.md": ["path": "architecture/sessions.md", "title": "Sessions", "type": "architecture", "description": .string(page.summary),
-                                         "verified": .string(ISO8601DateFormatter().string(from: Date().addingTimeInterval(-86400))),
+                                         "verified": .string(ISO8601DateFormatter().string(from: Date.now.addingTimeInterval(-86400))),
                                          "blocks": [["kind": "prose", "html": "<h1>Sessions</h1><p>A session starts its agent in <a href=\"repo://crates/harlo-core/src/session.rs#L31-L40\">session.rs</a> and keeps its rows by key. Back to the <a href=\"../quickstart.md\">quickstart</a>.</p>", "anchor": "sessions"],
                                                     ["kind": "code", "html": "<pre><code>let key = registry::start(kind, cwd);</code></pre>", "code": "let key = registry::start(kind, cwd);", "lang": "rust"]],
                                          "sources": [["path": "crates/harlo-core/src/session.rs", "ranges": [[31, 40], [88, 102]], "claims": 3],

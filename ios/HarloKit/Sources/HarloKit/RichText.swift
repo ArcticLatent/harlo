@@ -68,7 +68,7 @@ public enum RichText {
 
     /// Lines in code spans.
     public static func lineCount(_ spans: [Span]) -> Int {
-        spans.reduce(1) { $0 + $1.text.filter { $0 == "\n" }.count }
+        spans.reduce(1) { $0 + $1.text.count(where: { $0 == "\n" }) }
     }
 
     /// The first `n` lines of code spans (a long block folded).

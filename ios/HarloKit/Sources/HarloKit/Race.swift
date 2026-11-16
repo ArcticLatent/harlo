@@ -16,7 +16,7 @@ enum Race {
             box.set(cont)
             for (i, url) in items.enumerated() {
                 Task {
-                    if i > 0 { try? await Task.sleep(nanoseconds: UInt64(headStart * 1_000_000_000)) }
+                    if i > 0 { try? await Task.sleep(for: .seconds(headStart)) }
                     if box.isDone { return box.failed(i, HarloError.closed("")) }
                     do {
                         let r = try await attempt(url)

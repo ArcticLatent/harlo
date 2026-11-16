@@ -1,0 +1,191 @@
+import HarloKit
+import SwiftUI
+
+/// One file's diff: hunks of lines with their numbers, added and removed
+/// lines tinted as on the desktop.
+struct DiffView: View {
+    @Environment(HarloModel.self) private var model
+    @Environment(\.palette) private var p
+    let file: Changes.File
+    /// After the comments are sent: back to the session.
+    var close: () -> Void = {}
+    @State private var diff: FileDiff?
+    @State private var loading = true
+    /// Comments on lines (Settings → Comments on changes).
+    @AppStorage("reviewComments") private var commentsOn = true
+    @AppStorage(CodeWrap.key) private var wrap = true
+    @State private var commenting: FileDiff.Line?
+    @State private var commentText = ""
+
+    var review: [ReviewComment] { model.session?.review ?? [] }
+
+    func comment(on l: FileDiff.Line) -> ReviewComment? {
+        let (side, line) = l.kind == .removed ? ("old", l.old ?? 0) : ("new", l.new ?? 0)
+        return review.first { $0.path == file.path && $0.side == side && $0.line == line }
+    }
+
+    var body: some View {
+        // (Up and down, then across: a two-way scroll view centres a short
+        // diff. Wrapped, only up and down.)
+        ScrollView(.vertical) {
+            CodeScroll(wrap: wrap) {
+                if let d = diff {
+                    VStack(alignment: .leading, spacing: 0) {
+                        if d.binary {
+                            Text("A binary file.").foregroundStyle(Color(p.muted)).padding()
+                        }
+                        ForEach(d.hunks.indices, id: \.self) { h in
+                            Text(d.hunks[h].header)
+                                .font(Style.mono(11.5))
+                                .foregroundStyle(Color(p.muted))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color(p.subtle))
+                            ForEach(d.hunks[h].lines.indices, id: \.self) { i in
+                                line(d.hunks[h].lines[i])
+                            }
+                        }
+                        if d.cut {
+                            Text("The rest of this diff is too long to show here.")
+                                .font(.footnote)
+                                .foregroundStyle(Color(p.muted))
+                                .padding()
+                        }
+                    }
+                    .padding(.bottom, 20)
+                }
+            }
+        }
+        .overlay { if loading { ProgressView() } }
+        // Comments: how many, sending them to the agent.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if commentsOn && !review.isEmpty {
+                HStack(spacing: 10) {
+                    Image(systemName: "text.bubble.fill").foregroundStyle(Color(p.primary))
+                    Text(review.count == 1 ? "1 comment" : "\(review.count) comments")
+                        .scaledFont(15, .medium)
+                    Spacer(minLength: 6)
+                    Button("Clear") { model.session?.review = [] }
+                        .scaledFont(15)
+                        .foregroundStyle(Color(p.muted))
+                    Button {
+                        let message = ReviewComment.message(review)
+                        model.session?.review = []
+                        Task { await model.send(message) }
+                        close()
+                    } label: {
+                        Text("Send to the agent")
+                            .scaledFont(15, .semibold)
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: 36)
+                            .background { Capsule().fill(Color(p.primary)) }
+                            .foregroundStyle(Color(p.onPrimary))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(Color(p.raised).ignoresSafeArea(edges: .bottom))
+                .overlay(alignment: .top) { Rectangle().fill(Color(p.hairline)).frame(height: 1) }
+            }
+        }
+        .alert(commenting.map { l in "Line \(l.kind == .removed ? l.old ?? 0 : l.new ?? 0)" + (l.kind == .removed ? " (removed)" : "") } ?? "",
+               isPresented: Binding(get: { commenting != nil }, set: { if !$0 { commenting = nil } })) {
+            TextField("What should the agent change here?", text: $commentText)
+            Button("Cancel", role: .cancel) {}
+            if let l = commenting, comment(on: l) != nil {
+                Button("Delete", role: .destructive) { save(nil) }
+            }
+            Button("Comment") { save(commentText) }
+        } message: {
+            Text(commenting?.text.trimmingCharacters(in: .whitespaces) ?? "")
+        }
+        .screen()
+        .navigationTitle(file.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                ViewMenu(wrap: $wrap)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                if let d = diff {
+                    HStack(spacing: 6) {
+                        Text("+\(d.added)").foregroundStyle(Color(p.token(9) ?? p.success))
+                        Text("−\(d.removed)").foregroundStyle(Color(p.token(10) ?? p.error))
+                    }
+                    .font(Style.mono(12, .semibold))
+                }
+            }
+        }
+        .task {
+            diff = await model.diff(file.path)
+            loading = false
+        }
+    }
+
+    /// Keeps (or with nil, removes) the comment on the line being commented.
+    func save(_ text: String?) {
+        guard let l = commenting, let s = model.session else { return }
+        let (side, line) = l.kind == .removed ? ("old", l.old ?? 0) : ("new", l.new ?? 0)
+        s.review.removeAll { $0.path == file.path && $0.side == side && $0.line == line }
+        if let t = text?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty {
+            s.review.append(ReviewComment(path: file.path, side: side, line: line, code: l.text, text: t))
+        }
+        commenting = nil
+    }
+
+    @ViewBuilder func line(_ l: FileDiff.Line) -> some View {
+        let tint: RGBA? = l.kind == .added ? (p.token(9) ?? p.success) : l.kind == .removed ? (p.token(10) ?? p.error) : nil
+        let commented = commentsOn && comment(on: l) != nil
+        HStack(alignment: .top, spacing: 0) {
+            // A commented line's mark.
+            Image(systemName: "text.bubble.fill")
+                .scaledFont(10)
+                .foregroundStyle(Color(p.primary))
+                .frame(width: 16)
+                .opacity(commented ? 1 : 0)
+            Text(l.old.map { String($0) } ?? "")
+                .frame(width: 34, alignment: .trailing)
+                .foregroundStyle(Color(p.muted).opacity(0.7))
+            Text(l.new.map { String($0) } ?? "")
+                .frame(width: 34, alignment: .trailing)
+                .foregroundStyle(Color(p.muted).opacity(0.7))
+            Text(l.kind == .added ? "+" : l.kind == .removed ? "−" : " ")
+                .frame(width: 18)
+                .foregroundStyle(tint.map { Color($0) } ?? Color(p.muted))
+            // (Wrapped, its further rows start under its code, past its
+            // indentation.)
+            // (Coloured as code, as the file view, when harlo sends it so.)
+            if wrap, let code = CodeLines.lines(l.spans).first {
+                WrappedLine(indent: code.indent, font: Style.mono(12)) {
+                    Text(Style.attributed(code.spans.isEmpty ? [Span(" ")] : RichText.breakable(code.spans), p, size: 14, inCode: true))
+                        .accessibilityLabel(RichText.plain(code.spans))
+                }
+                .padding(.trailing, 12)
+            } else {
+                Text(Style.attributed(l.text.isEmpty ? [Span(" ")] : l.spans, p, size: 14, inCode: true))
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(.trailing, 12)
+            }
+        }
+        .font(Style.mono(12))
+        .padding(.vertical, 1)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tint.map { Color($0).opacity(0.14) } ?? Color.clear)
+        .contentShape(Rectangle())
+        // A tap: a comment on this line (to the agent, with the others).
+        .onTapGesture { startComment(l) }
+        .accessibilityAddTraits(canComment(l) ? .isButton : [])
+        .accessibilityAction(named: "Comment on this line") { startComment(l) }
+    }
+
+    /// The line takes a comment (a changed or kept line, in a session).
+    func canComment(_ l: FileDiff.Line) -> Bool { commentsOn && model.session != nil && (l.kind == .removed ? l.old : l.new) != nil }
+
+    func startComment(_ l: FileDiff.Line) {
+        guard canComment(l) else { return }
+        commentText = comment(on: l)?.text ?? ""
+        commenting = l
+    }
+}

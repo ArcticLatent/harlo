@@ -11,6 +11,7 @@ import Foundation
 import HarloKit
 
 var failures = 0
+@MainActor
 func check(_ ok: Bool, _ what: String) {
     if !ok { failures += 1 }
     print("IOS-E2E", ok ? "PASS" : "FAIL", what)
@@ -18,10 +19,10 @@ func check(_ ok: Bool, _ what: String) {
 
 @MainActor
 func waitFor(_ seconds: Double, _ cond: @MainActor () -> Bool) async -> Bool {
-    let end = Date().addingTimeInterval(seconds)
-    while Date() < end {
+    let end = Date.now.addingTimeInterval(seconds)
+    while Date.now < end {
         if cond() { return true }
-        try? await Task.sleep(nanoseconds: 100_000_000)
+        try? await Task.sleep(for: .milliseconds(100))
     }
     return cond()
 }
@@ -228,10 +229,10 @@ func reaching(store: MemoryStore, offer: PairingOffer, good: URL) async {
     moved.save("identity", store.load("identity"))
     moved.save("host", try? JSONEncoder().encode(h))
     let elsewhere = HarloModel(store: moved, deviceName: "Probe iPhone")
-    let start = Date()
+    let start = Date.now
     elsewhere.resume()
     let quick = await waitFor(8) { elsewhere.state == .connected }
-    let took = Date().timeIntervalSince(start)
+    let took = Date.now.timeIntervalSince(start)
     check(quick && took < 2.5 && elsewhere.host?.lastEndpoint != dead, "a dead address doesn't hold it up (\(String(format: "%.1f", took)) s, via \(elsewhere.host?.lastEndpoint?.host ?? "-"))")
     check(elsewhere.host?.endpoints.contains(dead) == false, "and harlo's own list replaces addresses it no longer has")
 
@@ -468,12 +469,14 @@ func working(_ model: HarloModel, _ s: OpenSession) async {
     await model.send("queue demo")
     let queued = await waitFor(5) { s.queued.count == 3 }
     check(queued && s.canUnqueue, "the queue shows (\(s.queued.map(\.text)))")
-    await model.unqueue(0)
+    if let first = s.queued.first { await model.unqueue(first) }
     let taken = await waitFor(5) { s.queued.count == 2 && s.steering.isEmpty }
     check(taken, "a waiting message can be taken back (\(s.queued.map(\.text)))")
-    if let i = s.queued.firstIndex(where: { $0.text == "Update the changelog" }) { await model.sendNow(i) }
+    let waiting = s.queued.first { $0.text == "Then run the tests" }?.id
+    if let m = s.queued.first(where: { $0.text == "Update the changelog" }) { await model.sendNow(m) }
     let now = await waitFor(5) { s.steering == ["Update the changelog"] && s.followUp == ["Then run the tests"] }
     check(now, "a follow-up can be sent now (steering \(s.steering), next \(s.followUp))")
+    check(waiting != nil && s.queued.last?.id == waiting, "the follow-up left waiting keeps its row (\(s.queued.map(\.id)))")
 
     // Edit & resend: the demo agent can't branch, and the app says so.
     if let mine = s.rows.first(where: { $0.kind == "user" }) {
@@ -631,7 +634,7 @@ func record(_ link: String, to path: String) async {
         check(false, "the main session starts (\(model.alert ?? ""))")
         return
     }
-    check(s.rows.filter { $0.kind == "tool" }.count >= 4, "it reads, edits and runs the tests (\(s.rows.map { $0.kind == "tool" ? $0.title : $0.kind }))")
+    check(s.rows.count(where: { $0.kind == "tool" }) >= 4, "it reads, edits and runs the tests (\(s.rows.map { $0.kind == "tool" ? $0.title : $0.kind }))")
     // What its other screens ask for.
     _ = await model.changes()
     _ = await model.diff("src/sidebar.rs")

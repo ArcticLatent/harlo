@@ -16,8 +16,8 @@ struct ModelPicker: View {
     @State private var search = ""
 
     var providers: [(String, [ModelChoice])] {
-        let q = search.lowercased()
-        let shown = models.filter { q.isEmpty || $0.name.lowercased().contains(q) || $0.id.lowercased().contains(q) }
+        let q = search.trimmingCharacters(in: .whitespaces)
+        let shown = models.filter { q.isEmpty || $0.name.localizedStandardContains(q) || $0.id.localizedStandardContains(q) }
         var out: [(String, [ModelChoice])] = []
         for m in shown {
             if let i = out.firstIndex(where: { $0.0 == m.provider }) { out[i].1.append(m) } else { out.append((m.provider, [m])) }

@@ -138,7 +138,7 @@ public struct SessionLimit: Equatable, Sendable {
 
 /// When a limit resets, as harlo says it: "at 18:30", or "Thu 09:00" further
 /// off than 20 hours.
-public func resetTime(_ ms: Int64, now: Date = Date(), calendar: Calendar = .current) -> String {
+public func resetTime(_ ms: Int64, now: Date = Date.now, calendar: Calendar = .current) -> String {
     let at = Date(timeIntervalSince1970: TimeInterval(ms) / 1000)
     let f = DateFormatter()
     f.calendar = calendar

@@ -209,10 +209,8 @@ public final class OpenSession {
         return Activity(text: "Working", since: turn > rows.startIndex ? rows[rows.index(before: turn)].time : 0)
     }
 
-    /// Messages waiting for the agent, steering first: (queue, text).
-    public var queued: [(queue: String, text: String)] {
-        steering.map { ("steering", $0) } + followUp.map { ("followUp", $0) }
-    }
+    /// Messages waiting for the agent, steering first.
+    public var queued: [QueuedMessage] { QueuedMessage.list(steering: steering, followUp: followUp) }
 
     /// The agent lets a waiting message be taken back (the demo's).
     public var canUnqueue: Bool { harness == "demo" }
@@ -258,7 +256,7 @@ public final class OpenSession {
         case .request(_, let r):
             if !requests.contains(where: { $0.id == r.id }) {
                 requests.append(r)
-                asked[r.id] = Int64(Date().timeIntervalSince1970 * 1000)
+                asked[r.id] = Int64(Date.now.timeIntervalSince1970 * 1000)
             }
         case .cleared(_, let id):
             requests.removeAll { $0.id == id }
@@ -474,7 +472,7 @@ public final class HarloModel {
         better = Task { [weak self] in
             while !Task.isCancelled {
                 let every = self?.betterEvery ?? 60
-                try? await Task.sleep(nanoseconds: UInt64(every * 1_000_000_000))
+                try? await Task.sleep(for: .seconds(every))
                 guard let self, !Task.isCancelled else { return }
                 if self.active { await self.moveToBetter() }
             }
@@ -520,7 +518,7 @@ public final class HarloModel {
                 } catch {
                     if Task.isCancelled { return }
                     state = .waiting(Self.describe(error))
-                    try? await Task.sleep(nanoseconds: UInt64(retry * 1_000_000_000))
+                    try? await Task.sleep(for: .seconds(retry))
                     retry = min(retry * 2, 15)
                     continue
                 }
@@ -537,7 +535,7 @@ public final class HarloModel {
             if client === c { client = nil }
             if Task.isCancelled || host == nil { return }
             state = .waiting(await c.closeReason ?? "")
-            try? await Task.sleep(nanoseconds: 500_000_000)
+            try? await Task.sleep(for: .milliseconds(500))
         }
     }
 
@@ -651,11 +649,11 @@ public final class HarloModel {
         guard host != nil else { return false }
         if state == .connected, client != nil { return true }
         if loop == nil { startLoop(with: nil) }
-        let end = Date().addingTimeInterval(timeout)
-        while Date() < end {
+        let end = Date.now.addingTimeInterval(timeout)
+        while Date.now < end {
             if state == .connected, client != nil { return true }
             if host == nil { return false }
-            try? await Task.sleep(nanoseconds: 200_000_000)
+            try? await Task.sleep(for: .milliseconds(200))
         }
         return false
     }
@@ -723,18 +721,18 @@ public final class HarloModel {
     /// Connects with the pairing code, trying again while the phone reports
     /// itself offline (the code isn't spent: nothing reached harlo).
     private func pairingConnect(_ endpoint: URL, _ offer: PairingOffer) async throws -> (HarloClient, Ready) {
-        let end = Date().addingTimeInterval(offlineWait)
+        let end = Date.now.addingTimeInterval(offlineWait)
         while true {
             do {
                 return try await HarloClient.connect(to: endpoint, identity: identity, harloKey: offer.key, code: offer.code,
                                                      deviceName: deviceName, timeout: timeouts.remote)
             } catch HarloError.offline(let why) {
-                guard Date() < end else {
+                guard Date.now < end else {
                     throw HarloError.offline(endpoint.scheme == "ws"
                         ? "\(why) If you turned off Local Network for harlo, turn it on in Settings › Privacy & Security › Local Network."
                         : why)
                 }
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                try? await Task.sleep(for: .seconds(1))
             }
         }
     }
@@ -1030,10 +1028,10 @@ public final class HarloModel {
         guard showsMockups else { return (nil, "This harlo doesn't show mockups on the phone.") }
         guard let c = client, let key = session?.liveKey, !key.isEmpty else { return (nil, "Not connected to harlo.") }
         let id = key + "|" + source
-        if let m = mockups[id], Date().timeIntervalSince(m.at) < 10 { return (m.pictures, "") }
+        if let m = mockups[id], Date.now.timeIntervalSince(m.at) < 10 { return (m.pictures, "") }
         do {
             let m = try await c.mockup(source, of: key)
-            mockups[id] = (Date(), m)
+            mockups[id] = (Date.now, m)
             return (m, "")
         } catch {
             return (nil, Self.describe(error))
@@ -1065,16 +1063,15 @@ public final class HarloModel {
 
     // ---- the queue, and branching -------------------------------------------------
 
-    /// Takes back the `index`-th waiting message (see `OpenSession.queued`).
-    public func unqueue(_ index: Int) async {
-        guard let q = session?.queued, q.indices.contains(index) else { return }
-        _ = await with { c, k in try await c.unqueue(k, queue: q[index].queue, text: q[index].text) }
+    /// Takes back a waiting message (one of `OpenSession.queued`).
+    public func unqueue(_ message: QueuedMessage) async {
+        _ = await with { c, k in try await c.unqueue(k, queue: message.queue, text: message.text) }
     }
 
-    /// Sends the `index`-th waiting follow-up now, as steering.
-    public func sendNow(_ index: Int) async {
-        guard let q = session?.queued, q.indices.contains(index), q[index].queue == "followUp" else { return }
-        _ = await with { c, k in try await c.promote(k, text: q[index].text) }
+    /// Sends a waiting follow-up now, as steering.
+    public func sendNow(_ message: QueuedMessage) async {
+        guard !message.isSteering else { return }
+        _ = await with { c, k in try await c.promote(k, text: message.text) }
     }
 
     /// Edit & resend: the session goes back to before one of your messages
@@ -1213,7 +1210,7 @@ public final class HarloModel {
 
     /// The open session's files matching what's typed after `@`.
     public func files(matching query: String) async -> [String] {
-        if let s = samples { return s.files.filter { query.isEmpty || $0.localizedCaseInsensitiveContains(query) } }
+        if let s = samples { return s.files.filter { query.isEmpty || $0.localizedStandardContains(query) } }
         guard let c = client, let k = session?.liveKey, !k.isEmpty else { return [] }
         return (try? await c.files(k, query: query)) ?? []
     }
@@ -1222,7 +1219,7 @@ public final class HarloModel {
     /// `@` (none from a harlo too old to have them).
     public func sessionMentions(matching query: String) async -> [SessionMention] {
         if let s = samples {
-            return s.sessionMentions.filter { query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) || $0.mention.dropFirst(9).hasPrefix(query.lowercased()) }
+            return s.sessionMentions.filter { query.isEmpty || $0.title.localizedStandardContains(query) || $0.mention.dropFirst(9).hasPrefix(query.lowercased()) }
         }
         guard features.contains("sessionMentions"), let c = client, let k = session?.liveKey, !k.isEmpty else { return [] }
         return (try? await c.sessionMentions(k, query: query)) ?? []

@@ -1541,3 +1541,27 @@ final class VisualsTests: XCTestCase {
         XCTAssertFalse(MockupPictures(["after": ["png": .string(png)]]).hasBefore)
     }
 }
+
+final class QueuedMessageTests: XCTestCase {
+    /// A steer sent leaves the queue; the rows after it keep their ids, so
+    /// the list doesn't hand one row's state to the next.
+    func testRowsKeepTheirIdsWhenOneLeaves() {
+        let before = QueuedMessage.list(steering: ["Use the other file"], followUp: ["Update the changelog", "Then run the tests"])
+        XCTAssertEqual(before.map(\.text), ["Use the other file", "Update the changelog", "Then run the tests"])
+        XCTAssertEqual(before.map(\.isSteering), [true, false, false])
+        let after = QueuedMessage.list(steering: [], followUp: ["Update the changelog", "Then run the tests"])
+        XCTAssertEqual(after.map(\.id), Array(before.map(\.id).dropFirst()))
+        // Sent now: the follow-up becomes steering, and the one left waiting
+        // keeps its row.
+        let sent = QueuedMessage.list(steering: ["Update the changelog"], followUp: ["Then run the tests"])
+        XCTAssertEqual(sent.map(\.text), ["Update the changelog", "Then run the tests"])
+        XCTAssertEqual(sent.last?.id, before.last?.id)
+    }
+
+    /// The same words queued twice are two rows.
+    func testTwoAlikeAreTwoRows() {
+        let q = QueuedMessage.list(steering: [], followUp: ["again", "again"])
+        XCTAssertEqual(Set(q.map(\.id)).count, 2)
+        XCTAssertNotEqual(QueuedMessage.list(steering: ["again"], followUp: ["again"]).map(\.id).first, q.first?.id)
+    }
+}

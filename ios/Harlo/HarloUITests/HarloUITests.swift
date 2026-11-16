@@ -9,13 +9,14 @@ import XCTest
 ///
 /// The run's text size comes from HARLO_TEXT_SIZE (a content size category,
 /// e.g. UICTContentSizeCategoryAccessibilityL); its appearance is the
-/// simulator's.
+/// simulator's. (On the main actor, as XCUIApplication is.)
+@MainActor
 final class HarloUITests: XCTestCase {
     var app = XCUIApplication()
     /// The main session: a fix, with its tool calls, questions and helpers.
     let main = "jumps to the top"
 
-    override func setUp() {
+    override func setUp() async throws {
         continueAfterFailure = true
     }
 
