@@ -359,6 +359,7 @@ Rectangle {
             Layout.rightMargin: 14
             Layout.bottomMargin: 6
             implicitHeight: 30
+            verticalPadding: 0  // (the style's 12 px would push the content low)
             leftPadding: 12
             rightPadding: 10
             contentItem: RowLayout {

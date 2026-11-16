@@ -24,6 +24,8 @@ Popup {
     signal runInTerminalRequested(string command)
     /// A file to open in harlo's editor (an agent's config, a log).
     signal openFileRequested(string path)
+    // Settings → Shortcuts' "Show every key".
+    signal shortcutsSheetRequested()
     /// A command in a terminal in `folder` (`ssh://host/…`: on that host).
     /// Where a page's floating action bar goes.
     readonly property Item pageFooter: footerHost
@@ -163,6 +165,7 @@ Popup {
                             Layout.fillWidth: true
                             Layout.topMargin: 6
                             implicitHeight: 36
+                            verticalPadding: 0  // (the style's 12 px would push the content low)
                             leftPadding: 12
                             onClicked: { root.navOpen = true; searchField.forceActiveFocus() }
                             contentItem: Icon { name: "search"; color: navSearch.hovered ? Theme.foreground : Theme.textMuted; implicitWidth: 16; implicitHeight: 16 }
@@ -217,6 +220,10 @@ Popup {
                                         readonly property bool current: root.page === modelData.id
                                         Layout.fillWidth: true
                                         implicitHeight: 36
+                                        // (The style's 12 px above and below would leave
+                                        // the icon and name a 12 px band, and they'd sit
+                                        // low on the highlight.)
+                                        verticalPadding: 0
                                         leftPadding: root.navWide ? 10 : 12
                                         rightPadding: root.navWide ? 8 : 0
                                         Layout.topMargin: !root.navWide && index === 0 ? 8 : 0
@@ -304,7 +311,7 @@ Popup {
     // Every page starts at the same left edge; wide ones (Shortcuts, Usage)
     // only reach further right.
     function pageX(w) { return Math.max(28, Math.floor((w - 720) / 2)) }
-    function pageWidth(w, wide) { return Math.min(w - pageX(w) - 58, wide ? 940 : 720) }
+    function pageWidth(w) { return Math.min(w - pageX(w) - 58, 720) }
     component PageTitle: Label {
         text: root.current.title
         color: Theme.foreground
@@ -319,7 +326,7 @@ Popup {
             color: "transparent"
             columnX: root.pageX(width)
             // (As wide as the other pages, so the edge stays put between them.)
-            columnWidth: root.pageWidth(width, false)
+            columnWidth: root.pageWidth(width)
             header: ColumnLayout {
                 id: usageColumn
                 spacing: 0
@@ -463,8 +470,8 @@ Popup {
                 id: pageBody
                 x: root.pageX(pageFlick.width)
                 y: 26
-                // Room for the close button on the right; shortcuts use two columns.
-                width: root.pageWidth(pageFlick.width, root.page === "shortcuts")
+                // Room for the close button on the right.
+                width: root.pageWidth(pageFlick.width)
                 spacing: 0
                 PageTitle { }
                 Loader {
@@ -683,22 +690,9 @@ Popup {
 
     Component {
         id: shortcutsPage
-        ColumnLayout {
-            spacing: 0
-            SectionHeader { title: "Keyboard shortcuts"; subtitle: "Click a key to change it: press the new keys (Esc cancels, Backspace removes it)." + (Keymap.seq("shortcuts") !== "" ? " Also shown with " + Keymap.seq("shortcuts") + "." : "") }
-            RowLayout {
-                Layout.fillWidth: true
-                Layout.topMargin: 8
-                visible: Object.keys(Keymap.overrides).length > 0
-                Item { Layout.fillWidth: true }
-                FlatButton { text: "Reset all"; font.pixelSize: Theme.px(12); onClicked: Keymap.resetAll() }
-            }
-            ShortcutList {
-                Layout.fillWidth: true
-                Layout.topMargin: 16
-                shortcuts: root.shortcuts
-                editable: true
-            }
+        ShortcutSettings {
+            shortcuts: root.shortcuts
+            onSheetRequested: root.shortcutsSheetRequested()
         }
     }
 

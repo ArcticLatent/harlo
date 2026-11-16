@@ -249,6 +249,7 @@ Rectangle {
                     Layout.fillWidth: true
                     Layout.minimumWidth: 0
                     implicitHeight: 30
+                    verticalPadding: 0  // (the style's 12 px would push the content low)
                     leftPadding: 8
                     rightPadding: 8
                     onClicked: root.git.selectRepo(modelData.root)
@@ -317,6 +318,7 @@ Rectangle {
                 visible: repoList.clean.length > 0
                 Layout.fillWidth: true
                 implicitHeight: 26
+                verticalPadding: 0  // (the style's 12 px would push the content low)
                 leftPadding: 8
                 onClicked: repoList.showClean = !repoList.showClean
                 background: Rectangle { radius: 8; color: parent.hovered ? Theme.rowHover : "transparent"; Behavior on color { ColorAnimation { duration: Theme.hoverMotion } } }
@@ -324,6 +326,7 @@ Rectangle {
                     text: repoList.showClean ? "Hide those without changes" : repoList.clean.length + (repoList.clean.length === 1 ? " without changes" : " without changes") + "…"
                     color: Theme.textMuted
                     font.pixelSize: Theme.px(12)
+                    verticalAlignment: Text.AlignVCenter
                 }
             }
             Rectangle { Layout.fillWidth: true; Layout.topMargin: 6; implicitHeight: 1; color: Theme.hairline }

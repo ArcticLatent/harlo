@@ -45,24 +45,63 @@ Rectangle {
         session.planMode = false
         session.send("Build it: work through the plan, step by step.", "normal")
     }
-    // Open while it has steps to do: the plan is what you'd look at. A
-    // finished one folds to "All done" (as it's reopened, and as its last
-    // step ends); folding or opening it by hand holds for that session.
-    property bool expanded: true
+    // Folded when a session opens: its header says the step in hand. It
+    // opens by hand, or when the agent makes the plan while you watch, and
+    // a finished one folds to "All done" (as its last step ends); folding
+    // or opening it by hand holds for that session.
+    property bool expanded: false
     readonly property bool allDone: steps.length > 0 && finished === steps.length
     readonly property string sessionKey: session ? session.key : ""
     /// By session: true folded by hand, false opened by hand.
     property var foldedByHand: ({})
+    /// By session: its plan's steps when last seen; true once a plan was
+    /// made in it while it was on screen.
+    property var seenSteps: ({})
+    property var madeHere: ({})
     function settleFold() {
         const k = sessionKey
-        expanded = k in foldedByHand ? !foldedByHand[k] : !allDone
+        expanded = k in foldedByHand ? !foldedByHand[k] : madeHere[k] === true && !allDone
         editing = -1
     }
-    onSessionKeyChanged: settleFold()
+    // (Read from harlo, not `steps`: that may still be the last session's.)
+    function noteSteps() {
+        const k = sessionKey
+        if (k === "") return
+        const n = (JSON.parse(Workspace.planJson(k)).steps || []).length
+        const seen = seenSteps
+        if (k in seen && seen[k] === 0 && n > 0) {
+            const made = madeHere
+            made[k] = true
+            madeHere = made
+            settleFold()
+        }
+        seen[k] = n
+        seenSteps = seen
+    }
+    /// A session opened: its plan folded (unless opened by hand), even one
+    /// made while you watched it before.
+    function sessionOpened() {
+        showFinished = false
+        madeHere = ({})
+        settleFold()
+        noteSteps()
+    }
+    onSessionKeyChanged: sessionOpened()
+    onStepsChanged: noteSteps()
     onAllDoneChanged: settleFold()
-    Component.onCompleted: settleFold()
+    Component.onCompleted: { settleFold(); noteSteps() }
     /// The most its steps take before they scroll.
-    property real maxStepsHeight: 320
+    property real maxStepsHeight: 168
+    /// The finished steps before the first one to do, folded to a line.
+    readonly property int leadFinished: {
+        const i = steps.findIndex(s => s.status === "pending" || s.status === "active")
+        return i < 0 ? 0 : i
+    }
+    property bool showFinished: false
+    // (Folding the card folds them again: the next open is quick.)
+    onExpandedChanged: if (!expanded) showFinished = false
+    /// The step in hand, else the next one to do.
+    readonly property var next: current || steps.find(s => s.status === "pending") || null
     /// The step being edited (its id; -1 none, 0 a new one).
     property int editing: -1
 
@@ -80,15 +119,8 @@ Rectangle {
         return i >= 0 && p.models[i] ? Theme.modelLabel(p.models[i]) : Theme.modelLabel(String(model).split("/").pop())
     }
     function edit(op) { Workspace.planEdit(session.key, JSON.stringify(op)) }
-    function mark(status) {
-        switch (status) {
-        // (Done is the usual end: faint, like a run's finished steps.)
-        case "done": return { icon: "checkbox-circle", color: Theme.textFaint }
-        case "active": return { icon: "arrow-right-s", color: Theme.primary }
-        case "skipped": return { icon: "close", color: Theme.muted }
-        default: return { icon: "", color: Theme.muted }
-        }
-    }
+    /// The step whose "Review…" menu is open.
+    property int reviewStepId: -1
     // Agents that can review a step (not the one that did it, first).
     readonly property var reviewers: (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.chatProvidersJson()) : [])
         .filter(p => p.id !== "demo")
@@ -120,10 +152,10 @@ Rectangle {
             }
             Rectangle {
                 visible: root.width >= 480
-                implicitWidth: 60
+                implicitWidth: 72
                 implicitHeight: 4
                 radius: 2
-                color: Theme.subtle
+                color: Theme.hairline
                 Rectangle { width: parent.width * (root.steps.length ? root.finished / root.steps.length : 0); height: parent.height; radius: 2; color: Theme.textMuted }
             }
             // Running with helpers (or paused, waiting for you); what they
@@ -141,15 +173,43 @@ Rectangle {
                 HoverHandler { id: runUsedHover }
                 readonly property string used: root.runUsed
             }
-            // Folded: the step in hand (open, the list shows it).
-            Label {
+            // Folded: the step in hand, or the next one, at the right by the
+            // toggle (open, the list shows them).
+            RowLayout {
+                id: planFolded
+                objectName: "planFoldedStep"
                 Layout.fillWidth: true
                 Layout.minimumWidth: 0
-                text: root.expanded ? "" : root.current ? root.current.title : (root.finished === root.steps.length ? "All done" : "")
-                color: Theme.muted
-                font.pixelSize: Theme.px(12)
-                elide: Text.ElideRight
+                Layout.leftMargin: 4
+                spacing: 6
+                visible: !root.expanded && (root.next !== null || root.allDone)
+                Item { Layout.fillWidth: true }
+                Rectangle {
+                    visible: !!root.current
+                    implicitWidth: 6
+                    implicitHeight: 6
+                    radius: 3
+                    color: Theme.primary
+                }
+                Label {
+                    visible: !root.current && !root.allDone
+                    text: "Next"
+                    color: Theme.textMuted
+                    font.pixelSize: Theme.px(12)
+                }
+                PlainLabel {
+                    // (Its own width while it fits; a long title elides.)
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    Layout.maximumWidth: implicitWidth
+                    text: root.allDone ? "All done" : root.next ? root.next.title : ""
+                    color: root.allDone ? Theme.textMuted : Theme.text
+                    font.pixelSize: Theme.px(12.5)
+                    elide: Text.ElideRight
+                    maximumLineCount: 1
+                }
             }
+            Item { visible: !planFolded.visible; Layout.fillWidth: true }
             // In Plan: switch to Build and start on the plan.
             FlatButton {
                 objectName: "planBuild"
@@ -187,6 +247,10 @@ Rectangle {
         Flickable {
             id: stepsView
             Layout.fillWidth: true
+            // (Rows reach toward the card's edges, their marks under the
+            // header's icon.)
+            Layout.leftMargin: -6
+            Layout.rightMargin: -6
             Layout.preferredHeight: Math.min(stepsCol.implicitHeight, root.maxStepsHeight)
             visible: root.expanded
             contentHeight: stepsCol.implicitHeight
@@ -196,215 +260,308 @@ Rectangle {
             ColumnLayout {
                 id: stepsCol
                 width: stepsView.width
-                spacing: col.spacing
+                spacing: 2
+                // The finished steps before the first to do, in a line that
+                // shows them.
+                Button {
+                    id: finishedToggle
+                    objectName: "planFinishedToggle"
+                    visible: root.leadFinished > 0
+                    Layout.fillWidth: true
+                    implicitHeight: 26
+                    flat: true
+                    padding: 0
+                    leftPadding: 6
+                    onClicked: root.showFinished = !root.showFinished
+                    Accessible.name: (root.showFinished ? "Hide " : "Show ") + root.leadFinished + " finished steps"
+                    contentItem: RowLayout {
+                        spacing: 8
+                        Icon {
+                            name: "arrow-right-s"
+                            rotation: root.showFinished ? 90 : 0
+                            color: finishedToggle.hovered ? Theme.foreground : Theme.textMuted
+                            implicitWidth: 14
+                            implicitHeight: 14
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: root.leadFinished === 1 ? "1 finished step" : root.leadFinished + " finished steps"
+                            color: finishedToggle.hovered ? Theme.foreground : Theme.textMuted
+                            font.pixelSize: Theme.px(12)
+                            font.features: { "tnum": 1 }
+                        }
+                    }
+                    background: Rectangle { radius: 6; color: finishedToggle.hovered ? Theme.hover : "transparent" }
+                }
                 Repeater {
-                    model: root.expanded ? root.steps : []
-                    ColumnLayout {
+                    // (The folded finished steps aren't made until shown: a
+                    // long plan's are most of it.)
+                    model: !root.expanded ? [] : root.showFinished ? root.steps : root.steps.slice(root.leadFinished)
+                    Item {
                         id: stepRow
                         required property var modelData
                         required property int index
-                        readonly property var m: root.mark(modelData.status)
                         readonly property bool open: modelData.status === "pending" || modelData.status === "active"
                         // (The session reviewing it, while its review runs.)
                         readonly property string reviewer: root.run && root.run.reviewing ? (root.run.reviewing[String(modelData.id)] || "") : ""
-                        readonly property bool pausedHere: root.pausedStep === index + 1
+                        objectName: "planStepRow"
+                        // Its place in the plan.
+                        readonly property int at: index + (root.showFinished ? 0 : root.leadFinished)
+                        readonly property bool pausedHere: root.pausedStep === at + 1
+                        readonly property bool active: modelData.status === "active"
+                        readonly property bool finishedStep: modelData.status === "done" || modelData.status === "skipped"
                         Layout.fillWidth: true
-                        spacing: 2
+                        implicitHeight: rowCol.implicitHeight > 0 ? rowCol.implicitHeight + 8 : 0
                         HoverHandler { id: stepHover }
-                        RowLayout {
-                            Layout.fillWidth: true
-                            visible: root.editing !== stepRow.modelData.id
-                            spacing: 8
-                            Item {
-                                implicitWidth: 14
-                                implicitHeight: 14
-                                Layout.alignment: Qt.AlignTop
-                                Layout.topMargin: 2
-                                Icon { anchors.fill: parent; visible: stepRow.m.icon !== ""; name: stepRow.m.icon; color: stepRow.m.color }
-                                Rectangle { visible: stepRow.m.icon === ""; anchors.centerIn: parent; width: 10; height: 10; radius: 5; color: "transparent"; border.color: Theme.muted }
-                            }
-                            ColumnLayout {
+                        // The step in hand stands out; the others take the hover.
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: 6
+                            color: stepRow.active ? Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, Theme.isLight ? 0.07 : 0.09)
+                                : stepHover.hovered ? Theme.hover : "transparent"
+                        }
+                        ColumnLayout {
+                            id: rowCol
+                            x: 6
+                            y: 4
+                            width: parent.width - 12
+                            spacing: 2
+                            RowLayout {
                                 Layout.fillWidth: true
-                                spacing: 1
-                                // Runs at the same time as the step before (with helpers).
-                                RowLayout {
-                                    visible: !!stepRow.modelData.alongside
-                                    spacing: 4
-                                    Icon { name: "layout-column"; color: Theme.info; implicitWidth: 11; implicitHeight: 11 }
-                                    Label { text: "With the step before"; color: Theme.info; font.pixelSize: Theme.px(10.5) }
+                                visible: root.editing !== stepRow.modelData.id
+                                spacing: 8
+                                // Its mark on the plan's line (as a run's steps):
+                                // done a check, the one in hand an accent dot,
+                                // to do a ring, skipped a cross.
+                                Item {
+                                    implicitWidth: 14
+                                    implicitHeight: 14
+                                    Layout.fillHeight: true
+                                    Layout.alignment: Qt.AlignTop
+                                    Layout.topMargin: 2
+                                    Rectangle {
+                                        // (To the next step's mark, across the gap.)
+                                        visible: stepRow.at < root.steps.length - 1
+                                        x: 6.5
+                                        y: 16
+                                        width: 1
+                                        height: Math.max(0, parent.height - 6)
+                                        color: Theme.border
+                                    }
+                                    Rectangle {
+                                        visible: stepRow.active
+                                        anchors.centerIn: mark
+                                        width: 14
+                                        height: 14
+                                        radius: 7
+                                        color: Theme.accentSoft
+                                    }
+                                    Rectangle {
+                                        id: mark
+                                        x: 2
+                                        y: 2
+                                        width: 10
+                                        height: 10
+                                        radius: 5
+                                        color: stepRow.active ? Theme.primary : "transparent"
+                                        border.width: stepRow.modelData.status === "pending" ? 1.5 : 0
+                                        border.color: Theme.textMuted
+                                    }
+                                    Icon {
+                                        visible: stepRow.finishedStep
+                                        anchors.centerIn: mark
+                                        name: stepRow.modelData.status === "done" ? "check" : "close"
+                                        color: stepRow.modelData.status === "done" ? Theme.textMuted : Theme.textFaint
+                                        implicitWidth: 13
+                                        implicitHeight: 13
+                                    }
                                 }
-                                PlainLabel {
+                                ColumnLayout {
                                     Layout.fillWidth: true
-                                    text: stepRow.modelData.title + (stepRow.modelData.editedByUser ? "  ·  yours" : "")
-                                    color: stepRow.modelData.status === "active" ? Theme.foreground : Theme.muted
-                                    font.pixelSize: Theme.px(12)
-                                    font.strikeout: stepRow.modelData.status === "skipped"
-                                    wrapMode: Text.Wrap
-                                }
-                                PlainLabel {
-                                    id: stepText
-                                    Layout.fillWidth: true
-                                    visible: text !== ""
-                                    // (A helper's report can run long: two lines, a click for all.)
-                                    property bool full: false
-                                    // (Its paragraphs as lines: no blank line in two.)
-                                    text: String(stepRow.modelData.summary || stepRow.modelData.detail || "").replace(/\n\s*\n/g, "\n").trim()
-                                    // The step the run stopped at: what went wrong, once, here.
-                                    color: stepRow.pausedHere ? Theme.warning : Theme.textFaint
-                                    font.pixelSize: Theme.px(11.5)
-                                    wrapMode: Text.Wrap
-                                    maximumLineCount: full ? 1000 : 2
-                                    elide: Text.ElideRight
-                                    HoverHandler { enabled: stepText.truncated || stepText.full; cursorShape: Qt.PointingHandCursor }
-                                    TapHandler { enabled: stepText.truncated || stepText.full; onTapped: stepText.full = !stepText.full }
-                                }
-                                // Its helper (a run), and the worktree it works in.
-                                RowLayout {
-                                    visible: (stepRow.modelData.helper || "") !== "" || (stepRow.modelData.branch || "") !== ""
-                                    Layout.fillWidth: true
-                                    spacing: 6
-                                    Icon { name: "node-tree"; color: Theme.muted; implicitWidth: 12; implicitHeight: 12 }
-                                    Label {
+                                    spacing: 1
+                                    // Runs at the same time as the step before (with helpers).
+                                    RowLayout {
+                                        visible: !!stepRow.modelData.alongside
+                                        spacing: 4
+                                        Icon { name: "layout-column"; color: Theme.info; implicitWidth: 11; implicitHeight: 11 }
+                                        Label { text: "With the step before"; color: Theme.info; font.pixelSize: Theme.px(10.5) }
+                                    }
+                                    PlainLabel {
                                         Layout.fillWidth: true
-                                        text: (stepRow.reviewer !== "" ? "Done, being reviewed" : stepRow.modelData.status === "active" ? "A helper is on it" : "Done by a helper") + ((stepRow.modelData.branch || "") !== "" ? " · ⎇ " + stepRow.modelData.branch : "")
-                                        color: Theme.muted
-                                        font.pixelSize: Theme.px(11)
-                                        elide: Text.ElideRight
-                                    }
-                                    FlatButton {
-                                        objectName: "planOpenHelper-" + stepRow.modelData.id
-                                        // (Under review: the review's, below.)
-                                        visible: (stepRow.modelData.helper || "") !== "" && stepRow.modelData.status === "active" && stepRow.reviewer === ""
-                                        text: "Open"
-                                        padding: 3
-                                        font.pixelSize: Theme.px(12)
-                                        onClicked: Workspace.open(stepRow.modelData.helper)
-                                    }
-                                    FlatButton {
-                                        objectName: "planOpenReview-" + stepRow.modelData.id
-                                        visible: stepRow.reviewer !== ""
-                                        text: "Open review"
-                                        padding: 3
-                                        font.pixelSize: Theme.px(12)
-                                        onClicked: Workspace.open(stepRow.reviewer)
-                                    }
-                                }
-                                // Who you chose to do it (a run with helpers).
-                                RowLayout {
-                                    visible: (stepRow.modelData.agent || "") !== "" && stepRow.modelData.status === "pending"
-                                    Layout.fillWidth: true
-                                    spacing: 6
-                                    Icon { name: "robot-2"; color: Theme.muted; implicitWidth: 12; implicitHeight: 12 }
-                                    Label {
-                                        objectName: "planStepWho-" + stepRow.modelData.id
-                                        Layout.fillWidth: true
-                                        Layout.maximumWidth: implicitWidth
-                                        Layout.minimumWidth: 0
-                                        text: "Done by " + root.agentName(stepRow.modelData.agent || "") + (stepRow.modelData.model ? " · " + root.modelName(stepRow.modelData.agent, stepRow.modelData.model) : "")
-                                        color: Theme.muted
-                                        font.pixelSize: Theme.px(11.5)
-                                        elide: Text.ElideRight
-                                    }
-                                    // Undo the choice, right by it (on hover).
-                                    FlatButton {
-                                        objectName: "planStepWhoClear-" + stepRow.modelData.id
-                                        opacity: stepHover.hovered || hovered || activeFocus ? 1 : 0
-                                        text: "Use the run's helpers"
-                                        outlined: false
-                                        accent: Theme.textMuted
-                                        padding: 2
-                                        font.pixelSize: Theme.px(11.5)
-                                        onClicked: root.edit({ op: "helper", id: stepRow.modelData.id, agent: "", model: "" })
-                                    }
-                                    Item { Layout.fillWidth: true }
-                                }
-                                // Its commit, or why there isn't one.
-                                RowLayout {
-                                    visible: (stepRow.modelData.commit || "") !== "" || (stepRow.modelData.commitNote || "") !== ""
-                                    Layout.fillWidth: true
-                                    spacing: 6
-                                    Icon { visible: (stepRow.modelData.commit || "") !== ""; name: "git-commit"; color: Theme.textMuted; implicitWidth: 12; implicitHeight: 12 }
-                                    Label {
-                                        Layout.fillWidth: true
-                                        text: (stepRow.modelData.commit || "") !== "" ? "Committed " + stepRow.modelData.commit.substring(0, 8) : (stepRow.modelData.commitNote || "")
-                                        color: (stepRow.modelData.commit || "") !== "" ? Theme.textMuted : (stepRow.modelData.commitNote || "").startsWith("Not committed") ? Theme.warning : Theme.muted
-                                        font.family: (stepRow.modelData.commit || "") !== "" ? Theme.mono : Theme.uiFont
-                                        font.pixelSize: Theme.px(11)
+                                        text: stepRow.modelData.title + (stepRow.modelData.editedByUser ? "  ·  yours" : "")
+                                        // (To do reads as the text it is; done steps step back.)
+                                        color: stepRow.finishedStep ? Theme.textMuted : Theme.text
+                                        font.pixelSize: Theme.px(12.5)
+                                        font.weight: stepRow.active ? Font.Medium : Font.Normal
+                                        font.strikeout: stepRow.modelData.status === "skipped"
                                         wrapMode: Text.Wrap
                                     }
-                                    FlatButton {
-                                        objectName: "planReview-" + stepRow.modelData.id
-                                        visible: (stepRow.modelData.commit || "") !== ""
-                                        text: "Review…"
-                                        padding: 3
-                                        font.pixelSize: Theme.px(12)
-                                        onClicked: reviewMenu.popup()
-                                        AppMenu {
-                                            id: reviewMenu
-                                            Repeater {
-                                                model: root.reviewers
-                                                AppMenuItem {
-                                                    required property var modelData
-                                                    text: "Review with " + modelData.label
-                                                    onTriggered: {
-                                                        const err = Workspace.reviewStep(root.session.key, stepRow.modelData.id, modelData.id)
-                                                        if (err !== "") Workspace.showNotice(err, true)
-                                                    }
-                                                }
+                                    PlainLabel {
+                                        id: stepText
+                                        Layout.fillWidth: true
+                                        visible: text !== ""
+                                        // (A helper's report can run long: two lines, a click for all.)
+                                        property bool full: false
+                                        // (Its paragraphs as lines: no blank line in two.)
+                                        text: String(stepRow.modelData.summary || stepRow.modelData.detail || "").replace(/\n\s*\n/g, "\n").trim()
+                                        // The step the run stopped at: what went wrong, once, here.
+                                        color: stepRow.pausedHere ? Theme.warning : stepRow.finishedStep ? Theme.textFaint : Theme.textMuted
+                                        font.pixelSize: Theme.px(11.5)
+                                        wrapMode: Text.Wrap
+                                        maximumLineCount: full ? 1000 : 2
+                                        elide: Text.ElideRight
+                                        HoverHandler { enabled: stepText.truncated || stepText.full; cursorShape: Qt.PointingHandCursor }
+                                        TapHandler { enabled: stepText.truncated || stepText.full; onTapped: stepText.full = !stepText.full }
+                                    }
+                                    // Its helper (a run), and the worktree it works in.
+                                    // (This and the rows below are made only for
+                                    // the steps that have them: a long plan opens
+                                    // at once.)
+                                    Loader {
+                                        Layout.fillWidth: true
+                                        active: (stepRow.modelData.helper || "") !== "" || (stepRow.modelData.branch || "") !== ""
+                                        visible: active
+                                        sourceComponent: RowLayout {
+                                            spacing: 6
+                                            Icon { name: "node-tree"; color: Theme.muted; implicitWidth: 12; implicitHeight: 12 }
+                                            Label {
+                                                Layout.fillWidth: true
+                                                text: (stepRow.reviewer !== "" ? "Done, being reviewed" : stepRow.modelData.status === "active" ? "A helper is on it" : "Done by a helper") + ((stepRow.modelData.branch || "") !== "" ? " · ⎇ " + stepRow.modelData.branch : "")
+                                                color: Theme.muted
+                                                font.pixelSize: Theme.px(11)
+                                                elide: Text.ElideRight
+                                            }
+                                            FlatButton {
+                                                objectName: "planOpenHelper-" + stepRow.modelData.id
+                                                // (Under review: the review's, below.)
+                                                visible: (stepRow.modelData.helper || "") !== "" && stepRow.modelData.status === "active" && stepRow.reviewer === ""
+                                                text: "Open"
+                                                padding: 3
+                                                font.pixelSize: Theme.px(12)
+                                                onClicked: Workspace.open(stepRow.modelData.helper)
+                                            }
+                                            FlatButton {
+                                                objectName: "planOpenReview-" + stepRow.modelData.id
+                                                visible: stepRow.reviewer !== ""
+                                                text: "Open review"
+                                                padding: 3
+                                                font.pixelSize: Theme.px(12)
+                                                onClicked: Workspace.open(stepRow.reviewer)
+                                            }
+                                        }
+                                    }
+                                    // Who you chose to do it (a run with helpers).
+                                    Loader {
+                                        Layout.fillWidth: true
+                                        active: (stepRow.modelData.agent || "") !== "" && stepRow.modelData.status === "pending"
+                                        visible: active
+                                        sourceComponent: RowLayout {
+                                            spacing: 6
+                                            Icon { name: "robot-2"; color: Theme.muted; implicitWidth: 12; implicitHeight: 12 }
+                                            Label {
+                                                objectName: "planStepWho-" + stepRow.modelData.id
+                                                Layout.fillWidth: true
+                                                Layout.maximumWidth: implicitWidth
+                                                Layout.minimumWidth: 0
+                                                text: "Done by " + root.agentName(stepRow.modelData.agent || "") + (stepRow.modelData.model ? " · " + root.modelName(stepRow.modelData.agent, stepRow.modelData.model) : "")
+                                                color: Theme.muted
+                                                font.pixelSize: Theme.px(11.5)
+                                                elide: Text.ElideRight
+                                            }
+                                            // Undo the choice, right by it (on hover).
+                                            FlatButton {
+                                                objectName: "planStepWhoClear-" + stepRow.modelData.id
+                                                opacity: stepHover.hovered || hovered || activeFocus ? 1 : 0
+                                                text: "Use the run's helpers"
+                                                outlined: false
+                                                accent: Theme.textMuted
+                                                padding: 2
+                                                font.pixelSize: Theme.px(11.5)
+                                                onClicked: root.edit({ op: "helper", id: stepRow.modelData.id, agent: "", model: "" })
+                                            }
+                                            Item { Layout.fillWidth: true }
+                                        }
+                                    }
+                                    // Its commit, or why there isn't one.
+                                    Loader {
+                                        Layout.fillWidth: true
+                                        active: (stepRow.modelData.commit || "") !== "" || (stepRow.modelData.commitNote || "") !== ""
+                                        visible: active
+                                        sourceComponent: RowLayout {
+                                            spacing: 6
+                                            Icon { visible: (stepRow.modelData.commit || "") !== ""; name: "git-commit"; color: Theme.textMuted; implicitWidth: 12; implicitHeight: 12 }
+                                            Label {
+                                                Layout.fillWidth: true
+                                                text: (stepRow.modelData.commit || "") !== "" ? "Committed " + stepRow.modelData.commit.substring(0, 8) : (stepRow.modelData.commitNote || "")
+                                                color: (stepRow.modelData.commit || "") !== "" ? Theme.textMuted : (stepRow.modelData.commitNote || "").startsWith("Not committed") ? Theme.warning : Theme.muted
+                                                font.family: (stepRow.modelData.commit || "") !== "" ? Theme.mono : Theme.uiFont
+                                                font.pixelSize: Theme.px(11)
+                                                wrapMode: Text.Wrap
+                                            }
+                                            FlatButton {
+                                                objectName: "planReview-" + stepRow.modelData.id
+                                                visible: (stepRow.modelData.commit || "") !== ""
+                                                text: "Review…"
+                                                padding: 3
+                                                font.pixelSize: Theme.px(12)
+                                                onClicked: { root.reviewStepId = stepRow.modelData.id; reviewMenu.popup() }
                                             }
                                         }
                                     }
                                 }
-                            }
-                            // Your edits, on hover: over the step's right end (they
-                            // take no room, so the text doesn't rewrap and the
-                            // step's own buttons stay at the right edge).
-                            Item {
-                                Layout.preferredWidth: 0
-                                Layout.alignment: Qt.AlignTop
-                                implicitHeight: 24
-                            Rectangle {
-                                anchors.right: parent.right
-                                anchors.top: parent.top
-                                anchors.topMargin: -2
-                                width: editRow.width + 8
-                                height: editRow.height + 4
-                                radius: 7
-                                color: root.color
-                                border.color: Theme.border
-                                visible: stepHover.hovered
-                                z: 2
-                            Row {
-                                id: editRow
-                                objectName: "planStepEdits"
-                                anchors.centerIn: parent
-                                spacing: 0
-                                StepButton { iconName: "arrow-up-s"; tip: "Move up"; enabled: stepRow.index > 0; onClicked: root.edit({ op: "shift", id: stepRow.modelData.id, by: -1 }) }
-                                StepButton { iconName: "arrow-down-s"; tip: "Move down"; enabled: stepRow.index < root.steps.length - 1; onClicked: root.edit({ op: "shift", id: stepRow.modelData.id, by: 1 }) }
-                                StepButton {
-                                    visible: stepRow.index > 0 && stepRow.modelData.status === "pending"
-                                    iconName: "layout-column"
-                                    tip: stepRow.modelData.alongside ? "Run it after the step before" : "Run it at the same time as the step before (with helpers)"
-                                    onClicked: root.edit({ op: "alongside", id: stepRow.modelData.id, alongside: !stepRow.modelData.alongside })
+                                // Your edits, on hover: over the step's right end (they
+                                // take no room, so the text doesn't rewrap and the
+                                // step's own buttons stay at the right edge).
+                                Item {
+                                    Layout.preferredWidth: 0
+                                    Layout.alignment: Qt.AlignTop
+                                    implicitHeight: 24
+                                    Loader {
+                                        anchors.right: parent.right
+                                        anchors.top: parent.top
+                                        anchors.topMargin: -2
+                                        z: 2
+                                        // (Made while the step is hovered.)
+                                        active: stepHover.hovered
+                                        sourceComponent: Rectangle {
+                                            width: editRow.width + 8
+                                            height: editRow.height + 4
+                                            radius: 7
+                                            color: root.color
+                                            border.color: Theme.border
+                                            Row {
+                                                id: editRow
+                                                objectName: "planStepEdits"
+                                                anchors.centerIn: parent
+                                                spacing: 0
+                                                StepButton { iconName: "arrow-up-s"; tip: "Move up"; enabled: stepRow.at > 0; onClicked: root.edit({ op: "shift", id: stepRow.modelData.id, by: -1 }) }
+                                                StepButton { iconName: "arrow-down-s"; tip: "Move down"; enabled: stepRow.at < root.steps.length - 1; onClicked: root.edit({ op: "shift", id: stepRow.modelData.id, by: 1 }) }
+                                                StepButton {
+                                                    visible: stepRow.at > 0 && stepRow.modelData.status === "pending"
+                                                    iconName: "layout-column"
+                                                    tip: stepRow.modelData.alongside ? "Run it after the step before" : "Run it at the same time as the step before (with helpers)"
+                                                    onClicked: root.edit({ op: "alongside", id: stepRow.modelData.id, alongside: !stepRow.modelData.alongside })
+                                                }
+                                                StepButton {
+                                                    objectName: "planStepHelper-" + stepRow.modelData.id
+                                                    visible: stepRow.modelData.status === "pending" && Workspace.orchestrationOn
+                                                    iconName: "robot-2"
+                                                    tip: "Who does it, when the plan runs with helpers"
+                                                    onClicked: root.chooseStepHelper(stepRow.modelData.id, stepRow.modelData.agent || "", stepRow.modelData.model || "")
+                                                }
+                                                StepButton { visible: stepRow.open; iconName: "edit"; tip: "Change it"; onClicked: { root.editing = stepRow.modelData.id; editTitle.text = stepRow.modelData.title; editDetail.text = stepRow.modelData.detail || "" } }
+                                                StepButton {
+                                                    visible: stepRow.modelData.status !== "done"
+                                                    iconName: stepRow.modelData.status === "skipped" ? "arrow-go-back" : "close"
+                                                    tip: stepRow.modelData.status === "skipped" ? "Don't skip it" : "Skip it"
+                                                    onClicked: root.edit({ op: "skip", id: stepRow.modelData.id, skipped: stepRow.modelData.status !== "skipped" })
+                                                }
+                                                StepButton { visible: stepRow.modelData.status === "pending"; iconName: "delete-bin"; tip: "Remove it"; onClicked: root.edit({ op: "remove", id: stepRow.modelData.id }) }
+                                                StepButton { visible: stepRow.modelData.status === "pending" || stepRow.modelData.status === "active"; iconName: "add"; tip: "Add a step after it"; onClicked: { root.editing = 0; addAfter.value = stepRow.modelData.id; editTitle.text = ""; editDetail.text = "" } }
+                                            }
+                                        }
+                                    }
                                 }
-                                StepButton {
-                                    objectName: "planStepHelper-" + stepRow.modelData.id
-                                    visible: stepRow.modelData.status === "pending" && Workspace.orchestrationOn
-                                    iconName: "robot-2"
-                                    tip: "Who does it, when the plan runs with helpers"
-                                    onClicked: root.chooseStepHelper(stepRow.modelData.id, stepRow.modelData.agent || "", stepRow.modelData.model || "")
-                                }
-                                StepButton { visible: stepRow.open; iconName: "edit"; tip: "Change it"; onClicked: { root.editing = stepRow.modelData.id; editTitle.text = stepRow.modelData.title; editDetail.text = stepRow.modelData.detail || "" } }
-                                StepButton {
-                                    visible: stepRow.modelData.status !== "done"
-                                    iconName: stepRow.modelData.status === "skipped" ? "arrow-go-back" : "close"
-                                    tip: stepRow.modelData.status === "skipped" ? "Don't skip it" : "Skip it"
-                                    onClicked: root.edit({ op: "skip", id: stepRow.modelData.id, skipped: stepRow.modelData.status !== "skipped" })
-                                }
-                                StepButton { visible: stepRow.modelData.status === "pending"; iconName: "delete-bin"; tip: "Remove it"; onClicked: root.edit({ op: "remove", id: stepRow.modelData.id }) }
-                                StepButton { visible: stepRow.modelData.status === "pending" || stepRow.modelData.status === "active"; iconName: "add"; tip: "Add a step after it"; onClicked: { root.editing = 0; addAfter.value = stepRow.modelData.id; editTitle.text = ""; editDetail.text = "" } }
-                            }
-                            }
                             }
                         }
                     }
@@ -535,6 +692,22 @@ Rectangle {
                 outlined: false
                 accent: Theme.textMuted
                 onClicked: root.edit({ op: "clear" })
+            }
+        }
+    }
+
+    // A done step's "Review…": one menu for every step.
+    AppMenu {
+        id: reviewMenu
+        Repeater {
+            model: root.reviewers
+            AppMenuItem {
+                required property var modelData
+                text: "Review with " + modelData.label
+                onTriggered: {
+                    const err = Workspace.reviewStep(root.session.key, root.reviewStepId, modelData.id)
+                    if (err !== "") Workspace.showNotice(err, true)
+                }
             }
         }
     }

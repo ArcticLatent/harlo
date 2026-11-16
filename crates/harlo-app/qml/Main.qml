@@ -927,6 +927,7 @@ ApplicationWindow {
             Qt.callLater(() => terminal.runInNewTab(command))
         }
         shortcuts: win.shortcutList.concat(win.composerKeys)
+        onShortcutsSheetRequested: shortcutsDialog.open()
     }
     ShortcutsDialog {
         id: shortcutsDialog

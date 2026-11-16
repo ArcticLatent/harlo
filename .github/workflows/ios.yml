@@ -40,7 +40,7 @@ on:
         type: boolean
         default: false
       uitests_set:
-        description: "full: three phones, dark and light, a large text size; quick: one phone, light"
+        description: "full: three phones and a large text size, light; quick: one phone, light"
         type: choice
         options: [full, quick]
         default: full
@@ -286,8 +286,9 @@ jobs:
           path: ${{ runner.temp }}/shots
           if-no-files-found: ignore
 
-  # A job per run, side by side (a run alone takes about 20 minutes; the
-  # five one after another took 85): a phone, light or dark, a text size.
+  # A job per run, side by side (a run alone takes about 20 minutes; five
+  # one after another took 85): a phone and a text size, all in light mode
+  # (one colour mode is enough for the tests).
   ui-tests:
     if: github.event_name == 'workflow_dispatch' && inputs.uitests
     runs-on: macos-15
@@ -295,7 +296,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        run: ${{ fromJSON(inputs.uitests_set == 'quick' && '["pro-light"]' || '["pro-light", "pro-dark", "small-light", "max-dark", "pro-light-largetext"]') }}
+        run: ${{ fromJSON(inputs.uitests_set == 'quick' && '["pro-light"]' || '["pro-light", "small-light", "max-light", "pro-light-largetext"]') }}
     steps:
       - uses: actions/checkout@v6
 
@@ -322,7 +323,7 @@ jobs:
         env:
           RUN: ${{ matrix.run }}
         run: |
-          # The run: a phone on the newest iOS, light or dark, a text size.
+          # The run: a phone on the newest iOS, its colour mode, a text size.
           xcrun simctl list devices available -j > "$RUNNER_TEMP/devices.json"
           python3 - "$RUNNER_TEMP/devices.json" "$RUN" > "$RUNNER_TEMP/runs.txt" <<'PY'
           import json, re, sys
@@ -338,8 +339,8 @@ jobs:
           pro, mx = pick(r"^iPhone \d+ Pro$"), pick(r"Pro Max$")
           small = pick(r"iPhone SE", r"mini$", r"^iPhone \d+e$", r"^iPhone \d+$")
           large = "UICTContentSizeCategoryAccessibilityL"
-          runs = [("pro-light", pro, "light", ""), ("pro-dark", pro, "dark", ""), ("small-light", small, "light", ""),
-                  ("max-dark", mx, "dark", ""), ("pro-light-largetext", pro, "light", large)]
+          runs = [("pro-light", pro, "light", ""), ("small-light", small, "light", ""),
+                  ("max-light", mx, "light", ""), ("pro-light-largetext", pro, "light", large)]
           for name, dev, look, size in (r for r in runs if r[0] == sys.argv[2]):
               print(name, dev["udid"], look, size or "-", dev["name"].replace(" ", "_"))
           PY

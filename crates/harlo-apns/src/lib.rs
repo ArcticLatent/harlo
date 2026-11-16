@@ -349,12 +349,23 @@ impl Forwarder {
     /// An [`Error`] that [`is_unreachable`](Error::is_unreachable) when the
     /// relay doesn't answer.
     pub async fn available(&self) -> Result<bool, Error> {
-        let r = self.http.get(format!("{}/push", self.base)).send().await.map_err(|e| Error::new(ErrorKind::RelayUnreachable, Some(&e)))?;
+        let r = self.http.get(format!("{}/push", self.base)).send().await.map_err(|e| Error::new(ErrorKind::RelayUnreachable, Some(&with_causes(&e))))?;
         Ok(r.status().is_success() && r.json::<Value>().await.is_ok_and(|v| v["push"] == true))
     }
 
+    /// Hands `push` to the relay.
+    ///
+    /// A connection that couldn't be made (the network was away for a
+    /// moment, say) is tried once more after [`RETRY_AFTER`]. Nothing was
+    /// sent over it, so the phone can't get the notification twice.
     pub async fn send(&self, push: &Push<'_>) -> Sent {
-        let sent = self.http.post(format!("{}/push", self.base)).json(&forward_json(push)).send().await;
+        let body = forward_json(push);
+        let post = || self.http.post(format!("{}/push", self.base)).json(&body).send();
+        let mut sent = post().await;
+        if sent.as_ref().is_err_and(reqwest::Error::is_connect) {
+            tokio::time::sleep(RETRY_AFTER).await;
+            sent = post().await;
+        }
         match sent {
             Ok(r) if r.status().is_success() => Sent::Ok,
             Ok(r) => {
@@ -367,9 +378,30 @@ impl Forwarder {
                     _ => Sent::Failed(if reason.is_empty() { format!("the relay refused it ({status})") } else { reason }),
                 }
             }
-            Err(e) => Sent::Failed(format!("couldn't reach the relay: {e}")),
+            Err(e) => Sent::Failed(format!("couldn't reach the relay: {}", with_causes(&e))),
         }
     }
+}
+
+/// How long [`Forwarder::send`] waits before its second try: long enough
+/// for a dropped Wi-Fi or a DNS hiccup to pass, short enough that the
+/// notification still arrives while it matters.
+pub const RETRY_AFTER: Duration = Duration::from_secs(3);
+
+/// `e` and what caused it, `error: cause: cause`. (An HTTP error's own text
+/// says only that the request failed, not why: DNS, refused, TLS, a timeout.)
+fn with_causes(e: &dyn std::error::Error) -> String {
+    let mut text = e.to_string();
+    let mut cause = e.source();
+    while let Some(c) = cause {
+        let more = c.to_string();
+        if !text.contains(&more) {
+            text.push_str(": ");
+            text.push_str(&more);
+        }
+        cause = c.source();
+    }
+    text
 }
 
 /// A new key in a `.p8` file's form (tests).
@@ -383,6 +415,20 @@ pub fn test_p8() -> String {
 mod tests {
     use super::*;
     use ring::signature::{ECDSA_P256_SHA256_FIXED, UnparsedPublicKey};
+
+    #[tokio::test]
+    async fn an_unreachable_relay_is_tried_twice_and_says_why() {
+        // A port nothing listens on: the connection is refused at once.
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let f = Forwarder::new(&format!("http://127.0.0.1:{port}")).unwrap();
+        let payload = json!({ "aps": { "alert": "x" } });
+        let push = Push { device_token: "ab12", sandbox: false, topic: "t", payload: &payload, collapse_id: None, kind: Kind::Alert };
+        let started = std::time::Instant::now();
+        let Sent::Failed(e) = f.send(&push).await else { panic!("expected a failure") };
+        assert!(started.elapsed() >= RETRY_AFTER, "tried again after {RETRY_AFTER:?}");
+        assert!(e.starts_with("couldn't reach the relay: error sending request"), "{e}");
+        assert!(e.to_lowercase().contains("refused"), "the cause is named: {e}");
+    }
 
     #[test]
     fn tokens_are_signed_by_the_key() {

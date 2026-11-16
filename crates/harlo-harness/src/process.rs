@@ -134,6 +134,12 @@ pub(crate) fn started(pid: Option<u32>) {
     }
 }
 
+/// How a harness ended, for its log line: "with code 0", or "by a signal"
+/// when it has no exit code (it was killed).
+pub(crate) fn exit_text(code: Option<i32>) -> std::borrow::Cow<'static, str> {
+    code.map_or(std::borrow::Cow::Borrowed("by a signal"), |c| std::borrow::Cow::Owned(format!("with code {c}")))
+}
+
 /// An agent ended and was waited for (its pid can be another's now).
 pub(crate) fn ended(pid: Option<u32>) {
     if let Some(pid) = pid {
@@ -638,7 +644,7 @@ async fn wait_loop(
     }
     let code = child.wait().await.ok().and_then(|s| s.code());
     ended(pid);
-    tracing::event!(name: "harness.exit", tracing::Level::INFO, process.pid = pid.unwrap_or(0), process.exit.code = ?code, "harness {{process.pid}} exited with {{process.exit.code}}");
+    tracing::event!(name: "harness.exit", tracing::Level::INFO, process.pid = pid.unwrap_or(0), process.exit = %exit_text(code), "harness {{process.pid}} exited {{process.exit}}");
     // What it said last (a child that kept stderr open isn't waited for).
     let _ = tokio::time::timeout(std::time::Duration::from_millis(500), stderr_done).await;
     let stderr_tail = stderr_tail.lock().unwrap().iter().cloned().collect::<Vec<_>>().join("\n");

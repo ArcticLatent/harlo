@@ -729,7 +729,7 @@ Rectangle {
             Layout.rightMargin: transcript.gutter
             Layout.topMargin: 8
             session: root.session
-            maxStepsHeight: Math.max(160, root.height * 0.4)
+            maxStepsHeight: Math.max(120, root.height * 0.2)
             onChooseHelpers: composer.delegatePopover.show("run")
             onChooseStepHelper: (id, agent, model) => composer.delegatePopover.showStep(id, agent, model)
             visible: plan.enabled && steps.length > 0 && !root.covered

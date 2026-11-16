@@ -48,6 +48,7 @@ const QML_FILES: &[&str] = &[
     "qml/SettingsDialog.qml",
     "qml/AppSwitch.qml",
     "qml/ShortcutList.qml",
+    "qml/ShortcutSettings.qml",
     "qml/KeyCap.qml",
     "qml/RefreshButton.qml",
     "qml/AskPanel.qml",

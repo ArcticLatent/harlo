@@ -47,6 +47,7 @@ mod orchestration;
 mod plans;
 mod graphics;
 mod jobs;
+mod log_format;
 mod updates;
 
 use std::sync::OnceLock;

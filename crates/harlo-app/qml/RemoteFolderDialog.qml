@@ -126,6 +126,7 @@ AppDialog {
                     required property string modelData
                     width: ListView.view.width
                     implicitHeight: 30
+                    verticalPadding: 0  // (the style's 12 px would push the content low)
                     leftPadding: 10
                     contentItem: RowLayout {
                         spacing: 8

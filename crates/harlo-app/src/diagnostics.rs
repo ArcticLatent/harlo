@@ -18,6 +18,8 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, fmt};
 
+use crate::log_format::Templates;
+
 pub fn logs_dir() -> PathBuf {
     harlo_core::db::default_path().parent().map_or_else(|| PathBuf::from("logs"), |p| p.join("logs"))
 }
@@ -31,8 +33,8 @@ pub fn init_logging() {
     // (Diagrams: the SVG renderer warns about each effect it skips, like a
     // drop shadow it can't parse; the picture is fine.)
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| "info,usvg=error,resvg=error".into());
-    let stderr = fmt::layer().with_writer(std::io::stderr);
-    let file = open_log().map(|f| fmt::layer().with_ansi(false).with_writer(Mutex::new(f)));
+    let stderr = fmt::layer().event_format(Templates).with_writer(std::io::stderr);
+    let file = open_log().map(|f| fmt::layer().with_ansi(false).event_format(Templates).with_writer(Mutex::new(f)));
     tracing_subscriber::registry().with(filter).with(stderr).with(file).init();
     if forced_on() {
         harlo_harness::protocol_log::set_dir(Some(logs_dir().join("protocol")));

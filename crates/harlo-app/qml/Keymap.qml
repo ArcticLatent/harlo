@@ -26,6 +26,9 @@ QtObject {
         return r
     }
 
+    /// The order of the shortcut groups, in Settings and the shortcuts sheet.
+    readonly property var groupOrder: ["Navigation", "Sessions and tabs", "Window", "Panels", "Composer", "Runs in a session", "File editor", "Image viewer", "Sidebar"]
+
     property var overrides: ({})
     /// True while Settings records a key: shortcuts stand down.
     property bool recording: false

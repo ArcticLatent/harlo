@@ -585,7 +585,7 @@ async fn read_stdout(s: Arc<Shared>, stdout: tokio::process::ChildStdout, genera
             let pid = c.id();
             let code = c.wait().await.ok().and_then(|st| st.code());
             crate::process::ended(pid);
-            tracing::event!(name: "harness.exit", tracing::Level::INFO, process.pid = pid.unwrap_or(0), process.exit.code = ?code, "harness {{process.pid}} exited with {{process.exit.code}}");
+            tracing::event!(name: "harness.exit", tracing::Level::INFO, process.pid = pid.unwrap_or(0), process.exit = %crate::process::exit_text(code), "harness {{process.pid}} exited {{process.exit}}");
             code
         }
         None => return, // stopped on purpose (a restart)

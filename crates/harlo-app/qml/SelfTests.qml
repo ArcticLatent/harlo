@@ -1221,9 +1221,25 @@ Item {
         PauseAnimation { duration: 1200 }
         ScriptAction { script: { if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth=")); TestInput.key(Qt.Key_Comma, Qt.ControlModifier) } }
         PauseAnimation { duration: 600 }
-        ScriptAction { script: { tests.check(settingsDialog.visible, "Ctrl+, opens Settings"); tests.clickItem(tests.findName("settingsNav-shortcuts", settingsDialog.contentItem), "Shortcuts") } }
+        ScriptAction { script: { tests.check(settingsDialog.visible, "Ctrl+, opens Settings")
+            const t0 = Date.now()
+            tests.clickItem(tests.findName("settingsNav-shortcuts", settingsDialog.contentItem), "Shortcuts")
+            const ms = Date.now() - t0
+            tests.log("shortcuts page built in", ms, "ms")
+            tests.check(ms < 150, "the Shortcuts page opens at once (" + ms + " ms)")
+            tests.check(tests.findText("Toggle sidebar", settingsDialog.contentItem) !== null && tests.findText("Send", settingsDialog.contentItem) === null && tests.findText("Zoom in", settingsDialog.contentItem) === null, "only keys that can be changed are listed")
+            tests.check(tests.findText("Show every key", settingsDialog.contentItem) !== null, "fixed keys are a click away")
+            // Each page's row in the list: its icon and name centred on
+            // the row's highlight.
+            const nav = tests.findName("settingsNav-shortcuts", settingsDialog.contentItem)
+            const mid = it => it.mapToItem(null, 0, it.height / 2).y
+            const icon = nav.contentItem.children[0], name = nav.contentItem.children[1]
+            // (Narrow, the list shows only icons.)
+            const offs = [icon, name].filter(it => it.visible).map(it => mid(it) - mid(nav.background))
+            tests.log("settings nav row: icon and name", offs.map(d => d.toFixed(2)).join(", "), "px off its highlight's centre")
+            tests.check(offs.every(d => Math.abs(d) <= 0.5), "a settings page's row centres its icon and name on its highlight (" + offs.map(d => d.toFixed(1)).join(", ") + " px off)") } }
         PauseAnimation { duration: 600 }
-        ScriptAction { script: tests.clickItem(tests.keyOf("Toggle sidebar", "B"), "Toggle sidebar's B") }
+        ScriptAction { script: tests.clickItem(tests.keyOf("Toggle sidebar", "Ctrl+B"), "Toggle sidebar's Ctrl+B") }
         PauseAnimation { duration: 300 }
         ScriptAction { script: { tests.check(Keymap.recording && tests.findText("Press keys…", settingsDialog.contentItem) !== null, "clicking a key starts recording"); TestInput.key(Qt.Key_K, Qt.ControlModifier) } }
         PauseAnimation { duration: 400 }
@@ -1234,7 +1250,7 @@ Item {
         PauseAnimation { duration: 500 }
         ScriptAction { script: tests.clickText("Cancel", settingsDialog.contentItem) }
         PauseAnimation { duration: 300 }
-        ScriptAction { script: { tests.check(Keymap.seq("toggleSidebar") === "Ctrl+B", "Cancel keeps Ctrl+B"); tests.clickItem(tests.keyOf("Toggle sidebar", "B"), "B again") } }
+        ScriptAction { script: { tests.check(Keymap.seq("toggleSidebar") === "Ctrl+B", "Cancel keeps Ctrl+B"); tests.clickItem(tests.keyOf("Toggle sidebar", "Ctrl+B"), "Ctrl+B again") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: TestInput.key(Qt.Key_X, 0) }
         PauseAnimation { duration: 300 }
@@ -1246,7 +1262,7 @@ Item {
             tests.check(Keymap.seq("toggleSidebar") === "Ctrl+Shift+B" && !Keymap.recording, "Ctrl+Shift+B is recorded")
             tests.check(JSON.parse(Workspace.setting("shortcuts")).toggleSidebar === "Ctrl+Shift+B", "and saved")
             // Replace: Files panel takes Changes panel's key.
-            tests.clickItem(tests.keyOf("Files panel", "E"), "Files panel's E") } }
+            tests.clickItem(tests.keyOf("Files panel", "Ctrl+Shift+E"), "Files panel's Ctrl+Shift+E") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: TestInput.key(Qt.Key_G, Qt.ControlModifier | Qt.ShiftModifier) }
         PauseAnimation { duration: 300 }
@@ -1254,13 +1270,13 @@ Item {
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             tests.check(Keymap.seq("filesPanel") === "Ctrl+Shift+G" && Keymap.seq("changesPanel") === "", "Replace moves the key and unassigns the other")
-            tests.clickItem(tests.keyOf("Terminal", "`"), "Terminal's key") } }
+            tests.clickItem(tests.keyOf("Terminal", "Ctrl+`"), "Terminal's key") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: TestInput.key(Qt.Key_Backspace, 0) }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             tests.check(Keymap.seq("terminal") === "" && tests.keyOf("Terminal", "Not set") !== null, "Backspace unassigns (shows Not set)")
-            tests.clickItem(tests.keyOf("New session", "N"), "New session's N") } }
+            tests.clickItem(tests.keyOf("New session", "Ctrl+N"), "New session's Ctrl+N") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: TestInput.key(Qt.Key_N, Qt.ControlModifier | Qt.AltModifier) }
         PauseAnimation { duration: 400 }
@@ -1282,6 +1298,18 @@ Item {
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
             tests.check(Keymap.seq("toggleSidebar") === "Ctrl+B" && Keymap.seq("changesPanel") === "Ctrl+Shift+G" && Keymap.seq("terminal") === "Ctrl+`" && Workspace.setting("shortcuts") === "", "Reset all restores the defaults")
+            tests.findName("keyChip-toggleSidebar", settingsDialog.contentItem).forceActiveFocus()
+            TestInput.key(Qt.Key_Return, 0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: { tests.check(Keymap.recording && tests.findText("Press keys…", settingsDialog.contentItem) !== null, "Enter on a key starts recording"); TestInput.key(Qt.Key_Escape, 0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(!Keymap.recording && settingsDialog.visible && Keymap.seq("toggleSidebar") === "Ctrl+B", "Esc stops recording and keeps the key")
+            tests.shotPopup(settingsDialog, "clicks-keys-page")
+            tests.clickText("Show every key", settingsDialog.contentItem) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            tests.check(shortcutsDialog.visible && tests.findText("Zoom in", shortcutsDialog.contentItem) !== null, "Show every key opens the shortcuts sheet")
             tests.summary(); Qt.quit() } }
     }
     property bool sidebarWas: true
@@ -9921,6 +9949,7 @@ Item {
         PauseAnimation { duration: 300 }
         ScriptAction { script: tests.waitUntil(planReviewSteps, () => (JSON.parse(Workspace.planJson(tests.harloKey)).steps || []).length === 1 && chat.session.status === "idle", 15000) }
         PauseAnimation { duration: 600 }
+        ScriptAction { script: tests.check(chat.planDock.expanded, "a plan made while you watch opens") }
         // The step to another model: chosen on the plan card.
         // (Its buttons show on hover.)
         ScriptAction { script: { const t = tests.findText("Write helper.txt", chat.planDock), p = t.mapToItem(null, t.width / 2, t.height / 2); TestInput.moveTo(p.x, p.y) } }
@@ -9995,6 +10024,67 @@ Item {
             chat.planDock.settleFold()
             tests.check(chat.planDock.expanded, "and stays open for that session")
             tests.clickItem(tests.findName("planToggle", chat.planDock), "fold it again") } }
+        // Opening a session with a plan to do: folded, the next step in its
+        // header; opened, its finished steps fold to a line.
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            chat.planDock.edit({ op: "add", title: "Write notes.txt" })
+            chat.planDock.foldedByHand = ({})
+            chat.planDock.sessionOpened() } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const folded = tests.findName("planFoldedStep", chat.planDock)
+            tests.check(!chat.planDock.expanded && tests.shown(folded) && tests.findText("Write notes.txt", folded) !== null && tests.findText("Next", folded) !== null, "a session opens with its plan folded, the next step in the header")
+            tests.check(chat.planDock.height < 60, "folded, the card is one line (" + Math.round(chat.planDock.height) + " px)")
+            {
+                const t = tests.findText("Write notes.txt", folded), toggle = tests.findName("planToggle", chat.planDock)
+                const gap = toggle.mapToItem(null, 0, 0).x - t.mapToItem(null, t.width, 0).x
+                tests.check(gap >= 0 && gap <= 16, "folded, the next step sits at the right, by the toggle (" + gap.toFixed(1) + " px from it)")
+            }
+            tests.clickItem(tests.findName("planToggle", chat.planDock), "open the plan") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const fin = tests.findName("planFinishedToggle", chat.planDock)
+            tests.check(tests.shown(fin) && tests.findText("1 finished step", fin) !== null && tests.findText("Write helper.txt", chat.planDock) === null && tests.findContaining("Write notes.txt", chat.planDock) !== null,
+                "opened, the finished step folds to a line and the step to do shows")
+            tests.check(chat.planDock.maxStepsHeight <= Math.max(120, chat.height * 0.2) + 1, "the steps scroll past a fifth of the chat's height (" + Math.round(chat.planDock.maxStepsHeight) + " px)")
+            tests.clickItem(fin, "show the finished steps") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(tests.findText("Write helper.txt", chat.planDock) !== null, "a click shows the finished steps")
+            tests.shotWindow("clicks-review-plan-open")
+            const p = JSON.parse(Workspace.planJson(tests.harloKey))
+            chat.planDock.edit({ op: "remove", id: p.steps[p.steps.length - 1].id })
+            tests.clickItem(tests.findName("planToggle", chat.planDock), "fold it again") } }
+        // A long plan opens at once (like a project's: 60 finished steps
+        // with long reports, then 30 to do): the folded finished steps aren't
+        // made, a step's buttons are made when it's hovered, and its helper,
+        // commit and review rows only when it has them.
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const report = "What was done and how it was checked. ".repeat(16)
+            for (let i = 1; i <= 60; i++) chat.planDock.edit({ op: "add", title: "Finished step " + i, detail: report })
+            for (const st of JSON.parse(Workspace.planJson(tests.harloKey)).steps.filter(x => x.title.startsWith("Finished step")))
+                chat.planDock.edit({ op: "skip", id: st.id, skipped: true })
+            for (let i = 1; i <= 30; i++) chat.planDock.edit({ op: "add", title: "Long plan step " + i, detail: report })
+            TestInput.moveTo(2, 2) } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const t0 = Date.now()
+            tests.clickItem(tests.findName("planToggle", chat.planDock), "open a long plan")
+            const ms = Date.now() - t0
+            tests.log("plan of", chat.planDock.steps.length, "steps opened in", ms, "ms")
+            tests.check(chat.planDock.steps.length === 91 && ms < 120, "a 91-step plan opens at once (" + ms + " ms)")
+            tests.check(tests.findAllNames("planStepRow", chat.planDock).length === 30, "only the steps to do are made, not the 61 folded finished ones (" + tests.findAllNames("planStepRow", chat.planDock).length + ")")
+            tests.check(tests.findAllNames("planStepEdits", chat.planDock).length === 0, "no step's buttons are made before it's hovered") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: { const t = tests.findContaining("Long plan step 1", chat.planDock), p = t.mapToItem(null, t.width / 2, t.height / 2); TestInput.moveTo(p.x, p.y) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(tests.findAllNames("planStepEdits", chat.planDock).length === 1, "hovering a step shows its buttons")
+            for (const st of JSON.parse(Workspace.planJson(tests.harloKey)).steps.filter(x => x.title.startsWith("Long plan step") || x.title.startsWith("Finished step")))
+                chat.planDock.edit({ op: "remove", id: st.id })
+            tests.clickItem(tests.findName("planToggle", chat.planDock), "fold the plan") } }
         // The project's Team: its helpers' agent, and its reviewer on
         // another model (the next run's reviews use it).
         PauseAnimation { duration: 300 }
